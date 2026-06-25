@@ -86,15 +86,59 @@ def chunk_text(text: str) -> list[str]:
     return chunks
 
 
-def document_from_source(source_type: str, item: Mapping[str, Any]) -> RagDocument | None:
-    source_id = item.get("id") or item.get("slug") or item.get("order_number") or item.get("key") or item.get("check_id") or item.get("user_principal_name")
+def document_from_source(
+    source_type: str, item: Mapping[str, Any]
+) -> RagDocument | None:
+    source_id = (
+        item.get("id")
+        or item.get("slug")
+        or item.get("order_number")
+        or item.get("key")
+        or item.get("check_id")
+        or item.get("user_principal_name")
+    )
     if source_id is None:
         return None
-    title = str(item.get("title") or item.get("subject") or item.get("name") or item.get("order_number") or item.get("key") or item.get("check_name") or source_id).strip()
+    title = str(
+        item.get("title")
+        or item.get("subject")
+        or item.get("name")
+        or item.get("order_number")
+        or item.get("key")
+        or item.get("check_name")
+        or source_id
+    ).strip()
     body_parts = [title]
-    for key in ("summary", "excerpt", "description", "status", "priority", "serial_number", "os_name", "last_user", "details"):
+    for key in (
+        "summary",
+        "excerpt",
+        "content",
+        "description",
+        "status",
+        "status_message",
+        "priority",
+        "serial_number",
+        "os_name",
+        "last_user",
+        "details",
+        "email",
+        "job_title",
+        "department",
+        "mobile_phone",
+        "org_company",
+        "manager_name",
+        "account_action",
+        "po_number",
+        "consignment_id",
+        "sku",
+        "vendor_sku",
+    ):
         if item.get(key):
             body_parts.append(str(item[key]))
+    for key in ("custom_fields", "assignments", "recommendations"):
+        nested = item.get(key)
+        if nested:
+            body_parts.append(json.dumps(nested, ensure_ascii=False, default=str))
     text = normalise_text("\n".join(body_parts))
     if not text:
         return None
@@ -103,7 +147,9 @@ def document_from_source(source_type: str, item: Mapping[str, Any]) -> RagDocume
         company_id = int(company_id) if company_id is not None else None
     except (TypeError, ValueError):
         company_id = None
-    metadata = {key: value for key, value in item.items() if key not in {"permission_scope"}}
+    metadata = {
+        key: value for key, value in item.items() if key not in {"permission_scope"}
+    }
     return RagDocument(
         source_type=source_type,
         source_id=str(source_id),
@@ -127,8 +173,12 @@ async def index_document(document: RagDocument) -> int:
             "company_id": document.company_id,
             "title": document.title,
             "url": document.url,
-            "permission_scope_json": json.dumps(document.permission_scope or {}, ensure_ascii=False),
-            "metadata_json": json.dumps(document.metadata or {}, ensure_ascii=False, default=str),
+            "permission_scope_json": json.dumps(
+                document.permission_scope or {}, ensure_ascii=False
+            ),
+            "metadata_json": json.dumps(
+                document.metadata or {}, ensure_ascii=False, default=str
+            ),
             "content_hash": content_hash(document.text),
             "embedding_model": embedding_model(),
         }
@@ -154,7 +204,11 @@ async def index_agent_sources(sources: Mapping[str, Any]) -> int:
     indexed = 0
     for source_type, values in sources.items():
         if source_type == "feature_packs" and isinstance(values, Mapping):
-            iterable = ((f"feature:{slug}", item) for slug, rows in values.items() for item in (rows or []))
+            iterable = (
+                (f"feature:{slug}", item)
+                for slug, rows in values.items()
+                for item in (rows or [])
+            )
         else:
             iterable = ((source_type, item) for item in (values or []))
         for normalised_type, item in iterable:
@@ -169,7 +223,11 @@ async def index_agent_sources(sources: Mapping[str, Any]) -> int:
 
 
 def candidate_to_source(candidate: Mapping[str, Any]) -> dict[str, Any]:
-    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), Mapping) else {}
+    metadata = (
+        candidate.get("metadata")
+        if isinstance(candidate.get("metadata"), Mapping)
+        else {}
+    )
     item = dict(metadata)
     item.setdefault("id", candidate.get("source_id"))
     item.setdefault("title", candidate.get("title"))

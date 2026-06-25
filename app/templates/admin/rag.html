@@ -18,7 +18,7 @@
     <button type="button" class="button button--ghost" data-rag-refresh>Refresh</button>
   </div>
   <div class="card__body">
-    <div class="stats-grid" data-rag-summary></div>
+    <div class="stat-strip rag-stat-strip" data-rag-summary></div>
 
     <div class="grid grid--2" style="margin-top: 1.5rem; gap: 1rem;">
       <section>
@@ -68,8 +68,8 @@
   const number = (value) => Number(value || 0).toLocaleString();
   const date = (value) => value ? new Date(value).toLocaleString() : '—';
   const esc = (value) => String(fmt(value)).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-  function metric(label, value, hint) {
-    return `<article class="stat-card"><span class="stat-card__label">${esc(label)}</span><strong class="stat-card__value">${esc(value)}</strong><span class="stat-card__hint">${esc(hint)}</span></article>`;
+  function metric(label, value, hint, variant = 'neutral') {
+    return `<article class="stat-strip__stat stat-strip__stat--${esc(variant)} rag-stat-strip__stat"><span class="stat-strip__stat-label">${esc(label)}</span><strong class="stat-strip__stat-value">${esc(value)}</strong><span class="rag-stat-strip__hint">${esc(hint)}</span></article>`;
   }
   function emptyRow(cols, text) { return `<tr><td colspan="${cols}" class="table__empty">${esc(text)}</td></tr>`; }
   async function loadHealth() {
@@ -78,12 +78,12 @@
     if (!res.ok) throw new Error('Unable to load RAG health');
     const data = await res.json();
     summary.innerHTML = [
-      metric('Active documents', number(data.documents), `${number(data.inactive_documents)} inactive`),
-      metric('Active chunks', number(data.chunks), `${number(data.stale_chunks)} stale chunks`),
-      metric('Indexed tokens', number(data.token_count), `${Number(data.avg_tokens_per_chunk || 0).toFixed(1)} avg/chunk`),
-      metric('Companies covered', number(data.company_count), `${number(data.model_count)} embedding model(s)`),
-      metric('First indexed', date(data.first_indexed_at), 'Oldest active document'),
-      metric('Last indexed', date(data.last_indexed_at), 'Newest active document'),
+      metric('Active documents', number(data.documents), `${number(data.inactive_documents)} inactive`, 'total'),
+      metric('Active chunks', number(data.chunks), `${number(data.stale_chunks)} stale chunks`, 'success'),
+      metric('Indexed tokens', number(data.token_count), `${Number(data.avg_tokens_per_chunk || 0).toFixed(1)} avg/chunk`, 'info'),
+      metric('Companies covered', number(data.company_count), `${number(data.model_count)} embedding model(s)`, 'neutral'),
+      metric('First indexed', date(data.first_indexed_at), 'Oldest active document', 'warning'),
+      metric('Last indexed', date(data.last_indexed_at), 'Newest active document', 'success'),
     ].join('');
     sourcesBody.innerHTML = (data.sources || []).map((row) => `<tr><td>${esc(row.source_type)}</td><td>${number(row.count)}</td><td>${number(row.chunk_count)}</td><td>${number(row.token_count)}</td><td>${date(row.last_indexed_at)}</td></tr>`).join('') || emptyRow(5, 'No indexed sources yet.');
     docsBody.innerHTML = (data.recent_documents || []).map((row) => `<tr><td>${esc(row.title)}</td><td>${esc(row.source_type)}:${esc(row.source_id)}</td><td>${esc(row.company_id)}</td><td>${esc(row.embedding_model)}</td><td>${date(row.indexed_at)}</td></tr>`).join('') || emptyRow(5, 'No recent documents.');

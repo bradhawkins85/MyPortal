@@ -14,7 +14,11 @@ from app.core.logging import log_error
 from app.repositories import knowledge_base as kb_repo
 from app.services import company_access
 from app.services import modules as modules_service
-from app.services.tagging import filter_helpful_texts, get_all_excluded_tags, slugify_tag
+from app.services.tagging import (
+    filter_helpful_texts,
+    get_all_excluded_tags,
+    slugify_tag,
+)
 from app.services.realtime import RefreshNotifier, refresh_notifier
 from app.services.knowledge_base_conditionals import (
     get_conditional_companies,
@@ -97,18 +101,18 @@ def _prepare_sections(
 ) -> tuple[list[dict[str, Any]], str]:
     prepared: list[dict[str, Any]] = []
     validation_errors: list[str] = []
-    
+
     if sections:
         for index, section in enumerate(sections, start=1):
             content = section.get("content") or ""
             if not isinstance(content, str):
                 content = str(content)
-            
+
             # Validate conditional syntax before sanitizing
             errors = validate_conditional_syntax(content)
             if errors:
                 validation_errors.extend([f"Section {index}: {err}" for err in errors])
-            
+
             content = _sanitise_html(content)
             heading = section.get("heading")
             heading_text = str(heading).strip() if isinstance(heading, str) else ""
@@ -131,7 +135,7 @@ def _prepare_sections(
             errors = validate_conditional_syntax(str(fallback_content))
             if errors:
                 validation_errors.extend(errors)
-        
+
         content = _sanitise_html(str(fallback_content))
         heading_text = (fallback_title or "").strip()
         prepared.append(
@@ -141,11 +145,11 @@ def _prepare_sections(
                 "position": 1,
             }
         )
-    
+
     # Raise an error if there are validation issues
     if validation_errors:
         raise ValueError("Conditional syntax errors: " + "; ".join(validation_errors))
-    
+
     combined = _combine_sections_html(prepared)
     return prepared, combined
 
@@ -200,10 +204,12 @@ def _render_ai_tag_prompt(
         fallback_text = " ".join(fallback_text.split())
         if fallback_text:
             lines.append(fallback_text[:600])
-    lines.extend([
-        "",
-        'Example output: ["networking", "setup", "security"]',
-    ])
+    lines.extend(
+        [
+            "",
+            'Example output: ["networking", "setup", "security"]',
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -228,7 +234,9 @@ def _parse_ai_tag_text(raw: str) -> list[str]:
         if match:
             decoded = _decode(match.group(0))
     if decoded is None:
-        stripped_lines = [segment.strip(" \t-*#•\u2022") for segment in re.split(r"[,\n;]+", text)]
+        stripped_lines = [
+            segment.strip(" \t-*#•\u2022") for segment in re.split(r"[,\n;]+", text)
+        ]
         decoded = [segment for segment in stripped_lines if segment]
     candidates = decoded if decoded is not None else []
 
@@ -265,7 +273,9 @@ async def _schedule_article_ai_tags(
         payload = result.get("response")
         text: str | None = None
         if isinstance(payload, Mapping):
-            text = payload.get("response") or payload.get("message") or payload.get("text")
+            text = (
+                payload.get("response") or payload.get("message") or payload.get("text")
+            )
         elif isinstance(payload, str):
             text = payload
         if not text:
@@ -284,15 +294,23 @@ async def _schedule_article_ai_tags(
         if not tags:
             log_error("Knowledge base AI tag parsing yielded no tags")
             return
-        
+
         # Fetch the current article to get excluded tags
         article = await kb_repo.get_article_by_id(article_id)
         if article:
-            excluded_tags = {slugify_tag(str(tag)) for tag in article.get("excluded_ai_tags", [])}
-            manual_tags = {slugify_tag(str(tag)) for tag in article.get("manual_ai_tags", [])}
+            excluded_tags = {
+                slugify_tag(str(tag)) for tag in article.get("excluded_ai_tags", [])
+            }
+            manual_tags = {
+                slugify_tag(str(tag)) for tag in article.get("manual_ai_tags", [])
+            }
             # Filter out article-specific excludes and preserve manual tags separately.
-            tags = [tag for tag in tags if tag not in excluded_tags and tag not in manual_tags]
-        
+            tags = [
+                tag
+                for tag in tags
+                if tag not in excluded_tags and tag not in manual_tags
+            ]
+
         await kb_repo.update_article(article_id, ai_tags=tags)
         resolved_notifier = notifier or refresh_notifier
         await resolved_notifier.broadcast_refresh(
@@ -346,7 +364,9 @@ def _normalise_ids(values: Iterable[int]) -> list[int]:
 
 async def build_access_context(user: Mapping[str, Any] | None) -> ArticleAccessContext:
     if not user:
-        return ArticleAccessContext(user=None, user_id=None, is_super_admin=False, memberships={})
+        return ArticleAccessContext(
+            user=None, user_id=None, is_super_admin=False, memberships={}
+        )
     try:
         user_id = int(user.get("id"))  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -356,7 +376,9 @@ async def build_access_context(user: Mapping[str, Any] | None) -> ArticleAccessC
         try:
             membership_rows = await company_access.list_accessible_companies(user)
         except Exception as exc:  # pragma: no cover - defensive
-            log_error("Failed to list company memberships for knowledge base", error=str(exc))
+            log_error(
+                "Failed to list company memberships for knowledge base", error=str(exc)
+            )
             membership_rows = []
         for membership in membership_rows:
             company_id = membership.get("company_id")
@@ -396,56 +418,64 @@ def _article_visible(article: Mapping[str, Any], context: ArticleAccessContext) 
         admin_companies = _normalise_ids(article.get("company_admin_ids", []))
         if admin_companies:
             return any(
-                company_id in context.memberships and bool(context.memberships[company_id].get("is_admin"))
+                company_id in context.memberships
+                and bool(context.memberships[company_id].get("is_admin"))
                 for company_id in admin_companies
             )
-        return any(bool(membership.get("is_admin")) for membership in context.memberships.values())
+        return any(
+            bool(membership.get("is_admin"))
+            for membership in context.memberships.values()
+        )
     return False
 
 
 def _get_primary_company_name(context: ArticleAccessContext) -> str | None:
     """Get the primary company name for the user context.
-    
+
     Returns the name of the first company in the user's memberships,
     or None if the user has no company memberships.
     """
     if not context.memberships:
         return None
-    
+
     # Get the first company from memberships
     # Memberships are stored as {company_id: membership_data}
     for membership in context.memberships.values():
         company_name = membership.get("company_name")
         if company_name:
             return str(company_name)
-    
+
     return None
 
 
-def _section_visible(section: Mapping[str, Any], context: ArticleAccessContext | None) -> bool:
+def _section_visible(
+    section: Mapping[str, Any], context: ArticleAccessContext | None
+) -> bool:
     """Check if a section is visible to the user based on company permissions.
-    
+
     Sections without company restrictions are visible to all.
     Sections with company restrictions are only visible to users in those companies.
     """
     allowed_company_ids = section.get("allowed_company_ids", [])
-    
+
     # If no company restrictions, section is visible to all
     if not allowed_company_ids:
         return True
-    
+
     # If no context (anonymous user), hide restricted sections
     if not context:
         return False
-    
+
     # Super admins can see all sections
     if context.is_super_admin:
         return True
-    
+
     # Check if user is a member of any allowed company
     user_company_ids = set(context.memberships.keys())
-    allowed_company_id_set = {int(cid) for cid in allowed_company_ids if isinstance(cid, (int, str))}
-    
+    allowed_company_id_set = {
+        int(cid) for cid in allowed_company_ids if isinstance(cid, (int, str))
+    }
+
     return bool(user_company_ids & allowed_company_id_set)
 
 
@@ -478,38 +508,38 @@ def _serialise_article(
         "created_at": article.get("created_at_utc"),
         "created_at_iso": _isoformat(article.get("created_at_utc")),
     }
-    
+
     # Determine company name for conditional processing
     company_name = _get_primary_company_name(context) if context else None
-    
+
     sections_payload = article.get("sections") or []
     serialised_sections: list[dict[str, Any]] = []
     for index, section in enumerate(sections_payload, start=1):
         # Filter sections based on company permissions (unless admin is editing)
         if not include_permissions and not _section_visible(section, context):
             continue
-            
+
         content = section.get("content") or ""
         heading = section.get("heading")
         section_id = section.get("id")
         allowed_company_ids = section.get("allowed_company_ids", [])
-        
+
         # Process conditional blocks in section content
         if content and not include_permissions:
             # Only process conditionals for end-user views, not for admin editing
             content = process_conditionals(content, company_name=company_name)
-        
+
         section_data = {
             "position": section.get("position") or index,
             "heading": heading if isinstance(heading, str) else None,
             "content": content,
         }
-        
+
         # Include section ID and company IDs for admin views
         if include_permissions:
             section_data["id"] = section_id
             section_data["allowed_company_ids"] = _normalise_ids(allowed_company_ids)
-        
+
         serialised_sections.append(section_data)
     base["sections"] = serialised_sections
     if include_content:
@@ -519,7 +549,9 @@ def _serialise_article(
         else:
             # Process conditionals in the combined content as well
             if article_content and not include_permissions:
-                article_content = process_conditionals(article_content, company_name=company_name)
+                article_content = process_conditionals(
+                    article_content, company_name=company_name
+                )
         base["content"] = article_content or ""
     if include_permissions:
         # Collect all companies referenced in conditional blocks across all sections
@@ -529,18 +561,20 @@ def _serialise_article(
             if content:
                 companies = get_conditional_companies(str(content))
                 all_conditional_companies.update(companies)
-        
+
         # Also check the combined content if it exists
         article_content = article.get("content")
         if article_content:
             companies = get_conditional_companies(str(article_content))
             all_conditional_companies.update(companies)
-        
+
         base.update(
             {
                 "allowed_user_ids": _normalise_ids(article.get("allowed_user_ids", [])),
                 "allowed_company_ids": _normalise_ids(article.get("company_ids", [])),
-                "company_admin_ids": _normalise_ids(article.get("company_admin_ids", [])),
+                "company_admin_ids": _normalise_ids(
+                    article.get("company_admin_ids", [])
+                ),
                 "conditional_companies": sorted(all_conditional_companies),
             }
         )
@@ -588,9 +622,15 @@ async def get_article_by_slug_for_context(
     article = await kb_repo.get_article_by_slug(slug)
     if not article:
         return None
-    if not include_unpublished and not article.get("is_published") and not context.is_super_admin:
+    if (
+        not include_unpublished
+        and not article.get("is_published")
+        and not context.is_super_admin
+    ):
         return None
-    if not _article_visible(article, context) and not (include_permissions and context.is_super_admin):
+    if not _article_visible(article, context) and not (
+        include_permissions and context.is_super_admin
+    ):
         return None
     return _serialise_article(
         article,
@@ -666,13 +706,25 @@ async def update_article(
     if "summary" in payload:
         updates["summary"] = payload.get("summary")
     sections_update_required = False
-    prepared_sections: list[dict[str, Any]] = _extract_sections_sequence(current.get("sections"))
+    prepared_sections: list[dict[str, Any]] = _extract_sections_sequence(
+        current.get("sections")
+    )
     if "sections" in payload or "content" in payload or "title" in payload:
-        sections_payload = payload.get("sections") if "sections" in payload else current.get("sections")
+        sections_payload = (
+            payload.get("sections")
+            if "sections" in payload
+            else current.get("sections")
+        )
         prepared_sections, combined_content = _prepare_sections(
             _extract_sections_sequence(sections_payload),
-            fallback_content=payload.get("content") if "content" in payload else current.get("content"),
-            fallback_title=payload.get("title") if "title" in payload else current.get("title"),
+            fallback_content=(
+                payload.get("content")
+                if "content" in payload
+                else current.get("content")
+            ),
+            fallback_title=(
+                payload.get("title") if "title" in payload else current.get("title")
+            ),
         )
         if not combined_content:
             raise ValueError("At least one section with content is required")
@@ -683,10 +735,14 @@ async def update_article(
     published_flag = payload.get("is_published")
     if published_flag is not None:
         updates["is_published"] = bool(published_flag)
-        updates["published_at"] = datetime.now(timezone.utc) if updates["is_published"] else None
+        updates["published_at"] = (
+            datetime.now(timezone.utc) if updates["is_published"] else None
+        )
     title_for_ai_source = updates.get("title", current.get("title"))
     title_for_ai = str(title_for_ai_source) if title_for_ai_source is not None else ""
-    summary_for_ai = updates.get("summary") if "summary" in updates else current.get("summary")
+    summary_for_ai = (
+        updates.get("summary") if "summary" in updates else current.get("summary")
+    )
     content_for_ai = updates.get("content", current.get("content") or "")
     if updates:
         current = await kb_repo.update_article(article_id, **updates)
@@ -710,23 +766,27 @@ async def update_article(
     return refreshed
 
 
-async def delete_article(article_id: int, *, notifier: RefreshNotifier | None = None) -> None:
+async def delete_article(
+    article_id: int, *, notifier: RefreshNotifier | None = None
+) -> None:
     await kb_repo.delete_article(article_id)
     resolved_notifier = notifier or refresh_notifier
     await resolved_notifier.broadcast_refresh(reason="knowledge_base:article_deleted")
 
 
-async def refresh_article_ai_tags(article_id: int, *, notifier: RefreshNotifier | None = None) -> None:
+async def refresh_article_ai_tags(
+    article_id: int, *, notifier: RefreshNotifier | None = None
+) -> None:
     """Refresh the AI-generated tags for a knowledge base article."""
     article = await kb_repo.get_article_by_id(article_id)
     if not article:
         return
-    
+
     title = str(article.get("title", ""))
     summary = article.get("summary")
     sections = article.get("sections", [])
     content = article.get("content", "")
-    
+
     await _schedule_article_ai_tags(
         article_id,
         title,
@@ -737,16 +797,23 @@ async def refresh_article_ai_tags(article_id: int, *, notifier: RefreshNotifier 
     )
 
 
-
-async def _sync_relations(article_id: int, permission_scope: str, payload: Mapping[str, Any]) -> None:
+async def _sync_relations(
+    article_id: int, permission_scope: str, payload: Mapping[str, Any]
+) -> None:
     allowed_users = payload.get("allowed_user_ids") or []
     allowed_companies = payload.get("allowed_company_ids") or []
-    await kb_repo.replace_article_users(article_id, allowed_users if permission_scope == "user" else [])
+    await kb_repo.replace_article_users(
+        article_id, allowed_users if permission_scope == "user" else []
+    )
     if permission_scope == "company":
-        await kb_repo.replace_article_companies(article_id, allowed_companies, require_admin=False)
+        await kb_repo.replace_article_companies(
+            article_id, allowed_companies, require_admin=False
+        )
         await kb_repo.replace_article_companies(article_id, [], require_admin=True)
     elif permission_scope == "company_admin":
-        await kb_repo.replace_article_companies(article_id, allowed_companies, require_admin=True)
+        await kb_repo.replace_article_companies(
+            article_id, allowed_companies, require_admin=True
+        )
         await kb_repo.replace_article_companies(article_id, [], require_admin=False)
     else:
         await kb_repo.replace_article_companies(article_id, [], require_admin=False)
@@ -805,7 +872,9 @@ def _tokenise(text: str) -> list[str]:
     return _WORD_PATTERN.findall(text.lower())
 
 
-def _score_article(article: Mapping[str, Any], *, query: str, tokens: Sequence[str]) -> int:
+def _score_article(
+    article: Mapping[str, Any], *, query: str, tokens: Sequence[str]
+) -> int:
     if not tokens:
         return 0
 
@@ -827,7 +896,9 @@ def _score_article(article: Mapping[str, Any], *, query: str, tokens: Sequence[s
             if isinstance(tag, str):
                 haystack_parts.append(tag.lower())
 
-    if isinstance(manual_ai_tags, Sequence) and not isinstance(manual_ai_tags, (str, bytes)):
+    if isinstance(manual_ai_tags, Sequence) and not isinstance(
+        manual_ai_tags, (str, bytes)
+    ):
         for tag in manual_ai_tags:
             if isinstance(tag, str):
                 haystack_parts.append(tag.lower())
@@ -845,7 +916,7 @@ def _score_article(article: Mapping[str, Any], *, query: str, tokens: Sequence[s
 
     score = 0
     query_lower = query.lower()
-    
+
     # Count token occurrences first to determine actual relevance
     haystack_tokens = Counter(_tokenise(haystack_text))
     token_score = 0
@@ -855,7 +926,7 @@ def _score_article(article: Mapping[str, Any], *, query: str, tokens: Sequence[s
         if occurrences:
             token_score += min(occurrences, 3)
             matched_tokens += 1
-    
+
     # Only apply exact query bonus if there's also good token coverage
     # This prevents articles that just mention a word once from scoring highly
     if query_lower and query_lower in haystack_text:
@@ -870,17 +941,54 @@ def _score_article(article: Mapping[str, Any], *, query: str, tokens: Sequence[s
             # Require matching at least half the query tokens
             if matched_tokens >= (len(tokens) + 1) // 2:
                 score += max(len(query_lower), 4)
-    
+
     score += token_score
-    
+
     # For multi-word queries, require matching multiple distinct tokens
     # to avoid false positives from common/generic words
     if len(tokens) >= 4 and matched_tokens < 3:
         return 0
     elif len(tokens) == 3 and matched_tokens < 2:
         return 0
-    
+
     return score
+
+
+async def list_accessible_search_articles(
+    context: ArticleAccessContext, *, limit: int | None = None
+) -> list[dict[str, Any]]:
+    """Return all articles visible to a search user for complete RAG indexing."""
+
+    candidates = await kb_repo.list_articles(include_unpublished=context.is_super_admin)
+    visible: list[dict[str, Any]] = []
+    for article in candidates:
+        if not article.get("is_published") and not context.is_super_admin:
+            continue
+        if not _article_visible(article, context):
+            continue
+        content_parts = [
+            article.get("summary"),
+            article.get("content"),
+            *(
+                section.get("content")
+                for section in article.get("sections", [])
+                if isinstance(section, Mapping)
+            ),
+        ]
+        excerpt_source = "\n".join(str(part or "") for part in content_parts if part)
+        visible.append(
+            {
+                "id": int(article.get("id")),
+                "slug": str(article.get("slug")),
+                "title": str(article.get("title")),
+                "summary": article.get("summary"),
+                "excerpt": _build_excerpt(excerpt_source, "", article.get("summary")),
+                "updated_at_iso": _isoformat(article.get("updated_at_utc")),
+            }
+        )
+        if limit is not None and len(visible) >= limit:
+            break
+    return visible
 
 
 async def search_articles(
@@ -894,11 +1002,11 @@ async def search_articles(
     visible: list[dict[str, Any]] = []
     tokens = _tokenise(query)
     scored: list[tuple[int, float, Mapping[str, Any]]] = []
-    
+
     # Minimum score threshold to filter out weakly related articles
     # Articles must have meaningful relevance to be included
     min_score_threshold = 3
-    
+
     for article in candidates:
         if not article.get("is_published") and not context.is_super_admin:
             continue
