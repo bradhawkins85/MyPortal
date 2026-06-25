@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.dependencies.auth import get_current_user
 from app.schemas.agent import AgentQueryRequest, AgentQueryResponse
 from app.services import agent as agent_service
+from app.repositories import rag_index as rag_index_repo
 
 router = APIRouter(prefix="/api/agent", tags=["Agent"])
 
@@ -24,3 +25,10 @@ async def query_agent(
         memberships=memberships,
     )
     return AgentQueryResponse(**result)
+
+
+@router.get("/rag/health")
+async def rag_health(current_user: dict = Depends(get_current_user)) -> dict:
+    if not bool(current_user.get("is_super_admin")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not permitted")
+    return await rag_index_repo.health()

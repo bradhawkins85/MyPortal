@@ -20,6 +20,8 @@ from app.services import issues as issues_service
 from app.services import reports as reports_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import modules as modules_service
+from app.services import rag_index as rag_index_service
+from app.services import rag_retrieval
 
 _KB_RESULT_LIMIT = 5
 _TICKET_RESULT_LIMIT = 5
@@ -1141,6 +1143,36 @@ async def execute_agent_query(
         is_super_admin=is_super_admin,
     )
 
+    assembled_sources = {
+        "knowledge_base": knowledge_base_sources,
+        "tickets": ticket_sources,
+        "products": product_sources,
+        "packages": package_sources,
+        "chats": chat_sources,
+        "orders": order_sources,
+        "assets": asset_sources,
+        "companies": company_sources,
+        "staff": staff_sources,
+        "issues": issue_sources,
+        "service_status": service_status_sources,
+        "backup_jobs": backup_job_sources,
+        "reports": report_sources,
+        "mailboxes": mailbox_sources,
+        "best_practices": best_practice_sources,
+        "feature_packs": feature_pack_sources,
+    }
+    try:
+        await rag_index_service.index_agent_sources(assembled_sources)
+        rag_candidates = await rag_retrieval.retrieve_candidates(
+            query_text,
+            user,
+            active_company_id=active_company_id,
+            memberships=resolved_memberships,
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        log_error("Agent RAG retrieval failed", error=str(exc))
+        rag_candidates = []
+
     # Check if we have any relevant sources
     has_relevant_sources = bool(
         knowledge_base_sources
@@ -1184,6 +1216,22 @@ async def execute_agent_query(
                 "",
             ]
         )
+
+    if rag_candidates:
+        context_sections.append("High-confidence RAG candidates:")
+        for index, candidate in enumerate(rag_candidates, start=1):
+            source_type = candidate.get("source_type") or "source"
+            source_id = candidate.get("source_id") or candidate.get("document_id")
+            title = candidate.get("title") or f"{source_type} {source_id}"
+            excerpt = _truncate(candidate.get("excerpt"), 420) or "No excerpt available"
+            score = candidate.get("score")
+            context_sections.append(
+                f"- [RAG:{source_type}:{source_id}] #{index} score={score}: {title}: {excerpt}"
+            )
+        context_sections.append(
+            "Summarize and rank these RAG candidates first. Only use lower-confidence source lists below as fallback context."
+        )
+        context_sections.append("")
 
     if knowledge_base_sources:
         context_sections.append("Knowledge base articles:")
@@ -1491,5 +1539,5 @@ async def execute_agent_query(
             "best_practices": best_practice_sources,
             "feature_packs": feature_pack_sources,
         },
-        "context": {"companies": company_context},
+        "context": {"companies": company_context, "rag_candidates": rag_candidates},
     }
