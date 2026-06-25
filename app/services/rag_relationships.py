@@ -116,12 +116,48 @@ Return JSON only:
 {{"relationship":"DIRECT_MATCH","confidence":0.94,"score":0.93,"reason":"...","supporting_excerpt":"..."}}"""
 
 
+def _extract_json_object(text: str) -> str:
+    stripped = text.strip()
+    if not stripped:
+        raise ValueError("Relationship evaluator returned an empty response")
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].lstrip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    if stripped.startswith("{"):
+        return stripped
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start >= 0 and end > start:
+        return stripped[start : end + 1]
+    raise ValueError("Relationship evaluator did not return a JSON object")
+
+
+def _relationship_response_payload(response: Any) -> Any:
+    if not isinstance(response, Mapping):
+        return response
+    raw = response.get("payload")
+    if raw is None:
+        raw = response.get("response")
+    if raw is None:
+        raw = response.get("message")
+    if isinstance(raw, Mapping):
+        for key in ("response", "message", "text"):
+            nested = raw.get(key)
+            if nested is not None:
+                return nested
+    return raw
+
+
 def parse_relationship_response(value: Any, *, min_score: float) -> dict[str, Any]:
     if isinstance(value, Mapping):
         payload = value
     else:
         text = str(value or "").strip()
-        payload = json.loads(text)
+        payload = json.loads(_extract_json_object(text))
     relationship = str(payload.get("relationship") or payload.get("relationship_type") or "NOT_RELEVANT").strip().upper()
     try:
         relationship_type = RelationshipType(relationship)
@@ -166,9 +202,10 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
                     {"prompt": _prompt(source, target), "format": "json", "model": settings.rag_relationship_model},
                     background=False,
                 )
-                raw = response.get("payload") if isinstance(response, Mapping) else response
-                if isinstance(raw, Mapping):
-                    raw = raw.get("response") or raw.get("message") or raw
+                if isinstance(response, Mapping) and str(response.get("status") or "").lower() in {"error", "failed", "skipped"}:
+                    reason = response.get("last_error") or response.get("error") or response.get("reason") or "module did not complete"
+                    raise RuntimeError(f"Relationship evaluator unavailable: {reason}")
+                raw = _relationship_response_payload(response)
                 parsed = parse_relationship_response(raw, min_score=settings.rag_relationship_min_score)
                 await rel_repo.store_relationship(
                     int(source["id"]), int(target["id"]), parsed,
