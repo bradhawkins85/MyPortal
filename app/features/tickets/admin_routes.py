@@ -41,6 +41,7 @@ from app.repositories import users as user_repo
 from app.services import agent as agent_service
 from app.services import labour_types as labour_types_service
 from app.services import ticket_attachments as attachments_service
+from app.services import rag_retrieval
 from app.services import tickets as tickets_service
 from app.services import tray as tray_service
 from app.services.sanitization import sanitize_rich_text
@@ -296,11 +297,50 @@ async def admin_rescan_ticket_related(ticket_id: int, request: Request):
         active_company_id=getattr(request.state, "active_company_id", None),
         memberships=getattr(request.state, "available_companies", None),
     )
-    items = _related_items_from_agent_sources(
-        dict(result.get("sources") or {}),
-        ticket_id,
-        search_terms=search_terms,
-    )
+    try:
+        rag_candidates = await rag_retrieval.retrieve_candidates(
+            query,
+            current_user,
+            active_company_id=getattr(request.state, "active_company_id", None),
+            memberships=getattr(request.state, "available_companies", None),
+            limit=12,
+            min_score=0.08,
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        log_error("Ticket related RAG retrieval failed", ticket_id=ticket_id, error=str(exc))
+        rag_candidates = []
+
+    items: list[dict[str, str]] = []
+    for candidate in rag_candidates:
+        source_type = str(candidate.get("source_type") or "")
+        source_id = candidate.get("source_id")
+        if source_type == "tickets":
+            try:
+                if int(source_id) == ticket_id:
+                    continue
+            except (TypeError, ValueError):
+                pass
+        url = _safe_related_url(candidate.get("url"))
+        if not url:
+            url = _source_url(source_type, {"id": source_id, "url": candidate.get("url")})
+        if not url:
+            continue
+        label = str(candidate.get("title") or f"{source_type.title()} {source_id}").strip()[:180]
+        items.append({
+            "type": source_type,
+            "label": label,
+            "url": url,
+            "score": str(candidate.get("score") or ""),
+        })
+        if len(items) >= 12:
+            break
+
+    if not items:
+        items = _related_items_from_agent_sources(
+            dict(result.get("sources") or {}),
+            ticket_id,
+            search_terms=search_terms,
+        )
     return JSONResponse({
         "items": items,
         "scanned": True,

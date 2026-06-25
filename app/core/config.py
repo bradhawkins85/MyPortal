@@ -203,6 +203,30 @@ class Settings(BaseSettings):
     disable_caching: bool = Field(
         default=True, validation_alias="DISABLE_CACHING"
     )
+    rag_embedding_model: str = Field(
+        default="myportal-hash-embedding-v1",
+        validation_alias="RAG_EMBEDDING_MODEL",
+        description=(
+            "Embedding model/version identifier stored with RAG chunks. Change this "
+            "when switching embedding providers or dimensions so new vectors are "
+            "indexed separately from old vectors."
+        ),
+    )
+    rag_embedding_dimensions: int = Field(
+        default=256, validation_alias="RAG_EMBEDDING_DIMENSIONS", ge=16, le=4096
+    )
+    rag_chunk_words: int = Field(
+        default=180, validation_alias="RAG_CHUNK_WORDS", ge=50, le=2000
+    )
+    rag_chunk_overlap_words: int = Field(
+        default=35, validation_alias="RAG_CHUNK_OVERLAP_WORDS", ge=0, le=500
+    )
+    rag_candidate_limit: int = Field(
+        default=8, validation_alias="RAG_CANDIDATE_LIMIT", ge=1, le=50
+    )
+    rag_min_score: float = Field(
+        default=0.12, validation_alias="RAG_MIN_SCORE", ge=0.0, le=1.0
+    )
     swagger_ui_url: str = Field(default="/docs", validation_alias="SWAGGER_UI_URL")
     public_base_url: str | None = Field(
         default=None,

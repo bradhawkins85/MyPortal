@@ -192,8 +192,18 @@ class AgentContextCompany(BaseModel):
     company_name: str
 
 
+class AgentContextRagCandidate(BaseModel):
+    source_type: str | None = None
+    source_id: str | None = None
+    title: str | None = None
+    url: str | None = None
+    excerpt: str | None = None
+    score: float | None = None
+
+
 class AgentContext(BaseModel):
     companies: list[AgentContextCompany] = Field(default_factory=list)
+    rag_candidates: list[AgentContextRagCandidate] = Field(default_factory=list)
 
 
 class AgentQueryRequest(BaseModel):
