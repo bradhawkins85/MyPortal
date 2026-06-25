@@ -444,7 +444,10 @@ async def test_execute_agent_query_includes_chat_order_and_asset_sources(monkeyp
     assert result["sources"]["service_status"][0]["id"] == 8
     assert result["sources"]["backup_jobs"][0]["id"] == 44
     assert result["sources"]["reports"][0]["key"] == "vpn-report"
-    assert result["sources"]["mailboxes"][0]["user_principal_name"] == "vpn.user@example.com"
+    assert (
+        result["sources"]["mailboxes"][0]["user_principal_name"]
+        == "vpn.user@example.com"
+    )
     assert result["sources"]["best_practices"][0]["check_id"] == "vpn-mfa"
     assert result["has_relevant_sources"] is True
 
@@ -566,3 +569,113 @@ async def test_search_staff_sources_matches_mobile_org_and_custom_fields(monkeyp
         "employment_type": "Contractor",
         "site": "HQ",
     }
+
+
+@pytest.mark.anyio
+async def test_execute_agent_query_minimises_llm_prompt_context(monkeypatch):
+    user = {"id": 7, "is_super_admin": False}
+    memberships = [
+        {"company_id": 1, "company_name": "Visible Co", "can_access_shop": True},
+        {"company_id": 2, "company_name": "Extra Co 2", "can_access_shop": True},
+        {"company_id": 3, "company_name": "Extra Co 3", "can_access_shop": True},
+        {"company_id": 4, "company_name": "Extra Co 4", "can_access_shop": True},
+    ]
+    kb_result = {
+        "results": [
+            {
+                "slug": f"kb-{index}",
+                "title": f"KB {index}",
+                "summary": f"Knowledge base summary {index}",
+                "excerpt": f"Knowledge base excerpt {index}",
+                "updated_at_iso": "2025-01-05T09:00:00Z",
+            }
+            for index in range(1, 7)
+        ]
+    }
+    ticket_rows = [
+        {
+            "id": index,
+            "subject": f"Ticket {index}",
+            "status": "open",
+            "priority": "normal",
+            "description": f"Ticket detail {index}",
+            "updated_at": datetime(2025, 1, index, tzinfo=timezone.utc),
+            "company_id": 1,
+        }
+        for index in range(1, 7)
+    ]
+    product_rows = [
+        {
+            "id": index,
+            "name": f"Product {index}",
+            "sku": f"SKU-{index}",
+            "vendor_sku": None,
+            "price": Decimal("1.00"),
+            "description": f"Product detail {index}",
+            "cross_sell_products": [],
+            "upsell_products": [],
+        }
+        for index in range(1, 7)
+    ]
+
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "build_access_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "search_articles",
+        AsyncMock(return_value=kb_result),
+    )
+    monkeypatch.setattr(
+        agent_service.tickets_repo,
+        "list_tickets_for_user",
+        AsyncMock(return_value=ticket_rows),
+    )
+    monkeypatch.setattr(
+        agent_service.shop_repo,
+        "list_products",
+        AsyncMock(return_value=product_rows),
+    )
+    monkeypatch.setattr(
+        agent_service.shop_repo,
+        "list_packages",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(agent_service.db, "fetch_all", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        agent_service.rag_index_service,
+        "index_agent_sources",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        agent_service.rag_retrieval,
+        "retrieve_candidates",
+        AsyncMock(return_value=[]),
+    )
+
+    captured_prompt = ""
+
+    async def fake_trigger(slug, payload, *, background):
+        nonlocal captured_prompt
+        captured_prompt = payload.get("prompt", "")
+        return {"status": "succeeded", "response": {"response": "Minimised"}}
+
+    monkeypatch.setattr(agent_service.modules_service, "trigger_module", fake_trigger)
+
+    result = await agent_service.execute_agent_query(
+        "network", user, active_company_id=1, memberships=memberships
+    )
+
+    assert len(result["sources"]["knowledge_base"]) == 6
+    assert len(result["sources"]["tickets"]) == 6
+    assert len(result["sources"]["products"]) == 6
+    assert "[KB:kb-5]" in captured_prompt
+    assert "[KB:kb-6]" not in captured_prompt
+    assert "[Ticket:#5]" in captured_prompt
+    assert "[Ticket:#6]" not in captured_prompt
+    assert "[Product:SKU-5]" in captured_prompt
+    assert "[Product:SKU-6]" not in captured_prompt
+    assert "Extra Co 3 (#3)" in captured_prompt
+    assert "Extra Co 4 (#4)" not in captured_prompt

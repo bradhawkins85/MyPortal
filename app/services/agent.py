@@ -36,6 +36,11 @@ _STAFF_RESULT_LIMIT = 1000
 _ISSUE_RESULT_LIMIT = 1000
 _SYSTEM_RESULT_LIMIT = 1000
 _MAX_SNIPPET_LENGTH = 320
+_LLM_SOURCE_LIMIT = 5
+_LLM_RAG_CANDIDATE_LIMIT = 8
+_LLM_COMPANY_CONTEXT_LIMIT = 3
+_LLM_PROMPT_CHAR_LIMIT = 24000
+_LLM_SNIPPET_LENGTH = 180
 
 
 def _utc_iso(dt: datetime | None) -> str | None:
@@ -62,6 +67,32 @@ def _truncate(value: str | None, limit: int = _MAX_SNIPPET_LENGTH) -> str | None
     if len(text) <= limit:
         return text
     return text[: limit - 1].rstrip() + "…"
+
+
+def _for_llm(
+    items: Sequence[Mapping[str, Any]], limit: int = _LLM_SOURCE_LIMIT
+) -> list[Mapping[str, Any]]:
+    """Return the small, highest-ranked subset that is safe to send to the LLM."""
+
+    return list(items[:limit])
+
+
+def _truncate_prompt_sections(
+    sections: list[str], *, limit: int = _LLM_PROMPT_CHAR_LIMIT
+) -> str:
+    """Join prompt sections while enforcing a hard character budget.
+
+    Source searches can return many records for the UI, but the model should only
+    receive the minimum necessary context.  If a future source type adds too much
+    text, this guard truncates the prompt rather than leaking excess portal data
+    or exhausting the model context window.
+    """
+
+    prompt = "\n".join(sections)
+    if len(prompt) <= limit:
+        return prompt
+    notice = "\n\n[Context truncated to keep the LLM prompt within the configured data-minimisation budget.]"
+    return prompt[: max(0, limit - len(notice))].rstrip() + notice
 
 
 def _normalise_memberships(
@@ -812,6 +843,7 @@ async def execute_agent_query(
 
     accessible_company_ids = _extract_company_ids(resolved_memberships)
     company_context = _company_summary(resolved_memberships)
+    llm_company_context = company_context[:_LLM_COMPANY_CONTEXT_LIMIT]
     is_super_admin = bool(user.get("is_super_admin"))
 
     kb_context = await knowledge_base_service.build_access_context(user)
@@ -1213,10 +1245,10 @@ async def execute_agent_query(
         "",
     ]
 
-    if company_context:
+    if llm_company_context:
         company_lines = ", ".join(
             f"{entry['company_name']} (#{entry['company_id']})"
-            for entry in company_context
+            for entry in llm_company_context
         )
         context_sections.extend(
             [
@@ -1228,11 +1260,16 @@ async def execute_agent_query(
 
     if rag_candidates:
         context_sections.append("High-confidence RAG candidates:")
-        for index, candidate in enumerate(rag_candidates, start=1):
+        for index, candidate in enumerate(
+            rag_candidates[:_LLM_RAG_CANDIDATE_LIMIT], start=1
+        ):
             source_type = candidate.get("source_type") or "source"
             source_id = candidate.get("source_id") or candidate.get("document_id")
             title = candidate.get("title") or f"{source_type} {source_id}"
-            excerpt = _truncate(candidate.get("excerpt"), 420) or "No excerpt available"
+            excerpt = (
+                _truncate(candidate.get("excerpt"), _LLM_SNIPPET_LENGTH)
+                or "No excerpt available"
+            )
             score = candidate.get("score")
             context_sections.append(
                 f"- [RAG:{source_type}:{source_id}] #{index} score={score}: {title}: {excerpt}"
@@ -1244,8 +1281,11 @@ async def execute_agent_query(
 
     if knowledge_base_sources:
         context_sections.append("Knowledge base articles:")
-        for article in knowledge_base_sources:
-            summary = article["summary"] or article["excerpt"] or "No summary available"
+        for article in _for_llm(knowledge_base_sources):
+            summary = (
+                _truncate(article["summary"] or article["excerpt"], _LLM_SNIPPET_LENGTH)
+                or "No summary available"
+            )
             context_sections.append(
                 f"- [KB:{article['slug']}] {article['title']}: {summary}"
             )
@@ -1253,8 +1293,11 @@ async def execute_agent_query(
 
     if ticket_sources:
         context_sections.append("Tickets created by or watched by the user:")
-        for ticket in ticket_sources:
-            summary = ticket["summary"] or "No summary available"
+        for ticket in _for_llm(ticket_sources):
+            summary = (
+                _truncate(ticket["summary"], _LLM_SNIPPET_LENGTH)
+                or "No summary available"
+            )
             context_sections.append(
                 f"- [Ticket:#{ticket['id']}] {ticket['subject']} (status: {ticket['status']}, priority: {ticket['priority']}): {summary}"
             )
@@ -1262,8 +1305,11 @@ async def execute_agent_query(
 
     if chat_sources:
         context_sections.append("Chats accessible to the user:")
-        for chat in chat_sources:
-            summary = chat["summary"] or "No matching message excerpt available"
+        for chat in _for_llm(chat_sources):
+            summary = (
+                _truncate(chat["summary"], _LLM_SNIPPET_LENGTH)
+                or "No matching message excerpt available"
+            )
             context_sections.append(
                 f"- [Chat:#{chat['id']}] {chat['subject']} (status: {chat['status']}): {summary}"
             )
@@ -1271,20 +1317,20 @@ async def execute_agent_query(
 
     if order_sources:
         context_sections.append("Orders accessible to the user:")
-        for order in order_sources:
+        for order in _for_llm(order_sources):
             parts = [f"[Order:{order['order_number']}] status: {order['status']}"]
             if order.get("shipping_status"):
                 parts.append(f"shipping: {order['shipping_status']}")
             if order.get("po_number"):
                 parts.append(f"PO: {order['po_number']}")
             if order.get("summary"):
-                parts.append(order["summary"])
+                parts.append(_truncate(order["summary"], _LLM_SNIPPET_LENGTH) or "")
             context_sections.append("- " + " — ".join(parts))
         context_sections.append("")
 
     if asset_sources:
         context_sections.append("Assets accessible to the user:")
-        for asset in asset_sources:
+        for asset in _for_llm(asset_sources):
             parts = [f"[Asset:#{asset['id']}] {asset['name']}"]
             for key, label in (
                 ("type", "type"),
@@ -1300,7 +1346,7 @@ async def execute_agent_query(
 
     if company_sources:
         context_sections.append("Companies accessible to the user:")
-        for company in company_sources:
+        for company in _for_llm(company_sources):
             parts = [f"[Company:#{company['id']}] {company['name']}"]
             if company.get("syncro_company_id"):
                 parts.append(f"Syncro ID: {company['syncro_company_id']}")
@@ -1309,7 +1355,7 @@ async def execute_agent_query(
 
     if staff_sources:
         context_sections.append("Staff accessible to the user:")
-        for staff_member in staff_sources:
+        for staff_member in _for_llm(staff_sources):
             parts = [f"[Staff:#{staff_member['id']}] {staff_member['name']}"]
             if staff_member.get("email"):
                 parts.append(f"email: {staff_member['email']}")
@@ -1341,10 +1387,10 @@ async def execute_agent_query(
 
     if issue_sources:
         context_sections.append("Issues accessible to the user:")
-        for issue in issue_sources:
+        for issue in _for_llm(issue_sources):
             parts = [f"[Issue:#{issue['id']}] {issue['name']}"]
             if issue.get("description"):
-                parts.append(issue["description"])
+                parts.append(_truncate(issue["description"], _LLM_SNIPPET_LENGTH) or "")
             assignment_labels = [
                 (
                     f"{assignment.get('company_name') or assignment.get('company_id')}: "
@@ -1359,44 +1405,50 @@ async def execute_agent_query(
 
     if service_status_sources:
         context_sections.append("Service statuses accessible to the user:")
-        for service in service_status_sources:
+        for service in _for_llm(service_status_sources):
             parts = [f"[ServiceStatus:#{service['id']}] {service['name']}"]
             if service.get("status"):
                 parts.append(f"status: {service['status']}")
             if service.get("status_message"):
-                parts.append(service["status_message"])
+                parts.append(
+                    _truncate(service["status_message"], _LLM_SNIPPET_LENGTH) or ""
+                )
             elif service.get("description"):
-                parts.append(service["description"])
+                parts.append(
+                    _truncate(service["description"], _LLM_SNIPPET_LENGTH) or ""
+                )
             context_sections.append("- " + " — ".join(parts))
         context_sections.append("")
 
     if backup_job_sources:
         context_sections.append("Backup summary jobs accessible to the user:")
-        for job in backup_job_sources:
+        for job in _for_llm(backup_job_sources):
             parts = [f"[BackupJob:#{job['id']}] {job['name']}"]
             if job.get("today_status"):
                 parts.append(f"today: {job['today_status']}")
             if job.get("latest_status"):
                 parts.append(f"latest: {job['latest_status']}")
             if job.get("description"):
-                parts.append(job["description"])
+                parts.append(_truncate(job["description"], _LLM_SNIPPET_LENGTH) or "")
             context_sections.append("- " + " — ".join(parts))
         context_sections.append("")
 
     if report_sources:
         context_sections.append("Reports accessible to the user:")
-        for report in report_sources:
+        for report in _for_llm(report_sources):
             parts = [f"[Report:{report['key']}] {report['title']}"]
             if report.get("source_type"):
                 parts.append(f"type: {report['source_type']}")
             if report.get("description"):
-                parts.append(report["description"])
+                parts.append(
+                    _truncate(report["description"], _LLM_SNIPPET_LENGTH) or ""
+                )
             context_sections.append("- " + " — ".join(parts))
         context_sections.append("")
 
     if mailbox_sources:
         context_sections.append("Office 365 mailboxes accessible to the user:")
-        for mailbox in mailbox_sources:
+        for mailbox in _for_llm(mailbox_sources):
             parts = [
                 f"[Mailbox:{mailbox['user_principal_name']}] {mailbox['display_name']}"
             ]
@@ -1409,24 +1461,24 @@ async def execute_agent_query(
 
     if best_practice_sources:
         context_sections.append("Microsoft 365 best practices accessible to the user:")
-        for check in best_practice_sources:
+        for check in _for_llm(best_practice_sources):
             parts = [f"[BestPractice:{check['check_id']}] {check['check_name']}"]
             if check.get("status"):
                 parts.append(f"status: {check['status']}")
             if check.get("details"):
-                parts.append(check["details"])
+                parts.append(_truncate(check["details"], _LLM_SNIPPET_LENGTH) or "")
             context_sections.append("- " + " — ".join(parts))
         context_sections.append("")
 
     if feature_pack_sources:
         context_sections.append("Feature pack results accessible to the user:")
         for slug, items in sorted(feature_pack_sources.items()):
-            for item in items:
+            for item in _for_llm(items):
                 parts = [f"[Feature:{slug}] {item['title']}"]
                 if item.get("source_type"):
                     parts.append(f"type: {item['source_type']}")
                 if item.get("summary"):
-                    parts.append(item["summary"])
+                    parts.append(_truncate(item["summary"], _LLM_SNIPPET_LENGTH) or "")
                 context_sections.append("- " + " — ".join(parts))
         context_sections.append("")
 
@@ -1434,7 +1486,7 @@ async def execute_agent_query(
         context_sections.append(
             "Products and hardware recommendations available to the user:"
         )
-        for product in product_sources:
+        for product in _for_llm(product_sources):
             parts = [
                 (
                     f"[Product:{product['sku']}] {product['name']}"
@@ -1445,7 +1497,9 @@ async def execute_agent_query(
             if product.get("price"):
                 parts.append(f"Price: {product['price']}")
             if product.get("description"):
-                parts.append(product["description"])
+                parts.append(
+                    _truncate(product["description"], _LLM_SNIPPET_LENGTH) or ""
+                )
             if product.get("recommendations"):
                 recos = ", ".join(product["recommendations"])
                 parts.append(f"Recommended with: {recos}")
@@ -1456,7 +1510,7 @@ async def execute_agent_query(
         context_sections.append(
             "Hardware bundles and service packages available to the user:"
         )
-        for package in package_sources:
+        for package in _for_llm(package_sources):
             parts = [
                 (
                     f"[Package:{package['sku']}] {package['name']}"
@@ -1473,7 +1527,9 @@ async def execute_agent_query(
                 plural = "item" if count_int == 1 else "items"
                 parts.append(f"Includes {count_int} {plural}")
             if package.get("description"):
-                parts.append(package["description"])
+                parts.append(
+                    _truncate(package["description"], _LLM_SNIPPET_LENGTH) or ""
+                )
             context_sections.append("- " + " — ".join(parts))
         context_sections.append("")
 
@@ -1484,7 +1540,7 @@ async def execute_agent_query(
             "and recommend they create a support ticket for personalized assistance."
         )
 
-    prompt = "\n".join(context_sections)
+    prompt = _truncate_prompt_sections(context_sections)
 
     module_status = "skipped"
     model_name: str | None = None
