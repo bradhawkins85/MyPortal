@@ -48,8 +48,5 @@ func openNewTicketWindow(cfg *api.ConfigResponse) {
 }
 
 func showOSNotification(title, body string) {
-	ensureWindowsToastShortcut()
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", windowsToastEncodedCommand(title, body))
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000 /* CREATE_NO_WINDOW */}
-	_ = cmd.Start()
+	showWindowsNotification(title, body)
 }

@@ -222,6 +222,14 @@ class TrayChatTokenResponse(BaseModel):
     chat_url: str
 
 
+class TrayTicketTokenResponse(BaseModel):
+    """Response returned by POST /api/tray/ticket-token."""
+
+    token: str
+    expires_in: int = 300
+    ticket_url: str
+
+
 # ---------------------------------------------------------------------------
 # Phase 7 schemas — tray ticket submission
 # ---------------------------------------------------------------------------
