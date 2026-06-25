@@ -10,7 +10,9 @@ def _pair(source_id: int, target_id: int) -> tuple[int, int]:
 
 
 async def get_document(document_id: int) -> dict[str, Any] | None:
-    return await db.fetch_one("SELECT * FROM rag_documents WHERE id = ? AND is_active = 1", (document_id,))
+    return await db.fetch_one(
+        "SELECT * FROM rag_documents WHERE id = ? AND is_active = 1", (document_id,)
+    )
 
 
 async def get_document_with_content(document_id: int) -> dict[str, Any] | None:
@@ -27,9 +29,14 @@ async def get_document_with_content(document_id: int) -> dict[str, Any] | None:
     return row
 
 
-async def list_compatible_targets(document_id: int, *, include_tickets: bool) -> list[dict[str, Any]]:
+async def list_compatible_targets(
+    document_id: int, *, include_tickets: bool
+) -> list[dict[str, Any]]:
     if include_tickets:
-        return await db.fetch_all("SELECT * FROM rag_documents WHERE id <> ? AND is_active = 1", (document_id,))
+        return await db.fetch_all(
+            "SELECT * FROM rag_documents WHERE id <> ? AND is_active = 1",
+            (document_id,),
+        )
     return await db.fetch_all(
         "SELECT * FROM rag_documents WHERE id <> ? AND is_active = 1 AND source_type <> 'tickets'",
         (document_id,),
@@ -100,9 +107,34 @@ async def claim_jobs(limit: int) -> list[dict[str, Any]]:
     return jobs
 
 
-async def store_relationship(source_id: int, target_id: int, parsed: Mapping[str, Any], *, evaluated_model: str, source_hash: str, target_hash: str, duration_ms: int) -> None:
+async def store_relationship(
+    source_id: int,
+    target_id: int,
+    parsed: Mapping[str, Any],
+    *,
+    evaluated_model: str,
+    source_hash: str,
+    target_hash: str,
+    duration_ms: int,
+) -> None:
     left, right = _pair(source_id, target_id)
-    params = (left, right, parsed["relationship_type"], parsed["match_status"], parsed["relevance_score"], parsed["confidence"], parsed.get("reason"), parsed.get("supporting_excerpt"), evaluated_model, source_hash, target_hash, duration_ms)
+    left_hash, right_hash = (
+        (source_hash, target_hash) if left == source_id else (target_hash, source_hash)
+    )
+    params = (
+        left,
+        right,
+        parsed["relationship_type"],
+        parsed["match_status"],
+        parsed["relevance_score"],
+        parsed["confidence"],
+        parsed.get("reason"),
+        parsed.get("supporting_excerpt"),
+        evaluated_model,
+        left_hash,
+        right_hash,
+        duration_ms,
+    )
     if db.is_sqlite():
         await db.execute(
             """
@@ -147,7 +179,12 @@ async def complete_queue_item(queue_id: int, status: str) -> None:
 
 
 async def fail_queue_item(queue_id: int, error: str, *, max_retries: int) -> None:
-    row = await db.fetch_one("SELECT retry_count FROM rag_relationship_queue WHERE id = ?", (queue_id,)) or {}
+    row = (
+        await db.fetch_one(
+            "SELECT retry_count FROM rag_relationship_queue WHERE id = ?", (queue_id,)
+        )
+        or {}
+    )
     retry_count = int(row.get("retry_count") or 0) + 1
     status = "FAILED" if retry_count >= max_retries else "PENDING"
     await db.execute(
@@ -156,7 +193,9 @@ async def fail_queue_item(queue_id: int, error: str, *, max_retries: int) -> Non
     )
 
 
-async def list_relationship_evidence(document_id: int, *, limit: int) -> list[dict[str, Any]]:
+async def list_relationship_evidence(
+    document_id: int, *, limit: int
+) -> list[dict[str, Any]]:
     return await db.fetch_all(
         """
         SELECT r.*, d.source_type, d.source_id, d.title, d.url, GROUP_CONCAT(c.chunk_text, '\n') AS content
@@ -175,8 +214,50 @@ async def list_relationship_evidence(document_id: int, *, limit: int) -> list[di
 
 
 async def metrics() -> dict[str, Any]:
-    queue = await db.fetch_all("SELECT status, COUNT(*) AS count FROM rag_relationship_queue GROUP BY status")
-    rels = await db.fetch_all("SELECT match_status, COUNT(*) AS count FROM rag_relationships GROUP BY match_status")
-    avg = await db.fetch_one("SELECT COALESCE(AVG(evaluation_duration_ms),0) AS avg_ms FROM rag_relationships")
+    queue = await db.fetch_all(
+        "SELECT status, COUNT(*) AS count FROM rag_relationship_queue GROUP BY status"
+    )
+    rels = await db.fetch_all(
+        "SELECT match_status, COUNT(*) AS count FROM rag_relationships GROUP BY match_status"
+    )
+    avg = await db.fetch_one(
+        "SELECT COALESCE(AVG(evaluation_duration_ms),0) AS avg_ms FROM rag_relationships"
+    )
     total = await db.fetch_one("SELECT COUNT(*) AS count FROM rag_relationships")
-    return {"queue": queue, "relationships": rels, "average_evaluation_duration_ms": float((avg or {}).get("avg_ms") or 0), "total_stored_relationships": int((total or {}).get("count") or 0)}
+    matched_documents = await db.fetch_one("""
+        SELECT COUNT(DISTINCT document_id) AS count
+        FROM (
+            SELECT source_document_id AS document_id
+            FROM rag_relationships
+            WHERE match_status = 'MATCH'
+            UNION
+            SELECT target_document_id AS document_id
+            FROM rag_relationships
+            WHERE match_status = 'MATCH'
+        ) matched
+        """)
+    positive_matches = await db.fetch_one(
+        "SELECT COUNT(*) AS count FROM rag_relationships WHERE match_status = 'MATCH'"
+    )
+    stale_matches = await db.fetch_one(
+        "SELECT COUNT(*) AS count FROM rag_relationships WHERE match_status = 'STALE'"
+    )
+    pending_matches = await db.fetch_one("""
+        SELECT COUNT(*) AS count
+        FROM rag_relationship_queue
+        WHERE status IN ('PENDING', 'PROCESSING')
+        """)
+    failed_lookups = await db.fetch_one(
+        "SELECT COUNT(*) AS count FROM rag_relationship_queue WHERE status = 'FAILED'"
+    )
+    return {
+        "queue": queue,
+        "relationships": rels,
+        "average_evaluation_duration_ms": float((avg or {}).get("avg_ms") or 0),
+        "total_stored_relationships": int((total or {}).get("count") or 0),
+        "matched_documents": int((matched_documents or {}).get("count") or 0),
+        "positive_matches": int((positive_matches or {}).get("count") or 0),
+        "pending_matches": int((pending_matches or {}).get("count") or 0),
+        "failed_lookups": int((failed_lookups or {}).get("count") or 0),
+        "stale_matches": int((stale_matches or {}).get("count") or 0),
+    }

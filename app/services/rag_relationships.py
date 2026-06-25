@@ -80,15 +80,25 @@ async def enqueue_relationships_for_document(document_id: int) -> int:
             continue
         if await rel_repo.relationship_current(document_id, int(target["id"])):
             continue
-        if await rel_repo.enqueue(document_id, int(target["id"]), priority=1000):
+        if await rel_repo.enqueue(
+            document_id,
+            int(target["id"]),
+            priority=_relationship_queue_priority(source, target),
+        ):
             queued += 1
     return queued
 
 
-def _skip_pair(source: Mapping[str, Any], target: Mapping[str, Any], include_tickets: bool) -> bool:
+def _skip_pair(
+    source: Mapping[str, Any], target: Mapping[str, Any], include_tickets: bool
+) -> bool:
     if int(source["id"]) == int(target["id"]):
         return True
-    if source.get("company_id") and target.get("company_id") and int(source["company_id"]) != int(target["company_id"]):
+    if (
+        source.get("company_id")
+        and target.get("company_id")
+        and int(source["company_id"]) != int(target["company_id"])
+    ):
         return True
     source_type = str(source.get("source_type") or "")
     target_type = str(target.get("source_type") or "")
@@ -97,7 +107,38 @@ def _skip_pair(source: Mapping[str, Any], target: Mapping[str, Any], include_tic
     return False
 
 
+def _relationship_queue_priority(
+    source: Mapping[str, Any], target: Mapping[str, Any]
+) -> int:
+    """Return queue priority for a relationship candidate pair."""
+
+    source_type = str(source.get("source_type") or "")
+    target_type = str(target.get("source_type") or "")
+    if source_type == "tickets" or target_type == "tickets":
+        return 1100
+    return 1000
+
+
+def _evaluation_document_order(
+    source: Mapping[str, Any], target: Mapping[str, Any]
+) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+    """Return the source/target order to present to the relationship evaluator.
+
+    Tickets should be the anchor document whenever a ticket is compared with
+    another document type so relationship prompts consistently present the
+    support request as Document A. Ticket-to-ticket and non-ticket pairs retain
+    their queued order.
+    """
+
+    source_type = str(source.get("source_type") or "")
+    target_type = str(target.get("source_type") or "")
+    if source_type != "tickets" and target_type == "tickets":
+        return target, source
+    return source, target
+
+
 def _prompt(source: Mapping[str, Any], target: Mapping[str, Any]) -> str:
+    source, target = _evaluation_document_order(source, target)
     return f"""You evaluate MyPortal RAG document relationships. Return JSON only.
 
 Document A
@@ -158,14 +199,29 @@ def parse_relationship_response(value: Any, *, min_score: float) -> dict[str, An
     else:
         text = str(value or "").strip()
         payload = json.loads(_extract_json_object(text))
-    relationship = str(payload.get("relationship") or payload.get("relationship_type") or "NOT_RELEVANT").strip().upper()
+    relationship = (
+        str(
+            payload.get("relationship")
+            or payload.get("relationship_type")
+            or "NOT_RELEVANT"
+        )
+        .strip()
+        .upper()
+    )
     try:
         relationship_type = RelationshipType(relationship)
     except ValueError:
         relationship_type = RelationshipType.NOT_RELEVANT
-    score = max(0.0, min(1.0, float(payload.get("score") or payload.get("relevance_score") or 0.0)))
+    score = max(
+        0.0,
+        min(1.0, float(payload.get("score") or payload.get("relevance_score") or 0.0)),
+    )
     confidence = max(0.0, min(1.0, float(payload.get("confidence") or 0.0)))
-    match_status = MatchStatus.MATCH if relationship_type in _POSITIVE_TYPES and score >= min_score else MatchStatus.NO_MATCH
+    match_status = (
+        MatchStatus.MATCH
+        if relationship_type in _POSITIVE_TYPES and score >= min_score
+        else MatchStatus.NO_MATCH
+    )
     if match_status is MatchStatus.NO_MATCH:
         relationship_type = RelationshipType.NOT_RELEVANT
     return {
@@ -185,30 +241,52 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
     jobs = await rel_repo.claim_jobs(limit or settings.rag_relationship_batch_size)
     processed = 0
     semaphore = asyncio.Semaphore(max(1, int(settings.rag_relationship_max_concurrent)))
+
     async def _one(job: Mapping[str, Any]) -> None:
         nonlocal processed
         async with semaphore:
             started = time.perf_counter()
             try:
-                source = await rel_repo.get_document_with_content(int(job["source_document_id"]))
-                target = await rel_repo.get_document_with_content(int(job["target_document_id"]))
+                source = await rel_repo.get_document_with_content(
+                    int(job["source_document_id"])
+                )
+                target = await rel_repo.get_document_with_content(
+                    int(job["target_document_id"])
+                )
                 if not source or not target:
                     raise RuntimeError("Source or target document no longer exists")
-                if await rel_repo.relationship_current(int(source["id"]), int(target["id"])):
+                if await rel_repo.relationship_current(
+                    int(source["id"]), int(target["id"])
+                ):
                     await rel_repo.complete_queue_item(int(job["id"]), "skipped")
                     return
                 response = await modules_service.trigger_module(
                     "ollama",
-                    {"prompt": _prompt(source, target), "format": "json", "model": settings.rag_relationship_model},
+                    {
+                        "prompt": _prompt(source, target),
+                        "format": "json",
+                        "model": settings.rag_relationship_model,
+                    },
                     background=False,
                 )
-                if isinstance(response, Mapping) and str(response.get("status") or "").lower() in {"error", "failed", "skipped"}:
-                    reason = response.get("last_error") or response.get("error") or response.get("reason") or "module did not complete"
+                if isinstance(response, Mapping) and str(
+                    response.get("status") or ""
+                ).lower() in {"error", "failed", "skipped"}:
+                    reason = (
+                        response.get("last_error")
+                        or response.get("error")
+                        or response.get("reason")
+                        or "module did not complete"
+                    )
                     raise RuntimeError(f"Relationship evaluator unavailable: {reason}")
                 raw = _relationship_response_payload(response)
-                parsed = parse_relationship_response(raw, min_score=settings.rag_relationship_min_score)
+                parsed = parse_relationship_response(
+                    raw, min_score=settings.rag_relationship_min_score
+                )
                 await rel_repo.store_relationship(
-                    int(source["id"]), int(target["id"]), parsed,
+                    int(source["id"]),
+                    int(target["id"]),
+                    parsed,
                     evaluated_model=settings.rag_relationship_model,
                     source_hash=str(source.get("content_hash") or ""),
                     target_hash=str(target.get("content_hash") or ""),
@@ -219,6 +297,7 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
             except Exception as exc:
                 await rel_repo.fail_queue_item(int(job["id"]), str(exc), max_retries=5)
                 logger.warning("RAG relationship job failed: {}", exc)
+
     await asyncio.gather(*(_one(job) for job in jobs))
     return processed
 
@@ -228,9 +307,19 @@ async def relationship_worker(stop_event: asyncio.Event) -> None:
     while not stop_event.is_set():
         processed = await evaluate_next_batch()
         if not processed:
-            await asyncio.sleep(max(0.1, settings.rag_relationship_idle_delay_ms / 1000))
+            await asyncio.sleep(
+                max(0.1, settings.rag_relationship_idle_delay_ms / 1000)
+            )
 
 
-async def load_evidence_for_document(document_id: int, *, limit: int = 12) -> list[dict[str, Any]]:
+async def load_evidence_for_document(
+    document_id: int, *, limit: int = 12
+) -> list[dict[str, Any]]:
     rows = await rel_repo.list_relationship_evidence(document_id, limit=limit)
-    return sorted(rows, key=lambda r: (_MATCH_ORDER.get(str(r.get("relationship_type")), 99), -float(r.get("relevance_score") or 0)))
+    return sorted(
+        rows,
+        key=lambda r: (
+            _MATCH_ORDER.get(str(r.get("relationship_type")), 99),
+            -float(r.get("relevance_score") or 0),
+        ),
+    )
