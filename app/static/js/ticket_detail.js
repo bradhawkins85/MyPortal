@@ -213,7 +213,7 @@
         refreshButton.disabled = true;
         refreshButton.classList.add('is-loading');
       }
-      setStatus('Scanning this ticket for related MyPortal content…');
+      setStatus('Scanning this ticket for related MyPortal content...');
       try {
         const headers = { Accept: 'application/json' };
         const csrfToken = getCsrfToken();

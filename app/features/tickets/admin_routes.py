@@ -95,9 +95,22 @@ def _build_related_ticket_query(
     return "\n".join(part for part in parts if part).strip()[:2000]
 
 
+def _safe_related_url(url: str | None) -> str | None:
+    candidate = str(url or "").strip()
+    if not candidate:
+        return None
+    parsed = urlsplit(candidate)
+    if parsed.scheme or parsed.netloc:
+        return None
+    if not candidate.startswith("/") or candidate.startswith("//"):
+        return None
+    return candidate
+
+
 def _source_url(source_type: str, item: dict[str, Any]) -> str | None:
-    if item.get("url"):
-        return str(item["url"])
+    supplied_url = _safe_related_url(item.get("url"))
+    if supplied_url:
+        return supplied_url
     identifier = item.get("id")
     if source_type == "tickets" and identifier:
         return f"/admin/tickets/{identifier}"
@@ -229,7 +242,6 @@ async def admin_rescan_ticket_related(ticket_id: int, request: Request):
         "items": items,
         "scanned": True,
         "skipped": False,
-        "message": result.get("message"),
         "generated_at": result.get("generated_at"),
     })
 
