@@ -48,6 +48,60 @@
         aria-label="Filter webhook events"
         data-table-filter="webhooks-table"
       />
+      <select
+        class="form-input"
+        aria-label="Filter webhooks by direction"
+        data-table-column-filter="direction"
+        data-table-column-filter-table="webhooks-table"
+      >
+        <option value="">All directions</option>
+        <option value="incoming">Incoming</option>
+        <option value="outgoing">Outgoing</option>
+      </select>
+      <input
+        type="search"
+        class="form-input"
+        placeholder="Name"
+        aria-label="Filter webhooks by name"
+        data-table-column-filter="name"
+        data-table-column-filter-table="webhooks-table"
+      />
+      <input
+        type="search"
+        class="form-input"
+        placeholder="Target"
+        aria-label="Filter webhooks by target"
+        data-table-column-filter="target"
+        data-table-column-filter-table="webhooks-table"
+      />
+      <select
+        class="form-input"
+        aria-label="Filter webhooks by status"
+        data-table-column-filter="status"
+        data-table-column-filter-table="webhooks-table"
+      >
+        <option value="">All statuses</option>
+        <option value="pending">Pending</option>
+        <option value="in_progress">In progress</option>
+        <option value="succeeded">Succeeded</option>
+        <option value="failed">Failed</option>
+      </select>
+      <input
+        type="search"
+        class="form-input"
+        placeholder="Attempts"
+        aria-label="Filter webhooks by attempts"
+        data-table-column-filter="attempts"
+        data-table-column-filter-table="webhooks-table"
+      />
+      <input
+        type="search"
+        class="form-input"
+        placeholder="Last error"
+        aria-label="Filter webhooks by last error"
+        data-table-column-filter="last_error"
+        data-table-column-filter-table="webhooks-table"
+      />
     </div>
   </header>
   <div class="table-wrapper">
@@ -74,16 +128,16 @@
             data-event-status="{{ event.status }}"
             data-event-direction="{{ event.direction or 'outgoing' }}"
           >
-            <td data-label="Direction" data-column-key="direction">
+            <td data-label="Direction" data-value="{{ event.direction or 'outgoing' }}" data-column-key="direction">
               {% if event.direction == 'incoming' %}
                 <span class="badge badge--info">⬇ Incoming</span>
               {% else %}
                 <span class="badge badge--primary">⬆ Outgoing</span>
               {% endif %}
             </td>
-            <td data-label="Name" data-column-key="name">{{ event.name }}</td>
-            <td data-label="Target" class="table__col--truncate" title="{{ event.target_url or '' }}" data-column-key="target">{{ event.target_url }}</td>
-            <td data-label="Status" data-column-key="status">{{ event.status }}</td>
+            <td data-label="Name" data-value="{{ event.name }}" data-column-key="name">{{ event.name }}</td>
+            <td data-label="Target" class="table__col--truncate" title="{{ event.target_url or '' }}" data-value="{{ event.target_url or '' }}" data-column-key="target">{{ event.target_url }}</td>
+            <td data-label="Status" data-value="{{ event.status }}" data-column-key="status">{{ event.status }}</td>
             <td data-label="Attempts" data-value="{{ event.attempt_count }}" data-column-key="attempts">
               {{ event.attempt_count }}/{{ event.max_attempts }}
             </td>
@@ -94,7 +148,7 @@
                 <span class="text-muted">—</span>
               {% endif %}
             </td>
-            <td data-label="Last error" data-column-key="last_error">{{ event.last_error or '—' }}</td>
+            <td data-label="Last error" data-value="{{ event.last_error or '' }}" data-column-key="last_error">{{ event.last_error or '—' }}</td>
             <td data-label="Updated" data-value="{{ event.updated_iso or '' }}" data-column-key="updated">
               {% if event.updated_iso %}
                 <span data-utc="{{ event.updated_iso }}"></span>
