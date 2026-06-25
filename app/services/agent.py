@@ -23,18 +23,18 @@ from app.services import modules as modules_service
 from app.services import rag_index as rag_index_service
 from app.services import rag_retrieval
 
-_KB_RESULT_LIMIT = 5
-_TICKET_RESULT_LIMIT = 5
-_PRODUCT_RESULT_LIMIT = 5
-_PACKAGE_RESULT_LIMIT = 5
-_CHAT_RESULT_LIMIT = 5
-_ORDER_RESULT_LIMIT = 5
-_ASSET_RESULT_LIMIT = 5
-_FEATURE_PACK_RESULT_LIMIT = 5
-_COMPANY_RESULT_LIMIT = 5
-_STAFF_RESULT_LIMIT = 5
-_ISSUE_RESULT_LIMIT = 5
-_SYSTEM_RESULT_LIMIT = 5
+_KB_RESULT_LIMIT = 1000
+_TICKET_RESULT_LIMIT = 1000
+_PRODUCT_RESULT_LIMIT = 1000
+_PACKAGE_RESULT_LIMIT = 1000
+_CHAT_RESULT_LIMIT = 1000
+_ORDER_RESULT_LIMIT = 1000
+_ASSET_RESULT_LIMIT = 1000
+_FEATURE_PACK_RESULT_LIMIT = 1000
+_COMPANY_RESULT_LIMIT = 1000
+_STAFF_RESULT_LIMIT = 1000
+_ISSUE_RESULT_LIMIT = 1000
+_SYSTEM_RESULT_LIMIT = 1000
 _MAX_SNIPPET_LENGTH = 320
 
 
@@ -767,11 +767,12 @@ async def execute_agent_query(
     *,
     active_company_id: int | None = None,
     memberships: Sequence[Mapping[str, Any]] | None = None,
+    allow_empty_query: bool = False,
 ) -> dict[str, Any]:
     """Execute an agent query using the configured Ollama module."""
 
     query_text = (query or "").strip()
-    if not query_text:
+    if not query_text and not allow_empty_query:
         return {
             "query": "",
             "status": "error",
@@ -815,20 +816,28 @@ async def execute_agent_query(
 
     kb_context = await knowledge_base_service.build_access_context(user)
     try:
-        kb_search = await knowledge_base_service.search_articles(
-            query_text,
-            kb_context,
-            limit=_KB_RESULT_LIMIT,
-            use_ollama=False,
-        )
+        if allow_empty_query and not query_text:
+            kb_results = await knowledge_base_service.list_accessible_search_articles(
+                kb_context
+            )
+        else:
+            kb_search = await knowledge_base_service.search_articles(
+                query_text,
+                kb_context,
+                limit=_KB_RESULT_LIMIT,
+                use_ollama=False,
+            )
+            kb_results = list(kb_search.get("results") or [])
     except Exception as exc:  # pragma: no cover - defensive guard
         log_error("Agent knowledge base search failed", error=str(exc))
-        kb_results: list[dict[str, Any]] = []
-    else:
-        kb_results = list(kb_search.get("results") or [])
+        kb_results = []
 
     knowledge_base_sources: list[dict[str, Any]] = []
-    for article in kb_results[:_KB_RESULT_LIMIT]:
+    for article in (
+        kb_results
+        if allow_empty_query and not query_text
+        else kb_results[:_KB_RESULT_LIMIT]
+    ):
         slug = str(article.get("slug") or "").strip()
         if not slug:
             continue

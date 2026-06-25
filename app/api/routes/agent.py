@@ -52,6 +52,7 @@ async def _run_rag_index_job(
             current_user,
             active_company_id=active_company_id,
             memberships=memberships,
+            allow_empty_query=True,
         )
         indexed = 0
         for value in result.get("sources", {}).values():

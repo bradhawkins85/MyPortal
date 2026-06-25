@@ -10580,3 +10580,19 @@ a.stat-strip__stat:focus-visible {
   overflow: hidden;
   text-decoration: none;
 }
+
+.rag-stat-strip {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.rag-stat-strip__stat {
+  min-width: 0;
+}
+
+.rag-stat-strip__hint {
+  position: relative;
+  z-index: 1;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+  line-height: 1.3;
+}
