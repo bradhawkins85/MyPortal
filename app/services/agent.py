@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib
+import re
 from datetime import datetime, timezone
 from decimal import Decimal
+from enum import Enum
 from typing import Any, Mapping, Sequence
 
 from app.core.database import db
@@ -42,6 +44,15 @@ _LLM_RAG_CANDIDATE_LIMIT = 8
 _LLM_COMPANY_CONTEXT_LIMIT = 3
 _LLM_PROMPT_CHAR_LIMIT = 24000
 _LLM_SNIPPET_LENGTH = 180
+_EXPLICIT_TICKET_ID_RE = re.compile(
+    r"(?:ticket\s*#?|#)\s*(\d{3,})|\b(\d{4,})\b", re.IGNORECASE
+)
+
+
+class AgentContextMode(str, Enum):
+    RAG_ONLY = "rag_only"
+    DISCOVERY = "discovery"
+    FALLBACK = "fallback"
 
 
 def _utc_iso(dt: datetime | None) -> str | None:
@@ -168,6 +179,141 @@ def _coerce_user_id(user: Mapping[str, Any]) -> int:
         return int(user.get("id") or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _extract_explicit_ticket_ids(query: str) -> list[int]:
+    ids: list[int] = []
+    for match in _EXPLICIT_TICKET_ID_RE.findall(query or ""):
+        value = next((part for part in match if part), "")
+        try:
+            ticket_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if ticket_id > 0 and ticket_id not in ids:
+            ids.append(ticket_id)
+    return ids
+
+
+def _threshold_for_source(source_type: str | None) -> float:
+    thresholds = getattr(rag_retrieval, "_SOURCE_THRESHOLDS", {})
+    default = 0.35
+    if not source_type:
+        return default
+    return float(thresholds.get(str(source_type), default))
+
+
+def _infer_allowed_rag_sources(query: str) -> set[str]:
+    lowered = (query or "").casefold()
+    tokens = set(re.findall(r"[a-z0-9]+", lowered))
+    if _extract_explicit_ticket_ids(query) or {"ticket", "trello", "card"} & tokens:
+        return {"tickets", "ticket_comments", "chats", "knowledge_base"}
+    if {
+        "product",
+        "products",
+        "price",
+        "buy",
+        "purchase",
+        "compatible",
+        "sku",
+    } & tokens:
+        return {"products", "packages", "knowledge_base"}
+    if {"company", "customer", "client", "list", "show", "browse"} & tokens:
+        return {"companies", "knowledge_base"}
+    return {"knowledge_base", "tickets", "ticket_comments", "chats", "assets", "issues"}
+
+
+def _source_allowed(source_type: str | None, allowed_sources: set[str]) -> bool:
+    normalised = str(source_type or "").casefold()
+    aliases = {
+        "ticket": "tickets",
+        "ticket_reply": "ticket_comments",
+        "ticket_replies": "ticket_comments",
+        "chat": "chats",
+        "kb": "knowledge_base",
+        "product": "products",
+        "package": "packages",
+        "company": "companies",
+        "asset": "assets",
+        "issue": "issues",
+    }
+    return aliases.get(normalised, normalised) in allowed_sources
+
+
+def _filter_rag_candidates(
+    candidates: Sequence[Mapping[str, Any]], *, allowed_sources: set[str]
+) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
+    for candidate in candidates:
+        source_type = str(candidate.get("source_type") or "")
+        if not _source_allowed(source_type, allowed_sources):
+            continue
+        try:
+            score = float(candidate.get("score") or 0)
+        except (TypeError, ValueError):
+            score = 0.0
+        if score < _threshold_for_source(source_type):
+            continue
+        item = dict(candidate)
+        item["score"] = score
+        item["was_selected_by_rag"] = True
+        filtered.append(item)
+    return filtered
+
+
+def _candidate_label(candidate: Mapping[str, Any]) -> str:
+    source_type = str(candidate.get("source_type") or "source")
+    source_id = candidate.get("source_id") or candidate.get("document_id")
+    if source_type in {"tickets", "ticket"}:
+        return f"[Ticket:#{source_id}]"
+    if source_type == "knowledge_base":
+        return f"[KB:{source_id}]"
+    if source_type in {"products", "product"}:
+        return f"[Product:{source_id}]"
+    if source_type in {"chats", "chat"}:
+        return f"[Chat:#{source_id}]"
+    return f"[RAG:{source_type}:{source_id}]"
+
+
+def _build_llm_context(
+    query_text: str,
+    rag_evidence: Sequence[Mapping[str, Any]],
+    *,
+    mode: AgentContextMode = AgentContextMode.RAG_ONLY,
+) -> str:
+    sections = [
+        "You are the MyPortal Agent. Answer the user using only the supplied context.",
+        "Use only the retrieved evidence below. If the retrieved evidence does not directly answer the user query, say that no relevant information was found.",
+        "Accessible portal data is not relevant context unless it was selected as retrieved evidence.",
+        "Never reference systems, data, or permissions outside the provided information.",
+        "Use Markdown and cite sources inline with [KB:slug], [Ticket:#id], [Product:SKU], [Chat:#id], [Order:number], [Asset:#id], [Company:#id], [Staff:#id], [Issue:#id], [ServiceStatus:#id], [BackupJob:#id], [Report:key], [Mailbox:upn], or [BestPractice:check_id].",
+        f"Context mode: {mode.value}",
+        f"User query: {query_text}",
+        "",
+        "Relevant retrieved context:",
+    ]
+    if not rag_evidence:
+        sections.append("No relevant RAG evidence was found.")
+        return _truncate_prompt_sections(sections)
+
+    rag_context_chars = 0
+    rag_context_char_budget = int(get_settings().rag_max_context_tokens) * 4
+    for candidate in rag_evidence[:_LLM_RAG_CANDIDATE_LIMIT]:
+        label = _candidate_label(candidate)
+        title = candidate.get("title") or candidate.get("subject") or label
+        excerpt = (
+            _truncate(
+                candidate.get("excerpt") or candidate.get("summary"),
+                _LLM_SNIPPET_LENGTH,
+            )
+            or "No excerpt available"
+        )
+        score = candidate.get("score")
+        item_text = f"- {label} {title}\n  Score: {score}\n  Excerpt: {excerpt}"
+        if rag_context_chars + len(item_text) > rag_context_char_budget:
+            continue
+        rag_context_chars += len(item_text)
+        sections.append(item_text)
+    return _truncate_prompt_sections(sections)
 
 
 def _can_access_staff(
@@ -800,10 +946,13 @@ async def execute_agent_query(
     active_company_id: int | None = None,
     memberships: Sequence[Mapping[str, Any]] | None = None,
     allow_empty_query: bool = False,
+    context_mode: AgentContextMode = AgentContextMode.RAG_ONLY,
 ) -> dict[str, Any]:
     """Execute an agent query using the configured Ollama module."""
 
     query_text = (query or "").strip()
+    if not isinstance(context_mode, AgentContextMode):
+        context_mode = AgentContextMode(str(context_mode))
     if not query_text and not allow_empty_query:
         return {
             "query": "",
@@ -844,7 +993,6 @@ async def execute_agent_query(
 
     accessible_company_ids = _extract_company_ids(resolved_memberships)
     company_context = _company_summary(resolved_memberships)
-    llm_company_context = company_context[:_LLM_COMPANY_CONTEXT_LIMIT]
     is_super_admin = bool(user.get("is_super_admin"))
 
     kb_context = await knowledge_base_service.build_access_context(user)
@@ -891,7 +1039,61 @@ async def execute_agent_query(
         user_id = int(user_id_value)
     except (TypeError, ValueError):
         user_id = 0
+    explicit_ticket_ids = _extract_explicit_ticket_ids(query_text)
+    direct_ticket_evidence: list[dict[str, Any]] = []
     if user_id > 0:
+        for explicit_ticket_id in explicit_ticket_ids[:3]:
+            try:
+                ticket = await tickets_repo.get_ticket(explicit_ticket_id)
+                if not ticket:
+                    continue
+                ticket_company_id = ticket.get("company_id")
+                requester_id = ticket.get("requester_id")
+                can_access_ticket = is_super_admin or requester_id == user_id
+                try:
+                    can_access_ticket = (
+                        can_access_ticket
+                        or int(ticket_company_id or 0) in accessible_company_ids
+                    )
+                except (TypeError, ValueError):
+                    pass
+                if not can_access_ticket:
+                    can_access_ticket = await tickets_repo.is_ticket_watcher(
+                        explicit_ticket_id, user_id
+                    )
+                if not can_access_ticket:
+                    continue
+                replies = await tickets_repo.list_replies(
+                    explicit_ticket_id, include_internal=is_super_admin
+                )
+            except Exception as exc:  # pragma: no cover - defensive guard
+                log_error(
+                    "Agent direct ticket lookup failed",
+                    ticket_id=explicit_ticket_id,
+                    error=str(exc),
+                )
+                continue
+            subject = ticket.get("subject") or f"Ticket #{explicit_ticket_id}"
+            summary_parts = [
+                ticket.get("ai_summary") or ticket.get("description") or ""
+            ]
+            for reply in replies[:3]:
+                if reply.get("body"):
+                    summary_parts.append(str(reply.get("body")))
+            direct_ticket_evidence.append(
+                {
+                    "source_type": "tickets",
+                    "source_id": explicit_ticket_id,
+                    "document_id": explicit_ticket_id,
+                    "title": str(subject).strip(),
+                    "excerpt": _truncate(
+                        " ".join(part for part in summary_parts if part),
+                        _MAX_SNIPPET_LENGTH,
+                    ),
+                    "score": 1.0,
+                    "was_selected_by_rag": True,
+                }
+            )
         try:
             tickets = await tickets_repo.list_tickets_for_user(
                 user_id,
@@ -1205,7 +1407,7 @@ async def execute_agent_query(
     }
     try:
         await rag_index_service.index_agent_sources(assembled_sources)
-        rag_candidates = await rag_retrieval.retrieve_candidates(
+        raw_rag_candidates = await rag_retrieval.retrieve_candidates(
             query_text,
             user,
             active_company_id=active_company_id,
@@ -1213,346 +1415,25 @@ async def execute_agent_query(
         )
     except Exception as exc:  # pragma: no cover - defensive guard
         log_error("Agent RAG retrieval failed", error=str(exc))
-        rag_candidates = []
+        raw_rag_candidates = []
 
-    # Check if we have any relevant sources
-    has_relevant_sources = bool(
-        knowledge_base_sources
-        or ticket_sources
-        or product_sources
-        or package_sources
-        or chat_sources
-        or order_sources
-        or asset_sources
-        or company_sources
-        or staff_sources
-        or issue_sources
-        or service_status_sources
-        or backup_job_sources
-        or report_sources
-        or mailbox_sources
-        or best_practice_sources
-        or any(feature_pack_sources.values())
+    allowed_rag_sources = _infer_allowed_rag_sources(query_text)
+    rag_candidates = direct_ticket_evidence + _filter_rag_candidates(
+        raw_rag_candidates, allowed_sources=allowed_rag_sources
     )
 
-    context_sections: list[str] = [
-        "You are the MyPortal Agent. Answer the user using only the supplied context.",
-        "If the portal context does not contain information relevant to the user's question, "
-        "explicitly state that you don't have that specific information available and suggest creating a support ticket.",
-        "Do NOT suggest unrelated articles or products - only reference sources that directly answer the question.",
-        "Ignore any retrieved item whose relevance score is below the configured threshold.",
-        "Do not infer relationships between retrieved items; treat retrieved context as independent evidence.",
-        "If none of the retrieved items directly answer the question, state that no relevant information was found.",
-        "Never reference systems, data, or permissions outside the provided information.",
-        "Use Markdown and cite sources inline with [KB:slug], [Ticket:#id], [Product:SKU], [Chat:#id], [Order:number], [Asset:#id], [Company:#id], [Staff:#id], [Issue:#id], [ServiceStatus:#id], [BackupJob:#id], [Report:key], [Mailbox:upn], or [BestPractice:check_id].",
-        f"User query: {query_text}",
-        "",
-    ]
+    # Check if we have any relevant RAG evidence for the prompt.
+    has_relevant_sources = bool(rag_candidates)
 
-    if llm_company_context:
-        company_lines = ", ".join(
-            f"{entry['company_name']} (#{entry['company_id']})"
-            for entry in llm_company_context
+    if context_mode is AgentContextMode.RAG_ONLY:
+        prompt = _build_llm_context(
+            query_text, rag_candidates, mode=AgentContextMode.RAG_ONLY
         )
-        context_sections.extend(
-            [
-                "Companies available to the user:",
-                company_lines,
-                "",
-            ]
-        )
-
-    if rag_candidates:
-        context_sections.append("Structured high-confidence RAG context:")
-        rag_context_chars = 0
-        rag_context_char_budget = int(get_settings().rag_max_context_tokens) * 4
-        grouped_rag: dict[str, list[dict[str, Any]]] = {}
-        for candidate in rag_candidates[:_LLM_RAG_CANDIDATE_LIMIT]:
-            grouped_rag.setdefault(
-                str(candidate.get("source_type") or "source"), []
-            ).append(candidate)
-        for source_type, group in grouped_rag.items():
-            context_sections.append(f"### {source_type.replace('_', ' ').title()}")
-            for candidate in group:
-                source_id = candidate.get("source_id") or candidate.get("document_id")
-                title = candidate.get("title") or f"{source_type} {source_id}"
-                excerpt = (
-                    _truncate(candidate.get("excerpt"), _LLM_SNIPPET_LENGTH)
-                    or "No excerpt available"
-                )
-                score = candidate.get("score")
-                item_text = f"[RAG:{source_type}:{source_id}] {title}\nScore: {score}\nExcerpt: {excerpt}\n---"
-                if rag_context_chars + len(item_text) > rag_context_char_budget:
-                    continue
-                rag_context_chars += len(item_text)
-                context_sections.append(item_text)
-        context_sections.append(
-            "Use these structured RAG items first. Only use lower-confidence source lists below as fallback context."
-        )
-        context_sections.append("")
-
-    if knowledge_base_sources:
-        context_sections.append("Knowledge base articles:")
-        for article in _for_llm(knowledge_base_sources):
-            summary = (
-                _truncate(article["summary"] or article["excerpt"], _LLM_SNIPPET_LENGTH)
-                or "No summary available"
-            )
-            context_sections.append(
-                f"- [KB:{article['slug']}] {article['title']}: {summary}"
-            )
-        context_sections.append("")
-
-    if ticket_sources:
-        context_sections.append("Tickets created by or watched by the user:")
-        for ticket in _for_llm(ticket_sources):
-            summary = (
-                _truncate(ticket["summary"], _LLM_SNIPPET_LENGTH)
-                or "No summary available"
-            )
-            context_sections.append(
-                f"- [Ticket:#{ticket['id']}] {ticket['subject']} (status: {ticket['status']}, priority: {ticket['priority']}): {summary}"
-            )
-        context_sections.append("")
-
-    if chat_sources:
-        context_sections.append("Chats accessible to the user:")
-        for chat in _for_llm(chat_sources):
-            summary = (
-                _truncate(chat["summary"], _LLM_SNIPPET_LENGTH)
-                or "No matching message excerpt available"
-            )
-            context_sections.append(
-                f"- [Chat:#{chat['id']}] {chat['subject']} (status: {chat['status']}): {summary}"
-            )
-        context_sections.append("")
-
-    if order_sources:
-        context_sections.append("Orders accessible to the user:")
-        for order in _for_llm(order_sources):
-            parts = [f"[Order:{order['order_number']}] status: {order['status']}"]
-            if order.get("shipping_status"):
-                parts.append(f"shipping: {order['shipping_status']}")
-            if order.get("po_number"):
-                parts.append(f"PO: {order['po_number']}")
-            if order.get("summary"):
-                parts.append(_truncate(order["summary"], _LLM_SNIPPET_LENGTH) or "")
-            context_sections.append("- " + " — ".join(parts))
-        context_sections.append("")
-
-    if asset_sources:
-        context_sections.append("Assets accessible to the user:")
-        for asset in _for_llm(asset_sources):
-            parts = [f"[Asset:#{asset['id']}] {asset['name']}"]
-            for key, label in (
-                ("type", "type"),
-                ("serial_number", "serial"),
-                ("status", "status"),
-                ("os_name", "OS"),
-                ("last_user", "last user"),
-            ):
-                if asset.get(key):
-                    parts.append(f"{label}: {asset[key]}")
-            context_sections.append("- " + " — ".join(parts))
-        context_sections.append("")
-
-    if company_sources:
-        context_sections.append("Companies accessible to the user:")
-        for company in _for_llm(company_sources):
-            parts = [f"[Company:#{company['id']}] {company['name']}"]
-            if company.get("syncro_company_id"):
-                parts.append(f"Syncro ID: {company['syncro_company_id']}")
-            context_sections.append("- " + " — ".join(parts))
-        context_sections.append("")
-
-    if staff_sources:
-        context_sections.append("Staff accessible to the user:")
-        for staff_member in _for_llm(staff_sources):
-            parts = [f"[Staff:#{staff_member['id']}] {staff_member['name']}"]
-            if staff_member.get("email"):
-                parts.append(f"email: {staff_member['email']}")
-            if staff_member.get("job_title"):
-                parts.append(f"title: {staff_member['job_title']}")
-            if staff_member.get("department"):
-                parts.append(f"department: {staff_member['department']}")
-            if staff_member.get("mobile_phone"):
-                parts.append(f"mobile: {staff_member['mobile_phone']}")
-            if staff_member.get("org_company"):
-                parts.append(f"organisation: {staff_member['org_company']}")
-            if staff_member.get("manager_name"):
-                parts.append(f"manager: {staff_member['manager_name']}")
-            if staff_member.get("account_action"):
-                parts.append(f"account action: {staff_member['account_action']}")
-            custom_field_parts = [
-                f"{key}: {value}"
-                for key, value in sorted(
-                    (staff_member.get("custom_fields") or {}).items()
-                )
-                if value not in (None, "", [], {})
-            ]
-            if custom_field_parts:
-                parts.append("custom fields: " + ", ".join(custom_field_parts[:5]))
-            if staff_member.get("onboarding_status"):
-                parts.append(f"status: {staff_member['onboarding_status']}")
-            context_sections.append("- " + " — ".join(parts))
-        context_sections.append("")
-
-    if issue_sources:
-        context_sections.append("Issues accessible to the user:")
-        for issue in _for_llm(issue_sources):
-            parts = [f"[Issue:#{issue['id']}] {issue['name']}"]
-            if issue.get("description"):
-                parts.append(_truncate(issue["description"], _LLM_SNIPPET_LENGTH) or "")
-            assignment_labels = [
-                (
-                    f"{assignment.get('company_name') or assignment.get('company_id')}: "
-                    f"{assignment.get('status_label') or assignment.get('status')}"
-                )
-                for assignment in issue.get("assignments", [])
-            ]
-            if assignment_labels:
-                parts.append("Assignments: " + ", ".join(assignment_labels))
-            context_sections.append("- " + " — ".join(parts))
-        context_sections.append("")
-
-    if service_status_sources:
-        context_sections.append("Service statuses accessible to the user:")
-        for service in _for_llm(service_status_sources):
-            parts = [f"[ServiceStatus:#{service['id']}] {service['name']}"]
-            if service.get("status"):
-                parts.append(f"status: {service['status']}")
-            if service.get("status_message"):
-                parts.append(
-                    _truncate(service["status_message"], _LLM_SNIPPET_LENGTH) or ""
-                )
-            elif service.get("description"):
-                parts.append(
-                    _truncate(service["description"], _LLM_SNIPPET_LENGTH) or ""
-                )
-            context_sections.append("- " + " — ".join(parts))
-        context_sections.append("")
-
-    if backup_job_sources:
-        context_sections.append("Backup summary jobs accessible to the user:")
-        for job in _for_llm(backup_job_sources):
-            parts = [f"[BackupJob:#{job['id']}] {job['name']}"]
-            if job.get("today_status"):
-                parts.append(f"today: {job['today_status']}")
-            if job.get("latest_status"):
-                parts.append(f"latest: {job['latest_status']}")
-            if job.get("description"):
-                parts.append(_truncate(job["description"], _LLM_SNIPPET_LENGTH) or "")
-            context_sections.append("- " + " — ".join(parts))
-        context_sections.append("")
-
-    if report_sources:
-        context_sections.append("Reports accessible to the user:")
-        for report in _for_llm(report_sources):
-            parts = [f"[Report:{report['key']}] {report['title']}"]
-            if report.get("source_type"):
-                parts.append(f"type: {report['source_type']}")
-            if report.get("description"):
-                parts.append(
-                    _truncate(report["description"], _LLM_SNIPPET_LENGTH) or ""
-                )
-            context_sections.append("- " + " — ".join(parts))
-        context_sections.append("")
-
-    if mailbox_sources:
-        context_sections.append("Office 365 mailboxes accessible to the user:")
-        for mailbox in _for_llm(mailbox_sources):
-            parts = [
-                f"[Mailbox:{mailbox['user_principal_name']}] {mailbox['display_name']}"
-            ]
-            if mailbox.get("mailbox_type"):
-                parts.append(f"type: {mailbox['mailbox_type']}")
-            if mailbox.get("storage_used_bytes") is not None:
-                parts.append(f"storage bytes: {mailbox['storage_used_bytes']}")
-            context_sections.append("- " + " — ".join(parts))
-        context_sections.append("")
-
-    if best_practice_sources:
-        context_sections.append("Microsoft 365 best practices accessible to the user:")
-        for check in _for_llm(best_practice_sources):
-            parts = [f"[BestPractice:{check['check_id']}] {check['check_name']}"]
-            if check.get("status"):
-                parts.append(f"status: {check['status']}")
-            if check.get("details"):
-                parts.append(_truncate(check["details"], _LLM_SNIPPET_LENGTH) or "")
-            context_sections.append("- " + " — ".join(parts))
-        context_sections.append("")
-
-    if feature_pack_sources:
-        context_sections.append("Feature pack results accessible to the user:")
-        for slug, items in sorted(feature_pack_sources.items()):
-            for item in _for_llm(items):
-                parts = [f"[Feature:{slug}] {item['title']}"]
-                if item.get("source_type"):
-                    parts.append(f"type: {item['source_type']}")
-                if item.get("summary"):
-                    parts.append(_truncate(item["summary"], _LLM_SNIPPET_LENGTH) or "")
-                context_sections.append("- " + " — ".join(parts))
-        context_sections.append("")
-
-    if product_sources:
-        context_sections.append(
-            "Products and hardware recommendations available to the user:"
-        )
-        for product in _for_llm(product_sources):
-            parts = [
-                (
-                    f"[Product:{product['sku']}] {product['name']}"
-                    if product.get("sku")
-                    else product.get("name", "Product")
-                ),
-            ]
-            if product.get("price"):
-                parts.append(f"Price: {product['price']}")
-            if product.get("description"):
-                parts.append(
-                    _truncate(product["description"], _LLM_SNIPPET_LENGTH) or ""
-                )
-            if product.get("recommendations"):
-                recos = ", ".join(product["recommendations"])
-                parts.append(f"Recommended with: {recos}")
-            context_sections.append("- " + " — ".join(parts))
-        context_sections.append("")
-
-    if package_sources:
-        context_sections.append(
-            "Hardware bundles and service packages available to the user:"
-        )
-        for package in _for_llm(package_sources):
-            parts = [
-                (
-                    f"[Package:{package['sku']}] {package['name']}"
-                    if package.get("sku")
-                    else package.get("name", "Package")
-                ),
-            ]
-            count_value = package.get("product_count")
-            try:
-                count_int = int(count_value)
-            except (TypeError, ValueError):
-                count_int = None
-            if count_int is not None and count_int >= 0:
-                plural = "item" if count_int == 1 else "items"
-                parts.append(f"Includes {count_int} {plural}")
-            if package.get("description"):
-                parts.append(
-                    _truncate(package["description"], _LLM_SNIPPET_LENGTH) or ""
-                )
-            context_sections.append("- " + " — ".join(parts))
-        context_sections.append("")
-
-    if len(context_sections) == 8:  # only preamble, query, and blank line
-        context_sections.append(
-            "No portal records matched the query. "
-            "Politely inform the user that you don't have specific information about their question "
-            "and recommend they create a support ticket for personalized assistance."
-        )
-
-    prompt = _truncate_prompt_sections(context_sections)
+    else:
+        # Discovery/FALLBACK modes are opt-in compatibility paths. They still use
+        # hard-gated RAG evidence first, but may be expanded by future callers that
+        # explicitly request browsing/listing accessible records.
+        prompt = _build_llm_context(query_text, rag_candidates, mode=context_mode)
 
     module_status = "skipped"
     model_name: str | None = None

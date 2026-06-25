@@ -13,6 +13,20 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def default_agent_rag_mocks(monkeypatch):
+    monkeypatch.setattr(
+        agent_service.rag_index_service,
+        "index_agent_sources",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        agent_service.rag_retrieval,
+        "retrieve_candidates",
+        AsyncMock(return_value=[]),
+    )
+
+
 @pytest.mark.anyio
 async def test_execute_agent_query_returns_sources(monkeypatch):
     user = {"id": 7, "is_super_admin": False}
@@ -102,7 +116,8 @@ async def test_execute_agent_query_returns_sources(monkeypatch):
         assert background is False
         prompt = payload.get("prompt")
         assert prompt
-        assert "Knowledge base" in prompt
+        assert "No relevant RAG evidence was found." in prompt
+        assert "Knowledge base articles:" not in prompt
         return {
             "status": "succeeded",
             "model": "llama3",
@@ -189,7 +204,7 @@ async def test_execute_agent_query_has_relevant_sources_flag(monkeypatch):
         memberships=memberships,
     )
 
-    assert result["has_relevant_sources"] is True
+    assert result["has_relevant_sources"] is False
     assert len(result["sources"]["knowledge_base"]) == 1
 
 
@@ -222,11 +237,9 @@ async def test_execute_agent_query_no_relevant_sources(monkeypatch):
 
     async def fake_trigger(slug, payload, *, background):
         prompt = payload.get("prompt", "")
-        # Verify the prompt contains the updated messaging
-        assert (
-            "don't have specific information" in prompt.lower()
-            or "no portal records matched" in prompt.lower()
-        )
+        assert "No relevant RAG evidence was found." in prompt
+        assert "Knowledge base articles:" not in prompt
+        assert "Companies available to the user:" not in prompt
         return {
             "status": "succeeded",
             "model": "llama3",
@@ -349,14 +362,7 @@ async def test_execute_agent_query_includes_chat_order_and_asset_sources(monkeyp
 
     async def fake_trigger(slug, payload, *, background):
         prompt = payload.get("prompt", "")
-        assert "Chats accessible" in prompt
-        assert "Orders accessible" in prompt
-        assert "Assets accessible" in prompt
-        assert "Service statuses accessible" in prompt
-        assert "Backup summary jobs accessible" in prompt
-        assert "Reports accessible" in prompt
-        assert "Office 365 mailboxes accessible" in prompt
-        assert "Microsoft 365 best practices accessible" in prompt
+        assert "No relevant RAG evidence was found." in prompt
         return {
             "status": "succeeded",
             "model": "llama3",
@@ -449,7 +455,7 @@ async def test_execute_agent_query_includes_chat_order_and_asset_sources(monkeyp
         == "vpn.user@example.com"
     )
     assert result["sources"]["best_practices"][0]["check_id"] == "vpn-mfa"
-    assert result["has_relevant_sources"] is True
+    assert result["has_relevant_sources"] is False
 
 
 @pytest.mark.anyio
@@ -498,8 +504,7 @@ async def test_execute_agent_query_includes_generic_feature_pack_sources(monkeyp
 
     async def fake_trigger(slug, payload, *, background):
         prompt = payload.get("prompt", "")
-        assert "Feature pack results accessible" in prompt
-        assert "[Feature:backups] Backups policy" in prompt
+        assert "No relevant RAG evidence was found." in prompt
         return {"status": "succeeded", "response": {"response": "Found backups"}}
 
     monkeypatch.setattr(agent_service.modules_service, "trigger_module", fake_trigger)
@@ -511,7 +516,7 @@ async def test_execute_agent_query_includes_generic_feature_pack_sources(monkeyp
     assert provider_calls[0]["user"] == user
     assert provider_calls[0]["company_ids"] == [1]
     assert result["sources"]["feature_packs"]["backups"][0]["title"] == "Backups policy"
-    assert result["has_relevant_sources"] is True
+    assert result["has_relevant_sources"] is False
 
 
 @pytest.mark.anyio
@@ -671,11 +676,186 @@ async def test_execute_agent_query_minimises_llm_prompt_context(monkeypatch):
     assert len(result["sources"]["knowledge_base"]) == 6
     assert len(result["sources"]["tickets"]) == 6
     assert len(result["sources"]["products"]) == 6
-    assert "[KB:kb-5]" in captured_prompt
-    assert "[KB:kb-6]" not in captured_prompt
-    assert "[Ticket:#5]" in captured_prompt
-    assert "[Ticket:#6]" not in captured_prompt
-    assert "[Product:SKU-5]" in captured_prompt
-    assert "[Product:SKU-6]" not in captured_prompt
-    assert "Extra Co 3 (#3)" in captured_prompt
-    assert "Extra Co 4 (#4)" not in captured_prompt
+    assert "No relevant RAG evidence was found." in captured_prompt
+    assert "Knowledge base articles:" not in captured_prompt
+    assert "Tickets created by or watched by the user:" not in captured_prompt
+    assert "Products and hardware recommendations" not in captured_prompt
+    assert "Companies available to the user:" not in captured_prompt
+    assert "Extra Co" not in captured_prompt
+
+
+@pytest.mark.anyio
+async def test_execute_agent_query_ticket_id_prompt_uses_direct_ticket_only(
+    monkeypatch,
+):
+    user = {"id": 7, "is_super_admin": False}
+    memberships = [
+        {"company_id": 1, "company_name": "Visible Co", "can_access_shop": True}
+    ]
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "build_access_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "search_articles",
+        AsyncMock(
+            return_value={
+                "results": [
+                    {
+                        "slug": "touchpad",
+                        "title": "Touchpad",
+                        "summary": "Unrelated",
+                        "excerpt": "Unrelated",
+                    }
+                ]
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        agent_service.tickets_repo,
+        "get_ticket",
+        AsyncMock(
+            return_value={
+                "id": 24425,
+                "company_id": 1,
+                "requester_id": 7,
+                "subject": "CMOS battery purchase",
+                "description": "Purchase CR2032 CMOS batteries from Trello card",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        agent_service.tickets_repo,
+        "list_replies",
+        AsyncMock(
+            return_value=[
+                {"body": "Brad Hawkins asked Jimmi Nolan to source CMOS batteries."}
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        agent_service.tickets_repo, "list_tickets_for_user", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        agent_service.shop_repo,
+        "list_products",
+        AsyncMock(
+            return_value=[
+                {
+                    "id": 1,
+                    "name": "Lenovo mouse",
+                    "sku": "MOUSE",
+                    "price": Decimal("1"),
+                    "description": "Unrelated",
+                    "cross_sell_products": [],
+                    "upsell_products": [],
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        agent_service.shop_repo, "list_packages", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(agent_service.db, "fetch_all", AsyncMock(return_value=[]))
+
+    captured_prompt = ""
+
+    async def fake_trigger(slug, payload, *, background):
+        nonlocal captured_prompt
+        captured_prompt = payload.get("prompt", "")
+        return {"status": "succeeded", "response": {"response": "Ticket found"}}
+
+    monkeypatch.setattr(agent_service.modules_service, "trigger_module", fake_trigger)
+
+    result = await agent_service.execute_agent_query(
+        "CMOS batteries purchase Trello card 24425", user, memberships=memberships
+    )
+
+    assert result["has_relevant_sources"] is True
+    assert "[Ticket:#24425]" in captured_prompt
+    assert "CMOS battery purchase" in captured_prompt
+    assert "Companies available to the user:" not in captured_prompt
+    assert "Knowledge base articles:" not in captured_prompt
+    assert "Products and hardware recommendations" not in captured_prompt
+    assert "Lenovo mouse" not in captured_prompt
+    assert "Touchpad" not in captured_prompt
+
+
+@pytest.mark.anyio
+async def test_execute_agent_query_product_rag_allowlist_excludes_unrelated_products(
+    monkeypatch,
+):
+    user = {"id": 7, "is_super_admin": False}
+    memberships = [
+        {"company_id": 1, "company_name": "Visible Co", "can_access_shop": True}
+    ]
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "build_access_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "search_articles",
+        AsyncMock(return_value={"results": []}),
+    )
+    monkeypatch.setattr(
+        agent_service.tickets_repo, "list_tickets_for_user", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        agent_service.shop_repo, "list_products", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        agent_service.shop_repo, "list_packages", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(agent_service.db, "fetch_all", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        agent_service.rag_retrieval,
+        "retrieve_candidates",
+        AsyncMock(
+            return_value=[
+                {
+                    "source_type": "products",
+                    "source_id": "CR2032",
+                    "title": "CR2032 CMOS battery",
+                    "excerpt": "Compatible CMOS battery",
+                    "score": 0.9,
+                },
+                {
+                    "source_type": "products",
+                    "source_id": "MOUSE",
+                    "title": "Lenovo mouse",
+                    "excerpt": "Mouse",
+                    "score": 0.2,
+                },
+                {
+                    "source_type": "knowledge_base",
+                    "source_id": "touchpad",
+                    "title": "Touchpad issue",
+                    "excerpt": "Touchpad",
+                    "score": 0.1,
+                },
+            ]
+        ),
+    )
+
+    captured_prompt = ""
+
+    async def fake_trigger(slug, payload, *, background):
+        nonlocal captured_prompt
+        captured_prompt = payload.get("prompt", "")
+        return {"status": "succeeded", "response": {"response": "Product found"}}
+
+    monkeypatch.setattr(agent_service.modules_service, "trigger_module", fake_trigger)
+
+    result = await agent_service.execute_agent_query(
+        "show me compatible CMOS batteries", user, memberships=memberships
+    )
+
+    assert result["has_relevant_sources"] is True
+    assert "[Product:CR2032]" in captured_prompt
+    assert "Lenovo mouse" not in captured_prompt
+    assert "Touchpad issue" not in captured_prompt
+    assert "Products and hardware recommendations" not in captured_prompt
