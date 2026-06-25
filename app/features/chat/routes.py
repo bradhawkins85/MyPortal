@@ -16,6 +16,7 @@ from app.repositories import chat as chat_repo
 from app.repositories import companies as companies_repo
 from app.repositories import tray as tray_repo
 from app.repositories import user_companies as user_company_repo
+from app.repositories import site_settings as site_settings_repo
 from app.repositories import users as user_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.security.session import SessionData
@@ -369,6 +370,7 @@ async def tray_chat_popup(
     # 4. Load initial messages and render the popup.
     # ------------------------------------------------------------------
     messages = await chat_repo.get_messages(final_room_id, limit=50)
+    branding_display_name = await site_settings_repo.get_tray_icon_tooltip_name()
 
     html_content = _render_popup(
         room=chat_room,
@@ -377,6 +379,7 @@ async def tray_chat_popup(
         room_id=final_room_id,
         device_id=device_id,
         hostname=device.get("hostname") or "Tray Device",
+        branding_display_name=branding_display_name,
     )
 
     resp = HTMLResponse(content=html_content)
@@ -400,6 +403,7 @@ def _render_popup(
     room_id: int,
     device_id: int,
     hostname: str,
+    branding_display_name: str | None = None,
 ) -> str:
     """Render the standalone popup HTML using the Jinja2 template."""
     from jinja2 import Environment, PackageLoader, select_autoescape
@@ -439,6 +443,7 @@ def _render_popup(
         room_id=room_id,
         device_id=device_id,
         hostname=hostname,
+        branding_display_name=(branding_display_name or "MyPortal Helpdesk"),
     )
 
 

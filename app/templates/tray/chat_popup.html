@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="/tray/icon.ico" type="image/x-icon" />
-  <title>MyPortal Chat{% if room and room.subject %}: {{ room.subject }}{% endif %}</title>
+  <title>{{ branding_display_name }} Chat{% if room and room.subject %}: {{ room.subject }}{% endif %}</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
@@ -154,7 +154,7 @@
 <body>
 <div id="chat-root">
   <header id="chat-header">
-    <h1>{% if room and room.subject %}{{ room.subject }}{% else %}MyPortal Chat{% endif %}</h1>
+    <h1>{% if room and room.subject %}{{ room.subject }}{% else %}{{ branding_display_name }} Chat{% endif %}</h1>
     <span id="chat-status-badge"{% if room and room.status == 'closed' %} class="closed"{% endif %}>
       {% if room and room.status == 'closed' %}Closed{% else %}Open{% endif %}
     </span>

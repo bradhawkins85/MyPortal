@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/bradhawkins85/myportal-tray/internal/api"
 	"github.com/bradhawkins85/myportal-tray/internal/logger"
 )
 
@@ -115,12 +116,12 @@ func findChatShell() string {
 // openWithChatShell launches the dedicated chat shell with chatURL as its
 // argument.  Returns true when the shell was found and the process started
 // successfully.
-func openWithChatShell(chatURL string) bool {
+func openWithChatShell(chatURL string, cfg *api.ConfigResponse) bool {
 	shellPath := findChatShell()
 	if shellPath == "" {
 		return false
 	}
-	cmd := exec.Command(shellPath, "--url="+chatURL)
+	cmd := exec.Command(shellPath, "--url="+chatURL, "--title="+trayDisplayName(cfg)+" Chat")
 	if err := cmd.Start(); err != nil {
 		logger.Warn("openWithChatShell: launch failed: %v", err)
 		return false
