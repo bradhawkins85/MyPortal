@@ -260,4 +260,99 @@ async def metrics() -> dict[str, Any]:
         "pending_matches": int((pending_matches or {}).get("count") or 0),
         "failed_lookups": int((failed_lookups or {}).get("count") or 0),
         "stale_matches": int((stale_matches or {}).get("count") or 0),
+        "matching_paused": await matching_paused(),
+    }
+
+
+async def matching_paused() -> bool:
+    row = await db.fetch_one(
+        "SELECT value FROM rag_matching_state WHERE key = 'paused'",
+        (),
+    )
+    return str((row or {}).get("value") or "0").lower() in {"1", "true", "yes"}
+
+
+async def set_matching_paused(paused: bool) -> None:
+    value = "1" if paused else "0"
+    if db.is_sqlite():
+        await db.execute(
+            """
+            INSERT INTO rag_matching_state (key, value, updated_at)
+            VALUES ('paused', ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+            """,
+            (value,),
+        )
+        return
+    await db.execute(
+        """
+        INSERT INTO rag_matching_state (`key`, value, updated_at)
+        VALUES ('paused', ?, CURRENT_TIMESTAMP(6))
+        ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = CURRENT_TIMESTAMP(6)
+        """,
+        (value,),
+    )
+
+
+async def cleanup_stale_matches_and_decisions() -> dict[str, int]:
+    stale_relationships = await db.execute_rowcount(
+        (
+            """
+        DELETE r FROM rag_relationships r
+        LEFT JOIN rag_documents s ON s.id = r.source_document_id
+        LEFT JOIN rag_documents t ON t.id = r.target_document_id
+        WHERE r.match_status = 'STALE'
+           OR s.id IS NULL OR t.id IS NULL
+           OR s.is_active = 0 OR t.is_active = 0
+           OR r.source_hash <> s.content_hash
+           OR r.target_hash <> t.content_hash
+        """
+            if not db.is_sqlite()
+            else """
+        DELETE FROM rag_relationships
+        WHERE id IN (
+            SELECT r.id FROM rag_relationships r
+            LEFT JOIN rag_documents s ON s.id = r.source_document_id
+            LEFT JOIN rag_documents t ON t.id = r.target_document_id
+            WHERE r.match_status = 'STALE'
+               OR s.id IS NULL OR t.id IS NULL
+               OR s.is_active = 0 OR t.is_active = 0
+               OR r.source_hash <> s.content_hash
+               OR r.target_hash <> t.content_hash
+        )
+        """
+        ),
+        (),
+    )
+    stale_queue = await db.execute_rowcount(
+        (
+            """
+        DELETE q FROM rag_relationship_queue q
+        LEFT JOIN rag_documents s ON s.id = q.source_document_id
+        LEFT JOIN rag_documents t ON t.id = q.target_document_id
+        WHERE q.status IN ('completed', 'skipped', 'FAILED')
+           OR s.id IS NULL OR t.id IS NULL OR s.is_active = 0 OR t.is_active = 0
+        """
+            if not db.is_sqlite()
+            else """
+        DELETE FROM rag_relationship_queue
+        WHERE id IN (
+            SELECT q.id FROM rag_relationship_queue q
+            LEFT JOIN rag_documents s ON s.id = q.source_document_id
+            LEFT JOIN rag_documents t ON t.id = q.target_document_id
+            WHERE q.status IN ('completed', 'skipped', 'FAILED')
+               OR s.id IS NULL OR t.id IS NULL OR s.is_active = 0 OR t.is_active = 0
+        )
+        """
+        ),
+        (),
+    )
+    reset_processing = await db.execute_rowcount(
+        "UPDATE rag_relationship_queue SET status = 'PENDING', started_at = NULL WHERE status = 'PROCESSING'",
+        (),
+    )
+    return {
+        "relationships_deleted": stale_relationships,
+        "queue_deleted": stale_queue,
+        "processing_reset": reset_processing,
     }

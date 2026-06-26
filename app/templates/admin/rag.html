@@ -7,6 +7,9 @@
     <p class="page-description">Monitor retrieval-augmented generation coverage and refresh the searchable index.</p>
   </div>
   <div class="button-row">
+    <button type="button" class="button button--ghost" data-rag-matching-pause>Pause Matching</button>
+    <button type="button" class="button button--ghost" data-rag-matching-resume>Resume Matching</button>
+    <button type="button" class="button button--ghost" data-rag-matching-cleanup>Cleanup stale matches</button>
     <button type="button" class="button button--ghost" data-rag-jobs-cleanup>Cleanup finished jobs</button>
     <button type="button" class="button" data-rag-index-trigger>Trigger indexing</button>
   </div>
@@ -111,6 +114,7 @@
       metric('Failed lookups', number(matching.failed_lookups), 'Exhausted retries and still failed', matching.failed_lookups ? 'danger' : 'neutral'),
       metric('Stored decisions', number(matching.total_stored_relationships), `${number(matching.stale_matches)} stale decision(s)`, 'info'),
       metric('Avg lookup time', `${Number(matching.average_evaluation_duration_ms || 0).toFixed(0)} ms`, 'Relationship evaluator runtime', 'neutral'),
+      metric('Matching state', matching.matching_paused ? 'Paused' : 'Running', 'Pause suspends new matching work', matching.matching_paused ? 'warning' : 'success'),
     ].join('');
     sourcesBody.innerHTML = (data.sources || []).map((row) => `<tr><td>${esc(row.source_type)}</td><td>${number(row.count)}</td><td>${number(row.chunk_count)}</td><td>${number(row.token_count)}</td><td>${date(row.last_indexed_at)}</td></tr>`).join('') || emptyRow(5, 'No indexed sources yet.');
     docsBody.innerHTML = (data.recent_documents || []).map((row) => `<tr><td>${esc(row.title)}</td><td>${esc(row.source_type)}:${esc(row.source_id)}</td><td>${esc(row.company_id)}</td><td>${esc(row.embedding_model)}</td><td>${date(row.indexed_at)}</td></tr>`).join('') || emptyRow(5, 'No recent documents.');
@@ -147,6 +151,22 @@
     status.textContent = `Cleaned up ${number(data.deleted)} finished indexing job(s).`;
     await loadHealth();
   }
+  async function setMatchingPaused(paused) {
+    status.textContent = paused ? 'Pausing document matching…' : 'Resuming document matching…';
+    const res = await fetch(`/api/agent/rag/matching/${paused ? 'pause' : 'resume'}`, {method: 'POST', headers: {'Accept': 'application/json', 'X-CSRF-Token': csrf}});
+    if (!res.ok) throw new Error(paused ? 'Unable to pause matching' : 'Unable to resume matching');
+    status.textContent = paused ? 'Document matching paused.' : 'Document matching resumed.';
+    await loadHealth();
+  }
+  async function cleanupStaleMatches() {
+    if (!confirm('Delete stale RAG matches/decisions and reset abandoned matching work?')) return;
+    status.textContent = 'Cleaning up stale matches and decisions…';
+    const res = await fetch('/api/agent/rag/matching/stale', {method: 'DELETE', headers: {'Accept': 'application/json', 'X-CSRF-Token': csrf}});
+    if (!res.ok) throw new Error('Unable to cleanup stale matches');
+    const data = await res.json();
+    status.textContent = `Deleted ${number(data.relationships_deleted)} stale decision(s), removed ${number(data.queue_deleted)} queue row(s), reset ${number(data.processing_reset)} processing row(s).`;
+    await loadHealth();
+  }
   root.querySelector('[data-rag-refresh]')?.addEventListener('click', () => loadHealth().catch(err => status.textContent = err.message));
   root.addEventListener('click', (event) => {
     const stopButton = event.target.closest('[data-rag-job-stop]');
@@ -154,6 +174,9 @@
   });
   document.querySelector('[data-rag-index-trigger]')?.addEventListener('click', () => triggerIndex().catch(err => status.textContent = err.message));
   document.querySelector('[data-rag-jobs-cleanup]')?.addEventListener('click', () => cleanupJobs().catch(err => status.textContent = err.message));
+  document.querySelector('[data-rag-matching-pause]')?.addEventListener('click', () => setMatchingPaused(true).catch(err => status.textContent = err.message));
+  document.querySelector('[data-rag-matching-resume]')?.addEventListener('click', () => setMatchingPaused(false).catch(err => status.textContent = err.message));
+  document.querySelector('[data-rag-matching-cleanup]')?.addEventListener('click', () => cleanupStaleMatches().catch(err => status.textContent = err.message));
   loadHealth().catch(err => status.textContent = err.message);
 })();
 </script>

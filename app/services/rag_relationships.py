@@ -67,6 +67,8 @@ async def on_document_indexed(document_id: int, *, content_changed: bool) -> int
 
 async def enqueue_relationships_for_document(document_id: int) -> int:
     settings = get_settings()
+    if await rel_repo.matching_paused():
+        return 0
     source = await rel_repo.get_document(document_id)
     if not source:
         return 0
@@ -237,6 +239,8 @@ def parse_relationship_response(value: Any, *, min_score: float) -> dict[str, An
 async def evaluate_next_batch(*, limit: int | None = None) -> int:
     settings = get_settings()
     if not settings.enable_background_relationships:
+        return 0
+    if await rel_repo.matching_paused():
         return 0
     jobs = await rel_repo.claim_jobs(limit or settings.rag_relationship_batch_size)
     processed = 0
