@@ -30,6 +30,10 @@ def _chunk_overlap_words() -> int:
     return min(overlap, max(0, _chunk_words() - 1))
 
 
+class RagIndexCancelled(Exception):
+    """Raised when an administrator requests a running RAG index job to stop."""
+
+
 @dataclass(slots=True)
 class RagDocument:
     source_type: str
@@ -168,7 +172,9 @@ async def index_document(document: RagDocument) -> int:
         document.source_type, document.source_id, embedding_model()
     )
     new_hash = content_hash(document.text)
-    content_changed = not previous or str(previous.get("content_hash") or "") != new_hash
+    content_changed = (
+        not previous or str(previous.get("content_hash") or "") != new_hash
+    )
     chunks = chunk_text(document.text)
     if not chunks:
         chunks = [normalise_text(document.title)]
@@ -209,8 +215,8 @@ async def index_document(document: RagDocument) -> int:
     return doc_id
 
 
-async def index_agent_sources(sources: Mapping[str, Any]) -> int:
-    indexed = 0
+def source_keys_from_agent_sources(sources: Mapping[str, Any]) -> dict[str, set[str]]:
+    active: dict[str, set[str]] = {}
     for source_type, values in sources.items():
         if source_type == "feature_packs" and isinstance(values, Mapping):
             iterable = (
@@ -223,11 +229,45 @@ async def index_agent_sources(sources: Mapping[str, Any]) -> int:
         for normalised_type, item in iterable:
             if not isinstance(item, Mapping):
                 continue
+            source_id = (
+                item.get("id") or item.get("slug") or item.get("key") or item.get("uid")
+            )
+            if source_id is None:
+                continue
+            active.setdefault(str(normalised_type), set()).add(str(source_id))
+    return active
+
+
+async def index_agent_sources(
+    sources: Mapping[str, Any],
+    *,
+    job_id: int | None = None,
+    cleanup_missing: bool = False,
+) -> int:
+    indexed = 0
+    for source_type, values in sources.items():
+        if source_type == "feature_packs" and isinstance(values, Mapping):
+            iterable = (
+                (f"feature:{slug}", item)
+                for slug, rows in values.items()
+                for item in (rows or [])
+            )
+        else:
+            iterable = ((source_type, item) for item in (values or []))
+        for normalised_type, item in iterable:
+            if job_id is not None and await rag_repo.job_stop_requested(job_id):
+                raise RagIndexCancelled(f"Index job {job_id} was stopped.")
+            if not isinstance(item, Mapping):
+                continue
             document = document_from_source(normalised_type, item)
             if document is None:
                 continue
             await index_document(document)
             indexed += 1
+    if cleanup_missing:
+        if job_id is not None and await rag_repo.job_stop_requested(job_id):
+            raise RagIndexCancelled(f"Index job {job_id} was stopped.")
+        await cleanup_missing_agent_sources(sources)
     return indexed
 
 
@@ -244,3 +284,18 @@ def candidate_to_source(candidate: Mapping[str, Any]) -> dict[str, Any]:
     item.setdefault("url", candidate.get("url"))
     item.setdefault("rag_score", candidate.get("score"))
     return item
+
+
+async def cleanup_missing_agent_sources(sources: Mapping[str, Any]) -> int:
+    """Remove indexed RAG documents whose source records no longer exist.
+
+    The cleanup is scoped to source types present in the current indexing pass so
+    a partial future index cannot accidentally purge unrelated RAG assets.
+    Related relationship matchings and queue entries are deleted before document
+    removal to keep retrieval evidence from pointing at deleted tickets, chats,
+    assets, or other source records.
+    """
+
+    return await rag_repo.cleanup_missing_documents(
+        source_keys_from_agent_sources(sources), embedding_model=embedding_model()
+    )

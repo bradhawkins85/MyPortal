@@ -64,7 +64,6 @@ class AgentContextMode(str, Enum):
     FALLBACK = "fallback"
 
 
-
 def _context_token_budget() -> int:
     raw_value = os.getenv("AI_CONTEXT_BUDGET", "").strip()
     if not raw_value:
@@ -106,7 +105,9 @@ def _trim_sections_to_token_budget(
             # Keep a bounded prefix for required instructions/query text.
             char_budget = max(1024, budget * 4)
             notice = "\n\n[Context truncated to fit the configured AI token budget.]"
-            trimmed = section_text[: max(0, char_budget - len(notice))].rstrip() + notice
+            trimmed = (
+                section_text[: max(0, char_budget - len(notice))].rstrip() + notice
+            )
             selected.append(trimmed)
             used_tokens = _count_tokens(trimmed)
             continue
@@ -1364,6 +1365,8 @@ async def execute_agent_query(
     memberships: Sequence[Mapping[str, Any]] | None = None,
     allow_empty_query: bool = False,
     context_mode: AgentContextMode = AgentContextMode.RAG_ONLY,
+    rag_index_job_id: int | None = None,
+    cleanup_rag_index: bool = False,
 ) -> dict[str, Any]:
     """Execute an agent query using the configured Ollama module."""
 
@@ -1856,7 +1859,11 @@ async def execute_agent_query(
         )
     )
     try:
-        await rag_index_service.index_agent_sources(assembled_sources)
+        await rag_index_service.index_agent_sources(
+            assembled_sources,
+            job_id=rag_index_job_id,
+            cleanup_missing=cleanup_rag_index,
+        )
         raw_rag_candidates = await rag_retrieval.retrieve_candidates(
             query_text,
             user,
@@ -1885,26 +1892,39 @@ async def execute_agent_query(
     relationship_evidence = []
     for ticket_id in explicit_ticket_ids:
         try:
-            doc = await rag_index_repo.get_document_by_source("tickets", str(ticket_id), rag_index_service.embedding_model())
+            doc = await rag_index_repo.get_document_by_source(
+                "tickets", str(ticket_id), rag_index_service.embedding_model()
+            )
             if doc:
-                relationship_evidence.extend(await rag_relationship_service.load_evidence_for_document(int(doc["id"])))
+                relationship_evidence.extend(
+                    await rag_relationship_service.load_evidence_for_document(
+                        int(doc["id"])
+                    )
+                )
         except Exception as exc:  # pragma: no cover - defensive guard
-            log_error("Agent stored relationship retrieval failed", error=str(exc), ticket_id=ticket_id)
+            log_error(
+                "Agent stored relationship retrieval failed",
+                error=str(exc),
+                ticket_id=ticket_id,
+            )
     for item in relationship_evidence:
-        rag_candidates.append({
-            "source_type": item.get("source_type"),
-            "source_id": item.get("source_id"),
-            "title": item.get("title"),
-            "excerpt": item.get("supporting_excerpt") or item.get("content"),
-            "score": item.get("relevance_score"),
-            "url": item.get("url"),
-        })
+        rag_candidates.append(
+            {
+                "source_type": item.get("source_type"),
+                "source_id": item.get("source_id"),
+                "title": item.get("title"),
+                "excerpt": item.get("supporting_excerpt") or item.get("content"),
+                "score": item.get("relevance_score"),
+                "url": item.get("url"),
+            }
+        )
     curated_evidence, evidence_counts = _summarise_rag_by_source(rag_candidates)
     stages.append(
         _stage(
             "evidence_review",
             data={
-                "candidates_reviewed": len(raw_rag_candidates) + len(direct_ticket_evidence),
+                "candidates_reviewed": len(raw_rag_candidates)
+                + len(direct_ticket_evidence),
                 "curated_evidence": len(rag_candidates),
                 "precomputed_relationships": len(relationship_evidence),
                 "llm_status": "skipped_precomputed_relationships",
@@ -1912,7 +1932,11 @@ async def execute_agent_query(
             },
         )
     )
-    category_summary_llm = {"status": "skipped_final_prompt_only", "event_id": None, "text": ""}
+    category_summary_llm = {
+        "status": "skipped_final_prompt_only",
+        "event_id": None,
+        "text": "",
+    }
     stages.append(
         _stage(
             "category_summaries",

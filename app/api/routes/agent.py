@@ -50,9 +50,7 @@ async def stream_agent_query(
             payload = {"event": "stage", **stage}
             yield f"data: {json.dumps(payload, default=str)}\n\n"
         evidence = (
-            result.get("evidence")
-            if isinstance(result.get("evidence"), dict)
-            else {}
+            result.get("evidence") if isinstance(result.get("evidence"), dict) else {}
         )
         for source_type, items in evidence.items():
             if items:
@@ -102,6 +100,8 @@ async def _run_rag_index_job(
             active_company_id=active_company_id,
             memberships=memberships,
             allow_empty_query=True,
+            rag_index_job_id=job_id,
+            cleanup_rag_index=True,
         )
         indexed = 0
         for value in result.get("sources", {}).values():
@@ -111,13 +111,36 @@ async def _run_rag_index_job(
                 indexed += sum(
                     len(rows or []) for rows in value.values() if isinstance(rows, list)
                 )
+        if await rag_index_repo.job_stop_requested(job_id):
+            await rag_index_repo.update_job(
+                job_id,
+                status="cancelled",
+                message="Indexing stopped by an administrator.",
+                finished=True,
+            )
+            return
         await rag_index_repo.update_job(
             job_id,
             status="completed",
-            message=f"Indexing completed. Refreshed up to {indexed} source records.",
+            message=f"Indexing completed. Refreshed up to {indexed} source records and cleaned stale RAG matchings.",
+            finished=True,
+        )
+    except agent_service.rag_index_service.RagIndexCancelled:
+        await rag_index_repo.update_job(
+            job_id,
+            status="cancelled",
+            message="Indexing stopped by an administrator.",
             finished=True,
         )
     except Exception as exc:  # pragma: no cover - defensive background job guard
+        if await rag_index_repo.job_stop_requested(job_id):
+            await rag_index_repo.update_job(
+                job_id,
+                status="cancelled",
+                message="Indexing stopped by an administrator.",
+                finished=True,
+            )
+            return
         await rag_index_repo.update_job(
             job_id, status="failed", message=str(exc), finished=True
         )
@@ -140,3 +163,24 @@ async def trigger_rag_index(
         memberships=[dict(item) for item in memberships or []],
     )
     return {"job_id": job_id, "status": "queued"}
+
+
+@router.post("/rag/index/{job_id}/stop")
+async def stop_rag_index(
+    job_id: int,
+    current_user: dict = Depends(require_super_admin),
+) -> dict:
+    job = await rag_index_repo.get_job(job_id)
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="RAG index job not found"
+        )
+    job_status = str(job.get("status") or "")
+    if job_status in {"completed", "failed", "cancelled"}:
+        return {
+            "job_id": job_id,
+            "status": job_status,
+            "message": "Job is already finished.",
+        }
+    await rag_index_repo.request_job_stop(job_id)
+    return {"job_id": job_id, "status": "cancelling"}

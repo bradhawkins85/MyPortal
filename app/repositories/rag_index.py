@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 from app.core.database import db
 
 
-async def get_document_by_source(source_type: str, source_id: str, embedding_model: str) -> dict[str, Any] | None:
+async def get_document_by_source(
+    source_type: str, source_id: str, embedding_model: str
+) -> dict[str, Any] | None:
     return await db.fetch_one(
         """
         SELECT * FROM rag_documents
@@ -149,43 +151,33 @@ async def health() -> dict[str, Any]:
     stale = await db.fetch_one(
         "SELECT COUNT(*) AS count FROM rag_chunks WHERE is_active = 0"
     )
-    token_stats = await db.fetch_one(
-        """
+    token_stats = await db.fetch_one("""
         SELECT COALESCE(SUM(token_count), 0) AS token_count,
                COALESCE(AVG(token_count), 0) AS avg_tokens,
                COALESCE(MAX(token_count), 0) AS max_tokens
         FROM rag_chunks WHERE is_active = 1
-        """
-    )
-    doc_stats = await db.fetch_one(
-        """
+        """)
+    doc_stats = await db.fetch_one("""
         SELECT MIN(indexed_at) AS first_indexed_at, MAX(indexed_at) AS last_indexed_at,
                COUNT(DISTINCT company_id) AS company_count, COUNT(DISTINCT embedding_model) AS model_count
         FROM rag_documents WHERE is_active = 1
-        """
-    )
-    by_source = await db.fetch_all(
-        """
+        """)
+    by_source = await db.fetch_all("""
         SELECT d.source_type, COUNT(DISTINCT d.id) AS count, COUNT(c.id) AS chunk_count,
                COALESCE(SUM(c.token_count), 0) AS token_count, MAX(d.indexed_at) AS last_indexed_at
         FROM rag_documents d
         LEFT JOIN rag_chunks c ON c.document_id = d.id AND c.is_active = 1
         WHERE d.is_active = 1
         GROUP BY d.source_type ORDER BY d.source_type
-        """
-    )
-    recent_documents = await db.fetch_all(
-        """
+        """)
+    recent_documents = await db.fetch_all("""
         SELECT id, source_type, source_id, company_id, title, embedding_model, indexed_at
         FROM rag_documents WHERE is_active = 1 ORDER BY indexed_at DESC, id DESC LIMIT 10
-        """
-    )
-    recent_jobs = await db.fetch_all(
-        """
+        """)
+    recent_jobs = await db.fetch_all("""
         SELECT id, source_type, source_id, status, message, started_at, finished_at, created_at
         FROM rag_index_jobs ORDER BY created_at DESC, id DESC LIMIT 10
-        """
-    )
+        """)
     return {
         "documents": int((docs or {}).get("count") or 0),
         "inactive_documents": int((inactive_docs or {}).get("count") or 0),
@@ -232,3 +224,64 @@ async def update_job(
         f"UPDATE rag_index_jobs SET {', '.join(assignments)} WHERE id = ?",
         tuple(params),
     )
+
+
+async def get_job(job_id: int) -> dict[str, Any] | None:
+    return await db.fetch_one("SELECT * FROM rag_index_jobs WHERE id = ?", (job_id,))
+
+
+async def request_job_stop(job_id: int) -> bool:
+    rowcount = await db.execute_rowcount(
+        """
+        UPDATE rag_index_jobs
+        SET status = 'cancelling', message = 'Stop requested by an administrator.'
+        WHERE id = ? AND status IN ('queued', 'running')
+        """,
+        (job_id,),
+    )
+    return rowcount > 0
+
+
+async def job_stop_requested(job_id: int) -> bool:
+    row = await get_job(job_id)
+    return str((row or {}).get("status") or "") in {"cancelling", "cancelled"}
+
+
+async def delete_documents_by_ids(document_ids: Sequence[int]) -> int:
+    ids = [int(value) for value in document_ids if value is not None]
+    if not ids:
+        return 0
+    placeholders = ",".join("?" for _ in ids)
+    await db.execute(
+        f"DELETE FROM rag_relationship_queue WHERE source_document_id IN ({placeholders}) OR target_document_id IN ({placeholders})",
+        tuple(ids + ids),
+    )
+    await db.execute(
+        f"DELETE FROM rag_relationships WHERE source_document_id IN ({placeholders}) OR target_document_id IN ({placeholders})",
+        tuple(ids + ids),
+    )
+    await db.execute(
+        f"DELETE FROM rag_chunks WHERE document_id IN ({placeholders})", tuple(ids)
+    )
+    await db.execute(
+        f"DELETE FROM rag_documents WHERE id IN ({placeholders})", tuple(ids)
+    )
+    return len(ids)
+
+
+async def cleanup_missing_documents(
+    active_sources: Mapping[str, set[str]], *, embedding_model: str
+) -> int:
+    rows = await db.fetch_all(
+        "SELECT id, source_type, source_id FROM rag_documents WHERE embedding_model = ?",
+        (embedding_model,),
+    )
+    stale_ids: list[int] = []
+    for row in rows or []:
+        source_type = str(row.get("source_type") or "")
+        source_id = str(row.get("source_id") or "")
+        if source_type not in active_sources:
+            continue
+        if source_id not in active_sources[source_type]:
+            stale_ids.append(int(row["id"]))
+    return await delete_documents_by_ids(stale_ids)
