@@ -186,6 +186,33 @@ def test_scheduled_tasks_page_renders_tasks(super_admin_context, monkeypatch):
     assert 'data-task-create' in header_html
 
 
+def test_scheduled_tasks_page_offers_rag_control_commands(super_admin_context, monkeypatch):
+    """The create/edit modal exposes optional RAG maintenance commands even when no task exists yet."""
+
+    async def fake_list_tasks(include_inactive=False):
+        return []
+
+    async def fake_list_companies():
+        return []
+
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "list_tasks", fake_list_tasks)
+    monkeypatch.setattr(main_module.company_repo, "list_companies", fake_list_companies)
+
+    with TestClient(app) as client:
+        response = client.get("/admin/scheduled-tasks")
+
+    assert response.status_code == 200
+    html = response.text
+    for value, label in [
+        ("rag_index_start", "RAG start indexing"),
+        ("rag_index_stop", "RAG stop indexing"),
+        ("rag_matching_pause", "RAG pause matching"),
+        ("rag_matching_resume", "RAG resume matching"),
+        ("rag_cleanup_stale_matches", "RAG cleanup stale matches"),
+    ]:
+        assert f'<option value="{value}">{label}</option>' in html
+
+
 def test_scheduled_tasks_page_empty(super_admin_context, monkeypatch):
     """Test that the page shows an empty state when no tasks are configured."""
 
