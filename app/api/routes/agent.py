@@ -165,6 +165,14 @@ async def trigger_rag_index(
     return {"job_id": job_id, "status": "queued"}
 
 
+@router.delete("/rag/index/jobs/finished")
+async def cleanup_finished_rag_index_jobs(
+    current_user: dict = Depends(require_super_admin),
+) -> dict:
+    deleted = await rag_index_repo.cleanup_finished_jobs()
+    return {"deleted": deleted}
+
+
 @router.post("/rag/index/{job_id}/stop")
 async def stop_rag_index(
     job_id: int,
