@@ -205,6 +205,18 @@ async def create_job(
     )
 
 
+async def get_active_job() -> dict[str, Any] | None:
+    return await db.fetch_one(
+        """
+        SELECT * FROM rag_index_jobs
+        WHERE status IN ('queued', 'running', 'cancelling')
+        ORDER BY created_at ASC, id ASC
+        LIMIT 1
+        """,
+        (),
+    )
+
+
 async def update_job(
     job_id: int,
     *,
@@ -250,6 +262,17 @@ async def request_job_stop(job_id: int) -> bool:
         (job_id,),
     )
     return rowcount > 0
+
+
+async def request_all_active_job_stops() -> int:
+    return await db.execute_rowcount(
+        """
+        UPDATE rag_index_jobs
+        SET status = 'cancelling', message = 'Stop requested by an administrator.'
+        WHERE status IN ('queued', 'running')
+        """,
+        (),
+    )
 
 
 async def job_stop_requested(job_id: int) -> bool:

@@ -25,7 +25,9 @@ from app.services import m365 as m365_service
 from app.services import modules as modules_service
 from app.services import products as products_service
 from app.services import staff_importer
-from app.services import staff_onboarding_workflows as staff_onboarding_workflows_service
+from app.services import (
+    staff_onboarding_workflows as staff_onboarding_workflows_service,
+)
 from app.services import subscription_price_changes
 from app.services import subscription_renewals
 from app.services import tickets as tickets_service
@@ -35,6 +37,8 @@ from app.services import webhook_monitor
 from app.services import xero as xero_service
 from app.services import service_status as service_status_service
 from app.services import backup_jobs as backup_jobs_service
+from app.repositories import rag_index as rag_index_repo
+from app.repositories import rag_relationships as rag_relationship_repo
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SYSTEM_UPDATE_LOCK = asyncio.Lock()
@@ -47,7 +51,9 @@ _VALID_UPGRADE_MODES = {"graceful", "rolling", "restart"}
 # and reloads each listed slug in-process so the running app picks up
 # the new on-disk code without a service restart.  See
 # ``docs/wiki/developer/Feature Packs.md``.
-_FEATURE_PACK_RELOAD_FLAG_PATH = _PROJECT_ROOT / "var" / "state" / "feature_pack_reload.flag"
+_FEATURE_PACK_RELOAD_FLAG_PATH = (
+    _PROJECT_ROOT / "var" / "state" / "feature_pack_reload.flag"
+)
 
 # Directory prefix used to detect changes that are isolated to a single
 # feature pack (see ``app/core/features.py``).  When every file in a
@@ -78,7 +84,11 @@ COMMANDS_BY_MODULE: dict[str, set[str]] = {
         "sync_m365_mailboxes",
     },
     "xero": {"sync_to_xero", "sync_to_xero_auto_send"},
-    "call-recordings": {"sync_recordings", "queue_transcriptions", "process_transcription"},
+    "call-recordings": {
+        "sync_recordings",
+        "queue_transcriptions",
+        "process_transcription",
+    },
     "unifi-talk": {"sync_unifi_talk_recordings"},
     "tacticalrmm": {"push_tactical_companies", "pull_tactical_companies"},
     "huntress": {"sync_huntress"},
@@ -351,35 +361,56 @@ class SchedulerService:
         """Run automation processing with distributed lock to prevent duplicate execution."""
         async with db.acquire_lock("automation_runner", timeout=1) as lock_acquired:
             if not lock_acquired:
-                log_info("Automation runner already running on another worker, skipping")
+                log_info(
+                    "Automation runner already running on another worker, skipping"
+                )
                 return
             await automations_service.process_due_automations()
 
     async def _run_staff_workflow_due_runner(self) -> None:
         """Run due approved staff workflow executions with distributed lock."""
-        async with db.acquire_lock("staff_workflow_due_runner", timeout=1) as lock_acquired:
+        async with db.acquire_lock(
+            "staff_workflow_due_runner", timeout=1
+        ) as lock_acquired:
             if not lock_acquired:
-                log_info("Staff workflow due runner already running on another worker, skipping")
+                log_info(
+                    "Staff workflow due runner already running on another worker, skipping"
+                )
                 return
-            result = await staff_onboarding_workflows_service.process_due_approved_executions()
+            result = (
+                await staff_onboarding_workflows_service.process_due_approved_executions()
+            )
             if result.get("processed", 0) or result.get("skipped", 0):
                 log_info("Staff workflow due runner processed executions", **result)
 
     async def _run_staff_workflow_license_resume_runner(self) -> None:
         """Resume paused license-exhausted workflows when capacity becomes available."""
-        async with db.acquire_lock("staff_workflow_license_resume_runner", timeout=1) as lock_acquired:
+        async with db.acquire_lock(
+            "staff_workflow_license_resume_runner", timeout=1
+        ) as lock_acquired:
             if not lock_acquired:
-                log_info("Staff workflow license resume runner already running on another worker, skipping")
+                log_info(
+                    "Staff workflow license resume runner already running on another worker, skipping"
+                )
                 return
-            result = await staff_onboarding_workflows_service.process_paused_license_executions()
+            result = (
+                await staff_onboarding_workflows_service.process_paused_license_executions()
+            )
             if result.get("resumed", 0) or result.get("skipped", 0):
-                log_info("Staff workflow license resume runner processed executions", **result)
+                log_info(
+                    "Staff workflow license resume runner processed executions",
+                    **result,
+                )
 
     async def _run_service_status_ai_lookup(self) -> None:
         """Run AI lookups for service status monitors with distributed lock."""
-        async with db.acquire_lock("service_status_ai_lookup", timeout=1) as lock_acquired:
+        async with db.acquire_lock(
+            "service_status_ai_lookup", timeout=1
+        ) as lock_acquired:
             if not lock_acquired:
-                log_info("Service status AI lookup already running on another worker, skipping")
+                log_info(
+                    "Service status AI lookup already running on another worker, skipping"
+                )
                 return
             try:
                 result = await service_status_service.run_ai_lookup_for_all_services()
@@ -387,24 +418,26 @@ class SchedulerService:
                     log_info("Service status AI lookup completed", **result)
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error("Service status AI lookup failed", error=str(exc))
-    
+
     async def _run_subscription_renewals(self) -> None:
         """Run subscription renewal invoice creation (T-60 job) with distributed lock."""
         async with db.acquire_lock("subscription_renewals", timeout=5) as lock_acquired:
             if not lock_acquired:
-                log_info("Subscription renewals already running on another worker, skipping")
+                log_info(
+                    "Subscription renewals already running on another worker, skipping"
+                )
                 return
-            
+
             from datetime import date
+
             today = date.today()
             log_info("Starting subscription renewal invoice creation", date=today)
-            
+
             try:
-                result = await subscription_renewals.create_renewal_invoices_for_date(today)
-                log_info(
-                    "Subscription renewal invoice creation completed",
-                    **result
+                result = await subscription_renewals.create_renewal_invoices_for_date(
+                    today
                 )
+                log_info("Subscription renewal invoice creation completed", **result)
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error(
                     "Subscription renewal invoice creation failed",
@@ -414,9 +447,13 @@ class SchedulerService:
 
     async def _run_m365_credential_renewal(self) -> None:
         """Renew expiring Microsoft 365 client secrets with distributed lock."""
-        async with db.acquire_lock("m365_credential_renewal", timeout=5) as lock_acquired:
+        async with db.acquire_lock(
+            "m365_credential_renewal", timeout=5
+        ) as lock_acquired:
             if not lock_acquired:
-                log_info("M365 credential renewal already running on another worker, skipping")
+                log_info(
+                    "M365 credential renewal already running on another worker, skipping"
+                )
                 return
 
             log_info("Starting M365 client secret renewal check")
@@ -430,7 +467,9 @@ class SchedulerService:
         """Refresh Huntress snapshots for every linked company."""
         async with db.acquire_lock("huntress_daily_sync", timeout=5) as lock_acquired:
             if not lock_acquired:
-                log_info("Huntress daily sync already running on another worker, skipping")
+                log_info(
+                    "Huntress daily sync already running on another worker, skipping"
+                )
                 return
             from app.services import huntress as huntress_service
 
@@ -453,7 +492,9 @@ class SchedulerService:
         """Seed daily 'unknown' backup events with distributed lock."""
         async with db.acquire_lock("backup_history_seed", timeout=5) as lock_acquired:
             if not lock_acquired:
-                log_info("Backup history seed already running on another worker, skipping")
+                log_info(
+                    "Backup history seed already running on another worker, skipping"
+                )
                 return
             try:
                 inserted = await backup_jobs_service.seed_unknown_events_for_date()
@@ -465,7 +506,9 @@ class SchedulerService:
         """Check backup alert thresholds and create tickets with distributed lock."""
         async with db.acquire_lock("backup_alert_check", timeout=5) as lock_acquired:
             if not lock_acquired:
-                log_info("Backup alert check already running on another worker, skipping")
+                log_info(
+                    "Backup alert check already running on another worker, skipping"
+                )
                 return
             try:
                 result = await backup_jobs_service.check_backup_alerts()
@@ -501,7 +544,9 @@ class SchedulerService:
         try:
             fields = str(task["cron"]).strip().split()
             if len(fields) != 5:
-                raise ValueError(f"Wrong number of fields; got {len(fields)}, expected 5")
+                raise ValueError(
+                    f"Wrong number of fields; got {len(fields)}, expected 5"
+                )
             minute, hour, day, month, day_of_week = fields
             return CronTrigger(
                 minute=minute,
@@ -520,17 +565,19 @@ class SchedulerService:
             )
             return None
 
-    async def _run_task(self, task: dict[str, Any], *, force_restart: bool = False) -> None:
+    async def _run_task(
+        self, task: dict[str, Any], *, force_restart: bool = False
+    ) -> None:
         task_id = task.get("id")
         command = task.get("command")
-        
+
         if task_id is None:
             log_error("Scheduled task missing identifier", command=command)
             return
 
         # Use a distributed lock to ensure only one worker executes this task
         lock_name = f"scheduled_task_{task_id}"
-        
+
         async with db.acquire_lock(lock_name, timeout=1) as lock_acquired:
             if not lock_acquired:
                 # Another worker is already executing this task, skip silently
@@ -540,12 +587,14 @@ class SchedulerService:
             started_at = datetime.now(timezone.utc)
             status = "succeeded"
             details: str | None = None
-            
+
             try:
                 if command == "sync_staff":
                     company_id = task.get("company_id")
                     if company_id:
-                        await staff_importer.import_contacts_for_company(int(company_id))
+                        await staff_importer.import_contacts_for_company(
+                            int(company_id)
+                        )
                 elif command == "sync_assets":
                     company_id = task.get("company_id")
                     if company_id:
@@ -553,7 +602,11 @@ class SchedulerService:
                 elif command == "sync_tactical_assets":
                     company_id = task.get("company_id")
                     if company_id:
-                        processed = await asset_importer.import_tactical_assets_for_company(int(company_id))
+                        processed = (
+                            await asset_importer.import_tactical_assets_for_company(
+                                int(company_id)
+                            )
+                        )
                         details = json.dumps(
                             {"company_id": int(company_id), "processed": processed},
                             default=str,
@@ -581,11 +634,17 @@ class SchedulerService:
                         except Exception as exc:  # noqa: BLE001
                             licenses_sync_error = str(exc)
                         try:
-                            staff_summary = await staff_importer.import_m365_contacts_for_company(company_id_int)
+                            staff_summary = (
+                                await staff_importer.import_m365_contacts_for_company(
+                                    company_id_int
+                                )
+                            )
                         except Exception as exc:  # noqa: BLE001
                             staff_sync_error = str(exc)
                         try:
-                            mailboxes_synced = await m365_service.sync_mailboxes(company_id_int)
+                            mailboxes_synced = await m365_service.sync_mailboxes(
+                                company_id_int
+                            )
                         except Exception as exc:  # noqa: BLE001
                             mailbox_sync_error = str(exc)
                         details = json.dumps(
@@ -593,13 +652,17 @@ class SchedulerService:
                                 "company_id": company_id_int,
                                 "licenses_synced": licenses_sync_error is None,
                                 "licenses_sync_error": licenses_sync_error,
-                                "staff": {
-                                    "created": staff_summary.created,
-                                    "updated": staff_summary.updated,
-                                    "skipped": staff_summary.skipped,
-                                    "removed": staff_summary.removed,
-                                    "total": staff_summary.total,
-                                } if staff_summary is not None else None,
+                                "staff": (
+                                    {
+                                        "created": staff_summary.created,
+                                        "updated": staff_summary.updated,
+                                        "skipped": staff_summary.skipped,
+                                        "removed": staff_summary.removed,
+                                        "total": staff_summary.total,
+                                    }
+                                    if staff_summary is not None
+                                    else None
+                                ),
                                 "staff_sync_error": staff_sync_error,
                                 "mailboxes_synced": mailboxes_synced,
                                 "mailbox_sync_error": mailbox_sync_error,
@@ -622,7 +685,12 @@ class SchedulerService:
                         except Exception as exc:  # noqa: BLE001
                             status = "failed"
                             details = json.dumps(
-                                {"company_id": company_id_int, "licenses_synced": False, "error": str(exc) or f"{type(exc).__name__} (no details)"},
+                                {
+                                    "company_id": company_id_int,
+                                    "licenses_synced": False,
+                                    "error": str(exc)
+                                    or f"{type(exc).__name__} (no details)",
+                                },
                                 default=str,
                             )
                     else:
@@ -633,24 +701,36 @@ class SchedulerService:
                     if company_id:
                         company_id_int = int(company_id)
                         try:
-                            staff_summary = await staff_importer.import_m365_contacts_for_company(company_id_int)
+                            staff_summary = (
+                                await staff_importer.import_m365_contacts_for_company(
+                                    company_id_int
+                                )
+                            )
                             details = json.dumps(
                                 {
                                     "company_id": company_id_int,
-                                    "staff": {
-                                        "created": staff_summary.created,
-                                        "updated": staff_summary.updated,
-                                        "skipped": staff_summary.skipped,
-                                        "removed": staff_summary.removed,
-                                        "total": staff_summary.total,
-                                    } if staff_summary is not None else None,
+                                    "staff": (
+                                        {
+                                            "created": staff_summary.created,
+                                            "updated": staff_summary.updated,
+                                            "skipped": staff_summary.skipped,
+                                            "removed": staff_summary.removed,
+                                            "total": staff_summary.total,
+                                        }
+                                        if staff_summary is not None
+                                        else None
+                                    ),
                                 },
                                 default=str,
                             )
                         except Exception as exc:  # noqa: BLE001
                             status = "failed"
                             details = json.dumps(
-                                {"company_id": company_id_int, "staff_sync_error": str(exc) or f"{type(exc).__name__} (no details)"},
+                                {
+                                    "company_id": company_id_int,
+                                    "staff_sync_error": str(exc)
+                                    or f"{type(exc).__name__} (no details)",
+                                },
                                 default=str,
                             )
                     else:
@@ -661,16 +741,25 @@ class SchedulerService:
                     if company_id:
                         company_id_int = int(company_id)
                         try:
-                            mailboxes_synced = await m365_service.sync_mailboxes(company_id_int)
+                            mailboxes_synced = await m365_service.sync_mailboxes(
+                                company_id_int
+                            )
                             details = json.dumps(
-                                {"company_id": company_id_int, "mailboxes_synced": mailboxes_synced},
+                                {
+                                    "company_id": company_id_int,
+                                    "mailboxes_synced": mailboxes_synced,
+                                },
                                 default=str,
                             )
                         except Exception as exc:  # noqa: BLE001
                             status = "failed"
                             error_msg = str(exc) or f"{type(exc).__name__} (no details)"
                             details = json.dumps(
-                                {"company_id": company_id_int, "mailboxes_synced": 0, "error": error_msg},
+                                {
+                                    "company_id": company_id_int,
+                                    "mailboxes_synced": 0,
+                                    "error": error_msg,
+                                },
                                 default=str,
                             )
                     else:
@@ -690,11 +779,15 @@ class SchedulerService:
                         result = await xero_service.sync_company(int(company_id))
                         if result:
                             details = json.dumps(result, default=str)
-                            result_status = str(
-                                result.get("status")
-                                or result.get("event_status")
-                                or ""
-                            ).strip().lower()
+                            result_status = (
+                                str(
+                                    result.get("status")
+                                    or result.get("event_status")
+                                    or ""
+                                )
+                                .strip()
+                                .lower()
+                            )
                             if result_status in {"failed", "error", "partial"}:
                                 status = "failed"
                             elif result_status == "skipped":
@@ -707,14 +800,20 @@ class SchedulerService:
                 elif command == "sync_to_xero_auto_send":
                     company_id = task.get("company_id")
                     if company_id:
-                        result = await xero_service.sync_company(int(company_id), auto_send=True)
+                        result = await xero_service.sync_company(
+                            int(company_id), auto_send=True
+                        )
                         if result:
                             details = json.dumps(result, default=str)
-                            result_status = str(
-                                result.get("status")
-                                or result.get("event_status")
-                                or ""
-                            ).strip().lower()
+                            result_status = (
+                                str(
+                                    result.get("status")
+                                    or result.get("event_status")
+                                    or ""
+                                )
+                                .strip()
+                                .lower()
+                            )
                             if result_status in {"failed", "error", "partial"}:
                                 status = "failed"
                             elif result_status == "skipped":
@@ -727,10 +826,14 @@ class SchedulerService:
                 elif command == "generate_invoice":
                     company_id = task.get("company_id")
                     if company_id:
-                        result = await invoice_generator_service.generate_invoice(int(company_id))
+                        result = await invoice_generator_service.generate_invoice(
+                            int(company_id)
+                        )
                         if result:
                             details = json.dumps(result, default=str)
-                            result_status = str(result.get("status") or "").strip().lower()
+                            result_status = (
+                                str(result.get("status") or "").strip().lower()
+                            )
                             if result_status in {"failed", "error"}:
                                 status = "failed"
                             elif result_status == "skipped":
@@ -743,10 +846,14 @@ class SchedulerService:
                 elif command == "refresh_company_ids":
                     company_id = task.get("company_id")
                     if company_id:
-                        result = await company_id_lookup.lookup_missing_company_ids(int(company_id))
+                        result = await company_id_lookup.lookup_missing_company_ids(
+                            int(company_id)
+                        )
                         details = json.dumps(result, default=str) if result else None
                     else:
-                        result = await company_id_lookup.refresh_all_missing_company_ids()
+                        result = (
+                            await company_id_lookup.refresh_all_missing_company_ids()
+                        )
                         details = json.dumps(result, default=str) if result else None
                 elif command == "sync_huntress":
                     from app.services import huntress as huntress_service
@@ -764,7 +871,9 @@ class SchedulerService:
                         else:
                             try:
                                 result = await huntress_service.refresh_company(company)
-                                details = json.dumps(result, default=str) if result else None
+                                details = (
+                                    json.dumps(result, default=str) if result else None
+                                )
                                 result_status = str(result.get("status") or "").lower()
                                 if result_status == "failed":
                                     status = "failed"
@@ -776,7 +885,9 @@ class SchedulerService:
                     else:
                         try:
                             result = await huntress_service.refresh_all_companies()
-                            details = json.dumps(result, default=str) if result else None
+                            details = (
+                                json.dumps(result, default=str) if result else None
+                            )
                             result_status = str(result.get("status") or "").lower()
                             if result_status == "skipped":
                                 status = "skipped"
@@ -796,9 +907,11 @@ class SchedulerService:
                         details = output
                 elif command == "update_tray_icon_installer":
                     settings = get_settings()
-                    updated_assets = await tray_installer_service.fetch_latest_tray_installers(
-                        repo=settings.github_tray_msi_repo,
-                        github_token=settings.github_token,
+                    updated_assets = (
+                        await tray_installer_service.fetch_latest_tray_installers(
+                            repo=settings.github_tray_msi_repo,
+                            github_token=settings.github_token,
+                        )
                     )
                     details = json.dumps(
                         {
@@ -808,11 +921,80 @@ class SchedulerService:
                         },
                         default=str,
                     )
+                elif command == "rag_index_start":
+                    active = await rag_index_repo.get_active_job()
+                    if active:
+                        status = "skipped"
+                        details = json.dumps(
+                            {
+                                "active_job_id": active.get("id"),
+                                "active_status": active.get("status"),
+                            },
+                            default=str,
+                        )
+                    else:
+                        job_id = await rag_index_repo.create_job(source_type="all")
+                        await rag_index_repo.update_job(
+                            job_id,
+                            status="running",
+                            message="Indexing started by scheduled task.",
+                            started=True,
+                        )
+                        try:
+                            from app.services import agent as agent_service
+
+                            await agent_service.execute_agent_query(
+                                "",
+                                {"id": 0, "is_super_admin": True},
+                                allow_empty_query=True,
+                                rag_index_job_id=job_id,
+                                cleanup_rag_index=True,
+                            )
+                            final_status = (
+                                "cancelled"
+                                if await rag_index_repo.job_stop_requested(job_id)
+                                else "completed"
+                            )
+                            final_message = (
+                                "Indexing stopped by a scheduled/admin stop request."
+                                if final_status == "cancelled"
+                                else "Indexing completed by scheduled task."
+                            )
+                            await rag_index_repo.update_job(
+                                job_id,
+                                status=final_status,
+                                message=final_message,
+                                finished=True,
+                            )
+                            details = json.dumps(
+                                {"job_id": job_id, "status": final_status}, default=str
+                            )
+                        except Exception as exc:
+                            await rag_index_repo.update_job(
+                                job_id, status="failed", message=str(exc), finished=True
+                            )
+                            raise
+                elif command == "rag_index_stop":
+                    stopped = await rag_index_repo.request_all_active_job_stops()
+                    details = json.dumps({"stop_requests": stopped}, default=str)
+                elif command == "rag_matching_pause":
+                    await rag_relationship_repo.set_matching_paused(True)
+                    details = json.dumps({"paused": True}, default=str)
+                elif command == "rag_matching_resume":
+                    await rag_relationship_repo.set_matching_paused(False)
+                    details = json.dumps({"paused": False}, default=str)
+                elif command == "rag_cleanup_stale_matches":
+                    result = (
+                        await rag_relationship_repo.cleanup_stale_matches_and_decisions()
+                    )
+                    details = json.dumps(result, default=str)
                 elif command == "create_scheduled_ticket":
                     # Parse JSON payload from task description
                     task_description = task.get("description") or ""
                     try:
-                        payload = json.loads(task_description) if task_description else {}
+                        payload = (
+                            json.loads(task_description) if task_description else {}
+                        )
                     except json.JSONDecodeError as exc:
                         status = "failed"
                         details = f"Invalid JSON payload: {str(exc)}"
@@ -823,8 +1005,10 @@ class SchedulerService:
                         )
                     else:
                         # Render template variables in the payload
-                        payload = await value_templates.render_value_async(payload, context=None)
-                        
+                        payload = await value_templates.render_value_async(
+                            payload, context=None
+                        )
+
                         # Extract ticket fields from payload
                         subject = payload.get("subject", "")
                         if not subject:
@@ -837,22 +1021,49 @@ class SchedulerService:
                                     subject=str(subject),
                                     description=payload.get("description"),
                                     company_id=int(company_id) if company_id else None,
-                                    requester_id=int(payload.get("requester_id")) if payload.get("requester_id") else None,
-                                    assigned_user_id=int(payload.get("assigned_user_id")) if payload.get("assigned_user_id") else None,
+                                    requester_id=(
+                                        int(payload.get("requester_id"))
+                                        if payload.get("requester_id")
+                                        else None
+                                    ),
+                                    assigned_user_id=(
+                                        int(payload.get("assigned_user_id"))
+                                        if payload.get("assigned_user_id")
+                                        else None
+                                    ),
                                     priority=str(payload.get("priority", "normal")),
-                                    status=str(payload.get("status")) if payload.get("status") else None,
-                                    category=str(payload.get("category")) if payload.get("category") else None,
-                                    module_slug=str(payload.get("module_slug")) if payload.get("module_slug") else None,
-                                    external_reference=str(payload.get("external_reference")) if payload.get("external_reference") else None,
+                                    status=(
+                                        str(payload.get("status"))
+                                        if payload.get("status")
+                                        else None
+                                    ),
+                                    category=(
+                                        str(payload.get("category"))
+                                        if payload.get("category")
+                                        else None
+                                    ),
+                                    module_slug=(
+                                        str(payload.get("module_slug"))
+                                        if payload.get("module_slug")
+                                        else None
+                                    ),
+                                    external_reference=(
+                                        str(payload.get("external_reference"))
+                                        if payload.get("external_reference")
+                                        else None
+                                    ),
                                     trigger_automations=False,  # Prevent automation loops
                                 )
                                 ticket_id = ticket.get("id") if ticket else None
                                 ticket_number = ticket.get("number") if ticket else None
-                                details = json.dumps({
-                                    "ticket_id": ticket_id,
-                                    "ticket_number": ticket_number,
-                                    "subject": subject,
-                                }, default=str)
+                                details = json.dumps(
+                                    {
+                                        "ticket_id": ticket_id,
+                                        "ticket_number": ticket_number,
+                                        "subject": subject,
+                                    },
+                                    default=str,
+                                )
                                 log_info(
                                     "Scheduled ticket created",
                                     task_id=task_id,
@@ -898,17 +1109,21 @@ class SchedulerService:
                         result = await m365_mail_service.sync_account(account_id)
                         details = json.dumps(result, default=str) if result else None
                 elif command == "send_price_change_notifications":
-                    result = await subscription_price_changes.send_price_change_notifications()
+                    result = (
+                        await subscription_price_changes.send_price_change_notifications()
+                    )
                     details = json.dumps(result, default=str)
                     log_info("Price change notifications sent", **result)
                 elif command == "apply_scheduled_price_changes":
-                    result = await subscription_price_changes.apply_scheduled_price_changes()
+                    result = (
+                        await subscription_price_changes.apply_scheduled_price_changes()
+                    )
                     details = json.dumps(result, default=str)
                     log_info("Scheduled price changes applied", **result)
                 elif command == "sync_recordings":
                     from app.services import call_recordings as call_recordings_service
                     from app.services import modules as modules_service
-                    
+
                     # Get recordings path from module settings
                     module = await modules_service.get_module(
                         "call-recordings", redact=False
@@ -933,14 +1148,18 @@ class SchedulerService:
                         log_info("Call recordings sync skipped", reason=details)
                 elif command == "queue_transcriptions":
                     from app.services import call_recordings as call_recordings_service
-                    
-                    result = await call_recordings_service.queue_pending_transcriptions()
+
+                    result = (
+                        await call_recordings_service.queue_pending_transcriptions()
+                    )
                     details = json.dumps(result, default=str)
                     log_info("Transcriptions queued", **result)
                 elif command == "process_transcription":
                     from app.services import call_recordings as call_recordings_service
 
-                    result = await call_recordings_service.process_queued_transcriptions()
+                    result = (
+                        await call_recordings_service.process_queued_transcriptions()
+                    )
                     details = json.dumps(result, default=str)
                     if result.get("status") == "error":
                         status = "failed"
@@ -960,31 +1179,37 @@ class SchedulerService:
                     # Notify about upcoming BCP training sessions
                     from app.repositories import bcp as bcp_repo
                     from app.repositories import notifications as notifications_repo
-                    
+
                     # Get training items in the next 7 days (configurable via task description)
                     task_description = task.get("description") or ""
                     try:
-                        config = json.loads(task_description) if task_description else {}
+                        config = (
+                            json.loads(task_description) if task_description else {}
+                        )
                         days_ahead = config.get("days_ahead", 7)
                     except json.JSONDecodeError:
                         days_ahead = 7
-                    
-                    upcoming = await bcp_repo.get_upcoming_training_items(days_ahead=days_ahead)
-                    
+
+                    upcoming = await bcp_repo.get_upcoming_training_items(
+                        days_ahead=days_ahead
+                    )
+
                     if upcoming:
                         for item in upcoming:
                             plan = item.get("plan", {})
                             plan_id = plan.get("id")
-                            
+
                             if plan_id:
                                 # Get distribution list for the plan
-                                distribution_list = await bcp_repo.list_distribution_list(plan_id)
-                                
+                                distribution_list = (
+                                    await bcp_repo.list_distribution_list(plan_id)
+                                )
+
                                 # Create notification for each distribution list member
                                 message = f"Upcoming BCP training scheduled for {item['training_date'].strftime('%Y-%m-%d %H:%M')}"
                                 if item.get("training_type"):
                                     message += f" - {item['training_type']}"
-                                
+
                                 # Create notification for all users (could be refined to specific users)
                                 await notifications_repo.create_notification(
                                     event_type="bcp_training_reminder",
@@ -994,49 +1219,62 @@ class SchedulerService:
                                         "plan_id": plan_id,
                                         "plan_title": plan.get("title"),
                                         "training_id": item["id"],
-                                        "training_date": item["training_date"].isoformat(),
+                                        "training_date": item[
+                                            "training_date"
+                                        ].isoformat(),
                                         "training_type": item.get("training_type"),
-                                    }
+                                    },
                                 )
-                        
+
                         details = json.dumps(
-                            {"upcoming_training_count": len(upcoming), "days_ahead": days_ahead},
-                            default=str
+                            {
+                                "upcoming_training_count": len(upcoming),
+                                "days_ahead": days_ahead,
+                            },
+                            default=str,
                         )
                         log_info("BCP training reminders sent", count=len(upcoming))
                     else:
                         status = "skipped"
                         details = f"No upcoming training in next {days_ahead} days"
-                        log_info("No upcoming BCP training to notify", days_ahead=days_ahead)
+                        log_info(
+                            "No upcoming BCP training to notify", days_ahead=days_ahead
+                        )
                 elif command == "bcp_notify_upcoming_review":
                     # Notify about upcoming BCP plan reviews
                     from app.repositories import bcp as bcp_repo
                     from app.repositories import notifications as notifications_repo
-                    
+
                     # Get review items in the next 7 days (configurable via task description)
                     task_description = task.get("description") or ""
                     try:
-                        config = json.loads(task_description) if task_description else {}
+                        config = (
+                            json.loads(task_description) if task_description else {}
+                        )
                         days_ahead = config.get("days_ahead", 7)
                     except json.JSONDecodeError:
                         days_ahead = 7
-                    
-                    upcoming = await bcp_repo.get_upcoming_review_items(days_ahead=days_ahead)
-                    
+
+                    upcoming = await bcp_repo.get_upcoming_review_items(
+                        days_ahead=days_ahead
+                    )
+
                     if upcoming:
                         for item in upcoming:
                             plan = item.get("plan", {})
                             plan_id = plan.get("id")
-                            
+
                             if plan_id:
                                 # Get distribution list for the plan
-                                distribution_list = await bcp_repo.list_distribution_list(plan_id)
-                                
+                                distribution_list = (
+                                    await bcp_repo.list_distribution_list(plan_id)
+                                )
+
                                 # Create notification
                                 message = f"Upcoming BCP plan review scheduled for {item['review_date'].strftime('%Y-%m-%d %H:%M')}"
                                 if item.get("reason"):
                                     message += f" - {item['reason']}"
-                                
+
                                 # Create notification for all users (could be refined to specific users)
                                 await notifications_repo.create_notification(
                                     event_type="bcp_review_reminder",
@@ -1048,22 +1286,31 @@ class SchedulerService:
                                         "review_id": item["id"],
                                         "review_date": item["review_date"].isoformat(),
                                         "reason": item.get("reason"),
-                                    }
+                                    },
                                 )
-                        
+
                         details = json.dumps(
-                            {"upcoming_review_count": len(upcoming), "days_ahead": days_ahead},
-                            default=str
+                            {
+                                "upcoming_review_count": len(upcoming),
+                                "days_ahead": days_ahead,
+                            },
+                            default=str,
                         )
                         log_info("BCP review reminders sent", count=len(upcoming))
                     else:
                         status = "skipped"
                         details = f"No upcoming reviews in next {days_ahead} days"
-                        log_info("No upcoming BCP reviews to notify", days_ahead=days_ahead)
+                        log_info(
+                            "No upcoming BCP reviews to notify", days_ahead=days_ahead
+                        )
                 else:
                     status = "skipped"
                     details = "No handler registered for command"
-                    log_info("Scheduled task has no handler", task_id=task_id, command=command)
+                    log_info(
+                        "Scheduled task has no handler",
+                        task_id=task_id,
+                        command=command,
+                    )
             except Exception as exc:  # pragma: no cover - defensive logging
                 status = "failed"
                 details = str(exc)
@@ -1105,7 +1352,9 @@ class SchedulerService:
             local_head = await self._get_git_ref("HEAD")
             remote_head = await self._get_remote_main_ref()
             if not local_head or not remote_head:
-                raise RuntimeError("Unable to determine local and remote Git refs for system update")
+                raise RuntimeError(
+                    "Unable to determine local and remote Git refs for system update"
+                )
 
             if local_head == remote_head:
                 message = "No GitHub update available; upgrade was not scheduled."
@@ -1118,12 +1367,16 @@ class SchedulerService:
                 )
                 return message
 
-            requested_mode = self._resolve_requested_upgrade_mode(force_restart=force_restart)
+            requested_mode = self._resolve_requested_upgrade_mode(
+                force_restart=force_restart
+            )
             changed_files: list[str] | None = None
             if not force_restart:
                 fetched_head = await self._fetch_remote_main_ref()
                 if fetched_head:
-                    changed_files = await self._list_changed_files(local_head, fetched_head)
+                    changed_files = await self._list_changed_files(
+                        local_head, fetched_head
+                    )
 
             # Try to apply the update via the in-process feature-pack
             # reload API when the incoming diff is limited to one or
@@ -1288,12 +1541,8 @@ class SchedulerService:
             local_head=local_head,
             remote_head=remote_head,
         )
-        summary = ", ".join(
-            f"{slug}@{incoming_versions[slug]}" for slug in reloaded
-        )
-        return (
-            f"Feature pack(s) reloaded without restart: {summary}."
-        )
+        summary = ", ".join(f"{slug}@{incoming_versions[slug]}" for slug in reloaded)
+        return f"Feature pack(s) reloaded without restart: {summary}."
 
     async def _consume_feature_pack_reload_flag(self) -> None:
         """Reload feature packs listed in ``_FEATURE_PACK_RELOAD_FLAG_PATH``.
@@ -1427,7 +1676,7 @@ class SchedulerService:
                 continue
             if not path.startswith(_FEATURE_PACKS_DIR_PREFIX):
                 return None
-            rest = path[len(_FEATURE_PACKS_DIR_PREFIX):]
+            rest = path[len(_FEATURE_PACKS_DIR_PREFIX) :]
             parts = rest.split("/", 1)
             if len(parts) < 2 or not parts[0]:
                 # File sits directly under ``app/features/`` (e.g. the
@@ -1555,7 +1804,9 @@ class SchedulerService:
         stdout, stderr = await process.communicate()
         if process.returncode != 0:
             stderr_preview = _truncate_output(stderr)
-            log_error("Failed to query GitHub for latest main ref", error=stderr_preview)
+            log_error(
+                "Failed to query GitHub for latest main ref", error=stderr_preview
+            )
             return None
         response = _truncate_output(stdout)
         if not response:

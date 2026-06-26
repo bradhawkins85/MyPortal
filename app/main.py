@@ -494,6 +494,11 @@ TASK_COMMAND_LABELS: dict[str, str] = {
     "process_transcription": "Process transcription",
     "sync_huntress": "Sync Huntress data",
     "update_tray_icon_installer": "Update Tray Icon Installer",
+    "rag_index_start": "RAG start indexing",
+    "rag_index_stop": "RAG stop indexing",
+    "rag_matching_pause": "RAG pause matching",
+    "rag_matching_resume": "RAG resume matching",
+    "rag_cleanup_stale_matches": "RAG cleanup stale matches",
 }
 
 app = FastAPI(

@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.schemas.agent import AgentQueryRequest, AgentQueryResponse
 from app.services import agent as agent_service
+from app.core.database import db
 from app.repositories import rag_index as rag_index_repo
+from app.repositories import rag_relationships as rag_relationship_repo
 
 router = APIRouter(prefix="/api/agent", tags=["Agent"])
+_RAG_INDEX_TASKS: dict[int, asyncio.Task[None]] = {}
 
 
 @router.post("/query", response_model=AgentQueryResponse)
@@ -144,24 +148,48 @@ async def _run_rag_index_job(
         await rag_index_repo.update_job(
             job_id, status="failed", message=str(exc), finished=True
         )
+    finally:
+        _RAG_INDEX_TASKS.pop(job_id, None)
 
 
 @router.post("/rag/index")
 async def trigger_rag_index(
     request: Request,
-    background_tasks: BackgroundTasks,
     current_user: dict = Depends(require_super_admin),
 ) -> dict:
-    job_id = await rag_index_repo.create_job(source_type="all")
+    async with db.acquire_lock("rag_index_start", timeout=1) as lock_acquired:
+        if not lock_acquired:
+            active = await rag_index_repo.get_active_job()
+            if active:
+                return {
+                    "job_id": int(active["id"]),
+                    "status": active["status"],
+                    "message": "An indexing job is already active.",
+                }
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Unable to acquire indexing lock",
+            )
+        active = await rag_index_repo.get_active_job()
+        if active:
+            return {
+                "job_id": int(active["id"]),
+                "status": active["status"],
+                "message": "An indexing job is already active.",
+            }
+        job_id = await rag_index_repo.create_job(source_type="all")
     active_company_id = getattr(request.state, "active_company_id", None)
     memberships = getattr(request.state, "available_companies", None)
-    background_tasks.add_task(
-        _run_rag_index_job,
-        job_id,
-        dict(current_user),
-        active_company_id=active_company_id,
-        memberships=[dict(item) for item in memberships or []],
+    task = asyncio.create_task(
+        _run_rag_index_job(
+            job_id,
+            dict(current_user),
+            active_company_id=active_company_id,
+            memberships=[dict(item) for item in memberships or []],
+        ),
+        name=f"rag-index-{job_id}",
     )
+    _RAG_INDEX_TASKS[job_id] = task
     return {"job_id": job_id, "status": "queued"}
 
 
@@ -191,4 +219,35 @@ async def stop_rag_index(
             "message": "Job is already finished.",
         }
     await rag_index_repo.request_job_stop(job_id)
+    task = _RAG_INDEX_TASKS.get(job_id)
+    if task and not task.done():
+        task.cancel()
+        await rag_index_repo.update_job(
+            job_id,
+            status="cancelled",
+            message="Indexing force-stopped by an administrator.",
+            finished=True,
+        )
+        return {"job_id": job_id, "status": "cancelled"}
     return {"job_id": job_id, "status": "cancelling"}
+
+
+@router.post("/rag/matching/pause")
+async def pause_rag_matching(current_user: dict = Depends(require_super_admin)) -> dict:
+    await rag_relationship_repo.set_matching_paused(True)
+    return {"paused": True}
+
+
+@router.post("/rag/matching/resume")
+async def resume_rag_matching(
+    current_user: dict = Depends(require_super_admin),
+) -> dict:
+    await rag_relationship_repo.set_matching_paused(False)
+    return {"paused": False}
+
+
+@router.delete("/rag/matching/stale")
+async def cleanup_stale_rag_matches(
+    current_user: dict = Depends(require_super_admin),
+) -> dict:
+    return await rag_relationship_repo.cleanup_stale_matches_and_decisions()
