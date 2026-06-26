@@ -6,7 +6,10 @@
     <h1>RAG Index</h1>
     <p class="page-description">Monitor retrieval-augmented generation coverage and refresh the searchable index.</p>
   </div>
-  <button type="button" class="button" data-rag-index-trigger>Trigger indexing</button>
+  <div class="button-row">
+    <button type="button" class="button button--ghost" data-rag-jobs-cleanup>Cleanup finished jobs</button>
+    <button type="button" class="button" data-rag-index-trigger>Trigger indexing</button>
+  </div>
 </section>
 
 <div class="card card--panel" data-rag-dashboard>
@@ -44,7 +47,7 @@
         <h3>Recent indexing jobs</h3>
         <div class="table-responsive">
           <table class="table">
-            <thead><tr><th>ID</th><th>Status</th><th>Message</th><th>Finished</th></tr></thead>
+            <thead><tr><th>ID</th><th>Status</th><th>Message</th><th>Finished</th><th>Actions</th></tr></thead>
             <tbody data-rag-jobs></tbody>
           </table>
         </div>
@@ -78,6 +81,7 @@
   const fmt = (value) => value === null || value === undefined || value === '' ? '—' : value;
   const number = (value) => Number(value || 0).toLocaleString();
   const date = (value) => value ? new Date(value).toLocaleString() : '—';
+  const canStop = (status) => ['queued', 'running', 'cancelling'].includes(String(status || '').toLowerCase());
   const esc = (value) => String(fmt(value)).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   function metric(label, value, hint, variant = 'neutral') {
     return `<article class="stat-strip__stat stat-strip__stat--${esc(variant)} rag-stat-strip__stat"><span class="stat-strip__stat-label">${esc(label)}</span><strong class="stat-strip__stat-value">${esc(value)}</strong><span class="rag-stat-strip__hint">${esc(hint)}</span></article>`;
@@ -110,7 +114,12 @@
     ].join('');
     sourcesBody.innerHTML = (data.sources || []).map((row) => `<tr><td>${esc(row.source_type)}</td><td>${number(row.count)}</td><td>${number(row.chunk_count)}</td><td>${number(row.token_count)}</td><td>${date(row.last_indexed_at)}</td></tr>`).join('') || emptyRow(5, 'No indexed sources yet.');
     docsBody.innerHTML = (data.recent_documents || []).map((row) => `<tr><td>${esc(row.title)}</td><td>${esc(row.source_type)}:${esc(row.source_id)}</td><td>${esc(row.company_id)}</td><td>${esc(row.embedding_model)}</td><td>${date(row.indexed_at)}</td></tr>`).join('') || emptyRow(5, 'No recent documents.');
-    jobsBody.innerHTML = (data.recent_jobs || []).map((row) => `<tr><td>#${esc(row.id)}</td><td><span class="badge">${esc(row.status)}</span></td><td>${esc(row.message)}</td><td>${date(row.finished_at || row.created_at)}</td></tr>`).join('') || emptyRow(4, 'No indexing jobs yet.');
+    jobsBody.innerHTML = (data.recent_jobs || []).map((row) => {
+      const action = canStop(row.status)
+        ? `<button type="button" class="button button--small button--danger" data-rag-job-stop="${esc(row.id)}">Stop</button>`
+        : '<span class="text-muted">—</span>';
+      return `<tr><td>#${esc(row.id)}</td><td><span class="badge">${esc(row.status)}</span></td><td>${esc(row.message)}</td><td>${date(row.finished_at || row.created_at)}</td><td>${action}</td></tr>`;
+    }).join('') || emptyRow(5, 'No indexing jobs yet.');
     status.textContent = `Last refreshed ${new Date().toLocaleTimeString()}`;
   }
   async function triggerIndex() {
@@ -121,8 +130,30 @@
     status.textContent = `Indexing job #${data.job_id} queued.`;
     setTimeout(loadHealth, 1500);
   }
+  async function stopJob(jobId) {
+    if (!confirm(`Stop RAG indexing job #${jobId}?`)) return;
+    status.textContent = `Requesting stop for indexing job #${jobId}…`;
+    const res = await fetch(`/api/agent/rag/index/${encodeURIComponent(jobId)}/stop`, {method: 'POST', headers: {'Accept': 'application/json', 'X-CSRF-Token': csrf}});
+    if (!res.ok) throw new Error('Unable to stop indexing job');
+    status.textContent = `Stop requested for indexing job #${jobId}.`;
+    await loadHealth();
+  }
+  async function cleanupJobs() {
+    if (!confirm('Remove completed, failed, and cancelled RAG indexing jobs from the job history?')) return;
+    status.textContent = 'Cleaning up finished indexing jobs…';
+    const res = await fetch('/api/agent/rag/index/jobs/finished', {method: 'DELETE', headers: {'Accept': 'application/json', 'X-CSRF-Token': csrf}});
+    if (!res.ok) throw new Error('Unable to cleanup indexing jobs');
+    const data = await res.json();
+    status.textContent = `Cleaned up ${number(data.deleted)} finished indexing job(s).`;
+    await loadHealth();
+  }
   root.querySelector('[data-rag-refresh]')?.addEventListener('click', () => loadHealth().catch(err => status.textContent = err.message));
+  root.addEventListener('click', (event) => {
+    const stopButton = event.target.closest('[data-rag-job-stop]');
+    if (stopButton) stopJob(stopButton.getAttribute('data-rag-job-stop')).catch(err => status.textContent = err.message);
+  });
   document.querySelector('[data-rag-index-trigger]')?.addEventListener('click', () => triggerIndex().catch(err => status.textContent = err.message));
+  document.querySelector('[data-rag-jobs-cleanup]')?.addEventListener('click', () => cleanupJobs().catch(err => status.textContent = err.message));
   loadHealth().catch(err => status.textContent = err.message);
 })();
 </script>

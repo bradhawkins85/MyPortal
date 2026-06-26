@@ -226,6 +226,16 @@ async def update_job(
     )
 
 
+async def cleanup_finished_jobs() -> int:
+    return await db.execute_rowcount(
+        """
+        DELETE FROM rag_index_jobs
+        WHERE status IN ('completed', 'failed', 'cancelled')
+        """,
+        (),
+    )
+
+
 async def get_job(job_id: int) -> dict[str, Any] | None:
     return await db.fetch_one("SELECT * FROM rag_index_jobs WHERE id = ?", (job_id,))
 
