@@ -266,7 +266,7 @@ async def metrics() -> dict[str, Any]:
 
 async def matching_paused() -> bool:
     row = await db.fetch_one(
-        "SELECT value FROM rag_matching_state WHERE key = 'paused'",
+        "SELECT value FROM rag_matching_state WHERE `key` = 'paused'",
         (),
     )
     return str((row or {}).get("value") or "0").lower() in {"1", "true", "yes"}
@@ -277,9 +277,9 @@ async def set_matching_paused(paused: bool) -> None:
     if db.is_sqlite():
         await db.execute(
             """
-            INSERT INTO rag_matching_state (key, value, updated_at)
+            INSERT INTO rag_matching_state (`key`, value, updated_at)
             VALUES ('paused', ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+            ON CONFLICT(`key`) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
             """,
             (value,),
         )

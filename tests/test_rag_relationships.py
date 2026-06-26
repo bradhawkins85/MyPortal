@@ -1,3 +1,6 @@
+import pytest
+
+from app.repositories import rag_relationships as rag_relationships_repo
 from app.services.rag_relationships import (
     _relationship_response_payload,
     parse_relationship_response,
@@ -122,3 +125,40 @@ def test_relationship_queue_priority_prefers_ticket_pairs():
     assert _relationship_queue_priority(ticket, article) > _relationship_queue_priority(
         asset, article
     )
+
+
+@pytest.mark.anyio
+async def test_matching_paused_quotes_reserved_key_column(monkeypatch):
+    executed: list[tuple[str, tuple]] = []
+
+    async def fake_fetch_one(query, params=()):
+        executed.append((query, params))
+        return {"value": "1"}
+
+    monkeypatch.setattr(rag_relationships_repo.db, "fetch_one", fake_fetch_one)
+
+    assert await rag_relationships_repo.matching_paused() is True
+    query, params = executed[0]
+    assert "WHERE `key` = 'paused'" in query
+    assert "WHERE key = 'paused'" not in query
+    assert params == ()
+
+
+@pytest.mark.anyio
+async def test_set_matching_paused_quotes_reserved_key_column_for_sqlite(monkeypatch):
+    executed: list[tuple[str, tuple]] = []
+
+    def fake_is_sqlite():
+        return True
+
+    async def fake_execute(query, params=()):
+        executed.append((query, params))
+
+    monkeypatch.setattr(rag_relationships_repo.db, "is_sqlite", fake_is_sqlite)
+    monkeypatch.setattr(rag_relationships_repo.db, "execute", fake_execute)
+
+    await rag_relationships_repo.set_matching_paused(True)
+    query, params = executed[0]
+    assert "INSERT INTO rag_matching_state (`key`, value, updated_at)" in query
+    assert "ON CONFLICT(`key`)" in query
+    assert params == ("1",)
