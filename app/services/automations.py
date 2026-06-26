@@ -103,6 +103,74 @@ def _claim_reply_event_execution(
     return True
 
 
+
+def _context_ticket_identity(context: Mapping[str, Any] | None, result: Any = None) -> tuple[int | None, str | None]:
+    ticket_id: int | None = None
+    ticket_number: str | None = None
+    if isinstance(result, Mapping):
+        raw_ticket_id = result.get("ticket_id")
+        if raw_ticket_id is not None:
+            try:
+                ticket_id = int(raw_ticket_id)
+            except (TypeError, ValueError):
+                ticket_id = None
+        raw_number = result.get("ticket_number") or result.get("number")
+        if raw_number is not None:
+            ticket_number = str(raw_number)
+    if isinstance(context, Mapping):
+        ticket = context.get("ticket")
+        if isinstance(ticket, Mapping):
+            if ticket_id is None and ticket.get("id") is not None:
+                try:
+                    ticket_id = int(ticket.get("id"))
+                except (TypeError, ValueError):
+                    ticket_id = None
+            if ticket_number is None:
+                raw_number = ticket.get("ticket_number") or ticket.get("number")
+                if raw_number is not None:
+                    ticket_number = str(raw_number)
+    return ticket_id, ticket_number
+
+
+def _previous_values_from_result(result: Any) -> Any:
+    if not isinstance(result, Mapping):
+        return None
+    previous = result.get("previous_values")
+    if previous is not None:
+        return previous
+    nested = result.get("result")
+    if isinstance(nested, Mapping):
+        return nested.get("previous_values")
+    return None
+
+
+async def _record_action_history(
+    automation: Mapping[str, Any],
+    *,
+    action_name: str,
+    action_module: str | None,
+    status: str,
+    result: Any,
+    error_message: str | None,
+    context: Mapping[str, Any] | None,
+) -> None:
+    automation_id = int(automation.get("id"))
+    ticket_id, ticket_number = _context_ticket_identity(context, result)
+    try:
+        await automation_repo.record_history(
+            automation_id=automation_id,
+            action_name=action_name,
+            action_module=action_module,
+            ticket_id=ticket_id,
+            ticket_number=ticket_number,
+            status=status,
+            previous_values=_previous_values_from_result(result),
+            result_payload=result,
+            error_message=error_message,
+        )
+    except Exception as exc:  # pragma: no cover - history must not break automations
+        logger.warning("Failed to record automation history", automation_id=automation_id, error=str(exc))
+
 def _normalise_actions(actions: Any) -> list[dict[str, Any]]:
     normalised: list[dict[str, Any]] = []
     if not isinstance(actions, list):
@@ -557,7 +625,17 @@ async def _invoke_automation_actions_for_context(
                 exc_message = str(exc)
                 if not first_error:
                     first_error = exc_message
-                results.append({"module": module_slug, "status": "failed", "error": exc_message})
+                failure_entry = {"module": module_slug, "status": "failed", "error": exc_message}
+                results.append(failure_entry)
+                await _record_action_history(
+                    automation,
+                    action_name=action.get("note") or module_slug,
+                    action_module=module_slug,
+                    status="failed",
+                    result=failure_entry,
+                    error_message=exc_message,
+                    context=context,
+                )
                 continue
 
             action_status_raw = action_result.get("status") if isinstance(action_result, Mapping) else None
@@ -578,6 +656,16 @@ async def _invoke_automation_actions_for_context(
             if action_reason:
                 result_entry["reason"] = action_reason
             results.append(result_entry)
+            history_status = "failed" if action_status in {"failed", "error"} or (action_status == "unknown" and action_error) else "succeeded"
+            await _record_action_history(
+                automation,
+                action_name=action.get("note") or module_slug,
+                action_module=module_slug,
+                status=history_status,
+                result=result_entry,
+                error_message=str(action_error) if action_error else None,
+                context=context,
+            )
             if action_status in {"failed", "error"} or (action_status == "unknown" and action_error):
                 if not first_error:
                     first_error = str(action_error or "Module action failed")
@@ -591,11 +679,33 @@ async def _invoke_automation_actions_for_context(
         if context:
             module_payload.setdefault("context", context)
         result = await modules_service.trigger_module(str(module_slug), module_payload, background=False)
+        history_error = None
+        history_status = "succeeded"
         if isinstance(result, Mapping):
             result_status = str(result.get("status") or result.get("event_status") or "").strip().lower()
             result_error = result.get("error") or result.get("last_error") or None
             if result_status in {"failed", "error"} or result_error:
-                return result, str(result_error or "Module action failed")
+                history_status = "failed"
+                history_error = str(result_error or "Module action failed")
+                await _record_action_history(
+                    automation,
+                    action_name=str(module_slug),
+                    action_module=str(module_slug),
+                    status=history_status,
+                    result=result,
+                    error_message=history_error,
+                    context=context,
+                )
+                return result, history_error
+        await _record_action_history(
+            automation,
+            action_name=str(module_slug),
+            action_module=str(module_slug),
+            status=history_status,
+            result=result,
+            error_message=history_error,
+            context=context,
+        )
         return result, None
     return {"status": "skipped", "reason": "No action module configured"}, None
 
@@ -801,8 +911,16 @@ async def _execute_automation(
                         status = "failed"
                         if not error_message:
                             error_message = exc_message
-                        results.append(
-                            {"module": module_slug, "status": "failed", "error": exc_message}
+                        failure_entry = {"module": module_slug, "status": "failed", "error": exc_message}
+                        results.append(failure_entry)
+                        await _record_action_history(
+                            automation,
+                            action_name=action.get("note") or module_slug,
+                            action_module=module_slug,
+                            status="failed",
+                            result=failure_entry,
+                            error_message=exc_message,
+                            context=context,
                         )
                         logger.error(
                             "Automation action failed",
@@ -837,6 +955,16 @@ async def _execute_automation(
                     if action_reason:
                         result_entry["reason"] = action_reason
                     results.append(result_entry)
+                    history_status = "failed" if action_status in {"failed", "error"} or (action_status == "unknown" and action_error) else "succeeded"
+                    await _record_action_history(
+                        automation,
+                        action_name=action.get("note") or module_slug,
+                        action_module=module_slug,
+                        status=history_status,
+                        result=result_entry,
+                        error_message=str(action_error) if action_error else None,
+                        context=context,
+                    )
 
                     if action_status in {"failed", "error"} or (
                         action_status == "unknown" and action_error
@@ -857,6 +985,24 @@ async def _execute_automation(
                         module_payload.setdefault("context", context)
                     result_payload = await modules_service.trigger_module(
                         str(module_slug), module_payload, background=False
+                    )
+                    action_status = "succeeded"
+                    action_error = None
+                    if isinstance(result_payload, Mapping):
+                        raw_status = str(result_payload.get("status") or result_payload.get("event_status") or "").strip().lower()
+                        action_error = result_payload.get("error") or result_payload.get("last_error") or None
+                        if raw_status in {"failed", "error"} or action_error:
+                            action_status = "failed"
+                            status = "failed"
+                            error_message = str(action_error or "Module action failed")
+                    await _record_action_history(
+                        automation,
+                        action_name=str(module_slug),
+                        action_module=str(module_slug),
+                        status=action_status,
+                        result=result_payload,
+                        error_message=str(action_error) if action_error else None,
+                        context=context,
                     )
                 else:
                     result_payload = {"status": "skipped", "reason": "No action module configured"}

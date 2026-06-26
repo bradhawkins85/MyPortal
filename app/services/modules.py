@@ -3428,6 +3428,12 @@ async def _invoke_create_ticket(
     if external_reference is not None:
         external_reference = str(external_reference).strip() or None
     
+    try:
+        existing = await tickets_repo.get_ticket(ticket_id_int)
+    except RuntimeError:
+        existing = None
+    previous_description = existing.get("description") if existing else None
+
     # Create webhook event for tracking
     event = await webhook_monitor.create_manual_event(
         name="module.create-ticket.create",
@@ -4736,9 +4742,11 @@ async def _invoke_update_ticket(
             extra={"ticket_id": ticket_id_int},
         )
     
+    previous_values = {field: existing.get(field) for field in update_fields.keys()}
     response_body = json.dumps({
         "ticket_id": ticket_id_int,
         "updated_fields": list(update_fields.keys()),
+        "previous_values": previous_values,
     })
     updated_event = await _record_success(
         event_id,
@@ -4751,6 +4759,7 @@ async def _invoke_update_ticket(
         extra={
             "ticket_id": ticket_id_int,
             "updated_fields": list(update_fields.keys()),
+            "previous_values": previous_values,
         },
     )
 
@@ -4793,6 +4802,13 @@ async def _invoke_update_ticket_description(
     description = payload.get("description")
     if description is not None:
         description = str(description)
+
+    from app.repositories import tickets as tickets_repo
+    try:
+        existing = await tickets_repo.get_ticket(ticket_id_int)
+    except RuntimeError:
+        existing = None
+    previous_description = existing.get("description") if existing else None
     
     # Create webhook event for tracking
     event = await webhook_monitor.create_manual_event(
@@ -4842,7 +4858,12 @@ async def _invoke_update_ticket_description(
     )
     return _build_event_result(
         updated_event,
-        extra={"ticket_id": ticket_id_int, "description_updated": True},
+        extra={
+            "ticket_id": ticket_id_int,
+            "description_updated": True,
+            "previous_values": {"description": previous_description},
+            "updated_fields": ["description"],
+        },
     )
 
 

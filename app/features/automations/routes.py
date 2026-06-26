@@ -58,6 +58,11 @@ router.add_api_route(
     response_class=HTMLResponse,
 )
 router.add_api_route(
+    "/admin/automations/{automation_id}/history",
+    handlers.admin_automation_history,
+    methods=["GET"],
+)
+router.add_api_route(
     "/admin/automations/{automation_id}/execute",
     handlers.admin_execute_automation,
     methods=["POST"],

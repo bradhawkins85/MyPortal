@@ -10,6 +10,7 @@ from app.core.database import db
 
 AutomationRecord = dict[str, Any]
 AutomationRunRecord = dict[str, Any]
+AutomationHistoryRecord = dict[str, Any]
 
 
 async def _ensure_connection() -> None:
@@ -77,6 +78,17 @@ def _normalise_automation(row: dict[str, Any]) -> AutomationRecord:
             record[key] = bool(record[key])
     record["trigger_filters"] = _deserialise(record.get("trigger_filters"))
     record["action_payload"] = _deserialise(record.get("action_payload"))
+    return record
+
+
+def _normalise_history(row: dict[str, Any]) -> AutomationHistoryRecord:
+    record = dict(row)
+    for key in ("id", "automation_id", "automation_run_id", "ticket_id"):
+        if key in record and record[key] is not None:
+            record[key] = int(record[key])
+    record["occurred_at"] = _make_aware(record.get("occurred_at"))
+    record["previous_values"] = _deserialise(record.get("previous_values"))
+    record["result_payload"] = _deserialise(record.get("result_payload"))
     return record
 
 
@@ -372,3 +384,67 @@ async def list_event_automations(
         params.append(limit)
     rows = await db.fetch_all(query, tuple(params))
     return [_normalise_automation(row) for row in rows]
+
+
+async def record_history(
+    *,
+    automation_id: int,
+    automation_run_id: int | None = None,
+    occurred_at: datetime | None = None,
+    action_name: str,
+    action_module: str | None,
+    ticket_id: int | None,
+    ticket_number: str | None,
+    status: str,
+    previous_values: Any = None,
+    result_payload: Any = None,
+    error_message: str | None = None,
+) -> AutomationHistoryRecord:
+    await _ensure_connection()
+    history_id = await db.execute_returning_lastrowid(
+        """
+        INSERT INTO automation_history (
+            automation_id, automation_run_id, occurred_at, action_name, action_module,
+            ticket_id, ticket_number, status, previous_values, result_payload, error_message
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            automation_id,
+            automation_run_id,
+            _prepare_for_storage(occurred_at or datetime.now(timezone.utc)),
+            action_name,
+            action_module,
+            ticket_id,
+            ticket_number,
+            status,
+            _serialise(previous_values),
+            _serialise(result_payload),
+            error_message,
+        ),
+    )
+    row = await db.fetch_one("SELECT * FROM automation_history WHERE id = %s", (history_id,))
+    if not row:
+        row = {
+            "id": history_id, "automation_id": automation_id, "automation_run_id": automation_run_id,
+            "occurred_at": occurred_at or datetime.now(timezone.utc), "action_name": action_name,
+            "action_module": action_module, "ticket_id": ticket_id, "ticket_number": ticket_number,
+            "status": status, "previous_values": previous_values, "result_payload": result_payload,
+            "error_message": error_message,
+        }
+    return _normalise_history(row)
+
+
+async def list_history(automation_id: int, *, limit: int = 200) -> list[AutomationHistoryRecord]:
+    await _ensure_connection()
+    rows = await db.fetch_all(
+        """
+        SELECT *
+        FROM automation_history
+        WHERE automation_id = %s
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT %s
+        """,
+        (automation_id, limit),
+    )
+    return [_normalise_history(row) for row in rows]
