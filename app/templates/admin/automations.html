@@ -118,6 +118,9 @@
                           <li class="header-title-menu__item" role="none">
                             <a class="header-title-menu__link" role="menuitem" href="/admin/automations/{{ automation.id }}/edit">Edit</a>
                           </li>
+                          <li class="header-title-menu__item" role="none">
+                            <button type="button" class="header-title-menu__link" role="menuitem" data-automation-history-open data-automation-id="{{ automation.id }}" data-automation-name="{{ automation.name }}">History</button>
+                          </li>
                           {% if automation.kind == 'scheduled' %}
                           <li class="header-title-menu__item" role="none">
                             <a class="header-title-menu__link" role="menuitem" href="/admin/automations/{{ automation.id }}/preview">Preview tickets</a>
@@ -157,6 +160,44 @@
         </div>
       </div>
     </section>
+  </div>
+{% endblock %}
+
+
+{% block modals %}
+  {{ super() }}
+  <div class="modal" id="automation-history-modal" role="dialog" aria-modal="true" aria-labelledby="automation-history-title" hidden>
+    <div class="modal__backdrop" data-automation-history-close></div>
+    <div class="modal__panel modal__panel--wide">
+      <header class="modal__header">
+        <h2 class="modal__title" id="automation-history-title">Automation history</h2>
+        <button type="button" class="modal__close" data-automation-history-close aria-label="Close">×</button>
+      </header>
+      <div class="modal__body">
+        <div class="management__toolbar">
+          <div class="management__toolbar-search">
+            <input type="search" class="form-input" placeholder="Filter history" aria-label="Filter automation history" data-table-filter="automation-history-table" />
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table class="table" id="automation-history-table" data-table data-table-id="automation-history">
+            <thead>
+              <tr>
+                <th scope="col" data-sort="string" data-column-key="occurred_at">When</th>
+                <th scope="col" data-sort="string" data-column-key="ticket">Ticket</th>
+                <th scope="col" data-sort="string" data-column-key="action">Action</th>
+                <th scope="col" data-sort="string" data-column-key="status">Status</th>
+                <th scope="col" data-sort="string" data-column-key="previous">Previous values</th>
+                <th scope="col" data-sort="string" data-column-key="details">Details</th>
+              </tr>
+            </thead>
+            <tbody data-automation-history-rows>
+              <tr><td colspan="6" class="table__empty">Choose History from an automation action menu.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </div>
 {% endblock %}
 

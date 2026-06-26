@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 from starlette.datastructures import FormData
 
 from app.security.flash import flash_redirect
@@ -643,3 +644,29 @@ async def admin_delete_automation(automation_id: int, request: Request):
 
     message = f"Automation {automation_id} deleted."
     return flash_redirect("/admin/automations", message, "success")
+
+
+async def admin_automation_history(automation_id: int, request: Request, limit: int = Query(default=200, ge=1, le=1000)):
+    from app.repositories import automations as automation_repo
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return JSONResponse({"detail": "Authentication required"}, status_code=status.HTTP_401_UNAUTHORIZED)
+    automation = await automation_repo.get_automation(automation_id)
+    if not automation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
+    rows = await automation_repo.list_history(automation_id, limit=limit)
+
+    def encode(value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.astimezone(timezone.utc).isoformat()
+        if isinstance(value, Mapping):
+            return {str(k): encode(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [encode(item) for item in value]
+        return value
+
+    return JSONResponse({
+        "automation": {"id": automation_id, "name": automation.get("name")},
+        "history": [encode(row) for row in rows],
+    })

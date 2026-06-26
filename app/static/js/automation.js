@@ -2590,3 +2590,87 @@
     initialiseAutomationUI();
   }
 })();
+
+(function () {
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function formatDate(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return escapeHtml(value);
+    return date.toLocaleString();
+  }
+
+  function formatJson(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    try {
+      return escapeHtml(JSON.stringify(value));
+    } catch (error) {
+      return escapeHtml(value);
+    }
+  }
+
+  function renderRows(tbody, rows) {
+    if (!tbody) return;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="table__empty">No history recorded for this automation yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map((item) => {
+      const ticket = item.ticket_number || item.ticket_id || '—';
+      const action = item.action_name || item.action_module || '—';
+      const details = item.error_message || item.result_payload || null;
+      return `
+        <tr>
+          <td data-label="When" data-column-key="occurred_at">${formatDate(item.occurred_at)}</td>
+          <td data-label="Ticket" data-column-key="ticket">${escapeHtml(ticket)}</td>
+          <td data-label="Action" data-column-key="action">${escapeHtml(action)}</td>
+          <td data-label="Status" data-column-key="status">${escapeHtml(item.status || 'unknown')}</td>
+          <td data-label="Previous values" data-column-key="previous"><code>${formatJson(item.previous_values)}</code></td>
+          <td data-label="Details" data-column-key="details"><code>${formatJson(details)}</code></td>
+        </tr>`;
+    }).join('');
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    const modal = document.getElementById('automation-history-modal');
+    const title = document.getElementById('automation-history-title');
+    const tbody = document.querySelector('[data-automation-history-rows]');
+    if (!modal || !tbody) return;
+
+    function openModal() { modal.hidden = false; }
+    function closeModal() { modal.hidden = true; }
+
+    document.querySelectorAll('[data-automation-history-close]').forEach((button) => {
+      button.addEventListener('click', closeModal);
+    });
+
+    document.querySelectorAll('[data-automation-history-open]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const automationId = button.getAttribute('data-automation-id');
+        const automationName = button.getAttribute('data-automation-name') || `#${automationId}`;
+        title.textContent = `Automation history: ${automationName}`;
+        tbody.innerHTML = '<tr><td colspan="6" class="table__empty">Loading history…</td></tr>';
+        openModal();
+        try {
+          const response = await fetch(`/admin/automations/${encodeURIComponent(automationId)}/history`, {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+          });
+          if (!response.ok) throw new Error(`Request failed with ${response.status}`);
+          const payload = await response.json();
+          renderRows(tbody, payload.history || []);
+        } catch (error) {
+          tbody.innerHTML = `<tr><td colspan="6" class="table__empty">Unable to load history: ${escapeHtml(error.message)}</td></tr>`;
+        }
+      });
+    });
+  });
+}());
