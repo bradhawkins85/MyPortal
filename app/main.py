@@ -5693,6 +5693,11 @@ async def admin_scheduled_tasks(
         {"value": "queue_transcriptions", "label": "Queue transcriptions"},
         {"value": "process_transcription", "label": "Process transcription"},
         {"value": "update_tray_icon_installer", "label": "Update Tray Icon Installer"},
+        {"value": "rag_index_start", "label": "RAG start indexing"},
+        {"value": "rag_index_stop", "label": "RAG stop indexing"},
+        {"value": "rag_matching_pause", "label": "RAG pause matching"},
+        {"value": "rag_matching_resume", "label": "RAG resume matching"},
+        {"value": "rag_cleanup_stale_matches", "label": "RAG cleanup stale matches"},
     ]
     command_options = [o for o in command_options if o["value"] not in disabled_commands_global]
     existing_commands = {task.get("command") for task in tasks if task.get("command")}
