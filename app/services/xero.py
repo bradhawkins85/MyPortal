@@ -35,6 +35,7 @@ QuoteItemsFetcher = Callable[[str, int], Awaitable[Sequence[Mapping[str, Any]] |
 XERO_ITEM_NAME_MAX_LENGTH = 50
 _XERO_ERROR_DETAIL_MAX_LENGTH = 500
 _XERO_INVOICE_NUMBER_SUFFIX_RE = re.compile(r"^(.*)(\d+)$")
+_LABOUR_SUFFIX_SEPARATOR_RE = re.compile(r"\s+·")
 
 
 class _TemplateValues(dict[str, Any]):
@@ -229,6 +230,8 @@ def _format_line_description(
     )
     try:
         description = safe_template.format_map(values).strip()
+        if labour_name:
+            description = _LABOUR_SUFFIX_SEPARATOR_RE.sub(" ·", description)
     except Exception:  # pragma: no cover - defensive guardrail
         description = ""
     if not description:
