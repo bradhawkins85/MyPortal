@@ -65,6 +65,7 @@ async def list_field_definitions(
             COALESCE(ovr.condition_value, base.condition_value) AS condition_value,
             COALESCE(ovr.visible_to_job_titles, base.visible_to_job_titles) AS visible_to_job_titles,
             COALESCE(ovr.visible_to_requester_emails, base.visible_to_requester_emails) AS visible_to_requester_emails,
+            COALESCE(ovr.m365_upn, base.m365_upn) AS m365_upn,
             COALESCE(ovr.company_id, base.company_id) AS company_id
         FROM staff_custom_field_definitions AS base
         LEFT JOIN staff_custom_field_definitions AS ovr
@@ -99,7 +100,7 @@ async def list_field_definitions(
     id_csv = _int_csv(ids)
     option_rows = await db.fetch_all(
         """
-        SELECT field_definition_id, option_value, option_label, sort_order
+        SELECT field_definition_id, option_value, option_label, m365_upn, sort_order
         FROM staff_custom_field_options
         WHERE FIND_IN_SET(field_definition_id, %s) > 0
         ORDER BY field_definition_id, sort_order, id
@@ -115,6 +116,7 @@ async def list_field_definitions(
                 "label": str(
                     row.get("option_label") or row.get("option_value") or ""
                 ).strip(),
+                "m365_upn": str(row.get("m365_upn") or "").strip(),
             }
         )
 
@@ -142,6 +144,7 @@ async def list_company_owned_definitions(company_id: int) -> list[dict[str, Any]
             condition_value,
             visible_to_job_titles,
             visible_to_requester_emails,
+            m365_upn,
             created_at,
             updated_at
         FROM staff_custom_field_definitions
@@ -161,7 +164,7 @@ async def list_company_owned_definitions(company_id: int) -> list[dict[str, Any]
     id_csv = _int_csv(ids)
     option_rows = await db.fetch_all(
         """
-        SELECT field_definition_id, option_value, option_label, sort_order
+        SELECT field_definition_id, option_value, option_label, m365_upn, sort_order
         FROM staff_custom_field_options
         WHERE FIND_IN_SET(field_definition_id, %s) > 0
         ORDER BY field_definition_id, sort_order, id
@@ -177,6 +180,7 @@ async def list_company_owned_definitions(company_id: int) -> list[dict[str, Any]
                 "label": str(
                     row.get("option_label") or row.get("option_value") or ""
                 ).strip(),
+                "m365_upn": str(row.get("m365_upn") or "").strip(),
             }
         )
     for definition in definitions:
@@ -198,6 +202,7 @@ async def create_company_definition(
     condition_value: str | None = None,
     visible_to_job_titles: str | None = None,
     visible_to_requester_emails: str | None = None,
+    m365_upn: str | None = None,
     options: list[dict[str, str]] | None = None,
 ) -> int:
     definition_id = await db.execute_returning_lastrowid(
@@ -216,8 +221,9 @@ async def create_company_definition(
             condition_operator,
             condition_value,
             visible_to_job_titles,
-            visible_to_requester_emails
-        ) VALUES (%s, NULL, %s, %s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s)
+            visible_to_requester_emails,
+            m365_upn
+        ) VALUES (%s, NULL, %s, %s, %s, %s, %s, %s, 1, %s, %s, %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -232,6 +238,7 @@ async def create_company_definition(
             condition_value or None,
             visible_to_job_titles or None,
             visible_to_requester_emails or None,
+            m365_upn or None,
         ),
     )
     if not definition_id:
@@ -255,6 +262,7 @@ async def update_company_definition(
     condition_value: str | None,
     visible_to_job_titles: str | None,
     visible_to_requester_emails: str | None,
+    m365_upn: str | None,
     options: list[dict[str, str]] | None = None,
 ) -> None:
     await db.execute(
@@ -270,7 +278,8 @@ async def update_company_definition(
             condition_operator = %s,
             condition_value = %s,
             visible_to_job_titles = %s,
-            visible_to_requester_emails = %s
+            visible_to_requester_emails = %s,
+            m365_upn = %s
         WHERE id = %s AND company_id = %s
         """,
         (
@@ -285,6 +294,7 @@ async def update_company_definition(
             condition_value or None,
             visible_to_job_titles or None,
             visible_to_requester_emails or None,
+            m365_upn or None,
             definition_id,
             company_id,
         ),
@@ -314,10 +324,16 @@ async def replace_field_options(
         await db.execute(
             """
             INSERT INTO staff_custom_field_options (
-                field_definition_id, option_value, option_label, sort_order
-            ) VALUES (%s, %s, %s, %s)
+                field_definition_id, option_value, option_label, m365_upn, sort_order
+            ) VALUES (%s, %s, %s, %s, %s)
             """,
-            (definition_id, value, label, idx),
+            (
+                definition_id,
+                value,
+                label,
+                str(option.get("m365_upn") or "").strip() or None,
+                idx,
+            ),
         )
 
 
