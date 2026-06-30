@@ -14,13 +14,14 @@ from app.schemas.scheduler import (
     RunTaskResponse,
     ScheduledTaskCreate,
     ScheduledTaskResponse,
+    ScheduledTaskPreviewResponse,
     ScheduledTaskRunResponse,
     ScheduledTaskUpdate,
     WebhookEventAttemptResponse,
     WebhookEventResponse,
     WebhookEventsBulkDeleteResponse,
 )
-from app.services import webhook_monitor
+from app.services import scheduled_task_preview, webhook_monitor
 from app.services.scheduler import scheduler_service
 
 router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
@@ -135,6 +136,21 @@ async def activate_task(
     updated = await scheduled_tasks_repo.set_task_active(task_id, payload.active)
     await scheduler_service.refresh()
     return ScheduledTaskResponse.model_validate(updated)
+
+
+@router.get("/tasks/{task_id}/preview", response_model=ScheduledTaskPreviewResponse)
+async def preview_task(
+    task_id: int,
+    response: Response,
+    _: None = Depends(require_database),
+    __: dict[str, Any] = Depends(require_super_admin),
+) -> ScheduledTaskPreviewResponse:
+    existing = await scheduled_tasks_repo.get_task(task_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    response.headers["Cache-Control"] = "no-store"
+    preview = await scheduled_task_preview.preview_task(existing)
+    return ScheduledTaskPreviewResponse.model_validate(preview)
 
 
 @router.post("/tasks/{task_id}/run", response_model=RunTaskResponse, status_code=status.HTTP_202_ACCEPTED)

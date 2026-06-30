@@ -253,6 +253,11 @@
                         <li class="header-title-menu__item" role="none">
                           <button type="button" class="header-title-menu__link" role="menuitem" data-task-edit>Edit</button>
                         </li>
+                        {% if task.command in ["sync_to_xero", "sync_to_xero_auto_send", "generate_invoice", "send_price_change_notifications"] %}
+                        <li class="header-title-menu__item" role="none">
+                          <button type="button" class="header-title-menu__link" role="menuitem" data-task-preview>Preview</button>
+                        </li>
+                        {% endif %}
                         <li class="header-title-menu__item" role="none">
                           <button type="button" class="header-title-menu__link" role="menuitem" data-task-run>Run now</button>
                         </li>
@@ -416,6 +421,36 @@
           <tbody id="task-logs-body">
             <tr>
               <td colspan="5" class="table__empty" id="task-logs-empty">Select a task to view its recent runs.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="task-preview-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close task preview</span>
+    </button>
+    <h2 class="modal__title" id="task-preview-title">Scheduled task preview</h2>
+    <div class="modal__body">
+      <p id="task-preview-summary" class="modal__subtitle text-muted">Select a task to preview what it will do.</p>
+      <div id="task-preview-totals" class="detail-grid" hidden></div>
+      <div class="table-wrapper">
+        <table class="table" id="task-preview-table" data-table data-table-id="task-preview">
+          <thead>
+            <tr>
+              <th scope="col" data-sort="string">Type</th>
+              <th scope="col" data-sort="string">Item</th>
+              <th scope="col" data-sort="string">Action</th>
+              <th scope="col" data-sort="string">Details</th>
+            </tr>
+          </thead>
+          <tbody id="task-preview-body">
+            <tr>
+              <td colspan="4" class="table__empty">No preview loaded.</td>
             </tr>
           </tbody>
         </table>
