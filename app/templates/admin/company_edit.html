@@ -532,7 +532,13 @@
             </div>
             <div class="form-field admin-grid__full">
               <label class="form-label" for="new-custom-options">Options (select / multiselect only)</label>
-              <input class="form-input" id="new-custom-options" name="options" placeholder="small:Small, medium:Medium" />
+              <input class="form-input" id="new-custom-options" name="options" placeholder="small:Small|mailbox@example.com, medium:Medium|other@example.com" />
+              <p class="form-help">For M365 multi-select sync, append <code>|UPN</code> to each option.</p>
+            </div>
+            <div class="form-field admin-grid__full">
+              <label class="form-label" for="new-custom-m365-upn">M365 mailbox/group UPN (checkbox / select only)</label>
+              <input class="form-input" id="new-custom-m365-upn" name="m365_upn" placeholder="mailbox@example.com" />
+              <p class="form-help">When set, M365 mailbox sync updates this field from the staff member's mailbox memberships without creating tickets.</p>
             </div>
             <div class="form-field">
               <label class="form-label" for="new-custom-visible-job-titles">Visible to job titles</label>
@@ -582,6 +588,7 @@
                   <th>Conditional logic</th>
                   <th>Visibility</th>
                   <th>Options</th>
+                  <th>M365 UPN</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -628,7 +635,8 @@
                           <input class="form-input" name="visible_to_requester_emails" value="{{ field.visible_to_requester_emails or '' }}" placeholder="manager@example.com" />
                         </div>
                       </td>
-                      <td><input class="form-input" name="options" value="{% for option in field.options %}{{ option.value }}{% if option.label != option.value %}:{{ option.label }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}" /></td>
+                      <td><input class="form-input" name="options" value="{% for option in field.options %}{{ option.value }}{% if option.label != option.value %}:{{ option.label }}{% endif %}{% if option.m365_upn %}|{{ option.m365_upn }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}" /></td>
+                      <td><input class="form-input" name="m365_upn" value="{{ field.m365_upn or '' }}" placeholder="mailbox@example.com" /></td>
                       <td class="table__actions">
                         <button type="submit" class="button button--ghost">Save</button>
                     </form>

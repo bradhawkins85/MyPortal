@@ -867,6 +867,11 @@ def _parse_custom_field_options(options_text: str) -> list[dict[str, str]]:
         item = part.strip()
         if not item:
             continue
+        m365_upn = ""
+        if "|" in item:
+            item, m365_upn = item.split("|", 1)
+            item = item.strip()
+            m365_upn = m365_upn.strip().lower()
         if ":" in item:
             value_part, label_part = item.split(":", 1)
             value = value_part.strip()
@@ -876,7 +881,7 @@ def _parse_custom_field_options(options_text: str) -> list[dict[str, str]]:
             label = item
         if not value:
             continue
-        options.append({"value": value, "label": label})
+        options.append({"value": value, "label": label, "m365_upn": m365_upn})
     return options
 
 
@@ -1607,6 +1612,7 @@ async def admin_create_company_staff_custom_field(company_id: int, request: Requ
         form.get("visible_to_requester_emails")
     )
     options = _parse_custom_field_options(str(form.get("options") or ""))
+    m365_upn = str(form.get("m365_upn") or "").strip().lower() or None
     if not name:
         return _main()._company_edit_redirect(
             company_id=company_id, error="Custom field name is required."
@@ -1628,6 +1634,7 @@ async def admin_create_company_staff_custom_field(company_id: int, request: Requ
         condition_value=condition_value,
         visible_to_job_titles=visible_to_job_titles,
         visible_to_requester_emails=visible_to_requester_emails,
+        m365_upn=m365_upn,
         options=options,
     )
     return _main()._company_edit_redirect(
@@ -1673,6 +1680,7 @@ async def admin_update_company_staff_custom_field(
         form.get("visible_to_requester_emails")
     )
     options = _parse_custom_field_options(str(form.get("options") or ""))
+    m365_upn = str(form.get("m365_upn") or "").strip().lower() or None
     await staff_custom_fields_repo.update_company_definition(
         definition_id,
         company_id=company_id,
@@ -1687,6 +1695,7 @@ async def admin_update_company_staff_custom_field(
         condition_value=condition_value,
         visible_to_job_titles=visible_to_job_titles,
         visible_to_requester_emails=visible_to_requester_emails,
+        m365_upn=m365_upn,
         options=options,
     )
     return _main()._company_edit_redirect(

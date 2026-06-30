@@ -27,6 +27,7 @@ from app.repositories import license_sku_friendly_names as sku_friendly_repo
 from app.repositories import integration_modules as modules_repo
 from app.repositories import m365 as m365_repo
 from app.repositories import staff as staff_repo
+from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import modules as modules_service
 
@@ -5079,10 +5080,15 @@ async def sync_mailboxes(company_id: int) -> int:
     # to previous syncs and should be removed.
     await m365_repo.delete_stale_mailbox_members(company_id, member_sync_start)
 
+    synced_staff_custom_fields = await sync_staff_custom_fields_from_m365_mailboxes(
+        company_id
+    )
+
     log_info(
         "M365 mailbox sync complete",
         company_id=company_id,
         total=len(rows_to_upsert),
+        staff_custom_fields_synced=synced_staff_custom_fields,
         user_mailboxes=sum(
             1 for r in rows_to_upsert if r["mailbox_type"] == "UserMailbox"
         ),
@@ -5129,6 +5135,98 @@ async def check_report_privacy(company_id: int) -> bool:
     if not primary_upns:
         return False
     return obfuscated_count >= max(1, int(len(primary_upns) * 0.8))
+
+
+def _normalise_m365_upn(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _yes_no_select_value(options: list[dict[str, Any]], is_member: bool) -> str | None:
+    wanted = "yes" if is_member else "no"
+    for option in options:
+        value = str(option.get("value") or "").strip()
+        label = str(option.get("label") or "").strip()
+        if value.lower() == wanted or label.lower() == wanted:
+            return value
+    return wanted
+
+
+async def sync_staff_custom_fields_from_m365_mailboxes(company_id: int) -> int:
+    """Update M365-mapped staff custom fields from synced mailbox memberships.
+
+    This is intentionally one-way from Microsoft 365 into MyPortal. Manual staff
+    edits still follow the normal change-request/ticket flow and are never
+    pushed back to M365 by this sync.
+    """
+    definitions = await staff_custom_fields_repo.list_field_definitions(company_id)
+    mapped_definitions = []
+    for definition in definitions:
+        field_type = str(definition.get("field_type") or "text").lower()
+        if field_type == "multiselect":
+            options = [
+                option
+                for option in (definition.get("options") or [])
+                if _normalise_m365_upn(option.get("m365_upn"))
+            ]
+            if options:
+                mapped = dict(definition)
+                mapped["options"] = options
+                mapped_definitions.append(mapped)
+        elif field_type in {"checkbox", "select"} and _normalise_m365_upn(
+            definition.get("m365_upn")
+        ):
+            mapped_definitions.append(definition)
+    if not mapped_definitions:
+        return 0
+
+    staff_rows = await staff_repo.list_all_staff_for_import(company_id)
+    updated = 0
+    for staff in staff_rows:
+        staff_id = staff.get("id")
+        staff_upns = {
+            _normalise_m365_upn(staff.get("email")),
+        }
+        staff_upns.discard("")
+        if not staff_id or not staff_upns:
+            continue
+        accessible = {
+            _normalise_m365_upn(row.get("mailbox_email"))
+            for row in await m365_repo.get_mailboxes_accessible_by_member(
+                company_id, list(staff_upns)
+            )
+        }
+        values: dict[str, Any] = {}
+        for definition in mapped_definitions:
+            name = str(definition.get("name") or "").strip()
+            field_type = str(definition.get("field_type") or "text").lower()
+            if not name:
+                continue
+            if field_type == "multiselect":
+                selected = [
+                    str(option.get("value") or "").strip()
+                    for option in (definition.get("options") or [])
+                    if _normalise_m365_upn(option.get("m365_upn")) in accessible
+                    and str(option.get("value") or "").strip()
+                ]
+                values[name] = ",".join(selected) if selected else None
+            else:
+                is_member = (
+                    _normalise_m365_upn(definition.get("m365_upn")) in accessible
+                )
+                if field_type == "checkbox":
+                    values[name] = is_member
+                elif field_type == "select":
+                    values[name] = _yes_no_select_value(
+                        definition.get("options") or [], is_member
+                    )
+        if values:
+            await staff_custom_fields_repo.set_staff_field_values_by_name(
+                company_id=company_id,
+                staff_id=int(staff_id),
+                values=values,
+            )
+            updated += 1
+    return updated
 
 
 async def get_user_mailboxes(company_id: int) -> list[dict[str, Any]]:
