@@ -59,6 +59,20 @@ class ScheduledTaskResponse(BaseModel):
     }
 
 
+class ScheduledTaskPreviewResponse(BaseModel):
+    status: str
+    command: str
+    summary: str
+    company_id: int | None = Field(default=None, serialization_alias="companyId")
+    company_name: str | None = Field(default=None, serialization_alias="companyName")
+    totals: dict[str, Any] = Field(default_factory=dict)
+    items: list[dict[str, Any]] = Field(default_factory=list)
+
+    model_config = {
+        "populate_by_name": True,
+    }
+
+
 class ScheduledTaskRunResponse(BaseModel):
     id: int
     task_id: int = Field(serialization_alias="taskId")

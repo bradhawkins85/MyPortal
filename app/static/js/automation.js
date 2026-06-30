@@ -2,6 +2,7 @@
   const actionPayloadEditor = window.MyPortalActionPayloadEditor || null;
   let taskModal = null;
   let logsModal = null;
+  let previewModal = null;
   let activeTaskContext = { id: '', name: '' };
 
   function toJsonTemplate(data) {
@@ -1110,6 +1111,93 @@
     });
   }
 
+
+  function formatPreviewDetails(item) {
+    if (!item || typeof item !== 'object') {
+      return '—';
+    }
+    const hidden = new Set(['type', 'id', 'label', 'action']);
+    return Object.entries(item)
+      .filter(([key, value]) => !hidden.has(key) && value !== null && value !== undefined && value !== '')
+      .map(([key, value]) => `${key}: ${value}`)
+      .join(' · ') || '—';
+  }
+
+  function renderTaskPreview(preview) {
+    const summary = query('task-preview-summary');
+    if (summary) {
+      summary.textContent = (preview && preview.summary) || 'No preview details were returned.';
+    }
+    const totals = query('task-preview-totals');
+    if (totals) {
+      const entries = Object.entries((preview && preview.totals) || {});
+      totals.innerHTML = '';
+      totals.hidden = entries.length < 1;
+      entries.forEach(([key, value]) => {
+        const item = document.createElement('div');
+        item.className = 'detail-grid__item';
+        const label = document.createElement('span');
+        label.className = 'detail-grid__label';
+        label.textContent = key.replace(/([A-Z])/g, ' $1').replace(/^./, (char) => char.toUpperCase());
+        const data = document.createElement('strong');
+        data.className = 'detail-grid__value';
+        data.textContent = String(value);
+        item.append(label, data);
+        totals.appendChild(item);
+      });
+    }
+    const tbody = query('task-preview-body');
+    if (!tbody) {
+      return;
+    }
+    tbody.innerHTML = '';
+    const items = Array.isArray(preview && preview.items) ? preview.items : [];
+    if (items.length < 1) {
+      const row = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 4;
+      cell.className = 'table__empty';
+      cell.textContent = 'No matching records would be processed.';
+      row.appendChild(cell);
+      tbody.appendChild(row);
+      return;
+    }
+    items.forEach((item) => {
+      const row = document.createElement('tr');
+      ['type', 'label', 'action'].forEach((key) => {
+        const cell = document.createElement('td');
+        cell.textContent = item && item[key] ? String(item[key]) : '—';
+        row.appendChild(cell);
+      });
+      const details = document.createElement('td');
+      details.textContent = formatPreviewDetails(item);
+      row.appendChild(details);
+      tbody.appendChild(row);
+    });
+  }
+
+  async function showTaskPreview(task) {
+    if (!task || !task.id || !previewModal) {
+      return;
+    }
+    const title = query('task-preview-title');
+    if (title) {
+      title.textContent = `Preview — ${task.name || `Task #${task.id}`}`;
+    }
+    const summary = query('task-preview-summary');
+    if (summary) {
+      summary.textContent = 'Loading preview…';
+    }
+    renderTaskPreview({ summary: 'Loading preview…', items: [] });
+    openModal(previewModal);
+    try {
+      const preview = await requestJson(`/scheduler/tasks/${task.id}/preview`, { cache: 'no-store' });
+      renderTaskPreview(preview || {});
+    } catch (error) {
+      renderTaskPreview({ summary: `Unable to load preview: ${error.message}`, items: [] });
+    }
+  }
+
   async function showTaskLogs(task) {
     if (!task || !task.id) {
       return;
@@ -1378,6 +1466,17 @@
           restoreStatus();
           const message = error instanceof Error ? error.message : 'Unable to run task.';
           showTaskError(row, message);
+        }
+      });
+    });
+
+    document.querySelectorAll('[data-task-preview]').forEach((button) => {
+      button.addEventListener('click', () => {
+        closeRowDropdown(button);
+        const row = button.closest('tr');
+        const task = parseTask(row);
+        if (task) {
+          showTaskPreview(task);
         }
       });
     });
@@ -2547,8 +2646,10 @@
   function initialiseAutomationUI() {
     taskModal = query('task-editor-modal');
     logsModal = query('task-logs-modal');
+    previewModal = query('task-preview-modal');
     bindModalDismissal(taskModal);
     bindModalDismissal(logsModal);
+    bindModalDismissal(previewModal);
     clearTaskForm();
     bindTaskForm();
     bindTaskActions();
