@@ -546,6 +546,7 @@ def _default_xero_settings() -> dict[str, Any]:
     return {
         "client_id": _clean_env("XERO_CLIENT_ID"),
         "client_secret": _clean_env("XERO_CLIENT_SECRET"),
+        "webhook_key": _clean_env("XERO_WEBHOOK_KEY"),
         # Note: refresh_token is obtained via OAuth2 code flow only (/xero/connect)
         # and should not be set manually via environment variables
         "company_name": _clean_env("XERO_COMPANY_NAME"),
@@ -1000,6 +1001,7 @@ _ENV_BACKED_MODULE_FIELDS: dict[str, tuple[str, ...]] = {
         "billable_statuses",
         "line_item_description_template",
         "auto_create_products",
+        "webhook_key",
     ),
 }
 
@@ -1466,6 +1468,7 @@ def _coerce_settings(
             {
                 "client_id": str(merged.get("client_id", "")).strip(),
                 "client_secret": _preserve_secret("client_secret"),
+                "webhook_key": _preserve_secret("webhook_key"),
                 "refresh_token": refresh_token,
                 "access_token": access_token,
                 "token_expires_at": token_expires_at,
@@ -1757,7 +1760,7 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "uptimekuma": ("shared_secret_hash",),
         "tacticalrmm": ("api_key",),
         "ntfy": ("auth_token",),
-        "xero": ("client_secret", "refresh_token", "access_token"),
+        "xero": ("client_secret", "refresh_token", "access_token", "webhook_key"),
         "sms-gateway": ("authorization",),
         "unifi-talk": ("password",),
         "plausible": ("api_key", "pepper"),

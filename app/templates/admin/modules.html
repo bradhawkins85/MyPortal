@@ -109,11 +109,26 @@
                               data-webhook-url="{{ webhook_url | e }}"
                               aria-label="View webhook URL for {{ module.name }}"
                             >
-                              Webhook URL
+                              {% if module.slug == "xero" %}Callback URL{% else %}Webhook URL{% endif %}
                             </button>
                           </li>
                         {% endif %}
                         {% if module.slug == "xero" %}
+                          {% set xero_webhook_url = (module_webhook_urls or {}).get("xero_webhook") %}
+                          {% if xero_webhook_url %}
+                            <li class="header-title-menu__item" role="none">
+                              <button
+                                type="button"
+                                class="header-title-menu__link"
+                                role="menuitem"
+                                data-webhook-url-open
+                                data-webhook-url="{{ xero_webhook_url | e }}"
+                                aria-label="View Xero webhook URL for {{ module.name }}"
+                              >
+                                Webhook URL
+                              </button>
+                            </li>
+                          {% endif %}
                           <li class="header-title-menu__item" role="none">
                             <a href="/api/integration-modules/xero/tenants" class="header-title-menu__link" role="menuitem" target="_blank" rel="noopener noreferrer">Get tenant IDs</a>
                           </li>

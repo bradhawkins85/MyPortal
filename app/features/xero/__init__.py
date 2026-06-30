@@ -3,7 +3,8 @@
 This pack owns the Xero integration routes:
 
   API routes (prefix ``/api/integration-modules/xero``):
-  * ``POST /api/integration-modules/xero/callback``   – webhook ingestion
+  * ``POST /api/integration-modules/xero/webhook``    – signed invoice webhook ingestion
+  * ``POST /api/integration-modules/xero/callback``   – legacy callback ingestion
   * ``GET  /api/integration-modules/xero/callback``   – connectivity probe
   * ``GET  /api/integration-modules/xero/tenants``    – list Xero tenants
 

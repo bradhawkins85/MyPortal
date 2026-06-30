@@ -44,6 +44,22 @@ async def get_invoice_by_id(invoice_id: int) -> Optional[dict[str, Any]]:
     return _normalise_invoice(row) if row else None
 
 
+async def get_invoice_by_xero_invoice_id(xero_invoice_id: str) -> Optional[dict[str, Any]]:
+    row = await db.fetch_one(
+        "SELECT * FROM invoices WHERE xero_invoice_id = %s LIMIT 1",
+        (xero_invoice_id,),
+    )
+    return _normalise_invoice(row) if row else None
+
+
+async def get_invoice_by_number(invoice_number: str) -> Optional[dict[str, Any]]:
+    row = await db.fetch_one(
+        "SELECT * FROM invoices WHERE invoice_number = %s LIMIT 1",
+        (invoice_number,),
+    )
+    return _normalise_invoice(row) if row else None
+
+
 async def list_unsynced_company_invoices(company_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """

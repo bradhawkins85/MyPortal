@@ -635,6 +635,7 @@ if settings.ip_whitelist_enabled and settings.ip_whitelist:
         "/api/auth/login",
         "/api/auth/register",
         "/api/webhooks",  # Webhooks use signature verification instead
+        "/api/integration-modules/xero/webhook",
         "/manifest.webmanifest",
         "/service-worker.js",
     ]
@@ -757,6 +758,7 @@ app.add_middleware(
         "/api/webhooks/smtp2go",
         "/api/integration-modules/uptimekuma/alerts",
         "/api/integration-modules/trello/webhook",
+        "/api/integration-modules/xero/webhook",
         "/api/backup-status",
         "/api/tray/enrol",
         "/api/tray/popup-chat",
@@ -8822,6 +8824,7 @@ async def _render_modules_dashboard(
         "trello": f"{public_base}/api/integration-modules/trello/webhook",
         "uptimekuma": f"{public_base}/api/integration-modules/uptimekuma/alerts",
         "xero": f"{public_base}/api/integration-modules/xero/callback",
+        "xero_webhook": f"{public_base}/api/integration-modules/xero/webhook",
     }
     extra = {
         "title": "Integration modules",
