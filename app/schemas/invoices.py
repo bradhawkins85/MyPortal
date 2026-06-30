@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, Field
@@ -43,5 +43,6 @@ class InvoiceResponse(BaseModel):
     amount: Decimal
     due_date: date | None = Field(default=None, alias="dueDate")
     status: str | None
+    created_at: datetime | None = Field(default=None, alias="createdAt")
 
     model_config = {"populate_by_name": True}
