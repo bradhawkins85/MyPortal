@@ -14,6 +14,35 @@ _UNSET = object()
 _FULLTEXT_MIN_SEARCH_LENGTH = 3
 
 
+async def _get_default_labour_type_id() -> int | None:
+    row = await db.fetch_one(
+        """
+        SELECT id
+        FROM ticket_labour_types
+        WHERE is_default = 1
+        LIMIT 1
+        """,
+        (),
+    )
+    if not row:
+        return None
+    try:
+        return int(row.get("id"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+async def _default_labour_type_for_time_entry(
+    minutes_spent: int | None,
+    labour_type_id: int | None,
+) -> int | None:
+    if labour_type_id is not None:
+        return labour_type_id
+    if minutes_spent is None or minutes_spent <= 0:
+        return None
+    return await _get_default_labour_type_id()
+
+
 def _prepare_ticket_search_term(search: str | None) -> tuple[str | None, str | None]:
     term = (search or "").strip()
     if not term:
@@ -1054,6 +1083,8 @@ async def create_reply(
     created_at: datetime | None = None,
     labour_type_id: int | None = None,
 ) -> TicketRecord:
+    labour_type_id = await _default_labour_type_for_time_entry(minutes_spent, labour_type_id)
+
     log_info(
         "Creating ticket reply",
         ticket_id=ticket_id,
@@ -1299,13 +1330,32 @@ async def update_reply(
     if is_billable is not _UNSET:
         updates.append("is_billable = %s")
         params.append(1 if bool(is_billable) else 0)
-    if labour_type_id is not _UNSET:
-        if labour_type_id is None:
-            updates.append("labour_type_id = NULL")
-        else:
-            updates.append("labour_type_id = %s")
-            params.append(int(labour_type_id))
+    if labour_type_id is not _UNSET and labour_type_id is not None:
+        updates.append("labour_type_id = %s")
+        params.append(int(labour_type_id))
     if updates:
+        effective_minutes = minutes_spent
+        effective_labour_type_id = labour_type_id
+        if effective_minutes is _UNSET or effective_labour_type_id is _UNSET:
+            current = await get_reply_by_id(reply_id)
+            if effective_minutes is _UNSET:
+                current_minutes = current.get("minutes_spent") if current else None
+                effective_minutes = current_minutes if isinstance(current_minutes, int) else None
+            if effective_labour_type_id is _UNSET:
+                current_labour_type_id = current.get("labour_type_id") if current else None
+                effective_labour_type_id = (
+                    current_labour_type_id if isinstance(current_labour_type_id, int) else None
+                )
+        default_labour_type_id = await _default_labour_type_for_time_entry(
+            effective_minutes if isinstance(effective_minutes, int) else None,
+            effective_labour_type_id if isinstance(effective_labour_type_id, int) else None,
+        )
+        if effective_labour_type_id is None:
+            if default_labour_type_id is not None:
+                updates.append("labour_type_id = %s")
+                params.append(default_labour_type_id)
+            elif labour_type_id is None:
+                updates.append("labour_type_id = NULL")
         params.append(reply_id)
         await db.execute(
             f"""

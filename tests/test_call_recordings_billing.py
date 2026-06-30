@@ -176,3 +176,36 @@ async def test_call_recording_schema_validation():
     assert response_schema.labour_type_id == 5
     assert response_schema.labour_type_name == "Remote Support"
     assert response_schema.labour_type_code == "RS"
+
+
+@pytest.mark.anyio
+async def test_update_call_recording_defaults_labour_type_for_time_entry():
+    """Call recording time entries use the selected default labour type when omitted."""
+    from app.repositories import call_recordings as repo
+
+    recording_id = 1
+    updated_recording = {
+        "id": recording_id,
+        "minutes_spent": 45,
+        "is_billable": True,
+        "labour_type_id": 9,
+    }
+
+    with patch.object(repo.db, "execute", new_callable=AsyncMock) as mock_execute, \
+         patch.object(repo.db, "fetch_one", new_callable=AsyncMock) as mock_fetch_one, \
+         patch.object(repo, "get_call_recording_by_id", new_callable=AsyncMock) as mock_get:
+        mock_fetch_one.return_value = {"id": 9}
+        mock_get.return_value = updated_recording
+
+        result = await repo.update_call_recording(
+            recording_id,
+            minutes_spent=45,
+            is_billable=True,
+            labour_type_id=None,
+        )
+
+        assert result["labour_type_id"] == 9
+        mock_fetch_one.assert_called_once()
+        sql, params = mock_execute.call_args[0]
+        assert "labour_type_id = %s" in sql
+        assert params == (45, 1, 9, recording_id)
