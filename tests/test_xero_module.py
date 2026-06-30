@@ -1124,3 +1124,24 @@ async def test_acquire_xero_access_token_rechecks_cache_after_refresh_lock(monke
     assert token == "fresh-access-token"
     assert calls == 2
     refresh.assert_not_awaited()
+
+
+def test_xero_line_item_template_env_overrides_stored_settings(monkeypatch):
+    monkeypatch.setenv(
+        "XERO_LINE_ITEM_TEMPLATE",
+        "Ticket {ticket_id}: {ticket_subject} {labour_suffix} {requester_name} ({labour_duration})",
+    )
+    module = {
+        "slug": "xero",
+        "settings": {
+            "line_item_description_template": "Ticket {ticket_id}: {ticket_subject}{labour_suffix} ({labour_duration})",
+            "account_code": "400",
+            "line_amount_type": "Exclusive",
+        },
+    }
+
+    result = modules_service._resolve_module_settings_for_runtime("xero", module)
+
+    assert result["line_item_description_template"] == (
+        "Ticket {ticket_id}: {ticket_subject} {labour_suffix} {requester_name} ({labour_duration})"
+    )
