@@ -17,6 +17,7 @@ from app.repositories import invoice_lines as invoice_lines_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import ticket_billed_time_entries as billed_time_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import users as users_repo
 from app.services import modules as modules_service
 from app.services import xero as xero_service
 
@@ -68,6 +69,8 @@ def _build_ticket_line_description(
     *,
     billable_minutes: int,
     non_billable_minutes: int = 0,
+    requester_name: str = "",
+    requester_email: str = "",
 ) -> str:
     return xero_service._format_line_description(
         template,
@@ -76,7 +79,37 @@ def _build_ticket_line_description(
         minutes,
         billable_minutes=billable_minutes,
         non_billable_minutes=non_billable_minutes,
+        requester_name=requester_name,
+        requester_email=requester_email,
     )
+
+
+async def resolve_ticket_requester(ticket: dict[str, Any]) -> tuple[str, str]:
+    """Resolve requester display fields for invoice template substitutions."""
+
+    requester_name = str(ticket.get("requester_name") or "").strip()
+    requester_email = str(ticket.get("requester_email") or ticket.get("email") or "").strip()
+
+    if requester_name and requester_email:
+        return requester_name, requester_email
+
+    requester_id = ticket.get("requester_id")
+    try:
+        requester_id_int = int(requester_id) if requester_id is not None else 0
+    except (TypeError, ValueError):
+        requester_id_int = 0
+
+    if requester_id_int <= 0:
+        return requester_name, requester_email
+
+    requester = await users_repo.get_user_by_id(requester_id_int) or {}
+    if not requester_name:
+        first = str(requester.get("first_name") or "").strip()
+        last = str(requester.get("last_name") or "").strip()
+        requester_name = " ".join(part for part in (first, last) if part)
+    if not requester_email:
+        requester_email = str(requester.get("email") or "").strip()
+    return requester_name, requester_email
 
 
 async def _generate_invoice_number() -> str:
@@ -183,6 +216,7 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
             continue
 
         labour_groups = list(labour_map.values())
+        requester_name, requester_email = await resolve_ticket_requester(ticket)
         for group in labour_groups:
             group_minutes = int(group.get("minutes") or 0)
             if group_minutes <= 0:
@@ -196,6 +230,8 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
                 group,
                 group_minutes,
                 billable_minutes=billable_minutes,
+                requester_name=requester_name,
+                requester_email=requester_email,
             )
 
             local_rate = group.get("rate")
@@ -220,6 +256,8 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
                 "status": ticket.get("status"),
                 "billable_minutes": billable_minutes,
                 "labour_groups": labour_groups,
+                "requester_name": requester_name,
+                "requester_email": requester_email,
             }
         )
 

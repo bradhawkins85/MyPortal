@@ -1,4 +1,5 @@
 import asyncio
+from unittest.mock import AsyncMock
 
 from app.services import scheduled_task_preview
 
@@ -147,3 +148,50 @@ def test_generate_invoice_preview_prefers_env_xero_line_item_template(monkeypatc
     assert preview["items"][0]["xeroDescription"] == (
         "Ticket 42: Broken printer  · Remote Support Jane Requester (1 Hour 30 Mins)"
     )
+
+
+def test_generate_invoice_preview_resolves_requester_name_for_template(monkeypatch):
+    async def fake_company(company_id):
+        return {"id": company_id, "name": "Acme"}
+
+    async def fake_context(company_id):
+        return {}
+
+    async def fake_recurring(company_id, *, tax_type, context):
+        return []
+
+    async def fake_tickets(company_id, limit):
+        return [{"id": 42, "subject": "Broken printer", "status": "Resolved", "requester_id": 99}]
+
+    async def fake_unbilled(ticket_id):
+        return [100]
+
+    async def fake_replies(ticket_id, include_internal):
+        return [
+            {
+                "id": 100,
+                "is_billable": True,
+                "minutes_spent": 90,
+                "labour_type_code": "LAB",
+                "labour_type_name": "Remote Support",
+                "labour_type_rate": "125.50",
+            }
+        ]
+
+    monkeypatch.setenv("XERO_LINE_ITEM_TEMPLATE", "Ticket {ticket_id}: {ticket_subject} - {requester_name}")
+    monkeypatch.setattr(scheduled_task_preview.company_repo, "get_company_by_id", fake_company)
+    monkeypatch.setattr(scheduled_task_preview.xero_service, "build_invoice_context", fake_context)
+    monkeypatch.setattr(scheduled_task_preview.xero_service, "build_recurring_invoice_items", fake_recurring)
+    monkeypatch.setattr(scheduled_task_preview.tickets_repo, "list_tickets", fake_tickets)
+    monkeypatch.setattr(scheduled_task_preview.billed_time_repo, "get_unbilled_reply_ids", fake_unbilled)
+    monkeypatch.setattr(scheduled_task_preview.tickets_repo, "list_replies", fake_replies)
+    monkeypatch.setattr(
+        scheduled_task_preview.invoice_generator_service.users_repo,
+        "get_user_by_id",
+        AsyncMock(return_value={"id": 99, "first_name": "Jane", "last_name": "Requester", "email": "jane@example.com"}),
+    )
+
+    preview = asyncio.run(scheduled_task_preview.preview_task({"command": "generate_invoice", "company_id": 1}))
+
+    assert preview["status"] == "ready"
+    assert preview["items"][0]["xeroDescription"] == "Ticket 42: Broken printer - Jane Requester"
