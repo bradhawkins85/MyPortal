@@ -7,6 +7,24 @@ from app.core.database import db
 from app.core.phone_utils import normalize_to_e164
 
 
+async def _get_default_labour_type_id() -> int | None:
+    row = await db.fetch_one(
+        """
+        SELECT id
+        FROM ticket_labour_types
+        WHERE is_default = 1
+        LIMIT 1
+        """,
+        (),
+    )
+    if not row:
+        return None
+    try:
+        return int(row.get("id"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
 def _ensure_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -367,6 +385,11 @@ async def update_call_recording(
     if labour_type_id is not None:
         updates.append("labour_type_id = %s")
         params.append(labour_type_id)
+    elif minutes_spent is not None and minutes_spent > 0:
+        default_labour_type_id = await _get_default_labour_type_id()
+        if default_labour_type_id is not None:
+            updates.append("labour_type_id = %s")
+            params.append(default_labour_type_id)
     
     if not updates:
         # No updates to perform

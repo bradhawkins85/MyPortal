@@ -360,6 +360,7 @@ async def test_update_reply_updates_minutes_and_billable(monkeypatch):
         "is_internal": 0,
         "minutes_spent": 15,
         "is_billable": 1,
+        "labour_type_id": 6,
         "created_at": None,
     }
     dummy_db = _UpdateTicketDB(fetched)
@@ -572,3 +573,78 @@ def test_prepare_ticket_search_term_uses_fulltext_for_mysql(monkeypatch):
 
     assert mode == "fulltext"
     assert value == "+wireless* +mouse*"
+
+
+@pytest.mark.anyio
+async def test_create_reply_defaults_labour_type_for_time_entry(monkeypatch):
+    class _DefaultLabourDB(_DummyTicketDB):
+        async def fetch_one(self, sql, params=()):
+            sql_clean = sql.strip()
+            if "FROM ticket_labour_types" in sql_clean:
+                return {"id": 12}
+            self.fetch_sql = sql_clean
+            self.fetch_params = params
+            return self._fetched_row
+
+    fetched = {
+        "id": 42,
+        "ticket_id": 3,
+        "author_id": 4,
+        "body": "Reply",
+        "is_internal": 0,
+        "minutes_spent": 15,
+        "is_billable": 1,
+        "labour_type_id": 12,
+        "created_at": None,
+    }
+    dummy_db = _DefaultLabourDB(fetched)
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    record = await tickets.create_reply(
+        ticket_id=3,
+        author_id=4,
+        body="Reply",
+        is_internal=False,
+        minutes_spent=15,
+        is_billable=True,
+        labour_type_id=None,
+    )
+
+    assert "labour_type_id" in dummy_db.insert_sql
+    assert dummy_db.insert_params == (3, 4, "Reply", 0, 1, 15, 12)
+    assert record["labour_type_id"] == 12
+
+
+@pytest.mark.anyio
+async def test_update_reply_defaults_labour_type_when_time_entry_has_none(monkeypatch):
+    class _DefaultLabourUpdateDB(_UpdateTicketDB):
+        def __init__(self):
+            super().__init__(
+                {
+                    "id": 7,
+                    "ticket_id": 3,
+                    "author_id": 4,
+                    "body": "Reply",
+                    "is_internal": 0,
+                    "minutes_spent": 15,
+                    "is_billable": 1,
+                    "labour_type_id": None,
+                    "created_at": None,
+                }
+            )
+
+        async def fetch_one(self, sql, params=()):
+            sql_clean = sql.strip()
+            if "FROM ticket_labour_types" in sql_clean:
+                return {"id": 12}
+            self.fetch_sql = sql_clean
+            self.fetch_params = params
+            return self._row
+
+    dummy_db = _DefaultLabourUpdateDB()
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    await tickets.update_reply(7, minutes_spent=15, is_billable=True)
+
+    assert "labour_type_id = %s" in dummy_db.execute_sql
+    assert dummy_db.execute_params == (15, 1, 12, 7)
