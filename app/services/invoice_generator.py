@@ -22,7 +22,7 @@ from app.services import modules as modules_service
 from app.services import xero as xero_service
 
 
-DEFAULT_XERO_LINE_ITEM_TEMPLATE = "Ticket {ticket_id}: {ticket_subject}{labour_suffix} ({labour_duration})"
+DEFAULT_XERO_LINE_ITEM_TEMPLATE = "Ticket {ticket_id}: {ticket_subject} {labour_suffix} ({labour_duration})"
 
 
 def _env_xero_line_item_template() -> str:

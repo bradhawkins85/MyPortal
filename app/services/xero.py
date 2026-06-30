@@ -35,7 +35,6 @@ QuoteItemsFetcher = Callable[[str, int], Awaitable[Sequence[Mapping[str, Any]] |
 XERO_ITEM_NAME_MAX_LENGTH = 50
 _XERO_ERROR_DETAIL_MAX_LENGTH = 500
 _XERO_INVOICE_NUMBER_SUFFIX_RE = re.compile(r"^(.*)(\d+)$")
-_LABOUR_SUFFIX_SEPARATOR_RE = re.compile(r"\s+·")
 
 
 class _TemplateValues(dict[str, Any]):
@@ -203,7 +202,7 @@ def _format_line_description(
     non_billable_minutes: int = 0,
     duration_days: int | str = "",
 ) -> str:
-    safe_template = template.strip() or "Ticket {ticket_id}: {ticket_subject}{labour_suffix}"
+    safe_template = template.strip() or "Ticket {ticket_id}: {ticket_subject} {labour_suffix}"
     subject = str(ticket.get("subject") or "").strip()
     labour_name = str((labour or {}).get("name") or "").strip()
     labour_code = str((labour or {}).get("code") or "").strip()
@@ -219,7 +218,7 @@ def _format_line_description(
         labour_minutes=labour_minutes,
         labour_hours=float(_quantize(labour_hours_decimal)) if labour_minutes else 0.0,
         labour_duration=labour_duration,
-        labour_suffix=f" · {labour_name}" if labour_name else "",
+        labour_suffix=labour_name,
         requester_name=requester_name or _ticket_requester_name(ticket),
         requester_email=requester_email or _ticket_requester_email(ticket),
         ticket_created_date=ticket_created_date,
@@ -230,14 +229,12 @@ def _format_line_description(
     )
     try:
         description = safe_template.format_map(values).strip()
-        if labour_name:
-            description = _LABOUR_SUFFIX_SEPARATOR_RE.sub(" ·", description)
     except Exception:  # pragma: no cover - defensive guardrail
         description = ""
     if not description:
         description = f"Ticket {ticket.get('id')}: {subject}".strip()
         if labour_name:
-            description = f"{description} · {labour_name}" if description else labour_name
+            description = f"{description} {labour_name}" if description else labour_name
     return description
 
 

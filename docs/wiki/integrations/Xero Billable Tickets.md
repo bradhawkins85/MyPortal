@@ -72,9 +72,9 @@ Available template variables:
 - `{labour_minutes}` - Minutes spent on this labour type
 - `{labour_hours}` - Hours spent (decimal format)
 - `{labour_duration}` - Hours and minutes spent, for example `30 Mins` or `2 Hours 30 Mins`
-- `{labour_suffix}` - " · Labour Type Name" if present, empty otherwise
+- `{labour_suffix}` - labour type name if present, empty otherwise; add any separators or spacing in the template
 
-Default template: `Ticket {ticket_id}: {ticket_subject}{labour_suffix} ({labour_duration})`
+Default template: `Ticket {ticket_id}: {ticket_subject} {labour_suffix} ({labour_duration})`
 
 Example custom template: `#{ticket_id} - {ticket_subject} - {labour_name} ({labour_duration})`
 

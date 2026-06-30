@@ -557,7 +557,7 @@ def _default_xero_settings() -> dict[str, Any]:
         "reference_prefix": _clean_env("XERO_REFERENCE_PREFIX") or "Support",
         "billable_statuses": _normalise_statuses(_clean_env("XERO_BILLABLE_STATUSES")),
         "line_item_description_template": _clean_env("XERO_LINE_ITEM_TEMPLATE")
-        or "Ticket {ticket_id}: {ticket_subject}{labour_suffix} ({labour_duration})",
+        or "Ticket {ticket_id}: {ticket_subject} {labour_suffix} ({labour_duration})",
         "auto_create_products": _ensure_bool(os.getenv("XERO_AUTO_CREATE_PRODUCTS"), True),
     }
 
@@ -1487,7 +1487,7 @@ def _coerce_settings(
                 "line_item_description_template": str(
                     merged.get("line_item_description_template", "")
                 ).strip()
-                or "Ticket {ticket_id}: {ticket_subject}{labour_suffix} ({labour_duration})",
+                or "Ticket {ticket_id}: {ticket_subject} {labour_suffix} ({labour_duration})",
                 "auto_create_products": _ensure_bool(merged.get("auto_create_products"), True),
             }
         )

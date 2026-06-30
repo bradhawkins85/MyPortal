@@ -63,7 +63,7 @@ and additional placeholders are available for labour-specific information:
 
 - `{ticket_id}`, `{ticket_subject}`, `{ticket_status}`
 - `{labour_name}`, `{labour_code}`, `{labour_minutes}`, `{labour_hours}`
-- `{labour_suffix}` – resolves to ` · {labour_name}` when a labour type exists
+- `{labour_suffix}` – resolves to the labour type name when present; add any separators or spacing in the template
 
 For example, setting the template to `Ticket #{ticket_id} - {ticket_subject} -
 {labour_name}` produces descriptions such as `Ticket #123 - Fix Computer -
