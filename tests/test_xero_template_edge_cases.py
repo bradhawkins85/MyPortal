@@ -88,7 +88,7 @@ async def test_empty_template_uses_default():
         invoice_payload = call_args[1]["json"]["Invoices"][0]
         line_items = invoice_payload["LineItems"]
         
-        # Should use default template: "Ticket {ticket_id}: {ticket_subject}{labour_suffix}"
+        # Should use default template: "Ticket {ticket_id}: {ticket_subject} {labour_suffix}"
         # With no labour, labour_suffix is empty
         assert line_items[0]["Description"] == "Ticket 42: Test Issue"
 

@@ -202,7 +202,7 @@ def _format_line_description(
     non_billable_minutes: int = 0,
     duration_days: int | str = "",
 ) -> str:
-    safe_template = template.strip() or "Ticket {ticket_id}: {ticket_subject}{labour_suffix}"
+    safe_template = template.strip() or "Ticket {ticket_id}: {ticket_subject} {labour_suffix}"
     subject = str(ticket.get("subject") or "").strip()
     labour_name = str((labour or {}).get("name") or "").strip()
     labour_code = str((labour or {}).get("code") or "").strip()
@@ -218,7 +218,7 @@ def _format_line_description(
         labour_minutes=labour_minutes,
         labour_hours=float(_quantize(labour_hours_decimal)) if labour_minutes else 0.0,
         labour_duration=labour_duration,
-        labour_suffix=f" · {labour_name}" if labour_name else "",
+        labour_suffix=labour_name,
         requester_name=requester_name or _ticket_requester_name(ticket),
         requester_email=requester_email or _ticket_requester_email(ticket),
         ticket_created_date=ticket_created_date,
@@ -234,7 +234,7 @@ def _format_line_description(
     if not description:
         description = f"Ticket {ticket.get('id')}: {subject}".strip()
         if labour_name:
-            description = f"{description} · {labour_name}" if description else labour_name
+            description = f"{description} {labour_name}" if description else labour_name
     return description
 
 

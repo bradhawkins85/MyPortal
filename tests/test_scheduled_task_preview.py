@@ -146,7 +146,7 @@ def test_generate_invoice_preview_prefers_env_xero_line_item_template(monkeypatc
 
     assert preview["status"] == "ready"
     assert preview["items"][0]["xeroDescription"] == (
-        "Ticket 42: Broken printer  · Remote Support Jane Requester (1 Hour 30 Mins)"
+        "Ticket 42: Broken printer Remote Support Jane Requester (1 Hour 30 Mins)"
     )
 
 

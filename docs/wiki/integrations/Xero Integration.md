@@ -66,12 +66,12 @@ ticket runs grouped together without manual reconciliation.
 
 Each line item description is generated from a configurable template. The
 default includes the labour duration in hours and minutes
-(`Ticket {ticket_id}: {ticket_subject}{labour_suffix} ({labour_duration})`),
+(`Ticket {ticket_id}: {ticket_subject} {labour_suffix} ({labour_duration})`),
 and additional placeholders are available for labour-specific information:
 
 - `{ticket_id}`, `{ticket_subject}`, `{ticket_status}`
 - `{labour_name}`, `{labour_code}`, `{labour_minutes}`, `{labour_hours}`, `{labour_duration}`
-- `{labour_suffix}` – resolves to ` · {labour_name}` when a labour type exists
+- `{labour_suffix}` – resolves to the labour type name when present; add any separators or spacing in the template
 
 For example, setting the template to `Ticket #{ticket_id} - {ticket_subject} -
 {labour_name} ({labour_duration})` produces descriptions such as
