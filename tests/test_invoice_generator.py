@@ -251,7 +251,7 @@ def test_generate_invoice_resolves_requester_name_for_template(monkeypatch):
         AsyncMock(return_value=[{"id": 55, "subject": "VPN help", "requester_id": 99}]),
     )
     monkeypatch.setattr(
-        invoice_generator.users_repo,
+        invoice_generator.xero_service.users_repo,
         "get_user_by_id",
         AsyncMock(return_value={"id": 99, "first_name": "Jane", "last_name": "Requester", "email": "jane@example.com"}),
     )

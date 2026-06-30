@@ -186,7 +186,7 @@ def test_generate_invoice_preview_resolves_requester_name_for_template(monkeypat
     monkeypatch.setattr(scheduled_task_preview.billed_time_repo, "get_unbilled_reply_ids", fake_unbilled)
     monkeypatch.setattr(scheduled_task_preview.tickets_repo, "list_replies", fake_replies)
     monkeypatch.setattr(
-        scheduled_task_preview.invoice_generator_service.users_repo,
+        scheduled_task_preview.invoice_generator_service.xero_service.users_repo,
         "get_user_by_id",
         AsyncMock(return_value={"id": 99, "first_name": "Jane", "last_name": "Requester", "email": "jane@example.com"}),
     )

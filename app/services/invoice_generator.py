@@ -87,29 +87,7 @@ def _build_ticket_line_description(
 async def resolve_ticket_requester(ticket: dict[str, Any]) -> tuple[str, str]:
     """Resolve requester display fields for invoice template substitutions."""
 
-    requester_name = str(ticket.get("requester_name") or "").strip()
-    requester_email = str(ticket.get("requester_email") or ticket.get("email") or "").strip()
-
-    if requester_name and requester_email:
-        return requester_name, requester_email
-
-    requester_id = ticket.get("requester_id")
-    try:
-        requester_id_int = int(requester_id) if requester_id is not None else 0
-    except (TypeError, ValueError):
-        requester_id_int = 0
-
-    if requester_id_int <= 0:
-        return requester_name, requester_email
-
-    requester = await users_repo.get_user_by_id(requester_id_int) or {}
-    if not requester_name:
-        first = str(requester.get("first_name") or "").strip()
-        last = str(requester.get("last_name") or "").strip()
-        requester_name = " ".join(part for part in (first, last) if part)
-    if not requester_email:
-        requester_email = str(requester.get("email") or "").strip()
-    return requester_name, requester_email
+    return await xero_service.resolve_ticket_requester(ticket)
 
 
 async def _generate_invoice_number() -> str:

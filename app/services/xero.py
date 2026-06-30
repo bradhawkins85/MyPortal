@@ -16,6 +16,7 @@ from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.repositories import invoice_lines as invoice_lines_repo
+from app.repositories import staff as staff_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import ticket_billed_time_entries as billed_time_repo
 from app.repositories import tickets as tickets_repo
@@ -39,6 +40,94 @@ _XERO_INVOICE_NUMBER_SUFFIX_RE = re.compile(r"^(.*)(\d+)$")
 class _TemplateValues(dict[str, Any]):
     def __missing__(self, key: str) -> str:
         return ""
+
+
+def _requester_display_name(record: Mapping[str, Any] | None) -> str:
+    if not isinstance(record, Mapping):
+        return ""
+    first = str(record.get("first_name") or "").strip()
+    last = str(record.get("last_name") or "").strip()
+    full_name = " ".join(part for part in (first, last) if part)
+    return (
+        full_name
+        or str(record.get("display_name") or "").strip()
+        or str(record.get("name") or "").strip()
+        or str(record.get("email") or "").strip()
+    )
+
+
+def _ticket_requester_name(ticket: Mapping[str, Any]) -> str:
+    for key in ("requester_name", "requester_display_name", "requester_label", "contact_name", "name"):
+        value = str(ticket.get(key) or "").strip()
+        if value:
+            return value
+    requester = ticket.get("requester")
+    if isinstance(requester, Mapping):
+        return _requester_display_name(requester)
+    return ""
+
+
+def _ticket_requester_email(ticket: Mapping[str, Any]) -> str:
+    for key in ("requester_email", "email", "contact_email"):
+        value = str(ticket.get(key) or "").strip()
+        if value:
+            return value
+    requester = ticket.get("requester")
+    if isinstance(requester, Mapping):
+        return str(requester.get("email") or "").strip()
+    return ""
+
+
+async def resolve_ticket_requester(
+    ticket: Mapping[str, Any],
+    *,
+    requester_cache: MutableMapping[int, Mapping[str, Any]] | None = None,
+    staff_requester_cache: MutableMapping[int, Mapping[str, Any]] | None = None,
+) -> tuple[str, str]:
+    """Resolve requester display fields for invoice template substitutions."""
+
+    requester_name = _ticket_requester_name(ticket)
+    requester_email = _ticket_requester_email(ticket)
+
+    if not requester_name or not requester_email:
+        requester_id = ticket.get("requester_id")
+        try:
+            requester_id_int = int(requester_id) if requester_id is not None else 0
+        except (TypeError, ValueError):
+            requester_id_int = 0
+        if requester_id_int > 0:
+            requester: Mapping[str, Any] | None
+            if requester_cache is not None and requester_id_int in requester_cache:
+                requester = requester_cache[requester_id_int]
+            else:
+                requester = await users_repo.get_user_by_id(requester_id_int) or {}
+                if requester_cache is not None:
+                    requester_cache[requester_id_int] = requester
+            if not requester_name:
+                requester_name = _requester_display_name(requester)
+            if not requester_email:
+                requester_email = str((requester or {}).get("email") or "").strip()
+
+    if not requester_name or not requester_email:
+        requester_staff_id = ticket.get("requester_staff_id")
+        try:
+            requester_staff_id_int = int(requester_staff_id) if requester_staff_id is not None else 0
+        except (TypeError, ValueError):
+            requester_staff_id_int = 0
+        if requester_staff_id_int > 0:
+            staff_requester: Mapping[str, Any] | None
+            if staff_requester_cache is not None and requester_staff_id_int in staff_requester_cache:
+                staff_requester = staff_requester_cache[requester_staff_id_int]
+            else:
+                staff_requester = await staff_repo.get_staff_by_id(requester_staff_id_int) or {}
+                if staff_requester_cache is not None:
+                    staff_requester_cache[requester_staff_id_int] = staff_requester
+            if not requester_name:
+                requester_name = _requester_display_name(staff_requester)
+            if not requester_email:
+                requester_email = str((staff_requester or {}).get("email") or "").strip()
+
+    return requester_name, requester_email
 
 
 def _normalise_status_filter(
@@ -130,8 +219,8 @@ def _format_line_description(
         labour_hours=float(_quantize(labour_hours_decimal)) if labour_minutes else 0.0,
         labour_duration=labour_duration,
         labour_suffix=f" · {labour_name}" if labour_name else "",
-        requester_name=requester_name or str(ticket.get("requester_name") or "").strip(),
-        requester_email=requester_email or str(ticket.get("requester_email") or "").strip(),
+        requester_name=requester_name or _ticket_requester_name(ticket),
+        requester_email=requester_email or _ticket_requester_email(ticket),
         ticket_created_date=ticket_created_date,
         ticket_resolved_date=ticket_resolved_date,
         billable_minutes=billable_minutes,
@@ -895,7 +984,8 @@ async def build_ticket_invoices(
         return []
 
     tickets_by_company: dict[int, list[dict[str, Any]]] = {}
-    requester_cache: dict[int, dict[str, Any]] = {}
+    requester_cache: dict[int, Mapping[str, Any]] = {}
+    staff_requester_cache: dict[int, Mapping[str, Any]] = {}
     for ticket_id in unique_ticket_ids:
         ticket = await fetch_ticket(ticket_id)
         if not ticket:
@@ -962,28 +1052,11 @@ async def build_ticket_invoices(
             non_billable_minutes = int(item.get("non_billable_minutes") or 0)
             total_minutes += ticket_minutes
             labour_groups = item.get("labour_groups") or []
-            requester_name = str(ticket.get("requester_name") or "").strip()
-            requester_email = str(
-                ticket.get("requester_email") or ticket.get("email") or ""
-            ).strip()
-
-            if not requester_name or not requester_email:
-                requester_id = ticket.get("requester_id")
-                try:
-                    requester_id_int = int(requester_id) if requester_id is not None else 0
-                except (TypeError, ValueError):
-                    requester_id_int = 0
-                if requester_id_int > 0:
-                    requester = requester_cache.get(requester_id_int)
-                    if requester is None:
-                        requester = await users_repo.get_user_by_id(requester_id_int) or {}
-                        requester_cache[requester_id_int] = requester
-                    if not requester_name:
-                        first = str(requester.get("first_name") or "").strip()
-                        last = str(requester.get("last_name") or "").strip()
-                        requester_name = " ".join(part for part in (first, last) if part)
-                    if not requester_email:
-                        requester_email = str(requester.get("email") or "").strip()
+            requester_name, requester_email = await resolve_ticket_requester(
+                ticket,
+                requester_cache=requester_cache,
+                staff_requester_cache=staff_requester_cache,
+            )
 
             ticket_created_date = _format_date_value(ticket.get("created_at"))
             ticket_resolved_date = _format_date_value(ticket.get("closed_at"))
