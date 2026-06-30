@@ -228,7 +228,7 @@ def test_generate_invoice_billable_ticket_uses_hours_and_minutes(monkeypatch):
     result = asyncio.run(invoice_generator.generate_invoice(1))
 
     assert result["status"] == "succeeded"
-    assert created_lines[0]["description"] == "Ticket #55: VPN help — Remote (2 Hours 30 Mins)"
+    assert created_lines[0]["description"] == "Ticket 55: VPN help · Remote (2 Hours 30 Mins)"
 
 
 # ---------------------------------------------------------------------------

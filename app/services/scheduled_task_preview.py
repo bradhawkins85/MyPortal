@@ -9,6 +9,7 @@ from app.repositories import invoices as invoice_repo
 from app.repositories import ticket_billed_time_entries as billed_time_repo
 from app.repositories import tickets as tickets_repo
 from app.services import invoice_generator as invoice_generator_service
+from app.services import modules as modules_service
 from app.services import subscription_price_changes
 from app.services import xero as xero_service
 
@@ -94,6 +95,11 @@ async def _preview_sync_to_xero(company_id: int, company: Mapping[str, Any], *, 
 
 
 async def _preview_generate_invoice(company_id: int, company: Mapping[str, Any]) -> dict[str, Any]:
+    try:
+        settings = await modules_service.get_module_settings("xero") or {}
+    except RuntimeError:
+        settings = {}
+    line_item_template = str(settings.get("line_item_description_template") or "").strip()
     context = await xero_service.build_invoice_context(company_id)
     recurring_items = await xero_service.build_recurring_invoice_items(company_id, tax_type=None, context=context)
     tickets = await tickets_repo.list_tickets(company_id=company_id, limit=1000)
@@ -111,14 +117,53 @@ async def _preview_generate_invoice(company_id: int, company: Mapping[str, Any])
         if minutes <= 0:
             continue
         billable_reply_count += len([r for r in replies if r.get("id") in unbilled_ids and r.get("is_billable")])
-        ticket_items.append({
-            "type": "ticket",
-            "id": int(ticket_id),
-            "label": f"Ticket #{ticket_id}: {ticket.get('subject') or ''}".strip(),
-            "minutes": minutes,
-            "hours": str(invoice_generator_service._minutes_to_hours(minutes)),
-            "action": "Add billable ticket time to the generated invoice",
-        })
+        labour_map: dict[tuple[str | None, str | None], dict[str, Any]] = {}
+        for reply in replies:
+            if reply.get("id") not in unbilled_ids or not reply.get("is_billable"):
+                continue
+            reply_minutes = invoice_generator_service._coerce_minutes(reply.get("minutes_spent"))
+            if reply_minutes <= 0:
+                continue
+            labour_code = str(reply.get("labour_type_code") or "").strip() or None
+            labour_name = str(reply.get("labour_type_name") or "").strip() or None
+            labour_rate = reply.get("labour_type_rate")
+            key = (labour_code, labour_name)
+            bucket = labour_map.get(key)
+            if not bucket:
+                bucket = {"minutes": 0, "code": labour_code, "name": labour_name, "rate": labour_rate}
+                labour_map[key] = bucket
+            bucket["minutes"] += reply_minutes
+        for group in labour_map.values():
+            group_minutes = int(group.get("minutes") or 0)
+            if group_minutes <= 0:
+                continue
+            hours = invoice_generator_service._minutes_to_hours(group_minutes)
+            description = invoice_generator_service._build_ticket_line_description(
+                line_item_template,
+                ticket,
+                group,
+                group_minutes,
+                billable_minutes=minutes,
+            )
+            unit_amount = invoice_generator_service._to_decimal(group.get("rate")) or Decimal("0")
+            xero_line_item: dict[str, Any] = {
+                "Description": description,
+                "Quantity": float(hours),
+                "UnitAmount": float(unit_amount),
+            }
+            labour_code = str(group.get("code") or "").strip()
+            if labour_code:
+                xero_line_item["ItemCode"] = labour_code
+            ticket_items.append({
+                "type": "ticket",
+                "id": int(ticket_id),
+                "label": description,
+                "minutes": group_minutes,
+                "hours": str(hours),
+                "xeroLineItemTemplate": line_item_template or "Ticket {ticket_id}: {ticket_subject}{labour_suffix}",
+                "xeroLineItem": xero_line_item,
+                "action": "Add billable ticket time using this Xero line item format",
+            })
     recurring_total = sum(Decimal(str(i.get("Quantity") or 0)) * Decimal(str(i.get("UnitAmount") or 0)) for i in recurring_items)
     return {
         "status": "ready" if recurring_items or ticket_items else "skipped",
@@ -126,7 +171,7 @@ async def _preview_generate_invoice(company_id: int, company: Mapping[str, Any])
         "company_id": company_id,
         "company_name": company.get("name") or f"Company #{company_id}",
         "summary": "A draft MyPortal invoice will be generated." if recurring_items or ticket_items else "No active recurring invoice items or billable tickets were found.",
-        "totals": {"recurringLineCount": len(recurring_items), "ticketCount": len(ticket_items), "billableReplyCount": billable_reply_count, "recurringAmount": _money(recurring_total)},
+        "totals": {"recurringLineCount": len(recurring_items), "ticketLineCount": len(ticket_items), "billableReplyCount": billable_reply_count, "recurringAmount": _money(recurring_total)},
         "items": [{"type": "recurring", "label": i.get("Description") or i.get("ItemCode") or "Recurring item", "amount": _money(Decimal(str(i.get("Quantity") or 0)) * Decimal(str(i.get("UnitAmount") or 0))), "action": "Add recurring line to the generated invoice"} for i in recurring_items] + ticket_items,
     }
 
