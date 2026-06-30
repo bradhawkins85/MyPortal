@@ -146,24 +146,21 @@ async def _preview_generate_invoice(company_id: int, company: Mapping[str, Any])
                 billable_minutes=minutes,
             )
             unit_amount = invoice_generator_service._to_decimal(group.get("rate")) or Decimal("0")
-            xero_line_item: dict[str, Any] = {
-                "Description": description,
-                "Quantity": float(hours),
-                "UnitAmount": float(unit_amount),
-            }
             labour_code = str(group.get("code") or "").strip()
-            if labour_code:
-                xero_line_item["ItemCode"] = labour_code
-            ticket_items.append({
+            ticket_item: dict[str, Any] = {
                 "type": "ticket",
                 "id": int(ticket_id),
                 "label": description,
                 "minutes": group_minutes,
                 "hours": str(hours),
-                "xeroLineItemTemplate": line_item_template or "Ticket {ticket_id}: {ticket_subject}{labour_suffix}",
-                "xeroLineItem": xero_line_item,
+                "xeroDescription": description,
+                "xeroQuantity": str(hours),
+                "xeroUnitAmount": _money(unit_amount),
                 "action": "Add billable ticket time using this Xero line item format",
-            })
+            }
+            if labour_code:
+                ticket_item["xeroItemCode"] = labour_code
+            ticket_items.append(ticket_item)
     recurring_total = sum(Decimal(str(i.get("Quantity") or 0)) * Decimal(str(i.get("UnitAmount") or 0)) for i in recurring_items)
     return {
         "status": "ready" if recurring_items or ticket_items else "skipped",
