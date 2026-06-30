@@ -6,6 +6,7 @@ storing them locally in MyPortal (no external accounting system required).
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+import os
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
@@ -18,6 +19,13 @@ from app.repositories import ticket_billed_time_entries as billed_time_repo
 from app.repositories import tickets as tickets_repo
 from app.services import modules as modules_service
 from app.services import xero as xero_service
+
+
+DEFAULT_XERO_LINE_ITEM_TEMPLATE = "Ticket {ticket_id}: {ticket_subject}{labour_suffix} ({labour_duration})"
+
+
+def _env_xero_line_item_template() -> str:
+    return str(os.getenv("XERO_LINE_ITEM_TEMPLATE", "")).strip()
 
 
 def _minutes_to_hours(minutes: int) -> Decimal:
@@ -41,11 +49,15 @@ def _to_decimal(value: Any) -> Decimal | None:
 
 
 async def _get_xero_line_item_template() -> str:
+    env_template = _env_xero_line_item_template()
+    if env_template:
+        return env_template
+
     try:
         settings = await modules_service.get_module_settings("xero") or {}
     except RuntimeError:
-        return "Ticket {ticket_id}: {ticket_subject}{labour_suffix} ({labour_duration})"
-    return str(settings.get("line_item_description_template") or "").strip()
+        settings = {}
+    return str(settings.get("line_item_description_template") or "").strip() or DEFAULT_XERO_LINE_ITEM_TEMPLATE
 
 
 def _build_ticket_line_description(

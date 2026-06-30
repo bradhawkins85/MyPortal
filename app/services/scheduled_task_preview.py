@@ -95,11 +95,7 @@ async def _preview_sync_to_xero(company_id: int, company: Mapping[str, Any], *, 
 
 
 async def _preview_generate_invoice(company_id: int, company: Mapping[str, Any]) -> dict[str, Any]:
-    try:
-        settings = await modules_service.get_module_settings("xero") or {}
-    except RuntimeError:
-        settings = {}
-    line_item_template = str(settings.get("line_item_description_template") or "").strip()
+    line_item_template = await invoice_generator_service._get_xero_line_item_template()
     context = await xero_service.build_invoice_context(company_id)
     recurring_items = await xero_service.build_recurring_invoice_items(company_id, tax_type=None, context=context)
     tickets = await tickets_repo.list_tickets(company_id=company_id, limit=1000)
