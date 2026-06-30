@@ -16,7 +16,7 @@ from app.repositories import invoice_lines as invoice_lines_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import ticket_billed_time_entries as billed_time_repo
 from app.repositories import tickets as tickets_repo
-from app.services.billing_time import format_billable_minutes
+from app.services import modules as modules_service
 from app.services import xero as xero_service
 
 
@@ -38,6 +38,33 @@ def _to_decimal(value: Any) -> Decimal | None:
         return Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         return None
+
+
+async def _get_xero_line_item_template() -> str:
+    try:
+        settings = await modules_service.get_module_settings("xero") or {}
+    except RuntimeError:
+        return "Ticket {ticket_id}: {ticket_subject}{labour_suffix} ({labour_duration})"
+    return str(settings.get("line_item_description_template") or "").strip()
+
+
+def _build_ticket_line_description(
+    template: str,
+    ticket: dict[str, Any],
+    labour_group: dict[str, Any],
+    minutes: int,
+    *,
+    billable_minutes: int,
+    non_billable_minutes: int = 0,
+) -> str:
+    return xero_service._format_line_description(
+        template,
+        ticket,
+        labour_group,
+        minutes,
+        billable_minutes=billable_minutes,
+        non_billable_minutes=non_billable_minutes,
+    )
 
 
 async def _generate_invoice_number() -> str:
@@ -81,6 +108,8 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
         tax_type=None,
         context=context,
     )
+
+    line_item_template = await _get_xero_line_item_template()
 
     # Build ticket line items for billable tickets
     ticket_line_items: list[dict[str, Any]] = []
@@ -142,21 +171,20 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
             continue
 
         labour_groups = list(labour_map.values())
-        ticket_subject = str(ticket.get("subject") or "").strip()
-
         for group in labour_groups:
             group_minutes = int(group.get("minutes") or 0)
             if group_minutes <= 0:
                 continue
             hours_decimal = _minutes_to_hours(group_minutes)
-            duration_text = format_billable_minutes(group_minutes)
             labour_name = str(group.get("name") or "").strip()
             labour_code = str(group.get("code") or "").strip()
-
-            if labour_name:
-                description = f"Ticket #{ticket_id}: {ticket_subject} — {labour_name} ({duration_text})"
-            else:
-                description = f"Ticket #{ticket_id}: {ticket_subject} ({duration_text})"
+            description = _build_ticket_line_description(
+                line_item_template,
+                ticket,
+                group,
+                group_minutes,
+                billable_minutes=billable_minutes,
+            )
 
             local_rate = group.get("rate")
             rate: Decimal
