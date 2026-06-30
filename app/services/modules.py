@@ -45,6 +45,9 @@ _TACTICALRMM_RATE_LIMIT_LOCK = asyncio.Lock()
 _TACTICALRMM_LAST_REQUEST_AT: float | None = None
 _TACTICALRMM_DEFAULT_CALLS_PER_SECOND = 1.0
 
+_XERO_TOKEN_REFRESH_LOCK = asyncio.Lock()
+_XERO_TOKEN_EXPIRY_BUFFER = timedelta(minutes=5)
+
 
 # Module slug constants
 XERO_MODULE_SLUG = "xero"
@@ -292,6 +295,24 @@ async def refresh_xero_access_token() -> str:
     return access_token
 
 
+def _xero_cached_access_token(credentials: Mapping[str, Any] | None) -> str | None:
+    """Return the cached Xero access token when it is safely reusable."""
+    if not credentials:
+        return None
+
+    access_token = str(credentials.get("access_token", "")).strip()
+    token_expires_at = credentials.get("token_expires_at")
+    if not (access_token and isinstance(token_expires_at, datetime)):
+        return None
+
+    if token_expires_at.tzinfo is None:
+        token_expires_at = token_expires_at.replace(tzinfo=timezone.utc)
+
+    if datetime.now(timezone.utc) + _XERO_TOKEN_EXPIRY_BUFFER < token_expires_at:
+        return access_token
+    return None
+
+
 async def acquire_xero_access_token() -> str:
     """Get a valid Xero access token, refreshing if necessary.
     
@@ -304,26 +325,25 @@ async def acquire_xero_access_token() -> str:
     credentials = await get_xero_credentials()
     if not credentials:
         raise RuntimeError("Xero credentials not configured")
-    
-    access_token = credentials.get("access_token", "").strip()
-    token_expires_at = credentials.get("token_expires_at")
-    
-    # Check if we have a valid token
-    if access_token and token_expires_at:
-        # Add 5 minute buffer before expiry
-        now = datetime.now(timezone.utc)
-        buffer_time = timedelta(minutes=5)
-        
-        # Ensure token_expires_at is timezone-aware
-        if token_expires_at.tzinfo is None:
-            token_expires_at = token_expires_at.replace(tzinfo=timezone.utc)
-        
-        if now + buffer_time < token_expires_at:
-            # Token is still valid
-            return access_token
-    
-    # Token is missing or expired, refresh it
-    return await refresh_xero_access_token()
+
+    cached_token = _xero_cached_access_token(credentials)
+    if cached_token:
+        return cached_token
+
+    # Xero rotates refresh tokens. Serialise refreshes and re-read the token
+    # after waiting so a concurrent request does not reuse an already-rotated
+    # refresh token and poison the integration with intermittent invalid_grant
+    # failures.
+    async with _XERO_TOKEN_REFRESH_LOCK:
+        refreshed_credentials = await get_xero_credentials()
+        if not refreshed_credentials:
+            raise RuntimeError("Xero credentials not configured")
+
+        cached_token = _xero_cached_access_token(refreshed_credentials)
+        if cached_token:
+            return cached_token
+
+        return await refresh_xero_access_token()
 
 
 def _merge_settings(defaults: Mapping[str, Any], overrides: Mapping[str, Any] | None) -> dict[str, Any]:
