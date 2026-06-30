@@ -95,6 +95,14 @@ async def invoices_page(request: Request):
         if status_slug == "paid":
             paid_count += 1
         status_class = _STATUS_CLASS_MAP.get(status_slug, "status--invited" if status_slug else "")
+        created_value = record.get("created_at")
+        created_iso = ""
+        created_display = None
+        if isinstance(created_value, datetime):
+            if created_value.tzinfo is None:
+                created_value = created_value.replace(tzinfo=timezone.utc)
+            created_iso = created_value.astimezone(timezone.utc).isoformat()
+            created_display = created_iso
         due_value = record.get("due_date")
         if isinstance(due_value, datetime):
             due_value = due_value.date()
@@ -110,6 +118,9 @@ async def invoices_page(request: Request):
             | {
                 "amount": amount_decimal,
                 "amount_display": f"${amount_decimal:,.2f}",
+                "created_display": created_display,
+                "created_iso": created_iso,
+                "created_sort": created_iso,
                 "due_display": due_display,
                 "due_iso": due_iso,
                 "due_sort": due_iso,
@@ -158,6 +169,14 @@ async def invoice_detail_page(request: Request, invoice_id: int):
         status_slug = "xero"
         status_text_raw = "Xero"
     status_class = _STATUS_CLASS_MAP.get(status_slug, "status--invited" if status_slug else "")
+    created_value = invoice.get("created_at")
+    created_iso = ""
+    created_display = None
+    if isinstance(created_value, datetime):
+        if created_value.tzinfo is None:
+            created_value = created_value.replace(tzinfo=timezone.utc)
+        created_iso = created_value.astimezone(timezone.utc).isoformat()
+        created_display = created_iso
     due_value = invoice.get("due_date")
     if isinstance(due_value, datetime):
         due_value = due_value.date()
@@ -197,6 +216,8 @@ async def invoice_detail_page(request: Request, invoice_id: int):
         | {
             "amount": amount_decimal,
             "amount_display": f"${amount_decimal:,.2f}",
+            "created_display": created_display,
+            "created_iso": created_iso,
             "due_display": due_display,
             "status_display": status_text_raw.title() if status_text_raw else "—",
             "status_class": status_class,

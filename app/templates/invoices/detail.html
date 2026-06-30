@@ -19,7 +19,8 @@
         <h2 class="card__title">{{ invoice.invoice_number }}</h2>
         <p class="card__subtitle">
           {% if company %}{{ company.name }} · {% endif %}
-          {% if invoice.due_display %}Due {{ invoice.due_display }}{% else %}No due date{% endif %}
+          Created {% if invoice.created_display %}<span data-utc="{{ invoice.created_iso }}">{{ invoice.created_display }}</span>{% else %}unknown{% endif %}
+          · {% if invoice.due_display %}Due {{ invoice.due_display }}{% else %}No due date{% endif %}
         </p>
       </div>
       <div class="card__controls">

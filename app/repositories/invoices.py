@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -21,9 +21,13 @@ def _normalise_invoice(row: dict[str, Any]) -> dict[str, Any]:
         invoice["due_date"] = due_date.date()
     elif due_date is None or isinstance(due_date, date):
         invoice["due_date"] = due_date
-    synced_at = invoice.get("synced_to_xero_at")
-    if synced_at is not None and not isinstance(synced_at, datetime):
-        invoice["synced_to_xero_at"] = datetime.fromisoformat(str(synced_at))
+    for key in ("created_at", "synced_to_xero_at"):
+        value = invoice.get(key)
+        if value is not None and not isinstance(value, datetime):
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            invoice[key] = parsed
+        if isinstance(invoice.get(key), datetime) and invoice[key].tzinfo is None:
+            invoice[key] = invoice[key].replace(tzinfo=timezone.utc)
     return invoice
 
 
@@ -64,10 +68,10 @@ async def create_invoice(
 ) -> dict[str, Any]:
     invoice_id = await db.execute_returning_lastrowid(
         """
-        INSERT INTO invoices (company_id, invoice_number, amount, due_date, status)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO invoices (company_id, invoice_number, amount, due_date, status, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
         """,
-        (company_id, invoice_number, amount, due_date, status),
+        (company_id, invoice_number, amount, due_date, status, datetime.now(timezone.utc)),
     )
     if not invoice_id:
         raise RuntimeError("Failed to create invoice")

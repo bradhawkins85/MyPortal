@@ -49,6 +49,7 @@
           <tr>
             <th scope="col" data-sort="string" data-mobile-priority="essential">Invoice #</th>
             <th scope="col" data-sort="number" data-mobile-priority="essential">Amount</th>
+            <th scope="col" data-sort="date" data-mobile-priority="essential">Created</th>
             <th scope="col" data-sort="date" data-mobile-priority="essential">Due date</th>
             <th scope="col" data-sort="string" data-mobile-priority="essential">Status</th>
             {% if can_delete_invoices %}<th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>{% endif %}
@@ -61,6 +62,13 @@
               <a href="/invoices/{{ invoice.id }}" class="link">{{ invoice.invoice_number }}</a>
             </td>
             <td data-label="Amount" data-value="{{ invoice.amount }}">{{ invoice.amount_display }}</td>
+            <td data-label="Created" data-value="{{ invoice.created_sort }}" data-utc="{{ invoice.created_iso }}">
+              {% if invoice.created_display %}
+                {{ invoice.created_display }}
+              {% else %}
+                <span class="text-muted">Unknown</span>
+              {% endif %}
+            </td>
             <td data-label="Due date" data-value="{{ invoice.due_sort }}" data-utc="{{ invoice.due_iso }}">
               {% if invoice.due_display %}
                 {{ invoice.due_display }}
