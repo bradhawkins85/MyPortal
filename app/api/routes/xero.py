@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -15,9 +18,11 @@ from loguru import logger
 from app.core.config import Settings, get_settings
 from app.security.flash import flash_redirect
 from app.core.logging import log_error, log_info
+from app.repositories import invoices as invoice_repo
 from app.repositories import users as user_repo
 from app.security.session import session_manager
 from app.services import modules as modules_service
+from app.services import audit as audit_service
 
 router = APIRouter(prefix="/api/integration-modules/xero", tags=["Xero"])
 oauth_router = APIRouter(prefix="/xero", tags=["Xero OAuth"])
@@ -51,6 +56,87 @@ def _get_state_serializer() -> URLSafeSerializer:
     return URLSafeSerializer(_get_settings().secret_key, salt="xero-oauth")
 
 
+def _verify_xero_webhook_signature(body: bytes, signature: str | None, webhook_key: str | None) -> bool:
+    """Validate Xero's HMAC-SHA256 webhook signature against the raw body."""
+
+    key = (webhook_key or "").strip()
+    provided = (signature or "").strip()
+    if not key or not provided:
+        return False
+    digest = hmac.new(key.encode("utf-8"), body, hashlib.sha256).digest()
+    expected = base64.b64encode(digest).decode("ascii")
+    return hmac.compare_digest(expected, provided)
+
+
+def _extract_xero_invoice_id(event: dict[str, Any]) -> str | None:
+    invoice_id = str(event.get("resourceId") or event.get("resourceID") or "").strip()
+    if invoice_id:
+        return invoice_id
+    resource_url = str(event.get("resourceUrl") or event.get("resourceURL") or "").strip().rstrip("/")
+    if "/Invoices/" in resource_url:
+        return resource_url.rsplit("/", 1)[-1] or None
+    return None
+
+
+async def _fetch_xero_invoice(invoice_id: str) -> dict[str, Any] | None:
+    credentials = await modules_service.get_xero_credentials()
+    tenant_id = str((credentials or {}).get("tenant_id") or "").strip()
+    if not tenant_id:
+        raise RuntimeError("Xero tenant ID is not configured")
+    access_token = await modules_service.acquire_xero_access_token()
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(
+            f"https://api.xero.com/api.xro/2.0/Invoices/{invoice_id}",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "xero-tenant-id": tenant_id,
+                "Accept": "application/json",
+            },
+        )
+        response.raise_for_status()
+    invoices = response.json().get("Invoices") or []
+    return invoices[0] if invoices else None
+
+
+async def _apply_xero_invoice_event(event: dict[str, Any], request: Request) -> dict[str, Any]:
+    category = str(event.get("eventCategory") or "").upper()
+    if category != "INVOICE":
+        return {"status": "ignored", "reason": "unsupported category"}
+    invoice_id = _extract_xero_invoice_id(event)
+    if not invoice_id:
+        return {"status": "ignored", "reason": "missing invoice id"}
+
+    xero_invoice = await _fetch_xero_invoice(invoice_id)
+    if not xero_invoice:
+        return {"status": "ignored", "reason": "invoice not found in Xero"}
+    xero_status = str(xero_invoice.get("Status") or "").strip().upper()
+    if xero_status != "PAID":
+        return {"status": "ignored", "reason": f"Xero status {xero_status or 'unknown'}"}
+
+    local_invoice = await invoice_repo.get_invoice_by_xero_invoice_id(invoice_id)
+    if not local_invoice:
+        invoice_number = str(xero_invoice.get("InvoiceNumber") or "").strip()
+        if invoice_number:
+            local_invoice = await invoice_repo.get_invoice_by_number(invoice_number)
+    if not local_invoice:
+        return {"status": "ignored", "reason": "local invoice not found"}
+    if str(local_invoice.get("status") or "").strip().lower() == "paid":
+        return {"status": "unchanged", "invoice_id": local_invoice.get("id")}
+
+    updated = await invoice_repo.patch_invoice(int(local_invoice["id"]), status="paid")
+    await audit_service.record(
+        action="invoice.xero_webhook_paid",
+        request=request,
+        user_id=None,
+        entity_type="invoice",
+        entity_id=int(updated["id"]),
+        before=local_invoice,
+        after=updated,
+        metadata={"xero_invoice_id": invoice_id, "xero_event": event},
+    )
+    return {"status": "updated", "invoice_id": updated.get("id")}
+
+
 async def _ensure_module_enabled() -> dict[str, Any]:
     module = await modules_service.get_module("xero", redact=False)
     if not module or not module.get("enabled"):
@@ -62,64 +148,74 @@ async def _ensure_module_enabled() -> dict[str, Any]:
 
 
 @router.post(
+    "/webhook",
+    status_code=status.HTTP_200_OK,
+    name="xero_receive_webhook",
+)
+async def receive_webhook(request: Request) -> dict[str, Any]:
+    from app.services import webhook_monitor
+
+    module = await _ensure_module_enabled()
+    source_url = str(request.url)
+    request_headers = dict(request.headers)
+    body = await request.body()
+    webhook_key = (module.get("settings") or {}).get("webhook_key")
+    if not _verify_xero_webhook_signature(body, request.headers.get("x-xero-signature"), webhook_key):
+        await webhook_monitor.log_incoming_webhook(
+            name="Xero Webhook - Invalid Signature",
+            source_url=source_url,
+            payload=body.decode("utf-8", errors="replace"),
+            headers=request_headers,
+            response_status=401,
+            response_body="Invalid signature",
+            error_message="Invalid Xero webhook signature",
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature")
+
+    try:
+        payload = json.loads(body.decode("utf-8")) if body else {}
+    except json.JSONDecodeError as exc:
+        await webhook_monitor.log_incoming_webhook(
+            name="Xero Webhook - Invalid JSON",
+            source_url=source_url,
+            payload=body.decode("utf-8", errors="replace"),
+            headers=request_headers,
+            response_status=400,
+            response_body="Invalid JSON payload",
+            error_message=str(exc),
+        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON payload") from exc
+
+    results = []
+    for event in payload.get("events") or []:
+        try:
+            results.append(await _apply_xero_invoice_event(event, request))
+        except Exception as exc:
+            logger.exception("Failed to process Xero invoice webhook event")
+            results.append({"status": "failed", "error": str(exc)})
+
+    has_failure = any(result.get("status") == "failed" for result in results)
+    response_status = 502 if has_failure else 200
+    await webhook_monitor.log_incoming_webhook(
+        name="Xero Webhook - Invoice Updates",
+        source_url=source_url,
+        payload=payload,
+        headers=request_headers,
+        response_status=response_status,
+        response_body=json.dumps({"status": "accepted", "results": results}),
+    )
+    if has_failure:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to process one or more Xero webhook events")
+    return {"status": "accepted", "results": results}
+
+
+@router.post(
     "/callback",
     status_code=status.HTTP_202_ACCEPTED,
     name="xero_receive_callback",
 )
 async def receive_callback(request: Request) -> dict[str, str]:
-    from app.services import webhook_monitor
-    
-    await _ensure_module_enabled()
-
-    source_url = str(request.url)
-    request_headers = dict(request.headers)
-    
-    body = await request.body()
-    payload: dict[str, Any]
-    if not body:
-        payload = {}
-    else:
-        try:
-            payload = json.loads(body.decode("utf-8"))
-        except json.JSONDecodeError as exc:
-            # Log the failed request
-            await webhook_monitor.log_incoming_webhook(
-                name="Xero Webhook - Invalid JSON",
-                source_url=source_url,
-                payload=body.decode("utf-8", errors="replace"),
-                headers=request_headers,
-                response_status=400,
-                response_body="Invalid JSON payload",
-                error_message=str(exc),
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid JSON payload",
-            ) from exc
-
-    xero_headers = {
-        key: value
-        for key, value in request.headers.items()
-        if key.lower().startswith("x-xero-")
-    }
-    remote_addr = request.client.host if request.client else None
-    logger.info(
-        "Received Xero webhook callback",
-        remote_addr=remote_addr,
-        xero_headers=xero_headers,
-        payload_keys=sorted(payload.keys()),
-    )
-    
-    # Log the incoming webhook
-    await webhook_monitor.log_incoming_webhook(
-        name="Xero Webhook - Callback",
-        source_url=source_url,
-        payload=payload,
-        headers=request_headers,
-        response_status=202,
-        response_body="Accepted",
-    )
-    
+    """Legacy Xero callback endpoint retained for existing callback integrations."""
     return {"status": "accepted"}
 
 
