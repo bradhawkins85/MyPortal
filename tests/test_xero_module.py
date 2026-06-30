@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1084,3 +1084,43 @@ async def test_sync_company_uses_existing_contact_when_xero_id_missing():
     posted_body = post_call[1]["json"] if "json" in post_call[1] else post_call[0][1]
     invoice = posted_body["Invoices"][0]
     assert invoice["Contact"].get("ContactID") == "xero-contact-abc"
+
+@pytest.mark.anyio("asyncio")
+async def test_acquire_xero_access_token_rechecks_cache_after_refresh_lock(monkeypatch):
+    """Waiting requests must not reuse a Xero refresh token rotated by another request."""
+    expired_credentials = {
+        "access_token": "expired-access-token",
+        "token_expires_at": datetime(2026, 6, 30, tzinfo=timezone.utc),
+    }
+    valid_credentials = {
+        "access_token": "fresh-access-token",
+        "token_expires_at": (
+            datetime.now(timezone.utc)
+            + modules_service._XERO_TOKEN_EXPIRY_BUFFER
+            + timedelta(minutes=10)
+        ),
+    }
+    calls = 0
+
+    async def fake_get_xero_credentials():
+        nonlocal calls
+        calls += 1
+        return expired_credentials if calls == 1 else valid_credentials
+
+    refresh = AsyncMock(return_value="should-not-be-used")
+    lock = modules_service.asyncio.Lock()
+    await lock.acquire()
+
+    monkeypatch.setattr(modules_service, "get_xero_credentials", fake_get_xero_credentials)
+    monkeypatch.setattr(modules_service, "refresh_xero_access_token", refresh)
+    monkeypatch.setattr(modules_service, "_XERO_TOKEN_REFRESH_LOCK", lock)
+
+    task = modules_service.asyncio.create_task(modules_service.acquire_xero_access_token())
+    await modules_service.asyncio.sleep(0)
+    lock.release()
+
+    token = await task
+
+    assert token == "fresh-access-token"
+    assert calls == 2
+    refresh.assert_not_awaited()
