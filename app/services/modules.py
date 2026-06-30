@@ -1039,6 +1039,10 @@ def _resolve_module_settings_for_runtime(
 
     raw_settings = _parse_module_settings((module or {}).get("settings"))
     resolved = _coerce_settings(slug, raw_settings, module)
+    if slug == "xero":
+        env_line_item_template = str(os.getenv("XERO_LINE_ITEM_TEMPLATE", "")).strip()
+        if env_line_item_template:
+            resolved["line_item_description_template"] = env_line_item_template
     if not _force_env_module_settings():
         return resolved
     env_only = _coerce_settings(slug, {}, None)
