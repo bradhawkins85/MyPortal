@@ -1112,6 +1112,28 @@
   }
 
 
+  function humanizePreviewKey(key) {
+    return String(key || '')
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/^./, (char) => char.toUpperCase());
+  }
+
+  function formatPreviewValue(value) {
+    if (value === null || value === undefined || value === '') {
+      return '';
+    }
+    if (Array.isArray(value)) {
+      return value.map(formatPreviewValue).filter(Boolean).join(', ');
+    }
+    if (typeof value === 'object') {
+      return Object.entries(value)
+        .filter(([, nestedValue]) => nestedValue !== null && nestedValue !== undefined && nestedValue !== '')
+        .map(([nestedKey, nestedValue]) => `${humanizePreviewKey(nestedKey)}: ${formatPreviewValue(nestedValue)}`)
+        .join('; ');
+    }
+    return String(value);
+  }
+
   function formatPreviewDetails(item) {
     if (!item || typeof item !== 'object') {
       return '—';
@@ -1119,7 +1141,8 @@
     const hidden = new Set(['type', 'id', 'label', 'action']);
     return Object.entries(item)
       .filter(([key, value]) => !hidden.has(key) && value !== null && value !== undefined && value !== '')
-      .map(([key, value]) => `${key}: ${value}`)
+      .map(([key, value]) => `${humanizePreviewKey(key)}: ${formatPreviewValue(value)}`)
+      .filter(Boolean)
       .join(' · ') || '—';
   }
 
@@ -1138,7 +1161,7 @@
         item.className = 'detail-grid__item';
         const label = document.createElement('span');
         label.className = 'detail-grid__label';
-        label.textContent = key.replace(/([A-Z])/g, ' $1').replace(/^./, (char) => char.toUpperCase());
+        label.textContent = humanizePreviewKey(key);
         const data = document.createElement('strong');
         data.className = 'detail-grid__value';
         data.textContent = String(value);
