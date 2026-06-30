@@ -200,6 +200,37 @@ def test_generate_invoice_recurring_items_only(monkeypatch):
     assert created_invoices[0]["company_id"] == 1
 
 
+def test_generate_invoice_billable_ticket_uses_hours_and_minutes(monkeypatch):
+    created_lines: list[dict[str, Any]] = []
+
+    async def fake_create_invoice(**kwargs):
+        return {"id": 202, **kwargs}
+
+    async def fake_create_line(**kwargs):
+        created_lines.append(kwargs)
+        return {"id": len(created_lines), **kwargs}
+
+    monkeypatch.setattr(invoice_generator.company_repo, "get_company_by_id", AsyncMock(return_value=_make_company()))
+    monkeypatch.setattr(invoice_generator.xero_service, "build_invoice_context", AsyncMock(return_value={}))
+    monkeypatch.setattr(invoice_generator.xero_service, "build_recurring_invoice_items", AsyncMock(return_value=[]))
+    monkeypatch.setattr(invoice_generator.tickets_repo, "list_tickets", AsyncMock(return_value=[{"id": 55, "subject": "VPN help"}]))
+    monkeypatch.setattr(invoice_generator.billed_time_repo, "get_unbilled_reply_ids", AsyncMock(return_value=[1, 2]))
+    monkeypatch.setattr(invoice_generator.tickets_repo, "list_replies", AsyncMock(return_value=[
+        {"id": 1, "minutes_spent": 120, "is_billable": True, "labour_type_name": "Remote", "labour_type_code": "REMOTE", "labour_type_rate": "100"},
+        {"id": 2, "minutes_spent": 30, "is_billable": True, "labour_type_name": "Remote", "labour_type_code": "REMOTE", "labour_type_rate": "100"},
+    ]))
+    monkeypatch.setattr(invoice_generator.invoice_repo, "create_invoice", fake_create_invoice)
+    monkeypatch.setattr(invoice_generator.invoice_repo, "get_max_invoice_seq", AsyncMock(return_value=0))
+    monkeypatch.setattr(invoice_generator.invoice_lines_repo, "create_invoice_line", fake_create_line)
+    monkeypatch.setattr(invoice_generator.billed_time_repo, "create_billed_time_entry", AsyncMock())
+    monkeypatch.setattr(invoice_generator.tickets_repo, "update_ticket", AsyncMock())
+
+    result = asyncio.run(invoice_generator.generate_invoice(1))
+
+    assert result["status"] == "succeeded"
+    assert created_lines[0]["description"] == "Ticket #55: VPN help — Remote (2 Hours 30 Mins)"
+
+
 # ---------------------------------------------------------------------------
 # get_max_invoice_seq helper in repository
 # ---------------------------------------------------------------------------
