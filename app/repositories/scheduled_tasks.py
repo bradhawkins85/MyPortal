@@ -215,6 +215,21 @@ async def set_task_active(task_id: int, active: bool) -> dict[str, Any] | None:
     return await get_task(task_id)
 
 
+async def has_run_since(task_id: int, since: datetime) -> bool:
+    """Return whether *task_id* has a recorded run at or after *since*."""
+    row = await db.fetch_one(
+        """
+        SELECT id
+        FROM scheduled_task_runs
+        WHERE task_id = %s AND started_at >= %s
+        ORDER BY started_at DESC
+        LIMIT 1
+        """,
+        (task_id, since.replace(tzinfo=None)),
+    )
+    return bool(row)
+
+
 async def record_task_run(
     task_id: int,
     *,
