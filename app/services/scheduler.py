@@ -5,7 +5,7 @@ import json
 import os
 import re
 from asyncio.subprocess import PIPE
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -582,6 +582,28 @@ class SchedulerService:
             if not lock_acquired:
                 # Another worker is already executing this task, skip silently
                 return
+
+            if not force_restart:
+                debounce_cutoff = datetime.now(timezone.utc) - timedelta(seconds=55)
+                try:
+                    recently_ran = await scheduled_tasks_repo.has_run_since(
+                        int(task_id), debounce_cutoff
+                    )
+                except Exception as exc:  # pragma: no cover - keep scheduler resilient
+                    recently_ran = False
+                    log_error(
+                        "Scheduled task duplicate-run check failed",
+                        task_id=task_id,
+                        command=command,
+                        error=str(exc),
+                    )
+                if recently_ran:
+                    log_info(
+                        "Skipping duplicate scheduled task fire",
+                        task_id=task_id,
+                        command=command,
+                    )
+                    return
 
             log_info("Running scheduled task", task_id=task_id, command=command)
             started_at = datetime.now(timezone.utc)
