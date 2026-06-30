@@ -237,6 +237,51 @@ async def test_build_ticket_invoices_supports_extended_template_placeholders():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_build_ticket_invoices_resolves_staff_requester_for_template():
+    async def fake_fetch_ticket(ticket_id: int):
+        return {
+            "id": ticket_id,
+            "company_id": 10,
+            "subject": "Printer jam",
+            "status": "resolved",
+            "requester_staff_id": 77,
+        }
+
+    async def fake_fetch_replies(ticket_id: int):
+        return [{"id": 1, "minutes_spent": 60, "is_billable": True}]
+
+    async def fake_fetch_company(company_id: int):
+        return {"id": company_id, "name": "Acme"}
+
+    with patch(
+        "app.services.xero.staff_repo.get_staff_by_id",
+        new=AsyncMock(return_value={
+            "id": 77,
+            "first_name": "Sam",
+            "last_name": "Requester",
+            "email": "sam@example.com",
+        }),
+    ):
+        invoices = await xero_service.build_ticket_invoices(
+            [42],
+            hourly_rate=Decimal("150"),
+            account_code="400",
+            tax_type=None,
+            line_amount_type="Exclusive",
+            reference_prefix="Support",
+            description_template="Ticket {ticket_id}: {ticket_subject} - {requester_name} - {requester_email}",
+            fetch_ticket=fake_fetch_ticket,
+            fetch_replies=fake_fetch_replies,
+            fetch_company=fake_fetch_company,
+        )
+
+    assert len(invoices) == 1
+    assert invoices[0]["line_items"][0]["Description"] == (
+        "Ticket 42: Printer jam - Sam Requester - sam@example.com"
+    )
+
+
+@pytest.mark.anyio("asyncio")
 async def test_build_order_invoice_returns_payload_with_context():
     async def fake_fetch_summary(order_number: str, company_id: int):
         return {"order_number": order_number, "status": "placed"}

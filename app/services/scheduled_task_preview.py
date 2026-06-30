@@ -129,6 +129,7 @@ async def _preview_generate_invoice(company_id: int, company: Mapping[str, Any])
                 bucket = {"minutes": 0, "code": labour_code, "name": labour_name, "rate": labour_rate}
                 labour_map[key] = bucket
             bucket["minutes"] += reply_minutes
+        requester_name, requester_email = await invoice_generator_service.resolve_ticket_requester(dict(ticket))
         for group in labour_map.values():
             group_minutes = int(group.get("minutes") or 0)
             if group_minutes <= 0:
@@ -140,6 +141,8 @@ async def _preview_generate_invoice(company_id: int, company: Mapping[str, Any])
                 group,
                 group_minutes,
                 billable_minutes=minutes,
+                requester_name=requester_name,
+                requester_email=requester_email,
             )
             unit_amount = invoice_generator_service._to_decimal(group.get("rate")) or Decimal("0")
             labour_code = str(group.get("code") or "").strip()
