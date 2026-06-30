@@ -20,6 +20,7 @@ from app.repositories import invoices as invoice_repo
 from app.repositories import ticket_billed_time_entries as billed_time_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as users_repo
+from app.services.billing_time import format_billable_minutes
 from app.services import modules as modules_service
 from app.services import webhook_monitor
 
@@ -118,6 +119,7 @@ def _format_line_description(
     labour_code = str((labour or {}).get("code") or "").strip()
     labour_minutes = max(0, int(minutes))
     labour_hours_decimal = _minutes_to_hours(labour_minutes) if labour_minutes else Decimal("0")
+    labour_duration = format_billable_minutes(labour_minutes)
     values = _TemplateValues(
         ticket_id=ticket.get("id"),
         ticket_subject=subject,
@@ -126,6 +128,7 @@ def _format_line_description(
         labour_code=labour_code,
         labour_minutes=labour_minutes,
         labour_hours=float(_quantize(labour_hours_decimal)) if labour_minutes else 0.0,
+        labour_duration=labour_duration,
         labour_suffix=f" · {labour_name}" if labour_name else "",
         requester_name=requester_name,
         requester_email=requester_email,

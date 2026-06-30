@@ -16,6 +16,7 @@ from app.repositories import invoice_lines as invoice_lines_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import ticket_billed_time_entries as billed_time_repo
 from app.repositories import tickets as tickets_repo
+from app.services.billing_time import format_billable_minutes
 from app.services import xero as xero_service
 
 
@@ -148,13 +149,14 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
             if group_minutes <= 0:
                 continue
             hours_decimal = _minutes_to_hours(group_minutes)
+            duration_text = format_billable_minutes(group_minutes)
             labour_name = str(group.get("name") or "").strip()
             labour_code = str(group.get("code") or "").strip()
 
             if labour_name:
-                description = f"Ticket #{ticket_id}: {ticket_subject} — {labour_name} ({hours_decimal}h)"
+                description = f"Ticket #{ticket_id}: {ticket_subject} — {labour_name} ({duration_text})"
             else:
-                description = f"Ticket #{ticket_id}: {ticket_subject} ({hours_decimal}h)"
+                description = f"Ticket #{ticket_id}: {ticket_subject} ({duration_text})"
 
             local_rate = group.get("rate")
             rate: Decimal

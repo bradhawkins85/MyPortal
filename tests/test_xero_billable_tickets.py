@@ -268,7 +268,7 @@ async def test_build_ticket_invoices_uses_template():
     async def fake_fetch_company(company_id: int):
         return {"id": company_id, "name": "Test Corp", "xero_id": "xero-456"}
 
-    template = "#{ticket_id} - {ticket_subject} - {labour_name} ({labour_hours}h)"
+    template = "#{ticket_id} - {ticket_subject} - {labour_name} ({labour_duration})"
     
     invoices = await xero_service.build_ticket_invoices(
         [1],
@@ -286,11 +286,11 @@ async def test_build_ticket_invoices_uses_template():
     assert len(invoices) == 1
     line_item = invoices[0]["line_items"][0]
     
-    # Verify template was applied (45 min = 0.75 hr)
+    # Verify template was applied (45 min = 45 Mins)
     assert "#1" in line_item["Description"]
     assert "Email not working" in line_item["Description"]
     assert "Remote Support" in line_item["Description"]
-    assert "0.75" in line_item["Description"]
+    assert "45 Mins" in line_item["Description"]
 
 
 @pytest.mark.anyio("asyncio")
