@@ -5141,6 +5141,25 @@ def _normalise_m365_upn(value: Any) -> str:
     return str(value or "").strip().lower()
 
 
+def _m365_mapping_identifiers(value: Any) -> set[str]:
+    """Return configured M365 mailbox/group identifiers for a custom-field map.
+
+    Values may contain ``|`` separated alternatives so admins can keep the
+    MyPortal field/option label user-friendly while matching a different M365
+    display name or address, e.g. ``Netsuite|Netsuite Users``.
+    """
+    return {
+        identifier
+        for part in str(value or "").split("|")
+        if (identifier := _normalise_m365_upn(part))
+    }
+
+
+def _m365_mapping_matches(value: Any, accessible_identifiers: set[str]) -> bool:
+    identifiers = _m365_mapping_identifiers(value)
+    return bool(identifiers and identifiers.intersection(accessible_identifiers))
+
+
 def _yes_no_select_value(options: list[dict[str, Any]], is_member: bool) -> str | None:
     wanted = "yes" if is_member else "no"
     for option in options:
@@ -5166,13 +5185,13 @@ async def sync_staff_custom_fields_from_m365_mailboxes(company_id: int) -> int:
             options = [
                 option
                 for option in (definition.get("options") or [])
-                if _normalise_m365_upn(option.get("m365_upn"))
+                if _m365_mapping_identifiers(option.get("m365_upn"))
             ]
             if options:
                 mapped = dict(definition)
                 mapped["options"] = options
                 mapped_definitions.append(mapped)
-        elif field_type in {"checkbox", "select"} and _normalise_m365_upn(
+        elif field_type in {"checkbox", "select"} and _m365_mapping_identifiers(
             definition.get("m365_upn")
         ):
             mapped_definitions.append(definition)
@@ -5189,12 +5208,12 @@ async def sync_staff_custom_fields_from_m365_mailboxes(company_id: int) -> int:
         staff_upns.discard("")
         if not staff_id or not staff_upns:
             continue
-        accessible = {
-            _normalise_m365_upn(row.get("mailbox_email"))
-            for row in await m365_repo.get_mailboxes_accessible_by_member(
-                company_id, list(staff_upns)
-            )
-        }
+        accessible: set[str] = set()
+        for row in await m365_repo.get_mailboxes_accessible_by_member(
+            company_id, list(staff_upns)
+        ):
+            accessible.update(_m365_mapping_identifiers(row.get("mailbox_email")))
+            accessible.update(_m365_mapping_identifiers(row.get("display_name")))
         values: dict[str, Any] = {}
         for definition in mapped_definitions:
             name = str(definition.get("name") or "").strip()
@@ -5205,14 +5224,12 @@ async def sync_staff_custom_fields_from_m365_mailboxes(company_id: int) -> int:
                 selected = [
                     str(option.get("value") or "").strip()
                     for option in (definition.get("options") or [])
-                    if _normalise_m365_upn(option.get("m365_upn")) in accessible
+                    if _m365_mapping_matches(option.get("m365_upn"), accessible)
                     and str(option.get("value") or "").strip()
                 ]
                 values[name] = ",".join(selected) if selected else None
             else:
-                is_member = (
-                    _normalise_m365_upn(definition.get("m365_upn")) in accessible
-                )
+                is_member = _m365_mapping_matches(definition.get("m365_upn"), accessible)
                 if field_type == "checkbox":
                     values[name] = is_member
                 elif field_type == "select":
