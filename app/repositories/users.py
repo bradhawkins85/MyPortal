@@ -7,6 +7,30 @@ from app.core.database import db
 from app.core.logging import log_error, log_info
 from app.security.passwords import hash_password
 
+_ALLOWED_UPDATE_COLUMNS = {
+    "email",
+    "first_name",
+    "last_name",
+    "mobile_phone",
+    "company_id",
+    "is_super_admin",
+    "booking_link_url",
+    "email_signature",
+    "matrix_user_id",
+    "last_login_at",
+    "is_active",
+    "email_verified_at",
+    "force_password_change",
+}
+
+
+def _build_safe_update_clause(updates: dict[str, Any]) -> tuple[str, list[Any]]:
+    unknown = [column for column in updates if column not in _ALLOWED_UPDATE_COLUMNS]
+    if unknown:
+        raise ValueError(f"Unsupported update fields: {', '.join(sorted(unknown))}")
+    columns = ", ".join(f"{column} = %s" for column in updates.keys())
+    return columns, list(updates.values())
+
 
 async def get_user_by_email(email: str) -> Optional[dict[str, Any]]:
     row = await db.fetch_one("SELECT * FROM users WHERE email = %s", (email,))
@@ -89,8 +113,8 @@ async def update_user(user_id: int, **updates: Any) -> dict[str, Any]:
         return user
 
     log_info("Updating user", user_id=user_id, fields=list(updates.keys()))
-    columns = ", ".join(f"{column} = %s" for column in updates.keys())
-    params = list(updates.values()) + [user_id]
+    columns, params = _build_safe_update_clause(updates)
+    params.append(user_id)
     await db.execute(f"UPDATE users SET {columns} WHERE id = %s", tuple(params))
     updated = await get_user_by_id(user_id)
     if not updated:
