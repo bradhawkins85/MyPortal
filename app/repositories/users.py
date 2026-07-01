@@ -28,8 +28,9 @@ def _build_safe_update_clause(updates: dict[str, Any]) -> tuple[str, list[Any]]:
     unknown = [column for column in updates if column not in _ALLOWED_UPDATE_COLUMNS]
     if unknown:
         raise ValueError(f"Unsupported update fields: {', '.join(sorted(unknown))}")
-    columns = ", ".join(f"{column} = %s" for column in updates.keys())
-    return columns, list(updates.values())
+    items = list(updates.items())
+    columns = ", ".join(f"{column} = %s" for column, _ in items)
+    return columns, [value for _, value in items]
 
 
 async def get_user_by_email(email: str) -> Optional[dict[str, Any]]:

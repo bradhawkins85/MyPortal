@@ -30,4 +30,4 @@ async def test_update_user_rejects_unknown_columns_before_query(monkeypatch):
 
     with pytest.raises(ValueError, match="Unsupported update fields"):
         await users.update_user(1, **{"email = 'x' --": "bad"})
-    assert executed is False
+    assert not executed
