@@ -1,0 +1,7 @@
+{
+  "guid": "7117b959-8f53-443e-83a3-70f9bcd4d210",
+  "occurred_at": "2026-07-01T07:38Z",
+  "change_type": "Fix",
+  "summary": "Prevent duplicate plugin registry startup warnings by using a MySQL upsert when registering built-in plugins.",
+  "content_hash": "b1d6a12fc0f704fc1e420b36a476200cddcbdb6cbae91e031623bb8852786bfe"
+}

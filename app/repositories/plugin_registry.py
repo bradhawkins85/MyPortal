@@ -22,8 +22,9 @@ async def ensure_registered(slug: str) -> None:
     else:
         await db.execute(
             """
-            INSERT IGNORE INTO plugin_registry (slug, enabled)
+            INSERT INTO plugin_registry (slug, enabled)
             VALUES (%s, 1)
+            ON DUPLICATE KEY UPDATE slug = slug
             """,
             (slug,),
         )
