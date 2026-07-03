@@ -1,0 +1,2 @@
+ALTER TABLE assets
+  ADD COLUMN machine_type VARCHAR(50) DEFAULT NULL;

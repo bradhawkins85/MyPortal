@@ -14,6 +14,7 @@ async def list_company_assets(company_id: int) -> list[dict[str, Any]]:
             company_id,
             name,
             type,
+            machine_type,
             serial_number,
             status,
             os_name,
@@ -132,6 +133,7 @@ async def upsert_asset(
     company_id: int,
     name: str,
     type: str | None = None,
+    machine_type: str | None = None,
     serial_number: str | None = None,
     status: str | None = None,
     os_name: str | None = None,
@@ -183,6 +185,7 @@ async def upsert_asset(
     params = (
         name,
         type,
+        machine_type,
         status,
         os_name,
         cpu_name,
@@ -207,6 +210,7 @@ async def upsert_asset(
             UPDATE assets
             SET name = %s,
                 type = %s,
+                machine_type = COALESCE(%s, machine_type),
                 status = %s,
                 os_name = %s,
                 cpu_name = %s,
@@ -235,6 +239,7 @@ async def upsert_asset(
                 company_id,
                 name,
                 type,
+                machine_type,
                 serial_number,
                 status,
                 os_name,
@@ -251,12 +256,13 @@ async def upsert_asset(
                 warranty_end_date,
                 syncro_asset_id,
                 tactical_asset_id
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 company_id,
                 name,
                 type,
+                machine_type,
                 serial_number,
                 status,
                 os_name,

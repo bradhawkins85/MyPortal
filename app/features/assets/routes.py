@@ -22,6 +22,7 @@ router = APIRouter(tags=["Assets"])
 _ASSET_TABLE_COLUMNS: list[dict[str, str]] = [
     {"key": "name", "label": "Name", "sort": "string", "priority": "essential"},
     {"key": "type", "label": "Type", "sort": "string"},
+    {"key": "machine_type", "label": "Machine type", "sort": "string"},
     {"key": "serial_number", "label": "Serial number", "sort": "string"},
     {"key": "status", "label": "Status", "sort": "string", "priority": "essential"},
     {"key": "os_name", "label": "OS name", "sort": "string"},
@@ -144,6 +145,7 @@ async def assets_page(request: Request):
             "id": row.get("id"),
             "name": name,
             "type": _clean_text(row.get("type")),
+            "machine_type": _clean_text(row.get("machine_type")),
             "serial_number": _clean_text(row.get("serial_number")),
             "status": _clean_text(row.get("status")),
             "os_name": _clean_text(row.get("os_name")),

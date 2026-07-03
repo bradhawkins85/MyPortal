@@ -219,6 +219,60 @@ def _join_list(value: Any, separator: str = ", ") -> str | None:
     return str(value).strip() or None
 
 
+def _normalise_machine_type(value: Any) -> str | None:
+    """Return ``Physical`` or ``Virtual`` when a source value clearly identifies it."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return "Virtual" if value else "Physical"
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    if text in {"virtual", "vm", "virtual machine", "guest", "true", "1", "yes"}:
+        return "Virtual"
+    if text in {"physical", "bare metal", "bare-metal", "host", "false", "0", "no"}:
+        return "Physical"
+    virtual_markers = (
+        "virtual",
+        "vmware",
+        "virtualbox",
+        "kvm",
+        "qemu",
+        "hyper-v",
+        "hyperv",
+        "xen",
+        "parallels",
+        "bochs",
+        "bhyve",
+        "openstack",
+        "cloudstack",
+    )
+    if any(marker in text for marker in virtual_markers):
+        return "Virtual"
+    physical_markers = ("physical", "bare metal", "bare-metal")
+    if any(marker in text for marker in physical_markers):
+        return "Physical"
+    return None
+
+
+def _machine_type_from_sources(*values: Any) -> str | None:
+    for value in values:
+        if isinstance(value, Mapping):
+            nested = _machine_type_from_sources(*value.values())
+            if nested:
+                return nested
+            continue
+        if isinstance(value, list):
+            nested = _machine_type_from_sources(*value)
+            if nested:
+                return nested
+            continue
+        machine_type = _normalise_machine_type(value)
+        if machine_type:
+            return machine_type
+    return None
+
+
 def extract_agent_details(agent: Mapping[str, Any]) -> dict[str, Any]:
     # Support the TacticalRMM native ``wmi_detail`` sub-object as well as a
     # generic ``hardware`` sub-object that third-party proxies may expose.
@@ -265,6 +319,14 @@ def extract_agent_details(agent: Mapping[str, Any]) -> dict[str, Any]:
     details = {
         "name": name or "Agent",
         "type": _clean_text(_lookup(agent, "monitoring_type", "agent_type", "type")),
+        "machine_type": _machine_type_from_sources(
+            _lookup(agent, "machine_type", "device_machine_type", "virtualization_type"),
+            _lookup(agent, "is_virtual", "is_vm", "virtual_machine", "hypervisor_present"),
+            _lookup(hardware, "machine_type", "virtualization_type"),
+            _lookup(hardware, "is_virtual", "is_vm", "virtual_machine", "hypervisor_present"),
+            _lookup(agent, "make_model", "model", "manufacturer"),
+            _lookup(hardware, "model", "manufacturer", "system_model", "system_manufacturer"),
+        ),
         "serial_number": _clean_text(
             _lookup(agent, "serial_number", "serial", "bios_serial")
             or _lookup(hardware, "serial", "serial_number")

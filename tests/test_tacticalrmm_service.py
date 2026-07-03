@@ -214,6 +214,45 @@ def test_extract_agent_details_full_table_serialiser_payload():
     assert details["client_name"] == "Acme Corp"
 
 
+def test_extract_agent_details_reads_explicit_machine_type():
+    agent = {
+        "hostname": "VM-EXPLICIT",
+        "agent_id": "vm-explicit",
+        "machine_type": "Virtual Machine",
+    }
+
+    details = tacticalrmm.extract_agent_details(agent)
+
+    assert details["machine_type"] == "Virtual"
+
+
+def test_extract_agent_details_infers_virtual_machine_from_model():
+    agent = {
+        "hostname": "VM-MODEL",
+        "agent_id": "vm-model",
+        "wmi_detail": {
+            "manufacturer": "VMware, Inc.",
+            "model": "VMware Virtual Platform",
+        },
+    }
+
+    details = tacticalrmm.extract_agent_details(agent)
+
+    assert details["machine_type"] == "Virtual"
+
+
+def test_extract_agent_details_reads_physical_machine_boolean():
+    agent = {
+        "hostname": "PHYSICAL-BOOLEAN",
+        "agent_id": "physical-boolean",
+        "is_virtual": False,
+    }
+
+    details = tacticalrmm.extract_agent_details(agent)
+
+    assert details["machine_type"] == "Physical"
+
+
 # Tests for fetch_clients function
 
 def test_fetch_clients_handles_list_response(monkeypatch):

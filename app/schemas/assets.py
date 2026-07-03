@@ -11,6 +11,7 @@ class AssetResponse(BaseModel):
     company_id: int
     name: str
     type: Optional[str] = None
+    machine_type: Optional[str] = None
     serial_number: Optional[str] = None
     status: Optional[str] = None
     os_name: Optional[str] = None

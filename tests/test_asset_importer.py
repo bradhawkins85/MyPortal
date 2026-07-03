@@ -29,6 +29,7 @@ async def test_import_tactical_assets_for_company_upserts(monkeypatch):
         101: {
             "name": "Workstation-1",
             "type": "server",
+            "machine_type": "Physical",
             "serial_number": "XYZ",
             "status": "online",
             "os_name": "Windows",
@@ -48,6 +49,7 @@ async def test_import_tactical_assets_for_company_upserts(monkeypatch):
         102: {
             "name": "Laptop-2",
             "type": "laptop",
+            "machine_type": "Virtual",
             "serial_number": "ABC",
             "status": "offline",
             "os_name": "Ubuntu",
@@ -86,6 +88,8 @@ async def test_import_tactical_assets_for_company_upserts(monkeypatch):
     assert len(captured) == 2
     ids = {entry["tactical_asset_id"] for entry in captured}
     assert ids == {"agent-101", "agent-102"}
+    machine_types = {entry["machine_type"] for entry in captured}
+    assert machine_types == {"Physical", "Virtual"}
     assert all(entry.get("match_name") is True for entry in captured)
 
 
