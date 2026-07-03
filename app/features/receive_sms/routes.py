@@ -114,6 +114,19 @@ async def _find_contact(phone: str) -> dict[str, Any]:
 
 
 async def _find_sms_ticket(normalised_phone: str, sms_day: date) -> dict[str, Any] | None:
+    open_row = await db.fetch_one(
+        """
+        SELECT t.id FROM tickets t
+        INNER JOIN sms_ticket_links l ON l.ticket_id = t.id
+        WHERE l.from_number_normalized = %s
+          AND LOWER(COALESCE(t.status, '')) NOT IN ('closed', 'resolved')
+        ORDER BY t.updated_at DESC, t.id DESC LIMIT 1
+        """,
+        (normalised_phone,),
+    )
+    if open_row:
+        return await tickets_repo.get_ticket(int(open_row["id"]))
+
     row = await db.fetch_one(
         """
         SELECT t.id FROM tickets t
