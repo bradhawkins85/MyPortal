@@ -3,6 +3,7 @@ from __future__ import annotations
 import array
 import csv
 import json
+import os
 import re
 import wave
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 import httpx
+from dotenv import load_dotenv
 from loguru import logger
 
 from app.repositories import call_recordings as call_recordings_repo
@@ -33,6 +35,34 @@ _GRANDSTREAM_CSV_PATTERN = re.compile(
     r"^\.rd_files_netdisk_(?P<period>\d{4}-\d{2})\.csv$"
 )
 _GRANDSTREAM_CSV_GLOB = ".rd_files_netdisk_*.csv"
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_ENV_PATH = _PROJECT_ROOT / ".env"
+
+
+def _env_bool(value: str | None, default: bool = False) -> bool:
+    if value is None or not value.strip():
+        return default
+    return value.strip().lower() not in {"false", "0", "no", "off"}
+
+
+def _whisperx_env_settings() -> dict[str, Any]:
+    """Return WhisperX transcription settings sourced only from ``.env``/env.
+
+    Call recording transcription intentionally ignores the WhisperX module's
+    persisted settings so stale database values cannot redirect audio or leak
+    credentials to the wrong service. ``load_dotenv(..., override=True)`` lets
+    an updated project ``.env`` take precedence over inherited process values.
+    """
+
+    if _ENV_PATH.exists():
+        load_dotenv(_ENV_PATH, override=True)
+    return {
+        "base_url": os.getenv("WHISPERX_BASE_URL", "").strip().rstrip("/"),
+        "api_key": os.getenv("WHISPERX_API_KEY", "").strip(),
+        "language": os.getenv("WHISPERX_LANGUAGE", "").strip(),
+        "stereo_split": _env_bool(os.getenv("WHISPERX_STEREO_SPLIT"), False),
+    }
 
 
 def _extract_phone_from_title(title: str | None) -> str | None:
@@ -1080,19 +1110,12 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
         logger.info(f"Recording {recording_id} already being processed, skipping")
         return recording
 
-    # Get WhisperX module settings
-    module = await modules_service.get_module("whisperx", redact=False)
-    if not module or not module.get("enabled"):
-        logger.warning("WhisperX module not enabled")
-        await call_recordings_repo.update_call_recording(
-            recording_id,
-            transcription_status="failed",
-        )
-        raise ValueError("WhisperX module not enabled")
-
-    settings = module.get("settings", {})
-    base_url = settings.get("base_url")
-    api_key = settings.get("api_key")
+    # WhisperX transcription runtime settings are intentionally sourced only
+    # from .env/environment variables. Do not use the module database settings
+    # here: stale DB values can point transcription at the wrong endpoint.
+    settings = _whisperx_env_settings()
+    base_url = settings["base_url"]
+    api_key = settings["api_key"]
 
     if not base_url:
         logger.error("WhisperX base URL not configured")
