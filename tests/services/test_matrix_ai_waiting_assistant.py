@@ -122,6 +122,47 @@ def test_scan_waiting_rooms_skips_ack_when_response_slot_already_reserved(monkey
     assert sent == []
 
 
+def test_scan_waiting_rooms_skips_second_response_when_analysis_is_current(monkeypatch):
+    settings = SimpleNamespace(
+        matrix_enabled=True,
+        matrixbot_ai_waiting_assistant_enabled=True,
+        matrixbot_ai_ollama_enabled=True,
+        matrixbot_ai_ollama_url="http://ollama.test",
+        matrixbot_ai_ollama_model="llama3",
+        matrixbot_ai_max_responses=2,
+        matrixbot_ai_response_delay_minutes=5,
+        matrixbot_ai_queue_timeout_minutes=60,
+    )
+    created: list[dict] = []
+
+    monkeypatch.setattr(assistant, "get_settings", lambda: settings)
+
+    async def fake_list(due_before):
+        return [{
+            "id": 42,
+            "status": "open",
+            "assigned_tech_user_id": None,
+            "ai_bot_response_count": 1,
+            "ai_last_user_message_at": "2026-07-03T10:00:00",
+            "ai_last_analysis_at": "2026-07-03T10:01:00",
+        }]
+
+    async def fake_has_technician_message(room_id):
+        return False
+
+    async def fake_create(**kwargs):
+        created.append(kwargs)
+        return {"id": 7}
+
+    monkeypatch.setattr(assistant.chat_repo, "list_ai_waiting_candidate_rooms", fake_list)
+    monkeypatch.setattr(assistant.chat_repo, "has_technician_message", fake_has_technician_message)
+    monkeypatch.setattr(assistant.chat_repo, "create_ai_queue_item", fake_create)
+
+    asyncio.run(assistant.scan_waiting_rooms_once())
+
+    assert created == []
+
+
 def test_scan_waiting_rooms_queues_second_response_analysis(monkeypatch):
     settings = SimpleNamespace(
         matrix_enabled=True,

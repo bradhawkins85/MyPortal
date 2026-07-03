@@ -588,6 +588,20 @@ async def handle_chat_closed(room_id: int) -> None:
     await _audit("matrix_ai_waiting_assistant.queue_cancelled", room_id, {"reason": "chat_closed"})
 
 
+def _room_analysis_current(room: Mapping[str, Any]) -> bool:
+    """Return whether the last KB analysis covers the latest user activity.
+
+    The worker scans unattended rooms every minute.  If a previous analysis did
+    not find a sendable article, the response count stays at 1 (the initial
+    acknowledgement), so the room still looks eligible for a second response.
+    Treat an analysis at or after the most recent customer activity as current
+    so we do not keep re-querying the LLM for the same unchanged transcript.
+    """
+
+    last_analysis_at = _as_datetime(room.get("ai_last_analysis_at"))
+    last_user_message_at = _as_datetime(room.get("ai_last_user_message_at"))
+    return bool(last_analysis_at and last_user_message_at and last_analysis_at >= last_user_message_at)
+
 async def _eligible_room(room: Mapping[str, Any]) -> bool:
     if not _enabled():
         return False
@@ -619,6 +633,8 @@ async def scan_waiting_rooms_once() -> None:
                 await chat_repo.release_ai_bot_response_reservation(int(room["id"]), reserved_count=1)
             continue
         if count == 1 and settings.matrixbot_ai_max_responses >= 2:
+            if _room_analysis_current(room):
+                continue
             active = await chat_repo.get_active_ai_queue_item(int(room["id"]))
             if active:
                 continue
