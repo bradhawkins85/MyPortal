@@ -177,7 +177,10 @@ async def reporting_page(
                 )
             selected_report = record
             try:
-                result = await reporting_service.run_query(record["sql_query"])
+                result = await reporting_service.run_query_with_context(
+                    record["sql_query"],
+                    company_id=getattr(request.state, "active_company_id", None),
+                )
                 generated_at_iso = datetime.now(timezone.utc).isoformat()
                 await audit_service.record(
                     action="reporting.report.run",
@@ -234,7 +237,10 @@ async def reporting_export(request: Request, report_id: int, format: str = Query
         )
 
     try:
-        result = await reporting_service.run_query(record["sql_query"])
+        result = await reporting_service.run_query_with_context(
+            record["sql_query"],
+            company_id=getattr(request.state, "active_company_id", None),
+        )
     except reporting_service.ReportingQueryError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
