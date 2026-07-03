@@ -18,6 +18,7 @@ query we:
   ``credential``, ``private_key`` …) so that credentials stored in the
   database are never returned in plain text.
 """
+
 from __future__ import annotations
 
 import csv
@@ -32,7 +33,6 @@ from typing import Any, Iterable, Mapping
 
 from app.core.database import db
 
-
 MAX_RESULT_ROWS = 5000
 
 _REDACTED = "[REDACTED]"
@@ -45,6 +45,21 @@ _SENSITIVE_COLUMN_PATTERN = re.compile(
     r"(?<![a-zA-Z])(password[s]?|passwd|secret[s]?|token[s]?|api[_\-]?key[s]?|totp|otp[s]?|credential[s]?|private[_\-]?key[s]?|encrypted)(?![a-zA-Z])",
     re.IGNORECASE,
 )
+
+_CURRENT_COMPANY_PATTERN = re.compile(
+    r"\{\{\s*current\.company(?:_id)?\s*\}\}", re.IGNORECASE
+)
+
+
+def substitute_query_context(sql: str, *, company_id: int | None = None) -> str:
+    """Replace supported report SQL context placeholders with safe literals.
+
+    Only numeric company context is currently supported.  Missing context is
+    rendered as ``NULL`` so a filter such as ``company_id = {{current.company}}``
+    returns no rows instead of accidentally broadening scope.
+    """
+    replacement = "NULL" if company_id is None else str(int(company_id))
+    return _CURRENT_COMPANY_PATTERN.sub(replacement, sql or "")
 
 
 class ReportingQueryError(ValueError):
@@ -256,10 +271,7 @@ def _redact_sensitive_rows(
     if not sensitive:
         return rows
     return [
-        {
-            key: (_REDACTED if key in sensitive else value)
-            for key, value in row.items()
-        }
+        {key: (_REDACTED if key in sensitive else value) for key, value in row.items()}
         for row in rows
     ]
 
@@ -292,6 +304,34 @@ async def run_query(sql: str, *, max_rows: int = MAX_RESULT_ROWS) -> dict[str, A
         "row_count": len(rows),
         "truncated": truncated,
     }
+
+
+async def count_query_rows(sql: str, *, company_id: int | None = None) -> int:
+    """Return the number of rows found by a validated reporting query."""
+    statement = validate_select_query(
+        substitute_query_context(sql, company_id=company_id)
+    )
+    wrapped = f"SELECT COUNT(*) AS row_count FROM ({statement}) AS reporting_count_subq"
+    row = await db.fetch_one(wrapped)
+    if not row:
+        return 0
+    try:
+        return int(row.get("row_count", 0))
+    except (TypeError, ValueError, AttributeError):
+        return 0
+
+
+async def run_query_with_context(
+    sql: str,
+    *,
+    company_id: int | None = None,
+    max_rows: int = MAX_RESULT_ROWS,
+) -> dict[str, Any]:
+    """Run a report query after applying supported context placeholders."""
+    return await run_query(
+        substitute_query_context(sql, company_id=company_id),
+        max_rows=max_rows,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -340,8 +380,7 @@ def export_csv(columns: Iterable[str], rows: Iterable[Mapping[str, Any]]) -> str
 def export_json(columns: Iterable[str], rows: Iterable[Mapping[str, Any]]) -> str:
     column_list = list(columns)
     payload = [
-        {col: _coerce_for_json(row.get(col)) for col in column_list}
-        for row in rows
+        {col: _coerce_for_json(row.get(col)) for col in column_list} for row in rows
     ]
     return json.dumps(payload, indent=2, default=str)
 
@@ -381,7 +420,7 @@ def export_html_for_pdf(
     column_list = list(columns)
     rows_list = list(rows)
     parts: list[str] = []
-    parts.append("<!DOCTYPE html><html><head><meta charset=\"utf-8\"/>")
+    parts.append('<!DOCTYPE html><html><head><meta charset="utf-8"/>')
     parts.append(f"<title>{escape(name)}</title>")
     parts.append(
         "<style>"
@@ -397,20 +436,18 @@ def export_html_for_pdf(
     )
     parts.append(f"<h1>{escape(name)}</h1>")
     parts.append(
-        "<p class=\"meta\">Generated "
+        '<p class="meta">Generated '
         f"{escape(generated_at.strftime('%Y-%m-%d %H:%M UTC'))} · "
         f"{len(rows_list)} row(s)</p>"
     )
     if description:
-        parts.append(f"<p class=\"desc\">{escape(description)}</p>")
+        parts.append(f'<p class="desc">{escape(description)}</p>')
     parts.append("<table><thead><tr>")
     for col in column_list:
         parts.append(f"<th>{escape(str(col))}</th>")
     parts.append("</tr></thead><tbody>")
     if not rows_list:
-        parts.append(
-            f"<tr><td colspan=\"{max(len(column_list), 1)}\">No rows.</td></tr>"
-        )
+        parts.append(f'<tr><td colspan="{max(len(column_list), 1)}">No rows.</td></tr>')
     else:
         for row in rows_list:
             parts.append("<tr>")
