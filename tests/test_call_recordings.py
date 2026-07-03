@@ -869,3 +869,74 @@ async def test_create_call_recording_with_phone_number():
         assert result["caller_staff_id"] == 42
         assert mock_execute.called
         assert mock_lookup.call_count == 1
+
+
+def test_transcribe_recording_uses_whisperx_env_over_database(monkeypatch, tmp_path):
+    """Call recording transcription must ignore stale WhisperX DB settings."""
+    from app.services import call_recordings as service
+    from app.repositories import call_recordings as call_recordings_repo
+    from app.services import modules as modules_service
+
+    audio_path = tmp_path / "call.wav"
+    audio_path.write_bytes(b"fake audio data")
+    recording = {
+        "id": 99,
+        "file_path": str(audio_path),
+        "file_name": "call.wav",
+        "transcription": None,
+        "transcription_status": "pending",
+    }
+
+    monkeypatch.setenv("WHISPERX_BASE_URL", "http://env-whisperx.local/")
+    monkeypatch.setenv("WHISPERX_API_KEY", "env-api-key")
+    monkeypatch.setenv("WHISPERX_LANGUAGE", "en-AU")
+    monkeypatch.setenv("WHISPERX_STEREO_SPLIT", "false")
+
+    async def fake_get_module(slug: str, *args, **kwargs):
+        if slug == "whisperx":
+            return {
+                "slug": "whisperx",
+                "enabled": True,
+                "settings": {
+                    "base_url": "http://stale-db-whisperx.local",
+                    "api_key": "stale-db-key",
+                    "language": "fr",
+                },
+            }
+        if slug == "call-recordings":
+            return {"slug": "call-recordings", "settings": {"phone_system_type": "generic"}}
+        return None
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.content = b'{"text": "transcribed from env"}'
+    mock_response.text = '{"text": "transcribed from env"}'
+    mock_response.headers = {"content-type": "application/json"}
+    mock_response.json.return_value = {"text": "transcribed from env"}
+    mock_response.raise_for_status = MagicMock()
+
+    with patch.object(call_recordings_repo, "get_call_recording_by_id", new_callable=AsyncMock) as mock_get, \
+         patch.object(modules_service, "get_module", side_effect=fake_get_module) as mock_get_module, \
+         patch.object(call_recordings_repo, "update_call_recording", new_callable=AsyncMock) as mock_update, \
+         patch("httpx.AsyncClient") as mock_client_class:
+        mock_get.return_value = recording
+        mock_update.return_value = {
+            **recording,
+            "transcription": "transcribed from env",
+            "transcription_status": "completed",
+        }
+        mock_client = MagicMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client_class.return_value = mock_client
+
+        import asyncio
+        result = asyncio.run(service.transcribe_recording(99))
+
+    assert result["transcription"] == "transcribed from env"
+    mock_get_module.assert_called_once_with("call-recordings", redact=False)
+    post_args = mock_client.post.call_args
+    assert post_args.args[0] == "http://env-whisperx.local/asr"
+    assert post_args.kwargs["headers"]["Authorization"] == "Bearer env-api-key"
+    assert post_args.kwargs["params"]["language"] == "en-AU"
