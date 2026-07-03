@@ -1063,6 +1063,12 @@
               and <em>Bit Defender EDR</em> → <code>{cf_active_Bit_Defender_EDR}</code>.
             </p>
             <p class="card__help-text">
+              <strong>Saved report variables:</strong> dynamic template variables such as
+              <code>{{ '{{ report.billable-assets.count }}' }}</code> and
+              <code>{{ '{{ report.billable-assets.list }}' }}</code> can be used where dynamic variables are supported.
+              Reports can filter to the current invoice company with <code>{{ '{{current.company}}' }}</code> in the saved SQL.
+            </p>
+            <p class="card__help-text">
               If no price override is specified, the price will be retrieved from Xero using the product code.
             </p>
           </div>

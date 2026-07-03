@@ -82,6 +82,8 @@ emails or webhook requests). Newly added tokens include:
 | `{{ list:asset:field-name }}` | Comma-separated list of asset names with a specific custom field checkbox set to true (e.g., `{{ list:asset:bitdefender }}`). |
 | `{{ count:issue:slug }}` | Count of assets linked to a specific issue type (e.g., `{{ count:issue:network-outage }}`). |
 | `{{ list:issue:slug }}` | Comma-separated list of asset names linked to a specific issue type (e.g., `{{ list:issue:network-outage }}`). |
+| `{{ report.slug.count }}` | Count of rows returned by a saved Reporting query. Replace `slug` with the report slug from **Reporting → Manage reports**. |
+| `{{ report.slug.list }}` | CSV-formatted content returned by a saved Reporting query, including a header row. Replace `slug` with the report slug. |
 
 `{{ ACTIVE_ASSETS }}` tokens scope to the company in the current automation context when available (for example a ticket's company). When no company is present the counts cover the entire tenant. The default form returns assets with a Syncro sync timestamp in the current month; append `:N` to evaluate the past `N` days such as `{{ ACTIVE_ASSETS:1 }}` for the past day.
 
@@ -122,6 +124,37 @@ The `{{ list:asset:field-name }}` variables return a comma-separated list of ass
 **Context scoping and field matching:**
 
 List variables follow the same scoping and field name matching rules as count variables. The assets are returned as a comma-separated list (e.g., "Server-01, Server-02, Workstation-03"). When no assets match, an empty string is returned.
+
+### Saved report variables
+
+Admins can create SELECT-only reports in **Reporting → Manage reports** and reuse their output anywhere dynamic template variables are rendered, including invoice descriptions/quantities, ticket content, automations, and message templates. Use the report slug in the token:
+
+- `{{ report.billable-assets.count }}` returns the number of rows found by the `billable-assets` report.
+- `{{ report.billable-assets.list }}` returns the report result as CSV text with a header row.
+
+Report variables are useful when the built-in counters are not specific enough. For example, create a report that selects only assets with a particular lifecycle, contract, or custom join, then use `.count` for quantity-based billing or `.list` to include the matching records in ticket/invoice narrative text.
+
+Saved report SQL can include `{{current.company}}` or `{{current.company_id}}` as a numeric context placeholder. At render time this is replaced with the company ID from the current ticket, invoice, automation context, or top-level company context. If no company is available, the placeholder becomes `NULL` so company-filtered reports return no rows instead of leaking tenant-wide results.
+
+Example report SQL:
+
+```sql
+SELECT name, asset_type
+FROM assets
+WHERE company_id = {{current.company}}
+  AND status = 'active'
+ORDER BY name
+```
+
+Example template usage:
+
+```text
+Managed endpoint quantity: {{ report.managed-endpoints.count }}
+Managed endpoints:
+{{ report.managed-endpoints.list }}
+```
+
+Security notes: report SQL is still validated as a single read-only `SELECT`/`WITH` query, dangerous SQL keywords are rejected, result rows are capped for `.list`, and sensitive column names such as password, token, secret, API key, credential, or encrypted values are redacted.
 
 ### Conditional logic
 
