@@ -10,7 +10,7 @@ None. The company is identified by the path segment.
 
 ### Response
 
-The response is an array of asset records ordered alphabetically by name. Each record can include identifiers from Syncro and Tactical RMM along with hardware metadata.
+The response is an array of asset records ordered alphabetically by name. Each record can include identifiers from Syncro and Tactical RMM along with hardware metadata, including the optional `machine_type` value (`Physical` or `Virtual`) when an upstream integration provides enough information to determine it.
 
 ```json
 [
@@ -19,6 +19,7 @@ The response is an array of asset records ordered alphabetically by name. Each r
     "company_id": 7,
     "name": "FS-LAPTOP-03",
     "type": "Laptop",
+    "machine_type": "Physical",
     "serial_number": "ABC123456",
     "status": "active",
     "os_name": "Windows 11 Pro",
