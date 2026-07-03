@@ -137,3 +137,28 @@ def test_receive_sms_existing_ticket_reply_refreshes_ai(monkeypatch):
         assert calls == [("reply", 456), ("summary", 456), ("tags", 456)]
 
     asyncio.run(run_test())
+
+
+def test_find_sms_ticket_prefers_existing_open_ticket_before_sms_date(monkeypatch):
+    async def run_test():
+        queries: list[tuple[str, tuple]] = []
+
+        async def fake_fetch_one(query, params):
+            queries.append((query, params))
+            return {"id": 789}
+
+        async def fake_get_ticket(ticket_id):
+            return {"id": ticket_id, "status": "pending"}
+
+        monkeypatch.setattr(receive_sms_routes.db, "fetch_one", fake_fetch_one)
+        monkeypatch.setattr(receive_sms_routes.tickets_repo, "get_ticket", fake_get_ticket)
+
+        ticket = await receive_sms_routes._find_sms_ticket("61400123456", datetime(2026, 6, 17, tzinfo=timezone.utc).date())
+
+        assert ticket == {"id": 789, "status": "pending"}
+        assert len(queries) == 1
+        assert queries[0][1] == ("61400123456",)
+        assert "NOT IN ('closed', 'resolved')" in queries[0][0]
+        assert "l.sms_date = %s" not in queries[0][0]
+
+    asyncio.run(run_test())
