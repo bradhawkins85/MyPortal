@@ -684,7 +684,7 @@
   function bindTicketBulkDelete() {
     const form = document.querySelector('[data-bulk-delete-form]');
     const table = document.querySelector('[data-bulk-delete-table]');
-    if (!form || !table) {
+    if (!table) {
       return;
     }
 
@@ -695,6 +695,8 @@
 
     const submitButton = document.querySelector('[data-bulk-delete-submit]');
     const countLabel = document.querySelector('[data-bulk-delete-count]');
+    const mergeButton = document.querySelector('[data-ticket-merge-open]');
+    const mergeCountLabel = document.querySelector('[data-ticket-merge-count]');
     const selectAll = table.querySelector('[data-bulk-select-all]');
     const filterInputs = document.querySelectorAll('[data-table-filter="tickets-table"]');
 
@@ -750,6 +752,14 @@
         countLabel.textContent = `${count} selected`;
         countLabel.hidden = count === 0;
       }
+      if (mergeButton) {
+        mergeButton.disabled = selected.length < 2;
+      }
+      if (mergeCountLabel) {
+        const count = selected.length;
+        mergeCountLabel.textContent = `${count} selected`;
+        mergeCountLabel.hidden = count === 0;
+      }
       if (selectAll) {
         if (!visible.length) {
           selectAll.checked = false;
@@ -799,24 +809,83 @@
       window.requestAnimationFrame(updateState);
     });
 
-    form.addEventListener('submit', (event) => {
-      // Uncheck hidden checkboxes before validation and submission
-      uncheckHiddenCheckboxes();
-      
-      const selected = getVisibleCheckboxes().filter((checkbox) => checkbox.checked);
-      const count = selected.length;
-      if (!count) {
-        event.preventDefault();
-        return;
+    if (form) {
+      form.addEventListener('submit', (event) => {
+        // Uncheck hidden checkboxes before validation and submission
+        uncheckHiddenCheckboxes();
+
+        const selected = getVisibleCheckboxes().filter((checkbox) => checkbox.checked);
+        const count = selected.length;
+        if (!count) {
+          event.preventDefault();
+          return;
+        }
+        const confirmationMessage =
+          count === 1
+            ? 'Delete the selected ticket? This cannot be undone.'
+            : `Delete ${count} selected tickets? This cannot be undone.`;
+        if (!window.confirm(confirmationMessage)) {
+          event.preventDefault();
+        }
+      });
+    }
+
+    if (mergeButton) {
+      const modal = document.querySelector('[data-ticket-merge-modal]');
+      const list = modal ? modal.querySelector('[data-ticket-merge-list]') : null;
+      const error = modal ? modal.querySelector('[data-ticket-merge-error]') : null;
+      const submit = modal ? modal.querySelector('[data-ticket-merge-submit]') : null;
+      const closeButtons = modal ? modal.querySelectorAll('[data-ticket-merge-close]') : [];
+      const closeModal = () => {
+        if (modal) modal.hidden = true;
+      };
+      closeButtons.forEach((button) => button.addEventListener('click', closeModal));
+      mergeButton.addEventListener('click', () => {
+        const selected = getVisibleCheckboxes().filter((checkbox) => checkbox.checked);
+        if (!modal || !list || selected.length < 2) return;
+        if (error) error.hidden = true;
+        list.replaceChildren(...selected.map((checkbox, index) => {
+          const row = checkbox.closest('tr');
+          const id = checkbox.value;
+          const subject = row ? (row.querySelector('[data-column="subject"]')?.textContent || row.cells[2]?.textContent || '').trim() : '';
+          const label = document.createElement('label');
+          label.className = 'ticket-merge-list__item';
+          const radio = document.createElement('input');
+          radio.type = 'radio';
+          radio.name = 'mergeParentTicketId';
+          radio.value = id;
+          radio.checked = index === 0;
+          label.append(radio, document.createTextNode(` Ticket #${id} — ${subject || 'Untitled ticket'}`));
+          return label;
+        }));
+        modal.hidden = false;
+      });
+      if (submit) {
+        submit.addEventListener('click', async () => {
+          const selected = getVisibleCheckboxes().filter((checkbox) => checkbox.checked);
+          const parent = modal ? modal.querySelector('input[name="mergeParentTicketId"]:checked') : null;
+          if (!parent || selected.length < 2) return;
+          submit.disabled = true;
+          if (error) error.hidden = true;
+          try {
+            const response = await fetch('/api/tickets/merge', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ticket_ids: selected.map((checkbox) => Number(checkbox.value)), target_ticket_id: Number(parent.value)}),
+            });
+            if (!response.ok) throw new Error('Unable to merge selected tickets.');
+            window.location.href = `/admin/tickets/${encodeURIComponent(parent.value)}`;
+          } catch (err) {
+            if (error) {
+              error.textContent = err instanceof Error ? err.message : 'Unable to merge selected tickets.';
+              error.hidden = false;
+            }
+          } finally {
+            submit.disabled = false;
+          }
+        });
       }
-      const confirmationMessage =
-        count === 1
-          ? 'Delete the selected ticket? This cannot be undone.'
-          : `Delete ${count} selected tickets? This cannot be undone.`;
-      if (!window.confirm(confirmationMessage)) {
-        event.preventDefault();
-      }
-    });
+    }
 
     updateState();
     table.dataset.bulkDeleteBound = 'true';
@@ -1054,6 +1123,7 @@
         checkbox.value = String(ticketId);
         checkbox.setAttribute('aria-label', `Select ticket ${ticketId}`);
         checkbox.setAttribute('data-bulk-delete-checkbox', '');
+        checkbox.setAttribute('data-ticket-select-checkbox', '');
         if (bulkDeleteFormId) {
           checkbox.setAttribute('form', bulkDeleteFormId);
         }
@@ -2440,13 +2510,13 @@
       if (rows.length <= 1) {
         return;
       }
-      
+
       // Check if the row being removed has the default selected
       const defaultRadio = row.querySelector('input[name="defaultStatus"]');
       const wasDefault = defaultRadio && defaultRadio.checked;
-      
+
       row.remove();
-      
+
       // If the removed row was default, select the first remaining row as default
       if (wasDefault) {
         const remainingRows = list.querySelectorAll('[data-status-row]');
@@ -2457,7 +2527,7 @@
           }
         }
       }
-      
+
       updateRowIdentifiers();
       updateRemoveButtons();
       clearError();
@@ -2528,7 +2598,7 @@
     updateRowIdentifiers();
     updateRemoveButtons();
     ensureDefaultRadioChecked();
-    
+
     // Return the initialization function for use in onOpen callback
     return {
       ensureDefaultRadioChecked: ensureDefaultRadioChecked
@@ -2652,13 +2722,13 @@
       if (rows.length <= 1) {
         return;
       }
-      
+
       // Check if the row being removed has the default selected
       const defaultRadio = row.querySelector('input[name="defaultLabourType"]');
       const wasDefault = defaultRadio && defaultRadio.checked;
-      
+
       row.remove();
-      
+
       // If the removed row was default, select the first remaining row as default
       if (wasDefault) {
         const remainingRows = list.querySelectorAll('[data-labour-row]');
@@ -2669,7 +2739,7 @@
           }
         }
       }
-      
+
       updateRowIdentifiers();
       updateRemoveButtons();
       clearError();
@@ -2697,7 +2767,7 @@
       clearError();
       const rows = Array.from(list.querySelectorAll('[data-labour-row]'));
       const seenCodes = new Set();
-      
+
       // Check if at least one default is selected
       const defaultRadios = form.querySelectorAll('input[name="defaultLabourType"]');
       const hasDefaultSelected = Array.from(defaultRadios).some(radio => radio.checked);
@@ -2706,7 +2776,7 @@
         event.preventDefault();
         return;
       }
-      
+
       for (const row of rows) {
         const codeInput = row.querySelector('input[name="labourCode"]');
         const nameInput = row.querySelector('input[name="labourName"]');
@@ -2751,7 +2821,7 @@
     const modal = document.getElementById('recurring-item-editor-modal');
     const form = document.getElementById('recurring-item-form');
     const companyIdElement = document.querySelector('[data-company-id]');
-    
+
     if (!modal || !form) {
       return;
     }
@@ -2797,7 +2867,7 @@
       document.getElementById('recurring-item-qty').value = item.qty_expression || '';
       document.getElementById('recurring-item-price').value = item.price_override || '';
       document.getElementById('recurring-item-active').checked = !!item.active;
-      
+
       if (item.id && deleteModalButton) {
         deleteModalButton.removeAttribute('hidden');
         deleteModalButton.setAttribute('aria-hidden', 'false');
@@ -2842,18 +2912,18 @@
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      
+
       const itemId = document.getElementById('recurring-item-id').value;
       const priceValue = document.getElementById('recurring-item-price').value.trim();
       let priceOverride = null;
-      
+
       if (priceValue) {
         const parsed = parseFloat(priceValue);
         if (!isNaN(parsed) && parsed >= 0) {
           priceOverride = parsed;
         }
       }
-      
+
       const formData = {
         product_code: document.getElementById('recurring-item-product-code').value.trim(),
         description_template: document.getElementById('recurring-item-description').value.trim(),
@@ -2893,7 +2963,7 @@
         if (!itemJson) {
           return;
         }
-        
+
         try {
           const item = JSON.parse(itemJson);
           if (!confirm(`Delete recurring invoice item "${item.product_code}"?`)) {
@@ -3010,12 +3080,12 @@
         const originalText = tacticalButton.innerHTML;
         tacticalButton.disabled = true;
         tacticalButton.innerHTML = spinnerHtml;
-        
+
         try {
           const result = await requestJson(`/api/companies/${companyId}/lookup-tactical-id`, {
             method: 'POST',
           });
-          
+
           if (result.status === 'found' && result.id) {
             tacticalInput.value = result.id;
             tacticalInput.classList.add('form-input--success');
@@ -3039,12 +3109,12 @@
         const originalText = xeroButton.innerHTML;
         xeroButton.disabled = true;
         xeroButton.innerHTML = spinnerHtml;
-        
+
         try {
           const result = await requestJson(`/api/companies/${companyId}/lookup-xero-id`, {
             method: 'POST',
           });
-          
+
           if (result.status === 'found' && result.id) {
             xeroInput.value = result.id;
             xeroInput.classList.add('form-input--success');
@@ -3218,7 +3288,7 @@
   function bindTicketRequesterField() {
     const companySelect = document.querySelector('[data-ticket-company-select]');
     const requesterSelect = document.querySelector('[data-ticket-requester-select]');
-    
+
     if (!companySelect || !requesterSelect) {
       return;
     }
@@ -3238,7 +3308,7 @@
 
       try {
         const users = await requestJson(`/api/companies/${encodeURIComponent(companyId)}/staff-users`);
-        
+
         if (!Array.isArray(users) || users.length === 0) {
           requesterSelect.disabled = true;
           // Add a disabled option to show why it's empty
@@ -3285,7 +3355,7 @@
       button.addEventListener('click', async (event) => {
         const companyId = button.dataset.companyId;
         const companyName = button.dataset.companyName || 'this company';
-        
+
         if (!companyId) {
           return;
         }
@@ -3313,7 +3383,7 @@
       button.addEventListener('click', async (event) => {
         const companyId = button.dataset.companyId;
         const companyName = button.dataset.companyName || 'this company';
-        
+
         if (!companyId) {
           return;
         }
@@ -3328,7 +3398,7 @@
           });
           const currentParams = new URLSearchParams(window.location.search);
           const showArchived = currentParams.get('show_archived') === 'true';
-          const redirectUrl = showArchived 
+          const redirectUrl = showArchived
             ? `/admin/companies?show_archived=true&success=${encodeURIComponent('Company archived.')}`
             : `/admin/companies?success=${encodeURIComponent('Company archived.')}`;
           window.location.href = redirectUrl;
@@ -3346,7 +3416,7 @@
       button.addEventListener('click', async (event) => {
         const companyId = button.dataset.companyId;
         const companyName = button.dataset.companyName || 'this company';
-        
+
         if (!companyId) {
           return;
         }
@@ -3361,7 +3431,7 @@
           });
           const currentParams = new URLSearchParams(window.location.search);
           const showArchived = currentParams.get('show_archived') === 'true';
-          const redirectUrl = showArchived 
+          const redirectUrl = showArchived
             ? `/admin/companies?show_archived=true&success=${encodeURIComponent('Company unarchived.')}`
             : `/admin/companies?success=${encodeURIComponent('Company unarchived.')}`;
           window.location.href = redirectUrl;
@@ -3379,7 +3449,7 @@
       button.addEventListener('click', async (event) => {
         const orderNumber = button.dataset.orderNumber;
         const companyId = button.dataset.companyId;
-        
+
         if (!orderNumber || !companyId) {
           return;
         }
@@ -3417,10 +3487,10 @@
 
       try {
         const data = await requestJson('/api/integration-modules/xero/tenants');
-        
+
         // Save the current selection
         const currentSelection = selectElement.value;
-        
+
         // Clear existing options except the placeholder
         while (selectElement.options.length > 1) {
           selectElement.remove(1);
@@ -3513,8 +3583,8 @@
     bindModal({ modalId: 'create-ticket-modal', triggerSelector: '[data-create-ticket-modal-open]' });
     bindModal({ modalId: 'create-api-key-modal', triggerSelector: '[data-create-api-key-modal-open]' });
     bindModal({ modalId: 'create-issue-modal', triggerSelector: '[data-create-issue-modal-open]' });
-    bindModal({ 
-      modalId: 'edit-ticket-statuses-modal', 
+    bindModal({
+      modalId: 'edit-ticket-statuses-modal',
       triggerSelector: '[data-edit-ticket-statuses-open]',
       onOpen: ticketStatusManager ? () => ticketStatusManager.ensureDefaultRadioChecked() : undefined
     });
