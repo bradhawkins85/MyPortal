@@ -718,6 +718,15 @@ html {
   text-decoration: underline;
 }
 
+.rich-text-viewer a.ticket-reference-link {
+  color: #f8fafc;
+}
+
+.rich-text-viewer a.ticket-reference-link:hover,
+.rich-text-viewer a.ticket-reference-link:focus {
+  color: #ffffff;
+}
+
 .rich-text-viewer table {
   width: 100%;
   border-collapse: collapse;

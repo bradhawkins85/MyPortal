@@ -21,13 +21,6 @@
         <div>
           <h1 class="management__title">{{ ticket.subject }}</h1>
           {% set ticket_status = (ticket.status or 'open') %}
-          {% set status_badge_map = {
-            'open': 'badge--warning',
-            'in_progress': 'badge--warning',
-            'pending': 'badge--warning',
-            'resolved': 'badge--success',
-            'closed': 'badge--muted'
-          } %}
           {% set ai_badge_map = {'succeeded': 'badge--success', 'error': 'badge--danger', 'skipped': 'badge--muted', 'unknown': 'badge--muted'} %}
           {% set ai_date_color_map = {'succeeded': '#bbf7d0', 'error': '#fecaca', 'skipped': 'rgba(226, 232, 240, 0.75)', 'unknown': 'rgba(226, 232, 240, 0.75)'} %}
           {% set resolution_label_map = {'likely_resolved': 'Likely Resolved', 'likely_in_progress': 'Likely In Progress'} %}
@@ -38,10 +31,6 @@
           {% set tag_status_value = ticket.ai_tags_status if ticket.ai_tags_status is not none else 'skipped' %}
           {% set tag_status_lower = tag_status_value | lower %}
           {% set ticket_status_label = ticket_status_label_map.get(ticket_status, ticket_status.replace('_', ' ').title()) %}
-          <p class="management__subtitle">
-            Ticket #{{ ticket.id }}
-            <span class="badge {{ status_badge_map.get(ticket_status, 'badge--muted') }}">{{ ticket_status_label }}</span>
-          </p>
         </div>
         <div class="management__header-actions">
           <a href="/admin/tickets" class="button button--ghost">Back to tickets</a>
