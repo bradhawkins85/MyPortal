@@ -57,6 +57,25 @@ async def test_apply_xero_invoice_event_marks_local_invoice_paid(monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
+async def test_apply_xero_invoice_event_ignores_unknown_local_invoice_without_fetch(monkeypatch):
+    fetch_mock = AsyncMock()
+    monkeypatch.setattr(xero, "_fetch_xero_invoice", fetch_mock)
+    monkeypatch.setattr(xero.invoice_repo, "get_invoice_by_xero_invoice_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(xero.invoice_repo, "patch_invoice", AsyncMock())
+    monkeypatch.setattr(xero.audit_service, "record", AsyncMock())
+
+    result = await xero._apply_xero_invoice_event(
+        {"eventCategory": "INVOICE", "resourceId": "foreign-xero-invoice-id"},
+        request=None,
+    )
+
+    assert result == {"status": "ignored", "reason": "local invoice not found"}
+    fetch_mock.assert_not_awaited()
+    xero.invoice_repo.patch_invoice.assert_not_awaited()
+    xero.audit_service.record.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
 async def test_receive_webhook_acknowledges_valid_delivery_when_event_processing_fails(monkeypatch):
     from starlette.requests import Request
     from app.services import webhook_monitor
