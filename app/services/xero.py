@@ -400,17 +400,22 @@ def _build_xero_line_items_from_local_invoice(
     line_items: list[dict[str, Any]] = []
     for stored_line in invoice_lines:
         quantity = _to_decimal(stored_line.get("quantity")) or Decimal("1")
-        unit_amount = _to_decimal(stored_line.get("unit_amount")) or Decimal("0")
+        raw_unit_amount = _to_decimal(stored_line.get("unit_amount"))
+        unit_amount = raw_unit_amount if raw_unit_amount is not None else Decimal("0")
         description = str(stored_line.get("description") or "").strip() or "MyPortal invoice line"
         product_code = str(stored_line.get("product_code") or "").strip()
         line_item: dict[str, Any] = {
             "Description": description,
             "Quantity": float(_quantize(quantity, "0.0001")),
-            "UnitAmount": float(_quantize(unit_amount)),
             "AccountCode": account_code,
         }
         if product_code:
             line_item["ItemCode"] = product_code
+        # For item-coded lines, a stored zero can mean the recurring item had
+        # no price override. Do not send UnitAmount in that case so Xero can
+        # apply the product's configured sales price instead of a zero override.
+        if raw_unit_amount is not None and (unit_amount != Decimal("0") or not product_code):
+            line_item["UnitAmount"] = float(_quantize(unit_amount))
         if tax_type:
             line_item["TaxType"] = tax_type
         line_items.append(line_item)
