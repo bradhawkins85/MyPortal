@@ -655,8 +655,15 @@
           <div class="management__column management__column--content">
           {% set description_html = ticket.description_html if ticket.description_html is defined else '' %}
           <details class="card card--panel card-collapsible" data-ticket-description-panel>
-            <summary class="card__header card__header--collapsible">
-              <h2 class="card__title">Description</h2>
+            <summary class="card__header card__header--collapsible ticket-description-summary">
+              <div class="ticket-description-summary__main">
+                <h2 class="card__title">Description</h2>
+                {% if description_html %}
+                  <div class="rich-text-viewer ticket-description-summary__preview" data-ticket-description-preview>
+                    {{ description_html | safe }}
+                  </div>
+                {% endif %}
+              </div>
               <div class="card__collapsible-meta">
                 <span class="card__toggle-icon" aria-hidden="true"></span>
               </div>
