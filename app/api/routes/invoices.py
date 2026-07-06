@@ -11,6 +11,7 @@ from app.repositories import invoices as invoice_repo
 from app.repositories import user_companies as user_company_repo
 from app.schemas.invoices import InvoiceCreate, InvoiceResponse, InvoiceUpdate
 from app.services import audit as audit_service
+from app.services import xero as xero_service
 
 router = APIRouter(prefix="/api/invoices", tags=["Invoices"])
 
@@ -162,6 +163,44 @@ async def patch_invoice(
         metadata=audit_metadata,
     )
     return InvoiceResponse.model_validate(updated)
+
+
+@router.post("/{invoice_id}/xero/sync")
+async def sync_invoice_to_xero(
+    invoice_id: int,
+    request: Request,
+    auto_send: bool = Query(default=False, alias="autoSend"),
+    _: None = Depends(require_database),
+    current_user: dict = Depends(require_super_admin),
+):
+    existing = await invoice_repo.get_invoice_by_id(invoice_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    result = await xero_service.sync_invoice(invoice_id, auto_send=auto_send)
+    if result.get("status") in {"failed", "error"}:
+        await audit_service.record(
+            action="invoice.xero_sync_failed",
+            request=request,
+            user_id=int(current_user["id"]),
+            entity_type="invoice",
+            entity_id=invoice_id,
+            before=existing,
+            after=None,
+            metadata={"company_id": int(existing["company_id"]), "result": result},
+        )
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result)
+    updated = await invoice_repo.get_invoice_by_id(invoice_id)
+    await audit_service.record(
+        action="invoice.xero_sync",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="invoice",
+        entity_id=invoice_id,
+        before=existing,
+        after=updated,
+        metadata={"company_id": int(existing["company_id"]), "result": result},
+    )
+    return result
 
 
 @router.delete("/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)

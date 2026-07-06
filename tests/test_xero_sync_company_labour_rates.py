@@ -279,3 +279,77 @@ async def test_sync_company_creates_missing_xero_items_and_retries():
         assert result["synced_invoices"][0]["invoice_number"] == "XERO-2003"
         assert mock_client_instance.get.await_count == 1
         assert mock_client_instance.post.await_count == 3
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_company_filters_to_requested_invoice_ids():
+    module_settings = {
+        "enabled": True,
+        "settings": {
+            "client_id": "test-client-id",
+            "client_secret": "test-client-secret",
+            "refresh_token": "test-refresh-token",
+            "tenant_id": "test-tenant-id",
+            "account_code": "400",
+        },
+    }
+    invoices = [
+        {"id": 10, "invoice_number": "INV-10", "due_date": None},
+        {"id": 11, "invoice_number": "INV-11", "due_date": None},
+    ]
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.text = json.dumps(
+        {"Invoices": [{"InvoiceID": "xero-11", "InvoiceNumber": "XERO-11", "Status": "DRAFT"}]}
+    )
+    mock_response.headers = {}
+
+    with patch("app.services.xero.modules_service") as mock_modules, \
+         patch("app.services.xero.company_repo") as mock_company_repo, \
+         patch("app.services.xero.invoice_repo") as mock_invoice_repo, \
+         patch("app.services.xero.invoice_lines_repo") as mock_invoice_lines_repo, \
+         patch("app.services.xero.billed_time_repo") as mock_billed_repo, \
+         patch("app.services.xero.tickets_repo") as mock_tickets_repo, \
+         patch("app.services.xero.webhook_monitor") as mock_webhook, \
+         patch("app.services.xero.httpx.AsyncClient") as mock_client:
+        mock_modules.get_module = AsyncMock(return_value=module_settings)
+        mock_modules.acquire_xero_access_token = AsyncMock(return_value="test-access-token")
+        mock_company_repo.get_company_by_id = AsyncMock(return_value={"id": 1, "name": "Test", "xero_id": "contact"})
+        mock_invoice_repo.list_unsynced_company_invoices = AsyncMock(return_value=invoices)
+        mock_invoice_repo.patch_invoice = AsyncMock()
+        mock_invoice_lines_repo.list_invoice_lines = AsyncMock(
+            return_value=[{"description": "Managed services", "quantity": 1, "unit_amount": 150.00}]
+        )
+        mock_billed_repo.rename_invoice_number = AsyncMock()
+        mock_tickets_repo.rename_xero_invoice_number = AsyncMock()
+        mock_webhook.create_manual_event = AsyncMock(return_value={"id": 1})
+        mock_webhook.record_manual_success = AsyncMock()
+        mock_client_instance = MagicMock()
+        mock_client_instance.post = AsyncMock(return_value=mock_response)
+        mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        mock_client.return_value.__aexit__ = AsyncMock()
+
+        result = await xero_service.sync_company(company_id=1, invoice_ids=[11])
+
+    assert result["status"] == "succeeded"
+    assert result["invoice_count"] == 1
+    assert result["synced_invoices"][0]["previous_invoice_number"] == "INV-11"
+    mock_invoice_lines_repo.list_invoice_lines.assert_awaited_once_with(11)
+    mock_invoice_repo.patch_invoice.assert_awaited_once()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_invoice_skips_already_linked_invoice():
+    with patch("app.services.xero.invoice_repo") as mock_invoice_repo:
+        mock_invoice_repo.get_invoice_by_id = AsyncMock(
+            return_value={"id": 10, "company_id": 1, "xero_invoice_id": "existing-xero-id"}
+        )
+
+        result = await xero_service.sync_invoice(10)
+
+    assert result == {
+        "status": "skipped",
+        "reason": "Invoice is already linked to Xero",
+        "invoice_id": 10,
+        "xero_invoice_id": "existing-xero-id",
+    }
