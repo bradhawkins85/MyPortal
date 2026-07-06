@@ -780,6 +780,7 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     def _clean_text(value: Any) -> str:
         return str(value).strip() if isinstance(value, str) else ""
 
+    subject_value = _clean_text(form.get("subject"))
     status_raw = _clean_text(form.get("status"))
     priority_value = _clean_text(form.get("priority")).lower()
     requester_raw = form.get("requesterId")
@@ -803,6 +804,23 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
             )
     else:
         status_value = ticket.get("status") or await tickets_service.resolve_status_or_default(None)
+
+    if not subject_value:
+        return await main_module._render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="Enter a ticket subject.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    if len(subject_value) > 255:
+        return await main_module._render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="Subject must be 255 characters or fewer.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
 
     default_priorities = {"urgent", "high", "normal", "low"}
     ticket_priority = (ticket.get("priority") or "normal").lower()
@@ -949,6 +967,7 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
         requester_staff_id = matched.get("staff_id")
 
     update_fields: dict[str, Any] = {
+        "subject": subject_value,
         "priority": priority_value,
         "requester_id": requester_id,
         "requester_staff_id": requester_staff_id,

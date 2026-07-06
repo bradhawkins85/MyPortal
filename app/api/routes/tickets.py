@@ -610,6 +610,13 @@ async def update_ticket(
                 "Invalid ticket status.",
                 error_id=error_id,
             ) from exc
+    if "subject" in fields and fields["subject"] is not None:
+        fields["subject"] = str(fields["subject"]).strip()
+        if not fields["subject"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Ticket subject is required",
+            )
     if fields:
         await tickets_repo.update_ticket(ticket_id, **fields)
     if description_value is not description_marker:
