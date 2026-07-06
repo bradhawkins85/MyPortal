@@ -177,7 +177,6 @@ from app.services import company_access
 from app.services import dashboard as dashboard_service
 from app.services import email as email_service
 from app.services import m365_mail as m365_mail_service
-from app.services import knowledge_base as knowledge_base_service
 from app.services import rag_relationships as rag_relationship_service
 from app.services import m365 as m365_service
 from app.services import cis_benchmark as cis_benchmark_service
