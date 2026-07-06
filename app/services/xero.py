@@ -1597,6 +1597,89 @@ async def build_invoice_context(company_id: int) -> dict[str, Any]:
     return context
 
 
+
+def _coerce_utc_date(value: Any) -> date | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).date() if value.tzinfo else value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+        except ValueError:
+            try:
+                return date.fromisoformat(value[:10])
+            except ValueError:
+                return None
+    return None
+
+
+def _coerce_utc_datetime(value: Any) -> datetime | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed.astimezone(timezone.utc) if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return None
+
+
+def _recurring_item_minimum_days(item: Mapping[str, Any]) -> int | None:
+    frequency = str(item.get("billing_frequency") or "every_run").strip().lower()
+    if frequency == "weekly":
+        return 7
+    if frequency == "monthly":
+        return 28
+    if frequency == "quarterly":
+        return 91
+    if frequency == "yearly":
+        return 365
+    if frequency == "times_per_year":
+        try:
+            times = int(item.get("billing_interval") or 0)
+        except (TypeError, ValueError):
+            return None
+        if times <= 0:
+            return None
+        return max(1, 365 // times)
+    return None
+
+
+def recurring_invoice_item_is_due(item: Mapping[str, Any], *, today: date | None = None) -> bool:
+    """Return whether a recurring item should be included in an automatic invoice run."""
+    if not item.get("active"):
+        return False
+    current_date = today or datetime.now(timezone.utc).date()
+    start_date = _coerce_utc_date(item.get("start_date"))
+    end_date = _coerce_utc_date(item.get("end_date"))
+    if start_date and current_date < start_date:
+        return False
+    if end_date and current_date > end_date:
+        return False
+
+    frequency = str(item.get("billing_frequency") or "every_run").strip().lower()
+    if frequency == "every_run":
+        return True
+
+    last_billed_at = _coerce_utc_datetime(item.get("last_billed_at"))
+    if last_billed_at is None:
+        return True
+    if frequency == "once":
+        return False
+
+    minimum_days = _recurring_item_minimum_days(item)
+    if minimum_days is None:
+        return False
+    return (current_date - last_billed_at.date()).days >= minimum_days
+
 async def build_recurring_invoice_items(
     company_id: int,
     *,
@@ -1604,6 +1687,7 @@ async def build_recurring_invoice_items(
     context: dict[str, Any] | None = None,
     tenant_id: str | None = None,
     access_token: str | None = None,
+    include_metadata: bool = False,
 ) -> list[dict[str, Any]]:
     """Build line items for recurring invoice items configured for a company.
     
@@ -1627,7 +1711,7 @@ async def build_recurring_invoice_items(
     # Collect item codes that need rates from Xero (those without price_override)
     item_codes_to_fetch: set[str] = set()
     for item in recurring_items:
-        if not item.get("active"):
+        if not recurring_invoice_item_is_due(item):
             continue
         product_code = str(item.get("product_code") or "").strip()
         price_override = item.get("price_override")
@@ -1660,7 +1744,7 @@ async def build_recurring_invoice_items(
     
     for item in recurring_items:
         # Skip inactive items
-        if not item.get("active"):
+        if not recurring_invoice_item_is_due(item):
             continue
         
         # Format description using dynamic variables and legacy template placeholders.
@@ -1708,6 +1792,8 @@ async def build_recurring_invoice_items(
         # Add tax type if specified
         if tax_type:
             line_item["TaxType"] = str(tax_type).strip()
+        if include_metadata:
+            line_item["MyPortalRecurringItemId"] = item.get("id")
         
         line_items.append(line_item)
     

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any, Optional, Sequence
 
 from app.core.database import db
@@ -15,7 +16,8 @@ async def list_company_recurring_invoice_items(company_id: int) -> Sequence[dict
     rows = await db.fetch_all(
         """
         SELECT id, company_id, product_code, description_template, qty_expression,
-               price_override, active, created_at, updated_at
+               price_override, active, billing_frequency, billing_interval,
+               start_date, end_date, last_billed_at, created_at, updated_at
         FROM company_recurring_invoice_items
         WHERE company_id = %s
         ORDER BY created_at DESC
@@ -30,7 +32,8 @@ async def get_recurring_invoice_item(item_id: int) -> Optional[dict[str, Any]]:
     row = await db.fetch_one(
         """
         SELECT id, company_id, product_code, description_template, qty_expression,
-               price_override, active, created_at, updated_at
+               price_override, active, billing_frequency, billing_interval,
+               start_date, end_date, last_billed_at, created_at, updated_at
         FROM company_recurring_invoice_items
         WHERE id = %s
         """,
@@ -46,20 +49,37 @@ async def create_recurring_invoice_item(
     qty_expression: str,
     price_override: Optional[float] = None,
     active: bool = True,
+    billing_frequency: str = "every_run",
+    billing_interval: Optional[int] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
 ) -> dict[str, Any]:
     """Create a new recurring invoice item."""
     item_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO company_recurring_invoice_items
-        (company_id, product_code, description_template, qty_expression, price_override, active)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        (company_id, product_code, description_template, qty_expression, price_override, active,
+         billing_frequency, billing_interval, start_date, end_date)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
-        (company_id, product_code, description_template, qty_expression, price_override, _bool_to_tinyint(active)),
+        (
+            company_id,
+            product_code,
+            description_template,
+            qty_expression,
+            price_override,
+            _bool_to_tinyint(active),
+            billing_frequency,
+            billing_interval,
+            start_date,
+            end_date,
+        ),
     )
     row = await db.fetch_one(
         """
         SELECT id, company_id, product_code, description_template, qty_expression,
-               price_override, active, created_at, updated_at
+               price_override, active, billing_frequency, billing_interval,
+               start_date, end_date, last_billed_at, created_at, updated_at
         FROM company_recurring_invoice_items
         WHERE id = %s
         """,
@@ -77,6 +97,14 @@ async def update_recurring_invoice_item(
     qty_expression: Optional[str] = None,
     price_override: Optional[float] = None,
     active: Optional[bool] = None,
+    billing_frequency: Optional[str] = None,
+    billing_interval: Optional[int] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    clear_price_override: bool = False,
+    clear_billing_interval: bool = False,
+    clear_start_date: bool = False,
+    clear_end_date: bool = False,
 ) -> Optional[dict[str, Any]]:
     """Update a recurring invoice item."""
     updates = []
@@ -94,13 +122,37 @@ async def update_recurring_invoice_item(
         updates.append("qty_expression = %s")
         params.append(qty_expression)
     
-    if price_override is not None:
+    if clear_price_override:
+        updates.append("price_override = NULL")
+    elif price_override is not None:
         updates.append("price_override = %s")
         params.append(price_override)
     
     if active is not None:
         updates.append("active = %s")
         params.append(_bool_to_tinyint(active))
+
+    if billing_frequency is not None:
+        updates.append("billing_frequency = %s")
+        params.append(billing_frequency)
+
+    if clear_billing_interval:
+        updates.append("billing_interval = NULL")
+    elif billing_interval is not None:
+        updates.append("billing_interval = %s")
+        params.append(billing_interval)
+
+    if clear_start_date:
+        updates.append("start_date = NULL")
+    elif start_date is not None:
+        updates.append("start_date = %s")
+        params.append(start_date)
+
+    if clear_end_date:
+        updates.append("end_date = NULL")
+    elif end_date is not None:
+        updates.append("end_date = %s")
+        params.append(end_date)
     
     if not updates:
         return await get_recurring_invoice_item(item_id)
@@ -119,4 +171,24 @@ async def delete_recurring_invoice_item(item_id: int) -> None:
     await db.execute(
         "DELETE FROM company_recurring_invoice_items WHERE id = %s",
         (item_id,),
+    )
+
+
+async def mark_recurring_invoice_items_billed(
+    item_ids: Sequence[int],
+    *,
+    billed_at: Optional[datetime] = None,
+) -> None:
+    """Record the UTC timestamp when recurring items were successfully invoiced."""
+    unique_ids = sorted({int(item_id) for item_id in item_ids if item_id})
+    if not unique_ids:
+        return
+    placeholders = ", ".join(["%s"] * len(unique_ids))
+    await db.execute(
+        f"""
+        UPDATE company_recurring_invoice_items
+        SET last_billed_at = %s
+        WHERE id IN ({placeholders})
+        """,
+        tuple([billed_at or datetime.utcnow(), *unique_ids]),
     )

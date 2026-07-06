@@ -504,3 +504,25 @@ def test_local_invoice_line_without_item_code_keeps_zero_price():
             "UnitAmount": 0.0,
         }
     ]
+
+
+def test_recurring_invoice_item_is_due_respects_frequency_and_dates():
+    today = xero.date(2026, 7, 6)
+    assert xero.recurring_invoice_item_is_due({"active": True, "billing_frequency": "weekly", "last_billed_at": "2026-06-28T00:00:00+00:00"}, today=today)
+    assert not xero.recurring_invoice_item_is_due({"active": True, "billing_frequency": "weekly", "last_billed_at": "2026-07-04T00:00:00+00:00"}, today=today)
+    assert not xero.recurring_invoice_item_is_due({"active": True, "billing_frequency": "once", "last_billed_at": "2026-06-01T00:00:00+00:00"}, today=today)
+    assert not xero.recurring_invoice_item_is_due({"active": True, "billing_frequency": "monthly", "start_date": "2026-07-07"}, today=today)
+    assert not xero.recurring_invoice_item_is_due({"active": True, "billing_frequency": "monthly", "end_date": "2026-07-05"}, today=today)
+
+
+def test_build_recurring_invoice_items_skips_items_not_due(monkeypatch):
+    async def fake_list_items(company_id):
+        return [
+            {"id": 1, "product_code": "DUE", "description_template": "Due", "qty_expression": "1", "active": True, "billing_frequency": "weekly", "last_billed_at": "2026-06-01T00:00:00+00:00"},
+            {"id": 2, "product_code": "SKIP", "description_template": "Skip", "qty_expression": "1", "active": True, "billing_frequency": "once", "last_billed_at": "2026-06-01T00:00:00+00:00"},
+        ]
+
+    monkeypatch.setattr(xero.recurring_items_repo, "list_company_recurring_invoice_items", fake_list_items)
+    result = asyncio.run(xero.build_recurring_invoice_items(company_id=1, tax_type=None, include_metadata=True))
+    assert [item["ItemCode"] for item in result] == ["DUE"]
+    assert result[0]["MyPortalRecurringItemId"] == 1

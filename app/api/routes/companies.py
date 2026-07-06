@@ -347,9 +347,23 @@ async def update_recurring_invoice_item(
     item = await recurring_items_repo.get_recurring_invoice_item(item_id)
     if not item or item.get("company_id") != company_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recurring invoice item not found")
+    update_data = payload.model_dump(exclude_unset=True)
+    fields_set = payload.model_fields_set
+    if "price_override" in fields_set and payload.price_override is None:
+        update_data.pop("price_override", None)
+        update_data["clear_price_override"] = True
+    if "billing_interval" in fields_set and payload.billing_interval is None:
+        update_data.pop("billing_interval", None)
+        update_data["clear_billing_interval"] = True
+    if "start_date" in fields_set and payload.start_date is None:
+        update_data.pop("start_date", None)
+        update_data["clear_start_date"] = True
+    if "end_date" in fields_set and payload.end_date is None:
+        update_data.pop("end_date", None)
+        update_data["clear_end_date"] = True
     updated = await recurring_items_repo.update_recurring_invoice_item(
         item_id,
-        **payload.model_dump(exclude_unset=True),
+        **update_data,
     )
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recurring invoice item not found")

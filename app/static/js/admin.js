@@ -2837,6 +2837,23 @@
     const deleteButtons = document.querySelectorAll('[data-recurring-item-delete]');
     const deleteModalButton = document.querySelector('[data-recurring-item-delete-modal]');
     const resetButton = document.querySelector('[data-recurring-item-reset]');
+    const frequencyInput = document.getElementById('recurring-item-frequency');
+    const intervalField = document.getElementById('recurring-item-interval-field');
+
+    function syncIntervalVisibility() {
+      if (!frequencyInput || !intervalField) {
+        return;
+      }
+      if (frequencyInput.value === 'times_per_year') {
+        intervalField.removeAttribute('hidden');
+      } else {
+        intervalField.setAttribute('hidden', '');
+      }
+    }
+
+    if (frequencyInput) {
+      frequencyInput.addEventListener('change', syncIntervalVisibility);
+    }
 
     function openModal() {
       modal.removeAttribute('hidden');
@@ -2854,6 +2871,11 @@
     function resetForm() {
       form.reset();
       document.getElementById('recurring-item-id').value = '';
+      document.getElementById('recurring-item-frequency').value = 'every_run';
+      document.getElementById('recurring-item-interval').value = '';
+      document.getElementById('recurring-item-start-date').value = '';
+      document.getElementById('recurring-item-end-date').value = '';
+      syncIntervalVisibility();
       if (deleteModalButton) {
         deleteModalButton.setAttribute('hidden', '');
         deleteModalButton.setAttribute('aria-hidden', 'true');
@@ -2867,6 +2889,11 @@
       document.getElementById('recurring-item-qty').value = item.qty_expression || '';
       document.getElementById('recurring-item-price').value = item.price_override || '';
       document.getElementById('recurring-item-active').checked = !!item.active;
+      document.getElementById('recurring-item-frequency').value = item.billing_frequency || 'every_run';
+      document.getElementById('recurring-item-interval').value = item.billing_interval || '';
+      document.getElementById('recurring-item-start-date').value = (item.start_date || '').slice(0, 10);
+      document.getElementById('recurring-item-end-date').value = (item.end_date || '').slice(0, 10);
+      syncIntervalVisibility();
 
       if (item.id && deleteModalButton) {
         deleteModalButton.removeAttribute('hidden');
@@ -2924,12 +2951,18 @@
         }
       }
 
+      const billingFrequency = document.getElementById('recurring-item-frequency').value;
+      const billingIntervalValue = document.getElementById('recurring-item-interval').value.trim();
       const formData = {
         product_code: document.getElementById('recurring-item-product-code').value.trim(),
         description_template: document.getElementById('recurring-item-description').value.trim(),
         qty_expression: document.getElementById('recurring-item-qty').value.trim(),
         price_override: priceOverride,
         active: document.getElementById('recurring-item-active').checked,
+        billing_frequency: billingFrequency,
+        billing_interval: billingFrequency === 'times_per_year' && billingIntervalValue ? parseInt(billingIntervalValue, 10) : null,
+        start_date: document.getElementById('recurring-item-start-date').value || null,
+        end_date: document.getElementById('recurring-item-end-date').value || null,
       };
 
       try {

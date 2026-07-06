@@ -15,6 +15,7 @@ from loguru import logger
 from app.repositories import companies as company_repo
 from app.repositories import invoice_lines as invoice_lines_repo
 from app.repositories import invoices as invoice_repo
+from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.repositories import ticket_billed_time_entries as billed_time_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as users_repo
@@ -174,6 +175,7 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
         context=context,
         tenant_id=tenant_id,
         access_token=access_token,
+        include_metadata=True,
     )
 
     line_item_template = await _get_xero_line_item_template()
@@ -363,9 +365,24 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
                 error=str(exc),
             )
 
+    recurring_item_ids = [
+        int(item["MyPortalRecurringItemId"])
+        for item in recurring_line_items
+        if item.get("MyPortalRecurringItemId")
+    ]
+    now = datetime.now(timezone.utc)
+    try:
+        await recurring_items_repo.mark_recurring_invoice_items_billed(recurring_item_ids, billed_at=now)
+    except Exception as exc:
+        logger.error(
+            "Failed to update recurring invoice item billing timestamps",
+            company_id=company_id,
+            invoice_id=invoice_id,
+            error=str(exc),
+        )
+
     # Mark time entries as billed and update ticket statuses
     billed_count = 0
-    now = datetime.now(timezone.utc)
 
     for ticket_ctx in tickets_context:
         ticket_id = ticket_ctx.get("id")
