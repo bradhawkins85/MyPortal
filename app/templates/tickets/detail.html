@@ -15,10 +15,6 @@
       <header class="management__header">
         <div>
           <h1 class="management__title">{{ ticket.subject or 'Ticket' }}</h1>
-          <p class="management__subtitle">
-            Ticket #{{ ticket.id }}
-            <span class="badge {{ ticket.status_badge }}">{{ ticket.status_label }}</span>
-          </p>
         </div>
         <div class="management__header-actions">
           <a class="button button--ghost" href="/tickets">Back to tickets</a>
