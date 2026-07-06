@@ -374,3 +374,74 @@ async def test_build_recurring_invoice_items_without_credentials(monkeypatch):
     assert len(line_items) == 1
     assert line_items[0]["ItemCode"] == "MANAGED-SERVICES"
     assert "UnitAmount" not in line_items[0], "Should not have UnitAmount without credentials"
+
+
+def test_build_recurring_invoice_items_with_report_variables(monkeypatch):
+    """Recurring item descriptions and quantities render saved-report variables."""
+
+    async def fake_list_items(company_id):
+        return [
+            {
+                "id": 1,
+                "company_id": company_id,
+                "product_code": "ONLINE-WORKSTATIONS",
+                "description_template": "Online workstations:\n{{ report.online-workstations-last-30-days.list }}",
+                "qty_expression": "{{ report.online-workstations-last-30-days.count }}",
+                "price_override": 2.50,
+                "active": True,
+            }
+        ]
+
+    async def fake_get_query_by_slug(slug):
+        assert slug == "online-workstations-last-30-days"
+        return {
+            "slug": slug,
+            "sql_query": "SELECT name FROM assets WHERE company_id = {{current.company}}",
+        }
+
+    async def fake_count_query_rows(sql_query, *, company_id=None):
+        assert company_id == 77
+        return 3
+
+    async def fake_run_query_with_context(sql_query, *, company_id=None):
+        assert company_id == 77
+        return {
+            "columns": ["name"],
+            "rows": [{"name": "PC-01"}, {"name": "PC-02"}, {"name": "PC-03"}],
+        }
+
+    monkeypatch.setattr(
+        xero.recurring_items_repo,
+        "list_company_recurring_invoice_items",
+        fake_list_items,
+    )
+    monkeypatch.setattr(
+        xero.value_templates.dynamic_variables.reporting_repo,
+        "get_query_by_slug",
+        fake_get_query_by_slug,
+    )
+    monkeypatch.setattr(
+        xero.value_templates.dynamic_variables.reporting_service,
+        "count_query_rows",
+        fake_count_query_rows,
+    )
+    monkeypatch.setattr(
+        xero.value_templates.dynamic_variables.reporting_service,
+        "run_query_with_context",
+        fake_run_query_with_context,
+    )
+
+    result = asyncio.run(
+        xero.build_recurring_invoice_items(
+            company_id=77,
+            tax_type="OUTPUT2",
+            context={"company_name": "Acme"},
+        )
+    )
+
+    assert len(result) == 1
+    assert result[0]["Quantity"] == 3.0
+    assert (
+        result[0]["Description"]
+        == "Online workstations:\nname\r\nPC-01\r\nPC-02\r\nPC-03"
+    )
