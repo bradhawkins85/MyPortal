@@ -6,6 +6,7 @@ import secrets
 from pathlib import Path
 from typing import Any
 
+import magic
 from fastapi import UploadFile
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
@@ -17,7 +18,9 @@ from app.repositories import ticket_attachments as attachments_repo
 # Maximum file size: 50 MB
 MAX_FILE_SIZE = 50 * 1024 * 1024
 
-# Allowed MIME types for attachments
+# Allowed MIME types for attachments.
+# SVG, HTML, and XML types are intentionally excluded: SVGs can contain embedded
+# <script> tags and HTML/XML documents can trigger XSS when rendered inline.
 ALLOWED_MIME_TYPES = {
     # Documents
     "application/pdf",
@@ -29,12 +32,11 @@ ALLOWED_MIME_TYPES = {
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     "text/plain",
     "text/csv",
-    # Images
+    # Images (raster only — SVG excluded due to script-injection risk)
     "image/jpeg",
     "image/png",
     "image/gif",
     "image/webp",
-    "image/svg+xml",
     # Archives
     "application/zip",
     "application/x-7z-compressed",
@@ -42,15 +44,20 @@ ALLOWED_MIME_TYPES = {
     "application/gzip",
     # Other
     "application/json",
-    "text/html",
-    "text/xml",
-    "application/xml",
 }
+
+# Number of bytes to read from the start of a file for MIME sniffing.
+_MAGIC_HEADER_BYTES = 2048
 
 
 def _get_upload_directory() -> Path:
-    """Get the base upload directory for ticket attachments."""
-    base_dir = Path(__file__).parent.parent / "static" / "uploads" / "tickets"
+    """Get the base upload directory for ticket attachments.
+
+    Files are stored under ``private_uploads/tickets/`` (outside the public
+    ``/static`` tree) so that access-control checks in the download endpoint
+    cannot be bypassed by guessing a direct URL.
+    """
+    base_dir = Path(__file__).resolve().parents[2] / "private_uploads" / "tickets"
     base_dir.mkdir(parents=True, exist_ok=True)
     return base_dir
 
@@ -73,6 +80,20 @@ def _generate_secure_filename(original_filename: str) -> str:
     return random_name
 
 
+def _sniff_mime_type(header_bytes: bytes) -> str | None:
+    """Return the MIME type detected from the first bytes of a file.
+
+    Uses ``python-magic`` (libmagic) to inspect the file *content* rather than
+    trusting the client-supplied ``Content-Type`` header, which is trivially
+    spoofable.
+    """
+    try:
+        return magic.from_buffer(header_bytes, mime=True)
+    except Exception as exc:
+        log_error(f"MIME sniffing failed: {exc}")
+        return None
+
+
 def validate_file_upload(file: UploadFile, max_size: int = MAX_FILE_SIZE) -> tuple[bool, str | None]:
     """
     Validate an uploaded file.
@@ -88,8 +109,10 @@ def validate_file_upload(file: UploadFile, max_size: int = MAX_FILE_SIZE) -> tup
         max_mb = max_size / (1024 * 1024)
         return False, f"File size exceeds maximum allowed size of {max_mb}MB"
     
-    # Check MIME type
-    if file.content_type and file.content_type not in ALLOWED_MIME_TYPES:
+    # Check MIME type against the client-supplied header as a quick pre-filter.
+    # The actual bytes-based check is performed in save_uploaded_file after the
+    # file has been read.
+    if file.content_type and file.content_type.split(";")[0].strip() not in ALLOWED_MIME_TYPES:
         return False, f"File type '{file.content_type}' is not allowed"
     
     return True, None
@@ -137,11 +160,18 @@ async def save_uploaded_file(
         # Double check size after reading
         if file_size > MAX_FILE_SIZE:
             raise ValueError(f"File size {file_size} exceeds maximum")
+
+        # Validate MIME type from actual file bytes (defeats spoofed Content-Type).
+        actual_mime = _sniff_mime_type(contents[:_MAGIC_HEADER_BYTES])
+        if actual_mime and actual_mime not in ALLOWED_MIME_TYPES:
+            raise ValueError(f"File content type '{actual_mime}' is not allowed")
         
         with open(file_path, "wb") as f:
             f.write(contents)
         
         log_info(f"Saved file {secure_filename} ({file_size} bytes) for ticket {ticket_id}")
+    except ValueError:
+        raise
     except Exception as e:
         log_error(f"Failed to save file: {e}")
         # Clean up partial file if it exists
@@ -149,6 +179,9 @@ async def save_uploaded_file(
             file_path.unlink()
         raise IOError(f"Failed to save file: {e}") from e
     
+    # Use the sniffed MIME type (more trustworthy than client-supplied header).
+    resolved_mime = actual_mime or file.content_type
+
     # Create database record
     try:
         attachment = await attachments_repo.create_attachment(
@@ -156,7 +189,7 @@ async def save_uploaded_file(
             filename=secure_filename,
             original_filename=file.filename or "upload",
             file_size=file_size,
-            mime_type=file.content_type,
+            mime_type=resolved_mime,
             access_level=access_level,
             uploaded_by_user_id=uploaded_by_user_id,
         )
@@ -192,6 +225,13 @@ async def save_file_bytes(
     if file_size > MAX_FILE_SIZE:
         raise ValueError(f"File size {file_size} exceeds maximum")
 
+    # Validate MIME type from actual file bytes.
+    actual_mime = _sniff_mime_type(contents[:_MAGIC_HEADER_BYTES])
+    if actual_mime and actual_mime not in ALLOWED_MIME_TYPES:
+        raise ValueError(f"File content type '{actual_mime}' is not allowed")
+
+    resolved_mime = actual_mime or mime_type
+
     secure_filename = _generate_secure_filename(upload_name)
     upload_dir = _get_upload_directory()
     file_path = upload_dir / secure_filename
@@ -211,7 +251,7 @@ async def save_file_bytes(
             filename=secure_filename,
             original_filename=upload_name,
             file_size=file_size,
-            mime_type=mime_type,
+            mime_type=resolved_mime,
             access_level=access_level,
             uploaded_by_user_id=uploaded_by_user_id,
         )

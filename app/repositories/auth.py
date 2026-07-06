@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from app.core.database import db
 from app.core.logging import log_info
 from app.security.encryption import decrypt_secret, encrypt_secret
+
+
+def _hash_session_token(token: str) -> str:
+    """Return the SHA-256 hex digest of *token*.
+
+    Only the digest is stored in the database; the raw token travels in the
+    session cookie.  If the database is compromised the attacker learns only
+    hashes, which cannot be reversed to re-use active sessions.
+    """
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 async def create_session(
@@ -52,7 +63,7 @@ async def create_session(
         (
             user_id,
             active_company_id,
-            session_token,
+            _hash_session_token(session_token),
             csrf_token,
             created_at,
             expires_at,
@@ -71,7 +82,7 @@ async def create_session(
 
 async def get_session_by_token(token: str) -> Optional[dict[str, Any]]:
     row = await db.fetch_one(
-        "SELECT * FROM user_sessions WHERE session_token = %s", (token,)
+        "SELECT * FROM user_sessions WHERE session_token = %s", (_hash_session_token(token),)
     )
     return row
 

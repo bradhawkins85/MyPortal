@@ -1,7 +1,7 @@
 {
   "guid": "56477aa7-e4c1-4eb5-ad70-53221c3ed93a",
-  "occurred_at": "2026-06-09T02:40:07.303169+00:00",
+  "occurred_at": "2026-06-09T02:40Z",
   "change_type": "Feature",
   "summary": "Add ticket-age and last-reply scanning support to scheduled automations.",
-  "content_hash": "fbf8d635240ea1cbf58a8794bc77ee2234b99b4ca7f8fecc00271af62d97e89a"
+  "content_hash": "2ee8d5b8b6f9e2a1794c6df2c890fd849b83e285bfcc5598d94bcb3c7f1cb2d9"
 }

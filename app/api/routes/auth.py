@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -166,13 +167,18 @@ async def _determine_active_company_id(user: dict[str, Any]) -> int | None:
 
 
 def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    client = request.client
-    if client and client.host:
-        return client.host
-    return "unknown"
+    from app.security.client_ip import get_client_ip
+    return get_client_ip(request, default="unknown") or "unknown"
+
+
+def _hash_email(email: str) -> str:
+    """Return a short hash of *email* for structured log fields.
+
+    The full address is never written to logs, protecting user privacy in log
+    aggregation systems while still allowing correlation of events for the same
+    account.
+    """
+    return hashlib.sha256(email.encode()).hexdigest()[:12]
 
 
 def _user_agent(request: Request) -> str:
@@ -183,7 +189,10 @@ def _log_login_failure(request: Request, email: str, reason: str) -> None:
     normalized_email = str(email or "").lower()
     ip = _client_ip(request)
     log_error(
-        f"AUTH LOGIN FAIL email={normalized_email} ip={ip} reason={reason}",
+        "AUTH LOGIN FAIL",
+        email_hash=_hash_email(normalized_email),
+        ip=ip,
+        reason=reason,
         user_agent=_user_agent(request),
     )
 
@@ -193,7 +202,10 @@ def _log_login_success(request: Request, user: dict[str, Any]) -> None:
     ip = _client_ip(request)
     user_id = user.get("id")
     log_info(
-        f"AUTH LOGIN SUCCESS email={email} user_id={user_id} ip={ip}",
+        "AUTH LOGIN SUCCESS",
+        email_hash=_hash_email(email),
+        user_id=user_id,
+        ip=ip,
         user_agent=_user_agent(request),
     )
 

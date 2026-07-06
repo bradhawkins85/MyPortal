@@ -1474,6 +1474,7 @@ async def download_ticket_attachment(
         path=file_path,
         filename=attachment.get("original_filename"),
         media_type=attachment.get("mime_type") or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{attachment.get("original_filename", "download")}"'},
     )
 
 
@@ -1505,6 +1506,7 @@ async def download_open_attachment(token: str):
         path=file_path,
         filename=attachment.get("original_filename"),
         media_type=attachment.get("mime_type") or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{attachment.get("original_filename", "download")}"'},
     )
 
 

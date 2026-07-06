@@ -6,9 +6,9 @@ from dataclasses import dataclass
 import re
 from typing import Mapping
 
-import bleach
+import nh3
 
-_ALLOWED_TAGS: tuple[str, ...] = (
+_ALLOWED_TAGS: frozenset[str] = frozenset((
     "a",
     "b",
     "blockquote",
@@ -41,16 +41,16 @@ _ALLOWED_TAGS: tuple[str, ...] = (
     "tr",
     "u",
     "ul",
-)
+))
 
-_ALLOWED_ATTRIBUTES: Mapping[str, list[str]] = {
-    "a": ["href", "title", "target", "rel"],
-    "img": ["src", "alt", "title", "width", "height", "loading", "decoding"],
-    "span": ["data-mention"],
-    "table": ["role"],
+_ALLOWED_ATTRIBUTES: dict[str, set[str]] = {
+    "a": {"href", "title", "target"},
+    "img": {"src", "alt", "title", "width", "height", "loading", "decoding"},
+    "span": {"data-mention"},
+    "table": {"role"},
 }
 
-_ALLOWED_PROTOCOLS: tuple[str, ...] = ("http", "https", "mailto", "tel", "data")
+_ALLOWED_PROTOCOLS: frozenset[str] = frozenset(("http", "https", "mailto", "tel", "data"))
 
 _STYLE_BLOCK_PATTERN = re.compile(r"(?is)<style.*?>.*?</style>")
 _INLINE_CSS_PATTERN = re.compile(r"(?is)^(?:\s*[a-z0-9._#-]+\s*\{[^}]*\}\s*)+")
@@ -112,12 +112,11 @@ def sanitize_rich_text(value: str | None) -> SanitizedRichText:
         raw_text = _STYLE_BLOCK_PATTERN.sub("", raw_text)
         raw_text = _INLINE_CSS_PATTERN.sub("", raw_text)
         raw_text = _strip_quoted_email_headers(raw_text)
-    cleaned = bleach.clean(
+    cleaned = nh3.clean(
         raw_text,
         tags=_ALLOWED_TAGS,
         attributes=_ALLOWED_ATTRIBUTES,
-        protocols=_ALLOWED_PROTOCOLS,
-        strip=True,
+        url_schemes=_ALLOWED_PROTOCOLS,
     )
     normalised = cleaned.replace("\r\n", "\n").replace("\r", "\n").replace("\u200b", "")
     if normalised:
@@ -127,7 +126,7 @@ def sanitize_rich_text(value: str | None) -> SanitizedRichText:
             html_value = normalised
     else:
         html_value = ""
-    text_content = bleach.clean(html_value, tags=[], strip=True).strip()
+    text_content = nh3.clean(html_value, tags=frozenset()).strip()
     contains_media = bool(re.search(r"<img\b[^>]*\bsrc=", html_value, flags=re.IGNORECASE))
     if not text_content and not contains_media:
         html_value = ""

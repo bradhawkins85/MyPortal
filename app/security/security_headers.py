@@ -57,11 +57,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             if self._is_valid_csp_source(portal_url):
                 validated_portal_url = portal_url
 
-        # Build script-src directive with dynamic sources
+        # Build script-src directive with dynamic sources.
+        # NOTE: ``unsafe-inline`` is retained temporarily until all inline
+        # <script> blocks in Jinja2 templates have been migrated to external
+        # files or updated to carry a ``nonce="{{ csp_nonce }}"`` attribute.
+        # ``unsafe-eval`` has been removed as no production code uses eval().
         script_sources = [
             "'self'",
             "'unsafe-inline'",
-            "'unsafe-eval'",
             "https://unpkg.com",
             "https://cal.com",
             "https://app.cal.com",

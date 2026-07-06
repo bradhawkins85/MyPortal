@@ -194,7 +194,7 @@
         <div class="role-section">
           <h3 class="role-title">{{ role.title }}</h3>
           {% if role.responsibilities %}
-          <div class="role-responsibilities">{{ role.responsibilities|replace('\n', '<br>')|safe }}</div>
+          <div class="role-responsibilities">{{ role.responsibilities | e | replace('\n', '<br>') | safe }}</div>
           {% endif %}
           {% if role.assignments %}
           <div class="role-assignments">

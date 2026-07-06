@@ -1,7 +1,7 @@
 {
   "guid": "4671136a-6069-43bc-9350-2d747830c973",
-  "occurred_at": "2026-06-09T02:51:38Z",
+  "occurred_at": "2026-06-09T02:51Z",
   "change_type": "Fix",
   "summary": "Fix Windows tray Submit Ticket submission and HKCU prefill persistence",
-  "content_hash": "80fdc058194fb1878c7673804ae646b5809936033204f2b22587064256742e0d"
+  "content_hash": "f4714e4e7f56b347a28e8d3c806b1a32719d98af2a43eee7231aca2182281d95"
 }

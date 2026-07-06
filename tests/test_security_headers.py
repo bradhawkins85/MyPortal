@@ -121,9 +121,11 @@ def test_csp_header_configuration(test_app):
     assert "form-action 'self'" in csp
     # Check that unpkg.com is allowed for loading htmx in script-src directive
     assert (
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cal.com https://app.cal.com https://static.cloudflareinsights.com"
+        "script-src 'self' 'unsafe-inline' https://unpkg.com https://cal.com https://app.cal.com https://static.cloudflareinsights.com"
         in csp
     )
+    # unsafe-eval must not be present (removed to harden CSP)
+    assert "'unsafe-eval'" not in csp
 
 
 def test_x_frame_options_deny(test_app):
@@ -215,7 +217,7 @@ def test_csp_with_plausible_analytics(test_app_with_plausible):
     # Check that default sources are still present
     assert "'self'" in csp
     assert "'unsafe-inline'" in csp
-    assert "'unsafe-eval'" in csp
+    assert "'unsafe-eval'" not in csp
     assert "https://unpkg.com" in csp
 
 

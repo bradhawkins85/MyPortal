@@ -69,7 +69,7 @@
         {% if role.responsibilities %}
         <div class="form-group">
           <label class="form-label">Responsibilities</label>
-          <div class="responsibilities-text">{{ role.responsibilities|replace('\n', '<br>')|safe }}</div>
+          <div class="responsibilities-text">{{ role.responsibilities | e | replace('\n', '<br>') | safe }}</div>
         </div>
         {% endif %}
 
