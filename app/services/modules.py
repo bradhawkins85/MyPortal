@@ -547,6 +547,7 @@ def _default_xero_settings() -> dict[str, Any]:
         "client_id": _clean_env("XERO_CLIENT_ID"),
         "client_secret": _clean_env("XERO_CLIENT_SECRET"),
         "webhook_key": _clean_env("XERO_WEBHOOK_KEY"),
+        "tenant_id": _clean_env("XERO_TENANT_ID"),
         # Note: refresh_token is obtained via OAuth2 code flow only (/xero/connect)
         # and should not be set manually via environment variables
         "company_name": _clean_env("XERO_COMPANY_NAME"),
@@ -992,6 +993,7 @@ _ENV_BACKED_MODULE_FIELDS: dict[str, tuple[str, ...]] = {
     "xero": (
         "client_id",
         "client_secret",
+        "tenant_id",
         "company_name",
         "default_hourly_rate",
         "account_code",
@@ -1040,6 +1042,9 @@ def _resolve_module_settings_for_runtime(
     raw_settings = _parse_module_settings((module or {}).get("settings"))
     resolved = _coerce_settings(slug, raw_settings, module)
     if slug == "xero":
+        env_tenant_id = str(os.getenv("XERO_TENANT_ID", "")).strip()
+        if env_tenant_id and not str(resolved.get("tenant_id") or "").strip():
+            resolved["tenant_id"] = env_tenant_id
         env_line_item_template = str(os.getenv("XERO_LINE_ITEM_TEMPLATE", "")).strip()
         if env_line_item_template:
             resolved["line_item_description_template"] = env_line_item_template

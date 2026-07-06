@@ -2095,8 +2095,22 @@ async def sync_company(
         }
 
     settings = dict(module.get("settings") or {})
-    required_fields = ["client_id", "client_secret", "refresh_token", "tenant_id"]
-    missing = [field for field in required_fields if not str(settings.get(field) or "").strip()]
+    credentials = await modules_service.get_xero_credentials() or {}
+    tenant_id = str(credentials.get("tenant_id") or settings.get("tenant_id") or "").strip()
+    missing = [
+        field
+        for field in ("client_id", "client_secret", "tenant_id")
+        if not str(credentials.get(field) or settings.get(field) or "").strip()
+    ]
+    # A refresh token is required for durable OAuth operation because Xero
+    # access tokens expire quickly and refresh tokens are rotated. However, do
+    # not block a sync that still has a cached access token; acquire_xero_access_token()
+    # will reuse that token while it remains valid and will raise a clearer
+    # error if it has expired without a refresh token.
+    if not str(credentials.get("refresh_token") or "").strip() and not str(
+        credentials.get("access_token") or ""
+    ).strip():
+        missing.append("refresh_token")
     if missing:
         return {
             "status": "skipped",
@@ -2125,14 +2139,6 @@ async def sync_company(
             "reason": "No matching unsynchronised MyPortal invoices" if requested_invoice_ids else "No unsynchronised MyPortal invoices",
             "company_id": company_id,
             "invoice_count": 0,
-        }
-
-    tenant_id = str(settings.get("tenant_id", "")).strip()
-    if not tenant_id:
-        return {
-            "status": "skipped",
-            "reason": "Tenant ID not configured",
-            "company_id": company_id,
         }
 
     try:
