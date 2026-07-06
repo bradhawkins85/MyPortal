@@ -402,13 +402,14 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
                     error=str(exc),
                 )
 
-        # Update ticket: mark as billed and close
+        # Update ticket: mark as billed and move to the configured invoiced status.
+        invoiced_status = xero_service.resolve_invoiced_ticket_status()
         try:
             await tickets_repo.update_ticket(
                 ticket_id,
                 xero_invoice_number=invoice_number,
                 billed_at=now,
-                status="closed",
+                status=invoiced_status,
                 closed_at=now,
             )
         except Exception as exc:

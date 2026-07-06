@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -19,6 +20,7 @@ from app.repositories import invoice_lines as invoice_lines_repo
 from app.repositories import staff as staff_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import ticket_billed_time_entries as billed_time_repo
+from app.repositories import ticket_statuses as ticket_status_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as users_repo
 from app.services.billing_time import format_billable_minutes
@@ -35,6 +37,16 @@ QuoteItemsFetcher = Callable[[str, int], Awaitable[Sequence[Mapping[str, Any]] |
 XERO_ITEM_NAME_MAX_LENGTH = 50
 _XERO_ERROR_DETAIL_MAX_LENGTH = 500
 _XERO_INVOICE_NUMBER_SUFFIX_RE = re.compile(r"^(.*)(\d+)$")
+_INVOICED_TICKET_STATUS_ENV = "TICKET_INVOICED_STATUS"
+_DEFAULT_INVOICED_TICKET_STATUS = "closed"
+
+
+def resolve_invoiced_ticket_status() -> str:
+    """Return the ticket status applied after successful invoice creation."""
+
+    configured = os.getenv(_INVOICED_TICKET_STATUS_ENV, _DEFAULT_INVOICED_TICKET_STATUS)
+    status = ticket_status_repo.slugify_status_label(configured)
+    return status or _DEFAULT_INVOICED_TICKET_STATUS
 
 
 class _TemplateValues(dict[str, Any]):
@@ -2035,13 +2047,14 @@ async def sync_billable_tickets(
                             error=str(entry_exc),
                         )
                 
-                # Update ticket: mark as billed and move to Closed status
+                # Update ticket: mark as billed and move to the configured invoiced status.
+                invoiced_status = resolve_invoiced_ticket_status()
                 try:
                     await tickets_repo.update_ticket(
                         ticket_id,
                         xero_invoice_number=xero_invoice_number,
                         billed_at=now,
-                        status="closed",
+                        status=invoiced_status,
                         closed_at=now,
                     )
                 except Exception as update_exc:
