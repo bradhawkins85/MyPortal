@@ -54,3 +54,45 @@ async def test_apply_xero_invoice_event_marks_local_invoice_paid(monkeypatch):
     assert result == {"status": "updated", "invoice_id": 42}
     patch_mock.assert_awaited_once_with(42, status="paid")
     audit_mock.assert_awaited_once()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_receive_webhook_acknowledges_valid_delivery_when_event_processing_fails(monkeypatch):
+    from starlette.requests import Request
+    from app.services import webhook_monitor
+
+    body = b'{"events":[{"eventCategory":"INVOICE","resourceId":"xero-invoice-id"}]}'
+    key = "xero-webhook-key"
+    signature = base64.b64encode(hmac.new(key.encode(), body, hashlib.sha256).digest()).decode()
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/integration-modules/xero/webhook",
+            "headers": [
+                (b"host", b"testserver"),
+                (b"x-xero-signature", signature.encode()),
+                (b"content-type", b"application/json"),
+            ],
+            "scheme": "https",
+            "server": ("testserver", 443),
+            "client": ("127.0.0.1", 12345),
+        },
+        receive,
+    )
+
+    monkeypatch.setattr(xero, "_ensure_module_enabled", AsyncMock(return_value={"settings": {"webhook_key": key}}))
+    monkeypatch.setattr(xero, "_apply_xero_invoice_event", AsyncMock(side_effect=RuntimeError("Xero API timeout")))
+    log_mock = AsyncMock()
+    monkeypatch.setattr(webhook_monitor, "log_incoming_webhook", log_mock)
+
+    result = await xero.receive_webhook(request)
+
+    assert result == {"status": "accepted", "results": [{"status": "failed", "error": "Internal processing error"}]}
+    log_mock.assert_awaited_once()
+    assert log_mock.await_args.kwargs["response_status"] == 200
+    assert log_mock.await_args.kwargs["error_message"] == "Internal processing error"
