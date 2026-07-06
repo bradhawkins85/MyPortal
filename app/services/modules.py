@@ -4107,11 +4107,29 @@ async def _discover_xero_tenant_id(
             token_response.raise_for_status()
             token_data_response = token_response.json()
             access_token = token_data_response.get("access_token")
-            
+            new_refresh_token = token_data_response.get("refresh_token")
+            expires_in = token_data_response.get("expires_in")
+
             if not access_token:
                 logger.error("Failed to get access token from Xero")
                 return None
-            
+
+            expires_at = None
+            if isinstance(expires_in, (int, float)):
+                expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(expires_in))
+
+            # Xero rotates refresh tokens on every refresh-token grant.  Persist
+            # any replacement immediately so validation/tenant discovery cannot
+            # leave the module with a stale token that later produces
+            # ``invalid_grant`` and causes syncs to report a missing/unusable
+            # refresh_token.
+            if new_refresh_token:
+                await update_xero_tokens(
+                    access_token=str(access_token),
+                    refresh_token=str(new_refresh_token),
+                    token_expires_at=expires_at,
+                )
+
             # Step 2: Get connections (tenants)
             connections_url = "https://api.xero.com/connections"
             connections_response = await client.get(

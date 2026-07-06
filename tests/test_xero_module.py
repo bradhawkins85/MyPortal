@@ -390,6 +390,48 @@ async def test_discover_xero_tenant_id_from_connections_api():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_discover_xero_tenant_id_persists_rotated_refresh_token():
+    """Tenant discovery must store Xero's rotated refresh token for later syncs."""
+
+    with patch("app.services.modules.httpx.AsyncClient") as mock_client_class, patch(
+        "app.services.modules.update_xero_tokens", new_callable=AsyncMock
+    ) as mock_update_tokens:
+        mock_client = AsyncMock()
+        mock_client_class.return_value.__aenter__.return_value = mock_client
+
+        mock_token_response = MagicMock()
+        mock_token_response.json.return_value = {
+            "access_token": "new-access-token",
+            "refresh_token": "new-refresh-token",
+            "expires_in": 1800,
+        }
+        mock_token_response.raise_for_status.return_value = None
+
+        mock_connections_response = MagicMock()
+        mock_connections_response.json.return_value = [
+            {"tenantId": "tenant-123", "tenantName": "Test Company"},
+        ]
+        mock_connections_response.raise_for_status.return_value = None
+
+        mock_client.post.return_value = mock_token_response
+        mock_client.get.return_value = mock_connections_response
+
+        tenant_id = await modules_service._discover_xero_tenant_id(
+            client_id="test-client",
+            client_secret="test-secret",
+            refresh_token="old-refresh-token",
+            company_name="Test Company",
+        )
+
+    assert tenant_id == "tenant-123"
+    mock_update_tokens.assert_awaited_once()
+    update_kwargs = mock_update_tokens.await_args.kwargs
+    assert update_kwargs["access_token"] == "new-access-token"
+    assert update_kwargs["refresh_token"] == "new-refresh-token"
+    assert update_kwargs["token_expires_at"] is not None
+
+
+@pytest.mark.anyio("asyncio")
 async def test_discover_xero_tenant_id_case_insensitive_matching():
     """Test that tenant name matching is case-insensitive."""
     
