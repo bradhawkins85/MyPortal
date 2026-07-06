@@ -181,3 +181,74 @@ async def test_sync_company_auto_send_parameter():
         
         assert result["status"] == "skipped"
         assert result["reason"] == "Module disabled"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_company_uses_credentials_for_config_check_with_cached_access_token():
+    """Cached access tokens should allow sync attempts without a stored refresh token."""
+
+    with patch("app.services.xero.modules_service") as mock_modules, \
+         patch("app.services.xero.company_repo") as mock_company_repo, \
+         patch("app.services.xero.invoice_repo") as mock_invoice_repo:
+
+        mock_modules.get_module = AsyncMock(
+            return_value={
+                "enabled": True,
+                "settings": {
+                    "client_id": "client-id",
+                    "client_secret": "client-secret",
+                    "tenant_id": "tenant-id",
+                },
+            }
+        )
+        mock_modules.get_xero_credentials = AsyncMock(
+            return_value={
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+                "tenant_id": "tenant-id",
+                "access_token": "cached-access-token",
+                "refresh_token": "",
+            }
+        )
+        mock_company_repo.get_company_by_id = AsyncMock(
+            return_value={"id": 1, "name": "Test Company", "xero_id": "xero-123"}
+        )
+        mock_invoice_repo.list_unsynced_company_invoices = AsyncMock(return_value=[])
+
+        result = await xero_service.sync_company(company_id=1)
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "No unsynchronised MyPortal invoices"
+        assert "missing" not in result
+
+
+@pytest.mark.anyio("asyncio")
+async def test_sync_company_requires_refresh_token_when_no_cached_access_token():
+    """Without refresh or cached access token, Xero sync should clearly report refresh_token missing."""
+
+    with patch("app.services.xero.modules_service") as mock_modules:
+        mock_modules.get_module = AsyncMock(
+            return_value={
+                "enabled": True,
+                "settings": {
+                    "client_id": "client-id",
+                    "client_secret": "client-secret",
+                    "tenant_id": "tenant-id",
+                },
+            }
+        )
+        mock_modules.get_xero_credentials = AsyncMock(
+            return_value={
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+                "tenant_id": "tenant-id",
+                "access_token": "",
+                "refresh_token": "",
+            }
+        )
+
+        result = await xero_service.sync_company(company_id=1)
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "Module not fully configured"
+        assert result["missing"] == ["refresh_token"]
