@@ -2139,7 +2139,11 @@ async def trigger_module(
             )
             if event_future and not event_future.done():
                 event_future.set_result(None)
-            result = {"status": "error", "error": str(exc), "module": slug}
+            result = {
+                "status": "error",
+                "error": "An internal module error occurred",
+                "module": slug,
+            }
         if event_future and not event_future.done():
             event_id_value = result.get("event_id")
             event_future.set_result(event_id_value if isinstance(event_id_value, int) else None)

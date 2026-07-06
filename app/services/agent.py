@@ -488,9 +488,14 @@ async def _invoke_agent_llm_conversation(
                 background=False,
             )
         except ValueError as exc:
+            log_error(
+                "Agent LLM conversation validation failed",
+                stage=turn_name,
+                error=str(exc),
+            )
             return {
                 "status": "error",
-                "message": str(exc),
+                "message": "Unable to process the request at this time",
                 "text": None,
                 "model": None,
                 "event_id": None,
