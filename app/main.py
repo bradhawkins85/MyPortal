@@ -7668,9 +7668,14 @@ async def _render_portal_ticket_detail(
 
     sanitized_description = sanitize_rich_text(str(ticket.get("description") or ""))
     status_definitions = await tickets_service.list_status_definitions()
+    selectable_status_definitions = [
+        definition
+        for definition in status_definitions
+        if is_super_admin or not definition.hide_from_technicians
+    ]
     status_label_map = {definition.tech_status: definition.public_status for definition in status_definitions}
-    available_statuses = [definition.tech_status for definition in status_definitions]
-    reply_default_status = next((definition.tech_status for definition in status_definitions if definition.is_default), None)
+    available_statuses = [definition.tech_status for definition in selectable_status_definitions]
+    reply_default_status = next((definition.tech_status for definition in selectable_status_definitions if definition.is_default), None)
     if not reply_default_status:
         reply_default_status = "pending" if "pending" in available_statuses else (available_statuses[0] if available_statuses else "open")
     status_value = str(ticket.get("status") or "open").lower()
@@ -8023,6 +8028,7 @@ async def _render_portal_ticket_detail(
                 "tech_label": definition.tech_label,
                 "public_status": definition.public_status,
                 "is_default": definition.is_default,
+                "hide_from_technicians": definition.hide_from_technicians,
             }
             for definition in status_definitions
         ],
@@ -8186,14 +8192,20 @@ async def _render_tickets_dashboard(
         )
     reference_data = await _get_ticket_dashboard_reference_data()
     dashboard_endpoint = "/api/tickets/dashboard"
+    selectable_status_definitions = [
+        definition
+        for definition in dashboard.status_definitions
+        if bool(user.get("is_super_admin")) or not definition.hide_from_technicians
+    ]
     status_definitions_payload = [
         {
             "tech_status": definition.tech_status,
             "tech_label": definition.tech_label,
             "public_status": definition.public_status,
             "is_default": definition.is_default,
+            "hide_from_technicians": definition.hide_from_technicians,
         }
-        for definition in dashboard.status_definitions
+        for definition in selectable_status_definitions
     ]
     status_label_map = {
         definition.tech_status: definition.tech_label for definition in dashboard.status_definitions
@@ -8202,7 +8214,7 @@ async def _render_tickets_dashboard(
         definition.tech_status: definition.public_status for definition in dashboard.status_definitions
     }
     reply_default_status = next(
-        (definition.tech_status for definition in dashboard.status_definitions if definition.is_default),
+        (definition.tech_status for definition in selectable_status_definitions if definition.is_default),
         None,
     )
     if not reply_default_status:
@@ -8614,10 +8626,15 @@ async def _render_ticket_detail(
     labour_types = await labour_types_service.list_labour_types()
 
     status_definitions = await tickets_service.list_status_definitions()
+    selectable_status_definitions = [
+        definition
+        for definition in status_definitions
+        if bool(user.get("is_super_admin")) or not definition.hide_from_technicians
+    ]
     status_label_map = {definition.tech_status: definition.tech_label for definition in status_definitions}
     public_status_map = {definition.tech_status: definition.public_status for definition in status_definitions}
-    available_statuses = [definition.tech_status for definition in status_definitions]
-    reply_default_status = next((definition.tech_status for definition in status_definitions if definition.is_default), None)
+    available_statuses = [definition.tech_status for definition in selectable_status_definitions]
+    reply_default_status = next((definition.tech_status for definition in selectable_status_definitions if definition.is_default), None)
     if not reply_default_status:
         reply_default_status = "pending" if "pending" in available_statuses else (available_statuses[0] if available_statuses else "open")
     ticket_status_slug = ticket.get("status") or "open"
@@ -8788,14 +8805,16 @@ async def _render_ticket_detail(
         "ticket_billable_minutes": total_billable_minutes,
         "ticket_non_billable_minutes": total_non_billable_minutes,
         "ticket_available_statuses": available_statuses,
+        "ticket_selectable_status_values": [definition.tech_status for definition in selectable_status_definitions],
         "ticket_status_definitions": [
             {
                 "tech_status": definition.tech_status,
                 "tech_label": definition.tech_label,
                 "public_status": definition.public_status,
                 "is_default": definition.is_default,
+                "hide_from_technicians": definition.hide_from_technicians,
             }
-            for definition in status_definitions
+            for definition in selectable_status_definitions
         ],
         "ticket_status_label_map": status_label_map,
         "ticket_public_status_map": public_status_map,

@@ -119,6 +119,7 @@ class TicketStatusDefinition:
     tech_label: str
     public_status: str
     is_default: bool = False
+    hide_from_technicians: bool = False
 
 
 def _build_status_definitions(records: Sequence[Mapping[str, Any]]) -> list[TicketStatusDefinition]:
@@ -130,12 +131,14 @@ def _build_status_definitions(records: Sequence[Mapping[str, Any]]) -> list[Tick
         label = str(record.get("tech_label") or "").strip() or slug.replace("_", " ").title()
         public_status = str(record.get("public_status") or "").strip() or label
         is_default = bool(record.get("is_default", False))
+        hide_from_technicians = bool(record.get("hide_from_technicians", False))
         definitions.append(
             TicketStatusDefinition(
                 tech_status=slug,
                 tech_label=label,
                 public_status=public_status,
                 is_default=is_default,
+                hide_from_technicians=hide_from_technicians,
             )
         )
     return definitions
@@ -147,6 +150,7 @@ def _default_status_records() -> list[dict[str, str]]:
             "tech_status": item["tech_status"],
             "tech_label": item["tech_label"],
             "public_status": item["public_status"],
+            "hide_from_technicians": item.get("hide_from_technicians", False),
         }
         for item in ticket_status_repo.DEFAULT_STATUS_DEFINITIONS
     ]
@@ -226,6 +230,11 @@ async def replace_ticket_statuses(status_inputs: Sequence[Mapping[str, Any]]) ->
             or definition.get("isDefault")
             or False
         )
+        hide_from_technicians = bool(
+            definition.get("hide_from_technicians")
+            or definition.get("hideFromTechnicians")
+            or False
+        )
 
         if is_default:
             if has_default:
@@ -257,6 +266,7 @@ async def replace_ticket_statuses(status_inputs: Sequence[Mapping[str, Any]]) ->
                 "public_status": public_status,
                 "original_slug": original_slug or slug,
                 "is_default": is_default,
+                "hide_from_technicians": hide_from_technicians,
             }
         )
 
@@ -268,12 +278,15 @@ async def replace_ticket_statuses(status_inputs: Sequence[Mapping[str, Any]]) ->
     return _build_status_definitions(records)
 
 
-async def validate_status_choice(value: str) -> str:
+async def validate_status_choice(value: str, *, allow_hidden: bool = True) -> str:
     slug = ticket_status_repo.slugify_status_label(value)
     if not slug:
         raise ValueError("Select a status to apply.")
-    if not await ticket_status_repo.status_exists(slug):
+    definition = await ticket_status_repo.get_status_definition(slug)
+    if not definition:
         raise ValueError("Select a valid status to apply.")
+    if definition.get("hide_from_technicians") and not allow_hidden:
+        raise ValueError("Select a ticket status available to technicians.")
     return slug
 
 

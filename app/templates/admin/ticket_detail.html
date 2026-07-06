@@ -126,7 +126,7 @@
               <div class="form-field">
                 <label class="form-label" for="ticket-status-detail">Status</label>
                 <select id="ticket-status-detail" name="status" class="form-input">
-                  {% if ticket_status not in ticket_status_label_map %}
+                  {% if ticket_status not in ticket_selectable_status_values %}
                     <option value="{{ ticket_status }}" selected>{{ ticket_status_label }}</option>
                   {% endif %}
                   {% for status_option in ticket_status_definitions %}
