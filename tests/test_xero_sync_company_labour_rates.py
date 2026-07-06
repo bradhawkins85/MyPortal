@@ -39,12 +39,14 @@ async def test_sync_company_uploads_unsynchronised_invoice_lines_to_xero():
     }
     invoice_lines = [
         {
+            "id": 100,
             "description": "Managed services",
             "quantity": 1,
             "unit_amount": 150.00,
             "product_code": "MSP",
         },
         {
+            "id": 101,
             "description": "Remote labour",
             "quantity": 2.5,
             "unit_amount": 95.00,
@@ -61,6 +63,11 @@ async def test_sync_company_uploads_unsynchronised_invoice_lines_to_xero():
                     "InvoiceID": "xero-invoice-id",
                     "InvoiceNumber": "XERO-2001",
                     "Status": "DRAFT",
+                    "Total": 387.50,
+                    "LineItems": [
+                        {"Quantity": 1, "UnitAmount": 150.00, "LineAmount": 150.00},
+                        {"Quantity": 2.5, "UnitAmount": 95.00, "LineAmount": 237.50},
+                    ],
                 }
             ]
         }
@@ -77,11 +84,13 @@ async def test_sync_company_uploads_unsynchronised_invoice_lines_to_xero():
          patch("app.services.xero.httpx.AsyncClient") as mock_client:
 
         mock_modules.get_module = AsyncMock(return_value=module_settings)
+        mock_modules.get_xero_credentials = AsyncMock(return_value={"refresh_token": "test-refresh-token"})
         mock_modules.acquire_xero_access_token = AsyncMock(return_value="test-access-token")
         mock_company_repo.get_company_by_id = AsyncMock(return_value=company)
         mock_invoice_repo.list_unsynced_company_invoices = AsyncMock(return_value=[invoice])
         mock_invoice_repo.patch_invoice = AsyncMock()
         mock_invoice_lines_repo.list_invoice_lines = AsyncMock(return_value=invoice_lines)
+        mock_invoice_lines_repo.update_invoice_line_amounts = AsyncMock()
         mock_billed_repo.rename_invoice_number = AsyncMock()
         mock_tickets_repo.rename_xero_invoice_number = AsyncMock()
         mock_webhook.create_manual_event = AsyncMock(return_value={"id": 1})
@@ -123,6 +132,14 @@ async def test_sync_company_uploads_unsynchronised_invoice_lines_to_xero():
         ]
 
         mock_invoice_repo.patch_invoice.assert_awaited_once()
+        patch_args = mock_invoice_repo.patch_invoice.await_args
+        assert patch_args.args[0] == 10
+        assert patch_args.kwargs["amount"] == xero_service.Decimal("387.50")
+        assert mock_invoice_lines_repo.update_invoice_line_amounts.await_count == 2
+        first_line_update = mock_invoice_lines_repo.update_invoice_line_amounts.await_args_list[0]
+        assert first_line_update.kwargs["unit_amount"] == xero_service.Decimal("150.00")
+        second_line_update = mock_invoice_lines_repo.update_invoice_line_amounts.await_args_list[1]
+        assert second_line_update.kwargs["amount"] == xero_service.Decimal("237.50")
         mock_billed_repo.rename_invoice_number.assert_awaited_once_with(1, "INV-202603-0001", "XERO-2001")
         mock_tickets_repo.rename_xero_invoice_number.assert_awaited_once_with(1, "INV-202603-0001", "XERO-2001")
 
@@ -174,6 +191,7 @@ async def test_sync_company_auto_send_marks_invoice_authorised_and_sent():
          patch("app.services.xero.httpx.AsyncClient") as mock_client:
 
         mock_modules.get_module = AsyncMock(return_value=module_settings)
+        mock_modules.get_xero_credentials = AsyncMock(return_value={"refresh_token": "test-refresh-token"})
         mock_modules.acquire_xero_access_token = AsyncMock(return_value="test-access-token")
         mock_company_repo.get_company_by_id = AsyncMock(return_value=company)
         mock_invoice_repo.list_unsynced_company_invoices = AsyncMock(return_value=[invoice])
@@ -230,7 +248,7 @@ async def test_sync_company_creates_missing_xero_items_and_retries():
     first_invoice_response.headers = {}
 
     items_lookup_response = MagicMock()
-    items_lookup_response.status_code = 200
+    items_lookup_response.status_code = 404
     items_lookup_response.text = '{"Items":[]}'
     items_lookup_response.headers = {}
     items_lookup_response.json.return_value = {"Items": []}
@@ -255,6 +273,7 @@ async def test_sync_company_creates_missing_xero_items_and_retries():
          patch("app.services.xero.httpx.AsyncClient") as mock_client:
 
         mock_modules.get_module = AsyncMock(return_value=module_settings)
+        mock_modules.get_xero_credentials = AsyncMock(return_value={"refresh_token": "test-refresh-token"})
         mock_modules.acquire_xero_access_token = AsyncMock(return_value="test-access-token")
         mock_company_repo.get_company_by_id = AsyncMock(return_value=company)
         mock_invoice_repo.list_unsynced_company_invoices = AsyncMock(return_value=[invoice])
@@ -313,6 +332,7 @@ async def test_sync_company_filters_to_requested_invoice_ids():
          patch("app.services.xero.webhook_monitor") as mock_webhook, \
          patch("app.services.xero.httpx.AsyncClient") as mock_client:
         mock_modules.get_module = AsyncMock(return_value=module_settings)
+        mock_modules.get_xero_credentials = AsyncMock(return_value={"refresh_token": "test-refresh-token"})
         mock_modules.acquire_xero_access_token = AsyncMock(return_value="test-access-token")
         mock_company_repo.get_company_by_id = AsyncMock(return_value={"id": 1, "name": "Test", "xero_id": "contact"})
         mock_invoice_repo.list_unsynced_company_invoices = AsyncMock(return_value=invoices)

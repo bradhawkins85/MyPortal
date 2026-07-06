@@ -391,6 +391,48 @@ async def _resolve_xero_contact_payload(
     return contact_payload
 
 
+async def _apply_xero_invoice_totals_to_local_invoice(
+    invoice_id: int,
+    invoice_lines: Sequence[Mapping[str, Any]],
+    synced_invoice: Mapping[str, Any],
+) -> Decimal | None:
+    """Update local invoice line totals from Xero's calculated invoice response."""
+
+    xero_line_items = synced_invoice.get("LineItems") or []
+    total_amount = _to_decimal(synced_invoice.get("Total"))
+
+    if isinstance(xero_line_items, list) and len(xero_line_items) == len(invoice_lines):
+        recalculated_total = Decimal("0.00")
+        for stored_line, xero_line in zip(invoice_lines, xero_line_items):
+            if not isinstance(xero_line, Mapping):
+                continue
+            line_id = stored_line.get("id")
+            if line_id is None:
+                continue
+            quantity = _to_decimal(xero_line.get("Quantity")) or _to_decimal(stored_line.get("quantity")) or Decimal("1")
+            unit_amount = _to_decimal(xero_line.get("UnitAmount"))
+            if unit_amount is None:
+                unit_amount = _to_decimal(stored_line.get("unit_amount")) or Decimal("0")
+            line_amount = _to_decimal(xero_line.get("LineAmount"))
+            if line_amount is None:
+                line_amount = (quantity * unit_amount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            else:
+                line_amount = _quantize(line_amount)
+
+            recalculated_total += line_amount
+            await invoice_lines_repo.update_invoice_line_amounts(
+                int(line_id),
+                quantity=_quantize(quantity, "0.0001"),
+                unit_amount=_quantize(unit_amount),
+                amount=line_amount,
+            )
+
+        if total_amount is None:
+            total_amount = _quantize(recalculated_total)
+
+    return _quantize(total_amount) if total_amount is not None else None
+
+
 def _build_xero_line_items_from_local_invoice(
     invoice_lines: Sequence[Mapping[str, Any]],
     *,
@@ -2333,14 +2375,22 @@ async def sync_company(
             xero_invoice_id = str(synced_invoice.get("InvoiceID") or "").strip() or None
             xero_invoice_number = str(synced_invoice.get("InvoiceNumber") or "").strip() or working_invoice_number
             xero_status = str(synced_invoice.get("Status") or "").strip() or ("AUTHORISED" if auto_send else "DRAFT")
-
-            await invoice_repo.patch_invoice(
+            xero_total_amount = await _apply_xero_invoice_totals_to_local_invoice(
                 invoice_id,
-                invoice_number=xero_invoice_number,
-                status=xero_status.lower(),
-                xero_invoice_id=xero_invoice_id,
-                synced_to_xero_at=datetime.now(timezone.utc),
+                invoice_lines,
+                synced_invoice,
             )
+
+            invoice_updates: dict[str, Any] = {
+                "invoice_number": xero_invoice_number,
+                "status": xero_status.lower(),
+                "xero_invoice_id": xero_invoice_id,
+                "synced_to_xero_at": datetime.now(timezone.utc),
+            }
+            if xero_total_amount is not None:
+                invoice_updates["amount"] = xero_total_amount
+
+            await invoice_repo.patch_invoice(invoice_id, **invoice_updates)
             await _rename_local_invoice_references(company_id, working_invoice_number, xero_invoice_number)
 
             synced_results.append(
