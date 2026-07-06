@@ -68,6 +68,20 @@ def _verify_xero_webhook_signature(body: bytes, signature: str | None, webhook_k
     return hmac.compare_digest(expected, provided)
 
 
+def _empty_xero_webhook_response(status_code: int) -> Response:
+    """Return Xero's required empty webhook acknowledgement without a length header.
+
+    Xero webhook probes are sensitive to mismatched response framing.  The
+    endpoint intentionally sends no response body; omitting ``Content-Length``
+    avoids declaring a body size that intermediaries can accidentally make
+    inconsistent with the empty acknowledgement.
+    """
+
+    response = Response(content=b"", status_code=status_code)
+    del response.headers["content-length"]
+    return response
+
+
 def _extract_xero_invoice_id(event: dict[str, Any]) -> str | None:
     invoice_id = str(event.get("resourceId") or event.get("resourceID") or "").strip()
     if invoice_id:
@@ -170,7 +184,7 @@ async def receive_webhook(request: Request) -> Response:
             response_body="",
             error_message="Invalid Xero webhook signature",
         )
-        return Response(status_code=status.HTTP_401_UNAUTHORIZED)
+        return _empty_xero_webhook_response(status.HTTP_401_UNAUTHORIZED)
 
     try:
         payload = json.loads(body.decode("utf-8")) if body else {}
@@ -214,7 +228,7 @@ async def receive_webhook(request: Request) -> Response:
         )
         or None,
     )
-    return Response(status_code=status.HTTP_200_OK)
+    return _empty_xero_webhook_response(status.HTTP_200_OK)
 
 
 @router.post(
