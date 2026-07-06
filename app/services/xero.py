@@ -23,7 +23,7 @@ from app.repositories import tickets as tickets_repo
 from app.repositories import users as users_repo
 from app.services.billing_time import format_billable_minutes
 from app.services import modules as modules_service
-from app.services import webhook_monitor
+from app.services import value_templates, webhook_monitor
 
 TicketFetcher = Callable[[int], Awaitable[Mapping[str, Any] | None]]
 RepliesFetcher = Callable[[int], Awaitable[Sequence[Mapping[str, Any]] | None]]
@@ -1405,37 +1405,53 @@ async def build_quote_invoice(
 
 
 def _evaluate_qty_expression(expression: str, context: dict[str, Any]) -> float:
-    """Evaluate a quantity expression, supporting both static numbers and variables.
-    
-    Args:
-        expression: The quantity expression (e.g., "5", "{active_agents}", "10")
-        context: Dictionary of available variables for substitution
-    
-    Returns:
-        The evaluated quantity as a float
-    """
+    """Evaluate a quantity expression, supporting static numbers and legacy variables."""
     if not expression:
         return 1.0
-    
-    # Try to evaluate as a direct number first
+
     try:
         return float(expression)
     except ValueError:
         pass
-    
-    # Try to substitute variables and then evaluate
+
     try:
-        # Simple variable substitution using format_map
         evaluated = expression.format_map(_TemplateValues(context))
         return float(evaluated)
     except (ValueError, KeyError):
-        # If evaluation fails, default to 1
         logger.warning(
             "Failed to evaluate quantity expression, defaulting to 1",
             expression=expression,
             context_keys=list(context.keys()),
         )
         return 1.0
+
+
+async def _render_recurring_template_value(
+    template: str,
+    context: dict[str, Any],
+) -> Any:
+    """Render dynamic ``{{ token }}`` variables and legacy ``{token}`` placeholders."""
+    rendered = await value_templates.render_string_async(template, context)
+    if not isinstance(rendered, str):
+        return rendered
+    try:
+        return rendered.format_map(_TemplateValues(context))
+    except Exception:
+        return rendered
+
+
+async def _evaluate_recurring_qty_expression(
+    expression: str,
+    context: dict[str, Any],
+) -> float:
+    """Evaluate recurring item quantity after resolving all supported variables."""
+    if not expression:
+        return 1.0
+    rendered = await _render_recurring_template_value(expression, context)
+    try:
+        return float(rendered)
+    except (TypeError, ValueError):
+        return _evaluate_qty_expression(expression, context)
 
 
 async def build_invoice_context(company_id: int) -> dict[str, Any]:
@@ -1546,7 +1562,8 @@ async def build_recurring_invoice_items(
     if not recurring_items:
         return []
     
-    template_context = _TemplateValues(context or {})
+    raw_context = dict(context or {})
+    raw_context.setdefault("company_id", company_id)
     
     # Collect item codes that need rates from Xero (those without price_override)
     item_codes_to_fetch: set[str] = set()
@@ -1587,10 +1604,15 @@ async def build_recurring_invoice_items(
         if not item.get("active"):
             continue
         
-        # Format description using template
+        # Format description using dynamic variables and legacy template placeholders.
         description_template = str(item.get("description_template") or "")
         try:
-            description = description_template.format_map(template_context).strip()
+            description = str(
+                await _render_recurring_template_value(
+                    description_template,
+                    raw_context,
+                )
+            ).strip()
         except Exception:
             description = description_template.strip()
         
@@ -1599,7 +1621,7 @@ async def build_recurring_invoice_items(
         
         # Evaluate quantity expression
         qty_expression = str(item.get("qty_expression") or "1")
-        quantity = _evaluate_qty_expression(qty_expression, template_context)
+        quantity = await _evaluate_recurring_qty_expression(qty_expression, raw_context)
         
         product_code = str(item.get("product_code") or "")
         
