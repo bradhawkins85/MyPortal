@@ -9,7 +9,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from itsdangerous import URLSafeSerializer
 from itsdangerous import BadSignature
@@ -152,7 +152,7 @@ async def _ensure_module_enabled() -> dict[str, Any]:
     status_code=status.HTTP_200_OK,
     name="xero_receive_webhook",
 )
-async def receive_webhook(request: Request) -> dict[str, Any]:
+async def receive_webhook(request: Request) -> Response:
     from app.services import webhook_monitor
 
     module = await _ensure_module_enabled()
@@ -167,10 +167,10 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
             payload=body.decode("utf-8", errors="replace"),
             headers=request_headers,
             response_status=401,
-            response_body="Invalid signature",
+            response_body="",
             error_message="Invalid Xero webhook signature",
         )
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature")
+        return Response(status_code=status.HTTP_401_UNAUTHORIZED)
 
     try:
         payload = json.loads(body.decode("utf-8")) if body else {}
@@ -214,7 +214,7 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
         )
         or None,
     )
-    return {"status": "accepted", "results": results}
+    return Response(status_code=status.HTTP_200_OK)
 
 
 @router.post(

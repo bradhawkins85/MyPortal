@@ -5,22 +5,34 @@ Xero. Before MyPortal can refresh OAuth tokens or receive webhook
 notifications, register an application inside the Xero developer portal and
 record the generated credentials inside **Admin → Integration modules → Xero**.
 
-## Callback URL
+## Callback and webhook URLs
 
-Xero requires a callback URL (also called a redirect URI) for OAuth flows and
-webhook notifications. MyPortal exposes a dedicated endpoint at:
+Xero uses separate URLs for OAuth redirects and signed webhook notifications.
+Paste the OAuth callback URL into the **Redirect URI** field within your Xero
+application settings:
 
 ```
 https://<your-domain>/api/integration-modules/xero/callback
 ```
 
-This URL is displayed inside the Xero module configuration panel so that it can
-be copied without leaving the admin interface. Paste the fully-qualified URL
-into the **Redirect URI** field within your Xero application settings.
+Paste the webhook URL into the Xero webhook delivery URL field:
 
-The endpoint accepts POST requests and responds with HTTP 202 to acknowledge
-callbacks from Xero. A lightweight GET handler is also available for diagnostic
-probes and returns HTTP 200 when the integration module is enabled.
+```
+https://<your-domain>/api/integration-modules/xero/webhook
+```
+
+The webhook endpoint validates the raw request body against the
+`x-xero-signature` header using the configured Xero webhook signing key. During
+Xero's Intent to Receive test, Xero sends one correctly signed payload and three
+incorrectly signed payloads; MyPortal returns an empty HTTP 200 response for the
+correctly signed payload and an empty HTTP 401 response for each incorrectly
+signed payload, which is the status-code contract Xero requires before enabling
+webhook delivery. The empty-events Intent to Receive payload is acknowledged
+without invoice processing.
+
+The legacy callback endpoint accepts POST requests and responds with HTTP 202 to
+acknowledge callbacks from Xero. A lightweight GET handler is also available for
+diagnostic probes and returns HTTP 200 when the integration module is enabled.
 
 ## Ticket billing controls
 
