@@ -139,7 +139,7 @@ def _build_ticket_search_clause(
     )
     if not where:
         return "1=1", []
-    return where[0], params
+    return " AND ".join(where), params
 
 
 def _deserialise_tags(value: Any) -> list[str]:
@@ -271,7 +271,7 @@ async def create_ticket(
         priority=priority,
         explicit_id=id,
     )
-    
+
     # If an explicit ID is provided, insert with that ID
     if id is not None:
         ticket_id = await db.execute_returning_lastrowid(
@@ -390,7 +390,7 @@ async def list_tickets(
         limit=limit,
         offset=offset,
     )
-    where: list[str] = []
+    where: list[str] = ["merged_into_ticket_id IS NULL"]
     params: list[Any] = []
     if status:
         where.append("status = %s")
@@ -463,6 +463,7 @@ async def list_tickets_for_automation_scan(*, limit: int = 1000) -> list[TicketR
                 WHERE tr.ticket_id = t.id
             ) AS latest_reply_at
         FROM tickets t
+        WHERE t.merged_into_ticket_id IS NULL
         ORDER BY t.updated_at ASC, t.id ASC
         LIMIT %s
         """,
@@ -537,7 +538,7 @@ async def list_tickets_for_user(
         include_external_reference=True,
     )
 
-    where_clauses = [f"({search_clause})", "%s > 0"]
+    where_clauses = ["t.merged_into_ticket_id IS NULL", f"({search_clause})", "%s > 0"]
     if status_filters:
         status_placeholders = ", ".join(["%s"] * len(status_filters))
         where_clauses.append(f"t.status IN ({status_placeholders})")
@@ -614,7 +615,7 @@ async def list_tickets_in_companies(
         include_external_reference=True,
     )
 
-    where_clauses = [f"({search_clause})"]
+    where_clauses = ["t.merged_into_ticket_id IS NULL", f"({search_clause})"]
     if status_filters:
         status_placeholders = ", ".join(["%s"] * len(status_filters))
         where_clauses.append(f"t.status IN ({status_placeholders})")
@@ -665,7 +666,7 @@ async def count_tickets_in_companies(
         include_external_reference=True,
     )
 
-    where_clauses = [f"({search_clause})"]
+    where_clauses = ["t.merged_into_ticket_id IS NULL", f"({search_clause})"]
     if status_filters:
         status_placeholders = ", ".join(["%s"] * len(status_filters))
         where_clauses.append(f"t.status IN ({status_placeholders})")
@@ -707,7 +708,7 @@ async def count_tickets_for_user(
         include_external_reference=True,
     )
 
-    where_clauses = [f"({search_clause})", "%s > 0"]
+    where_clauses = ["t.merged_into_ticket_id IS NULL", f"({search_clause})", "%s > 0"]
     if status_filters:
         status_placeholders = ", ".join(["%s"] * len(status_filters))
         where_clauses.append(f"t.status IN ({status_placeholders})")
@@ -828,12 +829,12 @@ async def list_tickets_by_requester_phone(
     """
     if not phone_number or not phone_number.strip():
         return []
-    
+
     # Normalize phone number by removing common formatting characters
     normalized_phone = re.sub(r'[\s\-\(\)\+]', '', phone_number.strip())
-    
+
     where_clauses = [
-        "(" 
+        "("
         "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(u.mobile_phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') LIKE %s "
         "OR REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(s.mobile_phone, ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') LIKE %s"
         ")"
@@ -1274,7 +1275,7 @@ async def validate_replies_belong_to_ticket(reply_ids: list[int], ticket_id: int
     """
     if not reply_ids:
         return False, "No reply IDs provided"
-    
+
     placeholders = ", ".join(["%s"] * len(reply_ids))
     rows = await db.fetch_all(
         f"""
@@ -1284,16 +1285,16 @@ async def validate_replies_belong_to_ticket(reply_ids: list[int], ticket_id: int
         """,
         tuple(reply_ids),
     )
-    
+
     if len(rows) != len(reply_ids):
         found_ids = {row["id"] for row in rows}
         missing_ids = set(reply_ids) - found_ids
         return False, f"Reply IDs not found: {', '.join(map(str, missing_ids))}"
-    
+
     for row in rows:
         if row["ticket_id"] != ticket_id:
             return False, f"Reply {row['id']} does not belong to ticket {ticket_id}"
-    
+
     return True, None
 
 
@@ -1370,12 +1371,12 @@ async def update_reply(
 
 async def add_watcher(ticket_id: int, user_id: int | None = None, email: str | None = None) -> None:
     """Add a watcher to a ticket by user_id or email.
-    
+
     At least one of user_id or email must be provided.
     """
     if user_id is None and not email:
         raise ValueError("Either user_id or email must be provided")
-    
+
     if user_id is not None:
         # Adding by user_id
         await db.execute(
@@ -1391,7 +1392,7 @@ async def add_watcher(ticket_id: int, user_id: int | None = None, email: str | N
         email_normalized = email.strip().lower() if email else None
         if not email_normalized:
             raise ValueError("Email cannot be empty")
-        
+
         await db.execute(
             """
             INSERT INTO ticket_watchers (ticket_id, user_id, email)
@@ -1404,12 +1405,12 @@ async def add_watcher(ticket_id: int, user_id: int | None = None, email: str | N
 
 async def remove_watcher(ticket_id: int, user_id: int | None = None, email: str | None = None) -> None:
     """Remove a watcher from a ticket by user_id or email.
-    
+
     At least one of user_id or email must be provided.
     """
     if user_id is None and not email:
         raise ValueError("Either user_id or email must be provided")
-    
+
     if user_id is not None:
         await db.execute(
             "DELETE FROM ticket_watchers WHERE ticket_id = %s AND user_id = %s",
@@ -1460,7 +1461,7 @@ async def replace_watchers(ticket_id: int, user_ids: Iterable[int], emails: Iter
     """Replace all watchers for a ticket with new user_ids and emails."""
     await db.execute("DELETE FROM ticket_watchers WHERE ticket_id = %s", (ticket_id,))
     await bulk_add_watchers(ticket_id, user_ids)
-    
+
     if emails:
         for email in emails:
             email_normalized = email.strip().lower() if email else None
@@ -1499,7 +1500,7 @@ async def split_ticket(
     original_ticket = await get_ticket(original_ticket_id)
     if not original_ticket:
         return None, None, 0
-    
+
     # Create new ticket with same company and requester
     new_ticket = await create_ticket(
         id=new_ticket_id,
@@ -1515,20 +1516,20 @@ async def split_ticket(
         external_reference=None,
         ticket_number=None,
     )
-    
+
     # Update new ticket to mark it as split from original
     await db.execute(
         "UPDATE tickets SET split_from_ticket_id = %s WHERE id = %s",
         (original_ticket_id, new_ticket["id"]),
     )
-    
+
     # Move the specified replies to the new ticket
     moved_count = await move_replies_to_ticket(reply_ids, new_ticket["id"])
-    
+
     # Refresh ticket data
     original_ticket = await get_ticket(original_ticket_id)
     new_ticket = await get_ticket(new_ticket["id"])
-    
+
     return original_ticket, new_ticket, moved_count
 
 
@@ -1542,19 +1543,30 @@ async def merge_tickets(
     """
     if target_ticket_id not in ticket_ids:
         raise ValueError("Target ticket ID must be in the list of ticket IDs to merge")
-    
+
     # Get target ticket
     target_ticket = await get_ticket(target_ticket_id)
     if not target_ticket:
         return None, [], 0
-    
+
     # Get source ticket IDs (all except target)
     source_ticket_ids = [tid for tid in ticket_ids if tid != target_ticket_id]
     if not source_ticket_ids:
         return target_ticket, [], 0
-    
+
     moved_count = 0
-    
+
+    # Move watchers first so child tickets stop receiving notifications while the
+    # parent keeps all interested parties. add_watcher handles duplicates.
+    for source_id in source_ticket_ids:
+        for watcher in await list_watchers(source_id):
+            await add_watcher(
+                target_ticket_id,
+                user_id=watcher.get("user_id"),
+                email=watcher.get("email"),
+            )
+        await db.execute("DELETE FROM ticket_watchers WHERE ticket_id = %s", (source_id,))
+
     # Move all replies from source tickets to target ticket
     for source_id in source_ticket_ids:
         # Get all replies for this source ticket
@@ -1563,7 +1575,7 @@ async def merge_tickets(
         if reply_ids:
             count = await move_replies_to_ticket(reply_ids, target_ticket_id)
             moved_count += count
-    
+
     # Mark source tickets as merged into target
     placeholders = ", ".join(["%s"] * len(source_ticket_ids))
     await db.execute(
@@ -1576,12 +1588,26 @@ async def merge_tickets(
         """,
         (target_ticket_id, *source_ticket_ids),
     )
-    
+
     # Refresh target ticket
     target_ticket = await get_ticket(target_ticket_id)
-    
+
     return target_ticket, source_ticket_ids, moved_count
 
+
+
+async def list_merged_child_tickets(parent_ticket_id: int) -> list[TicketRecord]:
+    """Return tickets that have been merged into the supplied parent ticket."""
+    rows = await db.fetch_all(
+        """
+        SELECT *
+        FROM tickets
+        WHERE merged_into_ticket_id = %s
+        ORDER BY id ASC
+        """,
+        (parent_ticket_id,),
+    )
+    return [_normalise_ticket(row) for row in rows]
 
 async def get_merged_target_ticket_id(ticket_id: int) -> int | None:
     """
@@ -1590,7 +1616,7 @@ async def get_merged_target_ticket_id(ticket_id: int) -> int | None:
     """
     visited = set()
     current_id = ticket_id
-    
+
     while current_id and current_id not in visited:
         visited.add(current_id)
         row = await db.fetch_one(
@@ -1599,13 +1625,13 @@ async def get_merged_target_ticket_id(ticket_id: int) -> int | None:
         )
         if not row:
             return None
-        
+
         merged_into = row.get("merged_into_ticket_id")
         if merged_into is None:
             # This ticket is not merged, it's the final target
             return current_id if current_id != ticket_id else None
-        
+
         current_id = merged_into
-    
+
     # Circular reference or chain too long
     return None

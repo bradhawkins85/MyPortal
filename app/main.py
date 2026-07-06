@@ -7968,6 +7968,12 @@ async def _render_portal_ticket_detail(
     # Create service status lookup for consistent styling
     service_status_lookup = {entry["value"]: entry for entry in service_status_service.STATUS_DEFINITIONS}
 
+    merged_child_tickets: list[dict[str, Any]] = []
+    try:
+        merged_child_tickets = await tickets_repo.list_merged_child_tickets(int(ticket_id))
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to load merged child tickets", ticket_id=ticket_id, error=str(exc))
+
     # Fetch linked chat room for this ticket (if matrix chat is enabled)
     ticket_chat_room: dict[str, Any] | None = None
     if settings.matrix_enabled:
@@ -8019,6 +8025,7 @@ async def _render_portal_ticket_detail(
         "service_status_lookup": service_status_lookup,
         "matrix_chat_enabled": settings.matrix_enabled,
         "ticket_chat_room": ticket_chat_room,
+        "merged_child_tickets": merged_child_tickets,
         "can_reply": bool(has_helpdesk_access or is_super_admin or is_requester),
         "is_requester": is_requester,
         "is_watcher": is_watcher,
@@ -8734,6 +8741,12 @@ async def _render_ticket_detail(
     # Create service status lookup for consistent styling
     service_status_lookup = {entry["value"]: entry for entry in service_status_service.STATUS_DEFINITIONS}
 
+    merged_child_tickets: list[dict[str, Any]] = []
+    try:
+        merged_child_tickets = await tickets_repo.list_merged_child_tickets(int(ticket_id))
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to load merged child tickets", ticket_id=ticket_id, error=str(exc))
+
     # Fetch linked chat room for this ticket (if matrix chat is enabled)
     ticket_chat_room: dict[str, Any] | None = None
     if settings.matrix_enabled:
@@ -8791,6 +8804,7 @@ async def _render_ticket_detail(
         "relevant_services": relevant_services,
         "service_status_lookup": service_status_lookup,
         "ticket_chat_room": ticket_chat_room,
+        "merged_child_tickets": merged_child_tickets,
         "success_message": success_message,
         "error_message": error_message,
     }

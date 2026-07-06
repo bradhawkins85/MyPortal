@@ -562,6 +562,19 @@
               >
                 No pre-discovered related MyPortal content is available yet. Use refresh to scan this ticket manually.
               </div>
+              {% if ticket.merged_into_ticket_id %}
+                <div class="alert alert--info">This child ticket was merged into <a href="/admin/tickets/{{ ticket.merged_into_ticket_id }}">ticket #{{ ticket.merged_into_ticket_id }}</a>. Automations and billing are handled by the parent ticket.</div>
+              {% endif %}
+              {% if merged_child_tickets %}
+                <div class="ticket-related__merged">
+                  <h3 class="card__subtitle">Merged child tickets</h3>
+                  <ul>
+                    {% for child_ticket in merged_child_tickets %}
+                      <li><a href="/admin/tickets/{{ child_ticket.id }}">#{{ child_ticket.id }}</a> — {{ child_ticket.subject or 'Untitled ticket' }}</li>
+                    {% endfor %}
+                  </ul>
+                </div>
+              {% endif %}
               <ul
                 class="ticket-related__list"
                 data-ticket-related-list

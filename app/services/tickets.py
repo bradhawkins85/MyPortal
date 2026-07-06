@@ -637,6 +637,9 @@ async def _emit_ticket_event(
     if not ticket_record:
         return
 
+    if ticket_record.get("merged_into_ticket_id"):
+        return
+
     enriched = await _enrich_ticket_context(ticket_record)
 
     actor_snapshot = _build_user_snapshot(actor)
@@ -2088,13 +2091,9 @@ async def merge_tickets(
         )
         await broadcast_ticket_event(action="update", ticket_id=target_ticket_id)
     
-    # Emit events for closed/merged tickets
+    # Do not emit automation events for child tickets once merged; broadcast only
+    # so any open UI rows can disappear from lists that exclude merged tickets.
     for ticket_id in merged_ids:
-        await emit_ticket_updated_event(
-            ticket_id,
-            actor_type="system",
-            actor={"id": 0, "email": "system"},
-        )
         await broadcast_ticket_event(action="update", ticket_id=ticket_id)
     
     return merged_ticket, merged_ids, moved_count

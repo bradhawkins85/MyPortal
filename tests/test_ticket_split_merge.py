@@ -150,6 +150,12 @@ async def test_merge_tickets_moves_all_replies_to_target(monkeypatch):
     async def mock_move_replies(reply_ids, target_ticket_id):
         executed_queries.append(("move_replies", list(reply_ids), target_ticket_id))
         return len(reply_ids)
+
+    async def mock_list_watchers(ticket_id: int):
+        return []
+
+    async def mock_add_watcher(ticket_id: int, user_id=None, email=None):
+        executed_queries.append(("add_watcher", ticket_id, user_id, email))
     
     async def mock_execute(query, params=None):
         executed_queries.append(("execute", query, params))
@@ -159,6 +165,8 @@ async def test_merge_tickets_moves_all_replies_to_target(monkeypatch):
     monkeypatch.setattr(tickets_repo, "get_ticket", mock_get_ticket)
     monkeypatch.setattr(tickets_repo, "list_replies", mock_list_replies)
     monkeypatch.setattr(tickets_repo, "move_replies_to_ticket", mock_move_replies)
+    monkeypatch.setattr(tickets_repo, "list_watchers", mock_list_watchers)
+    monkeypatch.setattr(tickets_repo, "add_watcher", mock_add_watcher)
     monkeypatch.setattr(tickets_repo.db, "execute", mock_execute)
     
     # Execute merge

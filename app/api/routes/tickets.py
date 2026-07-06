@@ -1617,6 +1617,11 @@ async def merge_tickets(
     Source tickets are marked as closed and merged.
     Requires helpdesk technician permission.
     """
+    moved_time_entry_count = 0
+    for source_ticket_id in payload.ticket_ids:
+        if source_ticket_id != payload.target_ticket_id:
+            moved_time_entry_count += await tickets_repo.count_time_entries(source_ticket_id)
+
     # Perform the merge (validation happens in service layer)
     try:
         merged_ticket, merged_ids, moved_count = await tickets_service.merge_tickets(
@@ -1643,12 +1648,9 @@ async def merge_tickets(
             detail="Failed to merge tickets"
         )
     
-    # Count time entries efficiently using database query
-    time_entry_count = await tickets_repo.count_time_entries(payload.target_ticket_id)
-    
     return TicketMergeResponse(
         merged_ticket=TicketResponse(**merged_ticket),
         merged_ticket_ids=merged_ids,
         moved_reply_count=moved_count,
-        moved_time_entry_count=time_entry_count,
+        moved_time_entry_count=moved_time_entry_count,
     )
