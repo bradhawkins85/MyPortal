@@ -662,7 +662,8 @@
           {% endif %}
         </div>
 
-        <div class="management__column management__column--content">
+        <div class="management__column-group management__column-group--main">
+          <div class="management__column management__column--content">
           {% set description_html = ticket.description_html if ticket.description_html is defined else '' %}
           <details class="card card--panel card-collapsible" data-ticket-description-panel>
             <summary class="card__header card__header--collapsible">
@@ -1412,6 +1413,7 @@
               {% endif %}
             </div>
           </article>
+          </div>
         </div>
       </div>
     </section>

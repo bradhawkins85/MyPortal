@@ -5143,27 +5143,39 @@ dialog.modal:not([open]) {
   min-width: 0;
 }
 
+.management__column-group {
+  min-width: 0;
+}
+
+.management__column-group--main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
 @media (min-width: 961px) and (max-width: 1799px) {
   .management__column--details {
     grid-column: 1;
-    grid-row: 1 / 3;
-  }
-
-  .management__column--content {
-    grid-column: 2;
     grid-row: 1;
   }
 
-  .management__column--activity,
-  .management__column--conversation {
+  .management__column-group--main {
     grid-column: 2;
-    grid-row: 2;
+    grid-row: 1;
   }
 }
 
 @media (min-width: 1800px) {
   .management__body--columns {
     grid-template-columns: minmax(280px, 320px) minmax(360px, 1fr) minmax(0, 1fr);
+  }
+
+  .management__column-group--main {
+    display: contents;
+  }
+
+  .management__column--content {
+    grid-column: 2;
   }
 
   .management__column--activity,
