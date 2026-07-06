@@ -70,13 +70,7 @@ async def _load_invoice_context(request: Request):
     return user, membership, company, company_id, None
 
 
-@router.get("/invoices", response_class=HTMLResponse)
-async def invoices_page(request: Request):
-    main_module = _main()
-    user, membership, company, company_id, redirect = await _load_invoice_context(request)
-    if redirect:
-        return redirect
-    records = await invoice_repo.list_company_invoices(company_id)
+def _format_invoice_records(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], Decimal, int]:
     total_amount = Decimal("0.00")
     paid_count = 0
     today = datetime.now(timezone.utc).date()
@@ -130,6 +124,17 @@ async def invoices_page(request: Request):
                 "is_overdue": is_overdue,
             }
         )
+    return formatted, total_amount, paid_count
+
+
+@router.get("/invoices", response_class=HTMLResponse)
+async def invoices_page(request: Request):
+    main_module = _main()
+    user, membership, company, company_id, redirect = await _load_invoice_context(request)
+    if redirect:
+        return redirect
+    records = await invoice_repo.list_company_invoices(company_id)
+    formatted, total_amount, paid_count = _format_invoice_records(records)
     unpaid_count = max(len(records) - paid_count, 0)
     total_amount_display = f"${total_amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):,.2f}"
     status_options = sorted({invoice["status_slug"] for invoice in formatted if invoice["status_slug"]})
@@ -143,6 +148,40 @@ async def invoices_page(request: Request):
         "unpaid_count": unpaid_count,
         "status_options": status_options,
         "can_delete_invoices": bool(user.get("is_super_admin")),
+        "is_global_invoices": False,
+        "invoice_table_id": "invoice",
+    }
+    return await main_module._render_template("invoices/index.html", request, user, extra=extra)
+
+
+@router.get("/invoices/global", response_class=HTMLResponse)
+async def global_invoices_page(request: Request):
+    main_module = _main()
+    user, redirect = await main_module._require_authenticated_user(request)
+    if redirect:
+        return redirect
+    if not bool(user.get("is_super_admin")):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Global invoice review requires super admin access",
+        )
+    records = await invoice_repo.list_all_invoices()
+    formatted, total_amount, paid_count = _format_invoice_records(records)
+    unpaid_count = max(len(records) - paid_count, 0)
+    total_amount_display = f"${total_amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):,.2f}"
+    status_options = sorted({invoice["status_slug"] for invoice in formatted if invoice["status_slug"]})
+    extra = {
+        "title": "Global invoices",
+        "invoices": formatted,
+        "company": None,
+        "has_invoices": bool(formatted),
+        "total_amount_display": total_amount_display,
+        "paid_count": paid_count,
+        "unpaid_count": unpaid_count,
+        "status_options": status_options,
+        "can_delete_invoices": True,
+        "is_global_invoices": True,
+        "invoice_table_id": "invoice-global",
     }
     return await main_module._render_template("invoices/index.html", request, user, extra=extra)
 
@@ -154,8 +193,12 @@ async def invoice_detail_page(request: Request, invoice_id: int):
     if redirect:
         return redirect
     invoice = await invoice_repo.get_invoice_by_id(invoice_id)
-    if not invoice or int(invoice.get("company_id", 0)) != company_id:
+    if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    if not bool(user.get("is_super_admin")) and int(invoice.get("company_id", 0)) != company_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+    if bool(user.get("is_super_admin")) and int(invoice.get("company_id", 0)) != company_id:
+        company = await company_repo.get_company_by_id(int(invoice.get("company_id", 0)))
     lines = await invoice_lines_repo.list_invoice_lines(invoice_id)
     amount_value = invoice.get("amount")
     amount_decimal = (

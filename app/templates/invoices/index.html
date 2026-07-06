@@ -1,26 +1,37 @@
 {% extends "base.html" %}
 
-{% block header_title %}Invoices{% endblock %}
+{% block header_title %}{{ 'Global invoices' if is_global_invoices else 'Invoices' }}{% endblock %}
 
-{% block title %}Invoices{% endblock %}
+{% block header_actions %}
+  {% from "macros/header.html" import page_header_actions %}
+  {% set invoice_actions = [] %}
+  {% if is_super_admin and not is_global_invoices %}
+    {% set _ = invoice_actions.append({"label": "Global invoices", "type": "link", "href": "/invoices/global"}) %}
+  {% elif is_global_invoices %}
+    {% set _ = invoice_actions.append({"label": "Company invoices", "type": "link", "href": "/invoices"}) %}
+  {% endif %}
+  {{ page_header_actions(invoice_actions) }}
+{% endblock %}
+
+{% block title %}{{ 'Global invoices' if is_global_invoices else 'Invoices' }}{% endblock %}
 
 {% block content %}
 <div class="admin-grid admin-grid--columns">
   <section class="card card--panel admin-grid__full">
     <header class="card__header">
       <div class="card__controls">
-        {% if company %}<span class="tag">{{ company.name }}</span>{% endif %}
-        <label class="visually-hidden" for="invoice-search">Search invoices</label>
+        {% if is_global_invoices %}<span class="tag">All companies</span>{% elif company %}<span class="tag">{{ company.name }}</span>{% endif %}
+        <label class="visually-hidden" for="{{ invoice_table_id }}-search">Search invoices</label>
         <input
           type="search"
-          id="invoice-search"
+          id="{{ invoice_table_id }}-search"
           class="form-input"
           placeholder="Search invoices"
           aria-label="Search invoices"
-          data-table-filter="invoice-table"
+          data-table-filter="{{ invoice_table_id }}-table"
         />
-        <label class="visually-hidden" for="invoice-status-filter">Filter by status</label>
-        <select id="invoice-status-filter" class="form-input" aria-label="Filter by status">
+        <label class="visually-hidden" for="{{ invoice_table_id }}-status-filter">Filter by status</label>
+        <select id="{{ invoice_table_id }}-status-filter" class="form-input" aria-label="Filter by status" data-table-column-filter="status" data-table-column-filter-table="{{ invoice_table_id }}-table">
           <option value="">All statuses</option>
           {% for status in status_options %}
             <option value="{{ status }}">{{ status|replace('_', ' ')|title }}</option>
@@ -44,9 +55,10 @@
     </div>
     {% if has_invoices %}
     <div class="table-wrapper">
-      <table class="table" id="invoice-table" data-table data-table-id="invoice">
+      <table class="table table--stack-mobile" id="{{ invoice_table_id }}-table" data-table data-table-id="{{ invoice_table_id }}" data-invoice-table>
         <thead>
           <tr>
+            {% if is_global_invoices %}<th scope="col" data-sort="string" data-mobile-priority="essential">Company</th>{% endif %}
             <th scope="col" data-sort="string" data-mobile-priority="essential">Invoice #</th>
             <th scope="col" data-sort="number" data-mobile-priority="essential">Amount</th>
             <th scope="col" data-sort="date" data-mobile-priority="essential">Created</th>
@@ -58,10 +70,13 @@
         <tbody>
           {% for invoice in invoices %}
           <tr data-status="{{ invoice.status_slug }}"{% if invoice.is_overdue %} class="invoice-row--overdue"{% endif %}>
-            <td data-label="Invoice number">
+            {% if is_global_invoices %}
+            <td data-label="Company" data-value="{{ invoice.company_name or '' }}">{{ invoice.company_name or 'Unknown company' }}</td>
+            {% endif %}
+            <td data-label="Invoice number" data-value="{{ invoice.invoice_number }}">
               <a href="/invoices/{{ invoice.id }}" class="link">{{ invoice.invoice_number }}</a>
             </td>
-            <td data-label="Amount" data-value="{{ invoice.amount }}">{{ invoice.amount_display }}</td>
+            <td data-label="Amount" data-value="{{ invoice.amount }}" data-invoice-amount>{{ invoice.amount_display }}</td>
             <td data-label="Created" data-value="{{ invoice.created_sort }}" data-utc="{{ invoice.created_iso }}">
               {% if invoice.created_display %}
                 {{ invoice.created_display }}
@@ -76,7 +91,7 @@
                 <span class="text-muted">No due date</span>
               {% endif %}
             </td>
-            <td data-label="Status" data-value="{{ invoice.status_slug }}">
+            <td data-label="Status" data-column-key="status" data-value="{{ invoice.status_slug }}">
               {% if invoice.status_slug %}
                 <span class="status {{ invoice.status_class }}">{{ invoice.status_display }}</span>
               {% else %}
@@ -115,7 +130,7 @@
       const totalEl = document.querySelector('[data-invoice-total]');
       const paidEl = document.querySelector('[data-invoice-paid]');
       const openEl = document.querySelector('[data-invoice-open]');
-      const table = document.getElementById('invoice-table');
+      const table = document.querySelector('[data-invoice-table]');
       if (!totalEl && !paidEl && !openEl) {
         return;
       }
@@ -144,7 +159,7 @@
       let total = 0;
       let paid = 0;
       visibleRows.forEach((row) => {
-        const amountCell = row.querySelector('td[data-value]');
+        const amountCell = row.querySelector('[data-invoice-amount]');
         if (amountCell) {
           const value = parseFloat(amountCell.getAttribute('data-value') || '0');
           if (!Number.isNaN(value)) total += value;
@@ -163,33 +178,13 @@
       if (openEl) openEl.textContent = String(visibleRows.length - paid);
     }
 
-    function applyStatusFilter() {
-      const table = document.getElementById('invoice-table');
-      const filter = document.getElementById('invoice-status-filter');
-      if (!table || !filter) return;
-      const selected = filter.value.trim().toLowerCase();
-      table.querySelectorAll('tbody tr').forEach((row) => {
-        const status = (row.getAttribute('data-status') || '').toLowerCase();
-        const matches = !selected || status === selected;
-        row.style.display = matches ? '' : 'none';
-      });
-    }
 
     document.addEventListener('DOMContentLoaded', () => {
-      const filter = document.getElementById('invoice-status-filter');
-      if (filter) {
-        filter.addEventListener('change', () => {
-          applyStatusFilter();
-          updateSummary();
-        });
+      const table = document.querySelector('[data-invoice-table]');
+      if (table) {
+        table.addEventListener('table:render', updateSummary);
+        table.addEventListener('table:sorted', updateSummary);
       }
-      const searchInput = document.querySelector('[data-table-filter="invoice-table"]');
-      if (searchInput) {
-        searchInput.addEventListener('input', () => {
-          window.setTimeout(updateSummary, 0);
-        });
-      }
-      applyStatusFilter();
       updateSummary();
 
       document.querySelectorAll('[data-invoice-delete]').forEach((button) => {
@@ -206,7 +201,7 @@
             if (row) {
               row.remove();
             }
-            const table = document.getElementById('invoice-table');
+            const table = document.querySelector('[data-invoice-table]');
             if (table && !table.querySelector('tbody tr')) {
               const wrapper = table.closest('.table-wrapper');
               const container = wrapper?.parentElement;
