@@ -85,14 +85,115 @@ async def test_receive_webhook_acknowledges_valid_delivery_when_event_processing
         receive,
     )
 
-    monkeypatch.setattr(xero, "_ensure_module_enabled", AsyncMock(return_value={"settings": {"webhook_key": key}}))
-    monkeypatch.setattr(xero, "_apply_xero_invoice_event", AsyncMock(side_effect=RuntimeError("Xero API timeout")))
+    monkeypatch.setattr(
+        xero,
+        "_ensure_module_enabled",
+        AsyncMock(return_value={"settings": {"webhook_key": key}}),
+    )
+    monkeypatch.setattr(
+        xero,
+        "_apply_xero_invoice_event",
+        AsyncMock(side_effect=RuntimeError("Xero API timeout")),
+    )
     log_mock = AsyncMock()
     monkeypatch.setattr(webhook_monitor, "log_incoming_webhook", log_mock)
 
-    result = await xero.receive_webhook(request)
+    response = await xero.receive_webhook(request)
 
-    assert result == {"status": "accepted", "results": [{"status": "failed", "error": "Internal processing error"}]}
+    assert response.status_code == 200
+    assert response.body == b""
     log_mock.assert_awaited_once()
     assert log_mock.await_args.kwargs["response_status"] == 200
     assert log_mock.await_args.kwargs["error_message"] == "Internal processing error"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_receive_webhook_returns_empty_401_for_invalid_intent_signature(monkeypatch):
+    from starlette.requests import Request
+    from app.services import webhook_monitor
+
+    body = b'{"events":[],"firstEventSequence":0,"lastEventSequence":0,"entropy":"BAD"}'
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/integration-modules/xero/webhook",
+            "headers": [
+                (b"host", b"testserver"),
+                (b"x-xero-signature", b"not-a-valid-signature"),
+                (b"content-type", b"application/json"),
+            ],
+            "scheme": "https",
+            "server": ("testserver", 443),
+            "client": ("127.0.0.1", 12345),
+        },
+        receive,
+    )
+
+    monkeypatch.setattr(
+        xero,
+        "_ensure_module_enabled",
+        AsyncMock(return_value={"settings": {"webhook_key": "xero-webhook-key"}}),
+    )
+    log_mock = AsyncMock()
+    monkeypatch.setattr(webhook_monitor, "log_incoming_webhook", log_mock)
+
+    response = await xero.receive_webhook(request)
+
+    assert response.status_code == 401
+    assert response.body == b""
+    log_mock.assert_awaited_once()
+    assert log_mock.await_args.kwargs["response_status"] == 401
+    assert log_mock.await_args.kwargs["response_body"] == ""
+
+
+@pytest.mark.anyio("asyncio")
+async def test_receive_webhook_returns_empty_200_for_valid_intent_payload(monkeypatch):
+    from starlette.requests import Request
+    from app.services import webhook_monitor
+
+    body = b'{"events":[],"firstEventSequence":0,"lastEventSequence":0,"entropy":"GOOD"}'
+    key = "xero-webhook-key"
+    signature = base64.b64encode(hmac.new(key.encode(), body, hashlib.sha256).digest()).decode()
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/integration-modules/xero/webhook",
+            "headers": [
+                (b"host", b"testserver"),
+                (b"x-xero-signature", signature.encode()),
+                (b"content-type", b"application/json"),
+            ],
+            "scheme": "https",
+            "server": ("testserver", 443),
+            "client": ("127.0.0.1", 12345),
+        },
+        receive,
+    )
+
+    monkeypatch.setattr(
+        xero,
+        "_ensure_module_enabled",
+        AsyncMock(return_value={"settings": {"webhook_key": key}}),
+    )
+    apply_mock = AsyncMock()
+    monkeypatch.setattr(xero, "_apply_xero_invoice_event", apply_mock)
+    log_mock = AsyncMock()
+    monkeypatch.setattr(webhook_monitor, "log_incoming_webhook", log_mock)
+
+    response = await xero.receive_webhook(request)
+
+    assert response.status_code == 200
+    assert response.body == b""
+    apply_mock.assert_not_awaited()
+    log_mock.assert_awaited_once()
+    assert log_mock.await_args.kwargs["response_status"] == 200

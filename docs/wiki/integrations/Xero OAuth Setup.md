@@ -138,7 +138,8 @@ Note: These are the exact scope names used in the code. Xero may show these with
 
 - `GET /xero/connect` - Initiate OAuth2 authorization flow (requires super admin)
 - `GET /xero/callback` - OAuth2 callback handler (called by Xero)
-- `POST /api/integration-modules/xero/callback` - Webhook endpoint for Xero events
+- `POST /api/integration-modules/xero/webhook` - Signed webhook endpoint for Xero events and Intent to Receive tests
+- `POST /api/integration-modules/xero/callback` - Legacy callback endpoint
 
 ### Module Functions
 
