@@ -298,7 +298,10 @@ async def asset_detail_page(request: Request, asset_id: int):
     if record_company_id is None or int(record_company_id) != company_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
 
-    return RedirectResponse(url=f"/assets#asset-{asset_id}", status_code=status.HTTP_303_SEE_OTHER)
+    safe_asset_id = int(asset_id)
+    if safe_asset_id <= 0:
+        return RedirectResponse(url="/assets", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url=f"/assets#asset-{safe_asset_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.delete("/assets/{asset_id}", response_class=JSONResponse)
