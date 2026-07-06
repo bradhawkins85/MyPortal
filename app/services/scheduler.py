@@ -1303,7 +1303,7 @@ class SchedulerService:
 
                             if plan_id:
                                 # Get distribution list for the plan
-                                distribution_list = (
+                                _unused_distribution_list = (
                                     await bcp_repo.list_distribution_list(plan_id)
                                 )
 
