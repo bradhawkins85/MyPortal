@@ -1026,9 +1026,24 @@ class SchedulerService:
                             error=str(exc),
                         )
                     else:
-                        # Render template variables in the payload
+                        company_id = task.get("company_id")
+                        render_context: dict[str, Any] = {
+                            "schedule": {
+                                "task_id": task_id,
+                                "task_name": task.get("name"),
+                                "command": command,
+                            }
+                        }
+                        if company_id:
+                            render_context["company_id"] = company_id
+                            render_context["company"] = {"id": company_id}
+
+                        # Render template variables in the payload. Scheduled ticket
+                        # payloads include the task company in context so saved
+                        # report variables such as {{ report.slug.list }} can
+                        # safely use {{current.company}} placeholders.
                         payload = await value_templates.render_value_async(
-                            payload, context=None
+                            payload, context=render_context
                         )
 
                         # Extract ticket fields from payload
