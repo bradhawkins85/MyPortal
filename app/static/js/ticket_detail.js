@@ -2196,6 +2196,78 @@
     return match ? match[1] : null;
   }
 
+  function initialiseTicketSplit() {
+    const timeline = document.querySelector('[data-ticket-timeline]');
+    if (!timeline) return;
+    const ticketId = timeline.getAttribute('data-ticket-id');
+    const splitButton = document.querySelector('[data-split-selected]');
+    const showHiddenButton = document.querySelector('[data-show-split-hidden]');
+    const checkboxes = Array.from(document.querySelectorAll('[data-split-reply-checkbox]'));
+    const hiddenReplies = Array.from(document.querySelectorAll('[data-split-hidden="true"]'));
+
+    if (showHiddenButton && hiddenReplies.length > 0) {
+      showHiddenButton.hidden = false;
+      showHiddenButton.addEventListener('click', () => {
+        const shouldShow = showHiddenButton.getAttribute('aria-pressed') !== 'true';
+        hiddenReplies.forEach((reply) => { reply.hidden = !shouldShow; });
+        showHiddenButton.setAttribute('aria-pressed', shouldShow ? 'true' : 'false');
+        showHiddenButton.textContent = shouldShow ? 'Hide split history' : 'Show hidden split history';
+      });
+    }
+
+    if (!splitButton || !ticketId || checkboxes.length === 0) return;
+
+    function selectedIds() {
+      return checkboxes.filter((box) => box.checked).map((box) => Number.parseInt(box.value, 10)).filter(Number.isFinite);
+    }
+
+    function updateButton() {
+      splitButton.disabled = selectedIds().length === 0;
+    }
+
+    checkboxes.forEach((box) => box.addEventListener('change', updateButton));
+
+    splitButton.addEventListener('click', async () => {
+      const ids = selectedIds();
+      if (ids.length === 0) return;
+      const subject = window.prompt('Subject for the new split ticket:', `Split from ticket #${ticketId}`);
+      if (!subject || !subject.trim()) return;
+      splitButton.disabled = true;
+      const originalLabel = splitButton.textContent;
+      splitButton.textContent = 'Splitting…';
+      try {
+        const response = await fetch(`/api/tickets/${encodeURIComponent(ticketId)}/split`, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': getCsrfToken(),
+          },
+          body: JSON.stringify({ reply_ids: ids, new_subject: subject.trim() }),
+        });
+        if (!response.ok) {
+          let message = 'Unable to split ticket.';
+          try {
+            const payload = await response.json();
+            if (payload && payload.detail) message = typeof payload.detail === 'string' ? payload.detail : message;
+          } catch (_err) {}
+          throw new Error(message);
+        }
+        const payload = await response.json();
+        const newId = payload && payload.new_ticket ? payload.new_ticket.id : null;
+        window.alert(newId ? `Ticket split to #${newId}.` : 'Ticket split successfully.');
+        window.location.reload();
+      } catch (error) {
+        window.alert(error instanceof Error ? error.message : 'Unable to split ticket.');
+        splitButton.disabled = false;
+        splitButton.textContent = originalLabel;
+        updateButton();
+      }
+    });
+
+    updateButton();
+  }
+
   function ready() {
     const messageWrappers = document.querySelectorAll('[data-timeline-message]');
 
@@ -2208,6 +2280,7 @@
       initialiseTimelineMessage(wrapper, toggle);
     });
 
+    initialiseTicketSplit();
     initialiseReplyTimeEditing();
     initialiseCallRecordingTimeEditing();
     initialiseAssetSelector();

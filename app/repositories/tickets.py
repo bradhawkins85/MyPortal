@@ -1471,9 +1471,9 @@ async def replace_watchers(ticket_id: int, user_ids: Iterable[int], emails: Iter
 
 async def move_replies_to_ticket(reply_ids: Iterable[int], target_ticket_id: int) -> int:
     """Move specified replies to a different ticket. Returns count of moved replies."""
-    if not reply_ids:
-        return 0
     reply_list = list(reply_ids)
+    if not reply_list:
+        return 0
     placeholders = ", ".join(["%s"] * len(reply_list))
     result = await db.execute(
         f"""
@@ -1510,7 +1510,7 @@ async def split_ticket(
         company_id=original_ticket.get("company_id"),
         assigned_user_id=original_ticket.get("assigned_user_id"),
         priority=original_ticket.get("priority", "normal"),
-        status=original_ticket.get("status", "open"),
+        status="new",
         category=original_ticket.get("category"),
         module_slug=original_ticket.get("module_slug"),
         external_reference=None,
@@ -1523,14 +1523,66 @@ async def split_ticket(
         (original_ticket_id, new_ticket["id"]),
     )
 
-    # Move the specified replies to the new ticket
+    # Copy watchers to the split ticket so the same interested parties follow it.
+    for watcher in await list_watchers(original_ticket_id):
+        await add_watcher(
+            int(new_ticket["id"]),
+            user_id=watcher.get("user_id"),
+            email=watcher.get("email"),
+        )
+
+    # Move the specified replies to the new ticket. Time entries and billed-time
+    # records are reply-based, so moving the reply removes those minutes from
+    # the original ticket's billing totals.
     moved_count = await move_replies_to_ticket(reply_ids, new_ticket["id"])
+
+    ticket_number = new_ticket.get("ticket_number") or new_ticket.get("id")
+    await create_reply(
+        ticket_id=original_ticket_id,
+        author_id=None,
+        body=f"Conversation split to ticket #{ticket_number}.",
+        is_internal=True,
+        minutes_spent=None,
+        is_billable=False,
+        external_reference=f"split:{new_ticket['id']}",
+    )
 
     # Refresh ticket data
     original_ticket = await get_ticket(original_ticket_id)
     new_ticket = await get_ticket(new_ticket["id"])
 
     return original_ticket, new_ticket, moved_count
+
+
+async def list_split_replies_for_original(original_ticket_id: int) -> list[TicketRecord]:
+    """Return replies moved to child tickets split from the original ticket."""
+    rows = await db.fetch_all(
+        """
+        SELECT
+            tr.*,
+            lt.name AS labour_type_name,
+            lt.code AS labour_type_code,
+            lt.rate AS labour_type_rate,
+            t.id AS split_to_ticket_id,
+            t.ticket_number AS split_to_ticket_number
+        FROM ticket_replies tr
+        INNER JOIN tickets t ON t.id = tr.ticket_id
+        LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id
+        WHERE t.split_from_ticket_id = %s
+          AND (tr.external_reference IS NULL OR tr.external_reference NOT LIKE 'split:%%')
+        ORDER BY tr.created_at ASC
+        """,
+        (original_ticket_id,),
+    )
+    replies: list[TicketRecord] = []
+    for row in rows:
+        record = _normalise_reply(row)
+        record["is_split_hidden"] = True
+        if row.get("split_to_ticket_id") is not None:
+            record["split_to_ticket_id"] = int(row["split_to_ticket_id"])
+        record["split_to_ticket_number"] = row.get("split_to_ticket_number")
+        replies.append(record)
+    return replies
 
 
 async def merge_tickets(
