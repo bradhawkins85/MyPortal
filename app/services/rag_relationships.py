@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 from loguru import logger
 
