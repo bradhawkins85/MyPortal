@@ -200,6 +200,47 @@ def test_generate_invoice_recurring_items_only(monkeypatch):
     assert created_invoices[0]["company_id"] == 1
 
 
+def test_generate_invoice_passes_xero_credentials_for_recurring_price_lookup(monkeypatch):
+    build_recurring = AsyncMock(return_value=_make_recurring_items())
+
+    async def fake_create_invoice(**kwargs):
+        return {"id": 404, **kwargs}
+
+    async def fake_create_line(**kwargs):
+        return {"id": 1, **kwargs}
+
+    monkeypatch.setattr(invoice_generator.company_repo, "get_company_by_id", AsyncMock(return_value=_make_company()))
+    monkeypatch.setattr(invoice_generator.xero_service, "build_invoice_context", AsyncMock(return_value={}))
+    monkeypatch.setattr(invoice_generator.xero_service, "build_recurring_invoice_items", build_recurring)
+    monkeypatch.setattr(
+        invoice_generator.modules_service,
+        "get_module",
+        AsyncMock(return_value={"enabled": True, "settings": {"tenant_id": "tenant-from-settings"}}),
+    )
+    monkeypatch.setattr(
+        invoice_generator.modules_service,
+        "get_xero_credentials",
+        AsyncMock(return_value={"tenant_id": "tenant-from-credentials"}),
+    )
+    monkeypatch.setattr(
+        invoice_generator.modules_service,
+        "acquire_xero_access_token",
+        AsyncMock(return_value="access-token"),
+    )
+    monkeypatch.setattr(invoice_generator.tickets_repo, "list_tickets", AsyncMock(return_value=[]))
+    monkeypatch.setattr(invoice_generator.invoice_repo, "create_invoice", fake_create_invoice)
+    monkeypatch.setattr(invoice_generator.invoice_repo, "get_max_invoice_seq", AsyncMock(return_value=0))
+    monkeypatch.setattr(invoice_generator.invoice_lines_repo, "create_invoice_line", fake_create_line)
+
+    result = asyncio.run(invoice_generator.generate_invoice(1))
+
+    assert result["status"] == "succeeded"
+    build_recurring.assert_awaited_once()
+    _, kwargs = build_recurring.await_args
+    assert kwargs["tenant_id"] == "tenant-from-credentials"
+    assert kwargs["access_token"] == "access-token"
+
+
 def test_generate_invoice_billable_ticket_uses_hours_and_minutes(monkeypatch):
     created_lines: list[dict[str, Any]] = []
 
