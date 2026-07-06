@@ -8,7 +8,7 @@ import re
 from collections import Counter
 from typing import Any, Iterable, Mapping, Sequence
 
-import bleach
+import nh3
 
 from app.core.logging import log_error
 from app.repositories import knowledge_base as kb_repo
@@ -28,7 +28,7 @@ from app.services.knowledge_base_conditionals import (
 
 PermissionScope = str
 
-_ALLOWED_TAGS: Sequence[str] = (
+_ALLOWED_TAGS: frozenset[str] = frozenset((
     "a",
     "abbr",
     "blockquote",
@@ -52,30 +52,29 @@ _ALLOWED_TAGS: Sequence[str] = (
     "td",
     "img",
     "kb-if",
-)
+))
 
-_ALLOWED_ATTRIBUTES: Mapping[str, Sequence[str]] = {
-    "a": ("href", "title", "target", "rel"),
-    "abbr": ("title",),
-    "img": ("src", "alt", "title"),
-    "th": ("colspan", "rowspan", "scope"),
-    "td": ("colspan", "rowspan", "headers"),
-    "kb-if": ("company",),
+_ALLOWED_ATTRIBUTES: dict[str, set[str]] = {
+    "a": {"href", "title", "target"},
+    "abbr": {"title"},
+    "img": {"src", "alt", "title"},
+    "th": {"colspan", "rowspan", "scope"},
+    "td": {"colspan", "rowspan", "headers"},
+    "kb-if": {"company"},
 }
 
-_ALLOWED_PROTOCOLS: Sequence[str] = ("http", "https", "mailto")
+_ALLOWED_PROTOCOLS: frozenset[str] = frozenset(("http", "https", "mailto"))
 
 _TAG_JSON_PATTERN = re.compile(r"\[[^\]]*\]")
 _WORD_PATTERN = re.compile(r"[A-Za-z0-9]+")
 
 
 def _sanitise_html(value: str) -> str:
-    return bleach.clean(
+    return nh3.clean(
         value,
         tags=_ALLOWED_TAGS,
         attributes=_ALLOWED_ATTRIBUTES,
-        protocols=_ALLOWED_PROTOCOLS,
-        strip=True,
+        url_schemes=_ALLOWED_PROTOCOLS,
     )
 
 
@@ -191,7 +190,7 @@ def _render_ai_tag_prompt(
         if included >= 6:
             break
         content = section.get("content") or ""
-        text_content = bleach.clean(str(content), tags=[], strip=True)
+        text_content = nh3.clean(str(content), tags=frozenset())
         text_content = " ".join(text_content.split())
         if not text_content:
             continue
@@ -200,7 +199,7 @@ def _render_ai_tag_prompt(
         lines.append(f"{included + 1}. {heading}: {snippet}")
         included += 1
     if included == 0:
-        fallback_text = bleach.clean(str(fallback_content), tags=[], strip=True)
+        fallback_text = nh3.clean(str(fallback_content), tags=frozenset())
         fallback_text = " ".join(fallback_text.split())
         if fallback_text:
             lines.append(fallback_text[:600])

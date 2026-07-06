@@ -9,11 +9,11 @@ from __future__ import annotations
 import pathlib
 from typing import TypedDict
 
-import bleach
+import nh3
 from markdown_it import MarkdownIt
 
 # Allowed HTML tags and attributes after markdown rendering
-_ALLOWED_TAGS = [
+_ALLOWED_TAGS: frozenset[str] = frozenset((
     "h1", "h2", "h3", "h4", "h5", "h6",
     "p", "br", "hr",
     "strong", "em", "b", "i", "u", "s", "del", "ins", "mark",
@@ -23,17 +23,17 @@ _ALLOWED_TAGS = [
     "a", "img",
     "details", "summary",
     "div", "span",
-]
+))
 
-_ALLOWED_ATTRS: dict[str, list[str]] = {
-    "a": ["href", "title", "target", "rel"],
-    "img": ["src", "alt", "title", "width", "height"],
-    "th": ["align", "colspan", "rowspan"],
-    "td": ["align", "colspan", "rowspan"],
-    "code": ["class"],
-    "pre": ["class"],
-    "div": ["class"],
-    "span": ["class"],
+_ALLOWED_ATTRS: dict[str, set[str]] = {
+    "a": {"href", "title", "target"},
+    "img": {"src", "alt", "title", "width", "height"},
+    "th": {"align", "colspan", "rowspan"},
+    "td": {"align", "colspan", "rowspan"},
+    "code": {"class"},
+    "pre": {"class"},
+    "div": {"class"},
+    "span": {"class"},
 }
 
 _md = MarkdownIt("commonmark", {"breaks": False, "html": False}).enable("table")
@@ -139,7 +139,7 @@ def render_article(article: HelpArticle) -> str:
     """Read and render the article's Markdown to sanitised HTML."""
     raw = article["path"].read_text(encoding="utf-8")
     html = _md.render(raw)
-    return bleach.clean(html, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS, strip=True)
+    return nh3.clean(html, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS)
 
 
 def _to_url_slug(name: str) -> str:

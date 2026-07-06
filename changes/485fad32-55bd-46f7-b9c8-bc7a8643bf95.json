@@ -1,7 +1,7 @@
 {
   "guid": "485fad32-55bd-46f7-b9c8-bc7a8643bf95",
-  "occurred_at": "2026-06-25T00:44:13.773087+00:00",
-  "change_type": "feature",
+  "occurred_at": "2026-06-25T00:44Z",
+  "change_type": "Feature",
   "summary": "Added permission-scoped RAG indexing and retrieval for MyPortal agent, search, and related content.",
-  "content_hash": "4a84c73c6a1e6d18bd5c124cef83c2bfbd8953ce1b17f598b3ec4dcd72e724da"
+  "content_hash": "6a919d671252e73c19cb128b024948fca5ae8d900fec2b88d544489a7c892b35"
 }

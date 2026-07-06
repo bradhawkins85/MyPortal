@@ -8,6 +8,8 @@ Provides:
 
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 
@@ -15,6 +17,17 @@ from .service import find_article, list_sections, render_article
 
 
 router = APIRouter(tags=["Help"])
+
+# Only allow slugs consisting of lowercase alphanumerics and hyphens, starting
+# with an alphanumeric character.  This prevents path-traversal attacks such as
+# ``../secret-file`` from escaping the wiki directory.
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9\-]*$")
+
+
+def _validate_slug(slug: str, label: str) -> None:
+    """Raise 404 if *slug* contains characters outside the allowed set."""
+    if not _SLUG_RE.match(slug):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Invalid {label}")
 
 
 def _main():
@@ -55,6 +68,9 @@ async def help_article(request: Request, section_slug: str, article_slug: str):
     )
     if redirect:
         return redirect
+
+    _validate_slug(section_slug, "section")
+    _validate_slug(article_slug, "article")
 
     article = find_article(section_slug, article_slug)
     if not article:

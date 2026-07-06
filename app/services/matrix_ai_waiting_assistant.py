@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 from urllib.parse import urljoin
 
-import bleach
+import nh3
 import httpx
 
 from app.core.config import get_settings
@@ -75,7 +75,7 @@ def _monitor_payload(payload: Mapping[str, Any] | None = None) -> dict[str, Any]
             safe[f"{key}_length"] = len(str(value or ""))
         elif key in {"body", "message"}:
             safe[f"{key}_preview"] = _truncate_text(
-                bleach.clean(str(value or ""), tags=[], strip=True),
+                nh3.clean(str(value or ""), tags=frozenset()),
                 limit=_MONITOR_PROMPT_PREVIEW_LIMIT,
             )
         else:
@@ -348,7 +348,7 @@ async def _chat_transcript(room_id: int) -> str:
     messages = await chat_repo.get_messages(room_id, limit=200)
     lines: list[str] = []
     for msg in messages:
-        body = bleach.clean(str(msg.get("body") or ""), tags=[], strip=True)
+        body = nh3.clean(str(msg.get("body") or ""), tags=frozenset())
         if not body.strip():
             continue
         sender = msg.get("sender_display_name") or msg.get("sender_matrix_id") or "Participant"
@@ -414,7 +414,7 @@ Chat transcript:
 
 
 async def _article_relevant(transcript: str, article: Mapping[str, Any]) -> bool:
-    content = bleach.clean(str(article.get("content") or ""), tags=[], strip=True)
+    content = nh3.clean(str(article.get("content") or ""), tags=frozenset())
     prompt = f"""Decide whether this knowledge base article is genuinely relevant to the user's support issue.
 Return JSON only: {{"relevant": true}} or {{"relevant": false}}.
 
@@ -431,7 +431,7 @@ Article content excerpt: {content[:5000]}
 
 
 async def _summarise_article(article: Mapping[str, Any]) -> str:
-    content = bleach.clean(str(article.get("content") or ""), tags=[], strip=True)
+    content = nh3.clean(str(article.get("content") or ""), tags=frozenset())
     prompt = f"""Summarize this knowledge base article in plain language for a user waiting for support.
 Use no more than three concise sentences. Focus on the article purpose or resolution steps.
 

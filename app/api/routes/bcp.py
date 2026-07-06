@@ -14,6 +14,7 @@ from app.repositories import bcp as bcp_repo
 from app.repositories import company_memberships as membership_repo
 from app.security.flash import flash_redirect
 from app.security.session import SessionData
+from app.services.sanitization import sanitize_rich_text
 
 router = APIRouter(prefix="/bcp", tags=["Business Continuity Planning"])
 
@@ -932,8 +933,9 @@ async def create_bcp_role(
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
-    
-    await bcp_repo.create_role(plan["id"], title, responsibilities)
+
+    sanitized = sanitize_rich_text(responsibilities).html if responsibilities else None
+    await bcp_repo.create_role(plan["id"], title, sanitized)
     
     return flash_redirect("/bcp/roles", "Role created successfully", "success")
 
@@ -947,8 +949,17 @@ async def update_bcp_role(
 ):
     """Update a BCP role."""
     user, company_id = await _require_bcp_edit(request)
-    
-    updated = await bcp_repo.update_role(role_id, title=title, responsibilities=responsibilities)
+
+    # IDOR check: ensure the role belongs to this company's plan.
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    role = await bcp_repo.get_role_by_id(role_id)
+    if not role or role["plan_id"] != plan["id"]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+
+    sanitized = sanitize_rich_text(responsibilities).html if responsibilities else None
+    updated = await bcp_repo.update_role(role_id, title=title, responsibilities=sanitized)
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
     
@@ -962,6 +973,14 @@ async def delete_bcp_role(
 ):
     """Delete a BCP role."""
     user, company_id = await _require_bcp_edit(request)
+
+    # IDOR check: ensure the role belongs to this company's plan.
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
+    role = await bcp_repo.get_role_by_id(role_id)
+    if not role or role["plan_id"] != plan["id"]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
     
     deleted = await bcp_repo.delete_role(role_id)
     if not deleted:

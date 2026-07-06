@@ -1,7 +1,7 @@
 {
   "guid": "57c2cc62-0b23-42c4-a00e-0968d5ba2551",
-  "occurred_at": "2026-06-09T02:17:54Z",
+  "occurred_at": "2026-06-09T02:17Z",
   "change_type": "Fix",
   "summary": "Fix tray submit ticket action displaying the Windows ticket form",
-  "content_hash": "87fd0a2989aa573dd9c4df475caf0fe151ee8a021fbc4253c328e3c934409577"
+  "content_hash": "424a4e651c81aff91eb634b4af2e53cc7eb50ba66befbf5be1995a4fbff10a90"
 }

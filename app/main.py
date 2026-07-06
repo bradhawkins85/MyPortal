@@ -153,6 +153,7 @@ from app.schemas.staff_onboarding_workflows import (
     WorkflowConfigSchema,
 )
 from app.security.cache_control import CacheControlMiddleware
+from app.security.client_ip import get_client_ip
 from app.security.csrf import CSRFMiddleware
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.security.flash import flash_redirect, set_flash
@@ -681,41 +682,25 @@ endpoint_limiter.add_limit("/api/auth/login", "POST", limit=5, window_seconds=90
 
 # Password reset: 3 requests per hour per email
 def _password_reset_key(request: Request) -> str:
-    """Generate rate limit key based on email from form data."""
+    """Generate rate limit key based on email from query params or IP fallback."""
     try:
-        # Try to get email from query params or form
         email = request.query_params.get("email")
-        if not email:
-            # For POST requests, we'd need to read the body but that's already
-            # consumed by the time middleware runs. Use IP as fallback.
-            client_ip = request.headers.get("x-forwarded-for")
-            if client_ip:
-                return client_ip.split(",")[0].strip()
-            client = request.client
-            return client.host if client else "anonymous"
-        return f"reset:{email.lower()}"
+        if email:
+            return f"reset:{email.lower()}"
+        # For POST requests with JSON bodies the body is consumed by FastAPI
+        # before middleware runs, so fall back to the validated client IP.
+        return get_client_ip(request, default="anonymous") or "anonymous"
     except Exception:
-        # Fallback to IP-based limiting
-        client_ip = request.headers.get("x-forwarded-for")
-        if client_ip:
-            return client_ip.split(",")[0].strip()
-        client = request.client
-        return client.host if client else "anonymous"
+        return get_client_ip(request, default="anonymous") or "anonymous"
 
 endpoint_limiter.add_limit("/api/auth/password/forgot", "POST", limit=3, window_seconds=3600, key_func=_password_reset_key)
 endpoint_limiter.add_limit("/auth/password/forgot", "POST", limit=3, window_seconds=3600, key_func=_password_reset_key)
 
 # File upload: 10 files per hour per user
 def _user_upload_key(request: Request) -> str:
-    """Generate rate limit key based on user ID from session."""
-    from app.security.session import session_manager
-    # Note: This is synchronous approximation - actual implementation
-    # would need to be async. For now, use IP-based limiting.
-    client_ip = request.headers.get("x-forwarded-for")
-    if client_ip:
-        return f"upload:{client_ip.split(',')[0].strip()}"
-    client = request.client
-    return f"upload:{client.host if client else 'anonymous'}"
+    """Generate rate limit key based on validated client IP."""
+    ip = get_client_ip(request, default="anonymous") or "anonymous"
+    return f"upload:{ip}"
 
 # Apply to common upload endpoints
 upload_paths = [

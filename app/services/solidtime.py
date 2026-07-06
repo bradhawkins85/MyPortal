@@ -34,7 +34,7 @@ from time import monotonic
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
-import bleach
+import nh3
 import httpx
 from loguru import logger
 from redis.asyncio import Redis
@@ -765,7 +765,7 @@ def _first_line_of_body(body: Any, limit: int = 240) -> str:
     """
     if not body:
         return ""
-    text = bleach.clean(str(body), tags=[], attributes={}, strip=True)
+    text = nh3.clean(str(body), tags=frozenset())
     text = text.replace("\xa0", " ").strip()
     if not text:
         return ""

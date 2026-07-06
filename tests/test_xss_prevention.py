@@ -24,7 +24,9 @@ def test_sanitize_rich_text_removes_onclick_attributes():
     
     assert "onclick" not in result.html
     assert "alert" not in result.html
-    assert '<a href="#">Click me</a>' in result.html
+    # nh3 adds rel="noopener noreferrer" automatically for security
+    assert 'href="#"' in result.html
+    assert "Click me" in result.html
 
 
 def test_sanitize_rich_text_removes_javascript_protocol():
