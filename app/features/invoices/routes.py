@@ -70,7 +70,9 @@ async def _load_invoice_context(request: Request):
     return user, membership, company, company_id, None
 
 
-def _format_invoice_records(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], Decimal, int]:
+def _format_invoice_records(
+    records: list[dict[str, Any]], *, is_super_admin: bool = False
+) -> tuple[list[dict[str, Any]], Decimal, int]:
     total_amount = Decimal("0.00")
     paid_count = 0
     today = datetime.now(timezone.utc).date()
@@ -129,14 +131,16 @@ def _format_invoice_records(records: list[dict[str, Any]]) -> tuple[list[dict[st
     return formatted, total_amount, paid_count
 
 
-@router.get("/invoices", response_class=HTMLResponse)
+@router.api_route("/invoices", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def invoices_page(request: Request):
     main_module = _main()
     user, membership, company, company_id, redirect = await _load_invoice_context(request)
     if redirect:
         return redirect
     records = await invoice_repo.list_company_invoices(company_id)
-    formatted, total_amount, paid_count = _format_invoice_records(records)
+    formatted, total_amount, paid_count = _format_invoice_records(
+        records, is_super_admin=bool(user.get("is_super_admin"))
+    )
     unpaid_count = max(len(records) - paid_count, 0)
     total_amount_display = f"${total_amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):,.2f}"
     status_options = sorted({invoice["status_slug"] for invoice in formatted if invoice["status_slug"]})
@@ -157,7 +161,7 @@ async def invoices_page(request: Request):
     return await main_module._render_template("invoices/index.html", request, user, extra=extra)
 
 
-@router.get("/invoices/global", response_class=HTMLResponse)
+@router.api_route("/invoices/global", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def global_invoices_page(request: Request):
     main_module = _main()
     user, redirect = await main_module._require_authenticated_user(request)
@@ -169,7 +173,7 @@ async def global_invoices_page(request: Request):
             detail="Global invoice review requires super admin access",
         )
     records = await invoice_repo.list_all_invoices()
-    formatted, total_amount, paid_count = _format_invoice_records(records)
+    formatted, total_amount, paid_count = _format_invoice_records(records, is_super_admin=True)
     unpaid_count = max(len(records) - paid_count, 0)
     total_amount_display = f"${total_amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):,.2f}"
     status_options = sorted({invoice["status_slug"] for invoice in formatted if invoice["status_slug"]})

@@ -47,6 +47,15 @@ def test_invoices_head_request():
     assert response.status_code in {200, 303, 401, 403}
 
 
+def test_global_invoices_head_request():
+    """Test that HEAD requests to /invoices/global don't return 405."""
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.head("/invoices/global")
+
+    assert response.status_code != 405, "HEAD requests should be supported"
+    assert response.status_code in {200, 303, 401, 403}
+
+
 def test_admin_service_status_head_request():
     """Test that HEAD requests to /admin/service-status don't return 405."""
     with TestClient(app, follow_redirects=False) as client:
