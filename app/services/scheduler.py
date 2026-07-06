@@ -1238,9 +1238,7 @@ class SchedulerService:
 
                             if plan_id:
                                 # Get distribution list for the plan
-                                distribution_list = (
-                                    await bcp_repo.list_distribution_list(plan_id)
-                                )
+                                await bcp_repo.list_distribution_list(plan_id)
 
                                 # Create notification for each distribution list member
                                 message = f"Upcoming BCP training scheduled for {item['training_date'].strftime('%Y-%m-%d %H:%M')}"
