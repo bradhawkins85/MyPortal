@@ -68,7 +68,7 @@ def test_create_recurring_invoice_item_builds_expected_query(monkeypatch):
     assert result["id"] == 1
     assert result["company_id"] == 5
     assert "INSERT INTO company_recurring_invoice_items" in captured["sql"]
-    assert captured["params"] == (5, "LABOR-MANAGED", "Monthly managed services", "1", None, 1)
+    assert captured["params"] == (5, "LABOR-MANAGED", "Monthly managed services", "1", None, 1, "every_run", None, None, None)
     # Verify fetch_one uses the returned ID instead of LAST_INSERT_ID()
     assert "WHERE id = %s" in captured["fetch_sql"]
     assert captured["fetch_params"] == (1,)

@@ -980,6 +980,9 @@
                   <th scope="col" data-sort="string">Description</th>
                   <th scope="col" data-sort="string">Qty Expression</th>
                   <th scope="col" data-sort="number">Price Override</th>
+                  <th scope="col" data-sort="string">Billing limit</th>
+                  <th scope="col" data-sort="string">Window</th>
+                  <th scope="col" data-sort="string">Last billed</th>
                   <th scope="col" data-sort="string">Active</th>
                   <th scope="col" class="table__actions">Actions</th>
                 </tr>
@@ -1000,6 +1003,22 @@
                           <span class="text-muted">Use Xero default</span>
                         {% endif %}
                       </td>
+                      <td data-label="Billing limit">
+                        {% set frequency_labels = {
+                          'every_run': 'Every run',
+                          'once': 'Once only',
+                          'weekly': 'Once per week',
+                          'monthly': 'Once per month',
+                          'quarterly': 'Once per quarter',
+                          'yearly': 'Once per year',
+                          'times_per_year': (item.billing_interval|string) ~ ' times per year' if item.billing_interval else 'Times per year'
+                        } %}
+                        {{ frequency_labels.get(item.billing_frequency or 'every_run', item.billing_frequency or 'Every run') }}
+                      </td>
+                      <td data-label="Window">
+                        {{ item.start_date or 'Any start' }} – {{ item.end_date or 'No end' }}
+                      </td>
+                      <td data-label="Last billed">{{ item.last_billed_at or 'Never' }}</td>
                       <td data-label="Active">
                         <span class="tag {{ 'tag--success' if item.active else 'tag--muted' }}">
                           {{ 'Yes' if item.active else 'No' }}
@@ -1015,7 +1034,7 @@
                   {% endfor %}
                 {% else %}
                   <tr>
-                    <td colspan="6" class="table__empty">No recurring invoice items configured yet.</td>
+                    <td colspan="9" class="table__empty">No recurring invoice items configured yet.</td>
                   </tr>
                 {% endif %}
               </tbody>
@@ -1581,6 +1600,33 @@
                 placeholder="Leave empty to use Xero default"
               />
               <p class="form-help">Override the price from Xero, or leave blank to use the default price.</p>
+            </div>
+
+            <div class="form-field">
+              <label class="form-label" for="recurring-item-frequency">Billing limit</label>
+              <select class="form-input" id="recurring-item-frequency" name="billing_frequency">
+                <option value="every_run">Every automatic run</option>
+                <option value="once">Once only</option>
+                <option value="weekly">Once per week</option>
+                <option value="monthly">Once per month</option>
+                <option value="quarterly">Once per quarter</option>
+                <option value="yearly">Once per year</option>
+                <option value="times_per_year">X times per year</option>
+              </select>
+              <p class="form-help">Limits repeat billing when invoice generation runs frequently.</p>
+            </div>
+            <div class="form-field" id="recurring-item-interval-field" hidden>
+              <label class="form-label" for="recurring-item-interval">Times per year</label>
+              <input class="form-input" id="recurring-item-interval" name="billing_interval" type="number" min="1" max="365" placeholder="12" />
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="recurring-item-start-date">Start date (optional)</label>
+              <input class="form-input" id="recurring-item-start-date" name="start_date" type="date" />
+              <p class="form-help">Stored and evaluated as a UTC date.</p>
+            </div>
+            <div class="form-field">
+              <label class="form-label" for="recurring-item-end-date">End date (optional)</label>
+              <input class="form-input" id="recurring-item-end-date" name="end_date" type="date" />
             </div>
             <div class="form-field form-field--checkbox">
               <label class="checkbox">
