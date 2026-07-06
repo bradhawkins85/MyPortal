@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 from typing import Literal
 
 from fastapi import Request, Response
@@ -34,6 +35,14 @@ _VALID_VARIANTS = frozenset({"info", "success", "warning", "error"})
 
 def _secret() -> bytes:
     return get_settings().secret_key.encode()
+
+
+def _sanitize_flash_message(message: str) -> str:
+    """Normalize untrusted flash text before embedding it in a cookie payload."""
+    text = str(message)
+    text = re.sub(r"[\x00-\x1f\x7f]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:200]
 
 
 def _sign(payload: str) -> str:
@@ -64,7 +73,8 @@ def set_flash(
     It is readable only by the server (``pop_flash``).
     """
     safe_variant = variant if variant in _VALID_VARIANTS else "info"
-    payload = json.dumps({"message": str(message)[:200], "variant": safe_variant})
+    safe_message = _sanitize_flash_message(message)
+    payload = json.dumps({"message": safe_message, "variant": safe_variant})
     signed = _sign(payload)
     settings = get_settings()
     secure = settings.environment.lower() == "production"
