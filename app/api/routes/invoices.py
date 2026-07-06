@@ -188,7 +188,10 @@ async def sync_invoice_to_xero(
             after=None,
             metadata={"company_id": int(existing["company_id"]), "result": result},
         )
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to synchronise invoice with Xero",
+        )
     updated = await invoice_repo.get_invoice_by_id(invoice_id)
     await audit_service.record(
         action="invoice.xero_sync",
@@ -200,7 +203,12 @@ async def sync_invoice_to_xero(
         after=updated,
         metadata={"company_id": int(existing["company_id"]), "result": result},
     )
-    return result
+    return {
+        "status": result.get("status"),
+        "reason": result.get("reason"),
+        "invoice_id": result.get("invoice_id", invoice_id),
+        "xero_invoice_id": result.get("xero_invoice_id"),
+    }
 
 
 @router.delete("/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
