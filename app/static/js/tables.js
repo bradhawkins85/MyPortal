@@ -16,7 +16,7 @@
     return value.toLowerCase();
   }
 
-  function sortTable(table, columnIndex, type, controller) {
+  function sortTable(table, columnIndex, type, controller, forcedOrder) {
     const tbody = table.tBodies[0];
     if (!tbody) {
       return;
@@ -26,7 +26,7 @@
     const current = table.getAttribute('data-sort-index') === String(columnIndex)
       ? table.getAttribute('data-sort-order')
       : null;
-    const ascending = current !== 'asc';
+    const ascending = forcedOrder ? forcedOrder === 'asc' : current !== 'asc';
 
     rows.sort((a, b) => {
       const valueA = parseValue(getCellValue(a, columnIndex), type);
@@ -61,6 +61,7 @@
     }));
 
     if (controller) {
+      controller.persistSortState(columnIndex, ascending ? 'asc' : 'desc', type);
       controller.refreshRows();
     }
   }
@@ -73,6 +74,9 @@
         sortTable(table, columnIndex, header.getAttribute('data-sort') || 'string', controller);
       });
     });
+    if (controller) {
+      controller.restorePersistedSort();
+    }
   }
 
   class TableController {
@@ -247,13 +251,22 @@
       if (!key) {
         return;
       }
+      const currentSortIndex = this.table.getAttribute('data-sort-index');
+      const currentSortOrder = this.table.getAttribute('data-sort-order');
+      const currentSortType = this.table.getAttribute('data-sort-type');
       const state = {
         global: this.filterInputValue || '',
         columns: this.columnFilters || {},
+        sort: currentSortIndex && currentSortOrder ? {
+          index: Number.parseInt(currentSortIndex, 10),
+          order: currentSortOrder,
+          type: currentSortType || undefined,
+        } : null,
       };
       const hasColumns = Object.values(state.columns).some((value) => Boolean(value));
+      const hasSort = state.sort && Number.isInteger(state.sort.index) && ['asc', 'desc'].includes(state.sort.order);
       try {
-        if (state.global || hasColumns) {
+        if (state.global || hasColumns || hasSort) {
           window.localStorage.setItem(key, JSON.stringify(state));
         } else {
           window.localStorage.removeItem(key);
@@ -261,6 +274,27 @@
       } catch (error) {
         /* Ignore storage failures so table filtering remains usable. */
       }
+    }
+
+
+    persistSortState(columnIndex, order, type) {
+      if (!this.table) {
+        return;
+      }
+      this.table.setAttribute('data-sort-type', type || 'string');
+      this.persistFilterState();
+    }
+
+    restorePersistedSort() {
+      const sort = this.persistedFilterState?.sort;
+      if (!sort || !Number.isInteger(sort.index) || !['asc', 'desc'].includes(sort.order)) {
+        return;
+      }
+      const header = this.table?.tHead?.rows?.[0]?.children?.[sort.index];
+      if (!header || !header.hasAttribute('data-sort')) {
+        return;
+      }
+      sortTable(this.table, sort.index, sort.type || header.getAttribute('data-sort') || 'string', this, sort.order);
     }
 
     restorePersistedFilters() {

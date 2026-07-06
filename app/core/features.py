@@ -271,6 +271,8 @@ class FeatureRegistry:
     def _build_parent_router(self, pack: FeaturePack) -> APIRouter:
         """Build a parent router that hosts all the pack's routes."""
 
+        if len(pack.routers) == 1:
+            return pack.routers[0]
         parent = APIRouter()
         for child in pack.routers:
             parent.include_router(child)
@@ -393,6 +395,13 @@ class FeatureRegistry:
         before = len(self._app.router.routes)
         self._app.include_router(parent)
         new_routes = self._app.router.routes[before:]
+        if (
+            len(new_routes) == 1
+            and getattr(new_routes[0], "path", None) is None
+            and hasattr(new_routes[0], "original_router")
+        ):
+            self._app.router.routes = self._app.router.routes[:before] + list(parent.routes)
+            new_routes = self._app.router.routes[before:]
         state.mounted_routes = list(new_routes)
         self._wrap_routes_with_state(new_routes, state)
         await self._run_hook(pack.startup, pack.slug, "startup")

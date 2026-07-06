@@ -11,6 +11,7 @@ from app.features.invoices import PACK
 
 EXPECTED = {
     ("GET", "/invoices"),
+    ("GET", "/invoices/global"),
     ("GET", "/invoices/{invoice_id}"),
     ("HEAD", "/invoices/{invoice_id}"),
 }
