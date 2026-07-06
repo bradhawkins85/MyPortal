@@ -192,7 +192,7 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
             results.append(await _apply_xero_invoice_event(event, request))
         except Exception as exc:
             logger.exception("Failed to process Xero invoice webhook event")
-            results.append({"status": "failed", "error": str(exc)})
+            results.append({"status": "failed", "error": "Internal processing error"})
 
     has_failure = any(result.get("status") == "failed" for result in results)
     response_status = 502 if has_failure else 200
