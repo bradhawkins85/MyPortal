@@ -162,12 +162,14 @@ class PluginLoader:
         return root
 
     async def install_from_directory(self, source_path: str) -> list[str]:
+        target_root = self._target_root()
         source = Path(source_path).expanduser().resolve()
+        if not source.is_relative_to(target_root):
+            raise ValueError("Plugin source directory must be inside the plugin root.")
         if not source.exists() or not source.is_dir():
             raise ValueError("Plugin source directory does not exist.")
         if not (source / "__init__.py").exists():
             raise ValueError("Plugin source must contain __init__.py.")
-        target_root = self._target_root()
         target = target_root / source.name
         if target.exists():
             raise ValueError(f"Plugin directory already exists: {target.name}")
