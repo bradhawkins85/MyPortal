@@ -70,12 +70,22 @@ async def test_split_ticket_moves_replies_to_new_ticket(monkeypatch):
     async def mock_move_replies(reply_ids, target_ticket_id):
         executed_queries.append(("move_replies", reply_ids, target_ticket_id))
         return len(reply_ids)
+
+    async def mock_list_watchers(ticket_id):
+        executed_queries.append(("list_watchers", ticket_id))
+        return []
+
+    async def mock_create_reply(**kwargs):
+        executed_queries.append(("create_reply", kwargs))
+        return {"id": 999, **kwargs}
     
     # Apply mocks
     monkeypatch.setattr(tickets_repo, "get_ticket", mock_get_ticket)
     monkeypatch.setattr(tickets_repo, "create_ticket", mock_create_ticket)
     monkeypatch.setattr(tickets_repo.db, "execute", mock_execute)
     monkeypatch.setattr(tickets_repo, "move_replies_to_ticket", mock_move_replies)
+    monkeypatch.setattr(tickets_repo, "list_watchers", mock_list_watchers)
+    monkeypatch.setattr(tickets_repo, "create_reply", mock_create_reply)
     
     # Execute split
     original, new_ticket, moved_count = await tickets_repo.split_ticket(
@@ -106,6 +116,24 @@ async def test_split_ticket_moves_replies_to_new_ticket(monkeypatch):
     assert move_call is not None
     assert move_call[1] == [100, 101]
     assert move_call[2] == 2
+
+
+@pytest.mark.anyio
+async def test_move_replies_to_ticket_returns_rowcount(monkeypatch):
+    """Moving replies returns the database rowcount instead of db.execute's None result."""
+    executed_queries = []
+
+    async def mock_execute_rowcount(query, params=None):
+        executed_queries.append((query, params))
+        return 2
+
+    monkeypatch.setattr(tickets_repo.db, "execute_rowcount", mock_execute_rowcount)
+
+    moved_count = await tickets_repo.move_replies_to_ticket([100, 101], 2)
+
+    assert moved_count == 2
+    assert len(executed_queries) == 1
+    assert executed_queries[0][1] == (2, 100, 101)
 
 
 @pytest.mark.anyio
@@ -264,11 +292,11 @@ async def test_move_replies_to_ticket(monkeypatch):
     """Test that move_replies_to_ticket updates the ticket_id for replies."""
     executed_queries = []
     
-    async def mock_execute(query, params=None):
+    async def mock_execute_rowcount(query, params=None):
         executed_queries.append((query, params))
         return 3  # Number of affected rows
     
-    monkeypatch.setattr(tickets_repo.db, "execute", mock_execute)
+    monkeypatch.setattr(tickets_repo.db, "execute_rowcount", mock_execute_rowcount)
     
     # Execute move
     moved_count = await tickets_repo.move_replies_to_ticket(

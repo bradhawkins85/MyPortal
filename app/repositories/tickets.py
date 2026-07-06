@@ -1475,7 +1475,7 @@ async def move_replies_to_ticket(reply_ids: Iterable[int], target_ticket_id: int
     if not reply_list:
         return 0
     placeholders = ", ".join(["%s"] * len(reply_list))
-    result = await db.execute(
+    return await db.execute_rowcount(
         f"""
         UPDATE ticket_replies
         SET ticket_id = %s
@@ -1483,7 +1483,6 @@ async def move_replies_to_ticket(reply_ids: Iterable[int], target_ticket_id: int
         """,
         (target_ticket_id, *reply_list),
     )
-    return result
 
 
 async def split_ticket(
