@@ -106,20 +106,20 @@ async def _apply_xero_invoice_event(event: dict[str, Any], request: Request) -> 
     if not invoice_id:
         return {"status": "ignored", "reason": "missing invoice id"}
 
+    local_invoice = await invoice_repo.get_invoice_by_xero_invoice_id(invoice_id)
+    if not local_invoice:
+        # Xero can send webhook events for invoices that were not created or
+        # tracked by MyPortal.  Treat those events as successfully ignored before
+        # doing any downstream processing so a foreign invoice cannot turn the
+        # whole webhook delivery into a processing failure.
+        return {"status": "ignored", "reason": "local invoice not found"}
+
     xero_invoice = await _fetch_xero_invoice(invoice_id)
     if not xero_invoice:
         return {"status": "ignored", "reason": "invoice not found in Xero"}
     xero_status = str(xero_invoice.get("Status") or "").strip().upper()
     if xero_status != "PAID":
         return {"status": "ignored", "reason": f"Xero status {xero_status or 'unknown'}"}
-
-    local_invoice = await invoice_repo.get_invoice_by_xero_invoice_id(invoice_id)
-    if not local_invoice:
-        invoice_number = str(xero_invoice.get("InvoiceNumber") or "").strip()
-        if invoice_number:
-            local_invoice = await invoice_repo.get_invoice_by_number(invoice_number)
-    if not local_invoice:
-        return {"status": "ignored", "reason": "local invoice not found"}
     if str(local_invoice.get("status") or "").strip().lower() == "paid":
         return {"status": "unchanged", "invoice_id": local_invoice.get("id")}
 
