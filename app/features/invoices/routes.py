@@ -128,6 +128,8 @@ async def invoices_page(request: Request):
                 "status_class": status_class,
                 "status_slug": status_slug,
                 "is_overdue": is_overdue,
+                "xero_invoice_id": xero_invoice_id,
+                "can_sync_to_xero": is_super_admin and not xero_invoice_id,
             }
         )
     unpaid_count = max(len(records) - paid_count, 0)
@@ -143,6 +145,7 @@ async def invoices_page(request: Request):
         "unpaid_count": unpaid_count,
         "status_options": status_options,
         "can_delete_invoices": bool(user.get("is_super_admin")),
+        "can_sync_invoices_to_xero": bool(user.get("is_super_admin")),
     }
     return await main_module._render_template("invoices/index.html", request, user, extra=extra)
 
@@ -227,6 +230,7 @@ async def invoice_detail_page(request: Request, invoice_id: int):
         "company": company,
         "has_lines": bool(formatted_lines),
         "can_delete_invoices": bool(user.get("is_super_admin")),
+        "can_sync_invoices_to_xero": bool(user.get("is_super_admin")),
     }
     return await main_module._render_template("invoices/detail.html", request, user, extra=extra)
 
