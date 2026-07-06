@@ -212,11 +212,11 @@
       .replace(/&#(\d+);/g, (_match, codepoint) => String.fromCodePoint(Number(codepoint)))
       .replace(/&#x([0-9a-f]+);/gi, (_match, codepoint) => String.fromCodePoint(parseInt(codepoint, 16)))
       .replace(/&nbsp;/g, '\u00a0')
-      .replace(/&amp;/g, '&')
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>')
       .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'");
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, '&');
   }
 
   function isSafeRichTextUrl(value) {
