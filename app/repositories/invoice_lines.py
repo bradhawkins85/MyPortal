@@ -50,5 +50,26 @@ async def create_invoice_line(
     return _normalise_line(row)
 
 
+async def update_invoice_line_amounts(
+    line_id: int,
+    *,
+    quantity: Decimal,
+    unit_amount: Decimal,
+    amount: Decimal,
+) -> dict[str, Any]:
+    await db.execute(
+        """
+        UPDATE invoice_lines
+        SET quantity = %s, unit_amount = %s, amount = %s
+        WHERE id = %s
+        """,
+        (quantity, unit_amount, amount, line_id),
+    )
+    row = await db.fetch_one("SELECT * FROM invoice_lines WHERE id = %s", (line_id,))
+    if not row:
+        raise RuntimeError("Failed to retrieve updated invoice line")
+    return _normalise_line(row)
+
+
 async def delete_invoice_lines(invoice_id: int) -> None:
     await db.execute("DELETE FROM invoice_lines WHERE invoice_id = %s", (invoice_id,))
