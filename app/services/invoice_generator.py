@@ -98,6 +98,45 @@ async def _generate_invoice_number() -> str:
     return f"{prefix}{seq + 1:04d}"
 
 
+async def _get_xero_rate_lookup_credentials() -> tuple[str | None, str | None]:
+    """Return Xero tenant/access token when item-price lookup is available.
+
+    Recurring invoice items can intentionally omit a local price override so
+    Xero remains the source of truth for product pricing. Rate lookup is best
+    effort: invoice generation should still work when Xero is disabled or
+    temporarily unavailable, but callers that can reach Xero should pass these
+    credentials into the recurring line builder.
+    """
+
+    try:
+        module = await modules_service.get_module("xero", redact=False)
+    except Exception as exc:
+        logger.warning("Failed to load Xero module for recurring item price lookup", error=str(exc))
+        return None, None
+
+    if not module or not module.get("enabled"):
+        return None, None
+
+    settings = dict(module.get("settings") or {})
+    try:
+        credentials = await modules_service.get_xero_credentials() or {}
+    except Exception as exc:
+        logger.warning("Failed to load Xero credentials for recurring item price lookup", error=str(exc))
+        credentials = {}
+
+    tenant_id = str(credentials.get("tenant_id") or settings.get("tenant_id") or "").strip()
+    if not tenant_id:
+        return None, None
+
+    try:
+        access_token = await modules_service.acquire_xero_access_token()
+    except Exception as exc:
+        logger.warning("Failed to acquire Xero access token for recurring item price lookup", error=str(exc))
+        return None, None
+
+    return tenant_id, access_token
+
+
 async def generate_invoice(company_id: int) -> dict[str, Any]:
     """Generate a local invoice for the given company.
 
@@ -125,11 +164,16 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
     # Build context for template substitution (device counts etc.)
     context = await xero_service.build_invoice_context(company_id)
 
-    # Build recurring invoice items (no Xero credentials needed)
+    tenant_id, access_token = await _get_xero_rate_lookup_credentials()
+
+    # Build recurring invoice items. When Xero is configured, pass credentials
+    # so items without a local price override use their Xero sales price.
     recurring_line_items = await xero_service.build_recurring_invoice_items(
         company_id,
         tax_type=None,
         context=context,
+        tenant_id=tenant_id,
+        access_token=access_token,
     )
 
     line_item_template = await _get_xero_line_item_template()
