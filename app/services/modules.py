@@ -3464,7 +3464,6 @@ async def _invoke_create_ticket(
         existing = await tickets_repo.get_ticket(ticket_id_int)
     except RuntimeError:
         existing = None
-    previous_description = existing.get("description") if existing else None
 
     # Create webhook event for tracking
     event = await webhook_monitor.create_manual_event(
