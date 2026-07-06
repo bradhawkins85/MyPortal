@@ -370,3 +370,15 @@ async def test_sync_billable_tickets_closes_tickets_after_invoicing():
         assert kwargs["xero_invoice_number"] == "INV-12345"
         assert "closed_at" in kwargs
         assert "billed_at" in kwargs
+
+
+def test_resolve_invoiced_ticket_status_defaults_to_closed(monkeypatch):
+    monkeypatch.delenv("TICKET_INVOICED_STATUS", raising=False)
+
+    assert xero_service.resolve_invoiced_ticket_status() == "closed"
+
+
+def test_resolve_invoiced_ticket_status_uses_env_override(monkeypatch):
+    monkeypatch.setenv("TICKET_INVOICED_STATUS", "Billing Complete")
+
+    assert xero_service.resolve_invoiced_ticket_status() == "billing_complete"
