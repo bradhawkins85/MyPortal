@@ -194,18 +194,26 @@ async def receive_webhook(request: Request) -> dict[str, Any]:
             logger.exception("Failed to process Xero invoice webhook event")
             results.append({"status": "failed", "error": "Internal processing error"})
 
-    has_failure = any(result.get("status") == "failed" for result in results)
-    response_status = 502 if has_failure else 200
+    # Xero disables webhook deliveries when receivers do not acknowledge valid
+    # webhook notifications with a 2xx response quickly and consistently.  Event
+    # processing is best-effort here: signature/JSON validation failures still
+    # reject the request, but downstream invoice-sync errors are logged in the
+    # webhook monitor without turning the provider delivery into a failed HTTP
+    # attempt.
     await webhook_monitor.log_incoming_webhook(
         name="Xero Webhook - Invoice Updates",
         source_url=source_url,
         payload=payload,
         headers=request_headers,
-        response_status=response_status,
+        response_status=200,
         response_body=json.dumps({"status": "accepted", "results": results}),
+        error_message="; ".join(
+            str(result.get("error") or "Xero event processing failed")
+            for result in results
+            if result.get("status") == "failed"
+        )
+        or None,
     )
-    if has_failure:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to process one or more Xero webhook events")
     return {"status": "accepted", "results": results}
 
 
