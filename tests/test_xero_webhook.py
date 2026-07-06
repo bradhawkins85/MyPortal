@@ -17,6 +17,14 @@ def test_verify_xero_webhook_signature_accepts_valid_hmac():
     assert xero._verify_xero_webhook_signature(body, signature, "wrong") is False
 
 
+def test_empty_xero_webhook_response_omits_content_length():
+    response = xero._empty_xero_webhook_response(200)
+
+    assert response.status_code == 200
+    assert response.body == b""
+    assert "content-length" not in response.headers
+
+
 def test_extract_xero_invoice_id_from_resource_url():
     event = {"resourceUrl": "https://api.xero.com/api.xro/2.0/Invoices/inv-123"}
 

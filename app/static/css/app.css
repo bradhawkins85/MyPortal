@@ -1847,6 +1847,40 @@ button.header-title-menu__link,
   min-width: 0;
 }
 
+.ticket-description-summary {
+  align-items: flex-start;
+}
+
+.ticket-description-summary__main {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ticket-description-summary__preview {
+  display: -webkit-box;
+  max-height: 7.5em;
+  overflow: hidden;
+  color: rgba(226, 232, 240, 0.82);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+}
+
+.ticket-description-summary__preview > :first-child {
+  margin-top: 0;
+}
+
+.ticket-description-summary__preview > :last-child {
+  margin-bottom: 0;
+}
+
+.card-collapsible[open] .ticket-description-summary__preview {
+  display: none;
+}
+
 @media (max-width: 1024px) {
   .layout {
     overflow: visible;
