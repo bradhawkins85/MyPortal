@@ -2448,6 +2448,17 @@
       });
     }
 
+    function syncHiddenStatusInputs() {
+      const rows = Array.from(list.querySelectorAll('[data-status-row]'));
+      rows.forEach((row) => {
+        const hiddenInput = row.querySelector('[data-status-hidden-input]');
+        const checkbox = row.querySelector('[data-status-hidden-checkbox]');
+        if (hiddenInput && checkbox) {
+          hiddenInput.value = checkbox.checked ? '1' : '0';
+        }
+      });
+    }
+
     function ensureDefaultRadioChecked() {
       const defaultRadios = form.querySelectorAll('input[name="defaultStatus"]');
       const hasChecked = Array.from(defaultRadios).some(radio => radio.checked);
@@ -2491,6 +2502,14 @@
       }
       if (slugInput) {
         slugInput.value = '';
+      }
+      const hiddenInput = row.querySelector('[data-status-hidden-input]');
+      const checkbox = row.querySelector('[data-status-hidden-checkbox]');
+      if (hiddenInput) {
+        hiddenInput.value = '0';
+      }
+      if (checkbox) {
+        checkbox.checked = false;
       }
       list.appendChild(row);
       updateRowIdentifiers();
@@ -2549,10 +2568,17 @@
 
     form.addEventListener('input', () => {
       clearError();
+      syncHiddenStatusInputs();
+    });
+
+    form.addEventListener('change', () => {
+      clearError();
+      syncHiddenStatusInputs();
     });
 
     form.addEventListener('submit', (event) => {
       clearError();
+      syncHiddenStatusInputs();
       const rows = Array.from(list.querySelectorAll('[data-status-row]'));
       const seen = new Set();
       const selectedDefaultRadio = form.querySelector('input[name="defaultStatus"]:checked');
@@ -2598,6 +2624,7 @@
     updateRowIdentifiers();
     updateRemoveButtons();
     ensureDefaultRadioChecked();
+    syncHiddenStatusInputs();
 
     // Return the initialization function for use in onOpen callback
     return {
@@ -2761,10 +2788,17 @@
 
     form.addEventListener('input', () => {
       clearError();
+      syncHiddenStatusInputs();
+    });
+
+    form.addEventListener('change', () => {
+      clearError();
+      syncHiddenStatusInputs();
     });
 
     form.addEventListener('submit', (event) => {
       clearError();
+      syncHiddenStatusInputs();
       const rows = Array.from(list.querySelectorAll('[data-labour-row]'));
       const seenCodes = new Set();
 

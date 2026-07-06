@@ -676,6 +676,7 @@
                 <th scope="col">Default</th>
                 <th scope="col">Tech status (technician label)</th>
                 <th scope="col">Public status (customer label)</th>
+                <th scope="col">Hide from technicians</th>
                 <th scope="col" class="table__actions">Actions</th>
               </tr>
             </thead>
@@ -717,6 +718,13 @@
                         required
                       />
                     </td>
+                    <td data-label="Hide from technicians">
+                      <input type="hidden" name="hideFromTechnicians" value="{% if status_option.hide_from_technicians %}1{% else %}0{% endif %}" data-status-hidden-input />
+                      <label class="checkbox">
+                        <input type="checkbox" data-status-hidden-checkbox {% if status_option.hide_from_technicians %}checked{% endif %} />
+                        <span>Hide</span>
+                      </label>
+                    </td>
                     <td class="table__actions">
                       <button
                         type="button"
@@ -751,6 +759,13 @@
                     <label class="visually-hidden" for="status-public-0">Public status</label>
                     <input id="status-public-0" name="publicLabel" class="form-input" maxlength="128" required />
                   </td>
+                  <td data-label="Hide from technicians">
+                    <input type="hidden" name="hideFromTechnicians" value="0" data-status-hidden-input />
+                    <label class="checkbox">
+                      <input type="checkbox" data-status-hidden-checkbox />
+                      <span>Hide</span>
+                    </label>
+                  </td>
                   <td class="table__actions">
                     <button type="button" class="button button--ghost" data-status-remove disabled>Remove</button>
                   </td>
@@ -781,6 +796,13 @@
       <td data-label="Public status">
         <label class="visually-hidden">Public status</label>
         <input name="publicLabel" class="form-input" maxlength="128" required />
+      </td>
+      <td data-label="Hide from technicians">
+        <input type="hidden" name="hideFromTechnicians" value="0" data-status-hidden-input />
+        <label class="checkbox">
+          <input type="checkbox" data-status-hidden-checkbox />
+          <span>Hide</span>
+        </label>
       </td>
       <td class="table__actions">
         <button type="button" class="button button--ghost" data-status-remove>Remove</button>

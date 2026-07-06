@@ -359,12 +359,15 @@ async def list_ticket_statuses_endpoint(
     current_user: dict = Depends(require_helpdesk_technician),
 ) -> TicketStatusListResponse:
     definitions = await tickets_service.list_status_definitions()
+    if not current_user.get("is_super_admin"):
+        definitions = [definition for definition in definitions if not definition.hide_from_technicians]
     items = [
         TicketStatusDefinitionModel(
             tech_status=definition.tech_status,
             tech_label=definition.tech_label,
             public_status=definition.public_status,
             is_default=definition.is_default,
+            hide_from_technicians=definition.hide_from_technicians,
         )
         for definition in definitions
     ]
@@ -396,6 +399,7 @@ async def replace_ticket_statuses_endpoint(
             tech_label=definition.tech_label,
             public_status=definition.public_status,
             is_default=definition.is_default,
+            hide_from_technicians=definition.hide_from_technicians,
         )
         for definition in definitions
     ]
@@ -523,7 +527,7 @@ async def create_ticket(
     if has_helpdesk_access:
         if payload.status:
             try:
-                status_value = await tickets_service.validate_status_choice(payload.status)
+                status_value = await tickets_service.validate_status_choice(payload.status, allow_hidden=bool(current_user.get("is_super_admin")))
             except ValueError as exc:
                 error_id = new_error_id()
                 log_exception_with_error_id(
@@ -601,7 +605,7 @@ async def update_ticket(
     description_value = fields.pop("description", description_marker)
     if "status" in fields and fields["status"] is not None:
         try:
-            fields["status"] = await tickets_service.validate_status_choice(fields["status"])
+            fields["status"] = await tickets_service.validate_status_choice(fields["status"], allow_hidden=bool(current_user.get("is_super_admin")))
         except ValueError as exc:
             error_id = new_error_id()
             log_exception_with_error_id(

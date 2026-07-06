@@ -455,7 +455,7 @@ async def admin_create_ticket(request: Request):
         )
     try:
         if status_raw:
-            status_value = await tickets_service.validate_status_choice(status_raw)
+            status_value = await tickets_service.validate_status_choice(status_raw, allow_hidden=bool(current_user.get("is_super_admin")))
         else:
             status_value = await tickets_service.resolve_status_or_default(None)
         created = await tickets_service.create_ticket(
@@ -505,7 +505,7 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
     return_url_raw = form.get("returnUrl")
     return_url = str(return_url_raw).strip() if isinstance(return_url_raw, str) else None
     try:
-        status_value = await tickets_service.validate_status_choice(status_raw)
+        status_value = await tickets_service.validate_status_choice(status_raw, allow_hidden=bool(current_user.get("is_super_admin")))
     except ValueError as exc:
         error_message = str(exc)
         if return_url and return_url.startswith(f"/admin/tickets/{ticket_id}"):
@@ -546,11 +546,12 @@ def _build_ticket_status_payloads(
     tech_labels: Sequence[str],
     public_labels: Sequence[str],
     existing_slugs: Sequence[str],
+    hidden_flags: Sequence[str],
     default_status_value: str,
 ) -> list[dict[str, Any]]:
     statuses: list[dict[str, Any]] = []
     max_length = (
-        max(len(tech_labels), len(public_labels), len(existing_slugs))
+        max(len(tech_labels), len(public_labels), len(existing_slugs), len(hidden_flags))
         if (tech_labels or public_labels or existing_slugs)
         else 0
     )
@@ -558,6 +559,7 @@ def _build_ticket_status_payloads(
         tech_label = tech_labels[index] if index < len(tech_labels) else ""
         public_status = public_labels[index] if index < len(public_labels) else ""
         existing_slug = existing_slugs[index] if index < len(existing_slugs) else None
+        hide_from_technicians = index < len(hidden_flags) and str(hidden_flags[index]).strip().lower() in {"1", "true", "on", "yes"}
         if not tech_label and not public_status:
             continue
         candidate_slug = ticket_status_repo.slugify_status_label(tech_label)
@@ -574,6 +576,7 @@ def _build_ticket_status_payloads(
                 "publicStatus": public_status,
                 "existingSlug": existing_slug,
                 "isDefault": is_default,
+                "hideFromTechnicians": hide_from_technicians,
             }
         )
     return statuses
@@ -590,12 +593,14 @@ async def admin_replace_ticket_statuses(request: Request):
     tech_labels = form.getlist("techLabel")
     public_labels = form.getlist("publicLabel")
     existing_slugs = form.getlist("existingSlug")
+    hidden_flags = form.getlist("hideFromTechnicians")
     default_status_value = ticket_status_repo.slugify_status_label(str(form.get("defaultStatus") or ""))
 
     statuses = _build_ticket_status_payloads(
         tech_labels,
         public_labels,
         existing_slugs,
+        hidden_flags,
         default_status_value,
     )
 
@@ -793,7 +798,10 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
 
     if status_raw:
         try:
-            status_value = await tickets_service.validate_status_choice(status_raw)
+            status_value = await tickets_service.validate_status_choice(
+                status_raw,
+                allow_hidden=bool(current_user.get("is_super_admin")) or status_raw == str(ticket.get("status") or "").strip().lower(),
+            )
         except ValueError as exc:
             return await main_module._render_ticket_detail(
                 request,
@@ -1292,8 +1300,13 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
     status_definitions = await tickets_service.list_status_definitions()
-    valid_reply_statuses = {definition.tech_status for definition in status_definitions}
-    default_reply_status = next((definition.tech_status for definition in status_definitions if definition.is_default), None)
+    selectable_status_definitions = [
+        definition
+        for definition in status_definitions
+        if bool(current_user.get("is_super_admin")) or not definition.hide_from_technicians
+    ]
+    valid_reply_statuses = {definition.tech_status for definition in selectable_status_definitions}
+    default_reply_status = next((definition.tech_status for definition in selectable_status_definitions if definition.is_default), None)
     if not default_reply_status:
         default_reply_status = "pending" if "pending" in valid_reply_statuses else (next(iter(valid_reply_statuses), "open"))
     reply_status = str(get_last_form_value(form, "replyStatus", default_reply_status) or default_reply_status).strip().lower()
