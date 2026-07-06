@@ -928,10 +928,35 @@ def reply_to_time_entry_payload(
 
 
 def _hash_payload(payload: Any) -> str:
+    sensitive_keys = {
+        "api_token",
+        "token",
+        "password",
+        "secret",
+        "authorization",
+    }
+
+    def _redact_sensitive(value: Any) -> Any:
+        if isinstance(value, Mapping):
+            redacted: dict[str, Any] = {}
+            for key, item in value.items():
+                key_text = str(key)
+                if key_text.lower() in sensitive_keys:
+                    redacted[key_text] = "***REDACTED***"
+                else:
+                    redacted[key_text] = _redact_sensitive(item)
+            return redacted
+        if isinstance(value, list):
+            return [_redact_sensitive(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(_redact_sensitive(item) for item in value)
+        return value
+
+    safe_payload = _redact_sensitive(payload)
     try:
-        serialised = json.dumps(payload, sort_keys=True, default=str)
+        serialised = json.dumps(safe_payload, sort_keys=True, default=str)
     except (TypeError, ValueError):
-        serialised = repr(payload)
+        serialised = repr(safe_payload)
     return hashlib.sha256(serialised.encode("utf-8")).hexdigest()
 
 
