@@ -64,7 +64,7 @@
             <th scope="col" data-sort="date" data-mobile-priority="essential">Created</th>
             <th scope="col" data-sort="date" data-mobile-priority="essential">Due date</th>
             <th scope="col" data-sort="string" data-mobile-priority="essential">Status</th>
-            {% if can_delete_invoices %}<th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>{% endif %}
+            {% if can_delete_invoices or can_sync_invoices_to_xero %}<th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>{% endif %}
           </tr>
         </thead>
         <tbody>
@@ -98,11 +98,23 @@
                 <span class="text-muted">No status</span>
               {% endif %}
             </td>
-            {% if can_delete_invoices %}
+            {% if can_delete_invoices or can_sync_invoices_to_xero %}
             <td class="table__actions">
+              {% if can_sync_invoices_to_xero %}
+                <button
+                  type="button"
+                  class="button button--secondary button--small"
+                  data-invoice-xero-sync="{{ invoice.id }}"
+                  {% if not invoice.can_sync_to_xero %}disabled aria-disabled="true" title="Invoice is already linked to Xero"{% endif %}
+                >
+                  Push to Xero
+                </button>
+              {% endif %}
+              {% if can_delete_invoices %}
               <button type="button" class="button button--danger button--small" data-invoice-delete="{{ invoice.id }}">
                 Delete
               </button>
+              {% endif %}
             </td>
             {% endif %}
           </tr>
@@ -186,6 +198,41 @@
         table.addEventListener('table:sorted', updateSummary);
       }
       updateSummary();
+
+      document.querySelectorAll('[data-invoice-xero-sync]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const invoiceId = button.getAttribute('data-invoice-xero-sync');
+          if (!invoiceId || button.disabled) return;
+          if (!window.confirm('Push this invoice to Xero now?')) return;
+          const originalText = button.textContent;
+          button.disabled = true;
+          button.textContent = 'Pushing…';
+          try {
+            const response = await fetch(`/api/invoices/${invoiceId}/xero/sync`, { method: 'POST' });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              const detail = payload.detail || {};
+              throw new Error(detail.error || detail.reason || 'Failed to push invoice to Xero');
+            }
+            const row = button.closest('tr');
+            const statusCell = row?.querySelector('td[data-label="Status"]');
+            if (row) row.setAttribute('data-status', 'xero');
+            if (statusCell) {
+              statusCell.setAttribute('data-value', 'xero');
+              statusCell.innerHTML = '<span class="status status--xero">Xero</span>';
+            }
+            button.textContent = 'Pushed';
+            button.setAttribute('title', 'Invoice is already linked to Xero');
+            window.alert('Invoice pushed to Xero successfully.');
+            updateSummary();
+          } catch (error) {
+            console.error(error);
+            window.alert(error.message || 'Unable to push invoice to Xero. Please try again.');
+            button.disabled = false;
+            button.textContent = originalText;
+          }
+        });
+      });
 
       document.querySelectorAll('[data-invoice-delete]').forEach((button) => {
         button.addEventListener('click', async () => {

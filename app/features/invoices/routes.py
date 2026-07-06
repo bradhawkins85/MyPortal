@@ -122,6 +122,8 @@ def _format_invoice_records(records: list[dict[str, Any]]) -> tuple[list[dict[st
                 "status_class": status_class,
                 "status_slug": status_slug,
                 "is_overdue": is_overdue,
+                "xero_invoice_id": xero_invoice_id,
+                "can_sync_to_xero": is_super_admin and not xero_invoice_id,
             }
         )
     return formatted, total_amount, paid_count
@@ -150,6 +152,7 @@ async def invoices_page(request: Request):
         "can_delete_invoices": bool(user.get("is_super_admin")),
         "is_global_invoices": False,
         "invoice_table_id": "invoice",
+        "can_sync_invoices_to_xero": bool(user.get("is_super_admin")),
     }
     return await main_module._render_template("invoices/index.html", request, user, extra=extra)
 
@@ -182,6 +185,7 @@ async def global_invoices_page(request: Request):
         "can_delete_invoices": True,
         "is_global_invoices": True,
         "invoice_table_id": "invoice-global",
+        "can_sync_invoices_to_xero": bool(user.get("is_super_admin")),
     }
     return await main_module._render_template("invoices/index.html", request, user, extra=extra)
 
@@ -270,6 +274,7 @@ async def invoice_detail_page(request: Request, invoice_id: int):
         "company": company,
         "has_lines": bool(formatted_lines),
         "can_delete_invoices": bool(user.get("is_super_admin")),
+        "can_sync_invoices_to_xero": bool(user.get("is_super_admin")),
     }
     return await main_module._render_template("invoices/detail.html", request, user, extra=extra)
 

@@ -112,6 +112,18 @@
               {% endif %}
               <input type="hidden" name="returnUrl" value="{{ ticket_return_url }}" />
               <div class="form-field">
+                <label class="form-label required" for="ticket-subject-detail">Subject</label>
+                <input
+                  id="ticket-subject-detail"
+                  name="subject"
+                  class="form-input"
+                  maxlength="255"
+                  value="{{ ticket.subject or '' }}"
+                  required
+                  placeholder="Briefly describe the request"
+                />
+              </div>
+              <div class="form-field">
                 <label class="form-label" for="ticket-status-detail">Status</label>
                 <select id="ticket-status-detail" name="status" class="form-input">
                   {% if ticket_status not in ticket_status_label_map %}
@@ -1164,16 +1176,24 @@
           </details>
 
           <article class="card card--panel">
-            <header class="card__header">
-              <h2 class="card__title">Conversation history</h2>
+            <header class="card__header ticket-split-toolbar">
+              <div>
+                <h2 class="card__title">Conversation history</h2>
+                <p class="card__subtitle">Select conversation items to split them into a new ticket.</p>
+              </div>
+              <div class="ticket-split-toolbar__actions">
+                <button type="button" class="button button--secondary button--small" data-show-split-hidden hidden>Show hidden split history</button>
+                <button type="button" class="button button--primary button--small" data-split-selected disabled>Split selected</button>
+              </div>
             </header>
             <div class="card__body">
               {% if ticket_replies or ticket_call_recordings %}
                 <div class="timeline timeline--conversation" data-ticket-timeline data-ticket-id="{{ ticket.id }}">
                   {% for reply in ticket_replies %}
                     <article
-                      class="timeline__event"
+                      class="timeline__event{% if reply.is_split_hidden %} timeline__event--split-hidden{% endif %}"
                       data-ticket-reply
+                      {% if reply.is_split_hidden %}data-split-hidden="true" hidden{% endif %}
                   data-reply-id="{{ reply.id }}"
                   data-reply-minutes="{{ reply.minutes_spent if reply.minutes_spent is not none else '' }}"
                   data-reply-billable="{{ 'true' if reply.is_billable else 'false' }}"
@@ -1181,6 +1201,11 @@
                 >
                       <header class="timeline__header">
                         <div class="timeline__header-main">
+                          {% if not reply.is_split_hidden %}
+                            <label class="ticket-split-select">
+                              <input type="checkbox" data-split-reply-checkbox value="{{ reply.id }}" aria-label="Select reply {{ reply.id }} for ticket split" />
+                            </label>
+                          {% endif %}
                           <span class="timeline__timestamp">
                             {{ reply.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.created_at else '—' }}
                           </span>
@@ -1188,6 +1213,9 @@
                             {{ reply.author.email if reply.author else 'System' }}
                             {% if reply.is_internal %}
                               <span class="badge badge--muted">Internal</span>
+                            {% endif %}
+                            {% if reply.is_split_hidden %}
+                              <span class="badge badge--warning">Split to #{{ reply.split_to_ticket_number or reply.split_to_ticket_id }}</span>
                             {% endif %}
                             {% if reply.has_email_tracking %}
                               {% set _reply_recipient_count = reply.recipient_count|default(0) %}
@@ -1252,6 +1280,7 @@
                           <button
                             type="button"
                             class="button button--ghost button--icon timeline__edit-button"
+                            {% if reply.is_split_hidden %}hidden disabled{% endif %}
                             data-reply-edit
                             aria-label="Edit time entry"
                             aria-controls="reply-time-modal"
@@ -1333,6 +1362,7 @@
                           <button
                             type="button"
                             class="button button--ghost button--icon timeline__edit-button"
+                            {% if reply.is_split_hidden %}hidden disabled{% endif %}
                             data-recording-edit
                             aria-label="Edit time entry"
                             aria-controls="recording-time-modal"

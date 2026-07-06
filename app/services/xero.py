@@ -2074,8 +2074,17 @@ async def sync_billable_tickets(
         }
 
 
-async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, Any]:
-    """Upload unsynchronised MyPortal invoices for the given company to Xero."""
+async def sync_company(
+    company_id: int,
+    auto_send: bool = False,
+    invoice_ids: Sequence[int] | None = None,
+) -> dict[str, Any]:
+    """Upload unsynchronised MyPortal invoices for the given company to Xero.
+
+    When ``invoice_ids`` is provided, only those unsynchronised invoices are
+    pushed. This supports manual retry from the invoices UI without sending
+    every pending invoice for the company.
+    """
 
     module = await modules_service.get_module("xero", redact=False)
     if not module or not module.get("enabled"):
@@ -2086,8 +2095,22 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
         }
 
     settings = dict(module.get("settings") or {})
-    required_fields = ["client_id", "client_secret", "refresh_token", "tenant_id"]
-    missing = [field for field in required_fields if not str(settings.get(field) or "").strip()]
+    credentials = await modules_service.get_xero_credentials() or {}
+    tenant_id = str(credentials.get("tenant_id") or settings.get("tenant_id") or "").strip()
+    missing = [
+        field
+        for field in ("client_id", "client_secret", "tenant_id")
+        if not str(credentials.get(field) or settings.get(field) or "").strip()
+    ]
+    # A refresh token is required for durable OAuth operation because Xero
+    # access tokens expire quickly and refresh tokens are rotated. However, do
+    # not block a sync that still has a cached access token; acquire_xero_access_token()
+    # will reuse that token while it remains valid and will raise a clearer
+    # error if it has expired without a refresh token.
+    if not str(credentials.get("refresh_token") or "").strip() and not str(
+        credentials.get("access_token") or ""
+    ).strip():
+        missing.append("refresh_token")
     if missing:
         return {
             "status": "skipped",
@@ -2105,20 +2128,17 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
         }
 
     unsynced_invoices = await invoice_repo.list_unsynced_company_invoices(company_id)
+    requested_invoice_ids = {int(invoice_id) for invoice_id in invoice_ids or []}
+    if requested_invoice_ids:
+        unsynced_invoices = [
+            invoice for invoice in unsynced_invoices if int(invoice.get("id") or 0) in requested_invoice_ids
+        ]
     if not unsynced_invoices:
         return {
             "status": "skipped",
-            "reason": "No unsynchronised MyPortal invoices",
+            "reason": "No matching unsynchronised MyPortal invoices" if requested_invoice_ids else "No unsynchronised MyPortal invoices",
             "company_id": company_id,
             "invoice_count": 0,
-        }
-
-    tenant_id = str(settings.get("tenant_id", "")).strip()
-    if not tenant_id:
-        return {
-            "status": "skipped",
-            "reason": "Tenant ID not configured",
-            "company_id": company_id,
         }
 
     try:
@@ -2384,6 +2404,29 @@ async def sync_company(company_id: int, auto_send: bool = False) -> dict[str, An
         "auto_send": auto_send,
     }
 
+
+async def sync_invoice(invoice_id: int, auto_send: bool = False) -> dict[str, Any]:
+    """Upload one unsynchronised MyPortal invoice to Xero."""
+
+    invoice = await invoice_repo.get_invoice_by_id(invoice_id)
+    if not invoice:
+        return {
+            "status": "skipped",
+            "reason": "Invoice not found",
+            "invoice_id": invoice_id,
+        }
+    xero_invoice_id = str(invoice.get("xero_invoice_id") or "").strip()
+    if xero_invoice_id:
+        return {
+            "status": "skipped",
+            "reason": "Invoice is already linked to Xero",
+            "invoice_id": invoice_id,
+            "xero_invoice_id": xero_invoice_id,
+        }
+    company_id = int(invoice["company_id"])
+    result = await sync_company(company_id, auto_send=auto_send, invoice_ids=[invoice_id])
+    result["invoice_id"] = invoice_id
+    return result
 
 
 async def send_order_to_xero(

@@ -172,7 +172,13 @@ async def _build_ticket_detail(ticket_id: int, current_user: dict) -> TicketDeta
     replies = await tickets_repo.list_replies(
         ticket_id, include_internal=has_helpdesk_access
     )
-    ordered_replies = list(reversed(replies))
+    if has_helpdesk_access:
+        replies = [*replies, *await tickets_repo.list_split_replies_for_original(ticket_id)]
+    ordered_replies = sorted(
+        replies,
+        key=lambda item: item.get("created_at") or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
     watcher_records = []
     if has_helpdesk_access:
         watcher_records = await tickets_repo.list_watchers(ticket_id)
@@ -610,6 +616,13 @@ async def update_ticket(
                 "Invalid ticket status.",
                 error_id=error_id,
             ) from exc
+    if "subject" in fields and fields["subject"] is not None:
+        fields["subject"] = str(fields["subject"]).strip()
+        if not fields["subject"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Ticket subject is required",
+            )
     if fields:
         await tickets_repo.update_ticket(ticket_id, **fields)
     if description_value is not description_marker:
@@ -1560,6 +1573,7 @@ async def get_open_access_token(
 async def split_ticket(
     ticket_id: int,
     payload: TicketSplitRequest,
+    request: Request,
     current_user: dict = Depends(require_helpdesk_technician),
 ) -> TicketSplitResponse:
     """
@@ -1599,6 +1613,21 @@ async def split_ticket(
             detail="Failed to split ticket"
         )
     
+    await audit_service.record(
+        action="ticket.split",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="ticket",
+        entity_id=ticket_id,
+        before=_audit_ticket_view(original_ticket),
+        after=_audit_ticket_view(original),
+        metadata={
+            "new_ticket_id": new_ticket.get("id"),
+            "reply_ids": payload.reply_ids,
+            "moved_reply_count": moved_count,
+        },
+    )
+
     return TicketSplitResponse(
         original_ticket=TicketResponse(**original),
         new_ticket=TicketResponse(**new_ticket),

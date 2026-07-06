@@ -3,7 +3,7 @@ import pytest
 from app.services import modules as modules_service
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio("asyncio")
 async def test_force_env_module_settings_ignores_db_values_for_env_backed_fields(monkeypatch):
     monkeypatch.setenv("FORCE_ENV_MODULE_SETTINGS", "true")
     monkeypatch.setenv("HUDU_BASE_URL", "https://env.example")
@@ -30,7 +30,7 @@ async def test_force_env_module_settings_ignores_db_values_for_env_backed_fields
     }
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio("asyncio")
 async def test_force_env_module_settings_preserves_non_env_fields(monkeypatch):
     monkeypatch.setenv("FORCE_ENV_MODULE_SETTINGS", "true")
     monkeypatch.setenv("SYNCRO_BASE_URL", "https://env.syncro.example")
@@ -60,7 +60,7 @@ async def test_force_env_module_settings_preserves_non_env_fields(monkeypatch):
     assert result["settings"]["custom_runtime_state"] == "preserve-me"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio("asyncio")
 async def test_force_env_module_settings_uses_defaults_when_env_is_blank(monkeypatch):
     monkeypatch.setenv("FORCE_ENV_MODULE_SETTINGS", "true")
     monkeypatch.delenv("CALL_RECORDINGS_PATH", raising=False)
@@ -83,3 +83,27 @@ async def test_force_env_module_settings_uses_defaults_when_env_is_blank(monkeyp
 
     assert result["recordings_path"] == "/var/lib/myportal/call_recordings"
     assert result["phone_system_type"] == "generic"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_xero_tenant_id_can_be_sourced_from_env(monkeypatch):
+    monkeypatch.delenv("FORCE_ENV_MODULE_SETTINGS", raising=False)
+    monkeypatch.setenv("XERO_TENANT_ID", "tenant-from-env")
+
+    async def fake_get_module(slug: str):
+        assert slug == "xero"
+        return {
+            "slug": "xero",
+            "enabled": True,
+            "settings": {
+                "tenant_id": "",
+                "client_id": "db-client-id",
+                "client_secret": "db-client-secret",
+            },
+        }
+
+    monkeypatch.setattr(modules_service.module_repo, "get_module", fake_get_module)
+
+    result = await modules_service.get_module("xero", redact=False)
+
+    assert result["settings"]["tenant_id"] == "tenant-from-env"
