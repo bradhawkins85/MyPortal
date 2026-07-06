@@ -78,6 +78,9 @@ class TicketReply(BaseModel):
     labour_type_id: Optional[int] = None
     labour_type_name: Optional[str] = None
     labour_type_code: Optional[str] = None
+    is_split_hidden: bool = False
+    split_to_ticket_id: Optional[int] = None
+    split_to_ticket_number: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -7716,7 +7716,11 @@ async def _render_portal_ticket_detail(
             company_record = None
 
     replies = await tickets_repo.list_replies(ticket_id, include_internal=has_helpdesk_access)
-    ordered_replies = list(reversed(replies))
+    ordered_replies = sorted(
+        replies,
+        key=lambda item: item.get("created_at") or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
 
     # Per-recipient delivery counts power the click-through delivery-status
     # popup. We only show the click trigger when there is more than one
@@ -7839,6 +7843,9 @@ async def _render_portal_ticket_detail(
                 "has_email_tracking": has_tracking,
                 "is_email_opened": is_email_opened,
                 "recipient_count": recipient_count_for_reply,
+                "is_split_hidden": bool(reply.get("is_split_hidden")),
+                "split_to_ticket_id": reply.get("split_to_ticket_id"),
+                "split_to_ticket_number": reply.get("split_to_ticket_number"),
             }
         )
     
@@ -8325,6 +8332,8 @@ async def _render_ticket_detail(
     }
 
     replies = await tickets_repo.list_replies(ticket_id)
+    split_replies = await tickets_repo.list_split_replies_for_original(ticket_id)
+    replies = [*replies, *split_replies]
     watchers = await tickets_repo.list_watchers(ticket_id)
 
     related_user_ids: set[int] = set()
@@ -8436,7 +8445,11 @@ async def _render_ticket_detail(
             error=str(_exc),
         )
 
-    ordered_replies = list(reversed(replies))
+    ordered_replies = sorted(
+        replies,
+        key=lambda item: item.get("created_at") or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
 
     # Per-recipient delivery counts so the delivery-status badge in the admin
     # ticket detail can be rendered as a click trigger when the email had
@@ -8545,6 +8558,9 @@ async def _render_ticket_detail(
                 "is_email_delivered": is_email_delivered,
                 "is_email_bounced": is_email_bounced,
                 "recipient_count": recipient_count_for_reply,
+                "is_split_hidden": bool(reply.get("is_split_hidden")),
+                "split_to_ticket_id": reply.get("split_to_ticket_id"),
+                "split_to_ticket_number": reply.get("split_to_ticket_number"),
             }
         )
     
