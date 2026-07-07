@@ -15,6 +15,7 @@ available through the Swagger UI once authenticated.
 | --- | --- |
 | `GET /api/message-templates` | List existing templates with optional search or content-type filters. |
 | `POST /api/message-templates` | Create a new template by providing a slug, name, content type, and body. |
+| `POST /api/message-templates/{id}/clone` | Clone an existing template, copying its metadata and body into a new template with a generated unique slug. |
 | `GET /api/message-templates/{id}` | Retrieve a template by numeric identifier. |
 | `GET /api/message-templates/slug/{slug}` | Retrieve a template by slug for quick lookups. |
 | `PUT /api/message-templates/{id}` | Update the template metadata or body content. |
