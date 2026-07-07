@@ -1,6 +1,16 @@
 from typing import Any
+import sys
+from types import SimpleNamespace
 
 import pytest
+
+sys.modules.setdefault(
+    "magic",
+    SimpleNamespace(
+        Magic=lambda *args, **kwargs: None,
+        from_buffer=lambda *args, **kwargs: "application/octet-stream",
+    ),
+)
 
 from app.services import tickets as tickets_service
 
@@ -164,6 +174,24 @@ def test_extract_summary_fields_from_triple_quoted_block():
 
     assert summary == "Still working"
     assert resolution == "Likely In Progress"
+
+
+def test_extract_summary_fields_from_html_line_break_json():
+    payload = '{<br />"summary": "Executed CHKDSK verification successfully.",<br />"resolution": "Likely Resolved"<br />}'
+
+    summary, resolution = tickets_service._extract_summary_fields(payload)
+
+    assert summary == "Executed CHKDSK verification successfully."
+    assert resolution == "Likely Resolved"
+
+
+def test_extract_summary_fields_from_html_escaped_json():
+    payload = '{&lt;br /&gt;&quot;summary&quot;: &quot;Disk scan completed.&quot;,&lt;br /&gt;&quot;resolution&quot;: &quot;Likely Resolved&quot;&lt;br /&gt;}'
+
+    summary, resolution = tickets_service._extract_summary_fields(payload)
+
+    assert summary == "Disk scan completed."
+    assert resolution == "Likely Resolved"
 
 
 def test_render_prompt_ignores_signatures_and_reply_markers():

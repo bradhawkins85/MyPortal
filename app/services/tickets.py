@@ -1602,6 +1602,25 @@ def _parse_json_candidate(candidate: str) -> tuple[str | None, str | None] | Non
     return candidate, None
 
 
+def _normalise_model_response_text(value: Any) -> str:
+    """Return model text in a parseable plain-text form.
+
+    Some integrations pass model output through HTML-oriented formatting before the
+    ticket summary parser sees it.  Convert common line-break markup back to text
+    so JSON such as ``{<br />"summary": ...}`` is parsed instead of displayed to
+    technicians.
+    """
+
+    text = str(value).strip() if value is not None else ""
+    if not text:
+        return ""
+    text = html.unescape(text)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</(p|div|li|tr|td|th|tbody|thead|ul|ol)>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    return text.strip()
+
+
 def _extract_summary_fields(payload: Any) -> tuple[str | None, str | None]:
     if isinstance(payload, Mapping):
         direct_summary = payload.get("summary")
@@ -1622,7 +1641,7 @@ def _extract_summary_fields(payload: Any) -> tuple[str | None, str | None]:
     else:
         payload_text = payload
 
-    text = str(payload_text).strip() if payload_text is not None else ""
+    text = _normalise_model_response_text(payload_text)
     if not text:
         return None, None
 
