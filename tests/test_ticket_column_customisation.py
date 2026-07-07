@@ -27,6 +27,17 @@ def test_columns_toggle_button_present():
     assert '>Columns<' in html
 
 
+def test_next_ticket_number_handler_is_always_rendered():
+    """The menu item handler must not depend on header-block scoped Jinja variables."""
+    html = _template_html()
+    script_index = html.index("data-next-ticket-number-open")
+    scripts_block_index = html.index("{% block scripts %}")
+    handler_index = html.index("form.requestSubmit();")
+
+    assert script_index < scripts_block_index < handler_index
+    assert "{% if show_next_ticket_number %}\n    <script>" not in html
+
+
 def test_column_panel_present():
     """The column customisation panel should be rendered."""
     html = _template_html()

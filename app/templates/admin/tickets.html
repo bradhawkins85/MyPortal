@@ -1116,26 +1116,24 @@
   <script src="{{ static_url('/static/js/ticket_columns.js') }}" defer></script>
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
 
-  {% if show_next_ticket_number %}
-    <script>
-      document.addEventListener('DOMContentLoaded', () => {
-        const button = document.querySelector('[data-next-ticket-number-open]');
-        const form = document.querySelector('[data-next-ticket-number-form]');
-        const input = document.querySelector('[data-next-ticket-number-input]');
-        if (!button || !form || !input) return;
-        button.addEventListener('click', () => {
-          const currentValue = button.getAttribute('data-current-next-ticket-number') || '';
-          const value = window.prompt('Enter the next ticket number to use for newly-created tickets.', currentValue);
-          if (value === null) return;
-          const cleaned = value.trim();
-          if (!/^\d+$/.test(cleaned) || Number(cleaned) <= 0) {
-            window.alert('Enter a positive whole number.');
-            return;
-          }
-          input.value = cleaned;
-          form.requestSubmit();
-        });
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const button = document.querySelector('[data-next-ticket-number-open]');
+      const form = document.querySelector('[data-next-ticket-number-form]');
+      const input = document.querySelector('[data-next-ticket-number-input]');
+      if (!button || !form || !input) return;
+      button.addEventListener('click', () => {
+        const currentValue = button.getAttribute('data-current-next-ticket-number') || '';
+        const value = window.prompt('Enter the next ticket number to use for newly-created tickets.', currentValue);
+        if (value === null) return;
+        const cleaned = value.trim();
+        if (!/^\d+$/.test(cleaned) || Number(cleaned) <= 0) {
+          window.alert('Enter a positive whole number.');
+          return;
+        }
+        input.value = cleaned;
+        form.requestSubmit();
       });
-    </script>
-  {% endif %}
+    });
+  </script>
 {% endblock %}
