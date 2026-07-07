@@ -474,6 +474,7 @@
             data-can-merge-tickets="{{ 'true' if can_merge_tickets else 'false' }}"
             data-bulk-delete-form-id="tickets-bulk-delete-form"
             data-table-empty-label="No tickets found for the selected filters."
+            {% if ticket_autoload %}data-table-autoload{% endif %}
           >
             <thead>
               <tr>

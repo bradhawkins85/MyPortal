@@ -186,7 +186,7 @@ class LabourTypeCreateRequest(BaseModel):
 
 
 class TicketSearchFilters(BaseModel):
-    status: Optional[str] = None
+    status: Optional[list[str]] = None
     module_slug: Optional[str] = None
     company_id: Optional[int] = None
     assigned_user_id: Optional[int] = None

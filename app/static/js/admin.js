@@ -205,11 +205,12 @@
         setBusy(true);
         let result;
         try {
-          const response = await requestJson(endpoint);
+          const currentEndpoint = table.getAttribute('data-table-refresh-url') || endpoint;
+          const response = await requestJson(currentEndpoint);
           result =
             (await handler({
               table,
-              endpoint,
+              endpoint: currentEndpoint,
               response,
               detail: detail || null,
               requestJson,
@@ -3667,6 +3668,12 @@
     bindIssueStatusAutoSubmit();
     registerTicketTableRefreshHandler();
     setupTableRealtimeRefreshControllers();
+    // Auto-load tables marked with data-table-autoload (e.g. tickets dashboard)
+    document.querySelectorAll('[data-table][data-table-autoload]').forEach((autoloadTable) => {
+      if (autoloadTable instanceof HTMLTableElement) {
+        autoloadTable.dispatchEvent(new CustomEvent('table:refresh-request'));
+      }
+    });
     bindTicketAiReplaceDescription();
     bindTicketAiRefresh();
     bindMessageTemplateForm();

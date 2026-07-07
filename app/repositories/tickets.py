@@ -398,7 +398,7 @@ async def create_ticket(
 
 async def list_tickets(
     *,
-    status: str | None = None,
+    status: str | Sequence[str] | None = None,
     module_slug: str | None = None,
     company_id: int | None = None,
     assigned_user_id: int | None = None,
@@ -421,9 +421,15 @@ async def list_tickets(
     )
     where: list[str] = ["merged_into_ticket_id IS NULL"]
     params: list[Any] = []
-    if status:
-        where.append("status = %s")
-        params.append(status)
+    status_filters = _prepare_status_filters(status)
+    if status_filters:
+        if len(status_filters) == 1:
+            where.append("status = %s")
+            params.append(status_filters[0])
+        else:
+            placeholders = ", ".join(["%s"] * len(status_filters))
+            where.append(f"status IN ({placeholders})")
+            params.extend(status_filters)
     if module_slug:
         where.append("module_slug = %s")
         params.append(module_slug)
@@ -788,7 +794,7 @@ async def count_tickets_for_user(
 
 async def count_tickets(
     *,
-    status: str | None = None,
+    status: str | Sequence[str] | None = None,
     module_slug: str | None = None,
     company_id: int | None = None,
     assigned_user_id: int | None = None,
@@ -797,9 +803,15 @@ async def count_tickets(
 ) -> int:
     where: list[str] = []
     params: list[Any] = []
-    if status:
-        where.append("status = %s")
-        params.append(status)
+    status_filters = _prepare_status_filters(status)
+    if status_filters:
+        if len(status_filters) == 1:
+            where.append("status = %s")
+            params.append(status_filters[0])
+        else:
+            placeholders = ", ".join(["%s"] * len(status_filters))
+            where.append(f"status IN ({placeholders})")
+            params.extend(status_filters)
     if module_slug:
         where.append("module_slug = %s")
         params.append(module_slug)
@@ -819,6 +831,15 @@ async def count_tickets(
         tuple(params) if params else None,
     )
     return int(row["count"]) if row else 0
+
+
+async def count_tickets_by_status() -> dict[str, int]:
+    """Return a mapping of status slug → count for all non-merged tickets."""
+    rows = await db.fetch_all(
+        "SELECT status, COUNT(*) AS count FROM tickets WHERE merged_into_ticket_id IS NULL GROUP BY status",
+        None,
+    )
+    return {str(row["status"] or ""): int(row["count"]) for row in rows}
 
 
 async def get_ticket(ticket_id: int) -> TicketRecord | None:

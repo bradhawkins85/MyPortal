@@ -307,7 +307,7 @@ async def list_tickets(
 
 @router.get("/dashboard", response_model=TicketDashboardResponse)
 async def get_ticket_dashboard(
-    status_filter: str | None = Query(default=None, alias="status"),
+    status_filter: list[str] = Query(default=[], alias="status"),
     module_slug: str | None = Query(default=None, alias="module"),
     company_id: int | None = Query(default=None, alias="companyId"),
     assigned_user_id: int | None = Query(default=None, alias="assignedUserId"),
@@ -316,8 +316,9 @@ async def get_ticket_dashboard(
     all_tickets: bool = Query(default=False, alias="all"),
     current_user: dict = Depends(require_helpdesk_technician),
 ) -> TicketDashboardResponse:
+    resolved_status: list[str] | None = status_filter if status_filter else None
     state = await tickets_service.load_dashboard_state(
-        status_filter=status_filter,
+        status_filter=resolved_status,
         module_filter=module_slug,
         company_id=company_id,
         assigned_user_id=assigned_user_id,
@@ -353,7 +354,7 @@ async def get_ticket_dashboard(
             )
         )
     filters = TicketSearchFilters(
-        status=status_filter,
+        status=resolved_status,
         module_slug=module_slug,
         company_id=company_id,
         assigned_user_id=assigned_user_id,
