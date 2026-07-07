@@ -839,7 +839,7 @@ async def count_tickets_by_status() -> dict[str, int]:
         "SELECT status, COUNT(*) AS count FROM tickets WHERE merged_into_ticket_id IS NULL GROUP BY status",
         None,
     )
-    return {str(row["status"] or ""): int(row["count"]) for row in rows if row.get("status")}
+    return {str(row["status"] or ""): int(row["count"]) for row in rows}
 
 
 async def get_ticket(ticket_id: int) -> TicketRecord | None:

@@ -8135,9 +8135,9 @@ async def _render_tickets_dashboard(
                 company_memberships = await company_access.list_accessible_companies(user)
                 available_company_ids: list[int] = []
                 for entry in company_memberships:
-                    cid = entry.get("company_id")
+                    member_company_id = entry.get("company_id")
                     try:
-                        available_company_ids.append(int(cid))
+                        available_company_ids.append(int(member_company_id))
                     except (TypeError, ValueError):
                         continue
 
