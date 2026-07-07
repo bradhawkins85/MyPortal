@@ -745,6 +745,7 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
                     "destination_emails": [
                         "customer@example.com",
                         "tech@example.com",
+                        "manager@example.com",
                     ],
                     "created_at": "2025-01-01T08:00:00Z",
                 },
@@ -807,13 +808,14 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
         recorded_recipients.append(kwargs)
         return len(kwargs.get("to") or [])
 
-    async def fake_add_watcher(ticket_id, user_id):
-        added_watchers.append((ticket_id, user_id))
+    async def fake_add_watcher(ticket_id, user_id=None, email=None):
+        added_watchers.append((ticket_id, user_id, email))
 
     async def fake_get_user_by_email(email):
         mapping = {
             "customer@example.com": {"id": 21},
             "tech@example.com": {"id": 31},
+            "manager@example.com": {"id": 41},
         }
         return mapping.get(email)
 
@@ -868,12 +870,58 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
     assert reply_calls[2].get("minutes_spent") is None
     assert reply_calls[2].get("is_billable", False) is False
     assert [call["to"] for call in recorded_recipients] == [
-        ["customer@example.com", "tech@example.com"],
+        ["customer@example.com", "manager@example.com", "tech@example.com"],
         ["support@hawkinsitsolutions.com.au", "tech@example.com"],
     ]
     assert all(call["tracking_id"] is None for call in recorded_recipients)
     # The ticket ID should now be 5001, not 400
-    assert added_watchers == [(5001, 31)]
+    assert added_watchers == [(5001, 41, None)]
+
+
+@pytest.mark.anyio
+async def test_syncro_destination_email_without_user_is_added_as_email_watcher(monkeypatch):
+    async def fake_list_watchers(ticket_id):  # noqa: ARG001
+        return []
+
+    added_watchers = []
+
+    async def fake_add_watcher(ticket_id, user_id=None, email=None):
+        added_watchers.append((ticket_id, user_id, email))
+
+    async def fake_get_user_by_email(_email):
+        return None
+
+    monkeypatch.setattr(tickets_repo, "list_watchers", fake_list_watchers)
+    monkeypatch.setattr(tickets_repo, "add_watcher", fake_add_watcher)
+    monkeypatch.setattr(
+        ticket_importer.user_repo, "get_user_by_email", fake_get_user_by_email
+    )
+
+    await ticket_importer._sync_ticket_watchers(
+        7001,
+        [
+            {
+                "tech": "customer-reply",
+                "email_sender": "requester@example.com",
+                "destination_emails": [
+                    "requester@example.com",
+                    "external@example.com",
+                ],
+            },
+            {
+                "tech": "agent",
+                "email_sender": "tech@example.com",
+                "destination_emails": [
+                    "tech@example.com",
+                    "support@hawkinsitsolutions.com.au",
+                    "external@example.com",
+                ],
+            },
+        ],
+        contact_email="requester@example.com",
+    )
+
+    assert added_watchers == [(7001, None, "external@example.com")]
 
 
 @pytest.mark.anyio
