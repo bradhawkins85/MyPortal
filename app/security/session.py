@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Optional
+from urllib.parse import unquote
 
 from fastapi import Request, Response
 
@@ -80,10 +81,15 @@ class SessionManager:
         cached: SessionData | None = getattr(request.state, "session", None)
         if cached:
             return cached
-        token = request.cookies.get(self.session_cookie_name)
-        if not token:
+        tokens = self._session_cookie_candidates(request)
+        if not tokens:
             return None
-        record = await auth_repo.get_session_by_token(token)
+
+        record = None
+        for token in tokens:
+            record = await auth_repo.get_session_by_token(token)
+            if record:
+                break
         if not record:
             return None
         if not allow_inactive and int(record.get("is_active", 0)) != 1:
@@ -168,6 +174,37 @@ class SessionManager:
     def clear_session_cookies(self, response: Response) -> None:
         response.delete_cookie(self.session_cookie_name)
         response.delete_cookie(self.csrf_cookie_name)
+
+    def _session_cookie_candidates(self, request: Request) -> list[str]:
+        """Return all candidate session cookie values sent by the browser.
+
+        Browsers can send duplicate cookie names when a deployment changes
+        cookie scope (for example from a domain cookie to a host-only cookie).
+        Starlette's parsed cookie mapping keeps only one value, so try every
+        matching value from the raw Cookie header before treating the user as
+        unauthenticated.
+        """
+
+        candidates: list[str] = []
+        parsed_token = request.cookies.get(self.session_cookie_name)
+        if parsed_token:
+            candidates.append(parsed_token)
+
+        raw_cookie = request.headers.get("cookie", "")
+        if raw_cookie:
+            cookie_prefix = f"{self.session_cookie_name}="
+            for part in raw_cookie.split(";"):
+                item = part.strip()
+                if not item.startswith(cookie_prefix):
+                    continue
+                raw_value = item[len(cookie_prefix) :]
+                if not raw_value:
+                    continue
+                value = unquote(raw_value.strip('"'))
+                if value not in candidates:
+                    candidates.append(value)
+
+        return candidates
 
     def _map_session(self, record: dict[str, Any]) -> SessionData:
         pending_secret = record.get("pending_totp_secret")
