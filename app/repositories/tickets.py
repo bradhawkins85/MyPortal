@@ -225,6 +225,8 @@ def _normalise_reply(row: dict[str, Any]) -> TicketRecord:
         record[key] = _make_aware(record.get(key))
     if "is_billable" in record:
         record["is_billable"] = bool(record.get("is_billable"))
+    if not record.get("kind"):
+        record["kind"] = "internal_note" if bool(record.get("is_internal")) else "message"
     labour_name = record.get("labour_type_name")
     if labour_name is not None:
         record["labour_type_name"] = str(labour_name)
@@ -1375,7 +1377,12 @@ async def get_automation_filter_context_by_ticket_ids(ticket_ids: list[int]) -> 
 
     latest_reply_rows = await db.fetch_all(
         f"""
-        SELECT tr.ticket_id, tr.id, tr.created_at, tr.is_internal, tr.kind
+        SELECT
+            tr.ticket_id,
+            tr.id,
+            tr.created_at,
+            tr.is_internal,
+            CASE WHEN tr.is_internal = 1 THEN 'internal_note' ELSE 'message' END AS kind
         FROM ticket_replies AS tr
         INNER JOIN (
             SELECT ticket_id, MAX(id) AS latest_reply_id
