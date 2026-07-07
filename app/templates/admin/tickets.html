@@ -416,6 +416,7 @@
                     ('labels', 'ticket.labels'),
                     ('age-days', 'ticket.age_days'),
                     ('updated-age-hours', 'ticket.updated_age_hours'),
+                    ('in-status-hours', 'ticket.in_status_age_hours'),
                     ('last-reply-age-hours', 'ticket.last_reply_age_hours'),
                     ('latest-reply-internal', 'reply.is_internal'),
                     ('latest-reply-kind', 'reply.kind')
@@ -504,6 +505,7 @@
                 <th scope="col" data-sort="string" data-column="labels" class="tickets-table__column tickets-table__column--labels">ticket.labels</th>
                 <th scope="col" data-sort="int" data-column="age-days" class="tickets-table__column tickets-table__column--age-days">ticket.age_days</th>
                 <th scope="col" data-sort="int" data-column="updated-age-hours" class="tickets-table__column tickets-table__column--updated-age-hours">ticket.updated_age_hours</th>
+                <th scope="col" data-sort="int" data-column="in-status-hours" class="tickets-table__column tickets-table__column--in-status-hours">ticket.in_status_age_hours</th>
                 <th scope="col" data-sort="int" data-column="last-reply-age-hours" class="tickets-table__column tickets-table__column--last-reply-age-hours">ticket.last_reply_age_hours</th>
                 <th scope="col" data-sort="string" data-column="latest-reply-internal" class="tickets-table__column tickets-table__column--latest-reply-internal">reply.is_internal</th>
                 <th scope="col" data-sort="string" data-column="latest-reply-kind" class="tickets-table__column tickets-table__column--latest-reply-kind">reply.kind</th>
@@ -579,6 +581,8 @@
                     {% set assigned_email = assigned.email if assigned else '' %}
                     {% set created_age_days = ((ticket_dashboard_now - ticket.created_at).total_seconds() // 86400) | int if ticket.created_at else '' %}
                     {% set updated_age_hours = ((ticket_dashboard_now - ticket.updated_at).total_seconds() // 3600) | int if ticket.updated_at else '' %}
+                    {% set status_changed_at = ticket.status_changed_at or ticket.created_at %}
+                    {% set in_status_age_hours = ((ticket_dashboard_now - status_changed_at).total_seconds() // 3600) | int if status_changed_at else '' %}
                     {% set latest_reply_at = automation_data.get('latest_reply_at') %}
                     {% set last_reply_age_hours = ((ticket_dashboard_now - latest_reply_at).total_seconds() // 3600) | int if latest_reply_at else '' %}
                     <td data-label="ticket.requester_email" data-column="requester-email" class="tickets-table__cell tickets-table__cell--requester-email">{{ requester_email or '—' }}</td>
@@ -595,6 +599,7 @@
                     <td data-label="ticket.labels" data-column="labels" class="tickets-table__cell tickets-table__cell--labels">{{ (ticket.ai_tags or []) | join(', ') or '—' }}</td>
                     <td data-label="ticket.age_days" data-column="age-days" class="tickets-table__cell tickets-table__cell--age-days">{{ created_age_days if created_age_days != '' else '—' }}</td>
                     <td data-label="ticket.updated_age_hours" data-column="updated-age-hours" class="tickets-table__cell tickets-table__cell--updated-age-hours">{{ updated_age_hours if updated_age_hours != '' else '—' }}</td>
+                    <td data-label="ticket.in_status_age_hours" data-column="in-status-hours" class="tickets-table__cell tickets-table__cell--in-status-hours">{{ in_status_age_hours if in_status_age_hours != '' else '—' }}</td>
                     <td data-label="ticket.last_reply_age_hours" data-column="last-reply-age-hours" class="tickets-table__cell tickets-table__cell--last-reply-age-hours">{{ last_reply_age_hours if last_reply_age_hours != '' else '—' }}</td>
                     <td data-label="reply.is_internal" data-column="latest-reply-internal" class="tickets-table__cell tickets-table__cell--latest-reply-internal">{{ 'true' if automation_data.get('latest_reply_is_internal') else ('false' if automation_data.get('latest_reply_id') else '—') }}</td>
                     <td data-label="reply.kind" data-column="latest-reply-kind" class="tickets-table__cell tickets-table__cell--latest-reply-kind">{{ automation_data.get('latest_reply_kind') or '—' }}</td>
@@ -605,7 +610,7 @@
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="{{ 36 + (1 if can_bulk_delete_tickets or can_merge_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
+                  <td colspan="{{ 37 + (1 if can_bulk_delete_tickets or can_merge_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
                 </tr>
               {% endif %}
             </tbody>

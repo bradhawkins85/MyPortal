@@ -745,6 +745,7 @@ def test_filters_match_supports_ticket_age_comparisons():
             "status": "open",
             "age_days": 31,
             "updated_age_hours": 49,
+            "in_status_age_hours": 25,
             "last_reply_age_hours": 12,
         }
     }
@@ -755,6 +756,7 @@ def test_filters_match_supports_ticket_age_comparisons():
                 {"match": {"ticket.status": "open"}},
                 {"greater_than": {"ticket.age_days": 30}},
                 {"greater_than_or_equal": {"ticket.updated_age_hours": 48}},
+                {"greater_than": {"ticket.in_status_age_hours": 24}},
             ]
         },
         context,

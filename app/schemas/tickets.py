@@ -102,6 +102,7 @@ class TicketResponse(TicketBase):
     requester_id: Optional[int]
     created_at: datetime
     updated_at: datetime
+    status_changed_at: Optional[datetime] = None
     closed_at: Optional[datetime]
     ai_summary: Optional[str] = None
     ai_summary_status: Optional[str] = None
@@ -143,6 +144,7 @@ class TicketDashboardRow(BaseModel):
     module_slug: Optional[str] = None
     requester_id: Optional[int] = None
     updated_at: Optional[datetime] = None
+    status_changed_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -161,6 +163,7 @@ class LabourTypeModel(BaseModel):
     is_default: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    status_changed_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

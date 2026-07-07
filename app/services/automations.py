@@ -471,22 +471,26 @@ def _attach_ticket_age_context(ticket: Mapping[str, Any], *, now: datetime) -> d
     enriched = dict(ticket)
     created_at = enriched.get("created_at")
     updated_at = enriched.get("updated_at")
+    status_changed_at = enriched.get("status_changed_at") or created_at
     latest_reply_at = enriched.get("latest_reply_at")
     last_activity_at = latest_reply_at or updated_at or created_at
 
     enriched["age"] = _age_metrics(created_at, now=now)
     enriched["updated_age"] = _age_metrics(updated_at, now=now)
+    enriched["status_changed_at"] = status_changed_at
+    enriched["in_status_age"] = _age_metrics(status_changed_at, now=now)
     enriched["last_reply_at"] = latest_reply_at
     enriched["last_activity_at"] = last_activity_at
     enriched["last_reply_age"] = _age_metrics(latest_reply_at or created_at, now=now)
     enriched["last_activity_age"] = _age_metrics(last_activity_at, now=now)
 
     # Flat aliases keep the builder simple and make advanced JSON easy to read.
-    for prefix in ("age", "updated_age", "last_reply_age", "last_activity_age"):
+    for prefix in ("age", "updated_age", "in_status_age", "last_reply_age", "last_activity_age"):
         metrics = enriched.get(prefix)
         if isinstance(metrics, Mapping):
             for unit, metric_value in metrics.items():
                 enriched[f"{prefix}_{unit}"] = metric_value
+    enriched["status_changed_at_iso"] = _serialise_datetime(status_changed_at)
     enriched["last_reply_at_iso"] = _serialise_datetime(latest_reply_at)
     enriched["last_activity_at_iso"] = _serialise_datetime(last_activity_at)
     return enriched
