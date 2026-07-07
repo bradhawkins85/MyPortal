@@ -776,7 +776,6 @@ async def count_tickets_for_user(
     return int(row["count"]) if row else 0
 
 
-
 async def count_tickets(
     *,
     status: str | None = None,
@@ -993,6 +992,40 @@ async def replace_ticket_assets(ticket_id: int, asset_ids: Iterable[int]) -> lis
 
     return await list_ticket_assets(ticket_id)
 
+
+async def list_billed_tickets_older_than(cutoff: datetime, *, limit: int = 10000) -> list[TicketRecord]:
+    """Return billed, unmerged tickets created before the supplied UTC cutoff."""
+    rows = await db.fetch_all(
+        """
+        SELECT *
+        FROM tickets
+        WHERE merged_into_ticket_id IS NULL
+          AND created_at < %s
+          AND (billed_at IS NOT NULL OR COALESCE(TRIM(xero_invoice_number), '') <> '')
+        ORDER BY created_at ASC, id ASC
+        LIMIT %s
+        """,
+        (cutoff, int(max(1, limit))),
+    )
+    return [_normalise_ticket(row) for row in rows]
+
+
+async def clear_ticket_billing_fields(ticket_ids: list[int]) -> int:
+    """Clear ticket-level billing markers for the supplied tickets."""
+    clean_ids = sorted({int(ticket_id) for ticket_id in ticket_ids if ticket_id})
+    if not clean_ids:
+        return 0
+    placeholders = ", ".join(["%s"] * len(clean_ids))
+    return await db.execute_rowcount(
+        f"""
+        UPDATE tickets
+        SET xero_invoice_number = NULL,
+            billed_at = NULL,
+            updated_at = %s
+        WHERE id IN ({placeholders})
+        """,
+        (datetime.now(timezone.utc), *clean_ids),
+    )
 
 async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
     if not fields:
@@ -1794,7 +1827,6 @@ async def merge_tickets(
     target_ticket = await get_ticket(target_ticket_id)
 
     return target_ticket, source_ticket_ids, moved_count
-
 
 
 async def list_merged_child_tickets(parent_ticket_id: int) -> list[TicketRecord]:

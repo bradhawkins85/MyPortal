@@ -48,6 +48,7 @@ from app.services import labour_types as labour_types_service
 from app.services import ticket_attachments as attachments_service
 from app.services import rag_retrieval
 from app.services import tickets as tickets_service
+from app.services import unbill_tickets as unbill_tickets_service
 from app.services import tray as tray_service
 from app.services.sanitization import sanitize_rich_text
 
@@ -65,14 +66,10 @@ _RELATED_STOP_WORDS = {
 }
 
 
-
 def _main():
     from app import main as main_module
 
     return main_module
-
-
-
 
 
 def _strip_external_links(text: str) -> str:
@@ -300,7 +297,6 @@ async def admin_ticket_detail(
     )
 
 
-
 @router.get("/admin/tickets/{ticket_id:int}/automation-history", response_class=JSONResponse)
 async def admin_ticket_automation_history(
     ticket_id: int,
@@ -437,6 +433,26 @@ async def admin_update_next_ticket_number(request: Request):
         log_debug("Failed to update ticket AUTO_INCREMENT from admin setting", error=str(exc))
     return flash_redirect("/admin/tickets", f"Next ticket number set to {next_ticket_number}.", "success")
 
+
+@router.post("/admin/tickets/unbill-older-than", response_class=HTMLResponse)
+async def admin_unbill_tickets_older_than(request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    if not current_user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+
+    form = await request.form()
+    raw_cutoff = str(form.get("cutoffDate", "")).strip()
+    try:
+        cutoff_date = unbill_tickets_service.parse_unbill_cutoff_date(raw_cutoff)
+    except ValueError as exc:
+        return flash_redirect("/admin/tickets", str(exc), "error")
+
+    result = await unbill_tickets_service.unbill_tickets_older_than(cutoff_date)
+    level = "success" if result.get("status") == "succeeded" else "info"
+    return flash_redirect("/admin/tickets", str(result.get("summary") or "Ticket un-bill completed."), level)
 
 @router.post("/admin/tickets", response_class=HTMLResponse)
 async def admin_create_ticket(request: Request):

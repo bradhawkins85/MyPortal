@@ -7,8 +7,9 @@
   {% set show_labour_type_editor = is_super_admin %}
   {% set show_tag_exclusions = is_super_admin %}
   {% set show_next_ticket_number = is_super_admin %}
+  {% set show_unbill_tickets = is_super_admin %}
   {% set can_merge_tickets = is_helpdesk_technician | default(false) %}
-  {% set show_ticket_tools = show_ticket_automations or show_syncro_import or show_ticket_status_editor or show_labour_type_editor or show_next_ticket_number or show_tag_exclusions or can_bulk_delete_tickets or can_merge_tickets %}
+  {% set show_ticket_tools = show_ticket_automations or show_syncro_import or show_ticket_status_editor or show_labour_type_editor or show_next_ticket_number or show_unbill_tickets or show_tag_exclusions or can_bulk_delete_tickets or can_merge_tickets %}
   <div class="header-title-menu">
     <span class="header-title-menu__label">Ticketing workspace</span>
     <button
@@ -81,6 +82,18 @@
               </button>
             </li>
           {% endif %}
+          {% if show_unbill_tickets %}
+            <li class="header-title-menu__item" role="none">
+              <button
+                type="button"
+                class="header-title-menu__link"
+                role="menuitem"
+                data-unbill-tickets-open
+              >
+                Un-bill tickets
+              </button>
+            </li>
+          {% endif %}
           {% if show_tag_exclusions %}
             <li class="header-title-menu__item" role="none">
               <a href="/admin/tag-exclusions" class="header-title-menu__link" role="menuitem">AI tag exclusions</a>
@@ -126,6 +139,14 @@
     <form action="/admin/tickets/next-number" method="post" data-next-ticket-number-form hidden>
       {% include "partials/csrf.html" %}
       <input type="hidden" name="nextTicketNumber" value="" data-next-ticket-number-input />
+    </form>
+  {% endif %}
+
+
+  {% if show_unbill_tickets %}
+    <form action="/admin/tickets/unbill-older-than" method="post" data-unbill-tickets-form hidden>
+      {% include "partials/csrf.html" %}
+      <input type="hidden" name="cutoffDate" value="" data-unbill-tickets-date-input />
     </form>
   {% endif %}
 
@@ -1131,6 +1152,26 @@
           window.alert('Enter a positive whole number.');
           return;
         }
+        input.value = cleaned;
+        form.requestSubmit();
+      });
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const button = document.querySelector('[data-unbill-tickets-open]');
+      const form = document.querySelector('[data-unbill-tickets-form]');
+      const input = document.querySelector('[data-unbill-tickets-date-input]');
+      if (!button || !form || !input) return;
+      button.addEventListener('click', () => {
+        const value = window.prompt('Enter the cutoff date in yyyyMMdd format. Billed tickets created before this UTC date will be un-billed.');
+        if (value === null) return;
+        const cleaned = value.trim();
+        if (!/^\d{8}$/.test(cleaned)) {
+          window.alert('Enter the date in yyyyMMdd format, for example 20240131.');
+          return;
+        }
+        const confirmed = window.confirm(`Un-bill billed tickets created before ${cleaned}? This removes ticket billing markers and billed time-entry records.`);
+        if (!confirmed) return;
         input.value = cleaned;
         form.requestSubmit();
       });
