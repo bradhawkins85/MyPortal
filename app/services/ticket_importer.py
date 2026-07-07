@@ -13,6 +13,7 @@ from typing import Any
 
 from app.core.logging import log_error, log_info
 from app.repositories import assets as assets_repo
+from app.repositories import staff as staff_repo
 from app.repositories import companies as company_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import ticket_attachments as attachments_repo
@@ -1307,6 +1308,29 @@ async def _resolve_user_id_by_email(email: str | None) -> int | None:
         return None
 
 
+async def _resolve_staff_id_by_email(
+    email: str | None, company_id: int | None
+) -> int | None:
+    if not email or company_id is None:
+        return None
+    try:
+        staff = await staff_repo.get_staff_by_company_and_email(company_id, email)
+    except RuntimeError as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to resolve staff requester from email",
+            email=email,
+            company_id=company_id,
+            error=str(exc),
+        )
+        return None
+    if not staff or staff.get("id") is None:
+        return None
+    try:
+        return int(staff["id"])
+    except (TypeError, ValueError):
+        return None
+
+
 def _extract_comment_author_email(comment: dict[str, Any]) -> str | None:
     for key in (
         "email_sender",
@@ -1719,6 +1743,11 @@ async def _upsert_ticket(
             status = default_status
 
     company_id = await _resolve_company_id(ticket)
+    requester_staff_id = (
+        None
+        if requester_id is not None
+        else await _resolve_staff_id_by_email(contact_email, company_id)
+    )
 
     existing = await tickets_repo.get_ticket_by_external_reference(external_reference)
     description_value: str | None = description or None
@@ -1735,6 +1764,7 @@ async def _upsert_ticket(
             "priority": priority,
             "ticket_number": ticket_number,
             "requester_id": requester_id,
+            "requester_staff_id": requester_staff_id,
         }
         if category_value is not None:
             updates["category"] = category_value
@@ -1763,6 +1793,7 @@ async def _upsert_ticket(
             subject=subject,
             description=description_value,
             requester_id=requester_id,
+            requester_staff_id=requester_staff_id,
             company_id=company_id,
             assigned_user_id=None,
             priority=priority,
