@@ -69,6 +69,12 @@ router.add_api_route(
     response_class=HTMLResponse,
 )
 router.add_api_route(
+    "/admin/automations/{automation_id}/clone",
+    handlers.admin_clone_automation,
+    methods=["POST"],
+    response_class=HTMLResponse,
+)
+router.add_api_route(
     "/admin/automations/{automation_id}/delete",
     handlers.admin_delete_automation,
     methods=["POST"],

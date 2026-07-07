@@ -10,6 +10,7 @@ Owns the admin automations page routes:
 * ``POST /admin/automations/{automation_id}``
 * ``POST /admin/automations/{automation_id}/status``
 * ``POST /admin/automations/{automation_id}/execute``
+* ``POST /admin/automations/{automation_id}/clone``
 * ``POST /admin/automations/{automation_id}/delete``
 """
 

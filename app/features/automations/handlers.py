@@ -609,6 +609,50 @@ async def admin_execute_automation(automation_id: int, request: Request):
     return flash_redirect("/admin/automations", message, "success")
 
 
+async def admin_clone_automation(automation_id: int, request: Request):
+    from app.core.logging import log_error, log_info
+    from app.repositories import automations as automation_repo
+    from app.services import automations as automations_service
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    automation = await automation_repo.get_automation(automation_id)
+    if not automation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
+
+    next_run = None
+    if automation.get("status") == "active":
+        next_run = automations_service.calculate_next_run(automation)
+
+    try:
+        cloned = await automation_repo.clone_automation(automation_id, next_run_at=next_run)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to clone automation", automation_id=automation_id, error=str(exc))
+        return await _render_automations_dashboard(
+            request,
+            current_user,
+            error_message="Unable to clone the automation. Please try again.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    if not cloned:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
+
+    if cloned.get("status") == "active":
+        await automations_service.refresh_schedule(int(cloned["id"]))
+
+    log_info(
+        "Automation cloned",
+        automation_id=automation_id,
+        cloned_automation_id=cloned.get("id"),
+        cloned_by=current_user.get("id") if isinstance(current_user, Mapping) else None,
+    )
+    message = f"Automation {cloned.get('name') or cloned.get('id')} cloned."
+    return flash_redirect("/admin/automations", message, "success")
+
+
 async def admin_delete_automation(automation_id: int, request: Request):
     from app.core.logging import log_error, log_info
     from app.repositories import automations as automation_repo
