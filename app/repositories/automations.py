@@ -485,3 +485,19 @@ async def list_history(automation_id: int, *, limit: int = 200) -> list[Automati
         (automation_id, limit),
     )
     return [_normalise_history(row) for row in rows]
+
+
+async def list_history_for_ticket(ticket_id: int, *, limit: int = 200) -> list[AutomationHistoryRecord]:
+    await _ensure_connection()
+    rows = await db.fetch_all(
+        """
+        SELECT history.*, automations.name AS automation_name
+        FROM automation_history AS history
+        LEFT JOIN automations ON automations.id = history.automation_id
+        WHERE history.ticket_id = %s
+        ORDER BY history.occurred_at DESC, history.id DESC
+        LIMIT %s
+        """,
+        (ticket_id, limit),
+    )
+    return [_normalise_history(row) for row in rows]

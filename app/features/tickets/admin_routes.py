@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Sequence
+from datetime import datetime, timezone
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
@@ -33,6 +34,7 @@ from app.core.logging import log_debug, log_error, log_info
 from app.features.tickets.form_helpers import get_last_form_value
 from app.security.flash import flash_redirect
 from app.repositories import assets as assets_repo
+from app.repositories import automations as automation_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import staff as staff_repo
@@ -298,6 +300,40 @@ async def admin_ticket_detail(
     )
 
 
+
+@router.get("/admin/tickets/{ticket_id:int}/automation-history", response_class=JSONResponse)
+async def admin_ticket_automation_history(
+    ticket_id: int,
+    request: Request,
+    limit: int = Query(default=200, ge=1, le=1000),
+):
+    main_module = _main()
+    _, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not permitted")
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    rows = await automation_repo.list_history_for_ticket(ticket_id, limit=limit)
+
+    def encode(value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.astimezone(timezone.utc).isoformat()
+        if isinstance(value, Mapping):
+            return {str(k): encode(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [encode(item) for item in value]
+        return value
+
+    return JSONResponse({
+        "ticket": {
+            "id": ticket_id,
+            "ticket_number": ticket.get("ticket_number"),
+            "subject": ticket.get("subject"),
+        },
+        "history": [encode(row) for row in rows],
+    })
 
 @router.post("/admin/tickets/{ticket_id:int}/related/rescan", response_class=JSONResponse)
 async def admin_rescan_ticket_related(ticket_id: int, request: Request):

@@ -2268,6 +2268,87 @@
     updateButton();
   }
 
+
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function formatAutomationHistoryDate(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString();
+  }
+
+  function formatAutomationHistoryJson(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    if (typeof value === 'string') return escapeHtml(value);
+    try {
+      return escapeHtml(JSON.stringify(value, null, 2));
+    } catch (error) {
+      return escapeHtml(String(value));
+    }
+  }
+
+  function renderAutomationHistoryRows(tbody, rows) {
+    if (!tbody) return;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="table__empty">No automation audit trail has been recorded for this ticket yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map((item) => {
+      const automation = item.automation_name || (item.automation_id ? `#${item.automation_id}` : '—');
+      const action = item.action_name || item.action_module || '—';
+      const details = item.error_message || item.result_payload || null;
+      return `
+        <tr>
+          <td data-label="When" data-column-key="occurred_at">${escapeHtml(formatAutomationHistoryDate(item.occurred_at))}</td>
+          <td data-label="Automation" data-column-key="automation">${escapeHtml(automation)}</td>
+          <td data-label="Action" data-column-key="action">${escapeHtml(action)}</td>
+          <td data-label="Status" data-column-key="status">${escapeHtml(item.status || 'unknown')}</td>
+          <td data-label="Previous values" data-column-key="previous"><code>${formatAutomationHistoryJson(item.previous_values)}</code></td>
+          <td data-label="Details" data-column-key="details"><code>${formatAutomationHistoryJson(details)}</code></td>
+        </tr>`;
+    }).join('');
+  }
+
+  function initialiseAutomationHistoryModal() {
+    const modal = document.getElementById('ticket-automation-history-modal');
+    const tbody = document.querySelector('[data-ticket-automation-history-rows]');
+    const openButton = document.querySelector('[data-ticket-automation-history-open]');
+    if (!modal || !tbody || !openButton) return;
+
+    const closeModal = () => { modal.hidden = true; };
+    const openModal = () => { modal.hidden = false; };
+
+    document.querySelectorAll('[data-ticket-automation-history-close]').forEach((button) => {
+      button.addEventListener('click', closeModal);
+    });
+
+    openButton.addEventListener('click', async () => {
+      const ticketId = openButton.getAttribute('data-ticket-id');
+      if (!ticketId) return;
+      tbody.innerHTML = '<tr><td colspan="6" class="table__empty">Loading automation audit trail…</td></tr>';
+      openModal();
+      try {
+        const response = await fetch(`/admin/tickets/${encodeURIComponent(ticketId)}/automation-history`, {
+          headers: { Accept: 'application/json' },
+          credentials: 'same-origin',
+        });
+        if (!response.ok) throw new Error(`Request failed with ${response.status}`);
+        const payload = await response.json();
+        renderAutomationHistoryRows(tbody, payload.history || []);
+      } catch (error) {
+        tbody.innerHTML = `<tr><td colspan="6" class="table__empty">Unable to load automation audit trail: ${escapeHtml(error.message)}</td></tr>`;
+      }
+    });
+  }
+
   function ready() {
     const messageWrappers = document.querySelectorAll('[data-timeline-message]');
 
@@ -2291,6 +2372,7 @@
     initTicketRelated();
     convertUtcElements();
     initialiseBookingModal();
+    initialiseAutomationHistoryModal();
   }
 
   function initialiseBookingModal() {

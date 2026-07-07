@@ -6,6 +6,7 @@
 
 {% block header_actions %}
   {{ page_header_actions([
+    {"label": "Audit Trail", "type": "button", "attrs": {"data-ticket-automation-history-open": true, "data-ticket-id": ticket.id}},
     {"label": "All tickets", "type": "link", "href": "/admin/tickets"}
   ]) }}
 {% endblock %}
@@ -1508,6 +1509,42 @@
           <button type="submit" class="button button--primary" data-recording-time-submit>Save changes</button>
         </div>
       </form>
+    </div>
+  </div>
+
+
+  <div class="modal" id="ticket-automation-history-modal" role="dialog" aria-modal="true" aria-labelledby="ticket-automation-history-title" hidden>
+    <div class="modal__backdrop" data-ticket-automation-history-close></div>
+    <div class="modal__panel modal__panel--wide">
+      <header class="modal__header">
+        <h2 class="modal__title" id="ticket-automation-history-title">Ticket automation audit trail</h2>
+        <button type="button" class="modal__close" data-ticket-automation-history-close aria-label="Close">×</button>
+      </header>
+      <div class="modal__body">
+        <p class="card__subtitle">Automation actions recorded against ticket #{{ ticket.ticket_number or ticket.id }}.</p>
+        <div class="management__toolbar">
+          <div class="management__toolbar-search">
+            <input type="search" class="form-input" placeholder="Filter audit trail" aria-label="Filter ticket automation audit trail" data-table-filter="ticket-automation-history-table" />
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table class="table" id="ticket-automation-history-table" data-table data-table-id="ticket-automation-history">
+            <thead>
+              <tr>
+                <th scope="col" data-sort="string" data-column-key="occurred_at">When</th>
+                <th scope="col" data-sort="string" data-column-key="automation">Automation</th>
+                <th scope="col" data-sort="string" data-column-key="action">Action</th>
+                <th scope="col" data-sort="string" data-column-key="status">Status</th>
+                <th scope="col" data-sort="string" data-column-key="previous">Previous values</th>
+                <th scope="col" data-sort="string" data-column-key="details">Details</th>
+              </tr>
+            </thead>
+            <tbody data-ticket-automation-history-rows>
+              <tr><td colspan="6" class="table__empty">Open the audit trail to load automation history.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
 
