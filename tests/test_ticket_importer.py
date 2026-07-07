@@ -2144,13 +2144,28 @@ async def test_import_ticket_no_asset_link_when_ticket_has_no_assets(monkeypatch
 
 def test_extract_comment_body_prefers_rich_text_preview():
     comment = {
-        "body": "Plain body [embedded image]",
+        "body": "Formatted",
         "rich_text_preview": '<p>Formatted</p><img src="https://example.test/image.png">',
     }
 
     assert ticket_importer._extract_comment_body(comment) == (
         '<p>Formatted</p><img src="https://example.test/image.png">'
     )
+
+
+def test_extract_comment_body_appends_full_body_when_rich_text_preview_is_truncated():
+    comment = {
+        "body": "First line\nSecond line\nThird line with <unsafe> markers",
+        "rich_text_preview": "<p>First line<br/>Second...</p><img src=\"https://example.test/image.png\">",
+    }
+
+    result = ticket_importer._extract_comment_body(comment)
+
+    assert result is not None
+    assert '<p>First line<br>Second...</p>' in result
+    assert '<img src="https://example.test/image.png">' in result
+    assert "Full ticket body from Syncro" in result
+    assert "First line\nSecond line\nThird line with  markers" in result
 
 
 def test_append_imported_image_markup_replaces_syncro_img_src():
