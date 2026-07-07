@@ -1673,6 +1673,39 @@ def _extract_total_pages(meta: dict[str, Any]) -> int | None:
     return None
 
 
+async def _fetch_ticket_detail_for_import(
+    ticket: dict[str, Any],
+    *,
+    rate_limiter: syncro.AsyncRateLimiter | None = None,
+) -> dict[str, Any]:
+    """Fetch a detailed ticket payload when a list item lacks import-only fields.
+
+    Syncro list endpoints can return ticket summaries that omit heavy nested
+    collections such as attachments and comments.  The per-ticket endpoint is
+    used to hydrate those summaries before importing so attachments are not
+    silently skipped during bulk imports.
+    """
+    if ticket.get("attachments") is not None and ticket.get("comments") is not None:
+        return ticket
+    ticket_id = ticket.get("id")
+    if ticket_id is None:
+        return ticket
+    try:
+        detail = await syncro.get_ticket(ticket_id, rate_limiter=rate_limiter)
+    except Exception as exc:  # pragma: no cover - caller handles import with summary
+        log_error(
+            "Failed to hydrate Syncro ticket detail",
+            syncro_id=ticket_id,
+            error=str(exc),
+        )
+        return ticket
+    if not detail:
+        return ticket
+    merged = dict(ticket)
+    merged.update(detail)
+    return merged
+
+
 async def import_all_tickets(
     *,
     rate_limiter: syncro.AsyncRateLimiter | None = None,
@@ -1690,8 +1723,11 @@ async def import_all_tickets(
         summary.fetched += len(tickets)
         for ticket in tickets:
             try:
+                ticket_detail = await _fetch_ticket_detail_for_import(
+                    ticket, rate_limiter=limiter
+                )
                 outcome = await _upsert_ticket(
-                    ticket, allowed_statuses, default_status, status_mappings
+                    ticket_detail, allowed_statuses, default_status, status_mappings
                 )
             except Exception as exc:  # pragma: no cover - defensive logging
                 reason = f"Syncro ticket {ticket.get('id') or 'unknown'} failed to import: {exc}"
