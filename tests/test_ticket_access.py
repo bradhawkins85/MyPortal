@@ -1189,6 +1189,8 @@ def test_admin_replace_ticket_description_returns_json(monkeypatch, active_sessi
         return {"id": ticket_id, "ai_summary": "First line\r\nSecond line"}
 
     update_mock = AsyncMock(return_value={"id": 55, "description": "First line\nSecond line"})
+    updated_event_mock = AsyncMock()
+    details_updated_event_mock = AsyncMock()
 
     def fake_sanitize(value: str) -> SimpleNamespace:
         return SimpleNamespace(html=f"<p>{value}</p>", text_content=value)
@@ -1196,6 +1198,12 @@ def test_admin_replace_ticket_description_returns_json(monkeypatch, active_sessi
     monkeypatch.setattr(main_module, "_require_helpdesk_page", fake_require_helpdesk)
     monkeypatch.setattr(main_module.tickets_repo, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(main_module.tickets_service, "update_ticket_description", update_mock)
+    monkeypatch.setattr(main_module.tickets_service, "emit_ticket_updated_event", updated_event_mock)
+    monkeypatch.setattr(
+        main_module.tickets_service,
+        "emit_ticket_details_updated_event",
+        details_updated_event_mock,
+    )
     monkeypatch.setattr(main_module, "sanitize_rich_text", fake_sanitize)
     monkeypatch.setattr(session_manager, "load_session", AsyncMock(return_value=active_session))
 
@@ -1219,6 +1227,12 @@ def test_admin_replace_ticket_description_returns_json(monkeypatch, active_sessi
     assert payload["descriptionHtml"] == "<p>First line\nSecond line</p>"
     assert payload["descriptionText"] == "First line\nSecond line"
     update_mock.assert_awaited_once_with(55, "First line\nSecond line")
+    updated_event_mock.assert_not_awaited()
+    details_updated_event_mock.assert_awaited_once_with(
+        55,
+        actor_type="technician",
+        actor={"id": 71, "email": "helper@example.com", "is_super_admin": False},
+    )
 
 
 def test_admin_replace_ticket_description_requires_summary(monkeypatch, active_session):
