@@ -1227,16 +1227,22 @@ async def _find_existing_ticket_for_reply(
             params.extend([requester_id, requester_id])
         elif from_email:
             # If no requester_id but we have an email, check watchers by email
+            # and email-created ticket descriptions that captured the sender in
+            # the leading "From:" line. External senders often do not have a
+            # local user record, so the description fallback prevents repeated
+            # Office 365/IMAP imports with the same sender + subject from opening
+            # duplicate tickets.
             query += """
                 AND (
                     EXISTS (
-                        SELECT 1 FROM users ru 
+                        SELECT 1 FROM users ru
                         WHERE ru.id = t.requester_id AND LOWER(ru.email) = LOWER(%s)
                     )
                     OR LOWER(u.email) = LOWER(%s)
+                    OR LOWER(COALESCE(t.description, '')) LIKE LOWER(%s)
                 )
             """
-            params.extend([from_email, from_email])
+            params.extend([from_email, from_email, f"%{from_email}%"])
         else:
             # No way to match sender, can't reliably determine if this is a reply
             return None

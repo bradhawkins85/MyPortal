@@ -265,6 +265,50 @@ class TestFindExistingTicket:
         assert result["id"] == 2
         assert result["subject"] == "Network Connection Issue"
 
+
+    async def test_find_ticket_by_subject_and_sender_in_description(self, monkeypatch):
+        """External sender tickets can be matched without a local requester user."""
+        from app.core import database
+        from app.services import imap
+
+        captured: dict[str, object] = {}
+
+        async def mock_fetch_all(query, params):
+            captured["query"] = query
+            captured["params"] = params
+            if "ticket_number" in query:
+                return []
+            return [
+                {
+                    "id": 12,
+                    "ticket_number": "25006",
+                    "subject": "We have moved Support requests to Ideagen Luminate",
+                    "description": "From: Ideagen Support <support@ideagen.example>\n\nHello",
+                    "status": "open",
+                    "requester_id": None,
+                    "company_id": 3,
+                    "created_at": None,
+                    "updated_at": None,
+                    "closed_at": None,
+                    "ai_summary_updated_at": None,
+                    "ai_tags": None,
+                    "ai_tags_updated_at": None,
+                }
+            ]
+
+        monkeypatch.setattr(database.db, "fetch_all", mock_fetch_all)
+
+        result = await imap._find_existing_ticket_for_reply(
+            subject="We have moved Support requests to Ideagen Luminate",
+            from_email="support@ideagen.example",
+            requester_id=None,
+        )
+
+        assert result is not None
+        assert result["id"] == 12
+        assert "COALESCE(t.description" in str(captured["query"])
+        assert "%support@ideagen.example%" in captured["params"]
+
     async def test_find_ticket_by_in_reply_to_header(self, monkeypatch):
         """Test finding ticket by matching Message-ID references."""
 
