@@ -88,6 +88,24 @@ class ScheduledTaskRunResponse(BaseModel):
     }
 
 
+class ScheduledTaskCalendarEventResponse(BaseModel):
+    id: str
+    task_id: int = Field(serialization_alias="taskId")
+    title: str
+    command: str
+    cron: str
+    company_id: int | None = Field(default=None, serialization_alias="companyId")
+    company_name: str = Field(serialization_alias="companyName")
+    active: bool
+    start: datetime
+    url: str
+    last_status: str | None = Field(default=None, serialization_alias="lastStatus")
+
+    model_config = {
+        "populate_by_name": True,
+    }
+
+
 class WebhookEventResponse(BaseModel):
     id: int
     name: str

@@ -544,6 +544,14 @@
                 </a>
               </li>
               <li class="menu__item">
+                <a href="/admin/cron-calendar" {% if current_path.startswith('/admin/cron-calendar') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M7 2h2v2h6V2h2v2h3a1 1 0 0 1 1 1v15a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a1 1 0 0 1 1-1h3V2zm12 8H5v10h14V10zM5 6v2h14V6H5zm2 6h3v3H7v-3zm5 0h3v3h-3v-3z"/></svg>
+                  </span>
+                  <span class="menu__label">Schedule</span>
+                </a>
+              </li>
+              <li class="menu__item">
                 <a href="/admin/backup-jobs" {% if current_path.startswith('/admin/backup-jobs') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M12 3a8 4 0 0 1 8 4v10a8 4 0 0 1-16 0V7a8 4 0 0 1 8-4zm-6 4c0 1.1 2.69 2 6 2s6-.9 6-2-2.69-2-6-2-6 .9-6 2zm0 3.5V13c0 1.1 2.69 2 6 2s6-.9 6-2v-2.5c-1.36.95-3.7 1.5-6 1.5s-4.64-.55-6-1.5zm0 4.5v2c0 1.1 2.69 2 6 2s6-.9 6-2v-2c-1.36.95-3.7 1.5-6 1.5s-4.64-.55-6-1.5z"/></svg>

@@ -2,6 +2,7 @@
 {% block header_title %}<span class="header__title-text">{{ title | default('Scheduled Tasks') }}</span>{% endblock %}
 
 {% block header_actions %}
+  <a class="button button--ghost" href="/admin/cron-calendar">Schedule calendar</a>
   <button
     type="button"
     class="button button--primary"
