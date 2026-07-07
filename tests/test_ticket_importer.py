@@ -145,6 +145,131 @@ async def test_import_ticket_by_id_creates_new_ticket(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_import_ticket_by_id_uses_staff_requester_when_no_portal_user(monkeypatch):
+    async def fake_get_ticket(ticket_id, rate_limiter=None):  # noqa: ARG001
+        return {
+            "id": 512,
+            "subject": "VPN issue",
+            "status": "New",
+            "problem": "Cannot connect",
+            "customer_id": "200",
+            "contact": {"email": "staff.requester@example.com"},
+        }
+
+    async def fake_get_company(syncro_id):
+        assert syncro_id == "200"
+        return {"id": 7}
+
+    async def fake_get_company_by_name(_name):
+        return None
+
+    async def fake_get_existing(_external_reference):
+        return None
+
+    created_calls = {}
+
+    async def fake_create_ticket(**kwargs):
+        created_calls.update(kwargs)
+        return {"id": kwargs.get("id") or 512, **kwargs}
+
+    async def fake_update_ticket(ticket_id, **fields):
+        return {"id": ticket_id, **fields}
+
+    async def fake_get_user_by_email(email):
+        assert email == "staff.requester@example.com"
+        return None
+
+    async def fake_get_staff_by_company_and_email(company_id, email):
+        assert company_id == 7
+        assert email == "staff.requester@example.com"
+        return {"id": 44}
+
+    monkeypatch.setattr(syncro, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(company_repo, "get_company_by_syncro_id", fake_get_company)
+    monkeypatch.setattr(company_repo, "get_company_by_name", fake_get_company_by_name)
+    monkeypatch.setattr(
+        tickets_repo, "get_ticket_by_external_reference", fake_get_existing
+    )
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(tickets_repo, "update_ticket", fake_update_ticket)
+    monkeypatch.setattr(
+        ticket_importer.user_repo, "get_user_by_email", fake_get_user_by_email
+    )
+    monkeypatch.setattr(
+        ticket_importer.staff_repo,
+        "get_staff_by_company_and_email",
+        fake_get_staff_by_company_and_email,
+    )
+
+    summary = await ticket_importer.import_ticket_by_id(512, rate_limiter=None)
+
+    assert summary.created == 1
+    assert created_calls["requester_id"] is None
+    assert created_calls["requester_staff_id"] == 44
+
+
+@pytest.mark.anyio
+async def test_import_ticket_by_id_updates_existing_staff_requester(monkeypatch):
+    async def fake_get_ticket(ticket_id, rate_limiter=None):  # noqa: ARG001
+        return {
+            "id": 513,
+            "subject": "Laptop issue",
+            "status": "New",
+            "problem": "Blue screen",
+            "customer_id": "201",
+            "contact": {"email": "staff.requester@example.com"},
+        }
+
+    async def fake_get_existing(external_reference):
+        return {"id": 99, "external_reference": external_reference}
+
+    async def fake_get_company(syncro_id):
+        assert syncro_id == "201"
+        return {"id": 8}
+
+    async def fake_get_company_by_name(_name):
+        return None
+
+    update_calls = []
+
+    async def fake_update_ticket(ticket_id, **fields):
+        update_calls.append((ticket_id, fields))
+        return {"id": ticket_id, **fields}
+
+    async def fake_get_user_by_email(email):
+        assert email == "staff.requester@example.com"
+        return None
+
+    async def fake_get_staff_by_company_and_email(company_id, email):
+        assert company_id == 8
+        assert email == "staff.requester@example.com"
+        return {"id": 45}
+
+    monkeypatch.setattr(syncro, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(
+        tickets_repo, "get_ticket_by_external_reference", fake_get_existing
+    )
+    monkeypatch.setattr(company_repo, "get_company_by_syncro_id", fake_get_company)
+    monkeypatch.setattr(company_repo, "get_company_by_name", fake_get_company_by_name)
+    monkeypatch.setattr(tickets_repo, "update_ticket", fake_update_ticket)
+    monkeypatch.setattr(
+        ticket_importer.user_repo, "get_user_by_email", fake_get_user_by_email
+    )
+    monkeypatch.setattr(
+        ticket_importer.staff_repo,
+        "get_staff_by_company_and_email",
+        fake_get_staff_by_company_and_email,
+    )
+
+    summary = await ticket_importer.import_ticket_by_id(513, rate_limiter=None)
+
+    assert summary.updated == 1
+    assert update_calls[0][0] == 99
+    assert update_calls[0][1]["requester_id"] is None
+    assert update_calls[0][1]["requester_staff_id"] == 45
+
+
+@pytest.mark.anyio
 async def test_import_ticket_by_id_does_not_queue_ollama_generation(monkeypatch):
     async def fake_get_ticket(ticket_id, rate_limiter=None):
         return {
