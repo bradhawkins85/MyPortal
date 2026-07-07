@@ -18,6 +18,7 @@ from app.repositories import tickets as tickets_repo
 from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import users as user_repo
 from app.repositories import webhook_events as webhook_events_repo
+from app.services.sanitization import sanitize_rich_text
 from app.services import (
     syncro,
     ticket_attachments as attachments_service,
@@ -228,6 +229,20 @@ def _parse_datetime(value: Any) -> datetime | None:
 
 
 def _extract_comment_body(comment: dict[str, Any]) -> str | None:
+    """Return the best available formatted Syncro comment body.
+
+    Syncro comments can include ``rich_text_preview`` with the original HTML
+    formatting and inline image tags, while ``body`` may be a plain-text
+    preview such as ``[embedded image]``.  Prefer the rich HTML field when it
+    is present, then fall back to legacy body-like fields.
+    """
+    for rich_key in ("rich_text_preview", "richTextPreview"):
+        rich_body = comment.get(rich_key)
+        if rich_body is not None:
+            text = unescape(str(rich_body).replace("\r\n", "\n")).replace("\xa0", " ")
+            sanitized = sanitize_rich_text(text)
+            if sanitized.has_rich_content:
+                return sanitized.html
     return _clean_text(
         comment.get("body")
         or comment.get("comment")
@@ -359,7 +374,16 @@ def _extract_comment_image_candidates(
     ):
         scan(comment.get(key))
 
-    for body_key in ("body", "html_body", "htmlBody", "comment", "text", "content"):
+    for body_key in (
+        "rich_text_preview",
+        "richTextPreview",
+        "body",
+        "html_body",
+        "htmlBody",
+        "comment",
+        "text",
+        "content",
+    ):
         body = comment.get(body_key)
         if not isinstance(body, str) or "<img" not in body.lower():
             continue
@@ -434,7 +458,9 @@ async def _import_comment_images(
                 uploaded_by_user_id=author_id,
             )
             if attachment:
-                imported.append(attachment)
+                imported_attachment = dict(attachment)
+                imported_attachment["syncro_source_url"] = candidate.get("url")
+                imported.append(imported_attachment)
         except (
             Exception
         ) as exc:  # pragma: no cover - import should continue if an image fails
@@ -474,14 +500,66 @@ def _build_imported_image_markup(
     return '<div class="syncro-embedded-images">' + "".join(image_tags) + "</div>"
 
 
+def _attachment_download_src(ticket_id: int, attachment: dict[str, Any]) -> str | None:
+    try:
+        attachment_id = int(attachment.get("id"))
+    except (TypeError, ValueError):
+        return None
+    return f"/api/tickets/{ticket_id}/attachments/{attachment_id}/download"
+
+
+def _replace_imported_image_sources(
+    body: str, ticket_id: int, attachments: list[dict[str, Any]]
+) -> tuple[str, set[int]]:
+    """Replace Syncro-hosted inline image URLs with local attachment URLs."""
+    source_map = {
+        str(attachment.get("syncro_source_url")): (index, attachment)
+        for index, attachment in enumerate(attachments)
+        if attachment.get("syncro_source_url")
+    }
+    replaced_indexes: set[int] = set()
+
+    def replace_src(match: re.Match[str]) -> str:
+        src = unescape(match.group(2))
+        mapped = source_map.get(src)
+        if not mapped:
+            return match.group(0)
+        index, attachment = mapped
+        local_src = _attachment_download_src(ticket_id, attachment)
+        if not local_src:
+            return match.group(0)
+        replaced_indexes.add(index)
+        return f"{match.group(1)}{escape(local_src, quote=True)}{match.group(3)}"
+
+    replaced = re.sub(
+        r'(<img\b[^>]*\bsrc=["\'])([^"\']+)(["\'])',
+        replace_src,
+        body,
+        flags=re.IGNORECASE,
+    )
+    return replaced, replaced_indexes
+
+
 def _append_imported_image_markup(
     body: str, ticket_id: int, attachments: list[dict[str, Any]]
 ) -> str:
-    image_markup = _build_imported_image_markup(ticket_id, attachments)
-    if not image_markup:
+    if not attachments:
         return body
-    cleaned = re.sub(r"\[embedded image\]", "", body, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip() or body
+    body_with_local_images, replaced_indexes = _replace_imported_image_sources(
+        body, ticket_id, attachments
+    )
+    remaining = [
+        attachment
+        for index, attachment in enumerate(attachments)
+        if index not in replaced_indexes
+    ]
+    image_markup = _build_imported_image_markup(ticket_id, remaining)
+    cleaned = re.sub(
+        r"\[embedded image\]", "", body_with_local_images, flags=re.IGNORECASE
+    )
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip() or body_with_local_images
+    if not image_markup:
+        return cleaned
     separator = "\n\n" if cleaned else ""
     return f"{cleaned}{separator}{image_markup}"
 
