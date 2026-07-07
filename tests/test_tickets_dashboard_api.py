@@ -97,14 +97,14 @@ def test_ticket_dashboard_endpoint(monkeypatch):
     payload = response.json()
     assert payload["total"] == 1
     assert payload["status_counts"] == {"open": 1}
-    assert payload["filters"]["status"] == "open"
+    assert payload["filters"]["status"] == ["open"]
     assert payload["filters"]["module_slug"] == "ops"
     assert payload["items"][0]["company_name"] == "Acme Corp"
     assert payload["items"][0]["assigned_user_email"] == "tech@example.com"
 
     load_state_mock.assert_awaited_once()
     kwargs = load_state_mock.await_args.kwargs
-    assert kwargs["status_filter"] == "open"
+    assert kwargs["status_filter"] == ["open"]
     assert kwargs["module_filter"] == "ops"
 
 

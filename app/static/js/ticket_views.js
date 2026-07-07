@@ -45,10 +45,12 @@
     }
 
     async init() {
-      await this.loadViews();
+      // Set up all event listeners synchronously first to avoid missing events
+      // that fire while async initialization (loadViews) is in progress.
       this.setupEventListeners();
       this.setupStatusFilters();
       this.setupGroupingControls();
+      await this.loadViews();
       this.updateViewActions();
       this.applyDefaultView();
     }
@@ -80,6 +82,11 @@
           if (fields.length) {
             this.applyGrouping();
           }
+        });
+
+        // After the API populates the table, apply client-side filters and grouping
+        table.addEventListener('table:rows-updated', () => {
+          this._applyPostLoadFilters();
         });
       }
 
@@ -219,12 +226,54 @@
     }
 
     /**
-     * Apply filters to the ticket table
+     * Apply filters to the ticket table.
+     * For tables with data-table-autoload, filters are applied server-side via the API.
+     * For server-rendered tables (e.g. phone search results), CSS-based filtering is used.
      */
     applyFilters() {
       const table = this.container.querySelector('[data-table]');
       if (!table) return;
 
+      if (table.hasAttribute('data-table-autoload')) {
+        this._applyFiltersViaApi(table);
+      } else {
+        this._applyFiltersCss(table);
+      }
+    }
+
+    /**
+     * Apply filters by updating the API URL and triggering a table refresh.
+     * Only status filters are applied server-side; priority filtering is deferred
+     * to _applyPostLoadFilters() which runs after the API response is rendered.
+     */
+    _applyFiltersViaApi(table) {
+      const currentUrl = table.getAttribute('data-table-refresh-url') || '/api/tickets/dashboard';
+      const [baseUrl, queryString = ''] = currentUrl.split('?');
+      const params = new URLSearchParams(queryString);
+
+      // Replace any existing status params with the current filter state
+      params.delete('status');
+
+      const allStatusValues = Array.from(
+        this.container.querySelectorAll('[data-status-filter]')
+      ).map(cb => cb.value);
+
+      // Only add status params for a partial selection; all-or-none means no filter
+      const isPartialSelection = this.filterState.statuses.length > 0 &&
+        this.filterState.statuses.length < allStatusValues.length;
+      if (isPartialSelection) {
+        this.filterState.statuses.forEach(s => params.append('status', s));
+      }
+
+      const newUrl = params.toString() ? `${baseUrl}?${params.toString()}` : baseUrl;
+      table.setAttribute('data-table-refresh-url', newUrl);
+      table.dispatchEvent(new CustomEvent('table:refresh-request'));
+    }
+
+    /**
+     * Apply filters using CSS visibility (for server-rendered tables such as phone search results).
+     */
+    _applyFiltersCss(table) {
       const tbody = table.querySelector('tbody');
       if (!tbody) return;
 
@@ -256,11 +305,47 @@
         }
       });
 
-      // Update table info
       this.updateTableInfo(visibleCount, rows.length);
 
-      // Apply grouping if set
-      if (this.groupingField) {
+      if (this.groupingField || this.groupingFields.length) {
+        this.applyGrouping();
+      }
+    }
+
+    /**
+     * Apply client-side filters (priority) and grouping after the API has populated the table.
+     * Called in response to the table:rows-updated event.
+     */
+    _applyPostLoadFilters() {
+      const table = this.container.querySelector('[data-table]');
+      if (!table) return;
+      const tbody = table.querySelector('tbody');
+      if (!tbody) return;
+
+      const rows = tbody.querySelectorAll('tr:not(.ticket-group-header)');
+      let visibleCount = 0;
+
+      rows.forEach(row => {
+        let shouldShow = true;
+
+        // Priority filter is client-side only (API does not support priority filtering)
+        if (this.filterState.priorities.length > 0) {
+          const priorityCell = row.querySelector('[data-label="Priority"]');
+          const rowPriority = priorityCell ? priorityCell.textContent.trim().toLowerCase() : '';
+          shouldShow = shouldShow && this.filterState.priorities.some(p => rowPriority.includes(p.toLowerCase()));
+        }
+
+        if (shouldShow) {
+          row.classList.remove('ticket-filtered-hidden');
+          visibleCount++;
+        } else {
+          row.classList.add('ticket-filtered-hidden');
+        }
+      });
+
+      this.updateTableInfo(visibleCount, rows.length);
+
+      if (this.groupingField || this.groupingFields.length) {
         this.applyGrouping();
       }
     }
@@ -502,15 +587,6 @@
       this.groupingFields = [];
       this.groupingField = null;
       this.updateGroupingUI();
-      
-      // Remove all filter classes from rows
-      const tbody = this.container.querySelector('tbody');
-      if (tbody) {
-        tbody.querySelectorAll('tr').forEach(row => {
-          row.classList.remove('ticket-filtered-hidden', 'ticket-group-hidden');
-        });
-      }
-      
       this.updateFilterUI();
       this.removeGrouping();
       this.applyFilters();

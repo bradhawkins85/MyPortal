@@ -269,6 +269,11 @@ def _safe_local_redirect_target(raw: str | None, *, fallback: str) -> str:
 async def admin_tickets_page(
     request: Request,
     phoneNumber: str | None = Query(default=None),
+    status: list[str] = Query(default=[]),
+    company_id: int | None = Query(default=None, alias="companyId"),
+    assigned_user_id: int | None = Query(default=None, alias="assignedUserId"),
+    search: str | None = Query(default=None),
+    module: str | None = Query(default=None),
 ):
     main_module = _main()
     current_user, redirect = await main_module._require_helpdesk_page(request)
@@ -278,6 +283,11 @@ async def admin_tickets_page(
         request,
         current_user,
         phone_number=phoneNumber,
+        status_filter=status if status else None,
+        company_id=company_id,
+        assigned_user_id=assigned_user_id,
+        search=search,
+        module_slug=module,
     )
 
 

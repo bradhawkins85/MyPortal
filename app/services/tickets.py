@@ -1926,7 +1926,7 @@ async def broadcast_ticket_event(
 
 async def load_dashboard_state(
     *,
-    status_filter: str | None = None,
+    status_filter: str | list[str] | None = None,
     module_filter: str | None = None,
     company_id: int | None = None,
     assigned_user_id: int | None = None,

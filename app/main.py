@@ -8104,9 +8104,30 @@ async def _render_tickets_dashboard(
     success_message: str | None = None,
     error_message: str | None = None,
     phone_number: str | None = None,
+    status_filter: list[str] | None = None,
+    company_id: int | None = None,
+    assigned_user_id: int | None = None,
+    search: str | None = None,
+    module_slug: str | None = None,
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
-    # If phone number is provided, search by phone
+    # Load status definitions for sidebar and filter options (no ticket rows needed)
+    dashboard = await tickets_service.load_dashboard_state(
+        status_filter=None,
+        module_filter=None,
+        limit=0,
+        include_reference_data=False,
+    )
+    # Global status counts for the sidebar stats (fast GROUP BY query)
+    global_status_counts: dict[str, int] = await tickets_repo.count_tickets_by_status()
+
+    tickets: list[dict[str, Any]] = []
+    ticket_total = 0
+    ticket_time_lookup: dict[int, dict[str, Any]] = {}
+    ticket_automation_filter_lookup: dict[int, dict[str, Any]] = {}
+    ticket_autoload = True
+
+    # If phone number is provided, search by phone and render results directly
     if phone_number:
         phone_number_stripped = phone_number.strip()
         if phone_number_stripped:
@@ -8114,9 +8135,9 @@ async def _render_tickets_dashboard(
                 company_memberships = await company_access.list_accessible_companies(user)
                 available_company_ids: list[int] = []
                 for entry in company_memberships:
-                    company_id = entry.get("company_id")
+                    cid = entry.get("company_id")
                     try:
-                        available_company_ids.append(int(company_id))
+                        available_company_ids.append(int(cid))
                     except (TypeError, ValueError):
                         continue
 
@@ -8136,18 +8157,10 @@ async def _render_tickets_dashboard(
                     user_id=user.get("id"),
                     company_ids=active_company_ids or None,
                 )
-                # Get minimal dashboard state with only the phone search results
-                dashboard = await tickets_service.load_dashboard_state(
-                    status_filter=None,
-                    module_filter=None,
-                    limit=0,  # Don't load default tickets, we'll use phone search results
-                    include_reference_data=False,
-                )
-                # Replace the tickets with phone search results
-                dashboard.tickets = phone_tickets
-                dashboard.total = len(phone_tickets)
-                
-                # Add info message about phone search
+                tickets = phone_tickets
+                ticket_total = len(phone_tickets)
+                ticket_autoload = False
+
                 if phone_tickets:
                     success_message = f"Found {len(phone_tickets)} ticket(s) for phone number {phone_number_stripped}"
                 else:
@@ -8163,31 +8176,32 @@ async def _render_tickets_dashboard(
                     phone_number_provided=True,
                 )
                 error_message = "Failed to search tickets by phone number. Please try again."
-                # Load normal dashboard on error
-                dashboard = await tickets_service.load_dashboard_state(
-                    status_filter=None,
-                    module_filter=None,
-                    limit=None,
-                    include_reference_data=False,
-                )
-        else:
-            # Empty phone number after stripping, load normal dashboard
-            dashboard = await tickets_service.load_dashboard_state(
-                status_filter=None,
-                module_filter=None,
-                limit=None,
-                include_reference_data=False,
-            )
-    else:
-        # Normal dashboard load without phone search
-        dashboard = await tickets_service.load_dashboard_state(
-            status_filter=None,
-            module_filter=None,
-            limit=None,
-            include_reference_data=False,
-        )
+
+    if tickets:
+        ticket_ids = [int(t.get("id")) for t in tickets if t.get("id") is not None]
+        ticket_time_lookup = await tickets_repo.get_time_totals_by_ticket_ids(ticket_ids)
+        ticket_automation_filter_lookup = await tickets_repo.get_automation_filter_context_by_ticket_ids(ticket_ids)
+
     reference_data = await _get_ticket_dashboard_reference_data()
-    dashboard_endpoint = "/api/tickets/dashboard?all=true"
+
+    # Build the initial dashboard API endpoint URL with active filter params
+    _dashboard_params: list[str] = []
+    if status_filter:
+        for s in status_filter:
+            _dashboard_params.append(f"status={s}")
+    if company_id is not None:
+        _dashboard_params.append(f"companyId={company_id}")
+    if assigned_user_id is not None:
+        _dashboard_params.append(f"assignedUserId={assigned_user_id}")
+    if search:
+        from urllib.parse import quote as _url_quote
+        _dashboard_params.append(f"search={_url_quote(search, safe='')}")
+    if module_slug:
+        _dashboard_params.append(f"module={module_slug}")
+    dashboard_endpoint = "/api/tickets/dashboard"
+    if _dashboard_params:
+        dashboard_endpoint = f"{dashboard_endpoint}?{'&'.join(_dashboard_params)}"
+
     selectable_status_definitions = [
         definition
         for definition in dashboard.status_definitions
@@ -8220,14 +8234,11 @@ async def _render_tickets_dashboard(
             else (dashboard.available_statuses[0] if dashboard.available_statuses else "open")
         )
     labour_types = await labour_types_service.list_labour_types()
-    ticket_ids = [int(t.get("id")) for t in dashboard.tickets if t.get("id") is not None]
-    ticket_time_lookup = await tickets_repo.get_time_totals_by_ticket_ids(ticket_ids)
-    ticket_automation_filter_lookup = await tickets_repo.get_automation_filter_context_by_ticket_ids(ticket_ids)
     extra = {
         "title": "Ticketing workspace",
-        "tickets": dashboard.tickets,
-        "ticket_total": dashboard.total,
-        "ticket_status_counts": dashboard.status_counts,
+        "tickets": tickets,
+        "ticket_total": ticket_total,
+        "ticket_status_counts": global_status_counts,
         "ticket_available_statuses": dashboard.available_statuses,
         "ticket_status_definitions": status_definitions_payload,
         "ticket_status_label_map": status_label_map,
@@ -8248,6 +8259,8 @@ async def _render_tickets_dashboard(
         "error_message": error_message,
         "ticket_dashboard_endpoint": dashboard_endpoint,
         "ticket_refresh_topics": ["tickets"],
+        "ticket_autoload": ticket_autoload,
+        "ticket_initial_status_filter": status_filter or [],
     }
     response = await _render_template("admin/tickets.html", request, user, extra=extra)
     response.status_code = status_code
