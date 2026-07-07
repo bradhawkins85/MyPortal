@@ -11,12 +11,14 @@ from app.repositories import tickets as tickets_repo
 from app.services import invoice_generator as invoice_generator_service
 from app.services import modules as modules_service
 from app.services import subscription_price_changes
+from app.services import unbill_time_entries as unbill_time_entries_service
 from app.services import xero as xero_service
 
 PREVIEWABLE_COMMANDS = {
     "sync_to_xero",
     "sync_to_xero_auto_send",
     "generate_invoice",
+    "unbill_time_entries",
     "send_price_change_notifications",
 }
 
@@ -37,15 +39,17 @@ async def preview_task(task: Mapping[str, Any]) -> dict[str, Any]:
             "summary": "Preview is not available for this scheduled task command.",
             "items": [],
         }
-    if command in {"sync_to_xero", "sync_to_xero_auto_send", "generate_invoice"}:
+    if command in {"sync_to_xero", "sync_to_xero_auto_send", "generate_invoice", "unbill_time_entries"}:
         company_id = task.get("company_id")
-        if not company_id:
+        if not company_id and command != "unbill_time_entries":
             return {
                 "status": "skipped",
                 "command": command,
                 "summary": "Company context is required before this task can run.",
                 "items": [],
             }
+        if command == "unbill_time_entries":
+            return await unbill_time_entries_service.preview_unbill_time_entries(int(company_id) if company_id else None)
         company = await company_repo.get_company_by_id(int(company_id))
         if not company:
             return {

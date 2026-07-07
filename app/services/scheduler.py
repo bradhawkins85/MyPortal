@@ -32,6 +32,7 @@ from app.services import subscription_price_changes
 from app.services import subscription_renewals
 from app.services import tickets as tickets_service
 from app.services import tray_installer as tray_installer_service
+from app.services import unbill_time_entries as unbill_time_entries_service
 from app.services import value_templates
 from app.services import webhook_monitor
 from app.services import xero as xero_service
@@ -870,6 +871,16 @@ class SchedulerService:
                     else:
                         status = "skipped"
                         details = "Company context required"
+                elif command == "unbill_time_entries":
+                    company_id = task.get("company_id")
+                    result = await unbill_time_entries_service.unbill_time_entries(
+                        int(company_id) if company_id else None
+                    )
+                    if result:
+                        details = json.dumps(result, default=str)
+                        result_status = str(result.get("status") or "").strip().lower()
+                        if result_status == "skipped":
+                            status = "skipped"
                 elif command == "refresh_company_ids":
                     company_id = task.get("company_id")
                     if company_id:
