@@ -21,36 +21,54 @@ def _display_ticket_label(ticket: Mapping[str, Any]) -> str:
 
 
 async def preview_unbill_time_entries(company_id: int | None = None, *, limit: int = 1000) -> dict[str, Any]:
-    """Preview billable, unbilled time entries that would be excluded from invoices."""
-    tickets = await tickets_repo.list_tickets(company_id=company_id, limit=limit)
+    """Preview billable, unbilled time entries that would be excluded from invoices.
+
+    Tickets are read in pages so the automation covers every ticket for the
+    selected customer instead of only the first repository page.  The ``limit``
+    argument controls the page size, matching the existing scheduled-task batch
+    behaviour without silently capping the total customer scan.
+    """
+    page_size = max(1, int(limit or 1000))
+    offset = 0
     items: list[dict[str, Any]] = []
     total_minutes = 0
-    for ticket in tickets:
-        ticket_id = ticket.get("id")
-        if not ticket_id:
-            continue
-        unbilled_ids = await billed_time_repo.get_unbilled_reply_ids(int(ticket_id))
-        if not unbilled_ids:
-            continue
-        replies = await tickets_repo.list_replies(int(ticket_id), include_internal=True)
-        for reply in replies:
-            reply_id = reply.get("id")
-            if reply_id not in unbilled_ids or not reply.get("is_billable"):
+    while True:
+        tickets = await tickets_repo.list_tickets(
+            company_id=company_id,
+            limit=page_size,
+            offset=offset,
+        )
+        if not tickets:
+            break
+        for ticket in tickets:
+            ticket_id = ticket.get("id")
+            if not ticket_id:
                 continue
-            minutes = invoice_generator_service._coerce_minutes(reply.get("minutes_spent"))
-            if minutes <= 0:
+            unbilled_ids = await billed_time_repo.get_unbilled_reply_ids(int(ticket_id))
+            if not unbilled_ids:
                 continue
-            total_minutes += minutes
-            items.append({
-                "type": "time_entry",
-                "id": int(reply_id),
-                "ticketId": int(ticket_id),
-                "label": _display_ticket_label(ticket),
-                "minutes": minutes,
-                "hours": str(invoice_generator_service._minutes_to_hours(minutes)),
-                "labourType": reply.get("labour_type_name") or reply.get("labour_type_code"),
-                "action": "Mark this billable time entry as already billed so invoice generation skips it",
-            })
+            replies = await tickets_repo.list_replies(int(ticket_id), include_internal=True)
+            for reply in replies:
+                reply_id = reply.get("id")
+                if reply_id not in unbilled_ids or not reply.get("is_billable"):
+                    continue
+                minutes = invoice_generator_service._coerce_minutes(reply.get("minutes_spent"))
+                if minutes <= 0:
+                    continue
+                total_minutes += minutes
+                items.append({
+                    "type": "time_entry",
+                    "id": int(reply_id),
+                    "ticketId": int(ticket_id),
+                    "label": _display_ticket_label(ticket),
+                    "minutes": minutes,
+                    "hours": str(invoice_generator_service._minutes_to_hours(minutes)),
+                    "labourType": reply.get("labour_type_name") or reply.get("labour_type_code"),
+                    "action": "Mark this billable time entry as already billed so invoice generation skips it",
+                })
+        if len(tickets) < page_size:
+            break
+        offset += page_size
     return {
         "status": "ready" if items else "skipped",
         "command": "unbill_time_entries",
