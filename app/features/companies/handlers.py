@@ -658,6 +658,7 @@ async def _render_company_edit_page(
             {"value": "sync_to_xero", "label": "Sync to Xero"},
             {"value": "sync_to_xero_auto_send", "label": "Sync to Xero (Auto Send)"},
             {"value": "generate_invoice", "label": "Generate Invoice"},
+            {"value": "unbill_time_entries", "label": "Un-Bill Time Entries"},
             {"value": "create_scheduled_ticket", "label": "Create scheduled ticket"},
             {"value": "sync_recordings", "label": "Sync call recordings"},
             {
