@@ -5605,6 +5605,15 @@ async def admin_roles(request: Request):
     return await _render_template("admin/roles.html", request, current_user, extra=extra)
 
 
+@app.get("/admin/cron-calendar", response_class=HTMLResponse)
+async def admin_cron_calendar(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    extra = {"title": "Cron Calendar"}
+    return await _render_template("admin/cron_calendar.html", request, current_user, extra=extra)
+
+
 @app.get("/admin/automation", response_class=HTMLResponse)
 async def admin_automation(request: Request, show_inactive: bool = Query(default=False)):
     return RedirectResponse(url="/admin/scheduled-tasks", status_code=status.HTTP_301_MOVED_PERMANENTLY)

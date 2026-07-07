@@ -93,6 +93,31 @@ async def list_tasks(include_inactive: bool = False) -> list[dict[str, Any]]:
     return [_normalise_task(row) for row in rows]
 
 
+async def list_calendar_tasks(include_inactive: bool = False) -> list[dict[str, Any]]:
+    """Return scheduled tasks with company names for calendar previews."""
+    where = "" if include_inactive else "WHERE t.active = 1"
+    rows = await db.fetch_all(
+        f"""
+        SELECT
+            t.*,
+            c.name AS company_name
+        FROM scheduled_tasks AS t
+        LEFT JOIN companies AS c ON c.id = t.company_id
+        {where}
+        ORDER BY t.name ASC
+        """,
+    )
+    tasks: list[dict[str, Any]] = []
+    for row in rows:
+        task = _normalise_task(row)
+        if task.get("company_id") is None:
+            task["company_name"] = "All companies"
+        elif not task.get("company_name"):
+            task["company_name"] = f"Company #{task['company_id']}"
+        tasks.append(task)
+    return tasks
+
+
 async def list_active_tasks() -> list[dict[str, Any]]:
     return await list_tasks(include_inactive=False)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -16,12 +17,13 @@ from app.schemas.scheduler import (
     ScheduledTaskResponse,
     ScheduledTaskPreviewResponse,
     ScheduledTaskRunResponse,
+    ScheduledTaskCalendarEventResponse,
     ScheduledTaskUpdate,
     WebhookEventAttemptResponse,
     WebhookEventResponse,
     WebhookEventsBulkDeleteResponse,
 )
-from app.services import scheduled_task_preview, webhook_monitor
+from app.services import cron_calendar, scheduled_task_preview, webhook_monitor
 from app.services.scheduler import scheduler_service
 
 router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
@@ -180,6 +182,20 @@ async def list_task_runs(
     response.headers["Cache-Control"] = "no-store"
     runs = await scheduled_tasks_repo.list_recent_runs(task_ids=[task_id], limit=limit)
     return [ScheduledTaskRunResponse.model_validate(run) for run in runs]
+
+
+@router.get("/calendar", response_model=list[ScheduledTaskCalendarEventResponse])
+async def list_calendar_events(
+    start: datetime,
+    end: datetime,
+    include_inactive: bool = False,
+    limit: int = Query(default=1000, ge=1, le=1000),
+    _: None = Depends(require_database),
+    __: dict[str, Any] = Depends(require_super_admin),
+) -> list[ScheduledTaskCalendarEventResponse]:
+    tasks = await scheduled_tasks_repo.list_calendar_tasks(include_inactive=include_inactive)
+    events = cron_calendar.build_calendar_events(tasks, start=start, end=end, limit=limit)
+    return [ScheduledTaskCalendarEventResponse.model_validate(event) for event in events]
 
 
 @router.get("/webhooks", response_model=list[WebhookEventResponse])
