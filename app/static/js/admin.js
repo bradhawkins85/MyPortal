@@ -1268,9 +1268,14 @@
         timer = window.setTimeout(() => {
           const endpoint = table.getAttribute('data-table-refresh-url');
           if (!endpoint) return;
-          const params = new URLSearchParams();
-          if (searchInput.value.trim()) params.set('search', searchInput.value.trim());
-          table.setAttribute('data-table-refresh-url', params.toString() ? `${endpoint.split('?')[0]}?${params.toString()}` : endpoint.split('?')[0]);
+          const [baseUrl, queryString = ''] = endpoint.split('?');
+          const params = new URLSearchParams(queryString);
+          if (searchInput.value.trim()) {
+            params.set('search', searchInput.value.trim());
+          } else {
+            params.delete('search');
+          }
+          table.setAttribute('data-table-refresh-url', params.toString() ? `${baseUrl}?${params.toString()}` : baseUrl);
           table.dispatchEvent(new CustomEvent('table:refresh-request'));
         }, 300);
       });
