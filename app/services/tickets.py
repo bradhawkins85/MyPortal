@@ -1602,6 +1602,44 @@ def _parse_json_candidate(candidate: str) -> tuple[str | None, str | None] | Non
     return candidate, None
 
 
+def _extract_chat_completion_content(payload: Any) -> Any:
+    """Return assistant message content from OpenAI-compatible chat responses.
+
+    Several Ollama-compatible gateways return the whole chat completion object as
+    the module response instead of only ``choices[0].message.content``.  The
+    ticket importers need the actual assistant content so summary, resolution,
+    and tag JSON can be parsed reliably.
+    """
+
+    if isinstance(payload, Mapping):
+        choices = payload.get("choices")
+        if isinstance(choices, Sequence) and not isinstance(choices, (str, bytes, bytearray)):
+            for choice in choices:
+                if not isinstance(choice, Mapping):
+                    continue
+                message = choice.get("message")
+                if isinstance(message, Mapping):
+                    content = message.get("content")
+                    if content is not None:
+                        return content
+                text = choice.get("text")
+                if text is not None:
+                    return text
+        return payload
+
+    if isinstance(payload, str):
+        text = payload.strip()
+        if not text:
+            return payload
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return payload
+        extracted = _extract_chat_completion_content(parsed)
+        return extracted if extracted is not parsed else payload
+
+    return payload
+
 def _normalise_model_response_text(value: Any) -> str:
     """Return model text in a parseable plain-text form.
 
@@ -1622,6 +1660,7 @@ def _normalise_model_response_text(value: Any) -> str:
 
 
 def _extract_summary_fields(payload: Any) -> tuple[str | None, str | None]:
+    payload = _extract_chat_completion_content(payload)
     if isinstance(payload, Mapping):
         direct_summary = payload.get("summary")
         direct_resolution = payload.get("resolution") or payload.get("resolution_label") or payload.get("status")
@@ -1705,6 +1744,8 @@ async def _extract_tags(payload: Any, ticket: Mapping[str, Any], replies: list[M
     external_ref_tokens = _extract_external_reference_tokens(ticket, replies or [])
     combined_exclusions = excluded_tags | external_ref_tokens
     
+    payload = _extract_chat_completion_content(payload)
+
     tags = _normalise_tag_list(payload, combined_exclusions)
     if tags:
         return _finalise_tags(tags, ticket, combined_exclusions)
@@ -1734,6 +1775,14 @@ def _normalise_tag_list(source: Any, excluded_tags: set[str] | None = None) -> l
                 return _normalise_tag_list(source[key], excluded_tags)
         return []
     if isinstance(source, str):
+        cleaned = _strip_wrapped_block(_normalise_model_response_text(source))
+        if cleaned and cleaned != source.strip():
+            try:
+                parsed = json.loads(cleaned)
+            except json.JSONDecodeError:
+                source = cleaned
+            else:
+                return _normalise_tag_list(parsed, excluded_tags)
         segments = [segment.strip() for segment in re.split(r"[,\n;]+", source) if segment.strip()]
         iterable: Iterable[str] = segments
     elif isinstance(source, Iterable) and not isinstance(source, (bytes, bytearray)):
