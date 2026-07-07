@@ -118,6 +118,19 @@ async def _has_helpdesk_permission(current_user: dict) -> bool:
         return False
 
 
+async def _validate_ticket_assignee(assigned_user_id: int | None) -> None:
+    if assigned_user_id is None:
+        return
+    has_permission = await membership_repo.user_has_permission(
+        assigned_user_id, tickets_service.HELPDESK_PERMISSION_KEY
+    )
+    if not has_permission:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Selected user cannot be assigned to tickets.",
+        )
+
+
 async def _resolve_ticket_actor(
     optional_user: dict | None = Depends(get_optional_user),
     api_key_record: dict | None = Depends(get_optional_api_key),
@@ -523,6 +536,7 @@ async def create_ticket(
             )
 
     assigned_user_id = payload.assigned_user_id if has_helpdesk_access else None
+    await _validate_ticket_assignee(assigned_user_id)
     priority = payload.priority if has_helpdesk_access else "normal"
     if has_helpdesk_access:
         if payload.status:
@@ -627,6 +641,8 @@ async def update_ticket(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Ticket subject is required",
             )
+    if "assigned_user_id" in fields:
+        await _validate_ticket_assignee(fields.get("assigned_user_id"))
     if fields:
         await tickets_repo.update_ticket(ticket_id, **fields)
     if description_value is not description_marker:

@@ -424,7 +424,24 @@ async def admin_create_ticket(request: Request):
     try:
         assigned_user_id = int(assigned_raw) if assigned_raw else None
     except (TypeError, ValueError):
-        assigned_user_id = None
+        return await main_module._render_tickets_dashboard(
+            request,
+            current_user,
+            error_message="Select a valid assignee.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    if assigned_user_id is not None:
+        has_permission = await membership_repo.user_has_permission(
+            assigned_user_id,
+            main_module.HELPDESK_PERMISSION_KEY,
+        )
+        if not has_permission:
+            return await main_module._render_tickets_dashboard(
+                request,
+                current_user,
+                error_message="Selected user cannot be assigned to tickets.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
     requester_id: int | None = None
     requester_staff_id: int | None = None
     if requester_raw:
