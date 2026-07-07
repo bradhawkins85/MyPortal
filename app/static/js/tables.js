@@ -5,8 +5,8 @@
   }
 
   function parseValue(value, type) {
-    if (type === 'number') {
-      const parsed = parseFloat(value);
+    if (type === 'number' || type === 'int') {
+      const parsed = type === 'int' ? Number.parseInt(value, 10) : parseFloat(value);
       return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
     }
     if (type === 'date') {
