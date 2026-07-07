@@ -8211,6 +8211,7 @@ async def _render_tickets_dashboard(
     labour_types = await labour_types_service.list_labour_types()
     ticket_ids = [int(t.get("id")) for t in dashboard.tickets if t.get("id") is not None]
     ticket_time_lookup = await tickets_repo.get_time_totals_by_ticket_ids(ticket_ids)
+    ticket_automation_filter_lookup = await tickets_repo.get_automation_filter_context_by_ticket_ids(ticket_ids)
     extra = {
         "title": "Ticketing workspace",
         "tickets": dashboard.tickets,
@@ -8228,6 +8229,8 @@ async def _render_tickets_dashboard(
         "ticket_user_lookup": reference_data["user_lookup"],
         "ticket_labour_types": labour_types,
         "ticket_time_lookup": ticket_time_lookup,
+        "ticket_automation_filter_lookup": ticket_automation_filter_lookup,
+        "ticket_dashboard_now": datetime.now(timezone.utc),
         "can_bulk_delete_tickets": bool(user.get("is_super_admin")),
         "success_message": success_message,
         "error_message": error_message,
