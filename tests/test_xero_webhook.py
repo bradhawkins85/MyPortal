@@ -31,6 +31,19 @@ def test_extract_xero_invoice_id_from_resource_url():
     assert xero._extract_xero_invoice_id(event) == "inv-123"
 
 
+def test_summarise_xero_webhook_results_deduplicates_failures():
+    results = [
+        {"status": "failed", "error": "Internal processing error"},
+        {"status": "failed", "error": "Internal processing error"},
+        {"status": "ignored", "reason": "unsupported category"},
+        {"status": "failed", "error": "Xero API timeout"},
+    ]
+
+    assert xero._summarise_xero_webhook_results(results) == (
+        "Internal processing error (2 events); Xero API timeout (1 event)"
+    )
+
+
 @pytest.mark.anyio("asyncio")
 async def test_apply_xero_invoice_event_marks_local_invoice_paid(monkeypatch):
     local_invoice = {
@@ -131,7 +144,10 @@ async def test_receive_webhook_acknowledges_valid_delivery_when_event_processing
     assert response.body == b""
     log_mock.assert_awaited_once()
     assert log_mock.await_args.kwargs["response_status"] == 200
-    assert log_mock.await_args.kwargs["error_message"] == "Internal processing error"
+    assert log_mock.await_args.kwargs["error_message"] is None
+    logged_body = log_mock.await_args.kwargs["response_body"]
+    assert "processing_warning" in logged_body
+    assert "Internal processing error (1 event)" in logged_body
 
 
 @pytest.mark.anyio("asyncio")
