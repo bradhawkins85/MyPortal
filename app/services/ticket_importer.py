@@ -21,6 +21,7 @@ from app.repositories import webhook_events as webhook_events_repo
 from app.services.sanitization import sanitize_rich_text
 from app.services import (
     syncro,
+    email_recipients,
     ticket_attachments as attachments_service,
     tickets as tickets_service,
     webhook_monitor,
@@ -1264,6 +1265,8 @@ async def _resolve_user_id_by_email(email: str | None) -> int | None:
 
 def _extract_comment_author_email(comment: dict[str, Any]) -> str | None:
     for key in (
+        "email_sender",
+        "emailSender",
         "user_email",
         "userEmail",
         "author_email",
@@ -1282,6 +1285,9 @@ def _extract_comment_author_email(comment: dict[str, Any]) -> str | None:
         email = _normalise_email(comment.get(key))
         if email:
             return email
+    tech_email = _normalise_email(comment.get("tech"))
+    if tech_email:
+        return tech_email
     for key in ("user", "author", "created_by", "creator"):
         nested = comment.get(key)
         if isinstance(nested, dict):
@@ -1301,6 +1307,13 @@ async def _resolve_comment_author_id(
 ) -> int | None:
     tech = _clean_text(comment.get("tech"))
     if tech and tech.lower() == "customer-reply":
+        email = _extract_comment_author_email(comment)
+        if email:
+            key = email.lower()
+            if key not in cache:
+                cache[key] = await _resolve_user_id_by_email(email)
+            if cache[key] is not None:
+                return cache[key]
         if requester_id is not None:
             return requester_id
         if contact_email:
@@ -1316,6 +1329,36 @@ async def _resolve_comment_author_id(
     if key not in cache:
         cache[key] = await _resolve_user_id_by_email(email)
     return cache[key]
+
+
+async def _record_imported_reply_recipients(
+    reply: dict[str, Any] | None,
+    comment: dict[str, Any],
+    sent_at: datetime | None,
+) -> None:
+    """Persist Syncro destination_emails as ticket reply recipients."""
+    reply_id = (reply or {}).get("id")
+    if reply_id is None:
+        return
+    recipients = sorted(
+        _extract_destination_emails(comment), key=lambda value: value.lower()
+    )
+    if not recipients:
+        return
+    try:
+        await email_recipients.record_recipients(
+            reply_id=int(reply_id),
+            tracking_id=None,
+            smtp2go_message_id=None,
+            to=recipients,
+            sent_at=sent_at,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to record imported Syncro reply recipients",
+            reply_id=reply_id,
+            error=str(exc),
+        )
 
 
 async def _sync_ticket_replies(
@@ -1381,7 +1424,7 @@ async def _sync_ticket_replies(
         enhanced_body = _build_comment_body_with_header(
             comment, body_with_images, minutes=minutes_spent
         )
-        await tickets_repo.create_reply(
+        reply = await tickets_repo.create_reply(
             ticket_id=ticket_id,
             author_id=author_id,
             body=enhanced_body,
@@ -1391,6 +1434,7 @@ async def _sync_ticket_replies(
             external_reference=external_ref,
             created_at=created_at,
         )
+        await _record_imported_reply_recipients(reply, comment, created_at)
         if external_ref:
             known_refs.add(external_ref)
 

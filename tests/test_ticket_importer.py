@@ -613,6 +613,7 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
                     "subject": "Initial Issue",
                     "body": "Customer message",
                     "tech": "customer-reply",
+                    "email_sender": "customer@example.com",
                     "hidden": False,
                     "destination_emails": [
                         "customer@example.com",
@@ -624,7 +625,7 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
                     "id": 2,
                     "body": "Internal update",
                     "tech": "agent",
-                    "user_email": "tech@example.com",
+                    "email_sender": "tech@example.com",
                     "hidden": True,
                     "destination_emails": [
                         "tech@example.com",
@@ -673,6 +674,11 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
         return []
 
     added_watchers = []
+    recorded_recipients = []
+
+    async def fake_record_recipients(**kwargs):
+        recorded_recipients.append(kwargs)
+        return len(kwargs.get("to") or [])
 
     async def fake_add_watcher(ticket_id, user_id):
         added_watchers.append((ticket_id, user_id))
@@ -700,6 +706,9 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
     monkeypatch.setattr(tickets_repo, "add_watcher", fake_add_watcher)
     monkeypatch.setattr(
         ticket_importer.user_repo, "get_user_by_email", fake_get_user_by_email
+    )
+    monkeypatch.setattr(
+        ticket_importer.email_recipients, "record_recipients", fake_record_recipients
     )
 
     summary = await ticket_importer.import_ticket_by_id(5001, rate_limiter=None)
@@ -730,6 +739,11 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
     assert reply_calls[2]["author_id"] == 31
     assert reply_calls[2].get("minutes_spent") is None
     assert reply_calls[2].get("is_billable", False) is False
+    assert [call["to"] for call in recorded_recipients] == [
+        ["customer@example.com", "tech@example.com"],
+        ["support@hawkinsitsolutions.com.au", "tech@example.com"],
+    ]
+    assert all(call["tracking_id"] is None for call in recorded_recipients)
     # The ticket ID should now be 5001, not 400
     assert added_watchers == [(5001, 31)]
 
