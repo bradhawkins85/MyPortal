@@ -950,7 +950,7 @@ async def test_import_ticket_skips_existing_comment_replies(monkeypatch):
 async def test_import_from_request_records_webhook_success(monkeypatch):
     summary = ticket_importer.TicketImportSummary(mode="single", fetched=1, created=1)
 
-    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None):
+    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None, **_kwargs):
         assert ticket_id == 42
         return summary
 
@@ -1013,7 +1013,7 @@ async def test_import_from_request_records_webhook_success(monkeypatch):
 async def test_import_from_request_falls_back_to_repo(monkeypatch):
     summary = ticket_importer.TicketImportSummary(mode="single", fetched=1, created=1)
 
-    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None):
+    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None, **_kwargs):
         assert ticket_id == 21
         return summary
 
@@ -1129,7 +1129,7 @@ async def test_import_from_request_falls_back_to_repo(monkeypatch):
 async def test_import_from_request_fallback_repo_create_failure(monkeypatch):
     summary = ticket_importer.TicketImportSummary(mode="single", fetched=1, created=1)
 
-    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None):
+    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None, **_kwargs):
         assert ticket_id == 22
         return summary
 
@@ -1191,7 +1191,7 @@ async def test_import_from_request_fallback_repo_create_failure(monkeypatch):
 async def test_import_from_request_fallback_mark_in_progress_failure(monkeypatch):
     summary = ticket_importer.TicketImportSummary(mode="single", fetched=1, created=1)
 
-    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None):
+    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None, **_kwargs):
         assert ticket_id == 23
         return summary
 
@@ -1253,7 +1253,7 @@ async def test_import_from_request_fallback_mark_in_progress_failure(monkeypatch
 
 @pytest.mark.anyio
 async def test_import_from_request_fallback_failure_records_repo(monkeypatch):
-    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None):
+    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None, **_kwargs):
         assert ticket_id == 24
         raise RuntimeError("boom")
 
@@ -1370,7 +1370,7 @@ async def test_import_from_request_fallback_failure_records_repo(monkeypatch):
 
 @pytest.mark.anyio
 async def test_import_from_request_records_webhook_failure(monkeypatch):
-    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None):
+    async def fake_import_ticket_by_id(ticket_id, rate_limiter=None, **_kwargs):
         raise RuntimeError("boom")
 
     recorded: dict[str, dict[str, object]] = {}
@@ -1550,8 +1550,8 @@ def test_resolve_comment_billable_no_timer_match():
 def test_build_timer_billable_map_basic():
     ticket = {
         "ticket_timers": [
-            {"id": 1, "comment_id": 10, "billable": True},
-            {"id": 2, "comment_id": 20, "billable": False},
+            {"id": 1, "comment_id": 10, "billable": True, "recorded": False},
+            {"id": 2, "comment_id": 20, "billable": True, "recorded": True},
         ]
     }
     result = ticket_importer._build_timer_billable_map(ticket)
@@ -1561,24 +1561,59 @@ def test_build_timer_billable_map_basic():
 def test_build_timer_billable_map_coerces_string_values():
     ticket = {
         "ticket_timers": [
-            {"id": 1, "comment_id": 10, "billable": "false"},
-            {"id": 2, "comment_id": 20, "billable": "true"},
-            {"id": 3, "comment_id": 30, "billable": "0"},
+            {"id": 1, "comment_id": 10, "billable": "true", "recorded": "false"},
+            {"id": 2, "comment_id": 20, "billable": "true", "recorded": "true"},
+            {"id": 3, "comment_id": 30, "billable": "0", "recorded": "0"},
         ]
     }
     result = ticket_importer._build_timer_billable_map(ticket)
-    assert result == {"10": False, "20": True, "30": False}
+    assert result == {"10": True, "20": False, "30": False}
 
 
 def test_build_timer_billable_map_skips_null_comment_id():
     ticket = {
         "ticket_timers": [
-            {"id": 1, "comment_id": None, "billable": True},
-            {"id": 2, "comment_id": 5, "billable": True},
+            {"id": 1, "comment_id": None, "billable": True, "recorded": False},
+            {"id": 2, "comment_id": 5, "billable": True, "recorded": False},
         ]
     }
     result = ticket_importer._build_timer_billable_map(ticket)
     assert result == {"5": True}
+
+
+def test_build_timer_billable_map_recorded_true_overrides_timer_billable_field():
+    ticket = {
+        "ticket_timers": [
+            {"id": 1, "comment_id": 10, "billable": True, "recorded": True},
+            {"id": 2, "comment_id": 20, "billable": False, "recorded": True},
+            {"id": 3, "comment_id": 30, "billable": True, "recorded": False},
+        ]
+    }
+    result = ticket_importer._build_timer_billable_map(ticket)
+    assert result == {"10": False, "20": False, "30": True}
+
+
+def test_build_timer_billable_map_treats_recorded_syncro_sample_as_non_billable():
+    ticket = {
+        "ticket_timers": [
+            {
+                "id": 40289461,
+                "ticket_id": 113547897,
+                "user_id": 172491,
+                "recorded": True,
+                "billable": True,
+                "comment_id": 422438348,
+                "ticket_line_item_id": 43160482,
+                "active_duration": 600,
+                "billable_time": 600,
+                "billable_override": None,
+            }
+        ]
+    }
+
+    result = ticket_importer._build_timer_billable_map(ticket)
+
+    assert result == {"422438348": False}
 
 
 def test_build_timer_billable_map_no_timers():
@@ -1888,9 +1923,22 @@ async def test_import_ticket_billable_from_ticket_timers(monkeypatch):
                 },
             ],
             "ticket_timers": [
-                # Comment 55 is billable, comment 56 is not
-                {"id": 1, "comment_id": 55, "billable": True, "billable_time": 60},
-                {"id": 2, "comment_id": 56, "billable": False, "billable_time": 30},
+                # Comment 55 is billable, comment 56 is non-billable because Syncro
+                # sets recorded=True for labor entered without a charge.
+                {
+                    "id": 1,
+                    "comment_id": 55,
+                    "billable": True,
+                    "recorded": False,
+                    "billable_time": 60,
+                },
+                {
+                    "id": 2,
+                    "comment_id": 56,
+                    "billable": True,
+                    "recorded": True,
+                    "billable_time": 30,
+                },
             ],
         }
 
@@ -2463,7 +2511,7 @@ async def test_sync_ticket_replies_can_mark_imported_billable_time_as_billed(
             {
                 "id": "syncro-comment-1",
                 "body": "Worked on billing setup",
-                "minutes_spent": 45,
+                "time_worked": "00:45:00",
                 "is_billable": True,
             }
         ],
