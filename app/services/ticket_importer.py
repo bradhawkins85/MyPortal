@@ -706,8 +706,10 @@ def _resolve_comment_billable(
 
     Checks the ticket_timers mapping first (keyed by comment ID) because
     Syncro stores the authoritative billable flag on the labor log (timer)
-    entry rather than on the comment object itself.  Falls back to the
-    comment's own fields when no timer entry exists for this comment.
+    entry rather than on the comment object itself. Syncro indicates whether
+    the technician charged the time with the timer's recorded value. Falls
+    back to the comment's own fields when no timer entry exists for this
+    comment.
     """
     if timer_billable:
         comment_id = comment.get("id")
@@ -723,7 +725,7 @@ def _resolve_comment_billable(
 
 
 def _build_timer_billable_map(ticket: dict[str, Any]) -> dict[str, bool]:
-    """Build a {comment_id_str: billable} mapping from ticket_timers."""
+    """Build a {comment_id_str: billable} mapping from timer recorded values."""
     timers = ticket.get("ticket_timers")
     if not isinstance(timers, list):
         return {}
@@ -734,9 +736,7 @@ def _build_timer_billable_map(ticket: dict[str, Any]) -> dict[str, bool]:
         comment_id = timer.get("comment_id")
         if comment_id is None:
             continue
-        billable = timer.get("billable")
-        if billable is not None:
-            result[str(comment_id)] = _coerce_bool(billable)
+        result[str(comment_id)] = _coerce_bool(timer.get("recorded"))
     return result
 
 

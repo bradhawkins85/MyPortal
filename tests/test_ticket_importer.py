@@ -1550,8 +1550,8 @@ def test_resolve_comment_billable_no_timer_match():
 def test_build_timer_billable_map_basic():
     ticket = {
         "ticket_timers": [
-            {"id": 1, "comment_id": 10, "billable": True},
-            {"id": 2, "comment_id": 20, "billable": False},
+            {"id": 1, "comment_id": 10, "recorded": True},
+            {"id": 2, "comment_id": 20, "recorded": False},
         ]
     }
     result = ticket_importer._build_timer_billable_map(ticket)
@@ -1561,9 +1561,9 @@ def test_build_timer_billable_map_basic():
 def test_build_timer_billable_map_coerces_string_values():
     ticket = {
         "ticket_timers": [
-            {"id": 1, "comment_id": 10, "billable": "false"},
-            {"id": 2, "comment_id": 20, "billable": "true"},
-            {"id": 3, "comment_id": 30, "billable": "0"},
+            {"id": 1, "comment_id": 10, "recorded": "false"},
+            {"id": 2, "comment_id": 20, "recorded": "true"},
+            {"id": 3, "comment_id": 30, "recorded": "0"},
         ]
     }
     result = ticket_importer._build_timer_billable_map(ticket)
@@ -1573,12 +1573,24 @@ def test_build_timer_billable_map_coerces_string_values():
 def test_build_timer_billable_map_skips_null_comment_id():
     ticket = {
         "ticket_timers": [
-            {"id": 1, "comment_id": None, "billable": True},
-            {"id": 2, "comment_id": 5, "billable": True},
+            {"id": 1, "comment_id": None, "recorded": True},
+            {"id": 2, "comment_id": 5, "recorded": True},
         ]
     }
     result = ticket_importer._build_timer_billable_map(ticket)
     assert result == {"5": True}
+
+
+def test_build_timer_billable_map_ignores_timer_billable_field():
+    ticket = {
+        "ticket_timers": [
+            {"id": 1, "comment_id": 10, "billable": True, "recorded": False},
+            {"id": 2, "comment_id": 20, "billable": False, "recorded": True},
+            {"id": 3, "comment_id": 30, "billable": True},
+        ]
+    }
+    result = ticket_importer._build_timer_billable_map(ticket)
+    assert result == {"10": False, "20": True, "30": False}
 
 
 def test_build_timer_billable_map_no_timers():
