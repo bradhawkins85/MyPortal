@@ -155,3 +155,15 @@ async def rename_invoice_number(
         """,
         (new_invoice_number, old_invoice_number, company_id),
     )
+
+
+async def delete_entries_for_tickets(ticket_ids: list[int]) -> int:
+    """Delete billed-time markers for the supplied tickets and return affected rows."""
+    clean_ids = sorted({int(ticket_id) for ticket_id in ticket_ids if ticket_id})
+    if not clean_ids:
+        return 0
+    placeholders = ", ".join(["%s"] * len(clean_ids))
+    return await db.execute_rowcount(
+        f"DELETE FROM ticket_billed_time_entries WHERE ticket_id IN ({placeholders})",
+        tuple(clean_ids),
+    )
