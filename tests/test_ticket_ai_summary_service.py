@@ -1,4 +1,5 @@
 from typing import Any
+import json
 import sys
 from types import SimpleNamespace
 
@@ -283,3 +284,45 @@ def test_strip_conversation_noise_removes_email_headers():
     assert "Date:" not in cleaned
     assert "Actual message body line one." in cleaned
     assert "Another line." in cleaned
+
+
+def test_extract_summary_fields_from_openai_chat_completion_json_string():
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "```json\n{\"summary\": \"CHKDSK found errors on BJP-DC-02.\", \"resolution\": \"Likely In Progress\"}\n```",
+                }
+            }
+        ],
+        "model": "gemma4:e2b",
+    }
+
+    summary, resolution = tickets_service._extract_summary_fields(json.dumps(payload))
+
+    assert summary == "CHKDSK found errors on BJP-DC-02."
+    assert resolution == "Likely In Progress"
+
+
+@pytest.mark.anyio
+async def test_extract_tags_from_openai_chat_completion_json_string(monkeypatch):
+    async def fake_excluded_tags():
+        return set()
+
+    monkeypatch.setattr(tickets_service, "get_all_excluded_tags", fake_excluded_tags)
+    payload = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "```json\n{\"tags\": [\"disk-verification\", \"chkdsk-scan\", \"server-health\"]}\n```",
+                }
+            }
+        ],
+        "model": "gemma4:e2b",
+    }
+
+    tags = await tickets_service._extract_tags(json.dumps(payload), {"subject": "BJPSC - Verify"}, [])
+
+    assert tags[:3] == ["disk-verification", "chkdsk-scan", "server-health"]
