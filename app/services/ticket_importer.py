@@ -263,27 +263,70 @@ def _syncro_ticket_is_unchanged(
     return syncro_updated_at <= last_imported_syncro_updated_at
 
 
+def _normalise_comment_comparison_text(value: str | None) -> str:
+    """Return comment text normalised for rich-preview/body comparisons."""
+
+    if not value:
+        return ""
+    return re.sub(r"\s+", " ", value).strip().casefold()
+
+
+def _append_full_plain_body_to_rich_preview(
+    rich_html: str, rich_text: str, plain_body: str | None
+) -> str:
+    """Ensure a truncated Syncro rich preview is supplemented with full text.
+
+    Syncro's ``rich_text_preview`` can preserve useful HTML, including images,
+    but it is sometimes only a preview of the full comment.  When the plain
+    ``body`` contains additional text, keep the rich preview and append the full
+    body as escaped preformatted text so no ticket content is lost.
+    """
+
+    if not plain_body:
+        return rich_html
+
+    normalised_rich = _normalise_comment_comparison_text(rich_text)
+    normalised_plain = _normalise_comment_comparison_text(plain_body)
+    if not normalised_plain or normalised_plain in normalised_rich:
+        return rich_html
+
+    escaped_body = escape(plain_body)
+    return (
+        f"{rich_html}"
+        '<hr />'
+        '<div class="syncro-full-body">'
+        '<p><strong>Full ticket body from Syncro:</strong></p>'
+        f"<pre>{escaped_body}</pre>"
+        '</div>'
+    )
+
+
 def _extract_comment_body(comment: dict[str, Any]) -> str | None:
     """Return the best available formatted Syncro comment body.
 
     Syncro comments can include ``rich_text_preview`` with the original HTML
-    formatting and inline image tags, while ``body`` may be a plain-text
-    preview such as ``[embedded image]``.  Prefer the rich HTML field when it
-    is present, then fall back to legacy body-like fields.
+    formatting and inline image tags, while ``body`` contains the full plain
+    text.  Keep useful rich content when it is present, but append the full
+    plain-text body whenever the rich preview is truncated so the import never
+    loses ticket content.
     """
+
+    plain_body = _clean_text(
+        comment.get("body")
+        or comment.get("comment")
+        or comment.get("text")
+        or comment.get("content")
+    )
     for rich_key in ("rich_text_preview", "richTextPreview"):
         rich_body = comment.get(rich_key)
         if rich_body is not None:
             text = unescape(str(rich_body).replace("\r\n", "\n")).replace("\xa0", " ")
             sanitized = sanitize_rich_text(text)
             if sanitized.has_rich_content:
-                return sanitized.html
-    return _clean_text(
-        comment.get("body")
-        or comment.get("comment")
-        or comment.get("text")
-        or comment.get("content")
-    )
+                return _append_full_plain_body_to_rich_preview(
+                    sanitized.html, sanitized.text_content, plain_body
+                )
+    return plain_body
 
 
 _IMAGE_MIME_TYPES = {
