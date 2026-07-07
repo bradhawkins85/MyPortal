@@ -47,6 +47,14 @@
       }),
     },
     {
+      label: 'Ticket has been in current status for 24 hours',
+      value: toJsonTemplate({
+        greater_than: {
+          'ticket.in_status_age_hours': 24,
+        },
+      }),
+    },
+    {
       label: 'Ticket has not had a reply for 24 hours',
       value: toJsonTemplate({
         greater_than: {
@@ -1836,6 +1844,7 @@
             'ticket.labels',
             'ticket.age_days',
             'ticket.updated_age_hours',
+            'ticket.in_status_age_hours',
             'ticket.last_reply_age_hours',
             'ticket_update.actor_type',
             'reply.is_internal',

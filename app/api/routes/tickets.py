@@ -335,6 +335,7 @@ async def get_ticket_dashboard(
                 module_slug=ticket.get("module_slug"),
                 requester_id=ticket.get("requester_id"),
                 updated_at=ticket.get("updated_at"),
+                status_changed_at=ticket.get("status_changed_at"),
             )
         )
     filters = TicketSearchFilters(

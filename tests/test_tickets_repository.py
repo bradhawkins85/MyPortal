@@ -561,6 +561,9 @@ async def test_update_ticket_allows_updated_at_override(monkeypatch):
     await tickets.update_ticket(1, status="resolved", updated_at=override)
 
     assert dummy_db.execute_sql.startswith("UPDATE tickets SET")
+    assert "status_changed_at = CASE WHEN status <> %s" in dummy_db.execute_sql
+    assert "ELSE COALESCE(status_changed_at, created_at) END" in dummy_db.execute_sql
+    assert dummy_db.execute_params[0] == "resolved"
     assert dummy_db.execute_params[-1] == 1
     assert dummy_db.execute_params[-2] == override
 

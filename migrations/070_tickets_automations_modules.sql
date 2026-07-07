@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS tickets (
     subject VARCHAR(255) NOT NULL,
     description TEXT NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'open',
+    status_changed_at DATETIME(6) NULL,
     priority VARCHAR(32) NOT NULL DEFAULT 'normal',
     category VARCHAR(64) NULL,
     module_slug VARCHAR(64) NULL,
