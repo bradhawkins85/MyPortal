@@ -779,6 +779,7 @@
   }
 
   const COMMAND_DEFAULT_CRONS = {
+    unbill_time_entries: '0 0 L * *',
     generate_invoice: '1 0 L * *',
     sync_to_xero: '1 15 L * *',
     sync_to_xero_auto_send: '1 16 L * *',
