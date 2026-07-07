@@ -55,6 +55,7 @@ module_repo = modules_service
 
 SOLIDTIME_MODULE_SLUG = "solidtime"
 DEFAULT_RATE_LIMIT_PER_MINUTE = 120
+DEFAULT_RECONCILE_INTERVAL_MINUTES = 15
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
 _BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
@@ -99,7 +100,9 @@ def _normalise_base_url(base: str) -> str:
     return url
 
 
-def _coerce_int(value: Any, default: int, *, minimum: int = 1, maximum: int = 600) -> int:
+def _coerce_int(
+    value: Any, default: int, *, minimum: int = 1, maximum: int = 600
+) -> int:
     try:
         result = int(value)
     except (TypeError, ValueError):
@@ -179,6 +182,15 @@ async def _load_module_settings() -> dict[str, Any] | None:
                     settings_payload.get("rate_limit_per_minute"),
                     DEFAULT_RATE_LIMIT_PER_MINUTE,
                 ),
+                "reconcile_interval_minutes": _coerce_int(
+                    settings_payload.get("reconcile_interval_minutes"),
+                    DEFAULT_RECONCILE_INTERVAL_MINUTES,
+                    minimum=5,
+                    maximum=1440,
+                ),
+                "monitor_successful_api_requests": bool(
+                    settings_payload.get("monitor_successful_api_requests", False)
+                ),
             }
         _MODULE_SETTINGS_EXPIRY = now + 30.0
     return _MODULE_SETTINGS_CACHE
@@ -218,9 +230,25 @@ async def _get_effective_settings() -> dict[str, Any]:
     return {**settings, "base_url": base_url, "api_token": api_token}
 
 
+def _monitor_successful_api_requests(settings: Mapping[str, Any]) -> bool:
+    return bool(settings.get("monitor_successful_api_requests", False))
+
+
+async def get_reconcile_interval_minutes() -> int:
+    """Return the configured Solidtime poll interval for scheduler setup."""
+    settings = await _load_module_settings() or {}
+    return _coerce_int(
+        settings.get("reconcile_interval_minutes"),
+        DEFAULT_RECONCILE_INTERVAL_MINUTES,
+        minimum=5,
+        maximum=1440,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Rate limiter (mirrors syncro pattern)
 # ---------------------------------------------------------------------------
+
 
 class AsyncRateLimiter:
     """Token-bucket limiter sharing slots via Redis when available."""
@@ -313,6 +341,7 @@ async def _get_or_create_rate_limiter(limit: int) -> AsyncRateLimiter:
 # HTTP request helper
 # ---------------------------------------------------------------------------
 
+
 def _truncate_body(body: str | None) -> str | None:
     if body is None:
         return None
@@ -345,34 +374,42 @@ async def _request(
     log_info("Calling Solidtime API", url=url, method=method)
 
     webhook_event: dict[str, Any] | None = None
+    event_id: int | None = None
     webhook_payload: dict[str, Any] = {"method": method.upper()}
     if params:
         webhook_payload["params"] = params
     if json_body is not None:
         webhook_payload["body"] = json_body
-    try:
-        webhook_event = await webhook_monitor.create_manual_event(
-            name="solidtime.api.request",
-            target_url=url,
-            payload=webhook_payload,
-            headers=None,
-            max_attempts=1,
-            backoff_seconds=0,
-        )
-    except Exception as exc:  # pragma: no cover - webhook monitor safety
-        log_error(
-            "Failed to record Solidtime request in webhook monitor",
-            url=url,
-            error=str(exc),
-        )
-        webhook_event = None
 
-    event_id: int | None = None
-    if webhook_event and webhook_event.get("id") is not None:
+    async def _ensure_webhook_event() -> int | None:
+        nonlocal webhook_event, event_id
+        if event_id is not None:
+            return event_id
         try:
-            event_id = int(webhook_event["id"])
-        except (TypeError, ValueError):  # pragma: no cover - defensive
-            event_id = None
+            webhook_event = await webhook_monitor.create_manual_event(
+                name="solidtime.api.request",
+                target_url=url,
+                payload=webhook_payload,
+                headers=None,
+                max_attempts=1,
+                backoff_seconds=0,
+            )
+        except Exception as exc:  # pragma: no cover - webhook monitor safety
+            log_error(
+                "Failed to record Solidtime request in webhook monitor",
+                url=url,
+                error=str(exc),
+            )
+            webhook_event = None
+        if webhook_event and webhook_event.get("id") is not None:
+            try:
+                event_id = int(webhook_event["id"])
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                event_id = None
+        return event_id
+
+    if _monitor_successful_api_requests(settings):
+        await _ensure_webhook_event()
 
     request_snapshot = {
         "method": method,
@@ -392,10 +429,11 @@ async def _request(
             response_headers = getattr(response, "headers", None)
         except httpx.HTTPError as exc:
             log_error("Solidtime API request failed", url=url, error=str(exc))
-            if event_id is not None:
+            failure_event_id = await _ensure_webhook_event()
+            if failure_event_id is not None:
                 try:
                     await webhook_monitor.record_manual_failure(
-                        event_id,
+                        failure_event_id,
                         attempt_number=1,
                         status="error",
                         error_message=str(exc),
@@ -439,10 +477,11 @@ async def _request(
             status=response.status_code,
             body=response.text,
         )
-        if event_id is not None:
+        failure_event_id = await _ensure_webhook_event()
+        if failure_event_id is not None:
             try:
                 await webhook_monitor.record_manual_failure(
-                    event_id,
+                    failure_event_id,
                     attempt_number=1,
                     status="failed",
                     error_message=f"HTTP {response.status_code}",
@@ -516,6 +555,7 @@ def _extract_data(payload: Any) -> Any:
 # ---------------------------------------------------------------------------
 # Resource helpers
 # ---------------------------------------------------------------------------
+
 
 async def list_organizations() -> list[dict[str, Any]]:
     payload = await _request("GET", "/users/me/memberships")
@@ -604,9 +644,7 @@ async def list_tasks(org_id: str, project_id: str) -> list[dict[str, Any]]:
     return []
 
 
-async def create_task(
-    org_id: str, project_id: str, *, name: str
-) -> dict[str, Any]:
+async def create_task(org_id: str, project_id: str, *, name: str) -> dict[str, Any]:
     payload = await _request(
         "POST",
         f"/organizations/{org_id}/projects/{project_id}/tasks",
@@ -663,9 +701,7 @@ async def list_time_entries(
     return []
 
 
-async def create_time_entry(
-    org_id: str, *, body: dict[str, Any]
-) -> dict[str, Any]:
+async def create_time_entry(org_id: str, *, body: dict[str, Any]) -> dict[str, Any]:
     payload = await _request(
         "POST",
         f"/organizations/{org_id}/time-entries",
@@ -694,6 +730,7 @@ async def delete_time_entry(org_id: str, time_entry_id: str) -> None:
 # ---------------------------------------------------------------------------
 # Conversion utilities
 # ---------------------------------------------------------------------------
+
 
 def _ticket_project_name(ticket: Mapping[str, Any]) -> str:
     number = (
@@ -1006,6 +1043,7 @@ async def _find_existing_project_by_name_and_client(
 # Outbound sync helpers
 # ---------------------------------------------------------------------------
 
+
 async def _ensure_client_for_company(
     company: Mapping[str, Any], *, settings: Mapping[str, Any]
 ) -> str | None:
@@ -1082,9 +1120,7 @@ async def sync_ticket_to_project(ticket_id: int) -> dict[str, Any] | None:
         await links_repo.mark_project_link_error(
             int(ticket_id), "Solidtime organization_id is not configured"
         )
-        raise SolidtimeConfigurationError(
-            "Solidtime organization_id is not configured"
-        )
+        raise SolidtimeConfigurationError("Solidtime organization_id is not configured")
 
     company_id = ticket.get("company_id")
     client_id: str | None = None
@@ -1092,9 +1128,7 @@ async def sync_ticket_to_project(ticket_id: int) -> dict[str, Any] | None:
         company = await company_repo.get_company_by_id(company_id)
         if company:
             try:
-                client_id = await _ensure_client_for_company(
-                    company, settings=settings
-                )
+                client_id = await _ensure_client_for_company(company, settings=settings)
             except SolidtimeAPIError as exc:
                 await links_repo.mark_project_link_error(int(ticket_id), str(exc))
                 raise
@@ -1151,9 +1185,7 @@ async def sync_ticket_to_project(ticket_id: int) -> dict[str, Any] | None:
     )
 
 
-async def _resolve_member_id_for_user(
-    org_id: str, user_id: int | None
-) -> str | None:
+async def _resolve_member_id_for_user(org_id: str, user_id: int | None) -> str | None:
     if not isinstance(user_id, int) or user_id <= 0:
         return None
     link = await links_repo.get_user_link(user_id)
@@ -1219,7 +1251,9 @@ async def sync_reply_to_time_entry(reply_id: int) -> dict[str, Any] | None:
             await links_repo.delete_time_entry_link(int(reply_id))
         return None
 
-    if settings.get("only_billable_to_solidtime") and not bool(reply.get("is_billable")):
+    if settings.get("only_billable_to_solidtime") and not bool(
+        reply.get("is_billable")
+    ):
         existing = await links_repo.get_time_entry_link(int(reply_id))
         if existing and existing.get("solidtime_time_entry_id"):
             try:
@@ -1269,9 +1303,7 @@ async def sync_reply_to_time_entry(reply_id: int) -> dict[str, Any] | None:
                 break
         if labour_name and not task_id:
             try:
-                created_task = await create_task(
-                    org_id, project_id, name=labour_name
-                )
+                created_task = await create_task(org_id, project_id, name=labour_name)
                 task_id = str(created_task.get("id") or "") or None
             except SolidtimeAPIError as exc:  # pragma: no cover - non-critical
                 log_warning(
@@ -1308,9 +1340,7 @@ async def sync_reply_to_time_entry(reply_id: int) -> dict[str, Any] | None:
             created = await create_time_entry(org_id, body=body)
             entry_id = str(created.get("id") or "").strip()
             if not entry_id:
-                raise SolidtimeAPIError(
-                    "Solidtime did not return a time entry ID"
-                )
+                raise SolidtimeAPIError("Solidtime did not return a time entry ID")
     except SolidtimeAPIError as exc:
         await links_repo.mark_time_entry_link_error(int(reply_id), str(exc))
         raise
@@ -1327,6 +1357,7 @@ async def sync_reply_to_time_entry(reply_id: int) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 # Background-task scheduling helpers
 # ---------------------------------------------------------------------------
+
 
 def _track_background_task(task: asyncio.Task[Any]) -> None:
     _BACKGROUND_TASKS.add(task)
@@ -1533,6 +1564,7 @@ def schedule_reply_sync(reply_id: int) -> None:
 # Inbound webhook signature verification
 # ---------------------------------------------------------------------------
 
+
 def verify_webhook_signature(secret: str, body: bytes, signature: str | None) -> bool:
     """Verify the HMAC-SHA256 signature carried in the inbound webhook header.
 
@@ -1635,6 +1667,7 @@ async def _sync_time_entry_from_solidtime(
 # Inbound reconciler (poll-based)
 # ---------------------------------------------------------------------------
 
+
 async def reconcile_once() -> dict[str, Any]:
     """Reconcile state between Solidtime and MyPortal.
 
@@ -1729,6 +1762,7 @@ async def reconcile_once() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # UI helpers
 # ---------------------------------------------------------------------------
+
 
 async def get_ticket_links(ticket_id: int) -> dict[str, Any]:
     """Return the Solidtime URLs to surface on the ticket detail page.
