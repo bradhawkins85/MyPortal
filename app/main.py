@@ -8232,6 +8232,7 @@ async def _render_tickets_dashboard(
         "ticket_automation_filter_lookup": ticket_automation_filter_lookup,
         "ticket_dashboard_now": datetime.now(timezone.utc),
         "can_bulk_delete_tickets": bool(user.get("is_super_admin")),
+        "next_ticket_number": await site_settings_repo.get_next_ticket_number(),
         "success_message": success_message,
         "error_message": error_message,
         "ticket_dashboard_endpoint": dashboard_endpoint,
