@@ -228,6 +228,40 @@ def _parse_datetime(value: Any) -> datetime | None:
     return parsed.replace(tzinfo=timezone.utc)
 
 
+def _ticket_updated_at(ticket: dict[str, Any]) -> datetime | None:
+    return _parse_datetime(
+        ticket.get("updated_at")
+        or ticket.get("updated_on")
+        or ticket.get("updated")
+        or ticket.get("updated_at_utc")
+    )
+
+
+def _existing_syncro_updated_at(existing: dict[str, Any]) -> datetime | None:
+    """Return the last Syncro update timestamp stored for an imported ticket.
+
+    Older imports predate ``syncro_updated_at`` and stored Syncro's
+    ``updated_at`` in the main ticket timestamp, so fall back to that value once.
+    """
+    return _parse_datetime(existing.get("syncro_updated_at")) or _parse_datetime(
+        existing.get("updated_at")
+    )
+
+
+def _syncro_ticket_is_unchanged(
+    ticket: dict[str, Any], existing: dict[str, Any] | None
+) -> bool:
+    if not existing:
+        return False
+    syncro_updated_at = _ticket_updated_at(ticket)
+    if syncro_updated_at is None:
+        return False
+    last_imported_syncro_updated_at = _existing_syncro_updated_at(existing)
+    if last_imported_syncro_updated_at is None:
+        return False
+    return syncro_updated_at <= last_imported_syncro_updated_at
+
+
 def _extract_comment_body(comment: dict[str, Any]) -> str | None:
     """Return the best available formatted Syncro comment body.
 
@@ -1554,12 +1588,7 @@ async def _upsert_ticket(
         or ticket.get("created")
         or ticket.get("created_at_utc")
     )
-    updated_at = _parse_datetime(
-        ticket.get("updated_at")
-        or ticket.get("updated_on")
-        or ticket.get("updated")
-        or ticket.get("updated_at_utc")
-    )
+    updated_at = _ticket_updated_at(ticket)
     closed_at = _parse_datetime(
         ticket.get("resolved_at")
         or ticket.get("closed_at")
@@ -1582,6 +1611,9 @@ async def _upsert_ticket(
     description_value: str | None = description or None
     category_value: str | None = category or None
 
+    if existing and _syncro_ticket_is_unchanged(ticket, existing):
+        return f"skipped: Syncro ticket {external_reference} has not changed since last import"
+
     if existing:
         updates: dict[str, Any] = {
             "subject": subject,
@@ -1601,6 +1633,7 @@ async def _upsert_ticket(
             updates["created_at"] = created_at
         if updated_at is not None:
             updates["updated_at"] = updated_at
+            updates["syncro_updated_at"] = updated_at
         await tickets_repo.update_ticket(int(existing["id"]), **updates)
         await tickets_service.emit_ticket_updated_event(
             int(existing["id"]),
@@ -1637,6 +1670,7 @@ async def _upsert_ticket(
                 timestamp_updates["created_at"] = created_at
             if updated_at is not None:
                 timestamp_updates["updated_at"] = updated_at
+                timestamp_updates["syncro_updated_at"] = updated_at
             if closed_at is not None:
                 timestamp_updates["closed_at"] = closed_at
             await tickets_repo.update_ticket(int(created_id), **timestamp_updates)
@@ -1801,12 +1835,21 @@ async def import_all_tickets(
         summary.fetched += len(tickets)
         for ticket in tickets:
             try:
-                ticket_detail = await _fetch_ticket_detail_for_import(
-                    ticket, rate_limiter=limiter
+                syncro_id = ticket.get("id")
+                existing = (
+                    await tickets_repo.get_ticket_by_external_reference(str(syncro_id))
+                    if syncro_id is not None
+                    else None
                 )
-                outcome = await _upsert_ticket(
-                    ticket_detail, allowed_statuses, default_status, status_mappings
-                )
+                if _syncro_ticket_is_unchanged(ticket, existing):
+                    outcome = f"skipped: Syncro ticket {syncro_id} has not changed since last import"
+                else:
+                    ticket_detail = await _fetch_ticket_detail_for_import(
+                        ticket, rate_limiter=limiter
+                    )
+                    outcome = await _upsert_ticket(
+                        ticket_detail, allowed_statuses, default_status, status_mappings
+                    )
             except Exception as exc:  # pragma: no cover - defensive logging
                 reason = f"Syncro ticket {ticket.get('id') or 'unknown'} failed to import: {exc}"
                 log_error(
