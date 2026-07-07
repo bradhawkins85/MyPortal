@@ -137,6 +137,7 @@ async def test_import_ticket_by_id_creates_new_ticket(monkeypatch):
     assert created_calls["requester_id"] is None
     assert created_calls["module_slug"] == "syncro"
     assert created_calls["trigger_automations"] is False
+    assert created_calls["record_initial_reply"] is False
     # Now the ticket ID should match the Syncro ticket number
     assert created_calls["id"] == 101
     assert update_calls[0][0] == 101
@@ -718,6 +719,7 @@ async def test_import_ticket_syncs_comments_and_watchers(monkeypatch):
     assert created_call["company_id"] == 8
     assert created_call["requester_id"] == 21
     assert created_call["description"] == "Customer message"
+    assert created_call["record_initial_reply"] is False
     # Verify the ticket ID was set to 5001 from the number
     assert created_call["id"] == 5001
     # 1 metadata note + 2 comments
