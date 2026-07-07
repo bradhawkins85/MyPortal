@@ -81,8 +81,10 @@ async def create_session(
 
 
 async def get_session_by_token(token: str) -> Optional[dict[str, Any]]:
+    token_hash = _hash_session_token(token)
     row = await db.fetch_one(
-        "SELECT * FROM user_sessions WHERE session_token = %s", (_hash_session_token(token),)
+        "SELECT * FROM user_sessions WHERE session_token = %s OR session_token = %s",
+        (token_hash, token),
     )
     return row
 

@@ -70,6 +70,11 @@ class SessionManager:
             impersonator_session_id=impersonator_session_id,
             impersonation_started_at=now if impersonator_user_id is not None else None,
         )
+        # The repository stores only a hash of the session token. Keep the raw
+        # token in the in-memory session returned to the login handler so the
+        # browser receives the usable token, not the database digest.
+        record = dict(record)
+        record["session_token"] = session_token
         return self._map_session(record)
 
     async def load_session(
