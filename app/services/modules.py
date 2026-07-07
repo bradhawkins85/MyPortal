@@ -137,7 +137,7 @@ async def update_xero_tokens(
     tenant_id: str | None = None,
 ) -> None:
     """Update Xero OAuth tokens in the module settings.
-    
+
     Args:
         refresh_token: The refresh token to store (will be encrypted)
         access_token: The access token to store (will be encrypted)
@@ -148,35 +148,39 @@ async def update_xero_tokens(
     if not module:
         logger.error("Xero module not found when attempting to update tokens")
         return
-    
+
     settings = dict(module.get("settings") or {})
-    
+
     # Encrypt and store tokens
     if refresh_token is not None:
-        settings["refresh_token"] = encrypt_secret(refresh_token) if refresh_token else ""
+        settings["refresh_token"] = (
+            encrypt_secret(refresh_token) if refresh_token else ""
+        )
     if access_token is not None:
         settings["access_token"] = encrypt_secret(access_token) if access_token else ""
     if token_expires_at is not None:
         # Store as ISO format string
-        settings["token_expires_at"] = token_expires_at.isoformat() if token_expires_at else None
+        settings["token_expires_at"] = (
+            token_expires_at.isoformat() if token_expires_at else None
+        )
     if tenant_id is not None:
         # Store tenant_id as a string (empty string allowed)
         settings["tenant_id"] = str(tenant_id)
-    
+
     await module_repo.update_module(XERO_MODULE_SLUG, settings=settings)
     logger.info("Updated Xero OAuth tokens")
 
 
 async def get_xero_credentials() -> dict[str, Any] | None:
     """Get Xero credentials with decrypted tokens.
-    
+
     Returns:
         Dictionary with decrypted credentials or None if module not found
     """
     module = await get_module(XERO_MODULE_SLUG, redact=False)
     if not module:
         return None
-    
+
     settings = dict(module.get("settings") or {})
     credentials = {
         "client_id": settings.get("client_id", ""),
@@ -192,7 +196,7 @@ async def get_xero_credentials() -> dict[str, Any] | None:
     # Decrypt tokens if present
     encrypted_refresh = settings.get("refresh_token", "")
     encrypted_access = settings.get("access_token", "")
-    
+
     if encrypted_refresh:
         try:
             credentials["refresh_token"] = decrypt_secret(encrypted_refresh)
@@ -201,7 +205,7 @@ async def get_xero_credentials() -> dict[str, Any] | None:
             credentials["refresh_token"] = ""
     else:
         credentials["refresh_token"] = ""
-    
+
     if encrypted_access:
         try:
             credentials["access_token"] = decrypt_secret(encrypted_access)
@@ -210,47 +214,49 @@ async def get_xero_credentials() -> dict[str, Any] | None:
             credentials["access_token"] = ""
     else:
         credentials["access_token"] = ""
-    
+
     # Parse token expiry
     token_expires_at_str = settings.get("token_expires_at")
     if token_expires_at_str:
         try:
-            credentials["token_expires_at"] = datetime.fromisoformat(token_expires_at_str)
+            credentials["token_expires_at"] = datetime.fromisoformat(
+                token_expires_at_str
+            )
         except (ValueError, TypeError):
             credentials["token_expires_at"] = None
     else:
         credentials["token_expires_at"] = None
-    
+
     return credentials
 
 
 async def refresh_xero_access_token() -> str:
     """Refresh the Xero access token using the stored refresh token.
-    
+
     Returns:
         The new access token
-        
+
     Raises:
         RuntimeError: If credentials are missing or token refresh fails
     """
     credentials = await get_xero_credentials()
     if not credentials:
         raise RuntimeError("Xero credentials not configured")
-    
+
     client_id = credentials.get("client_id", "").strip()
     client_secret = credentials.get("client_secret", "").strip()
     refresh_token = credentials.get("refresh_token", "").strip()
-    
+
     if not (client_id and client_secret and refresh_token):
         raise RuntimeError("Xero OAuth credentials incomplete")
-    
+
     # Exchange refresh token for new access token
     token_url = "https://identity.xero.com/connect/token"
     token_data = {
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
     }
-    
+
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
             response = await client.post(
@@ -271,26 +277,26 @@ async def refresh_xero_access_token() -> str:
     except Exception as exc:
         logger.error("Error refreshing Xero access token", error=str(exc))
         raise RuntimeError("Failed to refresh Xero access token") from exc
-    
+
     access_token = token_response.get("access_token")
     new_refresh_token = token_response.get("refresh_token")
     expires_in = token_response.get("expires_in")
-    
+
     if not access_token:
         raise RuntimeError("No access token in Xero response")
-    
+
     # Calculate expiry time
     expires_at = None
     if isinstance(expires_in, (int, float)):
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(expires_in))
-    
+
     # Store the new tokens
     await update_xero_tokens(
         access_token=access_token,
         refresh_token=new_refresh_token if new_refresh_token else refresh_token,
         token_expires_at=expires_at,
     )
-    
+
     logger.info("Successfully refreshed Xero access token")
     return access_token
 
@@ -315,10 +321,10 @@ def _xero_cached_access_token(credentials: Mapping[str, Any] | None) -> str | No
 
 async def acquire_xero_access_token() -> str:
     """Get a valid Xero access token, refreshing if necessary.
-    
+
     Returns:
         A valid access token
-        
+
     Raises:
         RuntimeError: If unable to acquire a valid token
     """
@@ -346,7 +352,9 @@ async def acquire_xero_access_token() -> str:
         return await refresh_xero_access_token()
 
 
-def _merge_settings(defaults: Mapping[str, Any], overrides: Mapping[str, Any] | None) -> dict[str, Any]:
+def _merge_settings(
+    defaults: Mapping[str, Any], overrides: Mapping[str, Any] | None
+) -> dict[str, Any]:
     merged = dict(defaults)
     if not overrides:
         return merged
@@ -381,7 +389,9 @@ def _ensure_list(value: Any) -> list[str]:
     return []
 
 
-def _coerce_int(value: Any, *, minimum: int | None = None, maximum: int | None = None) -> int | None:
+def _coerce_int(
+    value: Any, *, minimum: int | None = None, maximum: int | None = None
+) -> int | None:
     if value is None or value == "":
         return None
     try:
@@ -397,7 +407,7 @@ def _coerce_int(value: Any, *, minimum: int | None = None, maximum: int | None =
 
 def _parse_nullable_int(value: Any) -> int | None:
     """Parse an optional integer value from automation payload.
-    
+
     Handles None, empty string, and the literal string "null" as null values.
     Returns the parsed integer or None if the value is null or cannot be parsed.
     """
@@ -443,7 +453,9 @@ def _default_chatgpt_settings() -> dict[str, Any]:
     shared_secret = str(os.getenv("CHATGPT_MCP_SHARED_SECRET", "")).strip()
     shared_secret_hash = _hash_secret(shared_secret) if shared_secret else ""
     allowed_actions = _normalise_tool_names(os.getenv("CHATGPT_MCP_ALLOWED_ACTIONS"))
-    max_results = _coerce_int(os.getenv("CHATGPT_MCP_MAX_RESULTS"), minimum=1, maximum=200) or 50
+    max_results = (
+        _coerce_int(os.getenv("CHATGPT_MCP_MAX_RESULTS"), minimum=1, maximum=200) or 50
+    )
     allow_updates = _ensure_bool(os.getenv("CHATGPT_MCP_ALLOW_UPDATES"), False)
     allowed_statuses = _normalise_statuses(os.getenv("CHATGPT_MCP_ALLOWED_STATUSES"))
     system_user_id = _coerce_int(os.getenv("CHATGPT_MCP_SYSTEM_USER_ID"))
@@ -503,8 +515,7 @@ def _default_ollama_mcp_settings() -> dict[str, Any]:
         os.getenv("OLLAMA_MCP_ALLOWED_ACTIONS")
     )
     max_results = (
-        _coerce_int(os.getenv("OLLAMA_MCP_MAX_RESULTS"), minimum=1, maximum=200)
-        or 25
+        _coerce_int(os.getenv("OLLAMA_MCP_MAX_RESULTS"), minimum=1, maximum=200) or 25
     )
     allow_replies = _ensure_bool(os.getenv("OLLAMA_MCP_ALLOW_REPLIES"), False)
     allow_updates = _ensure_bool(os.getenv("OLLAMA_MCP_ALLOW_UPDATES"), False)
@@ -559,7 +570,9 @@ def _default_xero_settings() -> dict[str, Any]:
         "billable_statuses": _normalise_statuses(_clean_env("XERO_BILLABLE_STATUSES")),
         "line_item_description_template": _clean_env("XERO_LINE_ITEM_TEMPLATE")
         or "Ticket {ticket_id}: {ticket_subject} {labour_suffix} ({labour_duration})",
-        "auto_create_products": _ensure_bool(os.getenv("XERO_AUTO_CREATE_PRODUCTS"), True),
+        "auto_create_products": _ensure_bool(
+            os.getenv("XERO_AUTO_CREATE_PRODUCTS"), True
+        ),
     }
 
 
@@ -824,6 +837,8 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
             "labour_type_to_task": False,
             "webhook_secret": "",
             "rate_limit_per_minute": 120,
+            "reconcile_interval_minutes": 15,
+            "monitor_successful_api_requests": False,
             "manage_url": "/admin/modules/solidtime",
         },
     },
@@ -914,7 +929,9 @@ def _default_module_setting(slug: str, key: str, fallback: str) -> str:
 
 
 _DEFAULT_OLLAMA_MODEL = _default_module_setting("ollama", "model", "llama3")
-_DEFAULT_OLLAMA_BASE_URL = _default_module_setting("ollama", "base_url", "http://127.0.0.1:11434")
+_DEFAULT_OLLAMA_BASE_URL = _default_module_setting(
+    "ollama", "base_url", "http://127.0.0.1:11434"
+)
 
 # Map module slugs to the setting fields that can be sourced from environment
 # variables. When FORCE_ENV_MODULE_SETTINGS=true, these fields are resolved from
@@ -1075,7 +1092,9 @@ def _coerce_settings(
     payload: Mapping[str, Any] | None,
     existing: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    defaults = next((module["settings"] for module in DEFAULT_MODULES if module["slug"] == slug), {})
+    defaults = next(
+        (module["settings"] for module in DEFAULT_MODULES if module["slug"] == slug), {}
+    )
     existing_settings: Mapping[str, Any] | None = None
     if existing and isinstance(existing.get("settings"), Mapping):
         existing_settings = existing["settings"]
@@ -1097,7 +1116,15 @@ def _coerce_settings(
                 api_key = str(existing_settings.get("api_key") or "").strip()
             else:
                 api_key = candidate
-        merged.update({"provider": provider, "base_url": base_url, "model": model, "prompt": prompt, "api_key": api_key})
+        merged.update(
+            {
+                "provider": provider,
+                "base_url": base_url,
+                "model": model,
+                "prompt": prompt,
+                "api_key": api_key,
+            }
+        )
         _env = os.getenv("OLLAMA_PROVIDER", "").strip().lower()
         if _env in {"ollama", "openai", "llamacpp"}:
             merged["provider"] = _env
@@ -1126,7 +1153,9 @@ def _coerce_settings(
             merged["from_address"] = _env
         _env = os.getenv("SMTP_DEFAULT_RECIPIENTS", "").strip()
         if _env:
-            merged["default_recipients"] = [e.strip() for e in _env.split(",") if e.strip()]
+            merged["default_recipients"] = [
+                e.strip() for e in _env.split(",") if e.strip()
+            ]
         _env = os.getenv("SMTP_SUBJECT_PREFIX", "").strip()
         if _env:
             merged["subject_prefix"] = _env
@@ -1168,7 +1197,12 @@ def _coerce_settings(
             merged["track_clicks"] = _env.lower() not in ("false", "0", "no", "off")
         _env = os.getenv("SMTP2GO_DISABLE_WEBHOOK_SIGNATURE_VERIFICATION", "").strip()
         if _env:
-            merged["disable_webhook_signature_verification"] = _env.lower() not in ("false", "0", "no", "off")
+            merged["disable_webhook_signature_verification"] = _env.lower() not in (
+                "false",
+                "0",
+                "no",
+                "off",
+            )
     elif slug == "syncro":
         base_url = str(merged.get("base_url") or "").strip().rstrip("/")
         api_key_override = payload.get("api_key") if payload else None
@@ -1178,7 +1212,10 @@ def _coerce_settings(
             api_key = str(api_key_override or "").strip()
             if not api_key and existing_settings and existing_settings.get("api_key"):
                 api_key = str(existing_settings.get("api_key") or "").strip()
-        rate_limit = _coerce_int(merged.get("rate_limit_per_minute"), minimum=1, maximum=600) or 180
+        rate_limit = (
+            _coerce_int(merged.get("rate_limit_per_minute"), minimum=1, maximum=600)
+            or 180
+        )
         raw_mappings = merged.get("ticket_status_mappings") or []
         status_mappings: list[dict[str, str]] = []
         seen_syncro_statuses: set[str] = set()
@@ -1186,18 +1223,26 @@ def _coerce_settings(
             for item in raw_mappings:
                 if not isinstance(item, Mapping):
                     continue
-                syncro_status = str(item.get("syncro_status") or item.get("syncroStatus") or "").strip()
-                myportal_status = str(item.get("myportal_status") or item.get("myportalStatus") or "").strip().lower()
+                syncro_status = str(
+                    item.get("syncro_status") or item.get("syncroStatus") or ""
+                ).strip()
+                myportal_status = (
+                    str(item.get("myportal_status") or item.get("myportalStatus") or "")
+                    .strip()
+                    .lower()
+                )
                 if not syncro_status or not myportal_status:
                     continue
                 lookup_key = syncro_status.casefold()
                 if lookup_key in seen_syncro_statuses:
                     continue
                 seen_syncro_statuses.add(lookup_key)
-                status_mappings.append({
-                    "syncro_status": syncro_status[:128],
-                    "myportal_status": myportal_status[:128],
-                })
+                status_mappings.append(
+                    {
+                        "syncro_status": syncro_status[:128],
+                        "myportal_status": myportal_status[:128],
+                    }
+                )
         merged.update(
             {
                 "base_url": base_url,
@@ -1253,7 +1298,11 @@ def _coerce_settings(
             auth_token = str(merged.get("auth_token") or "").strip()
         else:
             candidate = str(auth_token_override or "").strip()
-            if not candidate and existing_settings and existing_settings.get("auth_token"):
+            if (
+                not candidate
+                and existing_settings
+                and existing_settings.get("auth_token")
+            ):
                 auth_token = str(existing_settings.get("auth_token") or "").strip()
             else:
                 auth_token = candidate
@@ -1306,7 +1355,7 @@ def _coerce_settings(
                 api_key = str(existing_settings.get("api_key") or "").strip()
             else:
                 api_key = candidate
-        
+
         # Handle pepper field similarly to api_key (preserve existing if not provided)
         pepper_override = overrides.get("pepper")
         if pepper_override is None:
@@ -1317,7 +1366,7 @@ def _coerce_settings(
                 pepper = str(existing_settings.get("pepper") or "").strip()
             else:
                 pepper = candidate
-        
+
         base_url_value = str(merged.get("base_url", "")).strip()
         base_url = base_url_value.rstrip("/") if base_url_value else ""
         merged.update(
@@ -1327,23 +1376,32 @@ def _coerce_settings(
                 "api_key": api_key,
                 "track_opens": _ensure_bool(merged.get("track_opens"), True),
                 "track_clicks": _ensure_bool(merged.get("track_clicks"), True),
-                "send_to_plausible": _ensure_bool(merged.get("send_to_plausible"), False),
+                "send_to_plausible": _ensure_bool(
+                    merged.get("send_to_plausible"), False
+                ),
                 "track_pageviews": _ensure_bool(merged.get("track_pageviews"), False),
                 "pepper": pepper,
                 "send_pii": _ensure_bool(merged.get("send_pii"), False),
             }
         )
     elif slug == "imap":
-        manage_url = str(merged.get("manage_url") or "").strip() or "/admin/modules/imap"
+        manage_url = (
+            str(merged.get("manage_url") or "").strip() or "/admin/modules/imap"
+        )
         merged.update({"manage_url": manage_url})
     elif slug == "m365-mail":
-        manage_url = str(merged.get("manage_url") or "").strip() or "/admin/modules/m365-mail"
+        manage_url = (
+            str(merged.get("manage_url") or "").strip() or "/admin/modules/m365-mail"
+        )
         merged.update({"manage_url": manage_url})
     elif slug == "chatgpt-mcp":
         overrides = payload or {}
         shared_secret_override = overrides.get("shared_secret")
         shared_secret_hash_override = overrides.get("shared_secret_hash")
-        if shared_secret_override is not None or shared_secret_hash_override is not None:
+        if (
+            shared_secret_override is not None
+            or shared_secret_hash_override is not None
+        ):
             candidate = shared_secret_override
             if candidate in (None, ""):
                 candidate = shared_secret_hash_override
@@ -1361,7 +1419,9 @@ def _coerce_settings(
         # ensure a hash is always present even if override absent
         merged["shared_secret_hash"] = str(merged.get("shared_secret_hash", "")).strip()
         merged["allowed_actions"] = _normalise_tool_names(merged.get("allowed_actions"))
-        merged["max_results"] = _coerce_int(merged.get("max_results"), minimum=1, maximum=200) or 50
+        merged["max_results"] = (
+            _coerce_int(merged.get("max_results"), minimum=1, maximum=200) or 50
+        )
         merged["allow_ticket_updates"] = _ensure_bool(
             merged.get("allow_ticket_updates"), False
         )
@@ -1372,7 +1432,10 @@ def _coerce_settings(
         overrides = payload or {}
         shared_secret_override = overrides.get("shared_secret")
         shared_secret_hash_override = overrides.get("shared_secret_hash")
-        if shared_secret_override is not None or shared_secret_hash_override is not None:
+        if (
+            shared_secret_override is not None
+            or shared_secret_hash_override is not None
+        ):
             candidate = shared_secret_override
             if candidate in (None, ""):
                 candidate = shared_secret_hash_override
@@ -1416,7 +1479,10 @@ def _coerce_settings(
         overrides = payload or {}
         shared_secret_override = overrides.get("shared_secret")
         shared_secret_hash_override = overrides.get("shared_secret_hash")
-        if shared_secret_override is not None or shared_secret_hash_override is not None:
+        if (
+            shared_secret_override is not None
+            or shared_secret_hash_override is not None
+        ):
             candidate = shared_secret_override
             if candidate in (None, ""):
                 candidate = shared_secret_hash_override
@@ -1433,10 +1499,17 @@ def _coerce_settings(
             # else: blank submission — preserve existing merged["shared_secret_hash"]
         merged["shared_secret_hash"] = str(merged.get("shared_secret_hash", "")).strip()
         merged.pop("shared_secret", None)
-        merged["sync_service_status"] = _ensure_bool(merged.get("sync_service_status"), True)
+        merged["sync_service_status"] = _ensure_bool(
+            merged.get("sync_service_status"), True
+        )
         _env = os.getenv("UPTIMEKUMA_SYNC_SERVICE_STATUS", "").strip()
         if _env:
-            merged["sync_service_status"] = _env.lower() not in ("false", "0", "no", "off")
+            merged["sync_service_status"] = _env.lower() not in (
+                "false",
+                "0",
+                "no",
+                "off",
+            )
         _env = os.getenv("UPTIMEKUMA_SHARED_SECRET", "").strip()
         if _env and not merged.get("shared_secret_hash"):
             merged["shared_secret_hash"] = _hash_secret(_env)
@@ -1468,7 +1541,7 @@ def _coerce_settings(
         access_token = _preserve_secret("access_token")
         refresh_token = _preserve_secret("refresh_token")
         token_expires_at = merged.get("token_expires_at")
-        
+
         # Preserve existing token expiry if not provided in overrides
         if token_expires_at is None and existing_settings:
             token_expires_at = existing_settings.get("token_expires_at")
@@ -1483,17 +1556,25 @@ def _coerce_settings(
                 "token_expires_at": token_expires_at,
                 "tenant_id": str(merged.get("tenant_id", "")).strip(),
                 "company_name": str(merged.get("company_name", "")).strip(),
-                "default_hourly_rate": _normalise_rate(merged.get("default_hourly_rate")),
+                "default_hourly_rate": _normalise_rate(
+                    merged.get("default_hourly_rate")
+                ),
                 "account_code": str(merged.get("account_code", "")).strip(),
                 "tax_type": str(merged.get("tax_type", "")).strip(),
-                "line_amount_type": str(merged.get("line_amount_type", "")).strip() or "Exclusive",
-                "reference_prefix": str(merged.get("reference_prefix", "")).strip() or "Support",
-                "billable_statuses": _normalise_statuses(merged.get("billable_statuses")),
+                "line_amount_type": str(merged.get("line_amount_type", "")).strip()
+                or "Exclusive",
+                "reference_prefix": str(merged.get("reference_prefix", "")).strip()
+                or "Support",
+                "billable_statuses": _normalise_statuses(
+                    merged.get("billable_statuses")
+                ),
                 "line_item_description_template": str(
                     merged.get("line_item_description_template", "")
                 ).strip()
                 or "Ticket {ticket_id}: {ticket_subject} {labour_suffix} ({labour_duration})",
-                "auto_create_products": _ensure_bool(merged.get("auto_create_products"), True),
+                "auto_create_products": _ensure_bool(
+                    merged.get("auto_create_products"), True
+                ),
             }
         )
     elif slug == "sms-gateway":
@@ -1503,8 +1584,14 @@ def _coerce_settings(
             authorization = str(merged.get("authorization") or "").strip()
         else:
             candidate = str(authorization_override or "").strip()
-            if not candidate and existing_settings and existing_settings.get("authorization"):
-                authorization = str(existing_settings.get("authorization") or "").strip()
+            if (
+                not candidate
+                and existing_settings
+                and existing_settings.get("authorization")
+            ):
+                authorization = str(
+                    existing_settings.get("authorization") or ""
+                ).strip()
             else:
                 authorization = candidate
         merged.update(
@@ -1526,10 +1613,17 @@ def _coerce_settings(
             client_secret = str(merged.get("client_secret") or "").strip()
         else:
             candidate = str(client_secret_override or "").strip()
-            if not candidate and existing_settings and existing_settings.get("client_secret"):
-                client_secret = str(existing_settings.get("client_secret") or "").strip()
+            if (
+                not candidate
+                and existing_settings
+                and existing_settings.get("client_secret")
+            ):
+                client_secret = str(
+                    existing_settings.get("client_secret") or ""
+                ).strip()
             else:
                 client_secret = candidate
+
         # Preserve app_object_id, client_secret_key_id, client_secret_expires_at
         # and tenant_id when not explicitly overridden so auto-provisioned values
         # are not wiped by an unrelated settings save.
@@ -1573,17 +1667,23 @@ def _coerce_settings(
             password = str(merged.get("password") or "").strip()
         else:
             candidate = str(password_override or "").strip()
-            if not candidate and existing_settings and existing_settings.get("password"):
+            if (
+                not candidate
+                and existing_settings
+                and existing_settings.get("password")
+            ):
                 password = str(existing_settings.get("password") or "").strip()
             else:
                 password = candidate
         merged.update(
             {
                 "remote_host": str(merged.get("remote_host", "")).strip(),
-                "remote_path": str(merged.get("remote_path", "")).strip() or "/volume1/.srv/unifi-talk/recordings",
+                "remote_path": str(merged.get("remote_path", "")).strip()
+                or "/volume1/.srv/unifi-talk/recordings",
                 "username": str(merged.get("username", "")).strip(),
                 "password": password,
-                "local_path": str(merged.get("local_path", "")).strip() or "/var/lib/myportal/call_recordings",
+                "local_path": str(merged.get("local_path", "")).strip()
+                or "/var/lib/myportal/call_recordings",
                 "port": _coerce_int(merged.get("port"), minimum=1, maximum=65535) or 22,
             }
         )
@@ -1618,12 +1718,21 @@ def _coerce_settings(
                 api_key = candidate
         merged.update(
             {
-                "base_url": str(merged.get("base_url", "")).strip().rstrip("/") or "https://pwpush.com",
+                "base_url": str(merged.get("base_url", "")).strip().rstrip("/")
+                or "https://pwpush.com",
                 "api_key": api_key,
                 "user_email": str(merged.get("user_email", "")).strip(),
-                "expire_after_days": _coerce_int(merged.get("expire_after_days"), minimum=1, maximum=90) or 7,
-                "expire_after_views": _coerce_int(merged.get("expire_after_views"), minimum=1, maximum=100) or 5,
-                "deletable_by_viewer": _ensure_bool(merged.get("deletable_by_viewer"), True),
+                "expire_after_days": _coerce_int(
+                    merged.get("expire_after_days"), minimum=1, maximum=90
+                )
+                or 7,
+                "expire_after_views": _coerce_int(
+                    merged.get("expire_after_views"), minimum=1, maximum=100
+                )
+                or 5,
+                "deletable_by_viewer": _ensure_bool(
+                    merged.get("deletable_by_viewer"), True
+                ),
                 "retrieval_step": _ensure_bool(merged.get("retrieval_step"), False),
             }
         )
@@ -1644,7 +1753,12 @@ def _coerce_settings(
             merged["expire_after_views"] = max(1, min(100, int(_env)))
         _env = os.getenv("PASSWORD_PUSHER_DELETABLE_BY_VIEWER", "").strip()
         if _env:
-            merged["deletable_by_viewer"] = _env.lower() not in ("false", "0", "no", "off")
+            merged["deletable_by_viewer"] = _env.lower() not in (
+                "false",
+                "0",
+                "no",
+                "off",
+            )
         _env = os.getenv("PASSWORD_PUSHER_RETRIEVAL_STEP", "").strip()
         if _env:
             merged["retrieval_step"] = _env.lower() not in ("false", "0", "no", "off")
@@ -1679,11 +1793,7 @@ def _coerce_settings(
             if override is None:
                 return str(merged.get(field) or "").strip()
             candidate = str(override or "").strip()
-            if (
-                not candidate
-                and existing_settings
-                and existing_settings.get(field)
-            ):
+            if not candidate and existing_settings and existing_settings.get(field):
                 return str(existing_settings.get(field) or "").strip()
             return candidate
 
@@ -1692,6 +1802,12 @@ def _coerce_settings(
         rate_limit = (
             _coerce_int(merged.get("rate_limit_per_minute"), minimum=1, maximum=600)
             or 120
+        )
+        reconcile_interval = (
+            _coerce_int(
+                merged.get("reconcile_interval_minutes"), minimum=5, maximum=1440
+            )
+            or 15
         )
         merged.update(
             {
@@ -1719,6 +1835,10 @@ def _coerce_settings(
                 ),
                 "webhook_secret": webhook_secret,
                 "rate_limit_per_minute": rate_limit,
+                "reconcile_interval_minutes": reconcile_interval,
+                "monitor_successful_api_requests": _ensure_bool(
+                    merged.get("monitor_successful_api_requests"), False
+                ),
                 "manage_url": str(merged.get("manage_url") or "").strip()
                 or "/admin/modules/solidtime",
             }
@@ -1737,25 +1857,66 @@ def _coerce_settings(
             merged["default_client_id"] = _env
         _env = os.getenv("SOLIDTIME_SYNC_TICKETS_TO_PROJECTS", "").strip()
         if _env:
-            merged["sync_tickets_to_projects"] = _env.lower() not in ("false", "0", "no", "off")
+            merged["sync_tickets_to_projects"] = _env.lower() not in (
+                "false",
+                "0",
+                "no",
+                "off",
+            )
         _env = os.getenv("SOLIDTIME_SYNC_PROJECTS_TO_TICKETS", "").strip()
         if _env:
-            merged["sync_projects_to_tickets"] = _env.lower() not in ("false", "0", "no", "off")
+            merged["sync_projects_to_tickets"] = _env.lower() not in (
+                "false",
+                "0",
+                "no",
+                "off",
+            )
         _env = os.getenv("SOLIDTIME_SYNC_TIME_ENTRIES_TO_SOLIDTIME", "").strip()
         if _env:
-            merged["sync_time_entries_to_solidtime"] = _env.lower() not in ("false", "0", "no", "off")
+            merged["sync_time_entries_to_solidtime"] = _env.lower() not in (
+                "false",
+                "0",
+                "no",
+                "off",
+            )
         _env = os.getenv("SOLIDTIME_SYNC_TIME_ENTRIES_FROM_SOLIDTIME", "").strip()
         if _env:
-            merged["sync_time_entries_from_solidtime"] = _env.lower() not in ("false", "0", "no", "off")
+            merged["sync_time_entries_from_solidtime"] = _env.lower() not in (
+                "false",
+                "0",
+                "no",
+                "off",
+            )
         _env = os.getenv("SOLIDTIME_ONLY_BILLABLE_TO_SOLIDTIME", "").strip()
         if _env:
-            merged["only_billable_to_solidtime"] = _env.lower() not in ("false", "0", "no", "off")
+            merged["only_billable_to_solidtime"] = _env.lower() not in (
+                "false",
+                "0",
+                "no",
+                "off",
+            )
         _env = os.getenv("SOLIDTIME_LABOUR_TYPE_TO_TASK", "").strip()
         if _env:
-            merged["labour_type_to_task"] = _env.lower() not in ("false", "0", "no", "off")
+            merged["labour_type_to_task"] = _env.lower() not in (
+                "false",
+                "0",
+                "no",
+                "off",
+            )
         _env = os.getenv("SOLIDTIME_RATE_LIMIT_PER_MINUTE", "").strip()
         if _env and _env.isdigit():
             merged["rate_limit_per_minute"] = max(1, min(600, int(_env)))
+        _env = os.getenv("SOLIDTIME_RECONCILE_INTERVAL_MINUTES", "").strip()
+        if _env and _env.isdigit():
+            merged["reconcile_interval_minutes"] = max(5, min(1440, int(_env)))
+        _env = os.getenv("SOLIDTIME_MONITOR_SUCCESSFUL_API_REQUESTS", "").strip()
+        if _env:
+            merged["monitor_successful_api_requests"] = _env.lower() not in (
+                "false",
+                "0",
+                "no",
+                "off",
+            )
     return merged
 
 
@@ -1802,7 +1963,8 @@ async def ensure_default_modules() -> None:
         existing = await module_repo.list_modules()
     except RuntimeError as exc:
         logger.warning(
-            "Unable to synchronise default modules due to database error", error=str(exc)
+            "Unable to synchronise default modules due to database error",
+            error=str(exc),
         )
         return
     existing_by_slug = {module["slug"]: module for module in existing}
@@ -1853,26 +2015,32 @@ async def get_module_settings(slug: str) -> dict[str, Any] | None:
 
 # Modules that are only ingesters or interfaces and cannot trigger actions
 _NON_TRIGGERABLE_MODULE_SLUGS = {
-    "imap",           # IMAP Mailboxes - only ingests emails
-    "ollama",         # Ollama - AI interface, doesn't output actions
-    "xero",           # Xero - removed from trigger actions
-    "uptimekuma",     # Uptime Kuma - removed from trigger actions  
-    "syncro",         # Syncro - removed from trigger actions
-    "chatgpt-mcp",    # ChatGPT MCP - removed from trigger actions
-    "ollama-mcp",     # Ollama MCP - inbound query surface, not an action module
-    "call-recordings", # Call Recordings - configuration only, not an action module
-    "unifi-talk",     # Unifi Talk - SFTP import module, not an action module
-    "plausible",      # Plausible - email tracking config only
-    "m365-admin",     # M365 Admin - configuration only, not an action module
-    "hudu",           # Hudu - documentation/password management, not a trigger action module
-    "huntress",       # Huntress - report data ingester, not a trigger action module
-    "solidtime",      # Solidtime - dedicated ticket/reply sync, not a generic trigger action module
+    "imap",  # IMAP Mailboxes - only ingests emails
+    "ollama",  # Ollama - AI interface, doesn't output actions
+    "xero",  # Xero - removed from trigger actions
+    "uptimekuma",  # Uptime Kuma - removed from trigger actions
+    "syncro",  # Syncro - removed from trigger actions
+    "chatgpt-mcp",  # ChatGPT MCP - removed from trigger actions
+    "ollama-mcp",  # Ollama MCP - inbound query surface, not an action module
+    "call-recordings",  # Call Recordings - configuration only, not an action module
+    "unifi-talk",  # Unifi Talk - SFTP import module, not an action module
+    "plausible",  # Plausible - email tracking config only
+    "m365-admin",  # M365 Admin - configuration only, not an action module
+    "hudu",  # Hudu - documentation/password management, not a trigger action module
+    "huntress",  # Huntress - report data ingester, not a trigger action module
+    "solidtime",  # Solidtime - dedicated ticket/reply sync, not a generic trigger action module
 }
 
 _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
     "smtp": {
         "fields": [
-            {"name": "recipients", "label": "Recipients", "type": "json", "required": True, "placeholder": '["support@example.com"]'},
+            {
+                "name": "recipients",
+                "label": "Recipients",
+                "type": "json",
+                "required": True,
+                "placeholder": '["support@example.com"]',
+            },
             {"name": "subject", "label": "Subject", "type": "string", "required": True},
             {"name": "html", "label": "HTML body", "type": "string"},
             {"name": "text", "label": "Text body", "type": "string"},
@@ -1895,7 +2063,12 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
     "create-ticket": {
         "fields": [
             {"name": "subject", "label": "Subject", "type": "string", "required": True},
-            {"name": "description", "label": "Description", "type": "string", "required": True},
+            {
+                "name": "description",
+                "label": "Description",
+                "type": "string",
+                "required": True,
+            },
             {"name": "status", "label": "Status", "type": "string"},
             {"name": "priority", "label": "Priority", "type": "string"},
             {"name": "company_id", "label": "Company ID", "type": "string"},
@@ -1924,20 +2097,40 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "update-ticket-description": {
         "fields": [
-            {"name": "ticket_id", "label": "Ticket ID", "type": "string", "required": True},
-            {"name": "description", "label": "Description", "type": "string", "required": True},
+            {
+                "name": "ticket_id",
+                "label": "Ticket ID",
+                "type": "string",
+                "required": True,
+            },
+            {
+                "name": "description",
+                "label": "Description",
+                "type": "string",
+                "required": True,
+            },
         ],
     },
     "reprocess-ai": {
         "fields": [
-            {"name": "ticket_id", "label": "Ticket ID", "type": "string", "required": True},
+            {
+                "name": "ticket_id",
+                "label": "Ticket ID",
+                "type": "string",
+                "required": True,
+            },
             {"name": "refresh_summary", "label": "Refresh summary", "type": "boolean"},
             {"name": "refresh_tags", "label": "Refresh tags", "type": "boolean"},
         ],
     },
     "add-ticket-reply": {
         "fields": [
-            {"name": "ticket_id", "label": "Ticket ID", "type": "string", "required": True},
+            {
+                "name": "ticket_id",
+                "label": "Ticket ID",
+                "type": "string",
+                "required": True,
+            },
             {"name": "body", "label": "Body", "type": "string", "required": True},
             {"name": "is_internal", "label": "Internal note", "type": "boolean"},
             {"name": "minutes_spent", "label": "Minutes spent", "type": "integer"},
@@ -1954,18 +2147,50 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "password-pusher": {
         "fields": [
-            {"name": "payload", "label": "Secret text", "type": "string", "required": True},
-            {"name": "expire_after_days", "label": "Expire after days", "type": "integer"},
-            {"name": "expire_after_views", "label": "Expire after views", "type": "integer"},
-            {"name": "deletable_by_viewer", "label": "Deletable by viewer", "type": "boolean"},
-            {"name": "retrieval_step", "label": "Add retrieval step", "type": "boolean"},
+            {
+                "name": "payload",
+                "label": "Secret text",
+                "type": "string",
+                "required": True,
+            },
+            {
+                "name": "expire_after_days",
+                "label": "Expire after days",
+                "type": "integer",
+            },
+            {
+                "name": "expire_after_views",
+                "label": "Expire after views",
+                "type": "integer",
+            },
+            {
+                "name": "deletable_by_viewer",
+                "label": "Deletable by viewer",
+                "type": "boolean",
+            },
+            {
+                "name": "retrieval_step",
+                "label": "Add retrieval step",
+                "type": "boolean",
+            },
             {"name": "note", "label": "Note", "type": "string"},
         ],
     },
     "trello": {
         "fields": [
-            {"name": "card_id", "label": "Card ID", "type": "string", "required": True, "placeholder": "{{ticket.external_reference}}"},
-            {"name": "text", "label": "Comment text", "type": "string", "required": True},
+            {
+                "name": "card_id",
+                "label": "Card ID",
+                "type": "string",
+                "required": True,
+                "placeholder": "{{ticket.external_reference}}",
+            },
+            {
+                "name": "text",
+                "label": "Comment text",
+                "type": "string",
+                "required": True,
+            },
         ],
     },
 }
@@ -1975,7 +2200,9 @@ def get_action_payload_schema(slug: str) -> dict[str, Any] | None:
     return _ACTION_PAYLOAD_SCHEMAS.get(str(slug or "").strip())
 
 
-def validate_action_payload(module_slug: str, payload: Mapping[str, Any] | None) -> None:
+def validate_action_payload(
+    module_slug: str, payload: Mapping[str, Any] | None
+) -> None:
     schema = get_action_payload_schema(module_slug)
     if not schema:
         return
@@ -1995,8 +2222,12 @@ def validate_action_payload(module_slug: str, payload: Mapping[str, Any] | None)
             continue
         required = bool(field.get("required"))
         value = payload.get(name)
-        if required and (value is None or (isinstance(value, str) and not value.strip())):
-            raise ValueError(f"Action payload field '{name}' is required for module '{module_slug}'.")
+        if required and (
+            value is None or (isinstance(value, str) and not value.strip())
+        ):
+            raise ValueError(
+                f"Action payload field '{name}' is required for module '{module_slug}'."
+            )
         if value is None:
             continue
         field_type = str(field.get("type") or "string").strip().lower()
@@ -2026,11 +2257,11 @@ def validate_action_payload(module_slug: str, payload: Mapping[str, Any] | None)
 
 async def list_trigger_action_modules() -> list[dict[str, Any]]:
     """Return modules that can be used as trigger actions in automations.
-    
+
     This filters out modules that are only ingesters (e.g., IMAP) or interfaces
     (e.g., Ollama, ChatGPT MCP) that cannot output actions, as well as modules
     that have been explicitly excluded (Xero, UptimeKuma, Syncro).
-    
+
     Additionally, disabled modules are filtered out to prevent them from appearing
     in the trigger actions menu.
     """
@@ -2038,7 +2269,9 @@ async def list_trigger_action_modules() -> list[dict[str, Any]]:
     actionable_by_slug: dict[str, dict[str, Any]] = {}
     for module in modules:
         module_slug = _normalise_slug(str(module.get("slug") or ""))
-        if module_slug in _NON_TRIGGERABLE_MODULE_SLUGS or not module.get("enabled", False):
+        if module_slug in _NON_TRIGGERABLE_MODULE_SLUGS or not module.get(
+            "enabled", False
+        ):
             continue
         redacted = _redact_module_settings(module)
         redacted["payload_schema"] = get_action_payload_schema(module_slug)
@@ -2048,7 +2281,10 @@ async def list_trigger_action_modules() -> list[dict[str, Any]]:
         internal_module = dict(module)
         internal_module["payload_schema"] = get_action_payload_schema(module_slug)
         actionable_by_slug[module_slug] = internal_module
-    return sorted(actionable_by_slug.values(), key=lambda module: str(module.get("name") or "").lower())
+    return sorted(
+        actionable_by_slug.values(),
+        key=lambda module: str(module.get("name") or "").lower(),
+    )
 
 
 async def get_module(slug: str, *, redact: bool = True) -> dict[str, Any] | None:
@@ -2067,12 +2303,17 @@ async def update_module(
     notifier: RefreshNotifier | None = None,
 ) -> dict[str, Any] | None:
     existing = await module_repo.get_module(slug)
-    coerced = _coerce_settings(slug, settings, existing) if settings is not None else None
+    coerced = (
+        _coerce_settings(slug, settings, existing) if settings is not None else None
+    )
     updated = await module_repo.update_module(slug, enabled=enabled, settings=coerced)
     if updated:
         # When a module is disabled, deactivate any scheduled tasks that belong to it.
         if enabled is False:
-            from app.services.scheduler import COMMANDS_BY_MODULE  # local import to avoid circular dependency
+            from app.services.scheduler import (
+                COMMANDS_BY_MODULE,
+            )  # local import to avoid circular dependency
+
             module_commands = COMMANDS_BY_MODULE.get(slug, set())
             if module_commands:
                 await scheduled_tasks_repo.disable_tasks_for_commands(module_commands)
@@ -2135,7 +2376,9 @@ async def trigger_module(
             result = await handler(settings, payload or {}, event_future=event_future)
         except Exception as exc:
             logger.exception(
-                "Module background task encountered an error", module=slug, error=str(exc)
+                "Module background task encountered an error",
+                module=slug,
+                error=str(exc),
             )
             if event_future and not event_future.done():
                 event_future.set_result(None)
@@ -2146,7 +2389,9 @@ async def trigger_module(
             }
         if event_future and not event_future.done():
             event_id_value = result.get("event_id")
-            event_future.set_result(event_id_value if isinstance(event_id_value, int) else None)
+            event_future.set_result(
+                event_id_value if isinstance(event_id_value, int) else None
+            )
         if on_complete:
             try:
                 await on_complete(result)
@@ -2175,9 +2420,7 @@ async def trigger_module(
         try:
             completed.result()
         except Exception as exc:  # pragma: no cover - defensive logging
-            logger.error(
-                "Module background task failed", module=slug, error=str(exc)
-            )
+            logger.error("Module background task failed", module=slug, error=str(exc))
 
     task.add_done_callback(_cleanup)
 
@@ -2266,7 +2509,9 @@ def _normalise_ai_response_payload(payload: Any) -> Any:
     return normalised
 
 
-def _build_event_result(event: Mapping[str, Any], extra: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def _build_event_result(
+    event: Mapping[str, Any], extra: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
     result: dict[str, Any] = {}
     if extra:
         result.update(extra)
@@ -2346,7 +2591,11 @@ async def _record_failure(
         response_body=response_body,
     )
     refreshed = await webhook_repo.get_event(event_id)
-    return refreshed or {"id": event_id, "status": "failed", "last_error": error_message}
+    return refreshed or {
+        "id": event_id,
+        "status": "failed",
+        "last_error": error_message,
+    }
 
 
 async def _invoke_ollama(
@@ -2355,19 +2604,29 @@ async def _invoke_ollama(
     *,
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
-    provider = str(payload.get("provider") or settings.get("provider") or "ollama").strip().lower()
+    provider = (
+        str(payload.get("provider") or settings.get("provider") or "ollama")
+        .strip()
+        .lower()
+    )
     if provider not in {"ollama", "openai", "llamacpp"}:
         provider = "ollama"
 
-    default_base_url = "https://api.openai.com" if provider == "openai" else _DEFAULT_OLLAMA_BASE_URL
+    default_base_url = (
+        "https://api.openai.com" if provider == "openai" else _DEFAULT_OLLAMA_BASE_URL
+    )
     configured_base_url = str(settings.get("base_url") or "").strip()
-    if provider == "openai" and configured_base_url.rstrip("/") == _DEFAULT_OLLAMA_BASE_URL.rstrip("/"):
+    if provider == "openai" and configured_base_url.rstrip(
+        "/"
+    ) == _DEFAULT_OLLAMA_BASE_URL.rstrip("/"):
         configured_base_url = ""
     base_url = (configured_base_url or default_base_url).rstrip("/")
 
     payload_model = payload.get("model")
     configured_model = str(settings.get("model") or "").strip()
-    model = str(payload_model or "").strip() or configured_model or _DEFAULT_OLLAMA_MODEL
+    model = (
+        str(payload_model or "").strip() or configured_model or _DEFAULT_OLLAMA_MODEL
+    )
 
     default_prompt = str(settings.get("prompt") or "")
     prompt = str(payload.get("prompt") or payload.get("text") or default_prompt)
@@ -2403,7 +2662,10 @@ async def _invoke_ollama(
         name=f"module.ollama.{provider}.generate",
         target_url=endpoint,
         payload={"request_body": body},
-        headers={k: ("********" if k.lower() == "authorization" else v) for k, v in request_headers.items()},
+        headers={
+            k: ("********" if k.lower() == "authorization" else v)
+            for k, v in request_headers.items()
+        },
         max_attempts=1,
         backoff_seconds=60,
     )
@@ -2413,7 +2675,10 @@ async def _invoke_ollama(
     if event_future and not event_future.done():
         event_future.set_result(event_id)
     attempt_number = 1
-    recorded_headers = {k: ("********" if k.lower() == "authorization" else v) for k, v in request_headers.items()}
+    recorded_headers = {
+        k: ("********" if k.lower() == "authorization" else v)
+        for k, v in request_headers.items()
+    }
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
             response = await client.post(endpoint, json=body, headers=request_headers)
@@ -2424,13 +2689,18 @@ async def _invoke_ollama(
             event_id,
             attempt_number=attempt_number,
             status="failed",
-            error_message=f"HTTP {exc.response.status_code}" if exc.response else str(exc),
+            error_message=(
+                f"HTTP {exc.response.status_code}" if exc.response else str(exc)
+            ),
             response_status=exc.response.status_code if exc.response else None,
             response_body=response_body,
             request_headers=recorded_headers,
             request_body=body,
         )
-        return _build_event_result(updated_event, extra={"model": model, "endpoint": endpoint, "provider": provider})
+        return _build_event_result(
+            updated_event,
+            extra={"model": model, "endpoint": endpoint, "provider": provider},
+        )
     except Exception as exc:  # pragma: no cover - defensive
         updated_event = await _record_failure(
             event_id,
@@ -2442,7 +2712,10 @@ async def _invoke_ollama(
             request_headers=recorded_headers,
             request_body=body,
         )
-        return _build_event_result(updated_event, extra={"model": model, "endpoint": endpoint, "provider": provider})
+        return _build_event_result(
+            updated_event,
+            extra={"model": model, "endpoint": endpoint, "provider": provider},
+        )
 
     response_body = response.text
     updated_event = await _record_success(
@@ -2453,7 +2726,10 @@ async def _invoke_ollama(
         request_headers=recorded_headers,
         request_body=body,
     )
-    return _build_event_result(updated_event, extra={"model": model, "endpoint": endpoint, "provider": provider})
+    return _build_event_result(
+        updated_event,
+        extra={"model": model, "endpoint": endpoint, "provider": provider},
+    )
 
 
 async def _invoke_smtp(
@@ -2463,7 +2739,9 @@ async def _invoke_smtp(
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
     # Support both 'to' (SMTP2Go API format) and 'recipients' (legacy format)
-    recipients = _ensure_list(payload.get("to") or payload.get("recipients")) or _ensure_list(settings.get("default_recipients"))
+    recipients = _ensure_list(
+        payload.get("to") or payload.get("recipients")
+    ) or _ensure_list(settings.get("default_recipients"))
     subject_prefix = str(settings.get("subject_prefix") or "").strip()
     # Use payload value if key exists, even if empty string (template may have rendered to empty)
     if "subject" in payload:
@@ -2486,7 +2764,7 @@ async def _invoke_smtp(
     text_body = payload.get("text") or payload.get("text_body")
     # Payload sender takes precedence over settings from_address
     sender = str(payload.get("sender") or settings.get("from_address") or "") or None
-    
+
     # Extract ticket reply ID from context if present, to enable email tracking
     enable_tracking = False
     ticket_reply_id: int | None = None
@@ -2504,7 +2782,7 @@ async def _invoke_smtp(
                     enable_tracking = True
                 except (TypeError, ValueError):
                     pass
-        
+
         # If not found in metadata, check ticket.latest_reply.id (for automation events)
         if ticket_reply_id is None:
             ticket = context.get("ticket")
@@ -2518,7 +2796,7 @@ async def _invoke_smtp(
                             enable_tracking = True
                         except (TypeError, ValueError):
                             pass
-    
+
     event = await webhook_monitor.create_manual_event(
         name="module.smtp.send",
         target_url="smtp://send",
@@ -2579,9 +2857,11 @@ async def _invoke_smtp(
             extra={
                 "recipients": recipients,
                 "subject": subject,
-                "email_event_id": (email_event_metadata or {}).get("id")
-                if isinstance(email_event_metadata, dict)
-                else None,
+                "email_event_id": (
+                    (email_event_metadata or {}).get("id")
+                    if isinstance(email_event_metadata, dict)
+                    else None
+                ),
             },
         )
 
@@ -2597,9 +2877,11 @@ async def _invoke_smtp(
         extra={
             "recipients": recipients,
             "subject": subject,
-            "email_event_id": (email_event_metadata or {}).get("id")
-            if isinstance(email_event_metadata, dict)
-            else None,
+            "email_event_id": (
+                (email_event_metadata or {}).get("id")
+                if isinstance(email_event_metadata, dict)
+                else None
+            ),
         },
     )
 
@@ -2611,9 +2893,9 @@ async def _invoke_smtp2go(
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
     """Invoke SMTP2Go module to send email.
-    
+
     Supports both direct payload and template-based email sending.
-    
+
     Direct payload format:
         {
             "recipients": ["user@example.com"],
@@ -2622,7 +2904,7 @@ async def _invoke_smtp2go(
             "text": "Plain text body",
             "sender": "sender@example.com"
         }
-    
+
     Template-based format:
         {
             "template": "password_reset",
@@ -2636,7 +2918,7 @@ async def _invoke_smtp2go(
         }
     """
     from app.services import smtp2go
-    
+
     # Check if using template
     template_type = payload.get("template")
     recipients: list[str] = []
@@ -2646,7 +2928,7 @@ async def _invoke_smtp2go(
             variables = payload.get("variables", {})
             recipients = _ensure_list(payload.get("recipients"))
             sender = str(payload.get("sender") or "").strip() or None
-            
+
             # Format payload using template
             formatted_payload = smtp2go.format_template_payload(
                 template_type,
@@ -2654,12 +2936,12 @@ async def _invoke_smtp2go(
                 recipients,
                 sender,
             )
-            
+
             subject = formatted_payload["subject"]
             html_body = formatted_payload["html_body"]
             text_body = formatted_payload.get("text_body")
             sender = formatted_payload.get("sender")
-            
+
         except ValueError as exc:
             raise ValueError(f"Template error: {str(exc)}") from exc
     else:
@@ -2668,7 +2950,12 @@ async def _invoke_smtp2go(
         recipients = _ensure_list(payload.get("to") or payload.get("recipients"))
 
         subject = str(payload.get("subject") or "Automation notification")
-        html_body = str(payload.get("html") or payload.get("html_body") or payload.get("body") or "<p>Automation triggered.</p>")
+        html_body = str(
+            payload.get("html")
+            or payload.get("html_body")
+            or payload.get("body")
+            or "<p>Automation triggered.</p>"
+        )
         text_body = payload.get("text") or payload.get("text_body")
         sender = str(payload.get("sender") or "").strip() or None
 
@@ -2676,19 +2963,31 @@ async def _invoke_smtp2go(
         logger.warning(
             "SMTP2Go module skipped because no recipients were provided after rendering",
             module="smtp2go",
-            context_keys=list(payload.get("context", {}).keys()) if isinstance(payload.get("context"), Mapping) else None,
+            context_keys=(
+                list(payload.get("context", {}).keys())
+                if isinstance(payload.get("context"), Mapping)
+                else None
+            ),
         )
         return {"status": "skipped", "reason": "no_recipients", "module": "smtp2go"}
-    
+
     reply_to = str(payload.get("reply_to") or "").strip() or None
-    
+
     # Extract additional SMTP2Go API fields
     cc = _ensure_list(payload.get("cc"))
     bcc = _ensure_list(payload.get("bcc"))
-    attachments = payload.get("attachments") if isinstance(payload.get("attachments"), list) else None
+    attachments = (
+        payload.get("attachments")
+        if isinstance(payload.get("attachments"), list)
+        else None
+    )
     template_id = str(payload.get("template_id") or "").strip() or None
-    template_data = payload.get("template_data") if isinstance(payload.get("template_data"), dict) else None
-    
+    template_data = (
+        payload.get("template_data")
+        if isinstance(payload.get("template_data"), dict)
+        else None
+    )
+
     # Extract custom_headers - support both dict and list formats
     custom_headers_input = payload.get("custom_headers")
     custom_headers_dict: dict[str, str] | None = None
@@ -2777,7 +3076,12 @@ async def _invoke_smtp2go(
         response_tracking_id = result.get("tracking_id") or tracking_id
         # Store smtp2go_message_id and tracking_id for webhook correlation
         # email_sent_at will be set when the 'processed' webhook event arrives
-        if enable_tracking and ticket_reply_id and response_tracking_id and smtp2go_message_id:
+        if (
+            enable_tracking
+            and ticket_reply_id
+            and response_tracking_id
+            and smtp2go_message_id
+        ):
             await smtp2go.record_smtp2go_message_id(
                 ticket_reply_id=ticket_reply_id,
                 tracking_id=response_tracking_id,
@@ -2904,7 +3208,9 @@ async def _invoke_tacticalrmm(
     try:
         await _throttle_tacticalrmm_request()
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT, verify=True) as client:
-            response = await client.request(method, url, json=request_body, headers=headers)
+            response = await client.request(
+                method, url, json=request_body, headers=headers
+            )
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         response_body = exc.response.text if exc.response is not None else None
@@ -2912,7 +3218,9 @@ async def _invoke_tacticalrmm(
             event_id,
             attempt_number=attempt_number,
             status="failed",
-            error_message=f"HTTP {exc.response.status_code}" if exc.response else str(exc),
+            error_message=(
+                f"HTTP {exc.response.status_code}" if exc.response else str(exc)
+            ),
             response_status=exc.response.status_code if exc.response else None,
             response_body=response_body,
         )
@@ -2981,7 +3289,9 @@ async def _invoke_ntfy(
             camel_source = swapped_dash
             parts = [part for part in camel_source.split("_") if part]
             if parts:
-                camel = parts[0].lower() + "".join(part.capitalize() for part in parts[1:])
+                camel = parts[0].lower() + "".join(
+                    part.capitalize() for part in parts[1:]
+                )
                 pascal = "".join(part.capitalize() for part in parts)
                 candidates.extend([camel, pascal])
             for candidate in candidates:
@@ -3040,7 +3350,9 @@ async def _invoke_ntfy(
     else:
         merged_payload = dict(payload_dict)
 
-    base_url_value, has_base_url = _lookup(merged_payload, "base_url", "base-url", "baseUrl")
+    base_url_value, has_base_url = _lookup(
+        merged_payload, "base_url", "base-url", "baseUrl"
+    )
     if not has_base_url:
         base_url_value = settings.get("base_url")
     base_url = str(base_url_value or "https://ntfy.sh").rstrip("/")
@@ -3052,11 +3364,14 @@ async def _invoke_ntfy(
     if not topic:
         raise ValueError("ntfy topic must be configured")
 
-    message_value, has_message = _lookup(merged_payload, "message", "body", "Message", "Body")
+    message_value, has_message = _lookup(
+        merged_payload, "message", "body", "Message", "Body"
+    )
     if not has_message:
         message_value = "Automation triggered"
     if isinstance(message_value, Mapping) or (
-        isinstance(message_value, (list, tuple)) and not isinstance(message_value, (str, bytes, bytearray))
+        isinstance(message_value, (list, tuple))
+        and not isinstance(message_value, (str, bytes, bytearray))
     ):
         message_text = json.dumps(message_value)
     elif message_value is None:
@@ -3181,7 +3496,9 @@ async def _invoke_ntfy(
             event_id,
             attempt_number=attempt_number,
             status="failed",
-            error_message=f"HTTP {exc.response.status_code}" if exc.response else str(exc),
+            error_message=(
+                f"HTTP {exc.response.status_code}" if exc.response else str(exc)
+            ),
             response_status=exc.response.status_code if exc.response else None,
             response_body=response_body,
         )
@@ -3250,7 +3567,7 @@ async def _invoke_sms_gateway(
         "Content-Type": "application/json",
         "authorization": authorization,
     }
-    
+
     # Create webhook event for monitoring
     event = await webhook_monitor.create_manual_event(
         name="module.sms-gateway.send",
@@ -3265,7 +3582,7 @@ async def _invoke_sms_gateway(
         raise RuntimeError("Failed to create webhook event for SMS Gateway request")
     if event_future and not event_future.done():
         event_future.set_result(event_id)
-    
+
     attempt_number = 1
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
@@ -3281,7 +3598,9 @@ async def _invoke_sms_gateway(
             event_id,
             attempt_number=attempt_number,
             status="failed",
-            error_message=f"HTTP {exc.response.status_code}" if exc.response else str(exc),
+            error_message=(
+                f"HTTP {exc.response.status_code}" if exc.response else str(exc)
+            ),
             response_status=exc.response.status_code if exc.response else None,
             response_body=response_body,
         )
@@ -3302,7 +3621,7 @@ async def _invoke_sms_gateway(
             updated_event,
             extra={"gateway_url": gateway_url, "phone_count": len(phone_numbers)},
         )
-    
+
     response_body = response.text
     updated_event = await _record_success(
         event_id,
@@ -3314,7 +3633,6 @@ async def _invoke_sms_gateway(
         updated_event,
         extra={"gateway_url": gateway_url, "phone_count": len(phone_numbers)},
     )
-
 
 
 async def _invoke_apprise(
@@ -3389,7 +3707,9 @@ async def _invoke_apprise(
             extra={"title": title, "url_count": len(urls)},
         )
 
-    response_body = json.dumps({"title": title, "message": message, "url_count": len(urls)})
+    response_body = json.dumps(
+        {"title": title, "message": message, "url_count": len(urls)}
+    )
     updated_event = await _record_success(
         event_id,
         attempt_number=attempt_number,
@@ -3401,6 +3721,7 @@ async def _invoke_apprise(
         extra={"title": title, "url_count": len(urls)},
     )
 
+
 async def _invoke_create_ticket(
     settings: Mapping[str, Any],
     payload: Mapping[str, Any],
@@ -3408,25 +3729,25 @@ async def _invoke_create_ticket(
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
     """Create a new ticket from automation payload.
-    
+
     Accepts a JSON payload with ticket details, supporting variable interpolation
-    for all fields. Required fields: subject. Optional fields: description, 
+    for all fields. Required fields: subject. Optional fields: description,
     company_id, assigned_user_id, requester_id, priority, status, category.
-    
-    When both requester_id and description are provided, the description is 
-    automatically added as the initial conversation history entry, attributed 
-    to the requester. This ensures the conversation history is properly populated 
+
+    When both requester_id and description are provided, the description is
+    automatically added as the initial conversation history entry, attributed
+    to the requester. This ensures the conversation history is properly populated
     from the start for tickets created by scheduled automations.
     """
     # Extract ticket details from payload with defaults
     subject = str(payload.get("subject", "")).strip()
     if not subject:
         raise ValueError("Ticket subject is required")
-    
+
     description = payload.get("description")
     if description is not None:
         description = str(description).strip() or None
-    
+
     # Get optional fields with appropriate defaults
     company_id = payload.get("company_id")
     if company_id is not None:
@@ -3434,36 +3755,36 @@ async def _invoke_create_ticket(
             company_id = int(company_id)
         except (TypeError, ValueError):
             company_id = None
-    
+
     assigned_user_id = payload.get("assigned_user_id")
     if assigned_user_id is not None:
         try:
             assigned_user_id = int(assigned_user_id)
         except (TypeError, ValueError):
             assigned_user_id = None
-    
+
     requester_id = payload.get("requester_id")
     if requester_id is not None:
         try:
             requester_id = int(requester_id)
         except (TypeError, ValueError):
             requester_id = None
-    
+
     priority = str(payload.get("priority", "normal")).strip().lower()
     status = str(payload.get("status", "open")).strip().lower()
-    
+
     category = payload.get("category")
     if category is not None:
         category = str(category).strip() or None
-    
+
     module_slug = payload.get("module_slug")
     if module_slug is not None:
         module_slug = str(module_slug).strip() or None
-    
+
     external_reference = payload.get("external_reference")
     if external_reference is not None:
         external_reference = str(external_reference).strip() or None
-    
+
     try:
         existing = await tickets_repo.get_ticket(ticket_id_int)
     except RuntimeError:
@@ -3492,7 +3813,7 @@ async def _invoke_create_ticket(
         raise RuntimeError("Failed to create webhook event for ticket creation")
     if event_future and not event_future.done():
         event_future.set_result(event_id)
-    
+
     attempt_number = 1
     try:
         # Create the ticket using the tickets service
@@ -3504,7 +3825,9 @@ async def _invoke_create_ticket(
         # When a requester is specified and a description is provided, we set
         # initial_reply_author_id to the requester to populate the description
         # as the initial conversation history entry.
-        initial_reply_author_id = requester_id if (requester_id and description) else None
+        initial_reply_author_id = (
+            requester_id if (requester_id and description) else None
+        )
         ticket = await tickets_service.create_ticket(
             subject=subject,
             description=description,
@@ -3559,13 +3882,15 @@ async def _invoke_create_ticket(
             updated_event,
             extra={"subject": subject},
         )
-    
+
     # Build success response
-    response_body = json.dumps({
-        "ticket_id": ticket.get("id"),
-        "ticket_number": ticket.get("ticket_number"),
-        "subject": ticket.get("subject"),
-    })
+    response_body = json.dumps(
+        {
+            "ticket_id": ticket.get("id"),
+            "ticket_number": ticket.get("ticket_number"),
+            "subject": ticket.get("subject"),
+        }
+    )
     updated_event = await _record_success(
         event_id,
         attempt_number=attempt_number,
@@ -3778,8 +4103,16 @@ async def _invoke_create_task(
             }
         )
         extra = {
-            "task_ids": [task.get("id") for task in created_tasks if task.get("id") is not None],
-            "ticket_ids": sorted({task.get("ticket_id") for task in created_tasks if task.get("ticket_id") is not None}),
+            "task_ids": [
+                task.get("id") for task in created_tasks if task.get("id") is not None
+            ],
+            "ticket_ids": sorted(
+                {
+                    task.get("ticket_id")
+                    for task in created_tasks
+                    if task.get("ticket_id") is not None
+                }
+            ),
         }
 
     updated_event = await _record_success(
@@ -3819,7 +4152,10 @@ async def _validate_syncro(
 ) -> dict[str, Any]:
     base_url = str(settings.get("base_url") or "").strip()
     api_key = str(settings.get("api_key") or "").strip()
-    rate_limit = _coerce_int(settings.get("rate_limit_per_minute"), minimum=1, maximum=600) or 180
+    rate_limit = (
+        _coerce_int(settings.get("rate_limit_per_minute"), minimum=1, maximum=600)
+        or 180
+    )
     if not base_url:
         raise ValueError("Syncro base URL is not configured")
     return {
@@ -3854,17 +4190,23 @@ async def _validate_plausible(
             raise ValueError("Plausible base URL is not configured")
         parsed = urlparse(base_url)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            raise ValueError("Plausible base URL must include http/https and a hostname")
+            raise ValueError(
+                "Plausible base URL must include http/https and a hostname"
+            )
         if not site_domain:
             raise ValueError("Plausible site domain is not configured")
-        
+
         # Warn if pageview tracking is enabled without a pepper
         if track_pageviews and not pepper:
-            logger.warning("Plausible pageview tracking enabled without pepper - using default (not secure)")
-        
+            logger.warning(
+                "Plausible pageview tracking enabled without pepper - using default (not secure)"
+            )
+
         # Warn if PII is enabled (should only be for self-hosted, compliant instances)
         if send_pii:
-            logger.warning("Plausible configured to send PII - ensure this is a self-hosted, compliant instance")
+            logger.warning(
+                "Plausible configured to send PII - ensure this is a self-hosted, compliant instance"
+            )
 
     return {
         "status": "ok",
@@ -3901,14 +4243,20 @@ async def _validate_call_recordings(
 ) -> dict[str, Any]:
     """Validate configuration and synchronise recordings from disk."""
     configured_path = str(settings.get("recordings_path") or "").strip()
-    override_path = str(payload.get("path") or payload.get("recordings_path") or "").strip()
+    override_path = str(
+        payload.get("path") or payload.get("recordings_path") or ""
+    ).strip()
     recordings_path = override_path or configured_path
 
-    phone_system_type = str(
-        payload.get("phone_system_type")
-        or settings.get("phone_system_type")
-        or "generic"
-    ).strip().lower()
+    phone_system_type = (
+        str(
+            payload.get("phone_system_type")
+            or settings.get("phone_system_type")
+            or "generic"
+        )
+        .strip()
+        .lower()
+    )
     if phone_system_type not in CALL_RECORDINGS_PHONE_SYSTEM_TYPES:
         phone_system_type = "generic"
 
@@ -3960,12 +4308,18 @@ async def _invoke_unifi_talk(
 ) -> dict[str, Any]:
     """Download call recordings from Unifi Talk via SFTP and sync to database."""
     remote_host = str(settings.get("remote_host") or "").strip()
-    remote_path = str(settings.get("remote_path") or "").strip() or "/volume1/.srv/unifi-talk/recordings"
+    remote_path = (
+        str(settings.get("remote_path") or "").strip()
+        or "/volume1/.srv/unifi-talk/recordings"
+    )
     username = str(settings.get("username") or "").strip()
     password = str(settings.get("password") or "").strip()
-    local_path = str(settings.get("local_path") or "").strip() or "/var/lib/myportal/call_recordings"
+    local_path = (
+        str(settings.get("local_path") or "").strip()
+        or "/var/lib/myportal/call_recordings"
+    )
     port = _coerce_int(settings.get("port"), minimum=1, maximum=65535) or 22
-    
+
     # Validate required settings
     if not remote_host:
         return {
@@ -3973,21 +4327,21 @@ async def _invoke_unifi_talk(
             "error": "Remote host is not configured",
             "has_remote_host": False,
         }
-    
+
     if not username:
         return {
             "status": "error",
             "error": "Username is not configured",
             "has_username": False,
         }
-    
+
     if not password:
         return {
             "status": "error",
             "error": "Password is not configured",
             "has_password": False,
         }
-    
+
     try:
         # Download recordings from SFTP
         logger.info(
@@ -4004,15 +4358,17 @@ async def _invoke_unifi_talk(
             local_path=local_path,
             port=port,
         )
-        
+
         # Sync downloaded recordings to database
         if download_result["downloaded"] > 0:
             logger.info(
                 f"Downloaded {download_result['downloaded']} recordings, syncing to database",
                 local_path=local_path,
             )
-            sync_result = await call_recordings_service.sync_recordings_from_filesystem(local_path)
-            
+            sync_result = await call_recordings_service.sync_recordings_from_filesystem(
+                local_path
+            )
+
             return {
                 "status": "ok",
                 "remote_host": remote_host,
@@ -4038,7 +4394,7 @@ async def _invoke_unifi_talk(
                 "message": "No new recordings to download",
                 "errors": download_result["errors"],
             }
-    
+
     except ValueError as exc:
         logger.error("Unifi Talk configuration error", error=str(exc))
         return {
@@ -4046,7 +4402,7 @@ async def _invoke_unifi_talk(
             "remote_host": remote_host,
             "error": str(exc),
         }
-    
+
     except RuntimeError as exc:
         logger.error("Unifi Talk SFTP connection error", error=str(exc))
         return {
@@ -4054,7 +4410,7 @@ async def _invoke_unifi_talk(
             "remote_host": remote_host,
             "error": str(exc),
         }
-    
+
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.exception("Unexpected error in Unifi Talk module")
         return {
@@ -4071,13 +4427,13 @@ async def _discover_xero_tenant_id(
     company_name: str,
 ) -> str | None:
     """Discover Xero tenant_id by querying the Xero API based on company name.
-    
+
     Args:
         client_id: Xero OAuth client ID
         client_secret: Xero OAuth client secret
         refresh_token: Xero OAuth refresh token
         company_name: Company name to match against Xero organisations
-    
+
     Returns:
         The tenant_id if found, None otherwise
     """
@@ -4091,7 +4447,7 @@ async def _discover_xero_tenant_id(
             has_company_name=bool(company_name),
         )
         return None
-    
+
     try:
         # Step 1: Get access token using refresh token
         token_url = "https://identity.xero.com/connect/token"
@@ -4099,7 +4455,7 @@ async def _discover_xero_tenant_id(
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
         }
-        
+
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
             token_response = await client.post(
                 token_url,
@@ -4119,7 +4475,9 @@ async def _discover_xero_tenant_id(
 
             expires_at = None
             if isinstance(expires_in, (int, float)):
-                expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(expires_in))
+                expires_at = datetime.now(timezone.utc) + timedelta(
+                    seconds=float(expires_in)
+                )
 
             # Xero rotates refresh tokens on every refresh-token grant.  Persist
             # any replacement immediately so validation/tenant discovery cannot
@@ -4144,7 +4502,7 @@ async def _discover_xero_tenant_id(
             )
             connections_response.raise_for_status()
             connections = connections_response.json()
-            
+
             # Step 3: Find matching tenant by company name (case-insensitive)
             company_name_lower = company_name.strip().lower()
             # Pre-process all connections for efficient matching
@@ -4152,7 +4510,7 @@ async def _discover_xero_tenant_id(
                 (str(conn.get("tenantName", "")).strip().lower(), conn.get("tenantId"))
                 for conn in connections
             ]
-            
+
             for tenant_name_lower, tenant_id in normalized_connections:
                 if tenant_name_lower == company_name_lower:
                     logger.info(
@@ -4161,14 +4519,14 @@ async def _discover_xero_tenant_id(
                         tenant_id=tenant_id,
                     )
                     return str(tenant_id) if tenant_id else None
-            
+
             logger.warning(
                 "No matching Xero tenant found for company name",
                 company_name=company_name,
                 available_tenants=[c.get("tenantName") for c in connections],
             )
             return None
-            
+
     except httpx.HTTPStatusError as exc:
         logger.error(
             "HTTP error while discovering Xero tenant_id",
@@ -4194,7 +4552,7 @@ async def _validate_xero(
 
     Returns a status object indicating which credentials are configured.
     This handler is used when trigger_module is called with the xero module.
-    
+
     The Xero company name is sourced from the XERO_COMPANY_NAME environment
     variable when available. During validation the /connections endpoint is
     queried to discover the tenant_id for the configured company and the
@@ -4207,7 +4565,7 @@ async def _validate_xero(
             "status": "error",
             "message": "Xero credentials not configured",
         }
-    
+
     client_id = credentials.get("client_id", "").strip()
     client_secret = credentials.get("client_secret", "").strip()
     refresh_token = credentials.get("refresh_token", "").strip()
@@ -4222,7 +4580,7 @@ async def _validate_xero(
         result_company_name = company_name
     access_token = credentials.get("access_token", "").strip()
     token_expires_at = credentials.get("token_expires_at")
-    
+
     result: dict[str, Any] = {
         "status": "ok",
         "has_client_id": bool(client_id),
@@ -4244,11 +4602,13 @@ async def _validate_xero(
             token_expires_at = token_expires_at.replace(tzinfo=timezone.utc)
         result["token_expired"] = now >= token_expires_at
 
-    should_discover = bool(company_name and client_id and client_secret and refresh_token)
+    should_discover = bool(
+        company_name and client_id and client_secret and refresh_token
+    )
 
     # Track updated settings to avoid reverting previous updates
     updated_settings = dict(settings)
-    
+
     if company_name_env and settings.get("company_name") != company_name_env:
         try:
             updated_settings["company_name"] = company_name_env
@@ -4288,7 +4648,9 @@ async def _validate_xero(
                     updated_settings["tenant_id"] = discovered_tenant_id
                     await module_repo.update_module(
                         XERO_MODULE_SLUG,
-                        settings=dict(updated_settings),  # Pass a copy to avoid mutation issues
+                        settings=dict(
+                            updated_settings
+                        ),  # Pass a copy to avoid mutation issues
                     )
                     result["tenant_id_updated"] = True
                     logger.info(
@@ -4380,7 +4742,9 @@ async def push_companies_to_tacticalrmm(
     default_site_key = default_site.casefold()
 
     companies = await company_repo.list_companies()
-    unique_companies: list[tuple[str, Mapping[str, Any]] | tuple[str, dict[str, Any]]] = []
+    unique_companies: list[
+        tuple[str, Mapping[str, Any]] | tuple[str, dict[str, Any]]
+    ] = []
     skipped: list[dict[str, str]] = []
     seen: set[str] = set()
 
@@ -4444,9 +4808,7 @@ async def push_companies_to_tacticalrmm(
         existing_client = client_lookup.get(client_key)
 
         if not existing_client:
-            logger.info(
-                "Creating Tactical RMM client", company=company_name
-            )
+            logger.info("Creating Tactical RMM client", company=company_name)
             create_payload = {
                 "endpoint": "/clients/",
                 "method": "POST",
@@ -4492,9 +4854,7 @@ async def push_companies_to_tacticalrmm(
             else None
         )
         if isinstance(raw_sites, list):
-            existing_sites = [
-                site for site in raw_sites if isinstance(site, Mapping)
-            ]
+            existing_sites = [site for site in raw_sites if isinstance(site, Mapping)]
 
         has_default_site = False
         for site in existing_sites:
@@ -4561,7 +4921,6 @@ async def push_companies_to_tacticalrmm(
     return summary
 
 
-
 async def pull_companies_from_tacticalrmm() -> dict[str, Any]:
     """Pull clients from Tactical RMM and create or update matching companies in MyPortal."""
     settings = await _load_tacticalrmm_settings()
@@ -4604,13 +4963,19 @@ async def pull_companies_from_tacticalrmm() -> dict[str, Any]:
             continue
 
         try:
-            tactical_id_str = str(client_id).strip() if client_id is not None and client_id != "" else None
+            tactical_id_str = (
+                str(client_id).strip()
+                if client_id is not None and client_id != ""
+                else None
+            )
             if not tactical_id_str:
                 tactical_id_str = None
 
             existing = None
             if tactical_id_str:
-                existing = await company_repo.get_company_by_tactical_id(tactical_id_str)
+                existing = await company_repo.get_company_by_tactical_id(
+                    tactical_id_str
+                )
             if not existing:
                 if tactical_id_str:
                     logger.info(
@@ -4622,7 +4987,11 @@ async def pull_companies_from_tacticalrmm() -> dict[str, Any]:
 
             if existing:
                 updates: dict[str, Any] = {}
-                if tactical_id_str and str(existing.get("tacticalrmm_client_id") or "").strip() != tactical_id_str:
+                if (
+                    tactical_id_str
+                    and str(existing.get("tacticalrmm_client_id") or "").strip()
+                    != tactical_id_str
+                ):
                     updates["tacticalrmm_client_id"] = tactical_id_str
                 if str(existing.get("name") or "").strip() != name:
                     updates["name"] = name
@@ -4644,7 +5013,9 @@ async def pull_companies_from_tacticalrmm() -> dict[str, Any]:
                 name=name,
                 error=str(exc),
             )
-            summary["errors"].append({"client_id": client_id, "name": name, "error": str(exc)})
+            summary["errors"].append(
+                {"client_id": client_id, "name": name, "error": str(exc)}
+            )
 
     logger.info(
         "Tactical RMM client pull completed",
@@ -4656,6 +5027,7 @@ async def pull_companies_from_tacticalrmm() -> dict[str, Any]:
     )
     return summary
 
+
 async def _invoke_update_ticket(
     settings: Mapping[str, Any],
     payload: Mapping[str, Any],
@@ -4663,17 +5035,17 @@ async def _invoke_update_ticket(
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
     """Update ticket fields from automation payload.
-    
+
     Accepts a JSON payload with ticket_id and any combination of:
     status, priority, assigned_user_id, requester_id, company_id, category.
-    
+
     The ticket_id can be provided directly or via context.ticket.id or context.ticket_id.
     """
     from app.repositories import tickets as tickets_repo
-    
+
     raw_context = payload.get("context")
     context = raw_context if isinstance(raw_context, Mapping) else {}
-    
+
     # Resolve ticket_id from payload or context
     ticket_id = payload.get("ticket_id")
     if ticket_id is None:
@@ -4682,60 +5054,74 @@ async def _invoke_update_ticket(
         ticket_context = context.get("ticket")
         if isinstance(ticket_context, Mapping):
             ticket_id = ticket_context.get("id")
-    
+
     if ticket_id is None:
         raise ValueError("ticket_id is required")
-    
+
     try:
         ticket_id_int = int(ticket_id)
     except (TypeError, ValueError):
         raise ValueError("ticket_id must be a valid integer")
-    
+
     # Check ticket exists
     existing = await tickets_repo.get_ticket(ticket_id_int)
     if not existing:
         raise ValueError(f"Ticket {ticket_id_int} not found")
-    
+
     # Build update dict from allowed fields
     update_fields: dict[str, Any] = {}
-    
+
     # Status
     if "status" in payload:
         status_value = str(payload["status"]).strip()
         if status_value:
-            normalised_status = re.sub(r"[^a-z0-9]+", "_", status_value.lower()).strip("_")
+            normalised_status = re.sub(r"[^a-z0-9]+", "_", status_value.lower()).strip(
+                "_"
+            )
             update_fields["status"] = normalised_status
-    
+
     # Priority
     if "priority" in payload:
         priority_value = str(payload["priority"]).strip().lower()
         if priority_value:
             update_fields["priority"] = priority_value
-    
+
     # Assigned user
     if "assigned_user_id" in payload:
         parsed_assigned = _parse_nullable_int(payload["assigned_user_id"])
-        if payload["assigned_user_id"] is None or payload["assigned_user_id"] == "" or payload["assigned_user_id"] == "null":
+        if (
+            payload["assigned_user_id"] is None
+            or payload["assigned_user_id"] == ""
+            or payload["assigned_user_id"] == "null"
+        ):
             update_fields["assigned_user_id"] = None
         elif parsed_assigned is not None:
             update_fields["assigned_user_id"] = parsed_assigned
-    
+
     # Requester
     if "requester_id" in payload:
         parsed_requester = _parse_nullable_int(payload["requester_id"])
-        if payload["requester_id"] is None or payload["requester_id"] == "" or payload["requester_id"] == "null":
+        if (
+            payload["requester_id"] is None
+            or payload["requester_id"] == ""
+            or payload["requester_id"] == "null"
+        ):
             update_fields["requester_id"] = None
         elif parsed_requester is not None:
             update_fields["requester_id"] = parsed_requester
-    
+
     # Company
     if "company_id" in payload:
         parsed_company = _parse_nullable_int(payload["company_id"])
-        if payload["company_id"] is None or payload["company_id"] == "" or payload["company_id"] == "null":
+        if (
+            payload["company_id"] is None
+            or payload["company_id"] == ""
+            or payload["company_id"] == "null"
+        ):
             update_fields["company_id"] = None
         elif parsed_company is not None:
             update_fields["company_id"] = parsed_company
-    
+
     # Category
     if "category" in payload:
         category_value = payload.get("category")
@@ -4743,14 +5129,14 @@ async def _invoke_update_ticket(
             update_fields["category"] = None
         else:
             update_fields["category"] = str(category_value).strip() or None
-    
+
     if not update_fields:
         return {
             "status": "skipped",
             "reason": "No update fields provided",
             "ticket_id": ticket_id_int,
         }
-    
+
     # Create webhook event for tracking
     event = await webhook_monitor.create_manual_event(
         name="module.update-ticket.update",
@@ -4765,11 +5151,13 @@ async def _invoke_update_ticket(
         raise RuntimeError("Failed to create webhook event for ticket update")
     if event_future and not event_future.done():
         event_future.set_result(event_id)
-    
+
     attempt_number = 1
     try:
-        updated_ticket = await tickets_repo.update_ticket(ticket_id_int, **update_fields)
-        
+        updated_ticket = await tickets_repo.update_ticket(
+            ticket_id_int, **update_fields
+        )
+
         # Emit ticket updated event
         await tickets_service.emit_ticket_updated_event(
             ticket_id_int,
@@ -4794,13 +5182,15 @@ async def _invoke_update_ticket(
             updated_event,
             extra={"ticket_id": ticket_id_int},
         )
-    
+
     previous_values = {field: existing.get(field) for field in update_fields.keys()}
-    response_body = json.dumps({
-        "ticket_id": ticket_id_int,
-        "updated_fields": list(update_fields.keys()),
-        "previous_values": previous_values,
-    })
+    response_body = json.dumps(
+        {
+            "ticket_id": ticket_id_int,
+            "updated_fields": list(update_fields.keys()),
+            "previous_values": previous_values,
+        }
+    )
     updated_event = await _record_success(
         event_id,
         attempt_number=attempt_number,
@@ -4824,13 +5214,13 @@ async def _invoke_update_ticket_description(
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
     """Update ticket description from automation payload.
-    
+
     Accepts a JSON payload with ticket_id and description.
     The ticket_id can be provided directly or via context.ticket.id or context.ticket_id.
     """
     raw_context = payload.get("context")
     context = raw_context if isinstance(raw_context, Mapping) else {}
-    
+
     # Resolve ticket_id from payload or context
     ticket_id = payload.get("ticket_id")
     if ticket_id is None:
@@ -4839,48 +5229,60 @@ async def _invoke_update_ticket_description(
         ticket_context = context.get("ticket")
         if isinstance(ticket_context, Mapping):
             ticket_id = ticket_context.get("id")
-    
+
     if ticket_id is None:
         raise ValueError("ticket_id is required")
-    
+
     try:
         ticket_id_int = int(ticket_id)
     except (TypeError, ValueError):
         raise ValueError("ticket_id must be a valid integer")
-    
+
     # Get description (allow empty string to clear description)
     if "description" not in payload:
         raise ValueError("description is required")
-    
+
     description = payload.get("description")
     if description is not None:
         description = str(description)
 
     from app.repositories import tickets as tickets_repo
+
     try:
         existing = await tickets_repo.get_ticket(ticket_id_int)
     except RuntimeError:
         existing = None
     previous_description = existing.get("description") if existing else None
-    
+
     # Create webhook event for tracking
     event = await webhook_monitor.create_manual_event(
         name="module.update-ticket-description.update",
         target_url=f"internal://tickets/{ticket_id_int}/description",
-        payload={"ticket_id": ticket_id_int, "description": description[:WEBHOOK_PAYLOAD_DESCRIPTION_MAX_LENGTH] if description else None},
+        payload={
+            "ticket_id": ticket_id_int,
+            "description": (
+                description[:WEBHOOK_PAYLOAD_DESCRIPTION_MAX_LENGTH]
+                if description
+                else None
+            ),
+        },
         headers={"X-Module": "update-ticket-description"},
         max_attempts=1,
         backoff_seconds=60,
     )
     event_id = int(event.get("id")) if event.get("id") is not None else None
     if event_id is None:
-        raise RuntimeError("Failed to create webhook event for ticket description update")
+        raise RuntimeError(
+            "Failed to create webhook event for ticket description update"
+        )
     if event_future and not event_future.done():
         event_future.set_result(event_id)
-    
+
     attempt_number = 1
     try:
-        updated_ticket = await tickets_service.update_ticket_description(ticket_id_int, description)
+        updated_ticket = await tickets_service.update_ticket_description(
+            ticket_id_int, description
+        )
         if not updated_ticket:
             raise ValueError(f"Ticket {ticket_id_int} not found")
     except Exception as exc:
@@ -4901,8 +5303,10 @@ async def _invoke_update_ticket_description(
             updated_event,
             extra={"ticket_id": ticket_id_int},
         )
-    
-    response_body = json.dumps({"ticket_id": ticket_id_int, "description_updated": True})
+
+    response_body = json.dumps(
+        {"ticket_id": ticket_id_int, "description_updated": True}
+    )
     updated_event = await _record_success(
         event_id,
         attempt_number=attempt_number,
@@ -4927,17 +5331,17 @@ async def _invoke_reprocess_ai(
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
     """Re-trigger AI processing for a ticket.
-    
+
     This will regenerate the AI summary and tags using the Ollama model.
     The ticket_id can be provided directly or via context.ticket.id or context.ticket_id.
-    
+
     Optional parameters:
     - refresh_summary: bool (default: True) - Whether to refresh the AI summary
     - refresh_tags: bool (default: True) - Whether to refresh the AI tags
     """
     raw_context = payload.get("context")
     context = raw_context if isinstance(raw_context, Mapping) else {}
-    
+
     # Resolve ticket_id from payload or context
     ticket_id = payload.get("ticket_id")
     if ticket_id is None:
@@ -4946,26 +5350,26 @@ async def _invoke_reprocess_ai(
         ticket_context = context.get("ticket")
         if isinstance(ticket_context, Mapping):
             ticket_id = ticket_context.get("id")
-    
+
     if ticket_id is None:
         raise ValueError("ticket_id is required")
-    
+
     try:
         ticket_id_int = int(ticket_id)
     except (TypeError, ValueError):
         raise ValueError("ticket_id must be a valid integer")
-    
+
     # Check options
     refresh_summary = _ensure_bool(payload.get("refresh_summary"), True)
     refresh_tags = _ensure_bool(payload.get("refresh_tags"), True)
-    
+
     if not refresh_summary and not refresh_tags:
         return {
             "status": "skipped",
             "reason": "No AI processing requested (both refresh_summary and refresh_tags are false)",
             "ticket_id": ticket_id_int,
         }
-    
+
     # Create webhook event for tracking
     event = await webhook_monitor.create_manual_event(
         name="module.reprocess-ai.process",
@@ -4984,7 +5388,7 @@ async def _invoke_reprocess_ai(
         raise RuntimeError("Failed to create webhook event for AI reprocessing")
     if event_future and not event_future.done():
         event_future.set_result(event_id)
-    
+
     attempt_number = 1
     processed = []
     try:
@@ -5012,11 +5416,13 @@ async def _invoke_reprocess_ai(
             updated_event,
             extra={"ticket_id": ticket_id_int, "processed": processed},
         )
-    
-    response_body = json.dumps({
-        "ticket_id": ticket_id_int,
-        "processed": processed,
-    })
+
+    response_body = json.dumps(
+        {
+            "ticket_id": ticket_id_int,
+            "processed": processed,
+        }
+    )
     updated_event = await _record_success(
         event_id,
         attempt_number=attempt_number,
@@ -5036,7 +5442,7 @@ async def _invoke_add_ticket_reply(
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
     """Add a reply to a ticket from automation payload.
-    
+
     Accepts a JSON payload with:
     - ticket_id: Required (can come from context.ticket.id)
     - body: Required - The reply content (HTML or plain text)
@@ -5048,10 +5454,10 @@ async def _invoke_add_ticket_reply(
     - send_notification: Optional (default: false) - Whether to send email notification
     """
     from app.repositories import tickets as tickets_repo
-    
+
     raw_context = payload.get("context")
     context = raw_context if isinstance(raw_context, Mapping) else {}
-    
+
     # Resolve ticket_id from payload or context
     ticket_id = payload.get("ticket_id")
     if ticket_id is None:
@@ -5060,36 +5466,36 @@ async def _invoke_add_ticket_reply(
         ticket_context = context.get("ticket")
         if isinstance(ticket_context, Mapping):
             ticket_id = ticket_context.get("id")
-    
+
     if ticket_id is None:
         raise ValueError("ticket_id is required")
-    
+
     try:
         ticket_id_int = int(ticket_id)
     except (TypeError, ValueError):
         raise ValueError("ticket_id must be a valid integer")
-    
+
     # Get reply body
     body = payload.get("body")
     if body is None or str(body).strip() == "":
         raise ValueError("body is required and cannot be empty")
     body_str = str(body)
-    
+
     # Get optional fields
     is_internal = _ensure_bool(payload.get("is_internal"), False)
-    
+
     author_id = _parse_nullable_int(payload.get("author_id"))
-    
+
     minutes_spent = _parse_nullable_int(payload.get("minutes_spent"))
     if minutes_spent is not None and minutes_spent < 0:
         minutes_spent = None
-    
+
     is_billable = _ensure_bool(payload.get("is_billable"), False)
-    
+
     labour_type_id = _parse_nullable_int(payload.get("labour_type_id"))
-    
+
     send_notification = _ensure_bool(payload.get("send_notification"), False)
-    
+
     # Create webhook event for tracking
     event = await webhook_monitor.create_manual_event(
         name="module.add-ticket-reply.create",
@@ -5111,14 +5517,14 @@ async def _invoke_add_ticket_reply(
         raise RuntimeError("Failed to create webhook event for ticket reply")
     if event_future and not event_future.done():
         event_future.set_result(event_id)
-    
+
     attempt_number = 1
     try:
         # Check ticket exists
         existing = await tickets_repo.get_ticket(ticket_id_int)
         if not existing:
             raise ValueError(f"Ticket {ticket_id_int} not found")
-        
+
         # Create the reply
         reply = await tickets_repo.create_reply(
             ticket_id=ticket_id_int,
@@ -5129,16 +5535,16 @@ async def _invoke_add_ticket_reply(
             is_billable=is_billable,
             labour_type_id=labour_type_id,
         )
-        
+
         # Emit ticket updated event
         await tickets_service.emit_ticket_updated_event(
             ticket_id_int,
             actor_type="automation",
             trigger_automations=False,
         )
-        
+
         reply_id = reply.get("id") if reply else None
-        
+
         # Optionally send notification (future enhancement)
         if send_notification and not is_internal and reply_id:
             # Note: Email notification would be triggered here
@@ -5166,14 +5572,16 @@ async def _invoke_add_ticket_reply(
             updated_event,
             extra={"ticket_id": ticket_id_int},
         )
-    
-    response_body = json.dumps({
-        "ticket_id": ticket_id_int,
-        "reply_id": reply_id,
-        "is_internal": is_internal,
-        "minutes_spent": minutes_spent,
-        "is_billable": is_billable,
-    })
+
+    response_body = json.dumps(
+        {
+            "ticket_id": ticket_id_int,
+            "reply_id": reply_id,
+            "is_internal": is_internal,
+            "minutes_spent": minutes_spent,
+            "is_billable": is_billable,
+        }
+    )
     updated_event = await _record_success(
         event_id,
         attempt_number=attempt_number,
@@ -5207,7 +5615,14 @@ _WHISPERX_AUDIO_MIME_TYPES = {
 
 # File extensions accepted when MIME type is missing or generic
 _WHISPERX_AUDIO_EXTENSIONS = {
-    ".wav", ".mp3", ".ogg", ".flac", ".webm", ".m4a", ".mp4", ".mpeg",
+    ".wav",
+    ".mp3",
+    ".ogg",
+    ".flac",
+    ".webm",
+    ".m4a",
+    ".mp4",
+    ".mpeg",
 }
 
 
@@ -5260,15 +5675,18 @@ def _split_stereo_wav(file_path: Path) -> tuple[Path, Path] | None:
 
     samples: array.array = array.array(typecode, raw_data)
     # Stereo samples are interleaved: [L0, R0, L1, R1, …]
-    callee_samples = samples[0::2]   # left  channel = callee
-    caller_samples = samples[1::2]   # right channel = caller
+    callee_samples = samples[0::2]  # left  channel = callee
+    caller_samples = samples[1::2]  # right channel = caller
 
     stem = file_path.stem
     callee_path = file_path.parent / f"{stem}_callee_ch.wav"
     caller_path = file_path.parent / f"{stem}_caller_ch.wav"
 
     try:
-        for path, channel in ((callee_path, callee_samples), (caller_path, caller_samples)):
+        for path, channel in (
+            (callee_path, callee_samples),
+            (caller_path, caller_samples),
+        ):
             with wave.open(str(path), "wb") as out:
                 out.setnchannels(1)
                 out.setsampwidth(sample_width)
@@ -5288,7 +5706,9 @@ def _fmt_time(seconds: float) -> str:
     return f"{secs // 60:02d}:{secs % 60:02d}"
 
 
-def _parse_whisperx_response(response: httpx.Response) -> tuple[str, list[dict[str, Any]]]:
+def _parse_whisperx_response(
+    response: httpx.Response,
+) -> tuple[str, list[dict[str, Any]]]:
     """Parse a WhisperX ``/asr`` response.
 
     Returns ``(text, segments)`` where *segments* is a (possibly empty) list
@@ -5309,7 +5729,7 @@ def _split_text_to_lines(text: str) -> list[str]:
     Splits on sentence-ending punctuation (.!?) followed by whitespace
     (preserving the punctuation via lookbehind), or on newlines.
     """
-    lines = re.split(r'(?<=[.!?])\s+|\n+', text.strip())
+    lines = re.split(r"(?<=[.!?])\s+|\n+", text.strip())
     return [line.strip() for line in lines if line.strip()]
 
 
@@ -5329,12 +5749,26 @@ def _build_stereo_transcription(
     if caller_segments or callee_segments:
         tagged: list[dict[str, Any]] = []
         for seg in caller_segments:
-            tagged.append({"start": seg.get("start", 0.0), "label": "Caller", "text": (seg.get("text") or "").strip()})
+            tagged.append(
+                {
+                    "start": seg.get("start", 0.0),
+                    "label": "Caller",
+                    "text": (seg.get("text") or "").strip(),
+                }
+            )
         for seg in callee_segments:
-            tagged.append({"start": seg.get("start", 0.0), "label": "Callee", "text": (seg.get("text") or "").strip()})
+            tagged.append(
+                {
+                    "start": seg.get("start", 0.0),
+                    "label": "Callee",
+                    "text": (seg.get("text") or "").strip(),
+                }
+            )
         tagged = [s for s in tagged if s["text"]]
         tagged.sort(key=lambda s: s["start"])
-        lines = [f"[{_fmt_time(s['start'])}] **{s['label']}:** {s['text']}" for s in tagged]
+        lines = [
+            f"[{_fmt_time(s['start'])}] **{s['label']}:** {s['text']}" for s in tagged
+        ]
         return "\n".join(lines)
 
     lines: list[str] = []
@@ -5452,7 +5886,9 @@ async def _invoke_whisperx(
             raise ValueError(f"No audio attachments found on ticket {ticket_id_int}")
 
         if not ready_attachments:
-            raise ValueError(f"Audio attachments not yet available on disk for ticket {ticket_id_int}")
+            raise ValueError(
+                f"Audio attachments not yet available on disk for ticket {ticket_id_int}"
+            )
 
         headers: dict[str, str] = {}
         if api_key:
@@ -5465,7 +5901,9 @@ async def _invoke_whisperx(
         async with httpx.AsyncClient(timeout=300.0) as client:
             for attachment in ready_attachments:
                 file_path = upload_dir / attachment["filename"]
-                original_name = attachment.get("original_filename") or attachment["filename"]
+                original_name = (
+                    attachment.get("original_filename") or attachment["filename"]
+                )
 
                 # Attempt stereo channel split when requested
                 # (Grandstream UCM: right channel = caller, left channel = callee)
@@ -5534,14 +5972,18 @@ async def _invoke_whisperx(
                     transcription, _ = _parse_whisperx_response(response)
 
                 if transcription:
-                    transcriptions.append({
-                        "attachment_id": attachment["id"],
-                        "filename": original_name,
-                        "transcription": transcription,
-                    })
+                    transcriptions.append(
+                        {
+                            "attachment_id": attachment["id"],
+                            "filename": original_name,
+                            "transcription": transcription,
+                        }
+                    )
 
         if not transcriptions:
-            raise ValueError("WhisperX returned empty transcriptions for all audio attachments")
+            raise ValueError(
+                "WhisperX returned empty transcriptions for all audio attachments"
+            )
 
         # -- optionally post an internal note -----------------------------
         reply_id = None
@@ -5585,14 +6027,16 @@ async def _invoke_whisperx(
             extra={"ticket_id": ticket_id_int},
         )
 
-    response_body = json.dumps({
-        "ticket_id": ticket_id_int,
-        "transcriptions": [
-            {"attachment_id": t["attachment_id"], "filename": t["filename"]}
-            for t in transcriptions
-        ],
-        "reply_id": reply_id,
-    })
+    response_body = json.dumps(
+        {
+            "ticket_id": ticket_id_int,
+            "transcriptions": [
+                {"attachment_id": t["attachment_id"], "filename": t["filename"]}
+                for t in transcriptions
+            ],
+            "reply_id": reply_id,
+        }
+    )
     updated_event = await _record_success(
         event_id,
         attempt_number=attempt_number,
@@ -5661,13 +6105,19 @@ async def _invoke_password_pusher(
         or 5
     )
     deletable_by_viewer = _ensure_bool(
-        payload.get("deletable_by_viewer") if payload.get("deletable_by_viewer") is not None
-        else settings.get("deletable_by_viewer"),
+        (
+            payload.get("deletable_by_viewer")
+            if payload.get("deletable_by_viewer") is not None
+            else settings.get("deletable_by_viewer")
+        ),
         True,
     )
     retrieval_step = _ensure_bool(
-        payload.get("retrieval_step") if payload.get("retrieval_step") is not None
-        else settings.get("retrieval_step"),
+        (
+            payload.get("retrieval_step")
+            if payload.get("retrieval_step") is not None
+            else settings.get("retrieval_step")
+        ),
         False,
     )
     note = str(payload.get("note") or "").strip() or None
@@ -5685,7 +6135,10 @@ async def _invoke_password_pusher(
     request_body = {"password": push_body}
     target_url = f"{base_url}/p.json"
 
-    headers: dict[str, str] = {"Content-Type": "application/json", "Accept": "application/json"}
+    headers: dict[str, str] = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
     if api_key and user_email:
         headers["X-User-Email"] = user_email
         headers["X-User-Token"] = api_key
@@ -5695,8 +6148,15 @@ async def _invoke_password_pusher(
     event = await webhook_monitor.create_manual_event(
         name="module.password-pusher.push",
         target_url=target_url,
-        payload={"expire_after_days": expire_after_days, "expire_after_views": expire_after_views},
-        headers={k: v for k, v in headers.items() if k not in {"Authorization", "X-User-Token"}},
+        payload={
+            "expire_after_days": expire_after_days,
+            "expire_after_views": expire_after_views,
+        },
+        headers={
+            k: v
+            for k, v in headers.items()
+            if k not in {"Authorization", "X-User-Token"}
+        },
         max_attempts=1,
         backoff_seconds=60,
     )
@@ -5717,11 +6177,15 @@ async def _invoke_password_pusher(
             event_id,
             attempt_number=attempt_number,
             status="failed",
-            error_message=f"HTTP {exc.response.status_code}" if exc.response else str(exc),
+            error_message=(
+                f"HTTP {exc.response.status_code}" if exc.response else str(exc)
+            ),
             response_status=exc.response.status_code if exc.response else None,
             response_body=response_body,
         )
-        return _build_event_result(updated_event, extra={"push_url": None, "url_token": None})
+        return _build_event_result(
+            updated_event, extra={"push_url": None, "url_token": None}
+        )
     except Exception as exc:  # pragma: no cover - defensive
         updated_event = await _record_failure(
             event_id,
@@ -5731,7 +6195,9 @@ async def _invoke_password_pusher(
             response_status=None,
             response_body=None,
         )
-        return _build_event_result(updated_event, extra={"push_url": None, "url_token": None})
+        return _build_event_result(
+            updated_event, extra={"push_url": None, "url_token": None}
+        )
 
     response_text = response.text
     try:
@@ -5805,6 +6271,7 @@ async def _validate_trello(
         event_future.set_result(None)
 
     from app.services.trello import validate_credentials
+
     return await validate_credentials()
 
 
@@ -5846,6 +6313,7 @@ async def _invoke_trello_add_comment(
         event_future.set_result(None)
 
     from app.services.trello import add_comment_to_card
+
     result = await add_comment_to_card(card_id, text, company=company)
     if result is None:
         return {
@@ -5877,4 +6345,5 @@ async def _invoke_solidtime_reconcile(
         event_future.set_result(None)
 
     from app.services.solidtime import reconcile_once
+
     return await reconcile_once()

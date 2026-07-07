@@ -135,7 +135,7 @@ class SchedulerService:
             return
         self._scheduler.start()
         self._started = True
-        self._ensure_monitoring_jobs()
+        await self._ensure_monitoring_jobs()
         self._start_refresh_task()
         log_info("Scheduler started")
 
@@ -168,7 +168,7 @@ class SchedulerService:
                 max_instances=1,
             )
         log_info("Scheduler tasks loaded", count=len(tasks))
-        self._ensure_monitoring_jobs()
+        await self._ensure_monitoring_jobs()
 
     def _track_refresh_task(self, task: asyncio.Task[None]) -> None:
         self._refresh_task = task
@@ -197,7 +197,7 @@ class SchedulerService:
         except Exception as exc:  # pragma: no cover - defensive logging
             log_error("Scheduler refresh failed during shutdown", error=str(exc))
 
-    def _ensure_monitoring_jobs(self) -> None:
+    async def _ensure_monitoring_jobs(self) -> None:
         if not self._started:
             return
         if not self._scheduler.get_job("webhook-monitor"):
@@ -313,13 +313,18 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
-        # Reconcile Solidtime state every 5 minutes. The reconciler is a
-        # no-op when the integration module is disabled or unconfigured.
+        # Reconcile Solidtime state on a configurable interval. The reconciler
+        # is a no-op when the integration module is disabled or unconfigured.
         if not self._scheduler.get_job("solidtime-reconcile"):
+            from app.services import solidtime as solidtime_service
+
+            solidtime_interval_minutes = (
+                await solidtime_service.get_reconcile_interval_minutes()
+            )
             self._scheduler.add_job(
                 self._run_solidtime_reconcile,
                 "interval",
-                minutes=5,
+                minutes=solidtime_interval_minutes,
                 id="solidtime-reconcile",
                 replace_existing=True,
                 coalesce=True,

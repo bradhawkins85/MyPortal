@@ -35,6 +35,7 @@ def reset_solidtime_caches(monkeypatch):
 # Conversion utilities
 # ---------------------------------------------------------------------------
 
+
 def test_ticket_to_project_payload_uses_number_and_subject():
     ticket = {
         "id": 7,
@@ -70,9 +71,10 @@ def test_ticket_to_project_payload_falls_back_when_missing():
     body = ticket_to_project_payload({"id": 3, "subject": ""})
     # Empty subject falls back to "Ticket"
     assert body["name"] == "#3 – Ticket"
-    assert body["color"] == ticket_to_project_payload(
-        {"id": 3, "subject": "Renamed"}
-    )["color"]
+    assert (
+        body["color"]
+        == ticket_to_project_payload({"id": 3, "subject": "Renamed"})["color"]
+    )
 
 
 def test_reply_to_time_entry_payload_computes_start_from_minutes_and_created_at():
@@ -124,6 +126,7 @@ def test_reply_to_time_entry_payload_returns_none_for_zero_minutes():
 # Webhook signature verification
 # ---------------------------------------------------------------------------
 
+
 def test_verify_webhook_signature_accepts_valid_hmac():
     secret = "shared-secret"
     body = b'{"type":"project.updated"}'
@@ -148,6 +151,7 @@ def test_verify_webhook_signature_rejects_invalid_or_missing():
 # Configuration & request plumbing
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.anyio
 async def test_get_effective_settings_requires_enabled_module(reset_solidtime_caches):
     async def fake_get_module(slug):
@@ -168,6 +172,7 @@ async def test_get_effective_settings_normalises_base_url(reset_solidtime_caches
                 "api_token": "tok-123",
                 "organization_id": "org-uuid",
                 "rate_limit_per_minute": 200,
+                "monitor_successful_api_requests": True,
             },
         }
 
@@ -206,20 +211,41 @@ def test_solidtime_monitor_target_url_uses_invalid_scheme_fallback():
     [
         (None, None, "Solidtime module is not configured"),
         ({"enabled": False}, None, "Solidtime module is disabled"),
-        ({"enabled": True, "base_url": "", "api_token": "tok"}, None, "Solidtime base URL is not configured"),
-        ({"enabled": True, "base_url": "https://app.solidtime.io", "api_token": ""}, None, "Solidtime API token is not configured"),
         (
-            {"enabled": True, "base_url": "https://app.solidtime.io", "api_token": "tok", "sync_tickets_to_projects": False},
+            {"enabled": True, "base_url": "", "api_token": "tok"},
+            None,
+            "Solidtime base URL is not configured",
+        ),
+        (
+            {"enabled": True, "base_url": "https://app.solidtime.io", "api_token": ""},
+            None,
+            "Solidtime API token is not configured",
+        ),
+        (
+            {
+                "enabled": True,
+                "base_url": "https://app.solidtime.io",
+                "api_token": "tok",
+                "sync_tickets_to_projects": False,
+            },
             None,
             "sync_tickets_to_projects is disabled",
         ),
         (
-            {"enabled": True, "base_url": "https://app.solidtime.io", "api_token": "tok"},
+            {
+                "enabled": True,
+                "base_url": "https://app.solidtime.io",
+                "api_token": "tok",
+            },
             None,
             "sync returned no action",
         ),
         (
-            {"enabled": True, "base_url": "https://app.solidtime.io", "api_token": "tok"},
+            {
+                "enabled": True,
+                "base_url": "https://app.solidtime.io",
+                "api_token": "tok",
+            },
             {"ticket_id": 1},
             "ticket synced",
         ),
@@ -227,7 +253,9 @@ def test_solidtime_monitor_target_url_uses_invalid_scheme_fallback():
 )
 def test_ticket_sync_outcome_reason_variants(settings, sync_result, expected):
     assert (
-        solidtime._ticket_sync_outcome_reason(settings=settings, sync_result=sync_result)
+        solidtime._ticket_sync_outcome_reason(
+            settings=settings, sync_result=sync_result
+        )
         == expected
     )
 
@@ -283,6 +311,7 @@ async def test_request_records_webhook_and_unwraps_data(reset_solidtime_caches):
                 "api_token": "tok",
                 "organization_id": "org-uuid",
                 "rate_limit_per_minute": 200,
+                "monitor_successful_api_requests": True,
             },
         }
 
@@ -338,10 +367,55 @@ async def test_request_records_webhook_and_unwraps_data(reset_solidtime_caches):
     data = solidtime._extract_data(payload)
     assert data == [{"id": "p1"}, {"id": "p2"}]
     assert captured["auth"] == "Bearer tok"
-    assert captured["url"].endswith(
-        "/api/v1/organizations/org-uuid/projects"
-    )
+    assert captured["url"].endswith("/api/v1/organizations/org-uuid/projects")
     assert recorded.get("success", {}).get("event_id") == 7
+
+
+@pytest.mark.anyio
+async def test_request_skips_success_webhook_by_default(reset_solidtime_caches):
+    async def fake_get_module(slug):
+        return {
+            "enabled": True,
+            "settings": {
+                "base_url": "https://example.solidtime",
+                "api_token": "tok",
+                "organization_id": "org-uuid",
+            },
+        }
+
+    reset_solidtime_caches.setattr(solidtime.module_repo, "get_module", fake_get_module)
+
+    created: list[dict[str, object]] = []
+
+    async def fake_manual_event(**kwargs):
+        created.append(kwargs)
+        return {"id": 7}
+
+    reset_solidtime_caches.setattr(
+        solidtime.webhook_monitor, "create_manual_event", fake_manual_event
+    )
+
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"data": []})
+    )
+    original_async_client = httpx.AsyncClient
+
+    class _DummyAsyncClient:
+        def __init__(self, *args, **kwargs):
+            self._client = original_async_client(transport=transport)
+
+        async def __aenter__(self):
+            return self._client
+
+        async def __aexit__(self, *exc):
+            await self._client.aclose()
+
+    reset_solidtime_caches.setattr(solidtime.httpx, "AsyncClient", _DummyAsyncClient)
+
+    payload = await solidtime._request("GET", "/organizations/org-uuid/projects")
+
+    assert solidtime._extract_data(payload) == []
+    assert created == []
 
 
 @pytest.mark.anyio
@@ -408,6 +482,7 @@ async def test_request_records_failure_when_api_returns_error(reset_solidtime_ca
 # ---------------------------------------------------------------------------
 # Outbound sync
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.anyio
 async def test_sync_ticket_to_project_creates_link(reset_solidtime_caches):
@@ -516,8 +591,7 @@ async def test_sync_ticket_to_project_creates_link(reset_solidtime_caches):
     assert project_payload["client_id"] == "client-uuid"
     assert any(u.get("kind") == "client" for u in upserts)
     assert any(
-        u.get("kind") == "project" and u.get("sync_status") == "synced"
-        for u in upserts
+        u.get("kind") == "project" and u.get("sync_status") == "synced" for u in upserts
     )
 
 
@@ -661,7 +735,9 @@ async def test_sync_ticket_skips_when_module_disabled(reset_solidtime_caches):
 
 
 @pytest.mark.anyio
-async def test_sync_ticket_logs_reason_when_ticket_push_toggle_off(reset_solidtime_caches):
+async def test_sync_ticket_logs_reason_when_ticket_push_toggle_off(
+    reset_solidtime_caches,
+):
     async def fake_get_module(slug):
         return {
             "enabled": True,
@@ -974,6 +1050,7 @@ async def test_reconcile_once_imports_new_time_entry_with_billable_status(
 # UI helper
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.anyio
 async def test_get_ticket_links_returns_disabled_snapshot(reset_solidtime_caches):
     async def fake_get_module(slug):
@@ -1021,6 +1098,7 @@ async def test_get_ticket_links_builds_timer_url_when_linked(reset_solidtime_cac
 # Migration idempotency (smoke)
 # ---------------------------------------------------------------------------
 
+
 def test_migration_uses_create_table_if_not_exists():
     from pathlib import Path
 
@@ -1036,8 +1114,11 @@ def test_migration_uses_create_table_if_not_exists():
 # trigger_module integration
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.anyio
-async def test_trigger_module_solidtime_calls_reconcile_once(reset_solidtime_caches, monkeypatch):
+async def test_trigger_module_solidtime_calls_reconcile_once(
+    reset_solidtime_caches, monkeypatch
+):
     """trigger_module('solidtime', ...) must not raise 'No handler registered'."""
     from app.services import modules
     from app.repositories import integration_modules as module_repo
@@ -1096,6 +1177,7 @@ async def test_trigger_module_solidtime_not_in_trigger_actions(monkeypatch):
 # Outbound ticket push in reconcile_once
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.anyio
 async def test_reconcile_once_pushes_unsynced_open_tickets(reset_solidtime_caches):
     """reconcile_once should push open tickets that have no Solidtime project link."""
@@ -1140,7 +1222,9 @@ async def test_reconcile_once_pushes_unsynced_open_tickets(reset_solidtime_cache
 
 
 @pytest.mark.anyio
-async def test_reconcile_once_records_error_on_ticket_push_failure(reset_solidtime_caches):
+async def test_reconcile_once_records_error_on_ticket_push_failure(
+    reset_solidtime_caches,
+):
     """reconcile_once should record errors when ticket push fails."""
 
     async def fake_get_module(slug):
@@ -1212,11 +1296,15 @@ async def test_reconcile_once_skips_ticket_push_when_disabled(reset_solidtime_ca
 
     assert summary["status"] == "ok"
     assert summary["tickets_pushed"] == 0
-    assert not called, "list_unsynced_ticket_ids should not be called when sync_tickets_to_projects is False"
+    assert (
+        not called
+    ), "list_unsynced_ticket_ids should not be called when sync_tickets_to_projects is False"
 
 
 @pytest.mark.anyio
-async def test_reconcile_once_returns_reason_when_module_disabled(reset_solidtime_caches):
+async def test_reconcile_once_returns_reason_when_module_disabled(
+    reset_solidtime_caches,
+):
     """reconcile_once should expose why it skipped so admins can act on it."""
 
     async def fake_get_module(slug):
