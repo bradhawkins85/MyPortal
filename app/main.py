@@ -8229,6 +8229,7 @@ async def _render_tickets_dashboard(
         "ticket_labour_types": labour_types,
         "ticket_time_lookup": ticket_time_lookup,
         "can_bulk_delete_tickets": bool(user.get("is_super_admin")),
+        "next_ticket_number": await site_settings_repo.get_next_ticket_number(),
         "success_message": success_message,
         "error_message": error_message,
         "ticket_dashboard_endpoint": dashboard_endpoint,

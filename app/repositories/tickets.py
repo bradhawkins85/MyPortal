@@ -7,6 +7,7 @@ from typing import Any, Iterable, Sequence
 
 from app.core.database import db
 from app.core.logging import log_debug, log_error, log_info
+from app.repositories import site_settings as site_settings_repo
 
 TicketRecord = dict[str, Any]
 
@@ -272,6 +273,19 @@ async def create_ticket(
         explicit_id=id,
     )
 
+    configured_next_ticket_number: int | None = None
+    if id is None:
+        configured_next_ticket_number = await site_settings_repo.get_next_ticket_number()
+        if configured_next_ticket_number is not None:
+            max_id_row = await db.fetch_one("SELECT MAX(id) as max_id FROM tickets")
+            max_id_value = max_id_row.get("max_id") if max_id_row else None
+            try:
+                max_id = int(max_id_value) if max_id_value is not None else 0
+            except (TypeError, ValueError):
+                max_id = 0
+            if max_id < configured_next_ticket_number:
+                id = configured_next_ticket_number
+
     # If an explicit ID is provided, insert with that ID
     if id is not None:
         ticket_id = await db.execute_returning_lastrowid(
@@ -309,6 +323,8 @@ async def create_ticket(
                 )
         except Exception as exc:  # pragma: no cover - defensive
             log_debug("Failed to update AUTO_INCREMENT after explicit ID insert", error=str(exc))
+        if configured_next_ticket_number is not None and ticket_id >= configured_next_ticket_number:
+            await site_settings_repo.set_next_ticket_number(ticket_id + 1)
     else:
         # Use normal auto-increment behavior
         ticket_id = await db.execute_returning_lastrowid(
@@ -332,6 +348,8 @@ async def create_ticket(
                 ticket_number,
             ),
         )
+        if configured_next_ticket_number is not None and ticket_id >= configured_next_ticket_number:
+            await site_settings_repo.set_next_ticket_number(ticket_id + 1)
     if ticket_id:
         log_info("Ticket created successfully", ticket_id=ticket_id)
         row = await db.fetch_one("SELECT * FROM tickets WHERE id = %s", (ticket_id,))

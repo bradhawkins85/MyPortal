@@ -28,7 +28,8 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from app.core.logging import log_error, log_info
+from app.core.database import db
+from app.core.logging import log_debug, log_error, log_info
 from app.features.tickets.form_helpers import get_last_form_value
 from app.security.flash import flash_redirect
 from app.repositories import assets as assets_repo
@@ -39,6 +40,7 @@ from app.repositories import ticket_statuses as ticket_status_repo
 from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as user_repo
+from app.repositories import site_settings as site_settings_repo
 from app.services import agent as agent_service
 from app.services import labour_types as labour_types_service
 from app.services import ticket_attachments as attachments_service
@@ -373,6 +375,32 @@ async def admin_rescan_ticket_related(ticket_id: int, request: Request):
         "skipped": False,
         "generated_at": result.get("generated_at"),
     })
+
+@router.post("/admin/tickets/next-number", response_class=HTMLResponse)
+async def admin_update_next_ticket_number(request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    if not current_user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+
+    form = await request.form()
+    raw_next_ticket_number = str(form.get("nextTicketNumber", "")).strip()
+    try:
+        next_ticket_number = int(raw_next_ticket_number)
+    except (TypeError, ValueError):
+        return flash_redirect("/admin/tickets", "Enter a valid next ticket number.", "error")
+    if next_ticket_number <= 0:
+        return flash_redirect("/admin/tickets", "Next ticket number must be a positive integer.", "error")
+
+    await site_settings_repo.set_next_ticket_number(next_ticket_number)
+    try:
+        await db.execute(f"ALTER TABLE tickets AUTO_INCREMENT = {next_ticket_number}")
+    except Exception as exc:  # pragma: no cover - SQLite and some MySQL versions may reject lower values
+        log_debug("Failed to update ticket AUTO_INCREMENT from admin setting", error=str(exc))
+    return flash_redirect("/admin/tickets", f"Next ticket number set to {next_ticket_number}.", "success")
+
 
 @router.post("/admin/tickets", response_class=HTMLResponse)
 async def admin_create_ticket(request: Request):

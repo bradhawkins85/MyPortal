@@ -6,8 +6,9 @@
   {% set show_ticket_status_editor = is_super_admin %}
   {% set show_labour_type_editor = is_super_admin %}
   {% set show_tag_exclusions = is_super_admin %}
+  {% set show_next_ticket_number = is_super_admin %}
   {% set can_merge_tickets = is_helpdesk_technician | default(false) %}
-  {% set show_ticket_tools = show_ticket_automations or show_syncro_import or show_ticket_status_editor or show_labour_type_editor or show_tag_exclusions or can_bulk_delete_tickets or can_merge_tickets %}
+  {% set show_ticket_tools = show_ticket_automations or show_syncro_import or show_ticket_status_editor or show_labour_type_editor or show_next_ticket_number or show_tag_exclusions or can_bulk_delete_tickets or can_merge_tickets %}
   <div class="header-title-menu">
     <span class="header-title-menu__label">Ticketing workspace</span>
     <button
@@ -67,6 +68,19 @@
               </button>
             </li>
           {% endif %}
+          {% if show_next_ticket_number %}
+            <li class="header-title-menu__item" role="none">
+              <button
+                type="button"
+                class="header-title-menu__link"
+                role="menuitem"
+                data-next-ticket-number-open
+                data-current-next-ticket-number="{{ next_ticket_number or '' }}"
+              >
+                Next ticket number
+              </button>
+            </li>
+          {% endif %}
           {% if show_tag_exclusions %}
             <li class="header-title-menu__item" role="none">
               <a href="/admin/tag-exclusions" class="header-title-menu__link" role="menuitem">AI tag exclusions</a>
@@ -107,6 +121,13 @@
       </details>
     {% endif %}
   </div>
+
+  {% if show_next_ticket_number %}
+    <form action="/admin/tickets/next-number" method="post" data-next-ticket-number-form hidden>
+      {% include "partials/csrf.html" %}
+      <input type="hidden" name="nextTicketNumber" value="" data-next-ticket-number-input />
+    </form>
+  {% endif %}
 
   {% if can_merge_tickets %}
     <div class="modal" id="merge-tickets-modal" data-ticket-merge-modal hidden role="dialog" aria-modal="true" aria-labelledby="merge-tickets-title">
@@ -1023,4 +1044,27 @@
   <script src="{{ static_url('/static/js/ticket_views.js') }}" defer></script>
   <script src="{{ static_url('/static/js/ticket_columns.js') }}" defer></script>
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
+
+  {% if show_next_ticket_number %}
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        const button = document.querySelector('[data-next-ticket-number-open]');
+        const form = document.querySelector('[data-next-ticket-number-form]');
+        const input = document.querySelector('[data-next-ticket-number-input]');
+        if (!button || !form || !input) return;
+        button.addEventListener('click', () => {
+          const currentValue = button.getAttribute('data-current-next-ticket-number') || '';
+          const value = window.prompt('Enter the next ticket number to use for newly-created tickets.', currentValue);
+          if (value === null) return;
+          const cleaned = value.trim();
+          if (!/^\d+$/.test(cleaned) || Number(cleaned) <= 0) {
+            window.alert('Enter a positive whole number.');
+            return;
+          }
+          input.value = cleaned;
+          form.requestSubmit();
+        });
+      });
+    </script>
+  {% endif %}
 {% endblock %}
