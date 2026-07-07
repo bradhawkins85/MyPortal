@@ -5202,6 +5202,10 @@ dialog.modal:not([open]) {
 }
 
 @media (min-width: 961px) and (max-width: 1799px) {
+  .management__body--ticket-detail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .management__column--details {
     grid-column: 1;
     grid-row: 1;
@@ -5216,6 +5220,10 @@ dialog.modal:not([open]) {
 @media (min-width: 1800px) {
   .management__body--columns {
     grid-template-columns: minmax(280px, 320px) minmax(360px, 1fr) minmax(0, 1fr);
+  }
+
+  .management__body--ticket-detail-two-column {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .management__column-group--main {
