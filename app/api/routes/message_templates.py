@@ -74,6 +74,33 @@ async def create_message_template(
     return MessageTemplateResponse(**record)
 
 
+@router.post("/{template_id}/clone", response_model=MessageTemplateResponse, status_code=status.HTTP_201_CREATED)
+async def clone_message_template(
+    template_id: int,
+    request: Request,
+    current_user: dict = Depends(require_super_admin),
+) -> MessageTemplateResponse:
+    existing = await message_templates_service.get_template(template_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+    try:
+        record = await message_templates_service.clone_template(template_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+    await audit_service.record(
+        action="message_template.clone",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="message_template",
+        entity_id=int(record["id"]) if record.get("id") is not None else None,
+        before=_audit_template_summary(existing),
+        after=_audit_template_summary(record),
+    )
+    return MessageTemplateResponse(**record)
+
+
 @router.get("/{template_id}", response_model=MessageTemplateResponse)
 async def get_message_template(
     template_id: int,

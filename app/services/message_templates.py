@@ -92,6 +92,24 @@ def _normalise_slug(slug: str) -> str:
     return candidate
 
 
+def _build_clone_slug_candidate(source_slug: str, index: int | None = None) -> str:
+    suffix = "-copy" if index is None else f"-copy-{index}"
+    max_base_length = 120 - len(suffix)
+    base = source_slug[:max_base_length].rstrip("._-")
+    return f"{base}{suffix}"
+
+
+async def _generate_clone_slug(source_slug: str) -> str:
+    candidate = _build_clone_slug_candidate(source_slug)
+    if not await template_repo.get_template_by_slug(candidate):
+        return candidate
+    for index in range(2, 1000):
+        candidate = _build_clone_slug_candidate(source_slug, index)
+        if not await template_repo.get_template_by_slug(candidate):
+            return candidate
+    raise ValueError("Unable to generate a unique clone slug")
+
+
 def _normalise_content_type(content_type: str | None) -> str:
     if not content_type:
         return "text/plain"
@@ -266,6 +284,25 @@ async def create_template(
         description=clean_description,
         content_type=normalised_content_type,
         content=content,
+    )
+    template = _coerce_template(record)
+    await refresh_cache()
+    return _to_dict(template)
+
+
+async def clone_template(template_id: int) -> dict[str, Any] | None:
+    source_record = await template_repo.get_template(template_id)
+    if not source_record:
+        return None
+    source = _coerce_template(source_record)
+    clone_slug = await _generate_clone_slug(source.slug)
+    clone_name = f"{source.name} (Copy)"
+    record = await template_repo.create_template(
+        slug=clone_slug,
+        name=clone_name,
+        description=source.description,
+        content_type=source.content_type,
+        content=source.content,
     )
     template = _coerce_template(record)
     await refresh_cache()

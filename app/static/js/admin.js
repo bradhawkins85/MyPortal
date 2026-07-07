@@ -1483,6 +1483,41 @@
     }
   }
 
+  function bindMessageTemplateCloneButtons() {
+    document.querySelectorAll('[data-template-clone]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const row = button.closest('tr');
+        if (!row) {
+          return;
+        }
+        const templateId = row.dataset.templateId;
+        if (!templateId) {
+          return;
+        }
+        const payload = getTemplatePayload(row.dataset.templateJson);
+        const templateName =
+          payload?.name || row.querySelector('[data-label="Name"]')?.textContent || 'this template';
+        if (!confirm(`Clone ${templateName.trim()}? A new template will be created with a unique slug.`)) {
+          return;
+        }
+        button.disabled = true;
+        try {
+          const cloned = await requestJson(
+            `/api/message-templates/${encodeURIComponent(templateId)}/clone`,
+            { method: 'POST' },
+          );
+          const message = `Template cloned as ${cloned.slug}.`;
+          window.location.href = `/admin/message-templates/${encodeURIComponent(
+            cloned.id,
+          )}/edit?success=${encodeURIComponent(message)}`;
+        } catch (error) {
+          alert(`Unable to clone template: ${error.message}`);
+          button.disabled = false;
+        }
+      });
+    });
+  }
+
   function bindMessageTemplateDeleteButtons() {
     document.querySelectorAll('[data-template-delete]').forEach((button) => {
       button.addEventListener('click', async () => {
@@ -1495,7 +1530,8 @@
           return;
         }
         const payload = getTemplatePayload(row.dataset.templateJson);
-        const templateName = payload?.name || row.querySelector('[data-label="Name"]')?.textContent || 'this template';
+        const templateName =
+          payload?.name || row.querySelector('[data-label="Name"]')?.textContent || 'this template';
         if (!confirm(`Delete ${templateName.trim()}? This action cannot be undone.`)) {
           return;
         }
@@ -3628,6 +3664,7 @@
     bindTicketAiReplaceDescription();
     bindTicketAiRefresh();
     bindMessageTemplateForm();
+    bindMessageTemplateCloneButtons();
     bindMessageTemplateDeleteButtons();
     bindRoleForm();
     bindCompanyAssignForm();
