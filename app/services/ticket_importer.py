@@ -1278,14 +1278,33 @@ def _extract_destination_emails(comment: dict[str, Any]) -> set[str]:
     return emails
 
 
-def _gather_comment_watchers(comments: list[dict[str, Any]]) -> set[str]:
+def _gather_comment_watchers(
+    comments: list[dict[str, Any]],
+    *,
+    excluded_emails: Collection[str] | None = None,
+) -> set[str]:
     watchers: dict[str, str] = {}
+    excluded = {email.lower() for email in (excluded_emails or []) if email}
     for comment in comments:
         for email in _extract_destination_emails(comment):
             key = email.lower()
+            if key in excluded:
+                continue
             if key not in watchers:
                 watchers[key] = email
     return set(watchers.values())
+
+
+def _gather_technician_emails(comments: list[dict[str, Any]]) -> set[str]:
+    emails: set[str] = set()
+    for comment in comments:
+        tech = _clean_text(comment.get("tech"))
+        if tech and tech.lower() == "customer-reply":
+            continue
+        email = _extract_comment_author_email(comment)
+        if email:
+            emails.add(email)
+    return emails
 
 
 def _should_comment_be_internal(comment: dict[str, Any]) -> bool:
@@ -1538,16 +1557,11 @@ async def _sync_ticket_watchers(
     comments: list[dict[str, Any]],
     contact_email: str | None,
 ) -> None:
-    watchers = _gather_comment_watchers(comments)
+    excluded_emails = {"support@hawkinsitsolutions.com.au"}
     if contact_email:
-        watchers = {
-            email for email in watchers if email.lower() != contact_email.lower()
-        }
-    watchers = {
-        email
-        for email in watchers
-        if email.lower() != "support@hawkinsitsolutions.com.au"
-    }
+        excluded_emails.add(contact_email)
+    excluded_emails.update(_gather_technician_emails(comments))
+    watchers = _gather_comment_watchers(comments, excluded_emails=excluded_emails)
     if not watchers:
         return
     try:
@@ -1564,12 +1578,24 @@ async def _sync_ticket_watchers(
         for watcher in existing
         if watcher.get("user_id") is not None
     }
+    existing_emails = {
+        str(watcher["email"]).lower()
+        for watcher in existing
+        if watcher.get("email") is not None
+    }
     for email in sorted(watchers, key=lambda value: value.lower()):
+        email_key = email.lower()
         user_id = await _resolve_user_id_by_email(email)
-        if user_id is None or user_id in existing_ids:
-            continue
+        if user_id is not None:
+            if user_id in existing_ids:
+                continue
+            add_kwargs: dict[str, Any] = {"user_id": user_id}
+        else:
+            if email_key in existing_emails:
+                continue
+            add_kwargs = {"email": email}
         try:
-            await tickets_repo.add_watcher(ticket_id, user_id)
+            await tickets_repo.add_watcher(ticket_id, **add_kwargs)
         except Exception as exc:  # pragma: no cover - defensive logging
             log_error(
                 "Failed to add ticket watcher",
@@ -1578,7 +1604,10 @@ async def _sync_ticket_watchers(
                 error=str(exc),
             )
             continue
-        existing_ids.add(user_id)
+        if user_id is not None:
+            existing_ids.add(user_id)
+        else:
+            existing_emails.add(email_key)
 
 
 async def _resolve_company_id(ticket: dict[str, Any]) -> int | None:
