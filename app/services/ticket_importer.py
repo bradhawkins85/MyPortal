@@ -240,6 +240,34 @@ def _ticket_updated_at(ticket: dict[str, Any]) -> datetime | None:
     )
 
 
+
+def _syncro_ticket_sort_key(ticket: dict[str, Any]) -> tuple[datetime, int]:
+    """Return a descending-sort key for processing the freshest Syncro work first."""
+
+    timestamp = (
+        _ticket_updated_at(ticket)
+        or _parse_datetime(
+            ticket.get("created_at")
+            or ticket.get("created_on")
+            or ticket.get("created")
+            or ticket.get("created_at_utc")
+        )
+        or datetime.min.replace(tzinfo=timezone.utc)
+    )
+    try:
+        ticket_id = int(ticket.get("id") or 0)
+    except (TypeError, ValueError):
+        ticket_id = 0
+    return timestamp, ticket_id
+
+
+def _sort_syncro_tickets_newest_first(
+    tickets: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Order Syncro tickets by most recent change, falling back to id ordering."""
+
+    return sorted(tickets, key=_syncro_ticket_sort_key, reverse=True)
+
 def _existing_syncro_updated_at(existing: dict[str, Any]) -> datetime | None:
     """Return the last Syncro update timestamp stored for an imported ticket.
 
@@ -2017,47 +2045,50 @@ async def import_all_tickets(
     allowed_statuses, default_status, status_mappings = await _get_status_context()
     page = 1
     total_pages: int | None = None
+    tickets_to_process: list[dict[str, Any]] = []
     while True:
         tickets, meta = await syncro.list_tickets(page=page, rate_limiter=limiter)
         if not tickets:
             break
         summary.fetched += len(tickets)
-        for ticket in tickets:
-            try:
-                syncro_id = ticket.get("id")
-                existing = (
-                    await tickets_repo.get_ticket_by_external_reference(str(syncro_id))
-                    if syncro_id is not None
-                    else None
-                )
-                if _syncro_ticket_is_unchanged(ticket, existing):
-                    outcome = f"skipped: Syncro ticket {syncro_id} has not changed since last import"
-                else:
-                    ticket_detail = await _fetch_ticket_detail_for_import(
-                        ticket, rate_limiter=limiter
-                    )
-                    outcome = await _upsert_ticket(
-                        ticket_detail,
-                        allowed_statuses,
-                        default_status,
-                        status_mappings,
-                        mark_billable_time_as_billed=mark_billable_time_as_billed,
-                    )
-            except Exception as exc:  # pragma: no cover - defensive logging
-                reason = f"Syncro ticket {ticket.get('id') or 'unknown'} failed to import: {exc}"
-                log_error(
-                    "Failed to import Syncro ticket",
-                    syncro_id=ticket.get("id"),
-                    error=str(exc),
-                )
-                summary.record_skip(reason)
-                continue
-            summary.record(outcome)
+        tickets_to_process.extend(tickets)
         if total_pages is None:
             total_pages = _extract_total_pages(meta)
         if total_pages is not None and page >= total_pages:
             break
         page += 1
+
+    for ticket in _sort_syncro_tickets_newest_first(tickets_to_process):
+        try:
+            syncro_id = ticket.get("id")
+            existing = (
+                await tickets_repo.get_ticket_by_external_reference(str(syncro_id))
+                if syncro_id is not None
+                else None
+            )
+            if _syncro_ticket_is_unchanged(ticket, existing):
+                outcome = f"skipped: Syncro ticket {syncro_id} has not changed since last import"
+            else:
+                ticket_detail = await _fetch_ticket_detail_for_import(
+                    ticket, rate_limiter=limiter
+                )
+                outcome = await _upsert_ticket(
+                    ticket_detail,
+                    allowed_statuses,
+                    default_status,
+                    status_mappings,
+                    mark_billable_time_as_billed=mark_billable_time_as_billed,
+                )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            reason = f"Syncro ticket {ticket.get('id') or 'unknown'} failed to import: {exc}"
+            log_error(
+                "Failed to import Syncro ticket",
+                syncro_id=ticket.get("id"),
+                error=str(exc),
+            )
+            summary.record_skip(reason)
+            continue
+        summary.record(outcome)
     log_info(
         "Syncro ticket import completed",
         mode="all",

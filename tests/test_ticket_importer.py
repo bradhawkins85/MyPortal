@@ -636,6 +636,82 @@ async def test_import_all_tickets_uses_pagination(monkeypatch):
     assert updated[0][0] == 88
 
 
+
+@pytest.mark.anyio
+async def test_import_all_tickets_processes_most_recent_changes_first(monkeypatch):
+    pages = {
+        1: (
+            [
+                {
+                    "id": 401,
+                    "subject": "Older page one ticket",
+                    "status": "Open",
+                    "priority": "Normal",
+                    "updated_at": "2024-01-02T10:00:00Z",
+                    "comments": [],
+                    "attachments": [],
+                },
+                {
+                    "id": 402,
+                    "subject": "Newest page one ticket",
+                    "status": "Open",
+                    "priority": "Normal",
+                    "updated_at": "2024-01-04T10:00:00Z",
+                    "comments": [],
+                    "attachments": [],
+                },
+            ],
+            {"total_pages": 2},
+        ),
+        2: (
+            [
+                {
+                    "id": 403,
+                    "subject": "Newest overall ticket",
+                    "status": "Open",
+                    "priority": "Normal",
+                    "updated_at": "2024-01-05T10:00:00Z",
+                    "comments": [],
+                    "attachments": [],
+                },
+                {
+                    "id": 404,
+                    "subject": "Oldest overall ticket",
+                    "status": "Open",
+                    "priority": "Normal",
+                    "updated_at": "2024-01-01T10:00:00Z",
+                    "comments": [],
+                    "attachments": [],
+                },
+            ],
+            {"total_pages": 2},
+        ),
+    }
+    processed: list[int] = []
+
+    async def fake_list_tickets(page, per_page=25, rate_limiter=None):
+        return pages.get(page, ([], {}))
+
+    async def fake_get_existing(_external_reference):
+        return None
+
+    async def fake_upsert_ticket(ticket, *args, **kwargs):
+        processed.append(ticket["id"])
+        return "created"
+
+    monkeypatch.setattr(syncro, "list_tickets", fake_list_tickets)
+    monkeypatch.setattr(
+        tickets_repo, "get_ticket_by_external_reference", fake_get_existing
+    )
+    monkeypatch.setattr(ticket_importer, "_upsert_ticket", fake_upsert_ticket)
+
+    summary = await ticket_importer.import_all_tickets(rate_limiter=None)
+
+    assert summary.fetched == 4
+    assert summary.created == 4
+    assert processed == [403, 402, 401, 404]
+
+
 @pytest.mark.anyio
 async def test_import_all_tickets_hydrates_detail_for_attachments(monkeypatch):
     pages = {
