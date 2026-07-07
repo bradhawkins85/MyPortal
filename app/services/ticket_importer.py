@@ -15,6 +15,7 @@ from app.core.logging import log_error, log_info
 from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import users as user_repo
 from app.repositories import webhook_events as webhook_events_repo
 from app.services import (
@@ -34,7 +35,14 @@ async def _get_status_context() -> tuple[set[str], str, dict[str, str]]:
     definitions = await tickets_service.list_status_definitions()
     if definitions:
         slugs = [definition.tech_status for definition in definitions]
-        default = next((definition.tech_status for definition in definitions if definition.is_default), slugs[0])
+        default = next(
+            (
+                definition.tech_status
+                for definition in definitions
+                if definition.is_default
+            ),
+            slugs[0],
+        )
     else:
         slugs = list(_ALLOWED_STATUSES)
         default = _DEFAULT_STATUS
@@ -42,7 +50,9 @@ async def _get_status_context() -> tuple[set[str], str, dict[str, str]]:
     return set(slugs), default, mappings
 
 
-async def _get_syncro_status_mappings(allowed_statuses: Collection[str]) -> dict[str, str]:
+async def _get_syncro_status_mappings(
+    allowed_statuses: Collection[str],
+) -> dict[str, str]:
     try:
         module = await syncro._load_module_settings()
     except Exception as exc:  # pragma: no cover - defensive fallback
@@ -55,14 +65,19 @@ async def _get_syncro_status_mappings(allowed_statuses: Collection[str]) -> dict
     for item in configured:
         if not isinstance(item, dict):
             continue
-        syncro_status = _clean_text(item.get("syncro_status") or item.get("syncroStatus"))
-        myportal_status = _clean_text(item.get("myportal_status") or item.get("myportalStatus"))
+        syncro_status = _clean_text(
+            item.get("syncro_status") or item.get("syncroStatus")
+        )
+        myportal_status = _clean_text(
+            item.get("myportal_status") or item.get("myportalStatus")
+        )
         if not syncro_status or not myportal_status:
             continue
         normalized_myportal = myportal_status.lower().replace(" ", "_")
         if normalized_myportal in allowed_statuses:
             mappings[syncro_status.casefold()] = normalized_myportal
     return mappings
+
 
 @dataclass(slots=True)
 class TicketImportSummary:
@@ -99,6 +114,8 @@ class TicketImportSummary:
             "skipped": self.skipped,
             "skipped_reasons": self.skipped_reasons or [],
         }
+
+
 _HTML_NEWLINE_TAGS = re.compile(
     r"<\s*(?:br\s*/?|/(?:p|div|li|tr|table|thead|tbody|tfoot|section|article|header|footer|h[1-6]))\b[^>]*>",
     flags=re.IGNORECASE,
@@ -151,7 +168,9 @@ def _normalise_status(
         ):
             return candidate
     for candidate in allowed_statuses:
-        if ("resolv" in normalized or "complete" in normalized) and "resolv" in candidate:
+        if (
+            "resolv" in normalized or "complete" in normalized
+        ) and "resolv" in candidate:
             return candidate
     for candidate in allowed_statuses:
         if "clos" in normalized and "clos" in candidate:
@@ -217,7 +236,13 @@ def _extract_comment_body(comment: dict[str, Any]) -> str | None:
     )
 
 
-_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"}
+_IMAGE_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/svg+xml",
+}
 _IMAGE_EXTENSIONS = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
@@ -247,11 +272,20 @@ _COMMENT_IMAGE_URL_KEYS = (
     "fullUrl",
     "href",
 )
-_COMMENT_IMAGE_FILENAME_KEYS = ("filename", "file_name", "fileName", "name", "title", "alt")
+_COMMENT_IMAGE_FILENAME_KEYS = (
+    "filename",
+    "file_name",
+    "fileName",
+    "name",
+    "title",
+    "alt",
+)
 _COMMENT_IMAGE_MIME_KEYS = ("content_type", "contentType", "mime_type", "mimeType")
 
 
-def _extract_comment_image_candidates(comment: dict[str, Any]) -> list[dict[str, str | None]]:
+def _extract_comment_image_candidates(
+    comment: dict[str, Any],
+) -> list[dict[str, str | None]]:
     """Return image attachment candidates embedded in a Syncro comment."""
     candidates: list[dict[str, str | None]] = []
     seen: set[tuple[str, str]] = set()
@@ -277,18 +311,31 @@ def _extract_comment_image_candidates(comment: dict[str, Any]) -> list[dict[str,
         if key in seen:
             return
         seen.add(key)
-        candidates.append({"url": url_text, "filename": filename_text, "mime_type": mime})
+        candidates.append(
+            {"url": url_text, "filename": filename_text, "mime_type": mime}
+        )
 
     def scan(value: Any) -> None:
         if isinstance(value, dict):
-            url = next((value.get(key) for key in _COMMENT_IMAGE_URL_KEYS if value.get(key)), None)
+            url = next(
+                (value.get(key) for key in _COMMENT_IMAGE_URL_KEYS if value.get(key)),
+                None,
+            )
             if url:
                 filename = next(
-                    (value.get(key) for key in _COMMENT_IMAGE_FILENAME_KEYS if value.get(key)),
+                    (
+                        value.get(key)
+                        for key in _COMMENT_IMAGE_FILENAME_KEYS
+                        if value.get(key)
+                    ),
                     None,
                 )
                 content_type = next(
-                    (value.get(key) for key in _COMMENT_IMAGE_MIME_KEYS if value.get(key)),
+                    (
+                        value.get(key)
+                        for key in _COMMENT_IMAGE_MIME_KEYS
+                        if value.get(key)
+                    ),
                     None,
                 )
                 add(url, filename, content_type)
@@ -302,7 +349,14 @@ def _extract_comment_image_candidates(comment: dict[str, Any]) -> list[dict[str,
                 elif isinstance(item, (dict, list)):
                     scan(item)
 
-    for key in ("attachments", "files", "uploads", "images", "inline_images", "inlineImages"):
+    for key in (
+        "attachments",
+        "files",
+        "uploads",
+        "images",
+        "inline_images",
+        "inlineImages",
+    ):
         scan(comment.get(key))
 
     for body_key in ("body", "html_body", "htmlBody", "comment", "text", "content"):
@@ -320,7 +374,10 @@ def _extract_comment_image_candidates(comment: dict[str, Any]) -> list[dict[str,
                 tag,
                 flags=re.IGNORECASE,
             )
-            add(unescape(match.group(1)), unescape(filename_match.group(1)) if filename_match else None)
+            add(
+                unescape(match.group(1)),
+                unescape(filename_match.group(1)) if filename_match else None,
+            )
     return candidates
 
 
@@ -331,10 +388,14 @@ def _filename_for_image_candidate(
     if filename and filename.lower() not in {"[embedded image]", "embedded image"}:
         name = PurePosixPath(unquote(urlparse(filename).path)).name or filename
     else:
-        parsed_name = PurePosixPath(unquote(urlparse(candidate.get("url") or "").path)).name
+        parsed_name = PurePosixPath(
+            unquote(urlparse(candidate.get("url") or "").path)
+        ).name
         name = parsed_name or f"syncro-comment-image-{index}"
     if "." not in name:
-        ext = _IMAGE_EXTENSIONS.get((content_type or candidate.get("mime_type") or "").lower(), ".img")
+        ext = _IMAGE_EXTENSIONS.get(
+            (content_type or candidate.get("mime_type") or "").lower(), ".img"
+        )
         name = f"{name}{ext}"
     return name[:255]
 
@@ -346,14 +407,12 @@ async def _import_comment_images(
     imported: list[dict[str, Any]] = []
     for index, candidate in enumerate(candidates, start=1):
         try:
-            contents, downloaded_type = await syncro.download_file(candidate["url"] or "")
-            content_type = (
-                (downloaded_type or candidate.get("mime_type") or "")
-                .split(";", 1)[0]
-                .strip()
-                .lower()
-                or None
+            contents, downloaded_type = await syncro.download_file(
+                candidate["url"] or ""
             )
+            content_type = (downloaded_type or candidate.get("mime_type") or "").split(
+                ";", 1
+            )[0].strip().lower() or None
             if content_type not in _IMAGE_MIME_TYPES:
                 guessed, _ = mimetypes.guess_type(candidate.get("url") or "")
                 content_type = guessed if guessed in _IMAGE_MIME_TYPES else content_type
@@ -367,14 +426,18 @@ async def _import_comment_images(
             attachment = await attachments_service.save_file_bytes(
                 ticket_id=ticket_id,
                 contents=contents,
-                original_filename=_filename_for_image_candidate(candidate, content_type, index),
+                original_filename=_filename_for_image_candidate(
+                    candidate, content_type, index
+                ),
                 mime_type=content_type,
                 access_level="closed",
                 uploaded_by_user_id=author_id,
             )
             if attachment:
                 imported.append(attachment)
-        except Exception as exc:  # pragma: no cover - import should continue if an image fails
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - import should continue if an image fails
             log_error(
                 "Failed to import Syncro embedded image",
                 ticket_id=ticket_id,
@@ -384,7 +447,9 @@ async def _import_comment_images(
     return imported
 
 
-def _build_imported_image_markup(ticket_id: int, attachments: list[dict[str, Any]]) -> str:
+def _build_imported_image_markup(
+    ticket_id: int, attachments: list[dict[str, Any]]
+) -> str:
     """Build inline image HTML for imported Syncro image attachments."""
     image_tags: list[str] = []
     for attachment in attachments:
@@ -423,7 +488,14 @@ def _append_imported_image_markup(
 
 def _extract_comment_author_name(comment: dict[str, Any]) -> str | None:
     """Return the display name for the comment author."""
-    for key in ("tech_name", "techName", "author_name", "authorName", "user_name", "userName"):
+    for key in (
+        "tech_name",
+        "techName",
+        "author_name",
+        "authorName",
+        "user_name",
+        "userName",
+    ):
         name = _clean_text(comment.get(key))
         if name:
             return name
@@ -620,9 +692,7 @@ def _extract_ticket_assets(ticket: dict[str, Any]) -> list[dict[str, Any]]:
                 if not isinstance(asset, dict):
                     continue
                 name = _clean_text(asset.get("name"))
-                asset_tag = _clean_text(
-                    asset.get("asset_tag") or asset.get("assetTag")
-                )
+                asset_tag = _clean_text(asset.get("asset_tag") or asset.get("assetTag"))
                 serial = _clean_text(
                     asset.get("serial_number") or asset.get("serialNumber")
                 )
@@ -714,6 +784,147 @@ def _build_ticket_metadata_note(ticket: dict[str, Any]) -> str | None:
     return "\n".join(lines)
 
 
+def _extract_ticket_attachment_candidates(
+    ticket: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Extract top-level Syncro ticket attachment download candidates.
+
+    Syncro exposes multiple URLs for a single attachment (original, thumb, and
+    main).  Only the original ``file.url`` is imported so thumbnail/preview URLs
+    are not saved as duplicate attachments.
+    """
+    attachments = ticket.get("attachments")
+    if not isinstance(attachments, list):
+        return []
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        file_payload = attachment.get("file")
+        url: Any = None
+        if isinstance(file_payload, dict):
+            url = file_payload.get("url")
+        elif isinstance(file_payload, str):
+            url = file_payload
+        url_text = str(url or "").strip()
+        if not url_text:
+            continue
+        filename = _clean_text(
+            attachment.get("file_name")
+            or attachment.get("filename")
+            or attachment.get("name")
+        )
+        if not filename:
+            filename = (
+                PurePosixPath(unquote(urlparse(url_text).path)).name
+                or "syncro-attachment"
+            )
+        content_type = _clean_text(
+            attachment.get("content_type")
+            or attachment.get("contentType")
+            or attachment.get("mime_type")
+            or attachment.get("mimeType")
+        )
+        if content_type and ";" in content_type:
+            content_type = content_type.split(";", 1)[0].strip().lower()
+        file_size: int | None = None
+        try:
+            raw_size = (
+                attachment.get("file_size")
+                or attachment.get("fileSize")
+                or attachment.get("size")
+            )
+            if raw_size is not None:
+                file_size = int(raw_size)
+        except (TypeError, ValueError):
+            file_size = None
+        key = (
+            str(attachment.get("id") or attachment.get("md5") or ""),
+            filename.casefold(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append(
+            {
+                "url": url_text,
+                "filename": filename[:255],
+                "content_type": content_type,
+                "file_size": file_size,
+                "syncro_id": attachment.get("id"),
+            }
+        )
+    return candidates
+
+
+async def _sync_ticket_attachments(ticket_id: int, ticket: dict[str, Any]) -> None:
+    """Import top-level Syncro ticket attachments without duplicate copies."""
+    candidates = _extract_ticket_attachment_candidates(ticket)
+    if not candidates:
+        return
+    try:
+        existing = await attachments_repo.list_attachments(ticket_id)
+    except (
+        Exception
+    ) as exc:  # pragma: no cover - import should continue when lookup fails
+        log_error(
+            "Failed to fetch existing ticket attachments",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
+        existing = []
+    existing_keys = {
+        (
+            str(item.get("original_filename") or "").casefold(),
+            int(item.get("file_size") or 0),
+        )
+        for item in existing
+    }
+    imported_keys = set(existing_keys)
+    for candidate in candidates:
+        candidate_size = int(candidate.get("file_size") or 0)
+        pre_download_key = (
+            str(candidate.get("filename") or "").casefold(),
+            candidate_size,
+        )
+        if candidate_size and pre_download_key in imported_keys:
+            continue
+        try:
+            contents, downloaded_type = await syncro.download_file(
+                candidate["url"] or ""
+            )
+            content_type = (
+                downloaded_type or candidate.get("content_type") or ""
+            ).split(";", 1)[0].strip().lower() or None
+            post_download_key = (
+                str(candidate.get("filename") or "").casefold(),
+                len(contents),
+            )
+            if post_download_key in imported_keys:
+                continue
+            attachment = await attachments_service.save_file_bytes(
+                ticket_id=ticket_id,
+                contents=contents,
+                original_filename=str(candidate.get("filename") or "syncro-attachment"),
+                mime_type=content_type,
+                access_level="closed",
+                uploaded_by_user_id=None,
+            )
+            if attachment:
+                imported_keys.add(post_download_key)
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - import should continue if an attachment fails
+            log_error(
+                "Failed to import Syncro ticket attachment",
+                ticket_id=ticket_id,
+                syncro_attachment_id=candidate.get("syncro_id"),
+                filename=candidate.get("filename"),
+                error=str(exc),
+            )
+
+
 def _extract_comment_subject(comment: dict[str, Any]) -> str | None:
     for key in ("subject", "title", "summary"):
         candidate = _clean_text(comment.get(key))
@@ -766,13 +977,14 @@ def _extract_numeric_ticket_id(ticket: dict[str, Any]) -> int | None:
         except (ValueError, TypeError):
             # If the ticket number is not purely numeric, try to extract digits
             import re
-            digits = re.sub(r'\D', '', ticket_number)
+
+            digits = re.sub(r"\D", "", ticket_number)
             if digits:
                 try:
                     return int(digits)
                 except (ValueError, TypeError):
                     pass
-    
+
     # Fall back to the Syncro ID if number parsing fails
     syncro_id = ticket.get("id")
     if syncro_id is not None:
@@ -780,7 +992,7 @@ def _extract_numeric_ticket_id(ticket: dict[str, Any]) -> int | None:
             return int(syncro_id)
         except (ValueError, TypeError):
             pass
-    
+
     return None
 
 
@@ -806,7 +1018,11 @@ def _iter_company_name_candidates(ticket: dict[str, Any]):
         if not text:
             continue
         yield text
-        segments = [segment.strip() for segment in re.split(r"\s*[-–—]\s*", text) if segment.strip()]
+        segments = [
+            segment.strip()
+            for segment in re.split(r"\s*[-–—]\s*", text)
+            if segment.strip()
+        ]
         if segments:
             yield segments[0]
 
@@ -1004,7 +1220,11 @@ async def _sync_ticket_replies(
     try:
         existing = await tickets_repo.list_replies(ticket_id)
     except Exception as exc:  # pragma: no cover - defensive logging
-        log_error("Failed to fetch existing ticket replies", ticket_id=ticket_id, error=str(exc))
+        log_error(
+            "Failed to fetch existing ticket replies",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
         existing = []
     known_refs = {
         str(reply.get("external_reference"))
@@ -1043,7 +1263,9 @@ async def _sync_ticket_replies(
             minutes_spent = timer_time.get(str(comment.get("id")))
         is_billable = _resolve_comment_billable(comment, timer_billable)
         imported_images = await _import_comment_images(ticket_id, comment, author_id)
-        body_with_images = _append_imported_image_markup(body, ticket_id, imported_images)
+        body_with_images = _append_imported_image_markup(
+            body, ticket_id, imported_images
+        )
         enhanced_body = _build_comment_body_with_header(
             comment, body_with_images, minutes=minutes_spent
         )
@@ -1068,7 +1290,9 @@ async def _sync_ticket_watchers(
 ) -> None:
     watchers = _gather_comment_watchers(comments)
     if contact_email:
-        watchers = {email for email in watchers if email.lower() != contact_email.lower()}
+        watchers = {
+            email for email in watchers if email.lower() != contact_email.lower()
+        }
     watchers = {
         email
         for email in watchers
@@ -1079,7 +1303,11 @@ async def _sync_ticket_watchers(
     try:
         existing = await tickets_repo.list_watchers(ticket_id)
     except Exception as exc:  # pragma: no cover - defensive logging
-        log_error("Failed to fetch existing ticket watchers", ticket_id=ticket_id, error=str(exc))
+        log_error(
+            "Failed to fetch existing ticket watchers",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
         existing = []
     existing_ids = {
         int(watcher["user_id"])
@@ -1109,7 +1337,11 @@ async def _resolve_company_id(ticket: dict[str, Any]) -> int | None:
         try:
             company = await company_repo.get_company_by_syncro_id(syncro_id)
         except RuntimeError as exc:  # pragma: no cover - defensive logging
-            log_error("Failed to resolve company from Syncro ID", syncro_id=syncro_id, error=str(exc))
+            log_error(
+                "Failed to resolve company from Syncro ID",
+                syncro_id=syncro_id,
+                error=str(exc),
+            )
             continue
         if company and company.get("id") is not None:
             try:
@@ -1121,7 +1353,9 @@ async def _resolve_company_id(ticket: dict[str, Any]) -> int | None:
         try:
             company = await company_repo.get_company_by_name(name)
         except RuntimeError as exc:  # pragma: no cover - defensive logging
-            log_error("Failed to resolve company from name", company_name=name, error=str(exc))
+            log_error(
+                "Failed to resolve company from name", company_name=name, error=str(exc)
+            )
             continue
         if company and company.get("id") is not None:
             try:
@@ -1218,7 +1452,9 @@ async def _upsert_ticket(
     if syncro_id is None:
         return "skipped: Syncro ticket payload did not include an id"
     external_reference = str(syncro_id)
-    subject = _clean_text(ticket.get("subject") or ticket.get("title") or ticket.get("summary"))
+    subject = _clean_text(
+        ticket.get("subject") or ticket.get("title") or ticket.get("summary")
+    )
     if not subject:
         subject = f"Syncro Ticket {external_reference}"
     description = _extract_description(ticket)
@@ -1298,7 +1534,7 @@ async def _upsert_ticket(
         # Extract the numeric ID for the ticket - this will be used as the database ID
         # to ensure Syncro ticket numbers match the database ticket IDs
         ticket_id_to_use = _extract_numeric_ticket_id(ticket)
-        
+
         created = await tickets_service.create_ticket(
             subject=subject,
             description=description_value,
@@ -1334,6 +1570,7 @@ async def _upsert_ticket(
     if ticket_db_id is not None:
         await _upsert_ticket_metadata_note(ticket_db_id, ticket, created_at=created_at)
         await _link_syncro_ticket_assets(ticket_db_id, ticket, company_id)
+        await _sync_ticket_attachments(ticket_db_id, ticket)
         await _sync_ticket_replies(
             ticket_db_id,
             comments,
@@ -1357,12 +1594,24 @@ async def import_ticket_by_id(
     log_info("Starting Syncro ticket import", mode="single", ticket_id=ticket_id)
     ticket = await syncro.get_ticket(ticket_id, rate_limiter=limiter)
     if not ticket:
-        summary.record_skip(f"Syncro ticket {ticket_id} was not returned by the Syncro API")
-        log_info("Syncro ticket import completed", mode="single", fetched=summary.fetched, created=0, updated=0, skipped=1, skipped_reasons=summary.skipped_reasons)
+        summary.record_skip(
+            f"Syncro ticket {ticket_id} was not returned by the Syncro API"
+        )
+        log_info(
+            "Syncro ticket import completed",
+            mode="single",
+            fetched=summary.fetched,
+            created=0,
+            updated=0,
+            skipped=1,
+            skipped_reasons=summary.skipped_reasons,
+        )
         return summary
     summary.fetched = 1
     allowed_statuses, default_status, status_mappings = await _get_status_context()
-    outcome = await _upsert_ticket(ticket, allowed_statuses, default_status, status_mappings)
+    outcome = await _upsert_ticket(
+        ticket, allowed_statuses, default_status, status_mappings
+    )
     summary.record(outcome)
     log_info(
         "Syncro ticket import completed",
@@ -1383,15 +1632,21 @@ async def import_ticket_range(
 ) -> TicketImportSummary:
     limiter = rate_limiter or await syncro.get_rate_limiter()
     summary = TicketImportSummary(mode="range")
-    log_info("Starting Syncro ticket import", mode="range", start_id=start_id, end_id=end_id)
+    log_info(
+        "Starting Syncro ticket import", mode="range", start_id=start_id, end_id=end_id
+    )
     allowed_statuses, default_status, status_mappings = await _get_status_context()
     for identifier in range(start_id, end_id + 1):
         ticket = await syncro.get_ticket(identifier, rate_limiter=limiter)
         if not ticket:
-            summary.record_skip(f"Syncro ticket {identifier} was not returned by the Syncro API")
+            summary.record_skip(
+                f"Syncro ticket {identifier} was not returned by the Syncro API"
+            )
             continue
         summary.fetched += 1
-        outcome = await _upsert_ticket(ticket, allowed_statuses, default_status, status_mappings)
+        outcome = await _upsert_ticket(
+            ticket, allowed_statuses, default_status, status_mappings
+        )
         summary.record(outcome)
     log_info(
         "Syncro ticket import completed",
@@ -1435,10 +1690,16 @@ async def import_all_tickets(
         summary.fetched += len(tickets)
         for ticket in tickets:
             try:
-                outcome = await _upsert_ticket(ticket, allowed_statuses, default_status, status_mappings)
+                outcome = await _upsert_ticket(
+                    ticket, allowed_statuses, default_status, status_mappings
+                )
             except Exception as exc:  # pragma: no cover - defensive logging
                 reason = f"Syncro ticket {ticket.get('id') or 'unknown'} failed to import: {exc}"
-                log_error("Failed to import Syncro ticket", syncro_id=ticket.get("id"), error=str(exc))
+                log_error(
+                    "Failed to import Syncro ticket",
+                    syncro_id=ticket.get("id"),
+                    error=str(exc),
+                )
                 summary.record_skip(reason)
                 continue
             summary.record(outcome)
@@ -1643,7 +1904,9 @@ async def import_from_request(
                 raise ValueError("start_id and end_id are required for range imports")
             if end_id < start_id:
                 raise ValueError("end_id must be greater than or equal to start_id")
-            summary = await import_ticket_range(start_id, end_id, rate_limiter=rate_limiter)
+            summary = await import_ticket_range(
+                start_id, end_id, rate_limiter=rate_limiter
+            )
         elif mode_lower == "all":
             summary = await import_all_tickets(rate_limiter=rate_limiter)
         else:
@@ -1692,5 +1955,6 @@ async def import_from_request(
                 using_monitor=using_monitor,
             )
     return summary
+
 
 # TEST CHANG

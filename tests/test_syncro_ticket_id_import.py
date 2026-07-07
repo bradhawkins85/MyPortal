@@ -1,6 +1,7 @@
 """
 Test that Syncro ticket imports use the Syncro ticket number as the database ID.
 """
+
 import pytest
 
 from app.services import ticket_importer
@@ -91,12 +92,16 @@ async def test_syncro_ticket_import_uses_syncro_id(monkeypatch):
     monkeypatch.setattr(syncro, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(company_repo, "get_company_by_syncro_id", fake_get_company)
     monkeypatch.setattr(company_repo, "get_company_by_name", fake_get_company_by_name)
-    monkeypatch.setattr(tickets_repo, "get_ticket_by_external_reference", fake_get_existing)
+    monkeypatch.setattr(
+        tickets_repo, "get_ticket_by_external_reference", fake_get_existing
+    )
     monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(tickets_repo, "update_ticket", fake_update_ticket)
     monkeypatch.setattr(user_repo, "get_user_by_email", fake_get_user_by_email)
     monkeypatch.setattr(tickets_service, "emit_ticket_updated_event", fake_emit_event)
-    monkeypatch.setattr(tickets_service, "refresh_ticket_ai_summary", fake_refresh_summary)
+    monkeypatch.setattr(
+        tickets_service, "refresh_ticket_ai_summary", fake_refresh_summary
+    )
     monkeypatch.setattr(tickets_service, "refresh_ticket_ai_tags", fake_refresh_tags)
 
     # Import the ticket
@@ -171,7 +176,9 @@ async def test_syncro_reply_import_embeds_downloaded_time_entry_images(monkeypat
         return {"id": 1, **kwargs}
 
     monkeypatch.setattr(tickets_repo, "list_replies", fake_list_replies)
-    monkeypatch.setattr(ticket_importer, "_resolve_comment_author_id", fake_resolve_author)
+    monkeypatch.setattr(
+        ticket_importer, "_resolve_comment_author_id", fake_resolve_author
+    )
     monkeypatch.setattr(ticket_importer, "_import_comment_images", fake_import_images)
     monkeypatch.setattr(tickets_repo, "create_reply", fake_create_reply)
 
@@ -193,3 +200,134 @@ async def test_syncro_reply_import_embeds_downloaded_time_entry_images(monkeypat
     assert created_reply["minutes_spent"] == 15
     assert "[embedded image]" not in created_reply["body"]
     assert "/api/tickets/12345/attachments/55/download" in created_reply["body"]
+
+
+def test_extract_ticket_attachment_candidates_uses_original_file_url_only():
+    ticket = {
+        "attachments": [
+            {
+                "id": 51309593,
+                "file_name": "Purchase Order.pdf",
+                "file": {
+                    "url": "https://example.test/original.pdf?sig=1",
+                    "thumb": {"url": "https://example.test/thumb_original.pdf?sig=2"},
+                    "main": {"url": "https://example.test/main_original.pdf?sig=3"},
+                },
+                "content_type": "application/pdf",
+                "file_size": 123,
+            }
+        ]
+    }
+
+    candidates = ticket_importer._extract_ticket_attachment_candidates(ticket)
+
+    assert candidates == [
+        {
+            "url": "https://example.test/original.pdf?sig=1",
+            "filename": "Purchase Order.pdf",
+            "content_type": "application/pdf",
+            "file_size": 123,
+            "syncro_id": 51309593,
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_sync_ticket_attachments_downloads_each_attachment_once(monkeypatch):
+    downloads = []
+    saved = []
+
+    async def fake_list_attachments(_ticket_id):
+        return []
+
+    async def fake_download_file(url):
+        downloads.append(url)
+        return b"%PDF-1.4\nbody", "application/pdf"
+
+    async def fake_save_file_bytes(**kwargs):
+        saved.append(kwargs)
+        return {"id": len(saved), "original_filename": kwargs["original_filename"]}
+
+    monkeypatch.setattr(
+        ticket_importer.attachments_repo, "list_attachments", fake_list_attachments
+    )
+    monkeypatch.setattr(ticket_importer.syncro, "download_file", fake_download_file)
+    monkeypatch.setattr(
+        ticket_importer.attachments_service, "save_file_bytes", fake_save_file_bytes
+    )
+
+    await ticket_importer._sync_ticket_attachments(
+        12345,
+        {
+            "attachments": [
+                {
+                    "id": 1,
+                    "file_name": "quote.pdf",
+                    "file": {
+                        "url": "https://example.test/quote.pdf",
+                        "thumb": {"url": "https://example.test/thumb_quote.pdf"},
+                        "main": {"url": "https://example.test/main_quote.pdf"},
+                    },
+                    "content_type": "application/pdf",
+                    "file_size": 13,
+                },
+                {
+                    "id": 2,
+                    "file_name": "po.pdf",
+                    "file": {"url": "https://example.test/po.pdf"},
+                    "content_type": "application/pdf",
+                    "file_size": 13,
+                },
+            ]
+        },
+    )
+
+    assert downloads == [
+        "https://example.test/quote.pdf",
+        "https://example.test/po.pdf",
+    ]
+    assert [item["original_filename"] for item in saved] == ["quote.pdf", "po.pdf"]
+    assert all(item["access_level"] == "closed" for item in saved)
+
+
+@pytest.mark.anyio
+async def test_sync_ticket_attachments_skips_existing_filename_size(monkeypatch):
+    downloads = []
+    saved = []
+
+    async def fake_list_attachments(_ticket_id):
+        return [{"original_filename": "quote.pdf", "file_size": 13}]
+
+    async def fake_download_file(url):
+        downloads.append(url)
+        return b"%PDF-1.4\nbody", "application/pdf"
+
+    async def fake_save_file_bytes(**kwargs):
+        saved.append(kwargs)
+        return {"id": len(saved)}
+
+    monkeypatch.setattr(
+        ticket_importer.attachments_repo, "list_attachments", fake_list_attachments
+    )
+    monkeypatch.setattr(ticket_importer.syncro, "download_file", fake_download_file)
+    monkeypatch.setattr(
+        ticket_importer.attachments_service, "save_file_bytes", fake_save_file_bytes
+    )
+
+    await ticket_importer._sync_ticket_attachments(
+        12345,
+        {
+            "attachments": [
+                {
+                    "id": 1,
+                    "file_name": "quote.pdf",
+                    "file": {"url": "https://example.test/quote.pdf"},
+                    "content_type": "application/pdf",
+                    "file_size": 13,
+                }
+            ]
+        },
+    )
+
+    assert downloads == []
+    assert saved == []
