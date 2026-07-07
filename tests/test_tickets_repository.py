@@ -96,6 +96,31 @@ class _ListTicketAssetsDB:
         return self._rows
 
 
+class _AutomationContextDB:
+    def __init__(self):
+        self.fetch_calls = []
+
+    async def fetch_all(self, sql, params):
+        self.fetch_calls.append((sql.strip(), params))
+        if "SUM(CASE WHEN is_billable" in sql:
+            return []
+        if "FROM ticket_attachments" in sql:
+            return []
+        if "FROM ticket_tasks" in sql:
+            return []
+        if "FROM ticket_replies AS tr" in sql:
+            return [
+                {
+                    "ticket_id": 5,
+                    "id": 12,
+                    "created_at": None,
+                    "is_internal": 1,
+                    "kind": "internal_note",
+                }
+            ]
+        return []
+
+
 class _ReplaceTicketAssetsDB:
     def __init__(self, existing_rows, final_rows):
         self.fetch_calls: list[tuple[str, tuple]] = []
@@ -301,6 +326,7 @@ async def test_create_reply_returns_inserted_record(monkeypatch):
     assert "FROM ticket_replies tr" in dummy_db.fetch_sql
     assert "LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id" in dummy_db.fetch_sql
     assert dummy_db.fetch_params == (42,)
+    assert record["kind"] == "message"
 
 
 @pytest.mark.anyio
@@ -322,6 +348,24 @@ async def test_create_reply_falls_back_when_fetch_missing(monkeypatch):
     assert record["is_internal"] == 1
     assert record["minutes_spent"] is None
     assert record["is_billable"] is False
+    assert record["kind"] == "internal_note"
+
+
+@pytest.mark.anyio
+async def test_automation_filter_context_derives_latest_reply_kind(monkeypatch):
+    dummy_db = _AutomationContextDB()
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    context = await tickets.get_automation_filter_context_by_ticket_ids([5])
+
+    latest_query = dummy_db.fetch_calls[-1][0]
+    assert "tr.kind" not in latest_query
+    assert (
+        "CASE WHEN tr.is_internal = 1 THEN 'internal_note' ELSE 'message' END AS kind"
+        in latest_query
+    )
+    assert context[5]["latest_reply_id"] == 12
+    assert context[5]["latest_reply_kind"] == "internal_note"
 
 
 @pytest.mark.anyio
