@@ -1,6 +1,7 @@
 """Repository for managing billed time entries in Xero."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from app.core.database import db
@@ -50,6 +51,53 @@ async def get_unbilled_reply_ids(ticket_id: int) -> set[int]:
         (ticket_id,),
     )
     return {int(row["id"]) for row in rows}
+
+
+async def mark_replies_billed(
+    reply_ids: list[int],
+    *,
+    xero_invoice_number: str,
+    billed_at: datetime,
+) -> int:
+    """Record multiple billable replies as billed and return the inserted count."""
+    clean_ids = sorted({int(reply_id) for reply_id in reply_ids if reply_id})
+    if not clean_ids:
+        return 0
+    placeholders = ", ".join(["%s"] * len(clean_ids))
+    rows = await db.fetch_all(
+        f"""
+        SELECT tr.ticket_id, tr.id AS reply_id, tr.minutes_spent, tr.labour_type_id
+        FROM ticket_replies tr
+        WHERE tr.id IN ({placeholders})
+          AND tr.is_billable = 1
+          AND tr.minutes_spent IS NOT NULL
+          AND tr.minutes_spent > 0
+          AND NOT EXISTS (
+              SELECT 1 FROM ticket_billed_time_entries bte
+              WHERE bte.reply_id = tr.id
+          )
+        """,
+        tuple(clean_ids),
+    )
+    inserted = 0
+    for row in rows:
+        await db.execute(
+            """
+            INSERT INTO ticket_billed_time_entries
+                (ticket_id, reply_id, xero_invoice_number, billed_at, minutes_billed, labour_type_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                row["ticket_id"],
+                row["reply_id"],
+                xero_invoice_number,
+                billed_at,
+                row["minutes_spent"],
+                row.get("labour_type_id"),
+            ),
+        )
+        inserted += 1
+    return inserted
 
 
 async def is_reply_billed(reply_id: int) -> bool:
