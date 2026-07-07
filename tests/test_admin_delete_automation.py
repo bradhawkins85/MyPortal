@@ -30,6 +30,38 @@ def _make_request(path: str = "/admin/automations/1/delete") -> Request:
 
 
 @pytest.mark.anyio("asyncio")
+async def test_admin_clone_automation_redirects_and_refreshes_active_clone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _make_request("/admin/automations/1/clone")
+
+    current_user = {"id": 5}
+    monkeypatch.setattr(
+        main,
+        "_require_super_admin_page",
+        AsyncMock(return_value=(current_user, None)),
+    )
+
+    automation = {"id": 1, "name": "Nightly cleanup", "status": "active"}
+    cloned = {"id": 2, "name": "Nightly cleanup (copy)", "status": "active"}
+    get_mock = AsyncMock(return_value=automation)
+    clone_mock = AsyncMock(return_value=cloned)
+    refresh_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(main.automation_repo, "get_automation", get_mock)
+    monkeypatch.setattr(main.automation_repo, "clone_automation", clone_mock)
+    monkeypatch.setattr(main.automations_service, "calculate_next_run", lambda data: "next-run")
+    monkeypatch.setattr(main.automations_service, "refresh_schedule", refresh_mock)
+
+    response = await handlers.admin_clone_automation(1, request)
+
+    assert response.status_code == status.HTTP_303_SEE_OTHER
+    assert response.headers["location"] == "/admin/automations"
+    get_mock.assert_awaited_once_with(1)
+    clone_mock.assert_awaited_once_with(1, next_run_at="next-run")
+    refresh_mock.assert_awaited_once_with(2)
+
+
+@pytest.mark.anyio("asyncio")
 async def test_admin_delete_automation_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
     request = _make_request()
 

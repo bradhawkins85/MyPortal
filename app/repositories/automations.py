@@ -193,6 +193,43 @@ async def get_automation(automation_id: int) -> AutomationRecord | None:
     return _normalise_automation(row) if row else None
 
 
+def _copy_name(base_name: Any, existing_names: set[str]) -> str:
+    name = str(base_name or "Automation").strip() or "Automation"
+    clone_name = f"{name} (copy)"
+    suffix = 2
+    while clone_name in existing_names:
+        clone_name = f"{name} (copy {suffix})"
+        suffix += 1
+    return clone_name
+
+
+async def clone_automation(automation_id: int, *, next_run_at: datetime | None = None) -> AutomationRecord | None:
+    original = await get_automation(automation_id)
+    if not original:
+        return None
+
+    existing = await list_automations(limit=1000)
+    existing_names = {str(item.get("name")) for item in existing if item.get("name")}
+    clone_name = _copy_name(original.get("name"), existing_names)
+
+    return await create_automation(
+        name=clone_name,
+        description=original.get("description"),
+        kind=str(original.get("kind") or "scheduled"),
+        execution_order=int(original.get("execution_order") or 0),
+        cadence=original.get("cadence"),
+        cron_expression=original.get("cron_expression"),
+        scheduled_time=original.get("scheduled_time"),
+        run_once=bool(original.get("run_once", False)),
+        trigger_event=original.get("trigger_event"),
+        trigger_filters=original.get("trigger_filters"),
+        action_module=original.get("action_module"),
+        action_payload=original.get("action_payload"),
+        status=str(original.get("status") or "inactive"),
+        next_run_at=next_run_at,
+    )
+
+
 async def list_automations(
     *,
     status: str | None = None,

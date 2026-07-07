@@ -133,6 +133,12 @@
                             </form>
                           </li>
                           <li class="header-title-menu__item" role="none">
+                            <form action="/admin/automations/{{ automation.id }}/clone" method="post" class="inline-form">
+                              {% include "partials/csrf.html" %}
+                              <button type="submit" class="header-title-menu__link" role="menuitem">Clone</button>
+                            </form>
+                          </li>
+                          <li class="header-title-menu__item" role="none">
                             <form
                               action="/admin/automations/{{ automation.id }}/delete"
                               method="post"

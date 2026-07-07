@@ -258,3 +258,11 @@ async def test_list_event_automations_orders_by_execution_order(monkeypatch):
     sql = dummy_db.fetch_all_sql or ""
     assert "execution_order" in sql.lower()
     assert "ORDER BY" in sql.upper()
+
+
+def test_copy_name_generates_unique_clone_names():
+    existing = {"Escalate stale tickets (copy)", "Escalate stale tickets (copy 2)"}
+
+    clone_name = automations._copy_name("Escalate stale tickets", existing)
+
+    assert clone_name == "Escalate stale tickets (copy 3)"
