@@ -1704,6 +1704,7 @@ async def _upsert_ticket(
             ticket_number=ticket_number,
             trigger_automations=False,
             send_creation_notification=False,
+            record_initial_reply=False,
             id=ticket_id_to_use,
         )
         created_id = created.get("id")

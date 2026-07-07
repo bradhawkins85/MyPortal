@@ -1277,6 +1277,7 @@ async def create_ticket(
     id: int | None = None,
     requester_email: str | None = None,
     send_creation_notification: bool = True,
+    record_initial_reply: bool = True,
 ) -> TicketRecord:
     """Create a ticket and emit the corresponding automation event."""
 
@@ -1318,6 +1319,7 @@ async def create_ticket(
     if (
         isinstance(ticket_id, int)
         and ticket_id > 0
+        and record_initial_reply
         and isinstance(original_description, str)
         and original_description
     ):
