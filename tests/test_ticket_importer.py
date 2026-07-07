@@ -241,6 +241,90 @@ async def test_import_ticket_by_id_updates_existing(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_import_ticket_by_id_skips_existing_when_syncro_updated_at_unchanged(monkeypatch):
+    async def fake_get_ticket(ticket_id, rate_limiter=None):
+        return {
+            "id": ticket_id,
+            "subject": "Network outage",
+            "status": "Resolved",
+            "updated_at": "2025-01-02T10:45:00Z",
+        }
+
+    async def fake_get_existing(external_reference):
+        return {
+            "id": 99,
+            "external_reference": external_reference,
+            "syncro_updated_at": "2025-01-02T10:45:00Z",
+            "updated_at": "2025-01-05T09:00:00Z",
+        }
+
+    async def fail_update_ticket(*args, **kwargs):
+        raise AssertionError("Unchanged Syncro tickets should not update MyPortal")
+
+    monkeypatch.setattr(syncro, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(
+        tickets_repo, "get_ticket_by_external_reference", fake_get_existing
+    )
+    monkeypatch.setattr(tickets_repo, "update_ticket", fail_update_ticket)
+
+    summary = await ticket_importer.import_ticket_by_id(500, rate_limiter=None)
+
+    assert summary.updated == 0
+    assert summary.created == 0
+    assert summary.skipped == 1
+    assert summary.skipped_reasons == [
+        "Syncro ticket 500 has not changed since last import"
+    ]
+
+
+@pytest.mark.anyio
+async def test_import_ticket_by_id_updates_existing_when_syncro_updated_at_newer(monkeypatch):
+    async def fake_get_ticket(ticket_id, rate_limiter=None):
+        return {
+            "id": ticket_id,
+            "subject": "Network outage",
+            "priority": "Critical",
+            "status": "Resolved",
+            "updated_at": "2025-01-03T10:45:00Z",
+        }
+
+    async def fake_get_existing(external_reference):
+        return {
+            "id": 99,
+            "external_reference": external_reference,
+            "syncro_updated_at": "2025-01-02T10:45:00Z",
+            "updated_at": "2025-01-05T09:00:00Z",
+        }
+
+    update_calls = []
+
+    async def fake_update_ticket(ticket_id, **fields):
+        update_calls.append((ticket_id, fields))
+        return {"id": ticket_id, **fields}
+
+    monkeypatch.setattr(syncro, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(
+        tickets_repo, "get_ticket_by_external_reference", fake_get_existing
+    )
+    monkeypatch.setattr(tickets_repo, "update_ticket", fake_update_ticket)
+    monkeypatch.setattr(
+        ticket_importer.user_repo, "get_user_by_email", lambda _email: None
+    )
+
+    summary = await ticket_importer.import_ticket_by_id(500, rate_limiter=None)
+
+    assert summary.updated == 1
+    assert (
+        update_calls[0][1]["syncro_updated_at"].isoformat()
+        == "2025-01-03T10:45:00+00:00"
+    )
+    assert (
+        update_calls[0][1]["updated_at"].isoformat()
+        == "2025-01-03T10:45:00+00:00"
+    )
+
+
+@pytest.mark.anyio
 async def test_import_ticket_range_handles_missing(monkeypatch):
     async def fake_get_ticket(ticket_id, rate_limiter=None):
         if ticket_id == 10:

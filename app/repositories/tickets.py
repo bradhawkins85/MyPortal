@@ -207,8 +207,16 @@ def _normalise_ticket(row: dict[str, Any]) -> TicketRecord:
     for key in ("id", "company_id", "requester_id", "requester_staff_id", "assigned_user_id", "merged_into_ticket_id", "split_from_ticket_id"):
         if key in record and record[key] is not None:
             record[key] = int(record[key])
-    for key in ("created_at", "updated_at", "closed_at", "status_changed_at", "ai_summary_updated_at"):
-        record[key] = _make_aware(record.get(key))
+    for key in (
+        "created_at",
+        "updated_at",
+        "closed_at",
+        "status_changed_at",
+        "ai_summary_updated_at",
+        "syncro_updated_at",
+    ):
+        if key in record:
+            record[key] = _make_aware(record.get(key))
     record["ai_tags"] = _deserialise_tags(record.get("ai_tags"))
     record["ai_tags_updated_at"] = _make_aware(record.get("ai_tags_updated_at"))
     return record
@@ -382,6 +390,7 @@ async def create_ticket(
         "ai_tags_updated_at": None,
         "created_at": None,
         "updated_at": None,
+        "syncro_updated_at": None,
         "closed_at": None,
     }
     return _normalise_ticket(fallback_row)
