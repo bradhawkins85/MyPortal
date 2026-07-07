@@ -2042,6 +2042,39 @@ async def test_import_ticket_no_asset_link_when_ticket_has_no_assets(monkeypatch
     assert len(replace_calls) == 0
 
 
+def test_extract_comment_body_prefers_rich_text_preview():
+    comment = {
+        "body": "Plain body [embedded image]",
+        "rich_text_preview": '<p>Formatted</p><img src="https://example.test/image.png">',
+    }
+
+    assert ticket_importer._extract_comment_body(comment) == (
+        '<p>Formatted</p><img src="https://example.test/image.png">'
+    )
+
+
+def test_append_imported_image_markup_replaces_syncro_img_src():
+    body = (
+        "<p>[embedded image]</p>"
+        '<img src="https://attachments.services.syncromsp.com/uploads/repairshopr/file/18728202/image005.png" '
+        'alt="image005.png">'
+    )
+    attachments = [
+        {
+            "id": 55,
+            "mime_type": "image/png",
+            "original_filename": "image005.png",
+            "syncro_source_url": "https://attachments.services.syncromsp.com/uploads/repairshopr/file/18728202/image005.png",
+        }
+    ]
+
+    result = ticket_importer._append_imported_image_markup(body, 123, attachments)
+
+    assert "attachments.services.syncromsp.com" not in result
+    assert 'src="/api/tickets/123/attachments/55/download"' in result
+    assert "syncro-embedded-images" not in result
+
+
 def test_extract_comment_image_candidates_from_html_img():
     comment = {
         "body": '<p>[embedded image]</p><img src="https://example.test/files/image.png" alt="screen.png">'
