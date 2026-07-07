@@ -816,7 +816,7 @@ async def admin_replace_ticket_description(ticket_id: int, request: Request):
 
     sanitized = sanitize_rich_text(str((updated or {}).get("description") or ""))
 
-    await tickets_service.emit_ticket_updated_event(
+    await tickets_service.emit_ticket_details_updated_event(
         ticket_id,
         actor_type="technician",
         actor=current_user,
