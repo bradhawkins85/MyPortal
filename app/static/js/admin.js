@@ -528,6 +528,7 @@
         }
         const payload = { mode };
         const formData = new FormData(form);
+        payload.importBillableTimeAsBilled = formData.get('importBillableTimeAsBilled') === 'on';
 
         const parseInteger = (value, errorMessage) => {
           const parsed = Number(value);

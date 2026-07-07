@@ -131,6 +131,13 @@
                 <label class="form-label" for="syncro-ticket-id">Syncro ticket ID</label>
                 <input id="syncro-ticket-id" name="ticketId" class="form-input" type="number" min="1" step="1" required {% if not is_configured %}disabled{% endif %} />
               </div>
+              <div class="form-field form-field--checkbox">
+                <label class="checkbox-option">
+                  <input name="importBillableTimeAsBilled" type="checkbox" {% if not is_configured %}disabled{% endif %} />
+                  <span>Import billable time entries as already billed</span>
+                </label>
+                <p class="form-help">Billable imported time remains visible for reporting, but MyPortal records it in billed-time tracking so it is excluded from future billing.</p>
+              </div>
               <div class="form-actions">
                 <button type="submit" class="button button--primary" {% if not is_configured %}disabled{% endif %}>Import ticket</button>
               </div>
@@ -150,6 +157,13 @@
                   <input id="syncro-ticket-end" name="endId" class="form-input" type="number" min="1" step="1" required {% if not is_configured %}disabled{% endif %} />
                 </div>
               </div>
+              <div class="form-field form-field--checkbox">
+                <label class="checkbox-option">
+                  <input name="importBillableTimeAsBilled" type="checkbox" {% if not is_configured %}disabled{% endif %} />
+                  <span>Import billable time entries as already billed</span>
+                </label>
+                <p class="form-help">Billable imported time remains visible for reporting, but MyPortal records it in billed-time tracking so it is excluded from future billing.</p>
+              </div>
               <div class="form-actions">
                 <button type="submit" class="button" {% if not is_configured %}disabled{% endif %}>Import range</button>
               </div>
@@ -158,6 +172,13 @@
               <div>
                 <h3 class="card__title">Full account import</h3>
                 <p class="card__subtitle text-muted">Iterate through all Syncro tickets using paginated requests.</p>
+              </div>
+              <div class="form-field form-field--checkbox">
+                <label class="checkbox-option">
+                  <input name="importBillableTimeAsBilled" type="checkbox" {% if not is_configured %}disabled{% endif %} />
+                  <span>Import billable time entries as already billed</span>
+                </label>
+                <p class="form-help">Billable imported time remains visible for reporting, but MyPortal records it in billed-time tracking so it is excluded from future billing.</p>
               </div>
               <div class="form-actions">
                 <button type="submit" class="button button--ghost" {% if not is_configured %}disabled{% endif %}>Import all tickets</button>
