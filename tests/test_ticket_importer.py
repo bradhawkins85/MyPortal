@@ -242,7 +242,9 @@ async def test_import_ticket_by_id_updates_existing(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_import_ticket_by_id_skips_existing_when_syncro_updated_at_unchanged(monkeypatch):
+async def test_import_ticket_by_id_skips_existing_when_syncro_updated_at_unchanged(
+    monkeypatch,
+):
     async def fake_get_ticket(ticket_id, rate_limiter=None):
         return {
             "id": ticket_id,
@@ -279,7 +281,9 @@ async def test_import_ticket_by_id_skips_existing_when_syncro_updated_at_unchang
 
 
 @pytest.mark.anyio
-async def test_import_ticket_by_id_updates_existing_when_syncro_updated_at_newer(monkeypatch):
+async def test_import_ticket_by_id_updates_existing_when_syncro_updated_at_newer(
+    monkeypatch,
+):
     async def fake_get_ticket(ticket_id, rate_limiter=None):
         return {
             "id": ticket_id,
@@ -319,10 +323,7 @@ async def test_import_ticket_by_id_updates_existing_when_syncro_updated_at_newer
         update_calls[0][1]["syncro_updated_at"].isoformat()
         == "2025-01-03T10:45:00+00:00"
     )
-    assert (
-        update_calls[0][1]["updated_at"].isoformat()
-        == "2025-01-03T10:45:00+00:00"
-    )
+    assert update_calls[0][1]["updated_at"].isoformat() == "2025-01-03T10:45:00+00:00"
 
 
 @pytest.mark.anyio
@@ -2156,13 +2157,13 @@ def test_extract_comment_body_prefers_rich_text_preview():
 def test_extract_comment_body_appends_full_body_when_rich_text_preview_is_truncated():
     comment = {
         "body": "First line\nSecond line\nThird line with <unsafe> markers",
-        "rich_text_preview": "<p>First line<br/>Second...</p><img src=\"https://example.test/image.png\">",
+        "rich_text_preview": '<p>First line<br/>Second...</p><img src="https://example.test/image.png">',
     }
 
     result = ticket_importer._extract_comment_body(comment)
 
     assert result is not None
-    assert '<p>First line<br>Second...</p>' in result
+    assert "<p>First line<br>Second...</p>" in result
     assert '<img src="https://example.test/image.png">' in result
     assert "Full ticket body from Syncro" in result
     assert "First line\nSecond line\nThird line with  markers" in result
@@ -2297,3 +2298,60 @@ async def test_sync_ticket_replies_imports_embedded_images(monkeypatch):
     assert attachment_calls[0]["original_filename"] == "screen.png"
     assert attachment_calls[0]["mime_type"] == "image/png"
     assert attachment_calls[0]["access_level"] == "closed"
+
+
+@pytest.mark.anyio
+async def test_sync_ticket_replies_can_mark_imported_billable_time_as_billed(
+    monkeypatch,
+):
+    async def fake_list_replies(ticket_id):
+        assert ticket_id == 123
+        return []
+
+    async def fake_create_reply(**kwargs):
+        return {"id": 456, **kwargs}
+
+    billed_calls = []
+
+    async def fake_create_billed_time_entry(**kwargs):
+        billed_calls.append(kwargs)
+        return {"id": 1, **kwargs}
+
+    monkeypatch.setattr(tickets_repo, "list_replies", fake_list_replies)
+    monkeypatch.setattr(tickets_repo, "create_reply", fake_create_reply)
+    monkeypatch.setattr(
+        ticket_importer.billed_time_repo,
+        "create_billed_time_entry",
+        fake_create_billed_time_entry,
+    )
+
+    async def fake_import_comment_images(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr(
+        ticket_importer, "_import_comment_images", fake_import_comment_images
+    )
+
+    await ticket_importer._sync_ticket_replies(
+        123,
+        [
+            {
+                "id": "syncro-comment-1",
+                "body": "Worked on billing setup",
+                "minutes_spent": 45,
+                "is_billable": True,
+            }
+        ],
+        requester_id=None,
+        contact_email=None,
+        mark_billable_time_as_billed=True,
+    )
+
+    assert billed_calls == [
+        {
+            "ticket_id": 123,
+            "reply_id": 456,
+            "xero_invoice_number": "SYNCRO-IMPORT-ALREADY-BILLED",
+            "minutes_billed": 45,
+        }
+    ]

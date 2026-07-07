@@ -16,6 +16,7 @@ from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import ticket_attachments as attachments_repo
+from app.repositories import ticket_billed_time_entries as billed_time_repo
 from app.repositories import users as user_repo
 from app.repositories import webhook_events as webhook_events_repo
 from app.services.sanitization import sanitize_rich_text
@@ -293,11 +294,11 @@ def _append_full_plain_body_to_rich_preview(
     escaped_body = escape(plain_body)
     return (
         f"{rich_html}"
-        '<hr />'
+        "<hr />"
         '<div class="syncro-full-body">'
-        '<p><strong>Full ticket body from Syncro:</strong></p>'
+        "<p><strong>Full ticket body from Syncro:</strong></p>"
         f"<pre>{escaped_body}</pre>"
-        '</div>'
+        "</div>"
     )
 
 
@@ -1412,6 +1413,7 @@ async def _sync_ticket_replies(
     contact_email: str | None,
     timer_billable: dict[str, bool] | None = None,
     timer_time: dict[str, int] | None = None,
+    mark_billable_time_as_billed: bool = False,
 ) -> None:
     if not comments:
         return
@@ -1478,6 +1480,28 @@ async def _sync_ticket_replies(
             created_at=created_at,
         )
         await _record_imported_reply_recipients(reply, comment, created_at)
+        if (
+            mark_billable_time_as_billed
+            and is_billable
+            and minutes_spent
+            and minutes_spent > 0
+        ):
+            reply_id = (reply or {}).get("id")
+            if reply_id is not None:
+                try:
+                    await billed_time_repo.create_billed_time_entry(
+                        ticket_id=ticket_id,
+                        reply_id=int(reply_id),
+                        xero_invoice_number="SYNCRO-IMPORT-ALREADY-BILLED",
+                        minutes_billed=int(minutes_spent),
+                    )
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    log_error(
+                        "Failed to mark imported Syncro billable time as already billed",
+                        ticket_id=ticket_id,
+                        reply_id=reply_id,
+                        error=str(exc),
+                    )
         if external_ref:
             known_refs.add(external_ref)
 
@@ -1645,6 +1669,8 @@ async def _upsert_ticket(
     allowed_statuses: Collection[str],
     default_status: str,
     status_mappings: dict[str, str] | None = None,
+    *,
+    mark_billable_time_as_billed: bool = False,
 ) -> str:
     status_choices = set(allowed_statuses)
     syncro_id = ticket.get("id")
@@ -1778,6 +1804,7 @@ async def _upsert_ticket(
             contact_email=contact_email,
             timer_billable=timer_billable,
             timer_time=timer_time,
+            mark_billable_time_as_billed=mark_billable_time_as_billed,
         )
         await _sync_ticket_watchers(ticket_db_id, comments, contact_email)
 
@@ -1788,6 +1815,7 @@ async def import_ticket_by_id(
     ticket_id: int,
     *,
     rate_limiter: syncro.AsyncRateLimiter | None = None,
+    mark_billable_time_as_billed: bool = False,
 ) -> TicketImportSummary:
     limiter = rate_limiter or await syncro.get_rate_limiter()
     summary = TicketImportSummary(mode="single")
@@ -1810,7 +1838,11 @@ async def import_ticket_by_id(
     summary.fetched = 1
     allowed_statuses, default_status, status_mappings = await _get_status_context()
     outcome = await _upsert_ticket(
-        ticket, allowed_statuses, default_status, status_mappings
+        ticket,
+        allowed_statuses,
+        default_status,
+        status_mappings,
+        mark_billable_time_as_billed=mark_billable_time_as_billed,
     )
     summary.record(outcome)
     log_info(
@@ -1829,6 +1861,7 @@ async def import_ticket_range(
     end_id: int,
     *,
     rate_limiter: syncro.AsyncRateLimiter | None = None,
+    mark_billable_time_as_billed: bool = False,
 ) -> TicketImportSummary:
     limiter = rate_limiter or await syncro.get_rate_limiter()
     summary = TicketImportSummary(mode="range")
@@ -1845,7 +1878,11 @@ async def import_ticket_range(
             continue
         summary.fetched += 1
         outcome = await _upsert_ticket(
-            ticket, allowed_statuses, default_status, status_mappings
+            ticket,
+            allowed_statuses,
+            default_status,
+            status_mappings,
+            mark_billable_time_as_billed=mark_billable_time_as_billed,
         )
         summary.record(outcome)
     log_info(
@@ -1909,6 +1946,7 @@ async def _fetch_ticket_detail_for_import(
 async def import_all_tickets(
     *,
     rate_limiter: syncro.AsyncRateLimiter | None = None,
+    mark_billable_time_as_billed: bool = False,
 ) -> TicketImportSummary:
     limiter = rate_limiter or await syncro.get_rate_limiter()
     summary = TicketImportSummary(mode="all")
@@ -1936,7 +1974,11 @@ async def import_all_tickets(
                         ticket, rate_limiter=limiter
                     )
                     outcome = await _upsert_ticket(
-                        ticket_detail, allowed_statuses, default_status, status_mappings
+                        ticket_detail,
+                        allowed_statuses,
+                        default_status,
+                        status_mappings,
+                        mark_billable_time_as_billed=mark_billable_time_as_billed,
                     )
             except Exception as exc:  # pragma: no cover - defensive logging
                 reason = f"Syncro ticket {ticket.get('id') or 'unknown'} failed to import: {exc}"
@@ -1988,6 +2030,7 @@ async def import_from_request(
     start_id: int | None = None,
     end_id: int | None = None,
     rate_limiter: syncro.AsyncRateLimiter | None = None,
+    mark_billable_time_as_billed: bool = False,
 ) -> TicketImportSummary:
     mode_lower = mode.lower()
     payload: dict[str, Any] = {"mode": mode_lower}
@@ -1997,6 +2040,8 @@ async def import_from_request(
         payload["startId"] = start_id
     if end_id is not None:
         payload["endId"] = end_id
+    if mark_billable_time_as_billed:
+        payload["importBillableTimeAsBilled"] = True
 
     event_id: int | None = None
     using_monitor: bool = False
@@ -2143,17 +2188,27 @@ async def import_from_request(
         if mode_lower == "single":
             if ticket_id is None:
                 raise ValueError("ticket_id is required for single imports")
-            summary = await import_ticket_by_id(ticket_id, rate_limiter=rate_limiter)
+            summary = await import_ticket_by_id(
+                ticket_id,
+                rate_limiter=rate_limiter,
+                mark_billable_time_as_billed=mark_billable_time_as_billed,
+            )
         elif mode_lower == "range":
             if start_id is None or end_id is None:
                 raise ValueError("start_id and end_id are required for range imports")
             if end_id < start_id:
                 raise ValueError("end_id must be greater than or equal to start_id")
             summary = await import_ticket_range(
-                start_id, end_id, rate_limiter=rate_limiter
+                start_id,
+                end_id,
+                rate_limiter=rate_limiter,
+                mark_billable_time_as_billed=mark_billable_time_as_billed,
             )
         elif mode_lower == "all":
-            summary = await import_all_tickets(rate_limiter=rate_limiter)
+            summary = await import_all_tickets(
+                rate_limiter=rate_limiter,
+                mark_billable_time_as_billed=mark_billable_time_as_billed,
+            )
         else:
             raise ValueError("mode must be one of 'single', 'range', or 'all'")
     except Exception as exc:

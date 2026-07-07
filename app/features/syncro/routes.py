@@ -15,8 +15,13 @@ from app.core.logging import log_error, log_info
 from app.features.staff.helpers import _load_staff_context
 from app.schemas.tickets import SyncroTicketImportRequest
 from app.services import background as background_tasks
-from app.services import company_importer, modules as modules_service, staff_importer, ticket_importer, tickets as tickets_service
-
+from app.services import (
+    company_importer,
+    modules as modules_service,
+    staff_importer,
+    ticket_importer,
+    tickets as tickets_service,
+)
 
 router = APIRouter(tags=["Syncro"])
 settings = get_settings()
@@ -120,7 +125,9 @@ async def admin_syncro_ticket_import_page(
     )
 
 
-@router.post("/admin/tickets/syncro-import/status-mappings", response_class=HTMLResponse)
+@router.post(
+    "/admin/tickets/syncro-import/status-mappings", response_class=HTMLResponse
+)
 async def update_syncro_ticket_status_mappings(request: Request):
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
@@ -134,10 +141,15 @@ async def update_syncro_ticket_status_mappings(request: Request):
     form = await request.form()
     syncro_statuses = form.getlist("syncroStatus")
     myportal_statuses = form.getlist("myportalStatus")
-    allowed_statuses = {definition.tech_status for definition in await tickets_service.list_status_definitions()}
+    allowed_statuses = {
+        definition.tech_status
+        for definition in await tickets_service.list_status_definitions()
+    }
     mappings: list[dict[str, str]] = []
     seen: set[str] = set()
-    for syncro_status_raw, myportal_status_raw in zip(syncro_statuses, myportal_statuses, strict=False):
+    for syncro_status_raw, myportal_status_raw in zip(
+        syncro_statuses, myportal_statuses, strict=False
+    ):
         syncro_status = str(syncro_status_raw or "").strip()
         myportal_status = str(myportal_status_raw or "").strip().lower()
         if not syncro_status and not myportal_status:
@@ -153,7 +165,9 @@ async def update_syncro_ticket_status_mappings(request: Request):
         if key in seen:
             continue
         seen.add(key)
-        mappings.append({"syncro_status": syncro_status[:128], "myportal_status": myportal_status})
+        mappings.append(
+            {"syncro_status": syncro_status[:128], "myportal_status": myportal_status}
+        )
     existing_settings = dict((module.get("settings") or {}))
     existing_settings["ticket_status_mappings"] = mappings
     await modules_service.update_module("syncro", settings=existing_settings)
@@ -183,7 +197,9 @@ async def route_import_syncro_contacts(request: Request):
             detail="Syncro module is disabled",
         )
     payload = await request.json()
-    syncro_company_id = payload.get("syncroCompanyId") or payload.get("syncro_company_id")
+    syncro_company_id = payload.get("syncroCompanyId") or payload.get(
+        "syncro_company_id"
+    )
     if not syncro_company_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -294,6 +310,7 @@ async def route_import_syncro_tickets(request: Request):
         ticket_id=import_request.ticket_id,
         start_id=import_request.start_id,
         end_id=import_request.end_id,
+        import_billable_time_as_billed=import_request.import_billable_time_as_billed,
         request_path=str(request.url),
     )
     try:
@@ -302,6 +319,7 @@ async def route_import_syncro_tickets(request: Request):
             ticket_id=import_request.ticket_id,
             start_id=import_request.start_id,
             end_id=import_request.end_id,
+            mark_billable_time_as_billed=import_request.import_billable_time_as_billed,
         )
     except ValueError as exc:
         raise HTTPException(

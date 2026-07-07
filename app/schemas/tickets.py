@@ -265,6 +265,13 @@ class SyncroTicketImportRequest(BaseModel):
         validation_alias=AliasChoices("endId", "end_id"),
         ge=1,
     )
+    import_billable_time_as_billed: bool = Field(
+        default=False,
+        alias="importBillableTimeAsBilled",
+        validation_alias=AliasChoices(
+            "importBillableTimeAsBilled", "import_billable_time_as_billed"
+        ),
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -300,7 +307,9 @@ class TicketTaskCreate(BaseModel):
 
 
 class TicketTaskUpdate(BaseModel):
-    task_name: Optional[str] = Field(default=None, min_length=1, max_length=255, alias="taskName")
+    task_name: Optional[str] = Field(
+        default=None, min_length=1, max_length=255, alias="taskName"
+    )
     is_completed: Optional[bool] = Field(default=None, alias="isCompleted")
     sort_order: Optional[int] = Field(default=None, alias="sortOrder")
 
@@ -327,6 +336,7 @@ class TicketTaskListResponse(BaseModel):
 
 class TicketViewFilters(BaseModel):
     """Filters that can be applied to ticket views"""
+
     status: Optional[list[str]] = None
     priority: Optional[list[str]] = None
     company_id: Optional[list[int]] = None
@@ -339,6 +349,7 @@ class TicketViewFilters(BaseModel):
 
 class TicketViewCreate(BaseModel):
     """Request to create a new saved ticket view"""
+
     name: str = Field(..., min_length=1, max_length=128)
     description: Optional[str] = None
     filters: Optional[TicketViewFilters] = None
@@ -353,6 +364,7 @@ class TicketViewCreate(BaseModel):
 
 class TicketViewUpdate(BaseModel):
     """Request to update an existing saved ticket view"""
+
     name: Optional[str] = Field(default=None, min_length=1, max_length=128)
     description: Optional[str] = None
     filters: Optional[TicketViewFilters] = None
@@ -367,6 +379,7 @@ class TicketViewUpdate(BaseModel):
 
 class TicketViewModel(BaseModel):
     """Saved ticket view model"""
+
     id: int
     user_id: int
     name: str
@@ -385,11 +398,13 @@ class TicketViewModel(BaseModel):
 
 class TicketViewListResponse(BaseModel):
     """Response containing list of ticket views"""
+
     items: list[TicketViewModel] = Field(default_factory=list)
 
 
 class TicketAttachmentAccessLevel(str, Enum):
     """Access levels for ticket attachments"""
+
     OPEN = "open"  # Accessible via URL without login
     CLOSED = "closed"  # Requires login, accessible by requester, watchers, technicians
     RESTRICTED = "restricted"  # Only accessible by helpdesk technicians
@@ -397,16 +412,21 @@ class TicketAttachmentAccessLevel(str, Enum):
 
 class TicketAttachmentCreate(BaseModel):
     """Schema for creating a ticket attachment"""
-    access_level: TicketAttachmentAccessLevel = Field(default=TicketAttachmentAccessLevel.CLOSED)
+
+    access_level: TicketAttachmentAccessLevel = Field(
+        default=TicketAttachmentAccessLevel.CLOSED
+    )
 
 
 class TicketAttachmentUpdate(BaseModel):
     """Schema for updating a ticket attachment"""
+
     access_level: Optional[TicketAttachmentAccessLevel] = None
 
 
 class TicketAttachment(BaseModel):
     """Schema for ticket attachment response"""
+
     id: int
     ticket_id: int
     filename: str
@@ -422,17 +442,24 @@ class TicketAttachment(BaseModel):
 
 class TicketAttachmentListResponse(BaseModel):
     """Response containing list of ticket attachments"""
+
     items: list[TicketAttachment] = Field(default_factory=list)
 
 
 class TicketSplitRequest(BaseModel):
     """Request to split selected replies into a new ticket"""
-    reply_ids: list[int] = Field(..., min_length=1, description="List of reply IDs to move to new ticket")
-    new_subject: str = Field(..., min_length=1, max_length=255, description="Subject for the new ticket")
+
+    reply_ids: list[int] = Field(
+        ..., min_length=1, description="List of reply IDs to move to new ticket"
+    )
+    new_subject: str = Field(
+        ..., min_length=1, max_length=255, description="Subject for the new ticket"
+    )
 
 
 class TicketSplitResponse(BaseModel):
     """Response after splitting a ticket"""
+
     original_ticket: TicketResponse
     new_ticket: TicketResponse
     moved_reply_count: int
@@ -440,12 +467,18 @@ class TicketSplitResponse(BaseModel):
 
 class TicketMergeRequest(BaseModel):
     """Request to merge multiple tickets into one"""
-    ticket_ids: list[int] = Field(..., min_length=2, description="List of ticket IDs to merge (at least 2)")
-    target_ticket_id: int = Field(..., description="ID of the ticket to merge into (must be in ticket_ids)")
+
+    ticket_ids: list[int] = Field(
+        ..., min_length=2, description="List of ticket IDs to merge (at least 2)"
+    )
+    target_ticket_id: int = Field(
+        ..., description="ID of the ticket to merge into (must be in ticket_ids)"
+    )
 
 
 class TicketMergeResponse(BaseModel):
     """Response after merging tickets"""
+
     merged_ticket: TicketResponse
     merged_ticket_ids: list[int] = Field(description="IDs of tickets that were merged")
     moved_reply_count: int
