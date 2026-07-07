@@ -220,10 +220,12 @@ async def list_users_with_permission(permission: str) -> List[dict[str, Any]]:
             u.company_id,
             u.is_super_admin,
             r.permissions
-        FROM company_memberships AS m
-        INNER JOIN roles AS r ON r.id = m.role_id
-        INNER JOIN users AS u ON u.id = m.user_id
-        WHERE LOWER(m.status) = 'active'
+        FROM users AS u
+        LEFT JOIN company_memberships AS m
+            ON m.user_id = u.id
+            AND LOWER(m.status) = 'active'
+        LEFT JOIN roles AS r ON r.id = m.role_id
+        WHERE m.id IS NOT NULL OR u.is_super_admin = 1
         ORDER BY u.email
         """,
     )
