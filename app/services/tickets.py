@@ -1932,7 +1932,7 @@ async def load_dashboard_state(
     assigned_user_id: int | None = None,
     search: str | None = None,
     requester_id: int | None = None,
-    limit: int = 200,
+    limit: int | None = 200,
     include_reference_data: bool = True,
 ) -> TicketDashboardState:
     """Load ticket dashboard data used by the admin workspace."""

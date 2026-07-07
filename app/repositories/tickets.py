@@ -403,7 +403,7 @@ async def list_tickets(
     company_id: int | None = None,
     assigned_user_id: int | None = None,
     search: str | None = None,
-    limit: int = 50,
+    limit: int | None = 50,
     offset: int = 0,
     requester_id: int | None = None,
     cursor_updated_at: datetime | None = None,
@@ -445,14 +445,24 @@ async def list_tickets(
     )
     where_clause = " WHERE " + " AND ".join(where) if where else ""
     if cursor_updated_at is not None and cursor_id is not None:
-        params.append(limit)
+        query_parts = [
+            "SELECT *",
+            "FROM tickets",
+            where_clause,
+            "ORDER BY updated_at DESC, id DESC",
+        ]
+        if limit is not None:
+            params.append(limit)
+            query_parts.append("LIMIT %s")
+        query = "\n".join(query_parts)
+        rows = await db.fetch_all(query, tuple(params))
+    elif limit is None:
         query = "\n".join(
             [
                 "SELECT *",
                 "FROM tickets",
                 where_clause,
                 "ORDER BY updated_at DESC, id DESC",
-                "LIMIT %s",
             ]
         )
         rows = await db.fetch_all(query, tuple(params))

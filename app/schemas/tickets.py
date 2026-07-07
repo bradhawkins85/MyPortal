@@ -191,7 +191,7 @@ class TicketSearchFilters(BaseModel):
     company_id: Optional[int] = None
     assigned_user_id: Optional[int] = None
     search: Optional[str] = None
-    limit: int = Field(default=100, ge=1, le=500)
+    limit: int = Field(default=100, ge=0)
     offset: int = Field(default=0, ge=0)
 
 

@@ -313,6 +313,7 @@ async def get_ticket_dashboard(
     assigned_user_id: int | None = Query(default=None, alias="assignedUserId"),
     search: str | None = Query(default=None, min_length=1),
     limit: int = Query(default=200, ge=1, le=500),
+    all_tickets: bool = Query(default=False, alias="all"),
     current_user: dict = Depends(require_helpdesk_technician),
 ) -> TicketDashboardResponse:
     state = await tickets_service.load_dashboard_state(
@@ -321,7 +322,7 @@ async def get_ticket_dashboard(
         company_id=company_id,
         assigned_user_id=assigned_user_id,
         search=search,
-        limit=limit,
+        limit=None if all_tickets else limit,
         include_reference_data=False,
     )
     rows: list[TicketDashboardRow] = []
@@ -357,7 +358,7 @@ async def get_ticket_dashboard(
         company_id=company_id,
         assigned_user_id=assigned_user_id,
         search=search,
-        limit=limit,
+        limit=state.total if all_tickets else limit,
         offset=0,
     )
     return TicketDashboardResponse(

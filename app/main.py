@@ -8167,7 +8167,7 @@ async def _render_tickets_dashboard(
                 dashboard = await tickets_service.load_dashboard_state(
                     status_filter=None,
                     module_filter=None,
-                    limit=200,
+                    limit=None,
                     include_reference_data=False,
                 )
         else:
@@ -8175,7 +8175,7 @@ async def _render_tickets_dashboard(
             dashboard = await tickets_service.load_dashboard_state(
                 status_filter=None,
                 module_filter=None,
-                limit=200,
+                limit=None,
                 include_reference_data=False,
             )
     else:
@@ -8183,11 +8183,11 @@ async def _render_tickets_dashboard(
         dashboard = await tickets_service.load_dashboard_state(
             status_filter=None,
             module_filter=None,
-            limit=200,
+            limit=None,
             include_reference_data=False,
         )
     reference_data = await _get_ticket_dashboard_reference_data()
-    dashboard_endpoint = "/api/tickets/dashboard"
+    dashboard_endpoint = "/api/tickets/dashboard?all=true"
     selectable_status_definitions = [
         definition
         for definition in dashboard.status_definitions
