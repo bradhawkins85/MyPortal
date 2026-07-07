@@ -380,6 +380,31 @@
                     <input type="checkbox" class="ticket-column-toggle" data-column="non-billable-minutes" />
                     <span>Non-Billable Minutes</span>
                   </label>
+                  {% set automation_column_options = [
+                    ('requester-email', 'ticket.requester_email'),
+                    ('requester-display-name', 'ticket.requester_display_name'),
+                    ('assigned-user-email', 'ticket.assigned_user_email'),
+                    ('assigned-user-display-name', 'ticket.assigned_user_display_name'),
+                    ('company-id', 'ticket.company.id'),
+                    ('has-attachments', 'ticket.has_attachments'),
+                    ('attachment-count', 'ticket.attachment_count'),
+                    ('has-tasks', 'ticket.has_tasks'),
+                    ('task-count', 'ticket.task_count'),
+                    ('has-open-tasks', 'ticket.has_open_tasks'),
+                    ('open-task-count', 'ticket.open_task_count'),
+                    ('labels', 'ticket.labels'),
+                    ('age-days', 'ticket.age_days'),
+                    ('updated-age-hours', 'ticket.updated_age_hours'),
+                    ('last-reply-age-hours', 'ticket.last_reply_age_hours'),
+                    ('latest-reply-internal', 'reply.is_internal'),
+                    ('latest-reply-kind', 'reply.kind')
+                  ] %}
+                  {% for column_key, column_label in automation_column_options %}
+                    <label class="ticket-columns__option">
+                      <input type="checkbox" class="ticket-column-toggle" data-column="{{ column_key }}" />
+                      <span>{{ column_label }}</span>
+                    </label>
+                  {% endfor %}
                 </div>
               </div>
             </div>
@@ -444,6 +469,23 @@
                 <th scope="col" data-sort="string" data-column="ai-tags" class="tickets-table__column tickets-table__column--ai-tags">AI Tags</th>
                 <th scope="col" data-sort="int" data-column="billable-minutes" class="tickets-table__column tickets-table__column--billable-minutes">Billable Mins</th>
                 <th scope="col" data-sort="int" data-column="non-billable-minutes" class="tickets-table__column tickets-table__column--non-billable-minutes">Non-Billable Mins</th>
+                <th scope="col" data-sort="string" data-column="requester-email" class="tickets-table__column tickets-table__column--requester-email">ticket.requester_email</th>
+                <th scope="col" data-sort="string" data-column="requester-display-name" class="tickets-table__column tickets-table__column--requester-display-name">ticket.requester_display_name</th>
+                <th scope="col" data-sort="string" data-column="assigned-user-email" class="tickets-table__column tickets-table__column--assigned-user-email">ticket.assigned_user_email</th>
+                <th scope="col" data-sort="string" data-column="assigned-user-display-name" class="tickets-table__column tickets-table__column--assigned-user-display-name">ticket.assigned_user_display_name</th>
+                <th scope="col" data-sort="int" data-column="company-id" class="tickets-table__column tickets-table__column--company-id">ticket.company.id</th>
+                <th scope="col" data-sort="string" data-column="has-attachments" class="tickets-table__column tickets-table__column--has-attachments">ticket.has_attachments</th>
+                <th scope="col" data-sort="int" data-column="attachment-count" class="tickets-table__column tickets-table__column--attachment-count">ticket.attachment_count</th>
+                <th scope="col" data-sort="string" data-column="has-tasks" class="tickets-table__column tickets-table__column--has-tasks">ticket.has_tasks</th>
+                <th scope="col" data-sort="int" data-column="task-count" class="tickets-table__column tickets-table__column--task-count">ticket.task_count</th>
+                <th scope="col" data-sort="string" data-column="has-open-tasks" class="tickets-table__column tickets-table__column--has-open-tasks">ticket.has_open_tasks</th>
+                <th scope="col" data-sort="int" data-column="open-task-count" class="tickets-table__column tickets-table__column--open-task-count">ticket.open_task_count</th>
+                <th scope="col" data-sort="string" data-column="labels" class="tickets-table__column tickets-table__column--labels">ticket.labels</th>
+                <th scope="col" data-sort="int" data-column="age-days" class="tickets-table__column tickets-table__column--age-days">ticket.age_days</th>
+                <th scope="col" data-sort="int" data-column="updated-age-hours" class="tickets-table__column tickets-table__column--updated-age-hours">ticket.updated_age_hours</th>
+                <th scope="col" data-sort="int" data-column="last-reply-age-hours" class="tickets-table__column tickets-table__column--last-reply-age-hours">ticket.last_reply_age_hours</th>
+                <th scope="col" data-sort="string" data-column="latest-reply-internal" class="tickets-table__column tickets-table__column--latest-reply-internal">reply.is_internal</th>
+                <th scope="col" data-sort="string" data-column="latest-reply-kind" class="tickets-table__column tickets-table__column--latest-reply-kind">reply.kind</th>
                 <th scope="col" class="table__actions tickets-table__column tickets-table__column--actions">Actions</th>
               </tr>
             </thead>
@@ -511,6 +553,30 @@
                     {% set time_data = (ticket_time_lookup or {}).get(ticket.id, {}) %}
                     <td data-label="Billable Mins" data-column="billable-minutes" class="tickets-table__cell tickets-table__cell--billable-minutes">{{ time_data.get('billable_minutes', 0) }}</td>
                     <td data-label="Non-Billable Mins" data-column="non-billable-minutes" class="tickets-table__cell tickets-table__cell--non-billable-minutes">{{ time_data.get('non_billable_minutes', 0) }}</td>
+                    {% set automation_data = (ticket_automation_filter_lookup or {}).get(ticket.id, {}) %}
+                    {% set requester_email = ticket.requester_email or (requester.email if requester else '') %}
+                    {% set assigned_email = assigned.email if assigned else '' %}
+                    {% set created_age_days = ((ticket_dashboard_now - ticket.created_at).total_seconds() // 86400) | int if ticket.created_at else '' %}
+                    {% set updated_age_hours = ((ticket_dashboard_now - ticket.updated_at).total_seconds() // 3600) | int if ticket.updated_at else '' %}
+                    {% set latest_reply_at = automation_data.get('latest_reply_at') %}
+                    {% set last_reply_age_hours = ((ticket_dashboard_now - latest_reply_at).total_seconds() // 3600) | int if latest_reply_at else '' %}
+                    <td data-label="ticket.requester_email" data-column="requester-email" class="tickets-table__cell tickets-table__cell--requester-email">{{ requester_email or '—' }}</td>
+                    <td data-label="ticket.requester_display_name" data-column="requester-display-name" class="tickets-table__cell tickets-table__cell--requester-display-name">{{ requester_label }}</td>
+                    <td data-label="ticket.assigned_user_email" data-column="assigned-user-email" class="tickets-table__cell tickets-table__cell--assigned-user-email">{{ assigned_email or '—' }}</td>
+                    <td data-label="ticket.assigned_user_display_name" data-column="assigned-user-display-name" class="tickets-table__cell tickets-table__cell--assigned-user-display-name">{{ assigned_label }}</td>
+                    <td data-label="ticket.company.id" data-column="company-id" class="tickets-table__cell tickets-table__cell--company-id">{{ ticket.company_id or '—' }}</td>
+                    <td data-label="ticket.has_attachments" data-column="has-attachments" class="tickets-table__cell tickets-table__cell--has-attachments">{{ 'true' if automation_data.get('has_attachments') else 'false' }}</td>
+                    <td data-label="ticket.attachment_count" data-column="attachment-count" class="tickets-table__cell tickets-table__cell--attachment-count">{{ automation_data.get('attachment_count', 0) }}</td>
+                    <td data-label="ticket.has_tasks" data-column="has-tasks" class="tickets-table__cell tickets-table__cell--has-tasks">{{ 'true' if automation_data.get('has_tasks') else 'false' }}</td>
+                    <td data-label="ticket.task_count" data-column="task-count" class="tickets-table__cell tickets-table__cell--task-count">{{ automation_data.get('task_count', 0) }}</td>
+                    <td data-label="ticket.has_open_tasks" data-column="has-open-tasks" class="tickets-table__cell tickets-table__cell--has-open-tasks">{{ 'true' if automation_data.get('has_open_tasks') else 'false' }}</td>
+                    <td data-label="ticket.open_task_count" data-column="open-task-count" class="tickets-table__cell tickets-table__cell--open-task-count">{{ automation_data.get('open_task_count', 0) }}</td>
+                    <td data-label="ticket.labels" data-column="labels" class="tickets-table__cell tickets-table__cell--labels">{{ (ticket.ai_tags or []) | join(', ') or '—' }}</td>
+                    <td data-label="ticket.age_days" data-column="age-days" class="tickets-table__cell tickets-table__cell--age-days">{{ created_age_days if created_age_days != '' else '—' }}</td>
+                    <td data-label="ticket.updated_age_hours" data-column="updated-age-hours" class="tickets-table__cell tickets-table__cell--updated-age-hours">{{ updated_age_hours if updated_age_hours != '' else '—' }}</td>
+                    <td data-label="ticket.last_reply_age_hours" data-column="last-reply-age-hours" class="tickets-table__cell tickets-table__cell--last-reply-age-hours">{{ last_reply_age_hours if last_reply_age_hours != '' else '—' }}</td>
+                    <td data-label="reply.is_internal" data-column="latest-reply-internal" class="tickets-table__cell tickets-table__cell--latest-reply-internal">{{ 'true' if automation_data.get('latest_reply_is_internal') else ('false' if automation_data.get('latest_reply_id') else '—') }}</td>
+                    <td data-label="reply.kind" data-column="latest-reply-kind" class="tickets-table__cell tickets-table__cell--latest-reply-kind">{{ automation_data.get('latest_reply_kind') or '—' }}</td>
                     <td class="table__actions tickets-table__cell tickets-table__cell--actions">
                       <a href="/admin/tickets/{{ ticket.id }}" class="button button--ghost">Open</a>
                     </td>
@@ -518,7 +584,7 @@
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="{{ 19 + (1 if can_bulk_delete_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
+                  <td colspan="{{ 36 + (1 if can_bulk_delete_tickets or can_merge_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
                 </tr>
               {% endif %}
             </tbody>

@@ -1268,6 +1268,116 @@ async def get_automation_filter_context(ticket_id: int) -> dict[str, int | bool]
     }
 
 
+async def get_automation_filter_context_by_ticket_ids(ticket_ids: list[int]) -> dict[int, dict[str, Any]]:
+    """Return automation filter helper values keyed by ticket ID for ticket lists."""
+
+    parsed_ids: set[int] = set()
+    for ticket_id in ticket_ids:
+        try:
+            parsed_id = int(ticket_id)
+        except (TypeError, ValueError):
+            continue
+        if parsed_id > 0:
+            parsed_ids.add(parsed_id)
+    unique_ids = sorted(parsed_ids)
+    if not unique_ids:
+        return {}
+
+    placeholders = ", ".join(["%s"] * len(unique_ids))
+    result: dict[int, dict[str, Any]] = {
+        ticket_id: {
+            "billable_minutes": 0,
+            "non_billable_minutes": 0,
+            "attachment_count": 0,
+            "has_attachments": False,
+            "task_count": 0,
+            "has_tasks": False,
+            "open_task_count": 0,
+            "has_open_tasks": False,
+            "latest_reply_id": None,
+            "latest_reply_at": None,
+            "latest_reply_is_internal": None,
+            "latest_reply_kind": None,
+        }
+        for ticket_id in unique_ids
+    }
+
+    time_rows = await db.fetch_all(
+        f"""
+        SELECT
+            ticket_id,
+            SUM(CASE WHEN is_billable = 1 AND minutes_spent IS NOT NULL THEN minutes_spent ELSE 0 END) AS billable_minutes,
+            SUM(CASE WHEN is_billable = 0 AND minutes_spent IS NOT NULL THEN minutes_spent ELSE 0 END) AS non_billable_minutes
+        FROM ticket_replies
+        WHERE ticket_id IN ({placeholders}) AND minutes_spent IS NOT NULL AND minutes_spent > 0
+        GROUP BY ticket_id
+        """,
+        tuple(unique_ids),
+    )
+    for row in time_rows:
+        ticket_id = int(row["ticket_id"])
+        result[ticket_id]["billable_minutes"] = int(row.get("billable_minutes") or 0)
+        result[ticket_id]["non_billable_minutes"] = int(row.get("non_billable_minutes") or 0)
+
+    attachment_rows = await db.fetch_all(
+        f"""
+        SELECT ticket_id, COUNT(*) AS attachment_count
+        FROM ticket_attachments
+        WHERE ticket_id IN ({placeholders})
+        GROUP BY ticket_id
+        """,
+        tuple(unique_ids),
+    )
+    for row in attachment_rows:
+        ticket_id = int(row["ticket_id"])
+        attachment_count = int(row.get("attachment_count") or 0)
+        result[ticket_id]["attachment_count"] = attachment_count
+        result[ticket_id]["has_attachments"] = attachment_count > 0
+
+    task_rows = await db.fetch_all(
+        f"""
+        SELECT
+            ticket_id,
+            COUNT(*) AS task_count,
+            SUM(CASE WHEN is_completed = 0 THEN 1 ELSE 0 END) AS open_task_count
+        FROM ticket_tasks
+        WHERE ticket_id IN ({placeholders})
+        GROUP BY ticket_id
+        """,
+        tuple(unique_ids),
+    )
+    for row in task_rows:
+        ticket_id = int(row["ticket_id"])
+        task_count = int(row.get("task_count") or 0)
+        open_task_count = int(row.get("open_task_count") or 0)
+        result[ticket_id]["task_count"] = task_count
+        result[ticket_id]["has_tasks"] = task_count > 0
+        result[ticket_id]["open_task_count"] = open_task_count
+        result[ticket_id]["has_open_tasks"] = open_task_count > 0
+
+    latest_reply_rows = await db.fetch_all(
+        f"""
+        SELECT tr.ticket_id, tr.id, tr.created_at, tr.is_internal, tr.kind
+        FROM ticket_replies AS tr
+        INNER JOIN (
+            SELECT ticket_id, MAX(id) AS latest_reply_id
+            FROM ticket_replies
+            WHERE ticket_id IN ({placeholders})
+            GROUP BY ticket_id
+        ) AS latest ON latest.latest_reply_id = tr.id
+        """,
+        tuple(unique_ids),
+    )
+    for row in latest_reply_rows:
+        ticket_id = int(row["ticket_id"])
+        result[ticket_id]["latest_reply_id"] = int(row.get("id")) if row.get("id") is not None else None
+        result[ticket_id]["latest_reply_at"] = _make_aware(row.get("created_at"))
+        result[ticket_id]["latest_reply_is_internal"] = bool(row.get("is_internal"))
+        result[ticket_id]["latest_reply_kind"] = row.get("kind")
+
+    return result
+
+
 async def validate_replies_belong_to_ticket(reply_ids: list[int], ticket_id: int) -> tuple[bool, str | None]:
     """
     Validate that all reply IDs belong to the specified ticket.
