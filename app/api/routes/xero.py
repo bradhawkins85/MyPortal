@@ -82,6 +82,22 @@ def _empty_xero_webhook_response(status_code: int) -> Response:
     return response
 
 
+def _summarise_xero_webhook_results(results: list[dict[str, Any]]) -> str | None:
+    """Summarise best-effort event processing failures without duplicating noise."""
+
+    failures = [result for result in results if result.get("status") == "failed"]
+    if not failures:
+        return None
+    counts: dict[str, int] = {}
+    for result in failures:
+        reason = str(result.get("error") or "Xero event processing failed")
+        counts[reason] = counts.get(reason, 0) + 1
+    return "; ".join(
+        f"{reason} ({count} event{'s' if count != 1 else ''})"
+        for reason, count in counts.items()
+    )
+
+
 def _extract_xero_invoice_id(event: dict[str, Any]) -> str | None:
     invoice_id = str(event.get("resourceId") or event.get("resourceID") or "").strip()
     if invoice_id:
@@ -214,19 +230,18 @@ async def receive_webhook(request: Request) -> Response:
     # reject the request, but downstream invoice-sync errors are logged in the
     # webhook monitor without turning the provider delivery into a failed HTTP
     # attempt.
+    processing_warning = _summarise_xero_webhook_results(results)
+    response_body = {"status": "accepted", "results": results}
+    if processing_warning:
+        response_body["processing_warning"] = processing_warning
     await webhook_monitor.log_incoming_webhook(
         name="Xero Webhook - Invoice Updates",
         source_url=source_url,
         payload=payload,
         headers=request_headers,
         response_status=200,
-        response_body=json.dumps({"status": "accepted", "results": results}),
-        error_message="; ".join(
-            str(result.get("error") or "Xero event processing failed")
-            for result in results
-            if result.get("status") == "failed"
-        )
-        or None,
+        response_body=json.dumps(response_body),
+        error_message=None,
     )
     return _empty_xero_webhook_response(status.HTTP_200_OK)
 
