@@ -141,10 +141,35 @@ class TicketDashboardRow(BaseModel):
     company_name: Optional[str] = None
     assigned_user_id: Optional[int] = None
     assigned_user_email: Optional[str] = None
+    assigned_user_display_name: Optional[str] = None
     module_slug: Optional[str] = None
     requester_id: Optional[int] = None
+    requester_email: Optional[str] = None
+    requester_label: Optional[str] = None
+    requester_display_name: Optional[str] = None
+    category: Optional[str] = None
+    external_reference: Optional[str] = None
+    created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
     status_changed_at: Optional[datetime] = None
+    ai_resolution_state: Optional[str] = None
+    ai_tags: list[str] = Field(default_factory=list)
+    billable_minutes: int = 0
+    non_billable_minutes: int = 0
+    has_attachments: bool = False
+    attachment_count: int = 0
+    has_tasks: bool = False
+    task_count: int = 0
+    has_open_tasks: bool = False
+    open_task_count: int = 0
+    labels: list[str] = Field(default_factory=list)
+    age_days: Optional[int] = None
+    updated_age_hours: Optional[int] = None
+    in_status_age_hours: Optional[int] = None
+    last_reply_age_hours: Optional[int] = None
+    latest_reply_is_internal: Optional[bool] = None
+    latest_reply_kind: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -327,6 +327,38 @@ async def get_ticket_dashboard(
         include_reference_data=False,
     )
     rows: list[TicketDashboardRow] = []
+    ticket_ids: list[int] = []
+    for ticket in state.tickets:
+        identifier = ticket.get("id")
+        try:
+            numeric_id = int(identifier)
+        except (TypeError, ValueError):
+            continue
+        ticket_ids.append(numeric_id)
+
+    automation_lookup = await tickets_repo.get_automation_filter_context_by_ticket_ids(ticket_ids) if ticket_ids else {}
+    dashboard_now = datetime.now(timezone.utc)
+
+    def _display_name(record: dict | None) -> str | None:
+        if not isinstance(record, dict):
+            return None
+        name = " ".join(
+            part
+            for part in (
+                str(record.get("first_name") or "").strip(),
+                str(record.get("last_name") or "").strip(),
+            )
+            if part
+        )
+        return name or str(record.get("email") or "").strip() or None
+
+    def _age_hours(value: datetime | None) -> int | None:
+        if not isinstance(value, datetime):
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return int((dashboard_now - value.astimezone(timezone.utc)).total_seconds() // 3600)
+
     for ticket in state.tickets:
         identifier = ticket.get("id")
         try:
@@ -335,6 +367,19 @@ async def get_ticket_dashboard(
             continue
         company_record = state.company_lookup.get(ticket.get("company_id"))
         assigned_record = state.user_lookup.get(ticket.get("assigned_user_id"))
+        requester_record = state.user_lookup.get(ticket.get("requester_id"))
+        automation_data = automation_lookup.get(numeric_id, {})
+        created_at = ticket.get("created_at")
+        updated_at = ticket.get("updated_at")
+        status_changed_at = ticket.get("status_changed_at") or created_at
+        latest_reply_at = automation_data.get("latest_reply_at")
+        requester_label = (
+            ticket.get("requester_label")
+            or _display_name(requester_record)
+            or ticket.get("requester_email")
+        )
+        assigned_display_name = _display_name(assigned_record)
+        ai_tags = ticket.get("ai_tags") if isinstance(ticket.get("ai_tags"), list) else []
         rows.append(
             TicketDashboardRow(
                 id=numeric_id,
@@ -347,10 +392,38 @@ async def get_ticket_dashboard(
                 assigned_user_email=(assigned_record or {}).get("email")
                 if isinstance(assigned_record, dict)
                 else None,
+                assigned_user_display_name=assigned_display_name,
                 module_slug=ticket.get("module_slug"),
                 requester_id=ticket.get("requester_id"),
-                updated_at=ticket.get("updated_at"),
+                requester_email=ticket.get("requester_email")
+                or ((requester_record or {}).get("email") if isinstance(requester_record, dict) else None),
+                requester_label=requester_label,
+                requester_display_name=ticket.get("requester_display_name") or requester_label,
+                category=ticket.get("category"),
+                external_reference=ticket.get("external_reference"),
+                created_at=created_at,
+                updated_at=updated_at,
+                closed_at=ticket.get("closed_at"),
                 status_changed_at=ticket.get("status_changed_at"),
+                ai_resolution_state=ticket.get("ai_resolution_state"),
+                ai_tags=ai_tags,
+                billable_minutes=int(automation_data.get("billable_minutes") or 0),
+                non_billable_minutes=int(automation_data.get("non_billable_minutes") or 0),
+                has_attachments=bool(automation_data.get("has_attachments")),
+                attachment_count=int(automation_data.get("attachment_count") or 0),
+                has_tasks=bool(automation_data.get("has_tasks")),
+                task_count=int(automation_data.get("task_count") or 0),
+                has_open_tasks=bool(automation_data.get("has_open_tasks")),
+                open_task_count=int(automation_data.get("open_task_count") or 0),
+                labels=ai_tags,
+                age_days=(_age_hours(created_at) // 24) if _age_hours(created_at) is not None else None,
+                updated_age_hours=_age_hours(updated_at),
+                in_status_age_hours=_age_hours(status_changed_at),
+                last_reply_age_hours=_age_hours(latest_reply_at),
+                latest_reply_is_internal=automation_data.get("latest_reply_is_internal")
+                if automation_data.get("latest_reply_id")
+                else None,
+                latest_reply_kind=automation_data.get("latest_reply_kind"),
             )
         )
     filters = TicketSearchFilters(

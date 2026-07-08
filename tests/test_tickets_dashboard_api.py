@@ -11,6 +11,7 @@ from app.main import app
 from app.main import automations_service, change_log_service, modules_service, scheduler_service
 from app.core.database import db
 from app.services import tickets as tickets_service
+from app.repositories import tickets as tickets_repo
 from app.security.session import SessionData, session_manager
 
 
@@ -64,7 +65,11 @@ def test_ticket_dashboard_endpoint(monkeypatch):
                 "assigned_user_id": 22,
                 "module_slug": None,
                 "requester_id": 12,
+                "requester_email": "requester@example.com",
+                "requester_label": "Riley Requester",
+                "created_at": datetime(2024, 4, 30, 9, 30, tzinfo=timezone.utc),
                 "updated_at": datetime(2024, 5, 1, 9, 30, tzinfo=timezone.utc),
+                "ai_tags": ["printer"],
             }
         ],
         total=1,
@@ -81,11 +86,30 @@ def test_ticket_dashboard_endpoint(monkeypatch):
         companies=[{"id": 301, "name": "Acme Corp"}],
         technicians=[{"id": 22, "email": "tech@example.com"}],
         company_lookup={301: {"id": 301, "name": "Acme Corp"}},
-        user_lookup={22: {"id": 22, "email": "tech@example.com"}},
+        user_lookup={22: {"id": 22, "email": "tech@example.com", "first_name": "Taylor", "last_name": "Tech"}},
     )
 
     load_state_mock = AsyncMock(return_value=sample_state)
+    automation_context_mock = AsyncMock(
+        return_value={
+            41: {
+                "billable_minutes": 15,
+                "non_billable_minutes": 5,
+                "attachment_count": 2,
+                "has_attachments": True,
+                "task_count": 3,
+                "has_tasks": True,
+                "open_task_count": 1,
+                "has_open_tasks": True,
+                "latest_reply_id": 99,
+                "latest_reply_at": datetime(2024, 5, 1, 10, 30, tzinfo=timezone.utc),
+                "latest_reply_is_internal": False,
+                "latest_reply_kind": "message",
+            }
+        }
+    )
     monkeypatch.setattr(tickets_service, "load_dashboard_state", load_state_mock)
+    monkeypatch.setattr(tickets_repo, "get_automation_filter_context_by_ticket_ids", automation_context_mock)
 
     app.dependency_overrides[require_helpdesk_technician] = lambda: {"id": 1, "is_super_admin": True}
     try:
@@ -101,11 +125,26 @@ def test_ticket_dashboard_endpoint(monkeypatch):
     assert payload["filters"]["module_slug"] == "ops"
     assert payload["items"][0]["company_name"] == "Acme Corp"
     assert payload["items"][0]["assigned_user_email"] == "tech@example.com"
+    assert payload["items"][0]["assigned_user_display_name"] == "Taylor Tech"
+    assert payload["items"][0]["requester_email"] == "requester@example.com"
+    assert payload["items"][0]["requester_display_name"] == "Riley Requester"
+    assert payload["items"][0]["billable_minutes"] == 15
+    assert payload["items"][0]["non_billable_minutes"] == 5
+    assert payload["items"][0]["has_attachments"] is True
+    assert payload["items"][0]["attachment_count"] == 2
+    assert payload["items"][0]["has_tasks"] is True
+    assert payload["items"][0]["task_count"] == 3
+    assert payload["items"][0]["has_open_tasks"] is True
+    assert payload["items"][0]["open_task_count"] == 1
+    assert payload["items"][0]["labels"] == ["printer"]
+    assert payload["items"][0]["latest_reply_is_internal"] is False
+    assert payload["items"][0]["latest_reply_kind"] == "message"
 
     load_state_mock.assert_awaited_once()
     kwargs = load_state_mock.await_args.kwargs
     assert kwargs["status_filter"] == ["open"]
     assert kwargs["module_filter"] == "ops"
+    automation_context_mock.assert_awaited_once_with([41])
 
 
 def test_list_ticket_statuses_endpoint(monkeypatch):
