@@ -215,6 +215,120 @@ async def delete_account(account_id: int) -> None:
     await db.execute("DELETE FROM m365_mail_accounts WHERE id = %s", (account_id,))
 
 
+def _json_dumps(value: Any) -> str | None:
+    if value is None:
+        return None
+    return json.dumps(value, default=str, separators=(",", ":"))
+
+
+def _json_loads(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8", errors="ignore")
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
+def _normalise_sync_history(row: dict[str, Any]) -> dict[str, Any]:
+    history = dict(row)
+    for key in (
+        "id",
+        "account_id",
+        "processed",
+        "created_count",
+        "attached_count",
+        "ignored_count",
+        "error_count",
+    ):
+        if key in history and history[key] is not None:
+            history[key] = int(history[key])
+    for key in ("started_at", "completed_at", "created_at"):
+        if key in history:
+            history[key] = _make_aware(history.get(key))
+    history["errors"] = _json_loads(history.get("errors")) or []
+    history["message_actions"] = _json_loads(history.get("message_actions")) or []
+    return history
+
+
+async def record_sync_history(
+    *,
+    account_id: int,
+    status: str,
+    processed: int,
+    created_count: int,
+    attached_count: int,
+    ignored_count: int,
+    error_count: int,
+    errors: list[dict[str, Any]],
+    message_actions: list[dict[str, Any]],
+    started_at: datetime,
+    completed_at: datetime,
+) -> dict[str, Any] | None:
+    history_id = await db.execute_returning_lastrowid(
+        """
+        INSERT INTO m365_mail_sync_history (
+            account_id, status, processed, created_count, attached_count,
+            ignored_count, error_count, errors, message_actions, started_at, completed_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            account_id,
+            status,
+            int(processed or 0),
+            int(created_count or 0),
+            int(attached_count or 0),
+            int(ignored_count or 0),
+            int(error_count or 0),
+            _json_dumps(errors or []),
+            _json_dumps(message_actions or []),
+            (
+                started_at.replace(tzinfo=None)
+                if isinstance(started_at, datetime)
+                else started_at
+            ),
+            (
+                completed_at.replace(tzinfo=None)
+                if isinstance(completed_at, datetime)
+                else completed_at
+            ),
+        ),
+    )
+    if not history_id:
+        return None
+    return await get_sync_history(int(history_id))
+
+
+async def get_sync_history(history_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT * FROM m365_mail_sync_history WHERE id = %s",
+        (history_id,),
+    )
+    return _normalise_sync_history(row) if row else None
+
+
+async def list_sync_history(
+    account_id: int, *, limit: int = 50
+) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT *
+        FROM m365_mail_sync_history
+        WHERE account_id = %s
+        ORDER BY completed_at DESC, id DESC
+        LIMIT %s
+        """,
+        (account_id, max(1, min(int(limit or 50), 200))),
+    )
+    return [_normalise_sync_history(row) for row in rows]
+
+
 def _normalise_message(row: dict[str, Any]) -> dict[str, Any]:
     message = dict(row)
     for key in ("id", "account_id", "ticket_id"):
@@ -279,6 +393,10 @@ async def upsert_message(
             status,
             ticket_id,
             error,
-            processed_at.replace(tzinfo=None) if isinstance(processed_at, datetime) else processed_at,
+            (
+                processed_at.replace(tzinfo=None)
+                if isinstance(processed_at, datetime)
+                else processed_at
+            ),
         ),
     )
