@@ -47,12 +47,12 @@
               type="submit"
               class="button button--primary"
               {% if not selected_update_script_id or not outdated_device_count %}disabled{% endif %}
-              data-confirm="Run the selected Tactical RMM update script on all active tray devices with an older agent version than the server tray app release?"
+              data-confirm="Queue the selected Tactical RMM update script for all non-revoked tray devices with an older agent version than the server tray app release?"
             >
               Update all outdated agents
             </button>
             <span class="form-help">
-              {{ outdated_device_count }} active tray {{ 'device is' if outdated_device_count == 1 else 'devices are' }} older than {{ tray_release.version or 'the loaded release' }}.
+              {{ outdated_device_count }} linked tray {{ 'device is' if outdated_device_count == 1 else 'devices are' }} older than {{ tray_release.version or 'the loaded release' }}.
             </span>
           </div>
         </form>
