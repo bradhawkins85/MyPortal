@@ -67,6 +67,21 @@ async def test_notify_tray_device_of_chat_message_sends_incoming_technician_repl
 
 
 @pytest.mark.anyio("asyncio")
+async def test_notify_tray_device_of_chat_message_skips_closed_room(monkeypatch):
+    async def fail_get_device_by_id(device_id: int):  # pragma: no cover - should not be called
+        raise AssertionError("closed room messages should not resolve devices")
+
+    monkeypatch.setattr(tray_chat_notifications.tray_repo, "get_device_by_id", fail_get_device_by_id)
+
+    delivered = await tray_chat_notifications.notify_tray_device_of_chat_message(
+        room={"id": 42, "tray_device_id": 7, "status": "closed"},
+        message={"sender_matrix_id": "@bot:example", "body": "This chat has been closed."},
+    )
+
+    assert delivered is False
+
+
+@pytest.mark.anyio("asyncio")
 async def test_notify_tray_device_of_chat_message_skips_own_tray_message(monkeypatch):
     async def fail_get_device_by_id(device_id: int):  # pragma: no cover - should not be called
         raise AssertionError("own tray messages should not resolve devices")
