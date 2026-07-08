@@ -1694,12 +1694,15 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         # This allows automations to fire when requestor/watcher replies via email
                         if reply_added:
                             try:
-                                actor_info: dict[str, Any] | None = None
+                                actor_info: dict[str, Any] = {}
                                 if reply_author_id is not None:
-                                    actor_info = {"id": reply_author_id}
+                                    actor_info["id"] = reply_author_id
+                                if from_email_addr:
+                                    actor_info["email"] = from_email_addr
+                                    actor_info["display_name"] = from_email_addr
                                 await tickets_service.emit_ticket_updated_event(
                                     ticket_id,
-                                    actor=actor_info,
+                                    actor=actor_info or None,
                                 )
                             except Exception as exc:  # pragma: no cover - defensive logging
                                 log_error(
