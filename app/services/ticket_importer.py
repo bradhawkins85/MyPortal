@@ -293,6 +293,28 @@ def _syncro_ticket_is_unchanged(
     return syncro_updated_at <= last_imported_syncro_updated_at
 
 
+def _syncro_ticket_is_older_than_local_copy(
+    ticket: dict[str, Any], existing: dict[str, Any] | None
+) -> bool:
+    """Return true when importing would overwrite fresher MyPortal ticket data."""
+
+    if not existing:
+        return False
+    syncro_updated_at = _ticket_updated_at(ticket)
+    if syncro_updated_at is None:
+        return False
+    local_updated_at = _parse_datetime(existing.get("updated_at"))
+    if local_updated_at is None:
+        return False
+    return local_updated_at > syncro_updated_at
+
+
+def _newer_local_copy_skip_reason(syncro_id: Any) -> str:
+    return (
+        f"Syncro ticket {syncro_id} is older than the MyPortal ticket and was not imported"
+    )
+
+
 def _normalise_comment_comparison_text(value: str | None) -> str:
     """Return comment text normalised for rich-preview/body comparisons."""
 
@@ -1815,6 +1837,8 @@ async def _upsert_ticket(
 
     if existing and _syncro_ticket_is_unchanged(ticket, existing):
         return f"skipped: Syncro ticket {external_reference} has not changed since last import"
+    if existing and _syncro_ticket_is_older_than_local_copy(ticket, existing):
+        return f"skipped: {_newer_local_copy_skip_reason(external_reference)}"
 
     if existing:
         updates: dict[str, Any] = {
@@ -2068,6 +2092,8 @@ async def import_all_tickets(
             )
             if _syncro_ticket_is_unchanged(ticket, existing):
                 outcome = f"skipped: Syncro ticket {syncro_id} has not changed since last import"
+            elif _syncro_ticket_is_older_than_local_copy(ticket, existing):
+                outcome = f"skipped: {_newer_local_copy_skip_reason(syncro_id)}"
             else:
                 ticket_detail = await _fetch_ticket_detail_for_import(
                     ticket, rate_limiter=limiter
