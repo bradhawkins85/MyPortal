@@ -1154,14 +1154,15 @@
               </div>
               <div class="form-actions">
                 <div class="ticket-reply-submit" data-ticket-reply-submit>
-                  <button type="submit" name="replyStatus" value="{{ ticket_reply_default_status }}" class="button button--primary ticket-reply-submit__primary">Post reply</button>
+                  <input type="hidden" name="replyStatus" value="{{ ticket_reply_default_status }}" data-ticket-reply-status-input />
+                  <button type="submit" class="button button--primary ticket-reply-submit__primary">Post reply</button>
                   <details class="ticket-reply-submit__status-menu">
                     <summary class="button button--primary ticket-reply-submit__toggle" aria-label="Post reply with a selected ticket status">
                       <span aria-hidden="true">▾</span>
                     </summary>
                     <div class="ticket-reply-submit__menu" role="menu" aria-label="Post reply and set status">
                       {% for status_definition in ticket_status_definitions %}
-                        <button type="submit" name="replyStatus" value="{{ status_definition.tech_status }}" class="ticket-reply-submit__menu-item" role="menuitem">
+                        <button type="submit" value="{{ status_definition.tech_status }}" class="ticket-reply-submit__menu-item" role="menuitem" onclick="this.form.querySelector('[data-ticket-reply-status-input]').value = this.value;">
                           {{ status_definition.tech_label }}
                         </button>
                       {% endfor %}
