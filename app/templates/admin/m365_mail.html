@@ -118,6 +118,116 @@
       </header>
 
       <div class="management__body">
+
+        {% if sync_result %}
+          {% set sync_actions = sync_result.message_actions or [] %}
+          <section class="panel" aria-labelledby="m365-sync-results-heading">
+            <div class="panel__header">
+              <div>
+                <h2 class="panel__title" id="m365-sync-results-heading">Latest Office 365 mailbox sync details</h2>
+                <p class="panel__subtitle">
+                  Status: <strong>{{ sync_result.status or 'unknown' }}</strong> ·
+                  Imported: <strong>{{ sync_result.processed or 0 }}</strong> ·
+                  Decisions shown: <strong>{{ sync_actions|length }}</strong>
+                </p>
+              </div>
+            </div>
+            {% if sync_result.errors %}
+              <div class="alert alert--error" role="alert">
+                <strong>Sync issues</strong>
+                <ul>
+                  {% for item in sync_result.errors %}
+                    <li>{{ item.error or item }}</li>
+                  {% endfor %}
+                </ul>
+              </div>
+            {% endif %}
+            {% if sync_actions %}
+              <div class="table-wrapper">
+                <table class="table" id="m365-mail-sync-results-table" data-table data-table-id="m365-mail-sync-results">
+                  <thead>
+                    <tr>
+                      <th scope="col" data-sort="string" data-column-key="outcome">Outcome</th>
+                      <th scope="col" data-sort="string" data-column-key="reason">Reason / reply</th>
+                      <th scope="col" data-sort="string" data-column-key="message">Mailbox message</th>
+                      <th scope="col" data-sort="string" data-column-key="sender">Sender</th>
+                      <th scope="col" data-sort="string" data-column-key="ticket">Ticket</th>
+                      <th scope="col" data-sort="string" data-column-key="matching">Matching details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for action in sync_actions %}
+                      <tr>
+                        <td data-column-key="outcome">
+                          <span class="badge {% if action.outcome == 'created_new_ticket' %}badge--success{% elif action.outcome == 'attached_to_existing_ticket' %}badge--info{% elif action.outcome == 'ignored' %}badge--muted{% elif action.outcome == 'error' %}badge--danger{% else %}badge--warning{% endif %}">
+                            {{ (action.outcome or 'unknown')|replace('_', ' ')|title }}
+                          </span>
+                        </td>
+                        <td data-column-key="reason">
+                          {{ (action.reason or action.reply_outcome or '—')|replace('_', ' ') }}
+                          {% if action.error %}
+                            <div class="table__meta">{{ action.error }}</div>
+                          {% endif %}
+                        </td>
+                        <td data-column-key="message">
+                          <strong>{{ action.subject or 'No subject' }}</strong>
+                          <div class="table__meta">Graph: <code>{{ action.message_id or '—' }}</code></div>
+                          <div class="table__meta">Internet: <code>{{ action.internet_message_id or '—' }}</code></div>
+                          {% if action.received_at %}
+                            <div class="table__meta">Received: {{ action.received_at }}</div>
+                          {% endif %}
+                        </td>
+                        <td data-column-key="sender">
+                          {{ action.from_address or '—' }}
+                          {% if action.mailbox %}
+                            <div class="table__meta">Mailbox: {{ action.mailbox }}</div>
+                          {% endif %}
+                        </td>
+                        <td data-column-key="ticket">
+                          {% if action.ticket_id %}
+                            <a href="/admin/tickets/{{ action.ticket_id }}">#{{ action.ticket_number or action.ticket_id }}</a>
+                            {% if action.ticket_subject %}
+                              <div class="table__meta">{{ action.ticket_subject }}</div>
+                            {% endif %}
+                            {% if action.reply_added is not none %}
+                              <div class="table__meta">Reply added: {{ 'yes' if action.reply_added else 'no' }}</div>
+                            {% endif %}
+                          {% else %}
+                            —
+                          {% endif %}
+                        </td>
+                        <td data-column-key="matching">
+                          {% if action.matched_by_related_message_ids %}
+                            Related message IDs matched
+                          {% elif action.read_state_repaired %}
+                            Already imported; read state repaired
+                          {% elif action.has_attachments %}
+                            Attachments present
+                          {% else %}
+                            —
+                          {% endif %}
+                          {% if action.related_message_ids %}
+                            <details>
+                              <summary>Related IDs</summary>
+                              <ul>
+                                {% for related_id in action.related_message_ids %}
+                                  <li><code>{{ related_id }}</code></li>
+                                {% endfor %}
+                              </ul>
+                            </details>
+                          {% endif %}
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <p class="empty-state">No mailbox messages were evaluated during this sync.</p>
+            {% endif %}
+          </section>
+        {% endif %}
+
         <div class="table-wrapper">
           <table class="table" id="m365-mail-accounts-table" data-table data-table-id="m365-mail-accounts">
             <thead>
@@ -161,7 +271,7 @@
                       {% if account.auth_status == 'signed_in' %}
                         <span class="badge badge--success">Signed in</span>
                       {% elif account.auth_status == 'company_credentials' %}
-                        <span class="badge badge--secondary">Company</span>
+                        <span class="badge badge--muted">Company</span>
                       {% else %}
                         <span class="badge badge--warning">Not configured</span>
                       {% endif %}
@@ -174,7 +284,7 @@
                       {% endif %}
                     </td>
                     <td data-column-key="status">
-                      <span class="badge {{ 'badge--success' if account.active else 'badge--secondary' }}">
+                      <span class="badge {{ 'badge--success' if account.active else 'badge--muted' }}">
                         {{ 'Active' if account.active else 'Paused' }}
                       </span>
                     </td>
