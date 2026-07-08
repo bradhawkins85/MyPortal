@@ -295,11 +295,12 @@ async def admin_email_blocklist_page(request: Request, search: str | None = Quer
     entries = await email_blocklist_repo.list_entries(search=search, limit=500, offset=0, sort="email", direction="asc")
     for entry in entries:
         entry["updated_iso"] = _iso_utc(entry.get("updated_at"))
-    return main_module.templates.TemplateResponse(
+    return await main_module._render_template(
         "admin/email_blocklist.html",
-        {
-            "request": request,
-            "current_user": current_user,
+        request,
+        current_user,
+        extra={
+            "title": "Email blocklist",
             "entries": entries,
             "search": search or "",
         },
