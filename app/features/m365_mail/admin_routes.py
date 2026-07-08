@@ -298,6 +298,15 @@ async def admin_sync_m365_mail_account(account_id: int, request: Request):
     status_value = str(result.get("status") or "").lower()
     processed = int(result.get("processed") or 0)
     error_count = len(result.get("errors") or [])
+    message_actions = result.get("message_actions") or []
+    created_count = sum(1 for action in message_actions if action.get("outcome") == "created_new_ticket")
+    attached_count = sum(1 for action in message_actions if action.get("outcome") == "attached_to_existing_ticket")
+    ignored_count = sum(1 for action in message_actions if action.get("outcome") == "ignored")
+    detail_summary = (
+        f" Created {created_count}, attached {attached_count}, ignored {ignored_count}."
+        if message_actions
+        else ""
+    )
     if status_value in {"error"}:
         message = result.get("error") or "Office 365 mail synchronisation failed."
         return flash_redirect("/admin/modules/m365-mail", message, "error")
@@ -308,8 +317,9 @@ async def admin_sync_m365_mail_account(account_id: int, request: Request):
         first_error = (result.get("errors") or [{}])[0].get("error") or "Office 365 mail sync completed with errors."
         if processed:
             first_error = f"{first_error} ({processed} message{'s' if processed != 1 else ''} imported.)"
+        first_error = f"{first_error}{detail_summary}"
         return flash_redirect("/admin/modules/m365-mail", first_error, "error")
-    message = f"Office 365 mail sync imported {processed} message{'s' if processed != 1 else ''}."
+    message = f"Office 365 mail sync imported {processed} message{'s' if processed != 1 else ''}.{detail_summary}"
     return flash_redirect("/admin/modules/m365-mail", message, "success")
 
 
