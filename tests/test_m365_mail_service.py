@@ -466,7 +466,11 @@ async def test_sync_account_resolves_subfolder(monkeypatch):
     async def fake_graph_get(access_token: str, url: str):
         decoded = unquote(url)
         graph_calls.append(decoded)
-        if "childFolders?" in decoded:
+        if "/mailFolders?" in decoded:
+            assert "displayName eq 'Inbox'" in decoded
+            return {"value": [{"id": "inbox-folder-id"}]}
+        if "/mailFolders/inbox-folder-id/childFolders?" in decoded:
+            assert "displayName eq 'Support'" in decoded
             return {"value": [{"id": "child-folder-id"}]}
         if "/mailFolders/child-folder-id/messages?" in decoded:
             return {"value": []}
@@ -489,13 +493,15 @@ async def test_sync_account_resolves_subfolder(monkeypatch):
 
     assert result["status"] == "succeeded"
     assert graph_calls, "Expected at least one Graph request"
-    expected_call_count = 2  # child folder lookup + messages fetch
-    assert len(graph_calls) == expected_call_count, "Expected child folder lookup, then messages fetch"
-    first_call, second_call = graph_calls
-    assert "childFolders?" in first_call
-    assert "/mailFolders/Inbox/childFolders?" in first_call
-    assert "displayName eq 'Support'" in first_call
-    assert "/mailFolders/child-folder-id/messages?" in second_call
+    expected_call_count = 3  # parent lookup + child folder lookup + messages fetch
+    assert len(graph_calls) == expected_call_count, "Expected parent lookup, child folder lookup, then messages fetch"
+    first_call, second_call, third_call = graph_calls
+    assert "/mailFolders?" in first_call
+    assert "displayName eq 'Inbox'" in first_call
+    assert "childFolders?" in second_call
+    assert "/mailFolders/inbox-folder-id/childFolders?" in second_call
+    assert "displayName eq 'Support'" in second_call
+    assert "/mailFolders/child-folder-id/messages?" in third_call
 
 
 async def test_sync_account_errors_on_empty_folder_segment(monkeypatch):
@@ -572,7 +578,10 @@ async def test_sync_account_resolves_multi_level_nested_folders(monkeypatch):
     async def fake_graph_get(access_token: str, url: str):
         decoded = unquote(url)
         graph_calls.append(decoded)
-        if "/mailFolders/Inbox/childFolders?" in decoded:
+        if "/mailFolders?" in decoded:
+            assert "displayName eq 'Inbox'" in decoded
+            return {"value": [{"id": "inbox-folder-id"}]}
+        if "/mailFolders/inbox-folder-id/childFolders?" in decoded:
             assert "displayName eq 'Team'" in decoded
             return {"value": [{"id": "team-folder-id"}]}
         if "/mailFolders/team-folder-id/childFolders?" in decoded:
@@ -598,11 +607,13 @@ async def test_sync_account_resolves_multi_level_nested_folders(monkeypatch):
     result = await m365_mail.sync_account(1)
 
     assert result["status"] == "succeeded"
-    expected_call_count = 3  # two child lookups + messages fetch
+    expected_call_count = 4  # parent lookup + two child lookups + messages fetch
     assert len(graph_calls) == expected_call_count
-    assert "childFolders?" in graph_calls[0]
+    assert "/mailFolders?" in graph_calls[0]
+    assert "displayName eq 'Inbox'" in graph_calls[0]
     assert "childFolders?" in graph_calls[1]
-    assert "/mailFolders/support-folder-id/messages?" in graph_calls[2]
+    assert "childFolders?" in graph_calls[2]
+    assert "/mailFolders/support-folder-id/messages?" in graph_calls[3]
 
 
 async def test_sync_account_escapes_folder_name(monkeypatch):
