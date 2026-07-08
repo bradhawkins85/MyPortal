@@ -279,6 +279,27 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
 
     form = await request.form()
     body = str(form.get("body") or "").strip()
+    try:
+        body, _inline_attachments = await attachments_service.persist_inline_images_for_ticket_body(
+            ticket_id,
+            body,
+            access_level="closed",
+            uploaded_by_user_id=user_id,
+        )
+    except (ValueError, IOError) as exc:
+        log_error(
+            "Failed to save inline image attachment",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
+        return await main_module._render_portal_ticket_detail(
+            request,
+            user,
+            ticket_id=ticket_id,
+            error_message="We couldn't save one of the images in your reply. Please try a smaller supported image.",
+            reply_body=body,
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
     sanitized_body = sanitize_rich_text(body)
     if not sanitized_body.has_rich_content:
         return await main_module._render_portal_ticket_detail(
