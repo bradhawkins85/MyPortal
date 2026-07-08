@@ -627,8 +627,10 @@ async def _resolve_mail_folder_identifier(
     """Resolve a mailbox folder display name to a Graph folder ID when needed."""
     folder_path = (folder or "").strip()
 
-    async def _resolve_top_level(folder_name: str) -> str:
-        if folder_name.lower() in _WELL_KNOWN_MAIL_FOLDERS or _looks_like_graph_folder_id(folder_name):
+    async def _resolve_top_level(folder_name: str, *, prefer_display_name_lookup: bool = False) -> str:
+        if _looks_like_graph_folder_id(folder_name):
+            return folder_name
+        if folder_name.lower() in _WELL_KNOWN_MAIL_FOLDERS and not prefer_display_name_lookup:
             return folder_name
 
         # OData string literal escaping (single-quote doubling); urlencode then handles
@@ -650,6 +652,9 @@ async def _resolve_mail_folder_identifier(
             folder_id = folders[0].get("id")
             if folder_id:
                 return folder_id
+
+        if folder_name.lower() in _WELL_KNOWN_MAIL_FOLDERS:
+            return folder_name
 
         raise M365Error(f"Mail folder '{folder_name}' not found or inaccessible", http_status=404)
 
@@ -699,8 +704,14 @@ async def _resolve_mail_folder_identifier(
             http_status=400,
         )
     if len(segments) > 1:
-        # Resolve the first segment against the root, then walk child folders for the rest
-        parent_identifier = await _resolve_top_level(segments[0])
+        # Resolve the first segment against the root, then walk child folders for the rest.
+        # Prefer a concrete folder ID for nested paths (including well-known parents
+        # like Inbox) because some tenants reject child-folder queries that use a
+        # well-known folder name as the parent path segment.
+        parent_identifier = await _resolve_top_level(
+            segments[0],
+            prefer_display_name_lookup=True,
+        )
         for child_name in segments[1:]:
             parent_identifier = await _resolve_child_folder(parent_identifier, child_name)
 
