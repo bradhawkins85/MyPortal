@@ -1013,6 +1013,8 @@
     }, {});
 
     const canBulkDelete = table.getAttribute('data-can-bulk-delete') === 'true';
+    const canMergeTickets = table.getAttribute('data-can-merge-tickets') === 'true';
+    const canSelectTickets = canBulkDelete || canMergeTickets;
     const bulkDeleteFormId = table.getAttribute('data-bulk-delete-form-id') || '';
     const emptyMessage = table.getAttribute('data-table-empty-label') || 'No records found.';
 
@@ -1106,6 +1108,24 @@
       return cell;
     }
 
+
+    function applyColumnVisibility() {
+      const toggles = Array.from(document.querySelectorAll('[data-ticket-columns] .ticket-column-toggle'));
+      if (!toggles.length) {
+        return;
+      }
+      toggles.forEach((toggle) => {
+        const column = toggle.dataset.column;
+        if (!column) {
+          return;
+        }
+        const visible = column === 'subject' || toggle.checked;
+        table.querySelectorAll(`[data-column="${column}"]`).forEach((element) => {
+          element.style.display = visible ? '' : 'none';
+        });
+      });
+    }
+
     function buildRow(ticket) {
       const numericId = Number(ticket.id);
       if (!Number.isFinite(numericId) || numericId <= 0) {
@@ -1115,7 +1135,7 @@
       const row = document.createElement('tr');
       row.setAttribute('data-ticket-id', String(ticketId));
 
-      if (canBulkDelete) {
+      if (canSelectTickets) {
         const selectCell = document.createElement('td');
         selectCell.dataset.label = 'Select';
         selectCell.className = 'table__select';
@@ -1133,58 +1153,73 @@
         row.appendChild(selectCell);
       }
 
-      const idCell = document.createElement('td');
-      idCell.dataset.label = 'ID';
-      idCell.dataset.value = String(ticketId);
+      function appendTextCell(column, label, value, options) {
+        const cell = document.createElement('td');
+        cell.dataset.label = label;
+        cell.dataset.column = column;
+        cell.className = `tickets-table__cell tickets-table__cell--${column}`;
+        if (options && options.value !== undefined) {
+          cell.dataset.value = String(options.value || '');
+        }
+        cell.textContent = value === null || value === undefined || value === '' ? '—' : String(value);
+        row.appendChild(cell);
+        return cell;
+      }
+
+      const idCell = appendTextCell('id', 'ID', ticketId, { value: ticketId });
       idCell.textContent = String(ticketId);
-      row.appendChild(idCell);
 
       const subjectCell = document.createElement('td');
       subjectCell.dataset.label = 'Subject';
+      subjectCell.dataset.column = 'subject';
+      subjectCell.dataset.mobilePriority = 'essential';
+      subjectCell.className = 'tickets-table__cell tickets-table__cell--subject';
       const subjectLink = document.createElement('a');
       subjectLink.href = `/admin/tickets/${ticketId}`;
-      subjectLink.textContent = String(ticket.subject || '');
+      subjectLink.textContent = String(ticket.subject || 'Untitled ticket');
       subjectCell.appendChild(subjectLink);
       row.appendChild(subjectCell);
 
-      const statusCell = createStatusCell(ticket.status);
-      row.appendChild(statusCell);
+      row.appendChild(createStatusCell(ticket.status));
+      appendTextCell('priority', 'Priority', ticket.priority || 'normal');
 
-      const priorityCell = document.createElement('td');
-      priorityCell.dataset.label = 'Priority';
-      priorityCell.textContent = String(ticket.priority || 'normal');
-      row.appendChild(priorityCell);
-
-      const companyCell = document.createElement('td');
-      companyCell.dataset.label = 'Company';
       let companyDisplay = '';
       if (ticket.company_name) {
         companyDisplay = String(ticket.company_name);
       } else if (ticket.company_id !== null && ticket.company_id !== undefined) {
         companyDisplay = String(ticket.company_id);
       }
-      companyCell.textContent = companyDisplay || '—';
-      row.appendChild(companyCell);
-
-      const assignedCell = document.createElement('td');
-      assignedCell.dataset.label = 'Assigned';
-      assignedCell.textContent = ticket.assigned_user_email ? String(ticket.assigned_user_email) : '—';
-      row.appendChild(assignedCell);
-
-      const updatedCell = document.createElement('td');
-      updatedCell.dataset.label = 'Updated';
-      updatedCell.dataset.value = ticket.updated_at || '';
-      updatedCell.textContent = formatUpdatedAt(ticket.updated_at);
-      row.appendChild(updatedCell);
-
-      const actionsCell = document.createElement('td');
-      actionsCell.className = 'table__actions';
-      const actionLink = document.createElement('a');
-      actionLink.className = 'button button--ghost';
-      actionLink.href = `/admin/tickets/${ticketId}`;
-      actionLink.textContent = 'Open';
-      actionsCell.appendChild(actionLink);
-      row.appendChild(actionsCell);
+      appendTextCell('company', 'Company', companyDisplay);
+      appendTextCell('assigned', 'Assigned', ticket.assigned_user_email || '—');
+      appendTextCell('updated', 'Updated', formatUpdatedAt(ticket.updated_at), { value: ticket.updated_at || '' });
+      appendTextCell('category', 'Category', ticket.category || '—');
+      appendTextCell('requester', 'Requester', ticket.requester_label || ticket.requester_email || ticket.requester_id || '—');
+      appendTextCell('module', 'Module', ticket.module_slug || '—');
+      appendTextCell('external-ref', 'External Ref', ticket.external_reference || '—');
+      appendTextCell('created', 'Created', formatUpdatedAt(ticket.created_at), { value: ticket.created_at || '' });
+      appendTextCell('closed', 'Closed', formatUpdatedAt(ticket.closed_at), { value: ticket.closed_at || '' });
+      appendTextCell('ai-status', 'AI Status', ticket.ai_resolution_state || '—');
+      appendTextCell('ai-tags', 'AI Tags', Array.isArray(ticket.ai_tags) ? ticket.ai_tags.join(', ') : (ticket.ai_tags || '—'));
+      appendTextCell('billable-minutes', 'Billable Mins', ticket.billable_minutes ?? 0, { value: ticket.billable_minutes ?? 0 });
+      appendTextCell('non-billable-minutes', 'Non-Billable Mins', ticket.non_billable_minutes ?? 0, { value: ticket.non_billable_minutes ?? 0 });
+      appendTextCell('requester-email', 'ticket.requester_email', ticket.requester_email || '—');
+      appendTextCell('requester-display-name', 'ticket.requester_display_name', ticket.requester_display_name || ticket.requester_label || '—');
+      appendTextCell('assigned-user-email', 'ticket.assigned_user_email', ticket.assigned_user_email || '—');
+      appendTextCell('assigned-user-display-name', 'ticket.assigned_user_display_name', ticket.assigned_user_display_name || ticket.assigned_user_email || '—');
+      appendTextCell('company-id', 'ticket.company.id', ticket.company_id || '—');
+      appendTextCell('has-attachments', 'ticket.has_attachments', ticket.has_attachments ?? '—');
+      appendTextCell('attachment-count', 'ticket.attachment_count', ticket.attachment_count ?? 0, { value: ticket.attachment_count ?? 0 });
+      appendTextCell('has-tasks', 'ticket.has_tasks', ticket.has_tasks ?? '—');
+      appendTextCell('task-count', 'ticket.task_count', ticket.task_count ?? 0, { value: ticket.task_count ?? 0 });
+      appendTextCell('has-open-tasks', 'ticket.has_open_tasks', ticket.has_open_tasks ?? '—');
+      appendTextCell('open-task-count', 'ticket.open_task_count', ticket.open_task_count ?? 0, { value: ticket.open_task_count ?? 0 });
+      appendTextCell('labels', 'ticket.labels', Array.isArray(ticket.labels) ? ticket.labels.join(', ') : (ticket.labels || '—'));
+      appendTextCell('age-days', 'ticket.age_days', ticket.age_days ?? '—', { value: ticket.age_days ?? '' });
+      appendTextCell('updated-age-hours', 'ticket.updated_age_hours', ticket.updated_age_hours ?? '—', { value: ticket.updated_age_hours ?? '' });
+      appendTextCell('in-status-hours', 'ticket.in_status_age_hours', ticket.in_status_age_hours ?? '—', { value: ticket.in_status_age_hours ?? '' });
+      appendTextCell('last-reply-age-hours', 'ticket.last_reply_age_hours', ticket.last_reply_age_hours ?? '—', { value: ticket.last_reply_age_hours ?? '' });
+      appendTextCell('latest-reply-internal', 'reply.is_internal', ticket.latest_reply_is_internal ?? '—');
+      appendTextCell('latest-reply-kind', 'reply.kind', ticket.latest_reply_kind || '—');
 
       return row;
     }
@@ -1214,6 +1249,7 @@
       while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
       if (fragment.childNodes.length) {
         tbody.appendChild(fragment);
+        applyColumnVisibility();
         return;
       }
       const emptyRow = document.createElement('tr');
