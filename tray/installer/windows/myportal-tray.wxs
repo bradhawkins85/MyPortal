@@ -22,7 +22,7 @@
   <Package
     Name="MyPortal Tray"
     Manufacturer="MyPortal"
-    Version="!(bind.FileVersion.ServiceExe)"
+    Version="$(var.ProductVersion)"
     UpgradeCode="A3E7F4C2-8B1D-4F5E-9A2C-1D6E3B7F8A4C"
     Scope="perMachine">
 
@@ -30,8 +30,22 @@
       Description="MyPortal Helpdesk Tray Application"
       Keywords="MyPortal;Helpdesk;Tray" />
 
-    <!-- Prevent downgrade -->
-    <MajorUpgrade DowngradeErrorMessage="A newer version is already installed." />
+    <!--
+      Configure a major-upgrade package. ProductCode is generated for each MSI
+      while UpgradeCode stays stable so Windows Installer can find and remove
+      prior installs. AllowSameVersionUpgrades covers rebuilds where only the
+      fourth/metadata version segment changed because MSI compares only the
+      first three numeric fields.
+    -->
+    <MajorUpgrade
+      AllowSameVersionUpgrades="yes"
+      DowngradeErrorMessage="A newer version is already installed." />
+
+    <!-- Add Programs and Features metadata so Windows records uninstall information. -->
+    <Property Id="ARPCONTACT" Value="MyPortal" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/bradhawkins85/MyPortal" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/bradhawkins85/MyPortal" />
+    <Property Id="ARPNOREPAIR" Value="yes" />
 
     <!-- Allow MSI properties on the command line -->
     <Property Id="MYPORTAL_URL" Secure="yes" />
@@ -53,7 +67,7 @@
         <RegistryKey Root="HKLM" Key="Software\MyPortal\Tray" ForceCreateOnInstall="yes" ForceDeleteOnUninstall="yes">
           <RegistryValue Type="string" Name="PortalURL"   Value="[MYPORTAL_URL]" />
           <RegistryValue Type="string" Name="EnrolToken"  Value="[ENROL_TOKEN]" />
-          <RegistryValue Type="string" Name="AutoUpdate"  Value="[AUTO_UPDATE]" />
+          <RegistryValue Type="string" Name="AutoUpdate"  Value="[AUTO_UPDATE]" KeyPath="yes" />
         </RegistryKey>
       </Component>
     </ComponentGroup>
