@@ -119,6 +119,112 @@
 
       <div class="management__body">
 
+        {% if history_account %}
+          <section class="panel" aria-labelledby="m365-sync-history-heading">
+            <div class="panel__header">
+              <div>
+                <h2 class="panel__title" id="m365-sync-history-heading">Sync history for {{ history_account.name or history_account.user_principal_name }}</h2>
+                <p class="panel__subtitle">Review past mailbox sync runs, imported-message decisions, and failure details.</p>
+              </div>
+              <a class="button button--small button--ghost" href="/admin/modules/m365-mail">Close history</a>
+            </div>
+            {% if history_runs %}
+              <div class="table-wrapper">
+                <table class="table" id="m365-mail-sync-history-table" data-table data-table-id="m365-mail-sync-history">
+                  <thead>
+                    <tr>
+                      <th scope="col" data-sort="string" data-column-key="completed">Completed</th>
+                      <th scope="col" data-sort="string" data-column-key="status">Status</th>
+                      <th scope="col" data-sort="number" data-column-key="processed">Imported</th>
+                      <th scope="col" data-sort="number" data-column-key="created">Created</th>
+                      <th scope="col" data-sort="number" data-column-key="attached">Attached</th>
+                      <th scope="col" data-sort="number" data-column-key="ignored">Ignored</th>
+                      <th scope="col" data-sort="number" data-column-key="errors">Errors</th>
+                      <th scope="col" data-column-key="details">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for run in history_runs %}
+                      {% set run_actions = run.message_actions or [] %}
+                      <tr>
+                        <td data-column-key="completed">{{ run.completed_at.isoformat() if run.completed_at else '—' }}</td>
+                        <td data-column-key="status">
+                          <span class="badge {% if run.status == 'succeeded' %}badge--success{% elif run.status == 'completed_with_errors' or run.status == 'error' %}badge--danger{% elif run.status == 'skipped' %}badge--muted{% else %}badge--warning{% endif %}">{{ (run.status or 'unknown')|replace('_', ' ')|title }}</span>
+                        </td>
+                        <td data-column-key="processed">{{ run.processed or 0 }}</td>
+                        <td data-column-key="created">{{ run.created_count or 0 }}</td>
+                        <td data-column-key="attached">{{ run.attached_count or 0 }}</td>
+                        <td data-column-key="ignored">{{ run.ignored_count or 0 }}</td>
+                        <td data-column-key="errors">{{ run.error_count or 0 }}</td>
+                        <td data-column-key="details">
+                          <details>
+                            <summary>{{ run_actions|length }} message decision{{ 's' if run_actions|length != 1 else '' }}</summary>
+                            {% if run.errors %}
+                              <div class="alert alert--error" role="alert">
+                                <strong>Sync errors</strong>
+                                <ul>
+                                  {% for err in run.errors %}
+                                    <li>{{ err.error or err }}</li>
+                                  {% endfor %}
+                                </ul>
+                              </div>
+                            {% endif %}
+                            {% if run_actions %}
+                              <div class="table-wrapper">
+                                <table class="table">
+                                  <thead>
+                                    <tr>
+                                      <th scope="col">Received</th>
+                                      <th scope="col">Outcome</th>
+                                      <th scope="col">Message</th>
+                                      <th scope="col">Sender</th>
+                                      <th scope="col">Ticket / reason</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {% for action in run_actions %}
+                                      <tr>
+                                        <td>{{ action.received_at or '—' }}</td>
+                                        <td>{{ (action.outcome or 'unknown')|replace('_', ' ')|title }}</td>
+                                        <td>
+                                          <strong>{{ action.subject or 'No subject' }}</strong>
+                                          <div class="table__meta">Graph: <code>{{ action.message_id or '—' }}</code></div>
+                                          <div class="table__meta">Internet: <code>{{ action.internet_message_id or '—' }}</code></div>
+                                        </td>
+                                        <td>{{ action.from_address or action.mailbox or '—' }}</td>
+                                        <td>
+                                          {% if action.ticket_id %}
+                                            <a href="/admin/tickets/{{ action.ticket_id }}">#{{ action.ticket_number or action.ticket_id }}</a>
+                                            {% if action.ticket_subject %}<div class="table__meta">{{ action.ticket_subject }}</div>{% endif %}
+                                          {% elif action.reason %}
+                                            {{ action.reason|replace('_', ' ') }}
+                                          {% elif action.error %}
+                                            <span class="text-danger">{{ action.error }}</span>
+                                          {% else %}
+                                            —
+                                          {% endif %}
+                                        </td>
+                                      </tr>
+                                    {% endfor %}
+                                  </tbody>
+                                </table>
+                              </div>
+                            {% else %}
+                              <p class="text-muted">No per-message decisions were recorded for this run.</p>
+                            {% endif %}
+                          </details>
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <p class="empty-state">No sync history has been recorded for this mailbox yet.</p>
+            {% endif %}
+          </section>
+        {% endif %}
+
         {% if sync_result %}
           {% set sync_actions = sync_result.message_actions or [] %}
           <section class="panel" aria-labelledby="m365-sync-results-heading">
@@ -307,6 +413,7 @@
                           <button type="submit" class="button button--small button--ghost">Clone</button>
                         </form>
                         <a class="button button--small button--ghost" href="/admin/modules/m365-mail?accountId={{ account.id }}">Edit</a>
+                        <a class="button button--small button--ghost" href="/admin/modules/m365-mail/accounts/{{ account.id }}/history">History</a>
                         <form action="/admin/modules/m365-mail/accounts/{{ account.id }}/sync" method="post" class="inline-form">
                           {% if csrf_token %}
                             <input type="hidden" name="_csrf" value="{{ csrf_token }}" />

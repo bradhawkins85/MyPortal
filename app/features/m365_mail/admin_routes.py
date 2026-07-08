@@ -42,6 +42,8 @@ async def _render_m365_mail_dashboard(
     success_message: str | None = None,
     error_message: str | None = None,
     sync_result: dict[str, Any] | None = None,
+    history_account_id: int | None = None,
+    history_runs: list[dict[str, Any]] | None = None,
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
     main_module = _main()
@@ -55,6 +57,14 @@ async def _render_m365_mail_dashboard(
         if not editing_account:
             editing_account = await m365_mail_service.get_account(editing_account_id)
     companies = await company_repo.list_companies()
+    history_account = None
+    if history_account_id is not None:
+        for account in accounts:
+            if account.get("id") == history_account_id:
+                history_account = account
+                break
+        if not history_account:
+            history_account = await m365_mail_service.get_account(history_account_id)
     extra = {
         "title": "Office 365 mailboxes",
         "accounts": accounts,
@@ -63,8 +73,12 @@ async def _render_m365_mail_dashboard(
         "success_message": success_message,
         "error_message": error_message,
         "sync_result": sync_result,
+        "history_account": history_account,
+        "history_runs": history_runs or [],
     }
-    response = await main_module._render_template("admin/m365_mail.html", request, user, extra=extra)
+    response = await main_module._render_template(
+        "admin/m365_mail.html", request, user, extra=extra
+    )
     response.status_code = status_code
     return response
 
@@ -151,7 +165,9 @@ async def admin_create_m365_mail_account(request: Request):
     return flash_redirect("/admin/modules/m365-mail", message, "success")
 
 
-@router.post("/admin/modules/m365-mail/accounts/{account_id}", response_class=HTMLResponse)
+@router.post(
+    "/admin/modules/m365-mail/accounts/{account_id}", response_class=HTMLResponse
+)
 async def admin_update_m365_mail_account(account_id: int, request: Request):
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
@@ -219,7 +235,9 @@ async def admin_update_m365_mail_account(account_id: int, request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
-        log_error("Failed to update M365 mail account", account_id=account_id, error=str(exc))
+        log_error(
+            "Failed to update M365 mail account", account_id=account_id, error=str(exc)
+        )
         return await _render_m365_mail_dashboard(
             request,
             current_user,
@@ -232,7 +250,29 @@ async def admin_update_m365_mail_account(account_id: int, request: Request):
     return flash_redirect("/admin/modules/m365-mail", message, "success")
 
 
-@router.post("/admin/modules/m365-mail/accounts/{account_id}/clone", response_class=HTMLResponse)
+@router.get(
+    "/admin/modules/m365-mail/accounts/{account_id}/history",
+    response_class=HTMLResponse,
+)
+async def admin_m365_mail_account_history(account_id: int, request: Request):
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    try:
+        history_runs = await m365_mail_service.list_sync_history(account_id, limit=100)
+    except LookupError:
+        return flash_redirect("/admin/modules/m365-mail", "Account not found.", "error")
+    return await _render_m365_mail_dashboard(
+        request,
+        current_user,
+        history_account_id=account_id,
+        history_runs=history_runs,
+    )
+
+
+@router.post(
+    "/admin/modules/m365-mail/accounts/{account_id}/clone", response_class=HTMLResponse
+)
 async def admin_clone_m365_mail_account(account_id: int, request: Request):
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
@@ -256,7 +296,9 @@ async def admin_clone_m365_mail_account(account_id: int, request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
-        log_error("Failed to clone M365 mail account", account_id=account_id, error=str(exc))
+        log_error(
+            "Failed to clone M365 mail account", account_id=account_id, error=str(exc)
+        )
         return await _render_m365_mail_dashboard(
             request,
             current_user,
@@ -269,7 +311,9 @@ async def admin_clone_m365_mail_account(account_id: int, request: Request):
     return flash_redirect("/admin/modules/m365-mail", message, "success")
 
 
-@router.post("/admin/modules/m365-mail/accounts/{account_id}/delete", response_class=HTMLResponse)
+@router.post(
+    "/admin/modules/m365-mail/accounts/{account_id}/delete", response_class=HTMLResponse
+)
 async def admin_delete_m365_mail_account(account_id: int, request: Request):
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
@@ -278,7 +322,9 @@ async def admin_delete_m365_mail_account(account_id: int, request: Request):
     try:
         await m365_mail_service.delete_account(account_id)
     except Exception as exc:  # pragma: no cover - defensive logging
-        log_error("Failed to delete M365 mail account", account_id=account_id, error=str(exc))
+        log_error(
+            "Failed to delete M365 mail account", account_id=account_id, error=str(exc)
+        )
         return await _render_m365_mail_dashboard(
             request,
             current_user,
@@ -291,7 +337,10 @@ async def admin_delete_m365_mail_account(account_id: int, request: Request):
     return flash_redirect("/admin/modules/m365-mail", message, "success")
 
 
-@router.post("/admin/modules/m365-mail/accounts/{account_id}/messages/force-import", response_class=HTMLResponse)
+@router.post(
+    "/admin/modules/m365-mail/accounts/{account_id}/messages/force-import",
+    response_class=HTMLResponse,
+)
 async def admin_force_import_m365_mail_message(account_id: int, request: Request):
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
@@ -315,7 +364,11 @@ async def admin_force_import_m365_mail_message(account_id: int, request: Request
             "error",
         )
     account = result.get("account") or {}
-    label = account.get("name") or account.get("user_principal_name") or f"Mailbox {account_id}"
+    label = (
+        account.get("name")
+        or account.get("user_principal_name")
+        or f"Mailbox {account_id}"
+    )
     unread_note = (
         " The message was also marked unread so the unread-only sync can pick it up."
         if result.get("marked_unread")
@@ -330,7 +383,9 @@ async def admin_force_import_m365_mail_message(account_id: int, request: Request
     )
 
 
-@router.post("/admin/modules/m365-mail/accounts/{account_id}/sync", response_class=HTMLResponse)
+@router.post(
+    "/admin/modules/m365-mail/accounts/{account_id}/sync", response_class=HTMLResponse
+)
 async def admin_sync_m365_mail_account(account_id: int, request: Request):
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
@@ -340,9 +395,17 @@ async def admin_sync_m365_mail_account(account_id: int, request: Request):
     processed = int(result.get("processed") or 0)
     error_count = len(result.get("errors") or [])
     message_actions = result.get("message_actions") or []
-    created_count = sum(1 for action in message_actions if action.get("outcome") == "created_new_ticket")
-    attached_count = sum(1 for action in message_actions if action.get("outcome") == "attached_to_existing_ticket")
-    ignored_count = sum(1 for action in message_actions if action.get("outcome") == "ignored")
+    created_count = sum(
+        1 for action in message_actions if action.get("outcome") == "created_new_ticket"
+    )
+    attached_count = sum(
+        1
+        for action in message_actions
+        if action.get("outcome") == "attached_to_existing_ticket"
+    )
+    ignored_count = sum(
+        1 for action in message_actions if action.get("outcome") == "ignored"
+    )
     detail_summary = (
         f" Created {created_count}, attached {attached_count}, ignored {ignored_count}."
         if message_actions
@@ -356,7 +419,9 @@ async def admin_sync_m365_mail_account(account_id: int, request: Request):
         message = result.get("reason") or "Office 365 mail synchronisation skipped."
         message_type = "error"
     elif status_value == "completed_with_errors" and error_count:
-        first_error = (result.get("errors") or [{}])[0].get("error") or "Office 365 mail sync completed with errors."
+        first_error = (result.get("errors") or [{}])[0].get(
+            "error"
+        ) or "Office 365 mail sync completed with errors."
         if processed:
             first_error = f"{first_error} ({processed} message{'s' if processed != 1 else ''} imported.)"
         message = f"{first_error}{detail_summary}"
@@ -395,19 +460,25 @@ async def admin_m365_mail_authorize(account_id: int, request: Request):
     company_id = account.get("company_id")
     redirect_uri = main_module._build_m365_redirect_uri(request)
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
-    state = main_module.oauth_state_serializer.dumps({
-        "user_id": current_user.get("id"),
-        "flow": "m365_mail_auth",
-        "account_id": account_id,
-        "company_id": company_id,
-        "code_verifier": code_verifier,
-    })
+    state = main_module.oauth_state_serializer.dumps(
+        {
+            "user_id": current_user.get("id"),
+            "flow": "m365_mail_auth",
+            "account_id": account_id,
+            "company_id": company_id,
+            "code_verifier": code_verifier,
+        }
+    )
     params = {
-        "client_id": await m365_service.get_effective_pkce_client_id_for_company(
-            company_id, redirect_uri=redirect_uri
-        )
-        if company_id
-        else await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri),
+        "client_id": (
+            await m365_service.get_effective_pkce_client_id_for_company(
+                company_id, redirect_uri=redirect_uri
+            )
+            if company_id
+            else await m365_service.get_effective_pkce_client_id(
+                redirect_uri=redirect_uri
+            )
+        ),
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",
@@ -424,7 +495,10 @@ async def admin_m365_mail_authorize(account_id: int, request: Request):
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_303_SEE_OTHER)
 
 
-@router.post("/admin/modules/m365-mail/accounts/{account_id}/disconnect", response_class=HTMLResponse)
+@router.post(
+    "/admin/modules/m365-mail/accounts/{account_id}/disconnect",
+    response_class=HTMLResponse,
+)
 async def admin_m365_mail_disconnect(account_id: int, request: Request):
     """Remove the per-account delegated tokens and revert to company credentials."""
     current_user, redirect = await _main()._require_super_admin_page(request)

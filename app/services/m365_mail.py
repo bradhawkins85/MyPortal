@@ -148,9 +148,7 @@ async def _acquire_delegated_access_token(account: Mapping[str, Any]) -> str:
 
     # Use the PKCE public client to exchange the refresh token — no
     # client_secret required (public client flow).
-    token_endpoint = (
-        f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-    )
+    token_endpoint = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
     data = {
         "client_id": await m365_service.get_effective_pkce_client_id(),
         "grant_type": "refresh_token",
@@ -216,12 +214,16 @@ async def _ensure_scheduled_task(account: Mapping[str, Any]) -> Mapping[str, Any
     account_id = account.get("id")
     if account_id is None:
         return account
-    account_name = _normalise_string(account.get("name"), default=f"Mailbox {account_id}")
+    account_name = _normalise_string(
+        account.get("name"), default=f"Mailbox {account_id}"
+    )
     company_id = account.get("company_id")
     active = bool(account.get("active", True))
     cron = _normalise_string(account.get("schedule_cron"), default="*/15 * * * *")
     upn = _normalise_string(account.get("user_principal_name"))
-    description = f"Synchronise O365 mailbox {upn}" if upn else "Synchronise O365 mailbox"
+    description = (
+        f"Synchronise O365 mailbox {upn}" if upn else "Synchronise O365 mailbox"
+    )
     command = f"m365_mail_sync:{account_id}"
     scheduled_task_id = account.get("scheduled_task_id")
     task = None
@@ -253,7 +255,9 @@ async def _ensure_scheduled_task(account: Mapping[str, Any]) -> Mapping[str, Any
     if task:
         refreshed = await mail_repo.update_account(
             int(account_id),
-            scheduled_task_id=int(task.get("id")) if task.get("id") is not None else None,
+            scheduled_task_id=(
+                int(task.get("id")) if task.get("id") is not None else None
+            ),
         )
         await scheduler_service.refresh()
         return refreshed or account
@@ -276,8 +280,12 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
     if mailbox_type not in ("user", "shared"):
         mailbox_type = "user"
     folder = _normalise_string(payload.get("folder"), default="Inbox")
-    schedule_cron = _normalise_string(payload.get("schedule_cron"), default="*/15 * * * *")
-    process_unread_only = _normalise_bool(payload.get("process_unread_only"), default=True)
+    schedule_cron = _normalise_string(
+        payload.get("schedule_cron"), default="*/15 * * * *"
+    )
+    process_unread_only = _normalise_bool(
+        payload.get("process_unread_only"), default=True
+    )
     mark_as_read = _normalise_bool(payload.get("mark_as_read"), default=True)
     sync_known_only = _normalise_bool(payload.get("sync_known_only"), default=False)
     active = _normalise_bool(payload.get("active"), default=True)
@@ -304,7 +312,9 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
     try:
         await modules_service.update_module(_MODULE_SLUG, enabled=True)
     except Exception as exc:  # pragma: no cover - defensive logging
-        log_error("Failed to enable M365 mail module after account creation", error=str(exc))
+        log_error(
+            "Failed to enable M365 mail module after account creation", error=str(exc)
+        )
     return enrich_account_response(account)
 
 
@@ -314,7 +324,9 @@ async def update_account(account_id: int, payload: Mapping[str, Any]) -> dict[st
         raise ValueError("Account not found")
     updates: dict[str, Any] = {}
     if "name" in payload:
-        updates["name"] = _normalise_string(payload.get("name"), default=existing.get("name") or "Mailbox")
+        updates["name"] = _normalise_string(
+            payload.get("name"), default=existing.get("name") or "Mailbox"
+        )
     if "company_id" in payload:
         company_value = payload.get("company_id")
         if company_value in ("", None):
@@ -336,14 +348,16 @@ async def update_account(account_id: int, payload: Mapping[str, Any]) -> dict[st
         updates["folder"] = _normalise_string(payload.get("folder"), default="Inbox")
     if "schedule_cron" in payload:
         updates["schedule_cron"] = _normalise_string(
-            payload.get("schedule_cron"), default=existing.get("schedule_cron") or "*/15 * * * *"
+            payload.get("schedule_cron"),
+            default=existing.get("schedule_cron") or "*/15 * * * *",
         )
     if "filter_query" in payload:
         filter_canonical, _ = _normalise_filter(payload.get("filter_query"))
         updates["filter_query"] = filter_canonical
     if "process_unread_only" in payload:
         updates["process_unread_only"] = _normalise_bool(
-            payload.get("process_unread_only"), default=existing.get("process_unread_only", True)
+            payload.get("process_unread_only"),
+            default=existing.get("process_unread_only", True),
         )
     if "mark_as_read" in payload:
         updates["mark_as_read"] = _normalise_bool(
@@ -351,12 +365,17 @@ async def update_account(account_id: int, payload: Mapping[str, Any]) -> dict[st
         )
     if "sync_known_only" in payload:
         updates["sync_known_only"] = _normalise_bool(
-            payload.get("sync_known_only"), default=existing.get("sync_known_only", False)
+            payload.get("sync_known_only"),
+            default=existing.get("sync_known_only", False),
         )
     if "active" in payload:
-        updates["active"] = _normalise_bool(payload.get("active"), default=existing.get("active", True))
+        updates["active"] = _normalise_bool(
+            payload.get("active"), default=existing.get("active", True)
+        )
     if "priority" in payload:
-        updates["priority"] = _normalise_priority(payload.get("priority"), default=existing.get("priority") or 100)
+        updates["priority"] = _normalise_priority(
+            payload.get("priority"), default=existing.get("priority") or 100
+        )
     updated = await mail_repo.update_account(account_id, **updates)
     if not updated:
         raise RuntimeError("Unable to update Office 365 mail account")
@@ -383,7 +402,9 @@ async def clone_account(account_id: int) -> dict[str, Any]:
     original_filter = original.get("filter_query")
     filter_canonical: str | None = None
     if isinstance(original_filter, Mapping):
-        filter_canonical = json.dumps(dict(original_filter), separators=(",", ":"), sort_keys=True)
+        filter_canonical = json.dumps(
+            dict(original_filter), separators=(",", ":"), sort_keys=True
+        )
     elif isinstance(original_filter, str):
         filter_canonical = original_filter.strip() or None
 
@@ -393,7 +414,9 @@ async def clone_account(account_id: int) -> dict[str, Any]:
         user_principal_name=_normalise_string(original.get("user_principal_name")),
         mailbox_type=_normalise_string(original.get("mailbox_type"), default="user"),
         folder=_normalise_string(original.get("folder"), default="Inbox") or "Inbox",
-        schedule_cron=_normalise_string(original.get("schedule_cron"), default="*/15 * * * *"),
+        schedule_cron=_normalise_string(
+            original.get("schedule_cron"), default="*/15 * * * *"
+        ),
         filter_query=filter_canonical,
         process_unread_only=bool(original.get("process_unread_only", True)),
         mark_as_read=bool(original.get("mark_as_read", True)),
@@ -627,10 +650,15 @@ async def _resolve_mail_folder_identifier(
     """Resolve a mailbox folder display name to a Graph folder ID when needed."""
     folder_path = (folder or "").strip()
 
-    async def _resolve_top_level(folder_name: str, *, prefer_display_name_lookup: bool = False) -> str:
+    async def _resolve_top_level(
+        folder_name: str, *, prefer_display_name_lookup: bool = False
+    ) -> str:
         if _looks_like_graph_folder_id(folder_name):
             return folder_name
-        if folder_name.lower() in _WELL_KNOWN_MAIL_FOLDERS and not prefer_display_name_lookup:
+        if (
+            folder_name.lower() in _WELL_KNOWN_MAIL_FOLDERS
+            and not prefer_display_name_lookup
+        ):
             return folder_name
 
         # OData string literal escaping (single-quote doubling); urlencode then handles
@@ -656,7 +684,9 @@ async def _resolve_mail_folder_identifier(
         if folder_name.lower() in _WELL_KNOWN_MAIL_FOLDERS:
             return folder_name
 
-        raise M365Error(f"Mail folder '{folder_name}' not found or inaccessible", http_status=404)
+        raise M365Error(
+            f"Mail folder '{folder_name}' not found or inaccessible", http_status=404
+        )
 
     async def _resolve_child_folder(parent_identifier: str, child_name: str) -> str:
         if _looks_like_graph_folder_id(child_name):
@@ -713,7 +743,9 @@ async def _resolve_mail_folder_identifier(
             prefer_display_name_lookup=True,
         )
         for child_name in segments[1:]:
-            parent_identifier = await _resolve_child_folder(parent_identifier, child_name)
+            parent_identifier = await _resolve_child_folder(
+                parent_identifier, child_name
+            )
 
         return parent_identifier
 
@@ -760,7 +792,7 @@ def _build_filter_context(
 
     # Build headers dict from internetMessageHeaders if available
     headers: dict[str, str] = {}
-    for header in (graph_message.get("internetMessageHeaders") or []):
+    for header in graph_message.get("internetMessageHeaders") or []:
         hdr_name = (header.get("name") or "").lower()
         if hdr_name:
             headers[hdr_name] = header.get("value") or ""
@@ -813,31 +845,105 @@ def _build_filter_context(
 # ---------------------------------------------------------------------------
 
 
+async def _record_sync_history_safe(
+    *,
+    account_id: int,
+    started_at: datetime,
+    result: Mapping[str, Any],
+) -> None:
+    message_actions = list(result.get("message_actions") or [])
+    errors = list(result.get("errors") or [])
+    try:
+        await mail_repo.record_sync_history(
+            account_id=int(account_id),
+            status=_normalise_string(result.get("status"), default="unknown"),
+            processed=int(result.get("processed") or 0),
+            created_count=sum(
+                1
+                for action in message_actions
+                if action.get("outcome") == "created_new_ticket"
+            ),
+            attached_count=sum(
+                1
+                for action in message_actions
+                if action.get("outcome") == "attached_to_existing_ticket"
+            ),
+            ignored_count=sum(
+                1 for action in message_actions if action.get("outcome") == "ignored"
+            ),
+            error_count=len(errors),
+            errors=errors,
+            message_actions=message_actions,
+            started_at=started_at,
+            completed_at=datetime.now(timezone.utc),
+        )
+    except Exception as exc:  # pragma: no cover - history must not break syncs
+        log_error(
+            "Failed to record M365 mail sync history",
+            account_id=account_id,
+            error=str(exc),
+        )
+
+
+async def list_sync_history(
+    account_id: int, *, limit: int = 50
+) -> list[dict[str, Any]]:
+    account = await mail_repo.get_account(account_id)
+    if not account:
+        raise LookupError("Mailbox account not found")
+    return await mail_repo.list_sync_history(account_id, limit=limit)
+
+
 async def sync_account(account_id: int) -> dict[str, Any]:
     """Synchronise a single Office 365 mailbox via Microsoft Graph API."""
+
+    started_at = datetime.now(timezone.utc)
 
     if system_state.is_restart_pending():
         log_info(
             "Skipping M365 mail sync because system restart is pending",
             account_id=account_id,
         )
-        return {"status": "skipped", "reason": "pending_restart"}
+        result = {"status": "skipped", "reason": "pending_restart"}
+        await _record_sync_history_safe(
+            account_id=account_id, started_at=started_at, result=result
+        )
+        return result
 
     module = await modules_service.get_module(_MODULE_SLUG, redact=False)
     if not module or not module.get("enabled"):
-        return {"status": "skipped", "reason": "Module disabled"}
+        result = {"status": "skipped", "reason": "Module disabled"}
+        await _record_sync_history_safe(
+            account_id=account_id, started_at=started_at, result=result
+        )
+        return result
 
     account = await mail_repo.get_account(account_id)
     if not account or not account.get("active", True):
-        log_info("Skipping M365 mail sync because account is inactive", account_id=account_id)
-        return {"status": "skipped", "reason": "Account inactive"}
+        log_info(
+            "Skipping M365 mail sync because account is inactive", account_id=account_id
+        )
+        result = {"status": "skipped", "reason": "Account inactive"}
+        if account:
+            await _record_sync_history_safe(
+                account_id=account_id, started_at=started_at, result=result
+            )
+        return result
 
     company_id = account.get("company_id")
     auth_company_id = _int_or_none(company_id)
 
     upn = _normalise_string(account.get("user_principal_name"))
     if not upn:
-        return {"status": "error", "error": "User principal name not configured"}
+        result = {
+            "status": "error",
+            "error": "User principal name not configured",
+            "errors": [{"error": "User principal name not configured"}],
+        }
+        await _record_sync_history_safe(
+            account_id=account_id, started_at=started_at, result=result
+        )
+        return result
 
     folder = _normalise_string(account.get("folder"), default="Inbox") or "Inbox"
     process_unread_only = bool(account.get("process_unread_only", True))
@@ -857,13 +963,18 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 account_id=account_id,
                 error=str(exc),
             )
-            return {
+            result = {
                 "status": "error",
                 "error": (
                     "Unable to authenticate with the signed-in user credentials. "
                     "The user may need to sign in again."
                 ),
+                "errors": [{"error": str(exc)}],
             }
+            await _record_sync_history_safe(
+                account_id=account_id, started_at=started_at, result=result
+            )
+            return result
     else:
         # Fall back to company credentials (per-tenant enterprise app)
         if auth_company_id is None:
@@ -871,7 +982,15 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             if provisioned:
                 auth_company_id = min(provisioned)
             else:
-                return {"status": "error", "error": "No Microsoft 365 credentials configured. Please sign in to authorize access to the mailbox."}
+                result = {
+                    "status": "error",
+                    "error": "No Microsoft 365 credentials configured. Please sign in to authorize access to the mailbox.",
+                    "errors": [{"error": "No Microsoft 365 credentials configured."}],
+                }
+                await _record_sync_history_safe(
+                    account_id=account_id, started_at=started_at, result=result
+                )
+                return result
 
         try:
             access_token = await m365_service.acquire_access_token(
@@ -884,7 +1003,15 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 company_id=auth_company_id,
                 error=str(exc),
             )
-            return {"status": "error", "error": f"Unable to authenticate with Microsoft 365: {exc}"}
+            result = {
+                "status": "error",
+                "error": f"Unable to authenticate with Microsoft 365: {exc}",
+                "errors": [{"error": str(exc)}],
+            }
+            await _record_sync_history_safe(
+                account_id=account_id, started_at=started_at, result=result
+            )
+            return result
 
     processed = 0
     errors: list[dict[str, Any]] = []
@@ -923,7 +1050,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             query_params["$filter"] = "isRead eq false"
         else:
             query_params["$orderby"] = "receivedDateTime asc"
-        full_url = messages_url + "?" + urlencode(query_params, quote_via=quote, safe="$,")
+        full_url = (
+            messages_url + "?" + urlencode(query_params, quote_via=quote, safe="$,")
+        )
 
         # Paginate through all messages
         delegated_fallback_attempted = False
@@ -932,7 +1061,11 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             try:
                 data = await _graph_get(access_token, full_url)
             except M365Error as exc:
-                if exc.http_status == 403 and using_delegated and not delegated_fallback_attempted:
+                if (
+                    exc.http_status == 403
+                    and using_delegated
+                    and not delegated_fallback_attempted
+                ):
                     # Delegated token lacks access to this mailbox.
                     # Fall back to client_credentials (app-level permissions)
                     # which can access any mailbox in the tenant.
@@ -966,15 +1099,17 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 account_id=account_id,
                                 error=str(fb_exc),
                             )
-                    errors.append({
-                        "error": (
-                            "Mail sync failed (403 Forbidden). The signed-in user "
-                            "may not have access to this mailbox and no company "
-                            "credentials are available to fall back to. Please sign "
-                            "in again with a user that has access, or configure "
-                            "Microsoft 365 company credentials."
-                        )
-                    })
+                    errors.append(
+                        {
+                            "error": (
+                                "Mail sync failed (403 Forbidden). The signed-in user "
+                                "may not have access to this mailbox and no company "
+                                "credentials are available to fall back to. Please sign "
+                                "in again with a user that has access, or configure "
+                                "Microsoft 365 company credentials."
+                            )
+                        }
+                    )
                     break
                 if (
                     exc.http_status == 403
@@ -992,10 +1127,14 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     fallback_params = dict(query_params)
                     fallback_params.pop("$filter", None)
                     fallback_params["$orderby"] = "receivedDateTime asc"
-                    full_url = messages_url + "?" + urlencode(
-                        fallback_params,
-                        quote_via=quote,
-                        safe="$,",
+                    full_url = (
+                        messages_url
+                        + "?"
+                        + urlencode(
+                            fallback_params,
+                            quote_via=quote,
+                            safe="$,",
+                        )
                     )
                     log_info(
                         "M365 unread filter was denied; falling back to full mailbox scan",
@@ -1041,13 +1180,15 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 internet_msg_id = msg.get("internetMessageId") or msg_id
 
                 if not msg_id:
-                    _remember_message_action({
-                        "account_id": account_id,
-                        "mailbox": upn,
-                        "folder": folder,
-                        "outcome": "ignored",
-                        "reason": "missing_graph_message_id",
-                    })
+                    _remember_message_action(
+                        {
+                            "account_id": account_id,
+                            "mailbox": upn,
+                            "folder": folder,
+                            "outcome": "ignored",
+                            "reason": "missing_graph_message_id",
+                        }
+                    )
                     continue
 
                 message_log_base = {
@@ -1064,11 +1205,13 @@ async def sync_account(account_id: int) -> dict[str, Any]:
 
                 # Skip already-read messages when only processing unread
                 if process_unread_only and msg.get("isRead", False):
-                    _remember_message_action({
-                        **message_log_base,
-                        "outcome": "ignored",
-                        "reason": "already_read",
-                    })
+                    _remember_message_action(
+                        {
+                            **message_log_base,
+                            "outcome": "ignored",
+                            "reason": "already_read",
+                        }
+                    )
                     continue
 
                 # Check if already processed
@@ -1084,7 +1227,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/"
                                 f"{quote(msg_id, safe='')}"
                             )
-                            await _graph_patch(access_token, patch_url, {"isRead": True})
+                            await _graph_patch(
+                                access_token, patch_url, {"isRead": True}
+                            )
                             read_state_repaired = True
                         except Exception:  # pragma: no cover - Graph API errors
                             log_error(
@@ -1095,16 +1240,28 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     existing_ticket_id = existing_message.get("ticket_id")
                     existing_ticket = None
                     if isinstance(existing_ticket_id, int):
-                        existing_ticket = await tickets_repo.get_ticket(existing_ticket_id)
-                    _remember_message_action({
-                        **message_log_base,
-                        "outcome": "ignored",
-                        "reason": "already_imported",
-                        "ticket_id": existing_ticket_id,
-                        "ticket_number": existing_ticket.get("ticket_number") if isinstance(existing_ticket, Mapping) else None,
-                        "ticket_subject": existing_ticket.get("subject") if isinstance(existing_ticket, Mapping) else None,
-                        "read_state_repaired": read_state_repaired,
-                    })
+                        existing_ticket = await tickets_repo.get_ticket(
+                            existing_ticket_id
+                        )
+                    _remember_message_action(
+                        {
+                            **message_log_base,
+                            "outcome": "ignored",
+                            "reason": "already_imported",
+                            "ticket_id": existing_ticket_id,
+                            "ticket_number": (
+                                existing_ticket.get("ticket_number")
+                                if isinstance(existing_ticket, Mapping)
+                                else None
+                            ),
+                            "ticket_subject": (
+                                existing_ticket.get("subject")
+                                if isinstance(existing_ticket, Mapping)
+                                else None
+                            ),
+                            "read_state_repaired": read_state_repaired,
+                        }
+                    )
                     continue
 
                 # Extract message details
@@ -1123,7 +1280,11 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 from_email_data = from_data.get("emailAddress", {})
                 from_address = from_email_data.get("address") or ""
                 from_name = from_email_data.get("name") or ""
-                from_header = f"{from_name} <{from_address}>" if from_name and from_address else from_address
+                from_header = (
+                    f"{from_name} <{from_address}>"
+                    if from_name and from_address
+                    else from_address
+                )
 
                 is_unread = not msg.get("isRead", False)
 
@@ -1132,7 +1293,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 raw_received = msg.get("receivedDateTime")
                 if raw_received:
                     try:
-                        parsed_date = datetime.fromisoformat(raw_received.replace("Z", "+00:00"))
+                        parsed_date = datetime.fromisoformat(
+                            raw_received.replace("Z", "+00:00")
+                        )
                         received_at = parsed_date.astimezone(timezone.utc)
                     except (TypeError, ValueError):
                         pass
@@ -1140,7 +1303,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 # Extract In-Reply-To and References from internet message headers
                 in_reply_to_ids: list[str] = []
                 reference_ids: list[str] = []
-                for header in (msg.get("internetMessageHeaders") or []):
+                for header in msg.get("internetMessageHeaders") or []:
                     hdr_name = (header.get("name") or "").lower()
                     hdr_value = header.get("value") or ""
                     if hdr_name == "in-reply-to":
@@ -1163,12 +1326,14 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         message_id=internet_msg_id,
                     )
                     if not _evaluate_filter(filter_rule, context):
-                        _remember_message_action({
-                            **message_log_base,
-                            "from_address": from_address,
-                            "outcome": "ignored",
-                            "reason": "filter_not_matched",
-                        })
+                        _remember_message_action(
+                            {
+                                **message_log_base,
+                                "from_address": from_address,
+                                "outcome": "ignored",
+                                "reason": "filter_not_matched",
+                            }
+                        )
                         continue
 
                 # Check sync_known_only
@@ -1176,20 +1341,24 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 if sync_known_only:
                     from_email_addresses = _extract_email_addresses(from_header)
                     if not from_email_addresses:
-                        _remember_message_action({
-                            **message_log_base,
-                            "from_address": from_address,
-                            "outcome": "ignored",
-                            "reason": "no_valid_sender_email",
-                        })
+                        _remember_message_action(
+                            {
+                                **message_log_base,
+                                "from_address": from_address,
+                                "outcome": "ignored",
+                                "reason": "no_valid_sender_email",
+                            }
+                        )
                         continue
                     if not await _is_any_email_address_known(from_email_addresses):
-                        _remember_message_action({
-                            **message_log_base,
-                            "from_address": from_address,
-                            "outcome": "ignored",
-                            "reason": "unknown_sender",
-                        })
+                        _remember_message_action(
+                            {
+                                **message_log_base,
+                                "from_address": from_address,
+                                "outcome": "ignored",
+                                "reason": "unknown_sender",
+                            }
+                        )
                         continue
 
                 # Resolve ticket entities
@@ -1241,29 +1410,41 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             category="email",
                             module_slug=_MODULE_SLUG,
                             external_reference=internet_msg_id,
-                            requester_email=from_email_addr if requester_id is None else None,
+                            requester_email=(
+                                from_email_addr if requester_id is None else None
+                            ),
                         )
                         is_new_ticket = True
-                        ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None
+                        ticket_id = (
+                            ticket.get("id") if isinstance(ticket, Mapping) else None
+                        )
                         if ticket_id is not None:
                             try:
-                                await tickets_service.refresh_ticket_ai_summary(int(ticket_id))
+                                await tickets_service.refresh_ticket_ai_summary(
+                                    int(ticket_id)
+                                )
                             except RuntimeError:
                                 pass
                             try:
-                                await tickets_service.refresh_ticket_ai_tags(int(ticket_id))
+                                await tickets_service.refresh_ticket_ai_tags(
+                                    int(ticket_id)
+                                )
                             except Exception:
                                 pass
                 except Exception as exc:  # pragma: no cover - defensive logging
                     error_text = str(exc)
                     errors.append({"message_id": msg_id, "error": error_text})
-                    _remember_message_action({
-                        **message_log_base,
-                        "from_address": from_address if "from_address" in locals() else None,
-                        "outcome": "error",
-                        "reason": "ticket_create_or_match_failed",
-                        "error": error_text,
-                    })
+                    _remember_message_action(
+                        {
+                            **message_log_base,
+                            "from_address": (
+                                from_address if "from_address" in locals() else None
+                            ),
+                            "outcome": "error",
+                            "reason": "ticket_create_or_match_failed",
+                            "error": error_text,
+                        }
+                    )
                     await _record_message(
                         account_id=int(account_id),
                         uid=msg_id,
@@ -1289,14 +1470,18 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         sanitized = sanitize_rich_text(conversation_source)
                         if sanitized.has_rich_content:
                             reply_created_at = received_at or datetime.now(timezone.utc)
-                            reply_author_id = requester_id if requester_id is not None else None
+                            reply_author_id = (
+                                requester_id if requester_id is not None else None
+                            )
                             try:
                                 await tickets_repo.create_reply(
                                     ticket_id=int(ticket_id),
                                     author_id=reply_author_id,
                                     body=sanitized.html,
                                     is_internal=False,
-                                    external_reference=internet_msg_id if internet_msg_id else None,
+                                    external_reference=(
+                                        internet_msg_id if internet_msg_id else None
+                                    ),
                                     created_at=reply_created_at,
                                 )
                                 reply_added = True
@@ -1306,7 +1491,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                     message_id=msg_id,
                                     ticket_id=ticket_id,
                                 )
-                            except Exception as exc:  # pragma: no cover - defensive logging
+                            except (
+                                Exception
+                            ) as exc:  # pragma: no cover - defensive logging
                                 reply_outcome = "failed_to_add_reply"
                                 log_error(
                                     "Failed to add M365 email reply to ticket",
@@ -1327,7 +1514,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                         ticket_id,
                                         actor=actor_info,
                                     )
-                                except Exception as exc:  # pragma: no cover - defensive logging
+                                except (
+                                    Exception
+                                ) as exc:  # pragma: no cover - defensive logging
                                     log_error(
                                         "Failed to trigger automation for M365 email reply",
                                         account_id=account_id,
@@ -1356,21 +1545,39 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 error=str(exc),
                             )
 
-                _remember_message_action({
-                    **message_log_base,
-                    "from_address": from_address,
-                    "requester_id": requester_id,
-                    "company_id": ticket_company_id,
-                    "outcome": "created_new_ticket" if is_new_ticket else "attached_to_existing_ticket",
-                    "ticket_id": int(ticket_id) if isinstance(ticket_id, int) else None,
-                    "ticket_number": ticket.get("ticket_number") if isinstance(ticket, Mapping) else None,
-                    "ticket_subject": ticket.get("subject") if isinstance(ticket, Mapping) else None,
-                    "reply_added": reply_added,
-                    "reply_outcome": reply_outcome,
-                    "has_attachments": bool(msg.get("hasAttachments")),
-                    "matched_by_related_message_ids": bool(related_message_ids),
-                    "related_message_ids": related_message_ids[:10] if related_message_ids else None,
-                })
+                _remember_message_action(
+                    {
+                        **message_log_base,
+                        "from_address": from_address,
+                        "requester_id": requester_id,
+                        "company_id": ticket_company_id,
+                        "outcome": (
+                            "created_new_ticket"
+                            if is_new_ticket
+                            else "attached_to_existing_ticket"
+                        ),
+                        "ticket_id": (
+                            int(ticket_id) if isinstance(ticket_id, int) else None
+                        ),
+                        "ticket_number": (
+                            ticket.get("ticket_number")
+                            if isinstance(ticket, Mapping)
+                            else None
+                        ),
+                        "ticket_subject": (
+                            ticket.get("subject")
+                            if isinstance(ticket, Mapping)
+                            else None
+                        ),
+                        "reply_added": reply_added,
+                        "reply_outcome": reply_outcome,
+                        "has_attachments": bool(msg.get("hasAttachments")),
+                        "matched_by_related_message_ids": bool(related_message_ids),
+                        "related_message_ids": (
+                            related_message_ids[:10] if related_message_ids else None
+                        ),
+                    }
+                )
 
                 await _record_message(
                     account_id=int(account_id),
@@ -1397,7 +1604,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         )
 
     except Exception as exc:  # pragma: no cover - network interaction
-        log_error("M365 mail synchronisation failed", account_id=account_id, error=str(exc))
+        log_error(
+            "M365 mail synchronisation failed", account_id=account_id, error=str(exc)
+        )
         errors.append({"error": str(exc)})
 
     await mail_repo.update_account(
@@ -1408,7 +1617,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         1 for action in message_actions if action.get("outcome") == "created_new_ticket"
     )
     attached_count = sum(
-        1 for action in message_actions if action.get("outcome") == "attached_to_existing_ticket"
+        1
+        for action in message_actions
+        if action.get("outcome") == "attached_to_existing_ticket"
     )
     ignored_count = sum(
         1 for action in message_actions if action.get("outcome") == "ignored"
@@ -1423,12 +1634,16 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         ignored=ignored_count,
     )
     status_value = "succeeded" if not errors else "completed_with_errors"
-    return {
+    result = {
         "status": status_value,
         "processed": processed,
         "errors": errors,
         "message_actions": message_actions,
     }
+    await _record_sync_history_safe(
+        account_id=account_id, started_at=started_at, result=result
+    )
+    return result
 
 
 async def _embed_graph_inline_images(
