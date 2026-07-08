@@ -4341,6 +4341,113 @@ dialog.modal:not([open]) {
   display: none;
 }
 
+
+.modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.42);
+}
+
+.modal__dialog {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: min(92vw, 44rem);
+  max-height: min(86vh, 48rem);
+  overflow: hidden;
+  color: #f8fafc;
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98));
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 1rem;
+  box-shadow: 0 30px 80px -24px rgba(2, 6, 23, 0.95), 0 0 0 1px rgba(15, 23, 42, 0.7);
+}
+
+.modal__dialog .modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-gap-base);
+  padding: calc(var(--space-gap-roomy) * 1.25) calc(var(--space-gap-roomy) * 1.5) var(--space-gap-base);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.modal__dialog .modal__header h2 {
+  margin: 0;
+  font-size: 1.35rem;
+  line-height: 1.25;
+}
+
+.modal__dialog .modal__body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-gap-roomy) calc(var(--space-gap-roomy) * 1.5);
+}
+
+.modal__dialog .modal__body p {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.82);
+}
+
+.modal__footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-gap-tight);
+  padding: var(--space-gap-base) calc(var(--space-gap-roomy) * 1.5) calc(var(--space-gap-roomy) * 1.25);
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.ticket-merge-list {
+  display: grid;
+  gap: var(--space-gap-tight);
+}
+
+.ticket-merge-list__item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-gap-tight);
+  padding: var(--space-gap-base);
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.76);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 0.75rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.ticket-merge-list__item:hover,
+.ticket-merge-list__item:focus-within {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(30, 41, 59, 0.86);
+}
+
+.ticket-merge-list__item input {
+  margin-top: 0.2rem;
+  accent-color: #38bdf8;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 640px) {
+  .modal {
+    padding: var(--space-gap-base);
+  }
+
+  .modal__dialog {
+    width: 100%;
+    max-height: calc(100vh - (var(--space-gap-base) * 2));
+  }
+
+  .modal__dialog .modal__header,
+  .modal__dialog .modal__body,
+  .modal__footer {
+    padding-left: var(--space-gap-base);
+    padding-right: var(--space-gap-base);
+  }
+}
+
 .modal__content {
   background: rgba(15, 23, 42, 0.95);
   border-radius: 1rem;
