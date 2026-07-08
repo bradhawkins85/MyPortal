@@ -348,3 +348,90 @@ async def test_issue_chat_token_rejects_closed_explicit_room(monkeypatch):
     assert exc.value.status_code == 409
     assert exc.value.detail == "Chat room is closed"
     create_token_mock.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_tray_bulk_update_outdated_devices_runs_for_outdated_linked_assets(monkeypatch):
+    import app.repositories.assets as assets_repo
+    import app.repositories.tray as tray_repo
+    from app.services import tacticalrmm as tacticalrmm_service
+    from app.services import tray_installer as tray_installer_service
+
+    monkeypatch.setattr(
+        main, "_require_super_admin_page", AsyncMock(return_value=({"id": 1}, None))
+    )
+    monkeypatch.setattr(
+        main.site_settings_repo,
+        "get_tray_update_trmm_script_id",
+        AsyncMock(return_value=99),
+    )
+    monkeypatch.setattr(
+        tray_installer_service,
+        "get_cached_latest_release_info",
+        lambda: {"version": "2.0.0"},
+    )
+    monkeypatch.setattr(
+        tray_repo,
+        "list_devices",
+        AsyncMock(
+            return_value=[
+                {"id": 1, "status": "active", "agent_version": "1.0.0", "asset_id": 10},
+                {"id": 2, "status": "active", "agent_version": "2.0.0", "asset_id": 20},
+                {"id": 3, "status": "active", "agent_version": None, "asset_id": 30},
+            ]
+        ),
+    )
+
+    async def fake_get_asset_by_id(asset_id: int):
+        return {"id": asset_id, "tactical_asset_id": f"agent-{asset_id}"}
+
+    monkeypatch.setattr(assets_repo, "get_asset_by_id", fake_get_asset_by_id)
+    log_mock = AsyncMock(side_effect=[101, 102])
+    monkeypatch.setattr(tray_repo, "log_command", log_mock)
+    mark_mock = AsyncMock()
+    monkeypatch.setattr(tray_repo, "mark_command_delivered", mark_mock)
+    run_mock = AsyncMock(return_value={"response": {"ok": True}})
+    monkeypatch.setattr(tacticalrmm_service, "run_script_on_agent", run_mock)
+
+    response = await main.admin_tray_bulk_update_outdated_devices(
+        _make_request("/admin/tray/devices/bulk-update-outdated")
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/tray/devices"
+    tray_repo.list_devices.assert_awaited_once_with(status="active")
+    assert run_mock.await_count == 2
+    run_mock.assert_any_await("agent-10", 99)
+    run_mock.assert_any_await("agent-30", 99)
+    assert log_mock.await_count == 2
+    assert mark_mock.await_count == 2
+
+
+@pytest.mark.anyio
+async def test_tray_bulk_update_outdated_devices_requires_loaded_release(monkeypatch):
+    import app.repositories.tray as tray_repo
+    from app.services import tray_installer as tray_installer_service
+
+    monkeypatch.setattr(
+        main, "_require_super_admin_page", AsyncMock(return_value=({"id": 1}, None))
+    )
+    monkeypatch.setattr(
+        main.site_settings_repo,
+        "get_tray_update_trmm_script_id",
+        AsyncMock(return_value=99),
+    )
+    monkeypatch.setattr(
+        tray_installer_service,
+        "get_cached_latest_release_info",
+        lambda: {"version": None},
+    )
+    list_mock = AsyncMock(return_value=[])
+    monkeypatch.setattr(tray_repo, "list_devices", list_mock)
+
+    response = await main.admin_tray_bulk_update_outdated_devices(
+        _make_request("/admin/tray/devices/bulk-update-outdated")
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/tray/devices"
+    list_mock.assert_not_called()

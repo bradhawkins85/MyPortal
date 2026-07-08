@@ -787,6 +787,28 @@ app.add_middleware(
 templates = Jinja2Templates(directory=str(templates_config.template_path))
 
 
+def _parse_tray_agent_version(value: str | None) -> tuple[int, int, int]:
+    raw = (value or "").strip()
+    if not raw:
+        return (0, 0, 0)
+    if raw.startswith(("v", "V")):
+        raw = raw[1:]
+    numeric = re.split(r"[-+]", raw, maxsplit=1)[0]
+    parts = [part.strip() for part in numeric.split(".") if part.strip()]
+    nums: list[int] = []
+    for part in parts[:3]:
+        nums.append(int(part) if part.isdigit() else 0)
+    while len(nums) < 3:
+        nums.append(0)
+    return nums[0], nums[1], nums[2]
+
+
+def _is_tray_agent_outdated(agent_version: str | None, latest_version: str | None) -> bool:
+    if not (latest_version or "").strip():
+        return False
+    return _parse_tray_agent_version(agent_version) < _parse_tray_agent_version(latest_version)
+
+
 def _static_url(path: str) -> str:
     """Generate cache-busted URL for static files.
     
@@ -5980,12 +6002,21 @@ async def admin_tray_devices_page(
     if current_user.get("is_super_admin"):
         trmm_scripts, trmm_scripts_error = await _get_tray_trmm_scripts_for_form()
         selected_update_script_id = await site_settings_repo.get_tray_update_trmm_script_id()
+    tray_release = tray_installer_service.get_cached_latest_release_info()
+    latest_tray_version = tray_release.get("version") if isinstance(tray_release, dict) else None
+    outdated_device_count = sum(
+        1
+        for device in devices
+        if device.get("status") != "revoked"
+        and _is_tray_agent_outdated(device.get("agent_version"), latest_tray_version)
+    )
     extra = {
         "title": "Tray devices",
         "devices": devices,
         "filters": {"search": search or "", "status": status or ""},
         "matrix_enabled": settings.matrix_enabled,
-        "tray_release": tray_installer_service.get_cached_latest_release_info(),
+        "tray_release": tray_release,
+        "outdated_device_count": outdated_device_count,
         "trmm_scripts": trmm_scripts,
         "trmm_scripts_error": trmm_scripts_error,
         "selected_update_script_id": selected_update_script_id,
@@ -6095,6 +6126,91 @@ async def admin_tray_update_device(device_id: int, request: Request):
         "Tactical RMM update script started for the tray device.",
         "success",
     )
+
+
+@app.post("/admin/tray/devices/bulk-update-outdated", response_class=HTMLResponse)
+async def admin_tray_bulk_update_outdated_devices(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import assets as assets_repo
+    from app.repositories import tray as tray_repo
+    from app.services import tacticalrmm as tacticalrmm_service
+    from app.services import tray_installer as tray_installer_service
+
+    script_id = await site_settings_repo.get_tray_update_trmm_script_id()
+    if not script_id:
+        return flash_redirect(
+            "/admin/tray/devices",
+            "Select a Tactical RMM script before running tray updates.",
+            "error",
+        )
+
+    tray_release = tray_installer_service.get_cached_latest_release_info()
+    latest_tray_version = tray_release.get("version") if isinstance(tray_release, dict) else None
+    if not latest_tray_version:
+        return flash_redirect(
+            "/admin/tray/devices",
+            "The latest tray app release is not loaded, so outdated devices cannot be determined.",
+            "error",
+        )
+
+    devices = await tray_repo.list_devices(status="active")
+    outdated_devices = [
+        device
+        for device in devices
+        if _is_tray_agent_outdated(device.get("agent_version"), latest_tray_version)
+    ]
+    if not outdated_devices:
+        return flash_redirect(
+            "/admin/tray/devices",
+            "No active tray devices are outdated.",
+            "info",
+        )
+
+    started_count = 0
+    skipped_count = 0
+    failed_count = 0
+    for device in outdated_devices:
+        asset_id = device.get("asset_id")
+        if not asset_id:
+            skipped_count += 1
+            continue
+        asset = await assets_repo.get_asset_by_id(int(asset_id))
+        tactical_agent_id = str((asset or {}).get("tactical_asset_id") or "").strip()
+        if not tactical_agent_id:
+            skipped_count += 1
+            continue
+        payload = {
+            "type": "tacticalrmm_script",
+            "purpose": "tray_update",
+            "script_id": script_id,
+            "tactical_agent_id": tactical_agent_id,
+            "latest_tray_version": latest_tray_version,
+            "current_agent_version": device.get("agent_version"),
+        }
+        command_id = await tray_repo.log_command(
+            device_id=int(device["id"]),
+            command="trmm_update_script",
+            payload_json=json.dumps(payload),
+            initiated_by_user_id=current_user.get("id") if current_user else None,
+            status="queued",
+        )
+        try:
+            result = await tacticalrmm_service.run_script_on_agent(tactical_agent_id, script_id)
+        except Exception as exc:  # pragma: no cover - external integration availability
+            failed_count += 1
+            await tray_repo.mark_command_delivered(command_id, error=str(exc))
+            continue
+        payload["tactical_rmm_response"] = result.get("response")
+        await tray_repo.mark_command_delivered(command_id)
+        started_count += 1
+
+    message = f"Started Tactical RMM update script for {started_count} outdated tray device(s)."
+    if skipped_count or failed_count:
+        message += f" Skipped {skipped_count}; failed {failed_count}."
+    category = "success" if started_count else "warning"
+    return flash_redirect("/admin/tray/devices", message, category)
 
 
 @app.post("/admin/tray/devices/{device_id}/revoke", response_class=HTMLResponse)

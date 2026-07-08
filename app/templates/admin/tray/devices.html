@@ -40,6 +40,22 @@
             <button type="submit" class="button button--primary">Save update script</button>
           </div>
         </form>
+        <form method="post" action="/admin/tray/devices/bulk-update-outdated" class="form-stack">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <div class="form-field form-field--actions">
+            <button
+              type="submit"
+              class="button button--primary"
+              {% if not selected_update_script_id or not outdated_device_count %}disabled{% endif %}
+              data-confirm="Run the selected Tactical RMM update script on all active tray devices with an older agent version than the server tray app release?"
+            >
+              Update all outdated agents
+            </button>
+            <span class="form-help">
+              {{ outdated_device_count }} active tray {{ 'device is' if outdated_device_count == 1 else 'devices are' }} older than {{ tray_release.version or 'the loaded release' }}.
+            </span>
+          </div>
+        </form>
       {% endif %}
       <div class="info-grid info-grid--compact" aria-label="Tray release loaded on this server">
         <div class="info-grid__item">
