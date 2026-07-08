@@ -16,6 +16,31 @@
   <section class="card card--panel">
     <header class="card__header card__header--stacked">
       <p class="card__lede">Endpoints that have enrolled with the MyPortal tray service. Use the menu configurations and install tokens pages to provision new fleets.</p>
+      {% if current_user.is_super_admin %}
+        <form method="post" action="/admin/tray/update-script" class="form-stack">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <div class="form-field">
+            <label class="form-label" for="tray-update-script">Tactical RMM update script</label>
+            <select class="form-input" id="tray-update-script" name="script_id">
+              <option value="">Select a script before using Update</option>
+              {% for script in trmm_scripts %}
+                <option value="{{ script.id }}" {% if selected_update_script_id == script.id %}selected{% endif %}>
+                  {{ script.name }}{% if script.script_type %} ({{ script.script_type }}){% endif %}
+                </option>
+              {% endfor %}
+            </select>
+            <div class="form-help">
+              The Update button runs this Tactical RMM script against the device's linked asset. The selected script is saved for future update calls.
+              {% if trmm_scripts_error %}
+                <span class="status status--warning">Scripts could not be loaded: {{ trmm_scripts_error }}</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="form-field form-field--actions">
+            <button type="submit" class="button button--primary">Save update script</button>
+          </div>
+        </form>
+      {% endif %}
       <div class="info-grid info-grid--compact" aria-label="Tray release loaded on this server">
         <div class="info-grid__item">
           <span class="info-grid__label">Server tray app release</span>
@@ -98,14 +123,18 @@
                 <td>{{ device.agent_version or '—' }}</td>
                 <td class="data-table__col--actions">
                   {% if device.status != 'revoked' %}
-                    <form method="post" action="/admin/tray/devices/{{ device.id }}/update" class="inline-form">
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                      <button type="submit" class="button button--small button--primary" data-confirm="Signal this tray device to check the server for an updated tray app installer?">Update</button>
-                    </form>
-                    <form method="post" action="/admin/tray/devices/{{ device.id }}/revoke" class="inline-form">
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                      <button type="submit" class="button button--small button--danger" data-confirm="Revoke this tray device? It will need to re-enrol to reconnect.">Revoke</button>
-                    </form>
+                    {% if current_user.is_super_admin %}
+                      <form method="post" action="/admin/tray/devices/{{ device.id }}/update" class="inline-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                        <button type="submit" class="button button--small button--primary" data-confirm="Run the selected Tactical RMM update script on this device's linked asset?">Update</button>
+                      </form>
+                      <form method="post" action="/admin/tray/devices/{{ device.id }}/revoke" class="inline-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                        <button type="submit" class="button button--small button--danger" data-confirm="Revoke this tray device? It will need to re-enrol to reconnect.">Revoke</button>
+                      </form>
+                    {% else %}
+                      —
+                    {% endif %}
                   {% else %}
                     <form method="post" action="/admin/tray/devices/{{ device.id }}/reactivate" class="inline-form">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />

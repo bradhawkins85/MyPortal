@@ -67,6 +67,26 @@ async def get_tray_icon_tooltip_name() -> str | None:
     return str(value) if value else None
 
 
+async def get_tray_update_trmm_script_id() -> int | None:
+    """Return the Tactical RMM script ID used for tray update requests."""
+    row = await db.fetch_one(
+        "SELECT tray_update_trmm_script_id FROM site_settings WHERE id = 1",
+        (),
+    )
+    if row is None:
+        return None
+    value: Any = (
+        row.get("tray_update_trmm_script_id")
+        if isinstance(row, Mapping)
+        else row["tray_update_trmm_script_id"]
+    )
+    try:
+        script_id = int(value)
+    except (TypeError, ValueError):
+        return None
+    return script_id if script_id > 0 else None
+
+
 async def set_tray_icon_path(path: str | None) -> None:
     """Persist (or clear) the custom tray icon path in site_settings.
 
@@ -103,6 +123,27 @@ async def set_tray_icon_tooltip_name(name: str | None) -> None:
         await db.execute(
             "UPDATE site_settings SET tray_icon_tooltip_name = %s WHERE id = 1",
             (name,),
+        )
+
+
+async def set_tray_update_trmm_script_id(script_id: int | None) -> None:
+    """Persist the Tactical RMM script ID used for tray update requests."""
+    value = int(script_id) if script_id is not None else None
+    if value is not None and value <= 0:
+        raise ValueError("Tactical RMM script ID must be a positive integer.")
+    existing = await db.fetch_one(
+        "SELECT id FROM site_settings WHERE id = 1",
+        (),
+    )
+    if existing is None:
+        await db.execute(
+            "INSERT INTO site_settings (id, tray_update_trmm_script_id) VALUES (1, %s)",
+            (value,),
+        )
+    else:
+        await db.execute(
+            "UPDATE site_settings SET tray_update_trmm_script_id = %s WHERE id = 1",
+            (value,),
         )
 
 
@@ -150,6 +191,8 @@ __all__ = [
     "get_next_ticket_number",
     "get_tray_icon_path",
     "get_tray_icon_tooltip_name",
+    "get_tray_update_trmm_script_id",
     "set_tray_icon_path",
     "set_tray_icon_tooltip_name",
+    "set_tray_update_trmm_script_id",
 ]
