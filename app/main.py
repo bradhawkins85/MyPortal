@@ -69,6 +69,7 @@ from app.api.routes import (
     companies,
     essential8 as essential8_api,
     compliance_checks as compliance_checks_api,
+    email_blocklist as email_blocklist_api,
     forms as forms_api,
     invoices as invoices_api,
     issues as issues_api,
@@ -1063,6 +1064,7 @@ app.include_router(audit_logs.router)
 app.include_router(api_keys.router)
 app.include_router(scheduler_api.router)
 app.include_router(tickets_api.router)
+app.include_router(email_blocklist_api.router)
 app.include_router(automations_api.router)
 app.include_router(modules_api.router)
 app.include_router(system.router)

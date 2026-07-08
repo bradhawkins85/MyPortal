@@ -62,6 +62,14 @@ async def send_email(
 
     settings = get_settings()
     to_addresses = _normalise_recipients(recipients)
+    try:
+        from app.repositories import email_blocklist as email_blocklist_repo
+
+        to_addresses, blocked_addresses = await email_blocklist_repo.filter_allowed(to_addresses)
+        if blocked_addresses:
+            logger.info("Email blocklist suppressed recipients", subject=subject, blocked_recipients=blocked_addresses)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning("Email blocklist check failed; continuing with original recipients", subject=subject, error=str(exc))
     if not to_addresses:
         logger.warning("Email delivery skipped because no recipients were provided", subject=subject)
         return False, None

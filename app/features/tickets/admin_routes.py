@@ -41,6 +41,7 @@ from app.repositories import staff as staff_repo
 from app.repositories import ticket_statuses as ticket_status_repo
 from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import email_blocklist as email_blocklist_repo
 from app.repositories import users as user_repo
 from app.repositories import site_settings as site_settings_repo
 from app.services import agent as agent_service
@@ -264,6 +265,78 @@ def _safe_local_redirect_target(raw: str | None, *, fallback: str) -> str:
         return fallback
     return candidate
 
+
+
+
+def _iso_utc(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return str(value)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+@router.get("/admin/tickets/email-blocklist", response_class=HTMLResponse)
+async def admin_email_blocklist_page(request: Request, search: str | None = Query(default=None)):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    if not current_user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+
+    entries = await email_blocklist_repo.list_entries(search=search, limit=500, offset=0, sort="email", direction="asc")
+    for entry in entries:
+        entry["updated_iso"] = _iso_utc(entry.get("updated_at"))
+    return main_module.templates.TemplateResponse(
+        "admin/email_blocklist.html",
+        {
+            "request": request,
+            "current_user": current_user,
+            "entries": entries,
+            "search": search or "",
+        },
+    )
+
+
+@router.post("/admin/tickets/email-blocklist", response_class=HTMLResponse)
+async def admin_add_email_blocklist_entry(request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    if not current_user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+    form = await request.form()
+    try:
+        await email_blocklist_repo.upsert_entry(
+            email=str(form.get("email") or ""),
+            reason=str(form.get("reason") or "").strip() or None,
+            source="manual",
+            created_by_user_id=current_user.get("id"),
+        )
+    except ValueError as exc:
+        return flash_redirect("/admin/tickets/email-blocklist", str(exc), "error")
+    return flash_redirect("/admin/tickets/email-blocklist", "Email address added to the blocklist.", "success")
+
+
+@router.post("/admin/tickets/email-blocklist/{entry_id:int}/delete", response_class=HTMLResponse)
+async def admin_delete_email_blocklist_entry(entry_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    if not current_user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
+    await email_blocklist_repo.delete_entry(entry_id)
+    return flash_redirect("/admin/tickets/email-blocklist", "Email address removed from the blocklist.", "success")
 
 @router.get("/admin/tickets", response_class=HTMLResponse)
 async def admin_tickets_page(
