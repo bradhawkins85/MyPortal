@@ -20,6 +20,10 @@
 ##   make clean
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.0.0-dev")
+# Windows Installer versions must be numeric and use at most three fields for
+# upgrade comparisons. Keep the app-facing VERSION unchanged, but normalize the
+# MSI ProductVersion so every tagged build produces a valid ARP/upgrade version.
+MSI_VERSION ?= $(shell printf '%s' '$(VERSION)' | sed -E 's/^v//; s/[^0-9.].*//; s/^$$/0.0.0/' | awk -F. '{printf "%d.%d.%d", $$1, ($$2==""?0:$$2), ($$3==""?0:$$3)}')
 LDFLAGS  := -X 'github.com/bradhawkins85/myportal-tray/internal/updater.AgentVersion=$(VERSION)'
 DIST     := dist
 
@@ -163,6 +167,7 @@ build-msi: build-windows
 	        wix build -acceptEula wix7 installer/windows/myportal-tray.wxs \
 	            -arch x64 \
 	            -d BinDir=$(CURDIR)/$(DIST)/windows \
+	            -d ProductVersion=$(MSI_VERSION) \
 	            -o $(DIST)/windows/myportal-tray.msi ;; \
 	    *) \
 	        echo "Skipping MSI build: WiX only supports Windows hosts (host: $(HOST_OS))."; \
