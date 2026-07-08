@@ -5888,6 +5888,14 @@ async def admin_bulk_redistribute_scheduled_tasks(request: Request):
     if hour < 0 or hour > 23:
         return flash_redirect("/admin/scheduled-tasks", "Enter an hour between 0 and 23.", "error")
 
+    try:
+        minute_offset = int(str(form.get("redistributeOffset") or "0").strip())
+    except (TypeError, ValueError):
+        return flash_redirect("/admin/scheduled-tasks", "Enter a starting minute offset between 0 and 59.", "error")
+
+    if minute_offset < 0 or minute_offset > 59:
+        return flash_redirect("/admin/scheduled-tasks", "Enter a starting minute offset between 0 and 59.", "error")
+
     redistributed_count = 0
     for offset, task_id in enumerate(task_ids):
         task = await scheduled_tasks_repo.get_task(task_id)
@@ -5901,8 +5909,9 @@ async def admin_bulk_redistribute_scheduled_tasks(request: Request):
                 cron=task.get("cron"),
             )
             continue
-        scheduled_hour = (hour + (offset // 60)) % 24
-        scheduled_minute = offset % 60
+        total_minutes = minute_offset + offset
+        scheduled_hour = (hour + (total_minutes // 60)) % 24
+        scheduled_minute = total_minutes % 60
         fields[0] = str(scheduled_minute)
         fields[1] = str(scheduled_hour)
         await scheduled_tasks_repo.update_task_cron(task_id, " ".join(fields))
@@ -5915,12 +5924,13 @@ async def admin_bulk_redistribute_scheduled_tasks(request: Request):
         "Scheduled tasks bulk redistributed",
         redistributed_count=redistributed_count,
         redistribute_hour=hour,
+        redistribute_offset=minute_offset,
         redistributed_by=current_user.get("id") if current_user else None,
         task_ids=task_ids,
     )
 
     message_suffix = "task" if redistributed_count == 1 else "tasks"
-    redirect_message = f"Redistributed {redistributed_count} {message_suffix} to run from {hour:02d}:00 UTC."
+    redirect_message = f"Redistributed {redistributed_count} {message_suffix} to run from {hour:02d}:{minute_offset:02d} UTC."
     if redistributed_count < len(task_ids):
         redirect_message = f"{redirect_message} Some selected tasks were not found or had invalid cron expressions."
 

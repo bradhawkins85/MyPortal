@@ -155,6 +155,7 @@
     const renameForm = document.querySelector('[data-scheduled-tasks-bulk-form="rename"]');
     const redistributeForm = document.querySelector('[data-scheduled-tasks-bulk-form="redistribute"]');
     const redistributeHourInput = document.querySelector('[data-scheduled-tasks-redistribute-hour]');
+    const redistributeOffsetInput = document.querySelector('[data-scheduled-tasks-redistribute-offset]');
     const countLabel = document.getElementById('scheduled-tasks-bulk-count');
 
     const getRowCheckboxes = () =>
@@ -289,8 +290,8 @@
       });
     }
 
-    // Handle redistribute button click — prompt for hour then submit the form
-    if (redistributeBtn && redistributeForm && redistributeHourInput) {
+    // Handle redistribute button click — prompt for hour and offset then submit the form
+    if (redistributeBtn && redistributeForm && redistributeHourInput && redistributeOffsetInput) {
       redistributeBtn.addEventListener('click', () => {
         uncheckHiddenCheckboxes();
         const selected = getVisibleCheckboxes().filter((cb) => cb.checked);
@@ -307,12 +308,22 @@
           window.alert('Enter an hour between 0 and 23.');
           return;
         }
+        const rawOffset = window.prompt('Enter the starting minute offset for the selected tasks (0-59):', '0');
+        if (rawOffset === null) {
+          return;
+        }
+        const offset = Number.parseInt(rawOffset.trim(), 10);
+        if (!Number.isInteger(offset) || offset < 0 || offset > 59) {
+          window.alert('Enter a starting minute offset between 0 and 59.');
+          return;
+        }
         const noun = count === 1 ? 'task' : 'tasks';
-        const message = `Redistribute ${count} selected ${noun} from ${String(hour).padStart(2, '0')}:00 UTC, one minute apart?`;
+        const message = `Redistribute ${count} selected ${noun} from ${String(hour).padStart(2, '0')}:${String(offset).padStart(2, '0')} UTC, one minute apart?`;
         if (!window.confirm(message)) {
           return;
         }
         redistributeHourInput.value = String(hour);
+        redistributeOffsetInput.value = String(offset);
         redistributeForm.submit();
       });
     }
