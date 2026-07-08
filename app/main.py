@@ -5959,14 +5959,54 @@ async def admin_tray_devices_page(
             or needle in str(d.get("device_uid") or "").lower()
             or needle in str(d.get("console_user") or "").lower()
         ]
+    trmm_scripts: list[dict] = []
+    trmm_scripts_error: str | None = None
+    selected_update_script_id: int | None = None
+    if current_user.get("is_super_admin"):
+        trmm_scripts, trmm_scripts_error = await _get_tray_trmm_scripts_for_form()
+        selected_update_script_id = await site_settings_repo.get_tray_update_trmm_script_id()
     extra = {
         "title": "Tray devices",
         "devices": devices,
         "filters": {"search": search or "", "status": status or ""},
         "matrix_enabled": settings.matrix_enabled,
         "tray_release": tray_installer_service.get_cached_latest_release_info(),
+        "trmm_scripts": trmm_scripts,
+        "trmm_scripts_error": trmm_scripts_error,
+        "selected_update_script_id": selected_update_script_id,
     }
     return await _render_template("admin/tray/devices.html", request, current_user, extra=extra)
+
+
+@app.post("/admin/tray/update-script", response_class=HTMLResponse)
+async def admin_tray_save_update_script(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+    raw_script_id = str(form.get("script_id") or "").strip()
+    if not raw_script_id:
+        await site_settings_repo.set_tray_update_trmm_script_id(None)
+        return flash_redirect(
+            "/admin/tray/devices",
+            "Tray update Tactical RMM script selection cleared.",
+            "success",
+        )
+    try:
+        script_id = int(raw_script_id)
+    except ValueError:
+        return flash_redirect(
+            "/admin/tray/devices",
+            "Select a valid Tactical RMM script for tray updates.",
+            "error",
+        )
+    await site_settings_repo.set_tray_update_trmm_script_id(script_id)
+    return flash_redirect(
+        "/admin/tray/devices",
+        "Tray update Tactical RMM script saved.",
+        "success",
+    )
 
 
 @app.post("/admin/tray/devices/{device_id}/update", response_class=HTMLResponse)
@@ -5974,8 +6014,9 @@ async def admin_tray_update_device(device_id: int, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
+    from app.repositories import assets as assets_repo
     from app.repositories import tray as tray_repo
-    from app.services import tray as tray_service
+    from app.services import tacticalrmm as tacticalrmm_service
 
     device = await tray_repo.get_device_by_id(device_id)
     if not device:
@@ -5987,29 +6028,57 @@ async def admin_tray_update_device(device_id: int, request: Request):
             "error",
         )
 
-    payload = {"type": "update"}
+    script_id = await site_settings_repo.get_tray_update_trmm_script_id()
+    if not script_id:
+        return flash_redirect(
+            "/admin/tray/devices",
+            "Select a Tactical RMM script before running tray updates.",
+            "error",
+        )
+    asset_id = device.get("asset_id")
+    if not asset_id:
+        return flash_redirect(
+            "/admin/tray/devices",
+            "This tray device is not linked to an asset with a Tactical RMM agent ID.",
+            "error",
+        )
+    asset = await assets_repo.get_asset_by_id(int(asset_id))
+    tactical_agent_id = str((asset or {}).get("tactical_asset_id") or "").strip()
+    if not tactical_agent_id:
+        return flash_redirect(
+            "/admin/tray/devices",
+            "The linked asset is missing a Tactical RMM agent ID.",
+            "error",
+        )
+
+    payload = {
+        "type": "tacticalrmm_script",
+        "purpose": "tray_update",
+        "script_id": script_id,
+        "tactical_agent_id": tactical_agent_id,
+    }
     command_id = await tray_repo.log_command(
         device_id=int(device["id"]),
-        command="update",
+        command="trmm_update_script",
         payload_json=json.dumps(payload),
         initiated_by_user_id=current_user.get("id") if current_user else None,
         status="queued",
     )
-    payload["command_id"] = command_id
-    device_uid = str(device.get("device_uid") or "").strip()
-    delivered = await tray_service.send_to_device(device_uid, payload) if device_uid else False
-    if delivered:
-        await tray_repo.mark_command_delivered(command_id)
-    if delivered:
+    try:
+        result = await tacticalrmm_service.run_script_on_agent(tactical_agent_id, script_id)
+    except Exception as exc:  # pragma: no cover - external integration availability
+        await tray_repo.mark_command_delivered(command_id, error=str(exc))
         return flash_redirect(
             "/admin/tray/devices",
-            "Update command sent to tray device.",
-            "success",
+            f"Unable to start Tactical RMM update script: {exc}",
+            "error",
         )
+    payload["tactical_rmm_response"] = result.get("response")
+    await tray_repo.mark_command_delivered(command_id)
     return flash_redirect(
         "/admin/tray/devices",
-        "Update command queued; the tray device is not currently connected to this server process.",
-        "info",
+        "Tactical RMM update script started for the tray device.",
+        "success",
     )
 
 
