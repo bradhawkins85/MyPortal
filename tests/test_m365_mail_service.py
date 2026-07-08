@@ -1512,3 +1512,62 @@ async def test_sync_account_marks_already_imported_unread_message_as_read(monkey
             {"isRead": True},
         )
     ]
+
+
+async def test_force_reimport_message_deletes_import_record_and_marks_unread(monkeypatch):
+    account = {
+        "id": 9,
+        "company_id": 5,
+        "user_principal_name": "user@example.com",
+        "process_unread_only": True,
+    }
+    deleted: list[tuple[int, str]] = []
+    patched: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_get_account(account_id: int):
+        return account
+
+    async def fake_get_message(account_id: int, message_uid: str):
+        return {"status": "imported", "message_uid": message_uid}
+
+    async def fake_delete_message(account_id: int, message_uid: str):
+        deleted.append((account_id, message_uid))
+
+    async def fake_acquire_token(company_id, **kwargs):
+        return "token"
+
+    async def fake_graph_patch(access_token: str, url: str, payload: dict[str, object]):
+        patched.append((url, payload))
+        return {}
+
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_message", fake_get_message)
+    monkeypatch.setattr(m365_mail.mail_repo, "delete_message", fake_delete_message)
+    monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(m365_mail, "_graph_patch", fake_graph_patch)
+
+    result = await m365_mail.force_reimport_message(9, " message/id ")
+
+    assert result["deleted"] is True
+    assert result["marked_unread"] is True
+    assert deleted == [(9, "message/id")]
+    assert patched == [
+        (
+            "https://graph.microsoft.com/v1.0/users/user%40example.com/messages/message%2Fid",
+            {"isRead": False},
+        )
+    ]
+
+
+async def test_force_reimport_message_requires_existing_record(monkeypatch):
+    async def fake_get_account(account_id: int):
+        return {"id": account_id}
+
+    async def fake_get_message(account_id: int, message_uid: str):
+        return None
+
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_message", fake_get_message)
+
+    with pytest.raises(LookupError):
+        await m365_mail.force_reimport_message(9, "missing")

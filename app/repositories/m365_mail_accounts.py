@@ -238,6 +238,16 @@ async def get_message(account_id: int, message_uid: str) -> dict[str, Any] | Non
     return _normalise_message(row) if row else None
 
 
+async def delete_message(account_id: int, message_uid: str) -> None:
+    await db.execute(
+        """
+        DELETE FROM m365_mail_account_messages
+        WHERE account_id = %s AND message_uid = %s
+        """,
+        (account_id, message_uid),
+    )
+
+
 async def upsert_message(
     *,
     account_id: int,

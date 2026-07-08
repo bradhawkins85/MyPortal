@@ -408,6 +408,67 @@ async def clone_account(account_id: int) -> dict[str, Any]:
     return enrich_account_response(account)
 
 
+async def _acquire_access_token_for_mail_account(account: Mapping[str, Any]) -> str:
+    if _account_has_delegated_tokens(account):
+        return await _acquire_delegated_access_token(account)
+    auth_company_id = _int_or_none(account.get("company_id"))
+    if auth_company_id is None:
+        provisioned = await m365_repo.list_provisioned_company_ids()
+        if provisioned:
+            auth_company_id = min(provisioned)
+    if auth_company_id is None:
+        raise ValueError("No Microsoft 365 credentials configured.")
+    return await m365_service.acquire_access_token(
+        int(auth_company_id), force_client_credentials=True
+    )
+
+
+async def force_reimport_message(account_id: int, message_uid: str) -> dict[str, Any]:
+    """Forget a previously imported Graph message so a future sync can import it again."""
+    normalized_uid = (message_uid or "").strip()
+    if not normalized_uid:
+        raise ValueError("Message id is required.")
+
+    account = await mail_repo.get_account(account_id)
+    if not account:
+        raise LookupError("Mailbox account not found.")
+
+    existing = await mail_repo.get_message(account_id, normalized_uid)
+    if not existing:
+        raise LookupError("Imported message record not found.")
+
+    await mail_repo.delete_message(account_id, normalized_uid)
+    marked_unread = False
+    mark_unread_error: str | None = None
+
+    if bool(account.get("process_unread_only")):
+        try:
+            access_token = await _acquire_access_token_for_mail_account(account)
+            upn = str(account.get("user_principal_name") or "")
+            patch_url = (
+                f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/"
+                f"{quote(normalized_uid, safe='')}"
+            )
+            await _graph_patch(access_token, patch_url, {"isRead": False})
+            marked_unread = True
+        except Exception as exc:  # pragma: no cover - depends on live Graph access
+            mark_unread_error = str(exc)
+            log_error(
+                "Unable to mark force-reimported M365 message as unread",
+                account_id=account_id,
+                message_id=normalized_uid,
+                error=mark_unread_error,
+            )
+
+    return {
+        "account": enrich_account_response(account),
+        "message_uid": normalized_uid,
+        "deleted": True,
+        "marked_unread": marked_unread,
+        "mark_unread_error": mark_unread_error,
+    }
+
+
 async def delete_account(account_id: int) -> None:
     from app.services.scheduler import scheduler_service
 
