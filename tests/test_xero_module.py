@@ -1213,6 +1213,63 @@ async def test_acquire_xero_access_token_rechecks_cache_after_refresh_lock(monke
     refresh.assert_not_awaited()
 
 
+@pytest.mark.anyio("asyncio")
+async def test_xero_token_keepalive_refreshes_configured_module(monkeypatch):
+    module = {"enabled": True, "settings": {}}
+    credentials = {
+        "client_id": "xero-client",
+        "client_secret": "xero-secret",
+        "refresh_token": "refresh-token",
+    }
+    acquire = AsyncMock(return_value="fresh-access-token")
+
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        assert slug == modules_service.XERO_MODULE_SLUG
+        assert redact is False
+        return module
+
+    async def fake_get_xero_credentials():
+        return credentials
+
+    monkeypatch.setattr(modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(modules_service, "get_xero_credentials", fake_get_xero_credentials)
+    monkeypatch.setattr(modules_service, "acquire_xero_access_token", acquire)
+
+    assert await modules_service._xero_token_keepalive_once() is True
+    acquire.assert_awaited_once()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_xero_token_keepalive_skips_incomplete_credentials(monkeypatch):
+    acquire = AsyncMock(return_value="fresh-access-token")
+
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        return {"enabled": True, "settings": {}}
+
+    async def fake_get_xero_credentials():
+        return {
+            "client_id": "xero-client",
+            "client_secret": "xero-secret",
+            "refresh_token": "",
+        }
+
+    monkeypatch.setattr(modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(modules_service, "get_xero_credentials", fake_get_xero_credentials)
+    monkeypatch.setattr(modules_service, "acquire_xero_access_token", acquire)
+
+    assert await modules_service._xero_token_keepalive_once() is False
+    acquire.assert_not_awaited()
+
+
+def test_xero_token_keepalive_interval_uses_safe_minimum(monkeypatch):
+    monkeypatch.setenv("XERO_TOKEN_KEEPALIVE_INTERVAL_SECONDS", "5")
+
+    assert (
+        modules_service._get_xero_token_keepalive_interval_seconds()
+        == modules_service._XERO_TOKEN_KEEPALIVE_MIN_INTERVAL_SECONDS
+    )
+
+
 def test_xero_line_item_template_env_overrides_stored_settings(monkeypatch):
     monkeypatch.setenv(
         "XERO_LINE_ITEM_TEMPLATE",
