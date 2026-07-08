@@ -64,8 +64,8 @@ async def test_sync_account_403_non_403_error_not_intercepted(monkeypatch):
     assert "500" in error_msg
 
 
-async def test_sync_no_filter_param_in_graph_url(monkeypatch):
-    """The Graph API request must NOT include $filter=isRead eq false."""
+async def test_sync_uses_unread_filter_param_in_graph_url(monkeypatch):
+    """Unread-only sync asks Graph for unread messages instead of scanning the whole folder."""
     _patch_common(monkeypatch)
     captured_urls: list[str] = []
     async def fake_acquire_token(company_id, **kwargs):
@@ -77,8 +77,8 @@ async def test_sync_no_filter_param_in_graph_url(monkeypatch):
     monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
     result = await m365_mail.sync_account(1)
     assert result["status"] == "succeeded"
-    assert "$filter" not in captured_urls[0], f"$filter found in URL: {captured_urls[0]}"
-    assert "$orderby" in captured_urls[0]
+    assert "$filter=isRead%20eq%20false" in captured_urls[0], captured_urls[0]
+    assert "$orderby" not in captured_urls[0]
 
 
 async def test_sync_read_message_skipped_when_process_unread_only(monkeypatch):
@@ -102,3 +102,29 @@ async def test_sync_read_message_skipped_when_process_unread_only(monkeypatch):
     assert "msg-read" not in visited
     assert "msg-unread" in visited
     assert result["status"] == "succeeded"
+
+
+async def test_sync_unread_filter_403_falls_back_to_full_scan(monkeypatch):
+    """A tenant that denies unread filtering should still sync via the full-folder scan."""
+    _patch_common(monkeypatch)
+    captured_urls: list[str] = []
+
+    async def fake_acquire_token(company_id, **kwargs):
+        return "fake-token"
+
+    async def fake_graph_get(access_token: str, url: str):
+        captured_urls.append(url)
+        if "$filter" in url:
+            raise M365Error("Microsoft Graph request failed (403)", http_status=403)
+        return {"value": [], "@odata.nextLink": None}
+
+    monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+
+    result = await m365_mail.sync_account(1)
+
+    assert result["status"] == "succeeded"
+    assert len(captured_urls) == 2
+    assert "$filter=isRead%20eq%20false" in captured_urls[0]
+    assert "$filter" not in captured_urls[1]
+    assert "$orderby" in captured_urls[1]

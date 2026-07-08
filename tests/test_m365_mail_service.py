@@ -1446,3 +1446,69 @@ def test_m365_mail_account_response_schema():
 
     assert response.id == 1
     assert response.user_principal_name == "user@example.com"
+
+
+async def test_sync_account_marks_already_imported_unread_message_as_read(monkeypatch):
+    monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
+
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        return {"enabled": True}
+
+    async def fake_get_account(account_id: int):
+        return {
+            "id": account_id,
+            "active": True,
+            "company_id": 5,
+            "user_principal_name": "user@example.com",
+            "folder": "Inbox",
+            "process_unread_only": True,
+            "mark_as_read": True,
+            "filter_query": None,
+            "sync_known_only": False,
+        }
+
+    async def fake_acquire_token(company_id, **kwargs):
+        return "fake-access-token"
+
+    async def fake_graph_get(access_token: str, url: str):
+        return {
+            "value": [
+                {
+                    "id": "message/id with spaces",
+                    "internetMessageId": "<message@example.com>",
+                    "isRead": False,
+                    "subject": "Already imported",
+                }
+            ]
+        }
+
+    async def fake_get_message(account_id: int, message_uid: str):
+        return {"status": "imported"}
+
+    patched: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_graph_patch(access_token: str, url: str, payload: dict[str, object]):
+        patched.append((url, payload))
+        return {}
+
+    async def fake_update_account(account_id: int, **fields):
+        return None
+
+    monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(m365_mail, "_graph_patch", fake_graph_patch)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_message", fake_get_message)
+    monkeypatch.setattr(m365_mail.mail_repo, "update_account", fake_update_account)
+
+    result = await m365_mail.sync_account(8)
+
+    assert result["status"] == "succeeded"
+    assert result["processed"] == 0
+    assert patched == [
+        (
+            "https://graph.microsoft.com/v1.0/users/user%40example.com/messages/message%2Fid%20with%20spaces",
+            {"isRead": True},
+        )
+    ]

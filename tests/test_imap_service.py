@@ -932,3 +932,65 @@ async def test_sync_account_reports_search_error(monkeypatch):
     assert result["errors"]
     assert "Unable to search mailbox" in result["errors"][0]["error"]
     assert mailbox.logged_out
+
+
+async def test_sync_account_marks_already_imported_unread_message_as_read(monkeypatch):
+    monkeypatch.setattr(imap.system_state, "is_restart_pending", lambda: False)
+
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        return {"enabled": True}
+
+    async def fake_get_account(account_id: int):
+        return {
+            "id": account_id,
+            "host": "mail.example.com",
+            "port": 993,
+            "username": "inbox",
+            "password_encrypted": "encrypted",
+            "folder": "INBOX",
+            "process_unread_only": True,
+            "mark_as_read": True,
+            "active": True,
+        }
+
+    async def fake_get_message(account_id: int, uid: str):
+        return {"status": "imported"}
+
+    async def fake_update_account(account_id: int, **payload):
+        return None
+
+    class AlreadyImportedMailbox:
+        def __init__(self) -> None:
+            self.commands: list[tuple[str, tuple[object, ...]]] = []
+
+        def login(self, username: str, password: str) -> None:
+            pass
+
+        def select(self, folder: str, readonly: bool = False):
+            return "OK", []
+
+        def uid(self, command: str, *args):
+            self.commands.append((command, args))
+            if command == "search":
+                return "OK", [b"42"]
+            if command == "store":
+                return "OK", []
+            raise AssertionError(f"Unexpected command {command!r}")
+
+        def logout(self) -> None:
+            pass
+
+    mailbox = AlreadyImportedMailbox()
+    monkeypatch.setattr(imap.imaplib, "IMAP4_SSL", lambda host, port: mailbox)
+    monkeypatch.setattr(imap.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(imap.imap_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(imap.imap_repo, "get_message", fake_get_message)
+    monkeypatch.setattr(imap.imap_repo, "update_account", fake_update_account)
+    monkeypatch.setattr(imap, "decrypt_secret", lambda value: "password")
+
+    result = await imap.sync_account(5)
+
+    assert result["status"] == "succeeded"
+    assert result["processed"] == 0
+    assert ("store", (b"42", "+FLAGS", "(\\Seen)")) in mailbox.commands
+    assert not any(command == "fetch" for command, _args in mailbox.commands)
