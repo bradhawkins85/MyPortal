@@ -43,7 +43,6 @@ async def _render_m365_mail_dashboard(
     error_message: str | None = None,
     sync_result: dict[str, Any] | None = None,
     status_code: int = status.HTTP_200_OK,
-    sync_result: dict[str, Any] | None = None,
 ) -> HTMLResponse:
     main_module = _main()
     accounts = await m365_mail_service.list_accounts()
@@ -290,6 +289,45 @@ async def admin_delete_m365_mail_account(account_id: int, request: Request):
     label = account.get("name") if account else f"#{account_id}"
     message = f"Mailbox {label} deleted."
     return flash_redirect("/admin/modules/m365-mail", message, "success")
+
+
+@router.post("/admin/modules/m365-mail/accounts/{account_id}/messages/force-import", response_class=HTMLResponse)
+async def admin_force_import_m365_mail_message(account_id: int, request: Request):
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    message_uid = str(form.get("messageUid") or "").strip()
+    try:
+        result = await m365_mail_service.force_reimport_message(account_id, message_uid)
+    except (LookupError, ValueError) as exc:
+        return flash_redirect("/admin/modules/m365-mail", str(exc), "error")
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to force M365 message reimport",
+            account_id=account_id,
+            message_uid=message_uid,
+            error=str(exc),
+        )
+        return flash_redirect(
+            "/admin/modules/m365-mail",
+            "Unable to force import that Office 365 mailbox message.",
+            "error",
+        )
+    account = result.get("account") or {}
+    label = account.get("name") or account.get("user_principal_name") or f"Mailbox {account_id}"
+    unread_note = (
+        " The message was also marked unread so the unread-only sync can pick it up."
+        if result.get("marked_unread")
+        else ""
+    )
+    if result.get("mark_unread_error"):
+        unread_note = " The import record was cleared, but the message could not be marked unread."
+    return flash_redirect(
+        "/admin/modules/m365-mail",
+        f"{label} will force import the selected email on the next sync cycle.{unread_note}",
+        "success",
+    )
 
 
 @router.post("/admin/modules/m365-mail/accounts/{account_id}/sync", response_class=HTMLResponse)

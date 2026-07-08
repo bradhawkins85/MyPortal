@@ -367,6 +367,7 @@
                     <th scope="col">From</th>
                     <th scope="col">Result</th>
                     <th scope="col">Ticket / reason</th>
+                    <th scope="col">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -395,6 +396,19 @@
                           {{ action.reason|replace('_', ' ') }}
                         {% elif action.error %}
                           <span class="text-danger">{{ action.error }}</span>
+                        {% else %}
+                          —
+                        {% endif %}
+                      </td>
+                      <td>
+                        {% if action.reason == 'already_imported' and action.message_id %}
+                          <form action="/admin/modules/m365-mail/accounts/{{ sync_account.id }}/messages/force-import" method="post" class="inline-form" onsubmit="return confirm('Force import this email again during the next sync cycle?');">
+                            {% if csrf_token %}
+                              <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                            {% endif %}
+                            <input type="hidden" name="messageUid" value="{{ action.message_id }}" />
+                            <button type="submit" class="button button--small button--ghost">Force import next sync</button>
+                          </form>
                         {% else %}
                           —
                         {% endif %}
