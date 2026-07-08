@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
@@ -184,6 +185,8 @@ def test_scheduled_tasks_page_renders_tasks(super_admin_context, monkeypatch):
     assert 'id="scheduled-tasks-bulk-actions-menu"' in header_html
     assert ">Manage Tasks<" not in header_html
     assert 'data-task-create' in header_html
+    assert 'Redistribute selected' in header_html
+    assert 'data-scheduled-tasks-bulk-action="redistribute"' in header_html
 
 
 def test_scheduled_tasks_page_offers_rag_control_commands(super_admin_context, monkeypatch):
@@ -581,6 +584,113 @@ async def test_bulk_rename_no_ids(super_admin_context, csrf_session, monkeypatch
 
     assert response.status_code == 303
     assert "error=" not in response.headers["location"]
+    flash_cookie = response.headers.get("set-cookie", "")
+    assert "_flash=" in flash_cookie
+    assert "error" in flash_cookie
+
+
+def test_bulk_redistribute_scheduled_tasks(super_admin_context, csrf_session, monkeypatch):
+    """Bulk redistribute updates cron minutes one minute apart at the requested hour."""
+    updated: dict[int, str] = {}
+    refreshed = False
+
+    async def fake_get_task(task_id):
+        tasks = {
+            1: {"id": 1, "cron": "15 4 * * *"},
+            2: {"id": 2, "cron": "30 5 * * 1"},
+            3: {"id": 3, "cron": "45 6 * * * extra"},
+        }
+        return tasks.get(task_id)
+
+    async def fake_update_task_cron(task_id, cron):
+        updated[task_id] = cron
+
+    async def fake_refresh():
+        nonlocal refreshed
+        refreshed = True
+
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "get_task", fake_get_task)
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "update_task_cron", fake_update_task_cron)
+    monkeypatch.setattr(main_module.scheduler_service, "refresh", fake_refresh)
+    request = _make_post_request("/admin/scheduled-tasks/bulk-redistribute")
+
+    async def fake_form():
+        return FormData(
+            [
+                ("taskIds", "1"),
+                ("taskIds", "2"),
+                ("taskIds", "3"),
+                ("redistributeHour", "9"),
+                ("_csrf", csrf_session.csrf_token),
+            ]
+        )
+
+    monkeypatch.setattr(request, "form", fake_form)
+
+    response = asyncio.run(main_module.admin_bulk_redistribute_scheduled_tasks(request))
+
+    assert response.status_code == 303
+    assert updated == {
+        1: "0 9 * * *",
+        2: "1 9 * * 1",
+        3: "2 9 * * * extra",
+    }
+    assert refreshed is True
+
+
+def test_bulk_redistribute_scheduled_tasks_rolls_into_later_hours(super_admin_context, csrf_session, monkeypatch):
+    """Bulk redistribute keeps spacing tasks one minute apart beyond the first hour."""
+    updated: dict[int, str] = {}
+    refreshed = False
+
+    async def fake_get_task(task_id):
+        return {"id": task_id, "cron": "15 4 * * *"}
+
+    async def fake_update_task_cron(task_id, cron):
+        updated[task_id] = cron
+
+    async def fake_refresh():
+        nonlocal refreshed
+        refreshed = True
+
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "get_task", fake_get_task)
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "update_task_cron", fake_update_task_cron)
+    monkeypatch.setattr(main_module.scheduler_service, "refresh", fake_refresh)
+    request = _make_post_request("/admin/scheduled-tasks/bulk-redistribute")
+
+    async def fake_form():
+        entries = [("taskIds", str(task_id)) for task_id in range(1, 63)]
+        entries.extend([("redistributeHour", "23"), ("_csrf", csrf_session.csrf_token)])
+        return FormData(entries)
+
+    monkeypatch.setattr(request, "form", fake_form)
+
+    response = asyncio.run(main_module.admin_bulk_redistribute_scheduled_tasks(request))
+
+    assert response.status_code == 303
+    assert len(updated) == 62
+    assert updated[1] == "0 23 * * *"
+    assert updated[60] == "59 23 * * *"
+    assert updated[61] == "0 0 * * *"
+    assert updated[62] == "1 0 * * *"
+    assert refreshed is True
+
+
+def test_bulk_redistribute_rejects_invalid_hour(super_admin_context, csrf_session, monkeypatch):
+    """Bulk redistribute validates the requested hour before updating tasks."""
+    update_mock = AsyncMock()
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "update_task_cron", update_mock)
+    request = _make_post_request("/admin/scheduled-tasks/bulk-redistribute")
+
+    async def fake_form():
+        return FormData([("taskIds", "1"), ("redistributeHour", "24"), ("_csrf", csrf_session.csrf_token)])
+
+    monkeypatch.setattr(request, "form", fake_form)
+
+    response = asyncio.run(main_module.admin_bulk_redistribute_scheduled_tasks(request))
+
+    assert response.status_code == 303
+    update_mock.assert_not_called()
     flash_cookie = response.headers.get("set-cookie", "")
     assert "_flash=" in flash_cookie
     assert "error" in flash_cookie

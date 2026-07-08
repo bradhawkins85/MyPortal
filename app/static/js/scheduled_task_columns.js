@@ -150,8 +150,11 @@
     const selectAll = document.querySelector('[data-scheduled-tasks-select-all]');
     const deleteBtn = document.querySelector('[data-scheduled-tasks-bulk-action="delete"]');
     const renameBtn = document.querySelector('[data-scheduled-tasks-bulk-action="rename"]');
+    const redistributeBtn = document.querySelector('[data-scheduled-tasks-bulk-action="redistribute"]');
     const deleteForm = document.querySelector('[data-scheduled-tasks-bulk-form="delete"]');
     const renameForm = document.querySelector('[data-scheduled-tasks-bulk-form="rename"]');
+    const redistributeForm = document.querySelector('[data-scheduled-tasks-bulk-form="redistribute"]');
+    const redistributeHourInput = document.querySelector('[data-scheduled-tasks-redistribute-hour]');
     const countLabel = document.getElementById('scheduled-tasks-bulk-count');
 
     const getRowCheckboxes = () =>
@@ -185,6 +188,10 @@
         renameBtn.disabled = count === 0;
         renameBtn.hidden = false;
       }
+      if (redistributeBtn) {
+        redistributeBtn.disabled = count === 0;
+        redistributeBtn.hidden = false;
+      }
       if (countLabel) {
         countLabel.textContent = `(${count})`;
         countLabel.hidden = count === 0;
@@ -202,17 +209,20 @@
         }
       }
 
-      // Mirror checked checkboxes into the rename form so it also receives taskIds
-      if (renameForm) {
-        renameForm.querySelectorAll('input[name="taskIds"]').forEach((el) => el.remove());
+      // Mirror checked checkboxes into forms that do not own the row checkboxes.
+      [renameForm, redistributeForm].forEach((form) => {
+        if (!form) {
+          return;
+        }
+        form.querySelectorAll('input[name="taskIds"]').forEach((el) => el.remove());
         selected.forEach((cb) => {
           const input = document.createElement('input');
           input.type = 'hidden';
           input.name = 'taskIds';
           input.value = cb.value;
-          renameForm.appendChild(input);
+          form.appendChild(input);
         });
-      }
+      });
     };
 
     if (selectAll) {
@@ -276,6 +286,34 @@
           return;
         }
         renameForm.submit();
+      });
+    }
+
+    // Handle redistribute button click — prompt for hour then submit the form
+    if (redistributeBtn && redistributeForm && redistributeHourInput) {
+      redistributeBtn.addEventListener('click', () => {
+        uncheckHiddenCheckboxes();
+        const selected = getVisibleCheckboxes().filter((cb) => cb.checked);
+        const count = selected.length;
+        if (!count) {
+          return;
+        }
+        const rawHour = window.prompt('Enter the UTC hour for the selected tasks to start running (0-23):', '0');
+        if (rawHour === null) {
+          return;
+        }
+        const hour = Number.parseInt(rawHour.trim(), 10);
+        if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
+          window.alert('Enter an hour between 0 and 23.');
+          return;
+        }
+        const noun = count === 1 ? 'task' : 'tasks';
+        const message = `Redistribute ${count} selected ${noun} from ${String(hour).padStart(2, '0')}:00 UTC, one minute apart?`;
+        if (!window.confirm(message)) {
+          return;
+        }
+        redistributeHourInput.value = String(hour);
+        redistributeForm.submit();
       });
     }
 

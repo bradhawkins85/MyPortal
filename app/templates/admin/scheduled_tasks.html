@@ -57,6 +57,17 @@
       >
         <span>Rename selected</span>
       </button>
+      <button
+        type="button"
+        class="header-menu__item"
+        role="menuitem"
+        id="scheduled-tasks-bulk-redistribute-btn"
+        form="scheduled-tasks-bulk-redistribute-form"
+        data-scheduled-tasks-bulk-action="redistribute"
+        disabled
+      >
+        <span>Redistribute selected</span>
+      </button>
     </div>
   </div>
 {% endblock %}
@@ -102,6 +113,19 @@
       hidden
     >
       {% include "partials/csrf.html" %}
+      {% if show_inactive %}<input type="hidden" name="show_inactive" value="1" />{% endif %}
+    </form>
+
+    {# Hidden bulk-redistribute form #}
+    <form
+      id="scheduled-tasks-bulk-redistribute-form"
+      method="post"
+      action="/admin/scheduled-tasks/bulk-redistribute"
+      data-scheduled-tasks-bulk-form="redistribute"
+      hidden
+    >
+      {% include "partials/csrf.html" %}
+      <input type="hidden" name="redistributeHour" data-scheduled-tasks-redistribute-hour />
       {% if show_inactive %}<input type="hidden" name="show_inactive" value="1" />{% endif %}
     </form>
 

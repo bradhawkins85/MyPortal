@@ -5778,6 +5778,9 @@ async def admin_bulk_delete_scheduled_tasks(request: Request):
     response = RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
     set_flash(response, redirect_message, "success")
     return response
+
+
+@app.post("/admin/scheduled-tasks/bulk-rename", response_class=HTMLResponse)
 async def admin_bulk_rename_scheduled_tasks(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
@@ -5852,6 +5855,83 @@ async def admin_bulk_rename_scheduled_tasks(request: Request):
     response = RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
     set_flash(response, redirect_message, "success")
     return response
+
+
+@app.post("/admin/scheduled-tasks/bulk-redistribute", response_class=HTMLResponse)
+async def admin_bulk_redistribute_scheduled_tasks(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+    raw_ids = form.getlist("taskIds")
+    task_ids: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_ids:
+        try:
+            identifier = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if identifier <= 0 or identifier in seen:
+            continue
+        seen.add(identifier)
+        task_ids.append(identifier)
+
+    if not task_ids:
+        return flash_redirect("/admin/scheduled-tasks", "Select at least one task to redistribute.", "error")
+
+    try:
+        hour = int(str(form.get("redistributeHour") or "").strip())
+    except (TypeError, ValueError):
+        return flash_redirect("/admin/scheduled-tasks", "Enter an hour between 0 and 23.", "error")
+
+    if hour < 0 or hour > 23:
+        return flash_redirect("/admin/scheduled-tasks", "Enter an hour between 0 and 23.", "error")
+
+    redistributed_count = 0
+    for offset, task_id in enumerate(task_ids):
+        task = await scheduled_tasks_repo.get_task(task_id)
+        if not task:
+            continue
+        fields = str(task.get("cron") or "").split()
+        if len(fields) < 5:
+            log_warning(
+                "Skipped scheduled task cron redistribution due to invalid cron",
+                task_id=task_id,
+                cron=task.get("cron"),
+            )
+            continue
+        scheduled_hour = (hour + (offset // 60)) % 24
+        scheduled_minute = offset % 60
+        fields[0] = str(scheduled_minute)
+        fields[1] = str(scheduled_hour)
+        await scheduled_tasks_repo.update_task_cron(task_id, " ".join(fields))
+        redistributed_count += 1
+
+    if redistributed_count:
+        await scheduler_service.refresh()
+
+    log_info(
+        "Scheduled tasks bulk redistributed",
+        redistributed_count=redistributed_count,
+        redistribute_hour=hour,
+        redistributed_by=current_user.get("id") if current_user else None,
+        task_ids=task_ids,
+    )
+
+    message_suffix = "task" if redistributed_count == 1 else "tasks"
+    redirect_message = f"Redistributed {redistributed_count} {message_suffix} to run from {hour:02d}:00 UTC."
+    if redistributed_count < len(task_ids):
+        redirect_message = f"{redirect_message} Some selected tasks were not found or had invalid cron expressions."
+
+    show_inactive_raw = form.get("show_inactive")
+    show_inactive_param = "1" if show_inactive_raw else ""
+    base_url = "/admin/scheduled-tasks"
+    redirect_url = f"{base_url}?show_inactive={show_inactive_param}" if show_inactive_param else base_url
+    response = RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+    set_flash(response, redirect_message, "success")
+    return response
+
 # ---------------------------------------------------------------------------
 
 
