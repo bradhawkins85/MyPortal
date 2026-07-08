@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import CroniterBadCronError, croniter
 
@@ -14,15 +15,30 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def _resolve_timezone(timezone_name: str | None) -> tzinfo:
+    if not timezone_name:
+        return timezone.utc
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        return timezone.utc
+
+
 def build_calendar_events(
     tasks: list[dict[str, Any]],
     *,
     start: datetime,
     end: datetime,
     limit: int = _MAX_EVENTS,
+    timezone_name: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Expand cron-based scheduled tasks into UTC calendar event instances."""
+    """Expand cron-based scheduled tasks into UTC calendar event instances.
 
+    Cron expressions are interpreted in the configured scheduler timezone, while
+    returned event timestamps remain UTC ISO-8601 values for browser display.
+    """
+
+    schedule_timezone = _resolve_timezone(timezone_name)
     start_utc = _as_utc(start)
     end_utc = _as_utc(end)
     if end_utc <= start_utc:
@@ -35,7 +51,9 @@ def build_calendar_events(
         if not cron_expression:
             continue
         try:
-            iterator = croniter(cron_expression, start_utc)
+            iterator = croniter(
+                cron_expression, start_utc.astimezone(schedule_timezone)
+            )
         except (CroniterBadCronError, ValueError, KeyError):
             continue
 
@@ -51,7 +69,9 @@ def build_calendar_events(
                 {
                     "id": f"task-{task.get('id')}-{next_run_utc.isoformat()}",
                     "task_id": int(task.get("id") or 0),
-                    "title": str(task.get("name") or task.get("command") or "Scheduled task"),
+                    "title": str(
+                        task.get("name") or task.get("command") or "Scheduled task"
+                    ),
                     "command": str(task.get("command") or ""),
                     "cron": cron_expression,
                     "company_id": task.get("company_id"),

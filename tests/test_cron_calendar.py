@@ -3,7 +3,9 @@ from datetime import datetime, timezone
 import importlib.util
 from pathlib import Path
 
-spec = importlib.util.spec_from_file_location("cron_calendar", Path("app/services/cron_calendar.py"))
+spec = importlib.util.spec_from_file_location(
+    "cron_calendar", Path("app/services/cron_calendar.py")
+)
 cron_calendar = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(cron_calendar)
@@ -51,3 +53,37 @@ def test_build_calendar_events_skips_invalid_cron():
     )
 
     assert events == []
+
+
+def test_build_calendar_events_uses_configured_cron_timezone():
+    events = build_calendar_events(
+        [
+            {
+                "id": 3,
+                "name": "Evening Brisbane job",
+                "command": "sync_staff",
+                "cron": "1 18 * * *",
+                "company_id": None,
+                "company_name": "All companies",
+                "active": True,
+            }
+        ],
+        start=datetime(2026, 7, 7, tzinfo=timezone.utc),
+        end=datetime(2026, 7, 8, tzinfo=timezone.utc),
+        timezone_name="Australia/Brisbane",
+    )
+
+    assert len(events) == 1
+    assert events[0]["start"] == "2026-07-07T08:01:00+00:00"
+
+
+def test_build_calendar_events_falls_back_to_utc_for_invalid_timezone():
+    events = build_calendar_events(
+        [{"id": 4, "name": "UTC fallback", "cron": "1 18 * * *", "active": True}],
+        start=datetime(2026, 7, 7, tzinfo=timezone.utc),
+        end=datetime(2026, 7, 8, tzinfo=timezone.utc),
+        timezone_name="Invalid/Timezone",
+    )
+
+    assert len(events) == 1
+    assert events[0]["start"] == "2026-07-07T18:01:00+00:00"
