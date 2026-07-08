@@ -1452,6 +1452,18 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 continue
             existing_message = await imap_repo.get_message(int(account_id), uid)
             if existing_message and existing_message.get("status") == "imported":
+                # A prior sync may have imported the ticket but failed to update the
+                # mailbox flag.  Do not re-import it, but still converge the mailbox
+                # state so imported messages are not left unread forever.
+                if mark_as_read:
+                    try:
+                        mailbox.uid("store", raw_uid, "+FLAGS", "(\\Seen)")
+                    except Exception:  # pragma: no cover - IMAP flag errors
+                        log_error(
+                            "Unable to mark already-imported IMAP message as read",
+                            account_id=account_id,
+                            uid=uid,
+                        )
                 continue
             # Use BODY.PEEK so that fetching the message does not set the \\Seen flag
             # before the ticket import succeeds.

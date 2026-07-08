@@ -827,25 +827,51 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         messages_url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/mailFolders/{quote(folder_identifier, safe='')}/messages"
         query_params = {
             "$top": "50",
-            "$orderby": "receivedDateTime asc",
             "$select": (
                 "id,subject,body,from,toRecipients,ccRecipients,bccRecipients,"
                 "replyTo,internetMessageHeaders,internetMessageId,isRead,receivedDateTime,"
                 "hasAttachments,conversationId"
             ),
         }
-        # Note: $filter is intentionally omitted. Combining $filter=isRead eq false
-        # with $orderby on the messages endpoint returns ErrorAccessDenied (403) for
-        # shared mailboxes and service accounts in certain Exchange Online configurations.
-        # Unread filtering is applied client-side using the isRead field from $select.
+        using_unread_filter = process_unread_only
+        if using_unread_filter:
+            # Ask Graph for unread messages directly.  Scanning a whole mailbox and
+            # filtering client-side can miss unread mail in large folders when the
+            # sync job exits, times out, or is interrupted before it has walked every
+            # page of already-read messages.  Do not combine this with $orderby:
+            # some Exchange Online/shared-mailbox configurations reject that shape.
+            query_params["$filter"] = "isRead eq false"
+        else:
+            query_params["$orderby"] = "receivedDateTime asc"
         full_url = messages_url + "?" + urlencode(query_params, quote_via=quote, safe="$,")
 
         # Paginate through all messages
         delegated_fallback_attempted = False
+        unread_filter_fallback_attempted = False
         while full_url:
             try:
                 data = await _graph_get(access_token, full_url)
             except M365Error as exc:
+                if exc.http_status == 403 and using_unread_filter and not unread_filter_fallback_attempted:
+                    # Older tenants or restricted shared-mailbox policies may reject
+                    # filtered message queries.  Fall back to the previous full-folder
+                    # scan rather than failing the sync outright.
+                    unread_filter_fallback_attempted = True
+                    using_unread_filter = False
+                    fallback_params = dict(query_params)
+                    fallback_params.pop("$filter", None)
+                    fallback_params["$orderby"] = "receivedDateTime asc"
+                    full_url = messages_url + "?" + urlencode(
+                        fallback_params,
+                        quote_via=quote,
+                        safe="$,",
+                    )
+                    log_info(
+                        "M365 unread filter was denied; falling back to full mailbox scan",
+                        account_id=account_id,
+                        upn=upn,
+                    )
+                    continue
                 if exc.http_status == 403 and using_delegated and not delegated_fallback_attempted:
                     # Delegated token lacks access to this mailbox.
                     # Fall back to client_credentials (app-level permissions)
@@ -930,6 +956,22 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 # Check if already processed
                 existing_message = await mail_repo.get_message(int(account_id), msg_id)
                 if existing_message and existing_message.get("status") == "imported":
+                    # A previous run may have successfully imported the message but
+                    # failed while marking it read.  Avoid duplicate ticket activity,
+                    # but still repair the mailbox read state on subsequent syncs.
+                    if mark_as_read and not msg.get("isRead", False):
+                        try:
+                            patch_url = (
+                                f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/"
+                                f"{quote(msg_id, safe='')}"
+                            )
+                            await _graph_patch(access_token, patch_url, {"isRead": True})
+                        except Exception:  # pragma: no cover - Graph API errors
+                            log_error(
+                                "Unable to mark already-imported M365 message as read",
+                                account_id=account_id,
+                                message_id=msg_id,
+                            )
                     continue
 
                 # Extract message details
@@ -1179,7 +1221,10 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 # Mark as read if configured
                 if mark_as_read and is_unread:
                     try:
-                        patch_url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/{msg_id}"
+                        patch_url = (
+                            f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/"
+                            f"{quote(msg_id, safe='')}"
+                        )
                         await _graph_patch(access_token, patch_url, {"isRead": True})
                     except Exception:  # pragma: no cover - Graph API errors
                         log_error(
