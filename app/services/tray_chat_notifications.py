@@ -52,6 +52,8 @@ async def notify_tray_device_of_chat_message(
         tray_device_id = 0
     if tray_device_id <= 0:
         return False
+    if str(room.get("status") or "").strip().lower() == "closed":
+        return False
     if _is_from_tray_device(message, tray_device_id):
         return False
 
