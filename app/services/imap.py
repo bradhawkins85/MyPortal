@@ -438,12 +438,16 @@ def _extract_record_id(record: Any) -> int | None:
     return _int_or_none(getattr(record, "id", None))
 
 
+def _normalise_email_address(email_address: str | None) -> str:
+    return (email_address or "").strip().lower()
+
+
 def _extract_email_addresses(from_header: str | None) -> list[str]:
     if not from_header:
         return []
     addresses = []
     for _name, email_address in getaddresses([from_header]):
-        candidate = (email_address or "").strip()
+        candidate = _normalise_email_address(email_address)
         if candidate:
             addresses.append(candidate)
     return addresses
@@ -532,6 +536,20 @@ async def _resolve_ticket_entities(
     default_company_id: int | None = None,
 ) -> tuple[int | None, int | None]:
     email_addresses = _extract_email_addresses(from_header)
+
+    checked_users: set[str] = set()
+    for email_address in email_addresses:
+        if email_address in checked_users:
+            continue
+        checked_users.add(email_address)
+        user = await users_repo.get_user_by_email(email_address)
+        requester_id = _extract_record_id(user)
+        if requester_id is not None:
+            user_company_id = _int_or_none(
+                user.get("company_id") if isinstance(user, Mapping) else None
+            )
+            return user_company_id or _int_or_none(default_company_id), requester_id
+
     seen_domains: set[str] = set()
 
     for email_address in email_addresses:
@@ -1635,6 +1653,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         category="email",
                         module_slug="imap",
                         external_reference=message_id,
+                        initial_reply_author_id=requester_id,
                         requester_email=from_email_addr if requester_id is None else None,
                     )
                     is_new_ticket = True

@@ -24,6 +24,12 @@ def test_extract_body_prefers_html_over_plain_text():
     assert "Plain text body" not in body
 
 
+def test_extract_email_addresses_normalises_case():
+    assert imap._extract_email_addresses("Sender <Sender@Example.COM>") == [
+        "sender@example.com"
+    ]
+
+
 def test_extract_body_inlines_cid_images():
     root = MIMEMultipart("related")
     alternative = MIMEMultipart("alternative")
@@ -408,6 +414,8 @@ async def test_sync_account_imports_email_successfully(monkeypatch):
         return None
 
     async def fake_get_user_by_email(email: str):
+        if email == "sender@example.com":
+            return {"id": 42, "company_id": 24}
         return None
 
     class SuccessMailbox:
@@ -429,7 +437,7 @@ async def test_sync_account_imports_email_successfully(monkeypatch):
                 return "OK", [b"10"]
             if command == "fetch":
                 raw_message = (
-                    b"From: Sender <sender@example.com>\r\n"
+                    b"From: Sender <Sender@Example.com>\r\n"
                     b"Subject: Help me with this\r\n"
                     b"Message-ID: <msg-10@example.com>\r\n"
                     b"\r\n"
@@ -469,6 +477,10 @@ async def test_sync_account_imports_email_successfully(monkeypatch):
     assert created_tickets, "Expected a ticket to be created"
     assert created_tickets[0]["subject"] == "Help me with this"
     assert created_tickets[0]["module_slug"] == "imap"
+    assert created_tickets[0]["requester_id"] == 42
+    assert created_tickets[0]["company_id"] == 24
+    assert created_tickets[0]["initial_reply_author_id"] == 42
+    assert created_tickets[0]["requester_email"] is None
 
     assert recorded_messages, "Expected message to be recorded"
     assert recorded_messages[-1]["status"] == "imported"
