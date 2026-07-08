@@ -1190,6 +1190,75 @@ async def test_sync_account_matches_existing_ticket(monkeypatch):
     assert len(replies_added) == 1
     assert replies_added[0]["ticket_id"] == 50
 
+async def test_embed_graph_inline_images_replaces_cid_with_data_uri(monkeypatch):
+    async def fake_graph_get(access_token: str, url: str):
+        return {
+            "value": [
+                {
+                    "@odata.type": "#microsoft.graph.fileAttachment",
+                    "id": "att-inline",
+                    "name": "image001.png",
+                    "contentType": "image/png",
+                    "contentId": "image001@example.com",
+                    "contentBytes": "cG5nLWJ5dGVz",
+                    "isInline": True,
+                }
+            ]
+        }
+
+    async def fake_graph_get_bytes(access_token: str, url: str):
+        raise AssertionError("contentBytes should avoid $value fetch")
+
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(m365_mail, "_graph_get_bytes", fake_graph_get_bytes)
+
+    body = await m365_mail._embed_graph_inline_images(
+        access_token="token",
+        upn="user@example.com",
+        message_id="msg-1",
+        html_body='<p>Screenshot</p><img src="cid:image001@example.com">',
+    )
+
+    assert "cid:image001@example.com" not in body
+    assert 'src="data:image/png;base64,cG5nLWJ5dGVz"' in body
+
+
+async def test_embed_graph_inline_images_fetches_value_when_content_bytes_missing(monkeypatch):
+    value_urls: list[str] = []
+
+    async def fake_graph_get(access_token: str, url: str):
+        return {
+            "value": [
+                {
+                    "@odata.type": "#microsoft.graph.fileAttachment",
+                    "id": "att inline/1",
+                    "name": "photo.jpg",
+                    "contentType": "image/jpeg",
+                    "contentId": "photo@cid",
+                    "isInline": True,
+                }
+            ]
+        }
+
+    async def fake_graph_get_bytes(access_token: str, url: str):
+        value_urls.append(url)
+        return b"jpeg-bytes"
+
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(m365_mail, "_graph_get_bytes", fake_graph_get_bytes)
+
+    body = await m365_mail._embed_graph_inline_images(
+        access_token="token",
+        upn="user@example.com",
+        message_id="AAMkAGI2/ABC==",
+        html_body="<img src='cid:photo%40cid'>",
+    )
+
+    assert "data:image/jpeg;base64,anBlZy1ieXRlcw==" in body
+    assert value_urls
+    assert "AAMkAGI2%2FABC%3D%3D" in value_urls[0]
+    assert "att%20inline%2F1" in value_urls[0]
+
 
 async def test_save_graph_attachments_fetches_value_when_content_bytes_missing(monkeypatch):
     """Attachments are saved even when Graph list response omits contentBytes."""
