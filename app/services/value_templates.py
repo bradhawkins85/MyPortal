@@ -162,6 +162,24 @@ _FIELD_ALIASES: dict[str, str] = {
 }
 
 
+def _project_sequence_field(value: Sequence[Any], field: str) -> str | None:
+    projected: list[str] = []
+    for item in value:
+        item_value: Any = None
+        if isinstance(item, Mapping):
+            item_value = item.get(field)
+        elif not isinstance(item, (str, bytes, bytearray)):
+            item_value = getattr(item, field, None)
+        if item_value is None:
+            continue
+        rendered = str(item_value).strip()
+        if rendered:
+            projected.append(rendered)
+    if not projected:
+        return None
+    return ", ".join(projected)
+
+
 def _resolve_context_value(context: Mapping[str, Any] | None, path: str) -> Any:
     if not context or not path:
         return None
@@ -176,7 +194,10 @@ def _resolve_context_value(context: Mapping[str, Any] | None, path: str) -> Any:
             try:
                 index = int(segment)
             except (TypeError, ValueError):
-                return None
+                current = _project_sequence_field(current, segment)
+                if current is None:
+                    return None
+                continue
             if index < 0 or index >= len(current):
                 return None
             current = current[index]

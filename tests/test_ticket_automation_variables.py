@@ -37,6 +37,10 @@ async def test_ticket_variables_are_rendered_in_automation_payload():
                 "id": 5,
                 "name": "Acme Corp",
             },
+            "watchers": [
+                {"email": "watcher.one@example.com", "display_name": "Watcher One"},
+                {"email": "watcher.two@example.com", "display_name": "Watcher Two"},
+            ],
         }
     }
     
@@ -48,6 +52,7 @@ async def test_ticket_variables_are_rendered_in_automation_payload():
         ("Subject: {{ticket.subject}}", "Subject: Printer is broken"),
         ("Requester: {{ticket.requester.email}}", "Requester: user@example.com"),
         ("Company: {{ticket.company.name}}", "Company: Acme Corp"),
+        ("CC: {{ticket.watchers.email}}", "CC: watcher.one@example.com, watcher.two@example.com"),
         
         # Complex payload
         (

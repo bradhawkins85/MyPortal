@@ -79,10 +79,22 @@ def test_system_variables_filter_sensitive_env(monkeypatch):
                         "email": "watcher@example.com",
                         "display_name": "Casey Lee",
                     },
+                },
+                {
+                    "id": 78,
+                    "ticket_id": 321,
+                    "user_id": 16,
+                    "email": "second.watcher@example.com",
+                    "display_name": "Morgan Reed",
+                    "user": {
+                        "id": 16,
+                        "email": "second.watcher@example.com",
+                        "display_name": "Morgan Reed",
+                    },
                 }
             ],
-            "watchers_count": 1,
-            "watcher_emails": ["watcher@example.com"],
+            "watchers_count": 2,
+            "watcher_emails": ["watcher@example.com", "second.watcher@example.com"],
             "latest_reply": {
                 "id": 555,
                 "ticket_id": 321,
@@ -122,8 +134,10 @@ def test_system_variables_include_ticket_tokens(ticket):
     assert variables["TICKET_CATEGORY"] == "hardware"
     assert variables["TICKET_PRIORITY"] == "high"
     assert variables["TICKET_EXTERNAL_REFERENCE"] == "RMM-42"
-    assert variables["TICKET_WATCHERS_COUNT"] == "1"
+    assert variables["TICKET_WATCHERS_COUNT"] == "2"
+    assert variables["TICKET_WATCHERS_EMAIL"] == "watcher@example.com, second.watcher@example.com"
     assert variables["TICKET_WATCHERS_0_EMAIL"] == "watcher@example.com"
     assert variables["TICKET_WATCHERS_0_USER_EMAIL"] == "watcher@example.com"
+    assert variables["TICKET_WATCHERS_1_EMAIL"] == "second.watcher@example.com"
     assert variables["TICKET_LATEST_REPLY_BODY"] == "We rebooted the printer."
     assert variables["TICKET_LATEST_REPLY_AUTHOR_EMAIL"] == "tech@example.com"
