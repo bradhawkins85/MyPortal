@@ -197,55 +197,32 @@ def test_generate_invoice_preview_resolves_requester_name_for_template(monkeypat
     assert preview["items"][0]["xeroDescription"] == "Ticket 42: Broken printer - Jane Requester"
 
 
-def test_unbill_time_entries_preview_lists_billable_unbilled_entries(monkeypatch):
-    async def fake_tickets(company_id, limit, offset=0):
-        return [{"id": 42, "ticket_number": "T-42", "subject": "AYCE support"}] if offset == 0 else []
-
-    async def fake_unbilled(ticket_id):
-        return {100}
-
-    async def fake_replies(ticket_id, include_internal):
+def test_unbill_time_entries_preview_lists_billable_entries(monkeypatch):
+    async def fake_entries(company_id, limit, offset=0):
         return [
-            {"id": 100, "is_billable": True, "minutes_spent": 45, "labour_type_name": "Remote Support"},
-            {"id": 101, "is_billable": True, "minutes_spent": 30, "labour_type_name": "Remote Support"},
-        ]
+            {"id": 100, "ticket_id": 42, "ticket_number": "T-42", "subject": "AYCE support", "is_billable": True, "minutes_spent": 45, "labour_type_name": "Remote Support"},
+            {"id": 101, "ticket_id": 42, "ticket_number": "T-42", "subject": "AYCE support", "is_billable": True, "minutes_spent": 30, "labour_type_name": "Remote Support"},
+        ] if offset == 0 else []
 
-    monkeypatch.setattr(scheduled_task_preview.unbill_time_entries_service.tickets_repo, "list_tickets", fake_tickets)
-    monkeypatch.setattr(scheduled_task_preview.unbill_time_entries_service.billed_time_repo, "get_unbilled_reply_ids", fake_unbilled)
-    monkeypatch.setattr(scheduled_task_preview.unbill_time_entries_service.tickets_repo, "list_replies", fake_replies)
+    monkeypatch.setattr(scheduled_task_preview.unbill_time_entries_service.tickets_repo, "list_billable_time_entries", fake_entries)
 
     preview = asyncio.run(scheduled_task_preview.preview_task({"command": "unbill_time_entries", "company_id": 1}))
 
     assert preview["status"] == "ready"
-    assert preview["totals"] == {"timeEntryCount": 1, "minutes": 45}
+    assert preview["totals"] == {"timeEntryCount": 2, "minutes": 75}
     assert preview["items"][0]["label"] == "Ticket #T-42: AYCE support"
-    assert preview["items"][0]["action"].startswith("Mark this billable time entry")
+    assert preview["items"][0]["action"].startswith("Clear the billable flag")
 
 
 def test_unbill_time_entries_preview_scans_all_ticket_pages(monkeypatch):
-    async def fake_tickets(company_id, limit, offset=0):
+    async def fake_entries(company_id, limit, offset=0):
         pages = {
-            0: [{"id": 42, "ticket_number": "T-42", "subject": "First page"}],
-            1: [{"id": 84, "ticket_number": "T-84", "subject": "Second page"}],
+            0: [{"id": 420, "ticket_id": 42, "ticket_number": "T-42", "subject": "First page", "minutes_spent": 30, "labour_type_name": "Remote Support"}],
+            1: [{"id": 840, "ticket_id": 84, "ticket_number": "T-84", "subject": "Second page", "minutes_spent": 30, "labour_type_name": "Remote Support"}],
         }
         return pages.get(offset, [])
 
-    async def fake_unbilled(ticket_id):
-        return {ticket_id * 10}
-
-    async def fake_replies(ticket_id, include_internal):
-        return [
-            {
-                "id": ticket_id * 10,
-                "is_billable": True,
-                "minutes_spent": 30,
-                "labour_type_name": "Remote Support",
-            }
-        ]
-
-    monkeypatch.setattr(scheduled_task_preview.unbill_time_entries_service.tickets_repo, "list_tickets", fake_tickets)
-    monkeypatch.setattr(scheduled_task_preview.unbill_time_entries_service.billed_time_repo, "get_unbilled_reply_ids", fake_unbilled)
-    monkeypatch.setattr(scheduled_task_preview.unbill_time_entries_service.tickets_repo, "list_replies", fake_replies)
+    monkeypatch.setattr(scheduled_task_preview.unbill_time_entries_service.tickets_repo, "list_billable_time_entries", fake_entries)
 
     preview = asyncio.run(
         scheduled_task_preview.unbill_time_entries_service.preview_unbill_time_entries(1, limit=1)
