@@ -2738,6 +2738,7 @@ async def on_startup() -> None:
             log_info("BCP default template bootstrapped")
 
     await scheduler_service.start()
+    modules_service.start_xero_token_keepalive()
     global _rag_relationship_stop, _rag_relationship_tasks
     _rag_relationship_stop = asyncio.Event()
     _rag_relationship_tasks = []
@@ -2797,6 +2798,7 @@ async def on_shutdown() -> None:
     if _feature_pack_watcher is not None:
         await _feature_pack_watcher.stop()
     await feature_registry.unload_all()
+    await modules_service.stop_xero_token_keepalive()
     await scheduler_service.stop()
     await db.disconnect()
     log_info("Application shutdown")

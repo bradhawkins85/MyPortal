@@ -47,6 +47,9 @@ _TACTICALRMM_DEFAULT_CALLS_PER_SECOND = 1.0
 
 _XERO_TOKEN_REFRESH_LOCK = asyncio.Lock()
 _XERO_TOKEN_EXPIRY_BUFFER = timedelta(minutes=5)
+_XERO_TOKEN_KEEPALIVE_TASK: asyncio.Task[Any] | None = None
+_XERO_TOKEN_KEEPALIVE_DEFAULT_INTERVAL_SECONDS = 24 * 60 * 60
+_XERO_TOKEN_KEEPALIVE_MIN_INTERVAL_SECONDS = 60 * 60
 
 
 # Module slug constants
@@ -350,6 +353,95 @@ async def acquire_xero_access_token() -> str:
             return cached_token
 
         return await refresh_xero_access_token()
+
+
+def _get_xero_token_keepalive_interval_seconds() -> int:
+    """Return how often the background Xero OAuth keepalive should run."""
+    raw_value = str(os.getenv("XERO_TOKEN_KEEPALIVE_INTERVAL_SECONDS", "")).strip()
+    if not raw_value:
+        return _XERO_TOKEN_KEEPALIVE_DEFAULT_INTERVAL_SECONDS
+    try:
+        interval = int(raw_value)
+    except ValueError:
+        logger.warning(
+            "Invalid XERO_TOKEN_KEEPALIVE_INTERVAL_SECONDS value; using default",
+            value=raw_value,
+            default=_XERO_TOKEN_KEEPALIVE_DEFAULT_INTERVAL_SECONDS,
+        )
+        return _XERO_TOKEN_KEEPALIVE_DEFAULT_INTERVAL_SECONDS
+    if interval < _XERO_TOKEN_KEEPALIVE_MIN_INTERVAL_SECONDS:
+        logger.warning(
+            "XERO_TOKEN_KEEPALIVE_INTERVAL_SECONDS below minimum; using minimum",
+            value=raw_value,
+            minimum=_XERO_TOKEN_KEEPALIVE_MIN_INTERVAL_SECONDS,
+        )
+        return _XERO_TOKEN_KEEPALIVE_MIN_INTERVAL_SECONDS
+    return interval
+
+
+async def _xero_token_keepalive_once() -> bool:
+    """Refresh/revalidate Xero OAuth when the module has enough credentials.
+
+    Xero access tokens are short lived and refresh tokens are rotated on use. If
+    the integration is idle for an extended period, an unused refresh token can
+    expire before the next scheduled sync. Running this keepalive periodically
+    keeps the stored refresh token current without requiring admins to revisit
+    the OAuth connect flow.
+    """
+    module = await get_module(XERO_MODULE_SLUG, redact=False)
+    if not module or not module.get("enabled", True):
+        return False
+
+    credentials = await get_xero_credentials()
+    if not credentials:
+        return False
+
+    required_fields = ("client_id", "client_secret", "refresh_token")
+    if not all(str(credentials.get(field) or "").strip() for field in required_fields):
+        return False
+
+    await acquire_xero_access_token()
+    return True
+
+
+async def _xero_token_keepalive_loop() -> None:
+    interval_seconds = _get_xero_token_keepalive_interval_seconds()
+    logger.info(
+        "Started Xero OAuth token keepalive task",
+        interval_seconds=interval_seconds,
+    )
+    try:
+        while True:
+            try:
+                refreshed = await _xero_token_keepalive_once()
+                if refreshed:
+                    logger.info("Xero OAuth token keepalive completed")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("Xero OAuth token keepalive failed", error=str(exc))
+            await asyncio.sleep(interval_seconds)
+    finally:
+        logger.info("Stopped Xero OAuth token keepalive task")
+
+
+def start_xero_token_keepalive() -> None:
+    """Start the background Xero OAuth keepalive task if not already running."""
+    global _XERO_TOKEN_KEEPALIVE_TASK
+    if _XERO_TOKEN_KEEPALIVE_TASK and not _XERO_TOKEN_KEEPALIVE_TASK.done():
+        return
+    _XERO_TOKEN_KEEPALIVE_TASK = asyncio.create_task(_xero_token_keepalive_loop())
+
+
+async def stop_xero_token_keepalive() -> None:
+    """Stop the background Xero OAuth keepalive task."""
+    global _XERO_TOKEN_KEEPALIVE_TASK
+    task = _XERO_TOKEN_KEEPALIVE_TASK
+    if not task:
+        return
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    _XERO_TOKEN_KEEPALIVE_TASK = None
 
 
 def _merge_settings(
