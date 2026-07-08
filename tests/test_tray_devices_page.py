@@ -351,7 +351,7 @@ async def test_issue_chat_token_rejects_closed_explicit_room(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_tray_bulk_update_outdated_devices_runs_for_outdated_linked_assets(monkeypatch):
+async def test_tray_bulk_update_outdated_devices_runs_for_outdated_linked_assets_regardless_of_active_status(monkeypatch):
     import app.repositories.assets as assets_repo
     import app.repositories.tray as tray_repo
     from app.services import tacticalrmm as tacticalrmm_service
@@ -377,7 +377,8 @@ async def test_tray_bulk_update_outdated_devices_runs_for_outdated_linked_assets
             return_value=[
                 {"id": 1, "status": "active", "agent_version": "1.0.0", "asset_id": 10},
                 {"id": 2, "status": "active", "agent_version": "2.0.0", "asset_id": 20},
-                {"id": 3, "status": "active", "agent_version": None, "asset_id": 30},
+                {"id": 3, "status": "offline", "agent_version": None, "asset_id": 30},
+                {"id": 4, "status": "revoked", "agent_version": "1.0.0", "asset_id": 40},
             ]
         ),
     )
@@ -399,7 +400,7 @@ async def test_tray_bulk_update_outdated_devices_runs_for_outdated_linked_assets
 
     assert response.status_code == 303
     assert response.headers["location"] == "/admin/tray/devices"
-    tray_repo.list_devices.assert_awaited_once_with(status="active")
+    tray_repo.list_devices.assert_awaited_once_with()
     assert run_mock.await_count == 2
     run_mock.assert_any_await("agent-10", 99)
     run_mock.assert_any_await("agent-30", 99)

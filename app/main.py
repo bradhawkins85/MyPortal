@@ -6155,16 +6155,17 @@ async def admin_tray_bulk_update_outdated_devices(request: Request):
             "error",
         )
 
-    devices = await tray_repo.list_devices(status="active")
+    devices = await tray_repo.list_devices()
     outdated_devices = [
         device
         for device in devices
-        if _is_tray_agent_outdated(device.get("agent_version"), latest_tray_version)
+        if device.get("status") != "revoked"
+        and _is_tray_agent_outdated(device.get("agent_version"), latest_tray_version)
     ]
     if not outdated_devices:
         return flash_redirect(
             "/admin/tray/devices",
-            "No active tray devices are outdated.",
+            "No linked tray devices are outdated.",
             "info",
         )
 
@@ -6206,7 +6207,7 @@ async def admin_tray_bulk_update_outdated_devices(request: Request):
         await tray_repo.mark_command_delivered(command_id)
         started_count += 1
 
-    message = f"Started Tactical RMM update script for {started_count} outdated tray device(s)."
+    message = f"Queued Tactical RMM update script for {started_count} outdated tray device(s)."
     if skipped_count or failed_count:
         message += f" Skipped {skipped_count}; failed {failed_count}."
     category = "success" if started_count else "warning"
