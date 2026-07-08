@@ -1410,6 +1410,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             category="email",
                             module_slug=_MODULE_SLUG,
                             external_reference=internet_msg_id,
+                            initial_reply_author_id=requester_id,
                             requester_email=(
                                 from_email_addr if requester_id is None else None
                             ),
