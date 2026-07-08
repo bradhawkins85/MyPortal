@@ -1,7 +1,10 @@
 """Service for handling ticket attachment file operations."""
 from __future__ import annotations
 
+import base64
+import binascii
 import os
+import re
 import secrets
 from pathlib import Path
 from typing import Any
@@ -48,6 +51,16 @@ ALLOWED_MIME_TYPES = {
 
 # Number of bytes to read from the start of a file for MIME sniffing.
 _MAGIC_HEADER_BYTES = 2048
+_INLINE_IMAGE_DATA_URI_PATTERN = re.compile(
+    r'(<img\b[^>]*?\bsrc=["\\\'])data:(image/[a-zA-Z0-9.+-]+);base64,([^"\\\']+)(["\\\'][^>]*>)',
+    re.IGNORECASE,
+)
+_INLINE_IMAGE_EXTENSIONS = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/gif": "gif",
+    "image/webp": "webp",
+}
 
 
 def _get_upload_directory() -> Path:
@@ -260,6 +273,63 @@ async def save_file_bytes(
         if file_path.exists():
             file_path.unlink()
         raise
+
+
+async def persist_inline_images_for_ticket_body(
+    ticket_id: int,
+    body: str,
+    *,
+    access_level: str,
+    uploaded_by_user_id: int | None,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Persist base64 inline ``<img>`` data URIs and rewrite them to downloads.
+
+    Rich-text editors commonly paste screenshots as ``data:image/...;base64``
+    URLs. Storing those data URIs directly in ``ticket_replies.body`` can exceed
+    MySQL ``TEXT`` limits or packet limits, causing reply saves to fail. This
+    helper turns supported raster images into regular ticket attachments and
+    replaces the image ``src`` with the authenticated attachment download URL.
+    """
+
+    if not body or "data:image/" not in body.lower():
+        return body, []
+
+    created_attachments: list[dict[str, Any]] = []
+
+    async def _save_match(match: re.Match[str]) -> str:
+        prefix, mime_type_raw, encoded_raw, suffix = match.groups()
+        mime_type = mime_type_raw.lower()
+        extension = _INLINE_IMAGE_EXTENSIONS.get(mime_type)
+        if not extension:
+            # Leave unsupported image data URIs for the sanitizer/validator path.
+            return match.group(0)
+
+        encoded = re.sub(r"\s+", "", encoded_raw)
+        try:
+            contents = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError):
+            return match.group(0)
+
+        attachment = await save_file_bytes(
+            ticket_id=ticket_id,
+            contents=contents,
+            original_filename=f"inline-image.{extension}",
+            mime_type=mime_type,
+            access_level=access_level,
+            uploaded_by_user_id=uploaded_by_user_id,
+        )
+        created_attachments.append(attachment)
+        attachment_id = attachment.get("id")
+        return f'{prefix}/api/tickets/{ticket_id}/attachments/{attachment_id}/download{suffix}'
+
+    rewritten_parts: list[str] = []
+    last_index = 0
+    for match in _INLINE_IMAGE_DATA_URI_PATTERN.finditer(body):
+        rewritten_parts.append(body[last_index:match.start()])
+        rewritten_parts.append(await _save_match(match))
+        last_index = match.end()
+    rewritten_parts.append(body[last_index:])
+    return "".join(rewritten_parts), created_attachments
 
 
 async def delete_attachment_file(attachment: dict[str, Any]) -> None:

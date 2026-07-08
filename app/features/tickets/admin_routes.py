@@ -1397,7 +1397,6 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
     form = await request.form()
     body_value = form.get("body", "")
     body_raw = str(body_value) if isinstance(body_value, str) else ""
-    sanitized_body = sanitize_rich_text(body_raw)
     is_internal = str(form.get("isInternal", "")).lower() in {"1", "true", "on", "yes"}
     minutes_input_raw = form.get("minutesSpent", "")
     minutes_input = str(minutes_input_raw).strip() if isinstance(minutes_input_raw, str) else ""
@@ -1468,14 +1467,6 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
         default_labour = await labour_types_service.get_default_labour_type()
         if default_labour:
             labour_type_id = default_labour.get("id")
-    if not sanitized_body.has_rich_content:
-        return await main_module._render_ticket_detail(
-            request,
-            current_user,
-            ticket_id=ticket_id,
-            error_message="Enter a reply before submitting.",
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
@@ -1506,6 +1497,38 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             current_user,
             ticket_id=ticket_id,
             error_message="Cannot add replies to a billed ticket. This ticket has been invoiced and closed.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        author_id_for_inline = current_user.get("id")
+        if not isinstance(author_id_for_inline, int):
+            try:
+                author_id_for_inline = int(author_id_for_inline)
+            except (TypeError, ValueError, AttributeError):
+                author_id_for_inline = None
+        body_raw, _inline_attachments = await attachments_service.persist_inline_images_for_ticket_body(
+            ticket_id,
+            body_raw,
+            access_level="closed",
+            uploaded_by_user_id=author_id_for_inline,
+        )
+    except (ValueError, IOError) as exc:
+        log_error("Failed to save inline image attachment", ticket_id=ticket_id, error=str(exc))
+        return await main_module._render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="Unable to save one of the images in the reply. Please try a smaller supported image.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    sanitized_body = sanitize_rich_text(body_raw)
+    if not sanitized_body.has_rich_content:
+        return await main_module._render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="Enter a reply before submitting.",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
