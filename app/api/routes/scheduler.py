@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.api.dependencies.auth import require_super_admin
 from app.api.dependencies.database import require_database
+from app.core.config import get_settings
 from app.core.logging import log_info
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import webhook_events as webhook_events_repo
@@ -39,7 +40,9 @@ async def list_tasks(
     return [ScheduledTaskResponse.model_validate(record) for record in records]
 
 
-@router.post("/tasks", response_model=ScheduledTaskResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/tasks", response_model=ScheduledTaskResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_task(
     payload: ScheduledTaskCreate,
     _: None = Depends(require_database),
@@ -73,7 +76,9 @@ async def get_task(
 ) -> ScheduledTaskResponse:
     task = await scheduled_tasks_repo.get_task(task_id)
     if not task:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
     return ScheduledTaskResponse.model_validate(task)
 
 
@@ -86,12 +91,12 @@ async def update_task(
 ) -> ScheduledTaskResponse:
     existing = await scheduled_tasks_repo.get_task(task_id)
     if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
     updates = payload.model_dump(exclude_unset=True, by_alias=False)
     merged = existing | {
-        key: value
-        for key, value in updates.items()
-        if value is not None
+        key: value for key, value in updates.items() if value is not None
     }
     raw_max_retries = merged.get("max_retries")
     raw_retry_backoff = merged.get("retry_backoff_seconds")
@@ -121,7 +126,9 @@ async def delete_task(
 ) -> None:
     existing = await scheduled_tasks_repo.get_task(task_id)
     if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
     await scheduled_tasks_repo.delete_task(task_id)
     await scheduler_service.refresh()
     return None
@@ -136,7 +143,9 @@ async def activate_task(
 ) -> ScheduledTaskResponse:
     existing = await scheduled_tasks_repo.get_task(task_id)
     if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
     updated = await scheduled_tasks_repo.set_task_active(task_id, payload.active)
     await scheduler_service.refresh()
     return ScheduledTaskResponse.model_validate(updated)
@@ -151,13 +160,19 @@ async def preview_task(
 ) -> ScheduledTaskPreviewResponse:
     existing = await scheduled_tasks_repo.get_task(task_id)
     if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
     response.headers["Cache-Control"] = "no-store"
     preview = await scheduled_task_preview.preview_task(existing)
     return ScheduledTaskPreviewResponse.model_validate(preview)
 
 
-@router.post("/tasks/{task_id}/run", response_model=RunTaskResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/tasks/{task_id}/run",
+    response_model=RunTaskResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def run_task_now(
     task_id: int,
     _: None = Depends(require_database),
@@ -165,7 +180,9 @@ async def run_task_now(
 ) -> RunTaskResponse:
     existing = await scheduled_tasks_repo.get_task(task_id)
     if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
     await scheduler_service.run_now(task_id)
     return RunTaskResponse()
 
@@ -180,7 +197,9 @@ async def list_task_runs(
 ) -> list[ScheduledTaskRunResponse]:
     existing = await scheduled_tasks_repo.get_task(task_id)
     if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
     response.headers["Cache-Control"] = "no-store"
     runs = await scheduled_tasks_repo.list_recent_runs(task_ids=[task_id], limit=limit)
     return [ScheduledTaskRunResponse.model_validate(run) for run in runs]
@@ -195,9 +214,20 @@ async def list_calendar_events(
     _: None = Depends(require_database),
     __: dict[str, Any] = Depends(require_super_admin),
 ) -> list[ScheduledTaskCalendarEventResponse]:
-    tasks = await scheduled_tasks_repo.list_calendar_tasks(include_inactive=include_inactive)
-    events = cron_calendar.build_calendar_events(tasks, start=start, end=end, limit=limit)
-    return [ScheduledTaskCalendarEventResponse.model_validate(event) for event in events]
+    tasks = await scheduled_tasks_repo.list_calendar_tasks(
+        include_inactive=include_inactive
+    )
+    settings = get_settings()
+    events = cron_calendar.build_calendar_events(
+        tasks,
+        start=start,
+        end=end,
+        limit=limit,
+        timezone_name=settings.default_timezone,
+    )
+    return [
+        ScheduledTaskCalendarEventResponse.model_validate(event) for event in events
+    ]
 
 
 @router.get("/webhooks", response_model=list[WebhookEventResponse])
@@ -211,7 +241,9 @@ async def list_webhook_events(
     return [WebhookEventResponse.model_validate(event) for event in events]
 
 
-@router.get("/webhooks/{event_id}/attempts", response_model=list[WebhookEventAttemptResponse])
+@router.get(
+    "/webhooks/{event_id}/attempts", response_model=list[WebhookEventAttemptResponse]
+)
 async def list_webhook_attempts(
     event_id: int,
     limit: int = Query(default=20, ge=1, le=200),
@@ -220,7 +252,9 @@ async def list_webhook_attempts(
 ) -> list[WebhookEventAttemptResponse]:
     event = await webhook_events_repo.get_event(event_id)
     if not event:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Event not found"
+        )
     attempts = await webhook_events_repo.list_attempts(event_id, limit=limit)
     return [WebhookEventAttemptResponse.model_validate(attempt) for attempt in attempts]
 
@@ -233,7 +267,9 @@ async def retry_webhook_event(
 ) -> WebhookEventResponse:
     event = await webhook_monitor.force_retry(event_id)
     if not event:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Event not found"
+        )
     return WebhookEventResponse.model_validate(event)
 
 
@@ -258,7 +294,9 @@ async def delete_webhook_event(
 ) -> None:
     event = await webhook_events_repo.get_event(event_id)
     if not event:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Event not found"
+        )
     if str(event.get("status") or "").lower() == "in_progress":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
