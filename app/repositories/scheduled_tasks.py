@@ -23,6 +23,7 @@ def _make_aware(dt: Any) -> datetime | None:
 def _normalise_task(row: dict[str, Any]) -> dict[str, Any]:
     task = dict(row)
     task["active"] = bool(int(task.get("active", 0)))
+    task["exclude_from_calendar"] = bool(int(task.get("exclude_from_calendar", 0)))
     for key in ("company_id", "id", "max_retries", "retry_backoff_seconds"):
         if key in task and task[key] is not None:
             task[key] = int(task[key])
@@ -95,7 +96,10 @@ async def list_tasks(include_inactive: bool = False) -> list[dict[str, Any]]:
 
 async def list_calendar_tasks(include_inactive: bool = False) -> list[dict[str, Any]]:
     """Return scheduled tasks with company names for calendar previews."""
-    where = "" if include_inactive else "WHERE t.active = 1"
+    where_clauses = ["COALESCE(t.exclude_from_calendar, 0) = 0"]
+    if not include_inactive:
+        where_clauses.append("t.active = 1")
+    where = "WHERE " + " AND ".join(where_clauses)
     rows = await db.fetch_all(
         f"""
         SELECT
@@ -140,12 +144,13 @@ async def create_task(
     active: bool = True,
     max_retries: int = 12,
     retry_backoff_seconds: int = 300,
+    exclude_from_calendar: bool = False,
 ) -> dict[str, Any]:
     task_id = await db.execute_returning_lastrowid(
         """
         INSERT INTO scheduled_tasks
-            (company_id, name, command, cron, description, active, max_retries, retry_backoff_seconds)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            (company_id, name, command, cron, description, active, max_retries, retry_backoff_seconds, exclude_from_calendar)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -156,6 +161,7 @@ async def create_task(
             1 if active else 0,
             max(0, max_retries),
             max(1, retry_backoff_seconds),
+            1 if exclude_from_calendar else 0,
         ),
     )
     if not task_id:
@@ -178,6 +184,7 @@ async def update_task(
     active: bool,
     max_retries: int,
     retry_backoff_seconds: int,
+    exclude_from_calendar: bool,
 ) -> dict[str, Any]:
     await db.execute(
         """
@@ -189,7 +196,8 @@ async def update_task(
             description = %s,
             active = %s,
             max_retries = %s,
-            retry_backoff_seconds = %s
+            retry_backoff_seconds = %s,
+            exclude_from_calendar = %s
         WHERE id = %s
         """,
         (
@@ -201,6 +209,7 @@ async def update_task(
             1 if active else 0,
             max(0, max_retries),
             max(1, retry_backoff_seconds),
+            1 if exclude_from_calendar else 0,
             task_id,
         ),
     )

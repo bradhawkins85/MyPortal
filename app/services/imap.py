@@ -675,6 +675,7 @@ async def _ensure_scheduled_task(account: Mapping[str, Any]) -> Mapping[str, Any
             company_id=int(company_id) if isinstance(company_id, int) else None,
             description=description,
             active=active,
+            exclude_from_calendar=True,
         )
     else:
         task = await scheduled_tasks_repo.update_task(
@@ -687,6 +688,7 @@ async def _ensure_scheduled_task(account: Mapping[str, Any]) -> Mapping[str, Any
             active=active,
             max_retries=int(task.get("max_retries") or 12),
             retry_backoff_seconds=int(task.get("retry_backoff_seconds") or 300),
+            exclude_from_calendar=bool(task.get("exclude_from_calendar", True)),
         )
     if task:
         refreshed = await imap_repo.update_account(

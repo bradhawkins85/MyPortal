@@ -103,3 +103,18 @@ async def test_list_active_tasks_still_works():
     query = call_args[0][0]
     assert "WHERE active = 1" in query
     assert len(tasks) == 1
+
+
+@pytest.mark.anyio("asyncio")
+async def test_list_calendar_tasks_excludes_hidden_tasks_by_default():
+    """Test that calendar task queries filter out tasks hidden from the cron calendar."""
+    mock_fetch_all = AsyncMock(return_value=[])
+
+    with patch('app.repositories.scheduled_tasks.db.fetch_all', mock_fetch_all):
+        tasks = await scheduled_tasks_repo.list_calendar_tasks()
+
+    mock_fetch_all.assert_called_once()
+    query = mock_fetch_all.call_args[0][0]
+    assert "COALESCE(t.exclude_from_calendar, 0) = 0" in query
+    assert "t.active = 1" in query
+    assert tasks == []
