@@ -174,6 +174,7 @@ from app.services import audit as audit_service
 from app.services import background as background_tasks
 from app.services import automations as automations_service
 from app.services import change_log as change_log_service
+from app.services import cron_calendar as cron_calendar_service
 from app.services import company_domains
 from app.services import company_access
 from app.services import dashboard as dashboard_service
@@ -5649,6 +5650,10 @@ async def admin_scheduled_tasks(
     for task in tasks:
         serialised_task = _serialise_mapping(task)
         serialised_task["last_run_iso"] = _to_iso(task.get("last_run_at"))
+        next_run = cron_calendar_service.calculate_next_run(
+            task, timezone_name=settings.default_timezone
+        )
+        serialised_task["next_run_iso"] = _to_iso(next_run)
         raw_company_id = task.get("company_id")
         company_key: int | None = None
         if raw_company_id is not None:

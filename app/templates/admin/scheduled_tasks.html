@@ -184,6 +184,10 @@
                   <span class="form-checkbox-text">Calendar</span>
                 </label>
                 <label class="form-checkbox-label">
+                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="next-run" checked />
+                  <span class="form-checkbox-text">Next run</span>
+                </label>
+                <label class="form-checkbox-label">
                   <input type="checkbox" class="scheduled-task-column-toggle" data-column="last-run" checked />
                   <span class="form-checkbox-text">Last run</span>
                 </label>
@@ -217,6 +221,7 @@
               <th scope="col" data-sort="string" data-column="cron" data-column-key="schedule">Schedule</th>
               <th scope="col" data-sort="string" data-column="active" data-column-key="active">Active</th>
               <th scope="col" data-sort="string" data-column="calendar" data-column-key="calendar">Calendar</th>
+              <th scope="col" data-sort="date" data-column="next-run" data-column-key="next_run">Next Run</th>
               <th scope="col" data-sort="date" data-column="last-run" data-column-key="last_run">Last run</th>
               <th scope="col" data-sort="string" data-column="status" data-column-key="status">Status</th>
               <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
@@ -257,6 +262,13 @@
                   </td>
                   <td data-label="Calendar" data-column="calendar" data-column-key="calendar">
                     <span class="tag {{ 'tag--muted' if task.exclude_from_calendar else 'tag--success' }}">{{ 'Hidden' if task.exclude_from_calendar else 'Shown' }}</span>
+                  </td>
+                  <td data-label="Next Run" data-column="next-run" data-value="{{ task.next_run_iso or '' }}" data-column-key="next_run">
+                    {% if task.next_run_iso %}
+                      <span data-utc="{{ task.next_run_iso }}"></span>
+                    {% else %}
+                      <span class="text-muted">Invalid schedule</span>
+                    {% endif %}
                   </td>
                   <td data-label="Last run" data-column="last-run" data-value="{{ task.last_run_iso or '' }}" data-column-key="last_run">
                     {% if task.last_run_iso %}
@@ -310,7 +322,7 @@
               {% endfor %}
             {% else %}
               <tr>
-                <td colspan="11" class="table__empty">
+                <td colspan="12" class="table__empty">
                   {% if show_inactive %}
                     No scheduled tasks configured yet.
                   {% else %}
