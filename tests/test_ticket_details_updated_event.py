@@ -139,3 +139,105 @@ async def test_emit_ticket_updated_event_fires_tickets_updated(monkeypatch):
     assert events_fired == ["tickets.updated"], (
         f"Expected ['tickets.updated'], got {events_fired}"
     )
+
+@pytest.mark.anyio
+async def test_emit_ticket_updated_event_detects_email_only_watcher(monkeypatch):
+    """Email-only ticket watchers should be detected as watcher actors."""
+    captured: dict[str, Any] = {}
+
+    async def fake_get_ticket(ticket_id: int) -> dict[str, Any]:
+        return {
+            "id": ticket_id,
+            "subject": "Test",
+            "status": "open",
+            "priority": "normal",
+            "company_id": None,
+            "requester_id": None,
+            "assigned_user_id": None,
+        }
+
+    async def fake_get_company(company_id: int) -> None:
+        return None
+
+    async def fake_get_user(user_id: int) -> None:
+        return None
+
+    async def fake_list_watchers(ticket_id: int) -> list[dict[str, Any]]:
+        return [{"id": 7, "ticket_id": ticket_id, "user_id": None, "email": "Watcher@Example.com"}]
+
+    async def fake_list_replies(ticket_id: int, include_internal: bool = True) -> list:
+        return []
+
+    async def fake_handle_event(event: str, context: dict[str, Any]) -> None:
+        captured["event"] = event
+        captured["context"] = context
+
+    from app.repositories import tickets as tickets_repo
+    from app.repositories import companies as company_repo
+    from app.repositories import users as user_repo
+
+    monkeypatch.setattr(tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(tickets_repo, "list_watchers", fake_list_watchers)
+    monkeypatch.setattr(tickets_repo, "list_replies", fake_list_replies)
+    monkeypatch.setattr(company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(user_repo, "get_user_by_id", fake_get_user)
+    monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
+
+    await tickets_service.emit_ticket_updated_event(
+        1,
+        actor={"email": "watcher@example.com", "display_name": "watcher@example.com"},
+    )
+
+    assert captured["event"] == "tickets.updated"
+    assert captured["context"]["ticket_update"]["actor_type"] == "watcher"
+    assert captured["context"]["ticket_update"]["actor_user_email"] == "watcher@example.com"
+    assert captured["context"]["ticket"]["watcher_emails"] == ["Watcher@Example.com"]
+
+
+@pytest.mark.anyio
+async def test_emit_ticket_updated_event_detects_requester_by_email(monkeypatch):
+    """Requester email actors should not fall back to system when no user id is present."""
+    captured: dict[str, Any] = {}
+
+    async def fake_get_ticket(ticket_id: int) -> dict[str, Any]:
+        return {
+            "id": ticket_id,
+            "subject": "Test",
+            "status": "open",
+            "priority": "normal",
+            "company_id": None,
+            "requester_id": 42,
+            "assigned_user_id": None,
+        }
+
+    async def fake_get_company(company_id: int) -> None:
+        return None
+
+    async def fake_get_user(user_id: int) -> dict[str, Any] | None:
+        if user_id == 42:
+            return {"id": 42, "email": "requester@example.com", "first_name": "Req", "last_name": "User"}
+        return None
+
+    async def fake_list_watchers(ticket_id: int) -> list:
+        return []
+
+    async def fake_list_replies(ticket_id: int, include_internal: bool = True) -> list:
+        return []
+
+    async def fake_handle_event(event: str, context: dict[str, Any]) -> None:
+        captured["context"] = context
+
+    from app.repositories import tickets as tickets_repo
+    from app.repositories import companies as company_repo
+    from app.repositories import users as user_repo
+
+    monkeypatch.setattr(tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(tickets_repo, "list_watchers", fake_list_watchers)
+    monkeypatch.setattr(tickets_repo, "list_replies", fake_list_replies)
+    monkeypatch.setattr(company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(user_repo, "get_user_by_id", fake_get_user)
+    monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
+
+    await tickets_service.emit_ticket_updated_event(1, actor={"email": "REQUESTER@example.com"})
+
+    assert captured["context"]["ticket_update"]["actor_type"] == "requester"

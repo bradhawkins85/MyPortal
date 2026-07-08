@@ -529,14 +529,15 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
         user_id = watcher.get("user_id")
         resolved_user = await _resolve_user_snapshot(user_value, user_id)
         snapshot = _build_user_snapshot(resolved_user)
+        watcher_email = snapshot.get("email") if snapshot else watcher.get("email")
         entry: dict[str, Any] = {
             "id": watcher.get("id"),
             "ticket_id": watcher.get("ticket_id"),
             "user_id": watcher.get("user_id"),
             "created_at": watcher.get("created_at"),
             "user": snapshot,
-            "email": snapshot.get("email") if snapshot else None,
-            "display_name": snapshot.get("display_name") if snapshot else None,
+            "email": str(watcher_email).strip() if watcher_email else None,
+            "display_name": snapshot.get("display_name") if snapshot else watcher.get("email"),
         }
         if entry["email"]:
             watcher_emails.append(entry["email"])
@@ -595,16 +596,25 @@ def _normalise_ticket_update_actor(value: str | None) -> str | None:
     return None
 
 
+def _normalise_email_for_compare(value: Any) -> str | None:
+    if value is None:
+        return None
+    candidate = str(value).strip().lower()
+    return candidate or None
+
+
 def _auto_detect_ticket_update_actor(
     ticket: Mapping[str, Any],
     actor: Mapping[str, Any] | None,
 ) -> str:
     actor_id = None
+    actor_email = None
     if isinstance(actor, Mapping):
         try:
             actor_id = int(actor.get("id")) if actor.get("id") is not None else None
         except (TypeError, ValueError):
             actor_id = None
+        actor_email = _normalise_email_for_compare(actor.get("email"))
     if actor_id is not None:
         requester_id = ticket.get("requester_id")
         if requester_id is not None and actor_id == requester_id:
@@ -623,6 +633,18 @@ def _auto_detect_ticket_update_actor(
                 except (TypeError, ValueError):
                     continue
                 if watcher_user_id_int == actor_id:
+                    return "watcher"
+    if actor_email:
+        requester_email = _normalise_email_for_compare(ticket.get("requester_email"))
+        if requester_email and actor_email == requester_email:
+            return "requester"
+        watchers = ticket.get("watchers")
+        if isinstance(watchers, Sequence):
+            for watcher in watchers:
+                if not isinstance(watcher, Mapping):
+                    continue
+                watcher_email = _normalise_email_for_compare(watcher.get("email"))
+                if watcher_email and actor_email == watcher_email:
                     return "watcher"
     return "system"
 
