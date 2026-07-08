@@ -3,9 +3,12 @@
   if (!root) return;
 
   const DISPLAY_MINUTES = 1;
+  const VISUAL_DURATION_MINUTES = 6;
+  const MINUTE_SLOTS_PER_HOUR = 60;
+  const MINUTE_SLOT_HEIGHT = 6;
   const DAY_START_HOUR = 0;
   const DAY_END_HOUR = 24;
-  const HOUR_HEIGHT = 96;
+  const HOUR_HEIGHT = MINUTE_SLOTS_PER_HOUR * MINUTE_SLOT_HEIGHT;
   const state = { view: 'week', anchor: new Date(), events: [], search: '', includeInactive: false };
   const grid = root.querySelector('[data-calendar-grid]');
   const rangeLabel = root.querySelector('[data-calendar-range]');
@@ -32,13 +35,17 @@
     return sorted.map(event => {
       const startsAt = new Date(event.start);
       const endsAt = new Date(startsAt.getTime() + DISPLAY_MINUTES * 60000);
+      const visualEndsAt = new Date(startsAt.getTime() + VISUAL_DURATION_MINUTES * 60000);
       for (let idx = active.length - 1; idx >= 0; idx -= 1) {
         if (active[idx].end <= startsAt) active.splice(idx, 1);
       }
+      // The timeline uses one vertical slot per minute.  Events are visually
+      // taller than one minute so titles remain readable, so keep nearby
+      // entries active for their rendered height to prevent visual overlap.
       const usedColumns = new Set(active.map(item => item.column));
       let column = 0;
       while (usedColumns.has(column)) column += 1;
-      const entry = { event, startsAt, endsAt, end: endsAt, column, clusterSize: column + 1 };
+      const entry = { event, startsAt, endsAt, end: visualEndsAt, column, clusterSize: column + 1 };
       active.push(entry);
       const clusterSize = Math.max(...active.map(item => item.column), column) + 1;
       active.forEach(item => { item.clusterSize = Math.max(item.clusterSize, clusterSize); });
@@ -118,8 +125,8 @@
         const items = layoutTimelineEvents(events.filter(event => isSameDay(new Date(event.start), day)));
         return `<div class="cron-calendar__day-column${isSameDay(day, now) ? ' is-today' : ''}">${items.map(item => {
           const { event, startsAt, endsAt, column, clusterSize } = item;
-          const top = Math.max(0, Math.min(timelineHeight - 36, (minutesSinceStart(startsAt) / 60) * HOUR_HEIGHT));
-          const height = Math.max(36, (DISPLAY_MINUTES / 60) * HOUR_HEIGHT);
+          const top = Math.max(0, Math.min(timelineHeight - MINUTE_SLOT_HEIGHT, (minutesSinceStart(startsAt) / 60) * HOUR_HEIGHT));
+          const height = Math.max(MINUTE_SLOT_HEIGHT, (VISUAL_DURATION_MINUTES / 60) * HOUR_HEIGHT);
           const width = `calc(${100 / clusterSize}% - .3rem)`;
           const left = `calc(${(100 / clusterSize) * column}% + .15rem)`;
           return `<a class="cron-calendar__timeline-event" href="${escapeHtml(event.url)}" style="top:${top}px;height:${height}px;left:${left};width:${width}" title="${escapeHtml(event.title)} ${formatTime(startsAt)} - ${formatTime(endsAt)}">
