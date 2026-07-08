@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
 from datetime import date, datetime, time, timezone
@@ -8,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
+
+TRAY_HEARTBEAT_PATH = "/api/tray/heartbeat"
 
 
 # Context variables that carry per-request state into every log line emitted
@@ -126,9 +129,12 @@ def configure_logging() -> None:
         record["message"] = str(record["message"]).replace("\r", "\\r").replace("\n", "\\n")
         return file_log_format + "\n"
 
-    logger.add(sink=lambda msg: print(msg, end=""), format=_format_console_record)
-
     settings = get_settings()
+    log_level = "DEBUG" if settings.verbose_logging else "INFO"
+
+    logger.add(sink=lambda msg: print(msg, end=""), format=_format_console_record, level=log_level)
+    _configure_uvicorn_access_logging(verbose=settings.verbose_logging)
+
     app_log_path = getattr(settings, "app_log_path", None)
     if app_log_path:
         app_log_path = app_log_path.expanduser()
@@ -140,7 +146,7 @@ def configure_logging() -> None:
                 logger.add(
                     str(app_log_path),
                     format=_format_file_record,
-                    level="INFO",
+                    level=log_level,
                     encoding="utf-8",
                     enqueue=True,
                     rotation=rotation,
@@ -196,6 +202,30 @@ def configure_logging() -> None:
                 logger.warning(
                     f"ERROR LOG FILE DISABLED - unable to open file path={error_log_path} error={exc}"
                 )
+
+
+class _UvicornHeartbeatAccessFilter(logging.Filter):
+    """Hide noisy tray heartbeat access logs unless verbose logging is enabled."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            rendered = record.getMessage()
+        except Exception:  # pragma: no cover - defensive logging hook
+            rendered = str(getattr(record, "msg", ""))
+        return TRAY_HEARTBEAT_PATH not in rendered
+
+
+def _configure_uvicorn_access_logging(*, verbose: bool) -> None:
+    """Apply endpoint-specific filtering to uvicorn's own access logger."""
+
+    access_logger = logging.getLogger("uvicorn.access")
+    access_logger.filters = [
+        existing
+        for existing in access_logger.filters
+        if not isinstance(existing, _UvicornHeartbeatAccessFilter)
+    ]
+    if not verbose:
+        access_logger.addFilter(_UvicornHeartbeatAccessFilter())
 
 
 def _coerce_optional(value: Any) -> Any:
