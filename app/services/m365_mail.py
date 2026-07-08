@@ -816,6 +816,13 @@ async def sync_account(account_id: int) -> dict[str, Any]:
 
     processed = 0
     errors: list[dict[str, Any]] = []
+    message_actions: list[dict[str, Any]] = []
+
+    def _remember_message_action(action: dict[str, Any]) -> None:
+        """Capture and emit a detailed per-message import decision."""
+        action = {key: value for key, value in action.items() if value is not None}
+        message_actions.append(action)
+        log_info("M365 mailbox import message decision", **action)
 
     try:
         # Build the messages URL
@@ -962,10 +969,34 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 internet_msg_id = msg.get("internetMessageId") or msg_id
 
                 if not msg_id:
+                    _remember_message_action({
+                        "account_id": account_id,
+                        "mailbox": upn,
+                        "folder": folder,
+                        "outcome": "ignored",
+                        "reason": "missing_graph_message_id",
+                    })
                     continue
+
+                message_log_base = {
+                    "account_id": account_id,
+                    "mailbox": upn,
+                    "folder": folder,
+                    "message_id": msg_id,
+                    "internet_message_id": internet_msg_id,
+                    "conversation_id": msg.get("conversationId"),
+                    "subject": msg.get("subject") or f"Email from {upn}",
+                    "is_read": bool(msg.get("isRead", False)),
+                    "received_at": msg.get("receivedDateTime"),
+                }
 
                 # Skip already-read messages when only processing unread
                 if process_unread_only and msg.get("isRead", False):
+                    _remember_message_action({
+                        **message_log_base,
+                        "outcome": "ignored",
+                        "reason": "already_read",
+                    })
                     continue
 
                 # Check if already processed
@@ -974,6 +1005,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     # A previous run may have successfully imported the message but
                     # failed while marking it read.  Avoid duplicate ticket activity,
                     # but still repair the mailbox read state on subsequent syncs.
+                    read_state_repaired = False
                     if mark_as_read and not msg.get("isRead", False):
                         try:
                             patch_url = (
@@ -981,12 +1013,20 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 f"{quote(msg_id, safe='')}"
                             )
                             await _graph_patch(access_token, patch_url, {"isRead": True})
+                            read_state_repaired = True
                         except Exception:  # pragma: no cover - Graph API errors
                             log_error(
                                 "Unable to mark already-imported M365 message as read",
                                 account_id=account_id,
                                 message_id=msg_id,
                             )
+                    _remember_message_action({
+                        **message_log_base,
+                        "outcome": "ignored",
+                        "reason": "already_imported",
+                        "ticket_id": existing_message.get("ticket_id"),
+                        "read_state_repaired": read_state_repaired,
+                    })
                     continue
 
                 # Extract message details
@@ -1045,11 +1085,12 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         message_id=internet_msg_id,
                     )
                     if not _evaluate_filter(filter_rule, context):
-                        log_info(
-                            "Skipping M365 message because it did not match the configured filter",
-                            account_id=account_id,
-                            message_id=msg_id,
-                        )
+                        _remember_message_action({
+                            **message_log_base,
+                            "from_address": from_address,
+                            "outcome": "ignored",
+                            "reason": "filter_not_matched",
+                        })
                         continue
 
                 # Check sync_known_only
@@ -1057,19 +1098,20 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 if sync_known_only:
                     from_email_addresses = _extract_email_addresses(from_header)
                     if not from_email_addresses:
-                        log_info(
-                            "Skipping M365 message because no valid sender email address found",
-                            account_id=account_id,
-                            message_id=msg_id,
-                        )
+                        _remember_message_action({
+                            **message_log_base,
+                            "from_address": from_address,
+                            "outcome": "ignored",
+                            "reason": "no_valid_sender_email",
+                        })
                         continue
                     if not await _is_any_email_address_known(from_email_addresses):
-                        log_info(
-                            "Skipping M365 message from unknown sender",
-                            account_id=account_id,
-                            message_id=msg_id,
-                            from_address=from_address,
-                        )
+                        _remember_message_action({
+                            **message_log_base,
+                            "from_address": from_address,
+                            "outcome": "ignored",
+                            "reason": "unknown_sender",
+                        })
                         continue
 
                 # Resolve ticket entities
@@ -1137,6 +1179,13 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 except Exception as exc:  # pragma: no cover - defensive logging
                     error_text = str(exc)
                     errors.append({"message_id": msg_id, "error": error_text})
+                    _remember_message_action({
+                        **message_log_base,
+                        "from_address": from_address if "from_address" in locals() else None,
+                        "outcome": "error",
+                        "reason": "ticket_create_or_match_failed",
+                        "error": error_text,
+                    })
                     await _record_message(
                         account_id=int(account_id),
                         uid=msg_id,
@@ -1153,6 +1202,8 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     continue
 
                 ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None
+                reply_added = False
+                reply_outcome: str | None = None
                 if isinstance(ticket_id, int):
                     # Add reply to existing ticket
                     if not is_new_ticket:
@@ -1161,7 +1212,6 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         if sanitized.has_rich_content:
                             reply_created_at = received_at or datetime.now(timezone.utc)
                             reply_author_id = requester_id if requester_id is not None else None
-                            reply_added = False
                             try:
                                 await tickets_repo.create_reply(
                                     ticket_id=int(ticket_id),
@@ -1179,6 +1229,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                     ticket_id=ticket_id,
                                 )
                             except Exception as exc:  # pragma: no cover - defensive logging
+                                reply_outcome = "failed_to_add_reply"
                                 log_error(
                                     "Failed to add M365 email reply to ticket",
                                     account_id=account_id,
@@ -1189,6 +1240,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
 
                             # Trigger ticket updated event for email replies
                             if reply_added:
+                                reply_outcome = "reply_added"
                                 try:
                                     actor_info: dict[str, Any] | None = None
                                     if reply_author_id is not None:
@@ -1205,6 +1257,8 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                         ticket_id=ticket_id,
                                         error=str(exc),
                                     )
+                        else:
+                            reply_outcome = "ignored_empty_reply_body"
 
                     # Fetch and save attachments if any
                     if msg.get("hasAttachments"):
@@ -1223,6 +1277,22 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 ticket_id=ticket_id,
                                 error=str(exc),
                             )
+
+                _remember_message_action({
+                    **message_log_base,
+                    "from_address": from_address,
+                    "requester_id": requester_id,
+                    "company_id": ticket_company_id,
+                    "outcome": "created_new_ticket" if is_new_ticket else "attached_to_existing_ticket",
+                    "ticket_id": int(ticket_id) if isinstance(ticket_id, int) else None,
+                    "ticket_number": ticket.get("ticket_number") if isinstance(ticket, Mapping) else None,
+                    "ticket_subject": ticket.get("subject") if isinstance(ticket, Mapping) else None,
+                    "reply_added": reply_added,
+                    "reply_outcome": reply_outcome,
+                    "has_attachments": bool(msg.get("hasAttachments")),
+                    "matched_by_related_message_ids": bool(related_message_ids),
+                    "related_message_ids": related_message_ids[:10] if related_message_ids else None,
+                })
 
                 await _record_message(
                     account_id=int(account_id),
@@ -1256,14 +1326,31 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         int(account_id),
         last_synced_at=datetime.now(timezone.utc),
     )
+    created_count = sum(
+        1 for action in message_actions if action.get("outcome") == "created_new_ticket"
+    )
+    attached_count = sum(
+        1 for action in message_actions if action.get("outcome") == "attached_to_existing_ticket"
+    )
+    ignored_count = sum(
+        1 for action in message_actions if action.get("outcome") == "ignored"
+    )
     log_info(
         "M365 mail synchronisation completed",
         account_id=account_id,
         processed=processed,
         errors=len(errors),
+        created=created_count,
+        attached=attached_count,
+        ignored=ignored_count,
     )
     status_value = "succeeded" if not errors else "completed_with_errors"
-    return {"status": status_value, "processed": processed, "errors": errors}
+    return {
+        "status": status_value,
+        "processed": processed,
+        "errors": errors,
+        "message_actions": message_actions,
+    }
 
 
 async def _embed_graph_inline_images(
