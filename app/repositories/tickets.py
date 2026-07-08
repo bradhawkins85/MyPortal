@@ -488,6 +488,54 @@ async def list_tickets(
     return [_normalise_ticket(row) for row in rows]
 
 
+async def list_billable_time_entries(
+    *,
+    company_id: int | None = None,
+    limit: int | None = 1000,
+    offset: int = 0,
+) -> list[TicketRecord]:
+    """Return billable ticket replies with positive tracked time.
+
+    This query scans time entries directly instead of paging through tickets so
+    bulk un-billing catches entries on closed, billed, or otherwise filtered
+    tickets that still contribute to billable-time reports.
+    """
+    where = [
+        "tr.is_billable = 1",
+        "tr.minutes_spent IS NOT NULL",
+        "tr.minutes_spent > 0",
+    ]
+    params: list[Any] = []
+    if company_id is not None:
+        where.append("t.company_id = %s")
+        params.append(int(company_id))
+    query_parts = [
+        "SELECT tr.*, t.ticket_number, t.subject, t.company_id, lt.name AS labour_type_name, lt.code AS labour_type_code",
+        "FROM ticket_replies tr",
+        "INNER JOIN tickets t ON t.id = tr.ticket_id",
+        "LEFT JOIN ticket_labour_types lt ON lt.id = tr.labour_type_id",
+        "WHERE " + " AND ".join(where),
+        "ORDER BY tr.created_at ASC, tr.id ASC",
+    ]
+    if limit is not None:
+        query_parts.append("LIMIT %s OFFSET %s")
+        params.extend([int(max(1, limit)), int(max(0, offset))])
+    rows = await db.fetch_all("\n".join(query_parts), tuple(params))
+    return [dict(row) for row in rows]
+
+
+async def mark_replies_non_billable(reply_ids: Sequence[int]) -> int:
+    """Clear the billable flag for the supplied replies and return affected rows."""
+    clean_ids = sorted({int(reply_id) for reply_id in reply_ids if reply_id})
+    if not clean_ids:
+        return 0
+    placeholders = ", ".join(["%s"] * len(clean_ids))
+    return await db.execute_rowcount(
+        f"UPDATE ticket_replies SET is_billable = 0 WHERE is_billable = 1 AND id IN ({placeholders})",
+        tuple(clean_ids),
+    )
+
+
 async def list_tickets_for_automation_scan(*, limit: int = 1000) -> list[TicketRecord]:
     """Return recent ticket records with reply timestamps for scheduled automations.
 

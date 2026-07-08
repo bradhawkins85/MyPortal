@@ -167,3 +167,15 @@ async def delete_entries_for_tickets(ticket_ids: list[int]) -> int:
         f"DELETE FROM ticket_billed_time_entries WHERE ticket_id IN ({placeholders})",
         tuple(clean_ids),
     )
+
+
+async def delete_entries_for_replies(reply_ids: list[int]) -> int:
+    """Delete billed-time markers for the supplied replies and return affected rows."""
+    clean_ids = sorted({int(reply_id) for reply_id in reply_ids if reply_id})
+    if not clean_ids:
+        return 0
+    placeholders = ", ".join(["%s"] * len(clean_ids))
+    return await db.execute_rowcount(
+        f"DELETE FROM ticket_billed_time_entries WHERE reply_id IN ({placeholders})",
+        tuple(clean_ids),
+    )
