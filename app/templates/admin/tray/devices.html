@@ -83,26 +83,26 @@
     </header>
     <div class="card__body card__body--table">
       {% if devices %}
-        <table class="data-table">
+        <table class="data-table" data-table data-table-id="tray-devices">
           <thead>
             <tr>
-              <th scope="col">Hostname</th>
-              <th scope="col">Status</th>
-              <th scope="col">OS</th>
-              <th scope="col">Console user</th>
-              <th scope="col">Last seen</th>
-              <th scope="col">Agent</th>
+              <th scope="col" data-sort="string">Hostname</th>
+              <th scope="col" data-sort="string">Status</th>
+              <th scope="col" data-sort="string">OS</th>
+              <th scope="col" data-sort="string">Console user</th>
+              <th scope="col" data-sort="date">Last seen</th>
+              <th scope="col" data-sort="string">Agent</th>
               <th scope="col" class="data-table__col--actions">Actions</th>
             </tr>
           </thead>
           <tbody>
             {% for device in devices %}
               <tr>
-                <td>
+                <td data-value="{{ (device.hostname or device.device_uid or '')|lower }}">
                   <strong>{{ device.hostname or device.device_uid }}</strong>
                   <div class="data-table__sub">{{ device.device_uid }}</div>
                 </td>
-                <td>
+                <td data-value="{{ device.status or '' }}">
                   {% if device.status == 'active' %}
                     <span class="status status--success">Active</span>
                   {% elif device.status == 'pending' %}
@@ -111,16 +111,16 @@
                     <span class="status status--danger">Revoked</span>
                   {% endif %}
                 </td>
-                <td>{{ device.os or '—' }} {{ device.os_version or '' }}</td>
-                <td>{{ device.console_user or '—' }}</td>
-                <td>
+                <td data-value="{{ ((device.os or '') ~ ' ' ~ (device.os_version or ''))|trim|lower }}">{{ device.os or '—' }} {{ device.os_version or '' }}</td>
+                <td data-value="{{ (device.console_user or '')|lower }}">{{ device.console_user or '—' }}</td>
+                <td data-value="{{ device.last_seen_utc or '' }}">
                   {% if device.last_seen_utc %}
                     <span data-utc="{{ device.last_seen_utc }}">{{ device.last_seen_utc }}</span>
                   {% else %}
                     —
                   {% endif %}
                 </td>
-                <td>{{ device.agent_version or '—' }}</td>
+                <td data-value="{{ (device.agent_version or '')|lower }}">{{ device.agent_version or '—' }}</td>
                 <td class="data-table__col--actions">
                   {% if device.status != 'revoked' %}
                     {% if current_user.is_super_admin %}
@@ -161,4 +161,5 @@
   </section>
 </div>
 
+<script src="{{ static_url('/static/js/tables.js') }}" defer></script>
 {% endblock %}
