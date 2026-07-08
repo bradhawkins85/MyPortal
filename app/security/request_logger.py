@@ -8,6 +8,7 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.logging import (
+    TRAY_HEARTBEAT_PATH,
     log_debug,
     log_error,
     log_info,
@@ -15,7 +16,6 @@ from app.core.logging import (
     set_request_context,
 )
 from app.core.log_redaction import redact_headers
-from app.core.logging import log_debug, log_error, log_info
 from app.security.client_ip import get_client_ip
 
 
@@ -88,7 +88,10 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         duration = time.time() - start_time
 
         # Log response
-        log_function = log_error if response.status_code >= 500 else log_info
+        if path == TRAY_HEARTBEAT_PATH and response.status_code < 500:
+            log_function = log_debug
+        else:
+            log_function = log_error if response.status_code >= 500 else log_info
         message = (
             "Request completed with server error"
             if response.status_code >= 500

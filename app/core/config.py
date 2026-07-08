@@ -301,6 +301,14 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("OPNFORM_BASE_URL", "OPNFORM_URL"),
     )
+    verbose_logging: bool = Field(
+        default=False,
+        validation_alias="VERBOSE_LOGGING",
+        description=(
+            "Enable verbose DEBUG-level request and access logging, including "
+            "high-frequency tray heartbeat events."
+        ),
+    )
     app_log_path: Path | None = Field(
         default=Path("/var/log/myportal/myportal.log"),
         validation_alias="APP_LOG_PATH",

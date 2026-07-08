@@ -62,3 +62,59 @@ def test_request_id_survives_exception_path() -> None:
     assert response.status_code == 500
     assert response.headers['X-Request-ID'] == 'req-explode'
     assert response.json()['request_id'] == 'req-explode'
+
+
+def test_tray_heartbeat_completion_logs_at_debug(monkeypatch) -> None:
+    app = FastAPI()
+    app.add_middleware(RequestLoggingMiddleware)
+
+    @app.post('/api/tray/heartbeat')
+    async def tray_heartbeat():
+        return {'status': 'ok'}
+
+    calls: list[tuple[str, str, dict]] = []
+
+    def fake_debug(message: str, **meta):
+        calls.append(('debug', message, meta))
+
+    def fake_info(message: str, **meta):
+        calls.append(('info', message, meta))
+
+    monkeypatch.setattr('app.security.request_logger.log_debug', fake_debug)
+    monkeypatch.setattr('app.security.request_logger.log_info', fake_info)
+
+    client = TestClient(app)
+    response = client.post('/api/tray/heartbeat')
+
+    assert response.status_code == 200
+    assert calls
+    assert calls[-1][0] == 'debug'
+    assert calls[-1][1] == 'Request completed'
+
+
+def test_regular_request_completion_logs_at_info(monkeypatch) -> None:
+    app = FastAPI()
+    app.add_middleware(RequestLoggingMiddleware)
+
+    @app.get('/api/ping')
+    async def ping():
+        return {'status': 'ok'}
+
+    calls: list[tuple[str, str, dict]] = []
+
+    def fake_debug(message: str, **meta):
+        calls.append(('debug', message, meta))
+
+    def fake_info(message: str, **meta):
+        calls.append(('info', message, meta))
+
+    monkeypatch.setattr('app.security.request_logger.log_debug', fake_debug)
+    monkeypatch.setattr('app.security.request_logger.log_info', fake_info)
+
+    client = TestClient(app)
+    response = client.get('/api/ping')
+
+    assert response.status_code == 200
+    assert calls
+    assert calls[-1][0] == 'info'
+    assert calls[-1][1] == 'Request completed'
