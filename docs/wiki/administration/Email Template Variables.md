@@ -31,6 +31,7 @@ When configuring email notifications in automation actions, you can use the foll
 
 ### Watchers
 - `{{ticket.watcher_emails}}` - Array of watcher email addresses
+- `{{ticket.watchers.email}}` - Comma-separated list of all watcher email addresses, useful for CC fields
 - `{{ticket.watchers_count}}` - Number of watchers
 
 ### Timestamps

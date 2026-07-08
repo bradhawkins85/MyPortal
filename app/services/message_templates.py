@@ -6,6 +6,7 @@ from html import escape as html_escape
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from threading import RLock
+from collections.abc import Sequence
 from typing import Any, Mapping
 
 from loguru import logger
@@ -45,11 +46,36 @@ _REDIS_CACHE_KEY = "message-templates:records"
 _TOKEN_PATTERN = re.compile(r"{{\s*([a-zA-Z0-9_.-]+)\s*}}")
 
 
+def _project_sequence_field(value: Sequence[Any], field: str) -> str | None:
+    projected: list[str] = []
+    for item in value:
+        item_value: Any = None
+        if isinstance(item, Mapping):
+            item_value = item.get(field)
+        elif not isinstance(item, (str, bytes, bytearray)):
+            item_value = getattr(item, field, None)
+        if item_value is None:
+            continue
+        rendered = str(item_value).strip()
+        if rendered:
+            projected.append(rendered)
+    if not projected:
+        return None
+    return ", ".join(projected)
+
+
 def _resolve_context_value(context: Mapping[str, Any], path: str) -> Any:
     current: Any = context
     for part in path.split("."):
         if isinstance(current, Mapping):
             current = current.get(part)
+        elif isinstance(current, Sequence) and not isinstance(current, (str, bytes, bytearray)):
+            try:
+                index = int(part)
+            except (TypeError, ValueError):
+                current = _project_sequence_field(current, part)
+            else:
+                current = current[index] if 0 <= index < len(current) else None
         else:
             current = getattr(current, part, None)
         if current is None:

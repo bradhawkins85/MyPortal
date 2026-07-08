@@ -203,6 +203,23 @@ def _safe_environment_variables() -> dict[str, str]:
     return safe
 
 
+def _project_sequence_field(value: Sequence[Any], field: str) -> str | None:
+    projected: list[str] = []
+    for item in value:
+        item_value: Any = None
+        if isinstance(item, Mapping):
+            item_value = item.get(field)
+        elif not isinstance(item, (str, bytes, bytearray)):
+            item_value = getattr(item, field, None)
+        if item_value is None:
+            continue
+        rendered = _stringify(item_value).strip()
+        if rendered:
+            projected.append(rendered)
+    if not projected:
+        return None
+    return ", ".join(projected)
+
 def _flatten_context_tokens(
     value: Any,
     path: list[str],
@@ -232,6 +249,16 @@ def _flatten_context_tokens(
         if identifier in seen:
             return
         seen.add(identifier)
+        aggregate_fields: set[str] = set()
+        for item in value:
+            if isinstance(item, Mapping):
+                aggregate_fields.update(key for key in item if isinstance(key, str))
+        for field in sorted(aggregate_fields):
+            projected = _project_sequence_field(value, field)
+            if projected is not None:
+                aggregate_token_name = "_".join(segment.upper() for segment in [*path, field] if segment)
+                if aggregate_token_name:
+                    tokens.setdefault(aggregate_token_name, projected)
         for index, item in enumerate(value):
             _flatten_context_tokens(
                 item,

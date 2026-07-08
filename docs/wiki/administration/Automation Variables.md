@@ -25,6 +25,8 @@ paths now available include:
 - `ticket.category`, `ticket.priority`, and `ticket.external_reference`
 - `ticket.ai_tags` for AI-generated categorisation
 - `ticket.watchers_count` for the number of subscribed users
+- `ticket.watchers.email` for a comma-separated list of every watcher email,
+  which is useful when populating an email CC field for multiple watchers
 - `ticket.watchers[0].email` (and subsequent indexes) for individual watcher
   details
 - `ticket.latest_reply.body` and `ticket.latest_reply.author_email` for the most
@@ -50,7 +52,9 @@ filters can react to specific sources. The following actor types are emitted:
 
 Arrays such as `ticket.watchers` can be indexed numerically. For example,
 matching `ticket.watchers[0].email` allows a workflow to react when the first
-watcher is a specific address.
+watcher is a specific address. Referencing a field directly on an array, such
+as `ticket.watchers.email`, projects that field from each watcher and returns a
+comma-separated list like `watcher.one@example.com, watcher.two@example.com`.
 
 ## Template tokens
 
@@ -70,6 +74,7 @@ emails or webhook requests). Newly added tokens include:
 | `{{ TICKET_EXTERNAL_REFERENCE }}` | External system identifier such as an RMM ticket number. |
 | `{{ TICKET_AI_TAGS_0 }}` ... | AI-generated tags (indexed for each tag). |
 | `{{ TICKET_WATCHERS_COUNT }}` | Number of watchers subscribed to the ticket. |
+| `{{ TICKET_WATCHERS_EMAIL }}` | Comma-separated list of all watcher email addresses. |
 | `{{ TICKET_WATCHERS_0_EMAIL }}` ... | Indexed watcher email addresses. |
 | `{{ TICKET_WATCHERS_0_USER_EMAIL }}` ... | Indexed watcher user profile email values. |
 | `{{ TICKET_WATCHER_EMAILS_0 }}` ... | Flattened list of watcher emails for quick iteration. |
