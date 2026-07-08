@@ -24,6 +24,32 @@ def _resolve_timezone(timezone_name: str | None) -> tzinfo:
         return timezone.utc
 
 
+def calculate_next_run(
+    task: dict[str, Any],
+    *,
+    reference: datetime | None = None,
+    timezone_name: str | None = None,
+) -> datetime | None:
+    """Return the next UTC datetime for a cron-based scheduled task.
+
+    Cron expressions are interpreted in the configured scheduler timezone so
+    the admin table mirrors when the background scheduler will fire tasks.
+    Invalid or empty cron expressions return ``None`` instead of raising.
+    """
+
+    cron_expression = str(task.get("cron") or "").strip()
+    if not cron_expression:
+        return None
+
+    schedule_timezone = _resolve_timezone(timezone_name)
+    reference_utc = _as_utc(reference or datetime.now(timezone.utc))
+    try:
+        iterator = croniter(cron_expression, reference_utc.astimezone(schedule_timezone))
+        return _as_utc(iterator.get_next(datetime))
+    except (CroniterBadCronError, ValueError, KeyError):
+        return None
+
+
 def build_calendar_events(
     tasks: list[dict[str, Any]],
     *,

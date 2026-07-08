@@ -10,6 +10,7 @@ cron_calendar = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(cron_calendar)
 build_calendar_events = cron_calendar.build_calendar_events
+calculate_next_run = cron_calendar.calculate_next_run
 
 
 def test_build_calendar_events_expands_cron_in_utc_order():
@@ -87,3 +88,21 @@ def test_build_calendar_events_falls_back_to_utc_for_invalid_timezone():
 
     assert len(events) == 1
     assert events[0]["start"] == "2026-07-07T18:01:00+00:00"
+
+
+def test_calculate_next_run_returns_utc_timestamp_for_configured_timezone():
+    next_run = calculate_next_run(
+        {"cron": "1 18 * * *"},
+        reference=datetime(2026, 7, 7, tzinfo=timezone.utc),
+        timezone_name="Australia/Brisbane",
+    )
+
+    assert next_run is not None
+    assert next_run.isoformat() == "2026-07-07T08:01:00+00:00"
+
+
+def test_calculate_next_run_returns_none_for_invalid_cron():
+    assert calculate_next_run(
+        {"cron": "not a cron"},
+        reference=datetime(2026, 7, 7, tzinfo=timezone.utc),
+    ) is None
