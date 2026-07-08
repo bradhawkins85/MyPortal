@@ -187,6 +187,7 @@ def test_scheduled_tasks_page_renders_tasks(super_admin_context, monkeypatch):
     assert 'data-task-create' in header_html
     assert 'Redistribute selected' in header_html
     assert 'data-scheduled-tasks-bulk-action="redistribute"' in header_html
+    assert 'data-scheduled-tasks-redistribute-offset' in html
 
 
 def test_scheduled_tasks_page_offers_rag_control_commands(super_admin_context, monkeypatch):
@@ -674,6 +675,78 @@ def test_bulk_redistribute_scheduled_tasks_rolls_into_later_hours(super_admin_co
     assert updated[61] == "0 0 * * *"
     assert updated[62] == "1 0 * * *"
     assert refreshed is True
+
+
+def test_bulk_redistribute_scheduled_tasks_uses_minute_offset(super_admin_context, csrf_session, monkeypatch):
+    """Bulk redistribute starts at the requested minute offset and rolls over hours."""
+    updated: dict[int, str] = {}
+    refreshed = False
+
+    async def fake_get_task(task_id):
+        return {"id": task_id, "cron": "15 4 * * *"}
+
+    async def fake_update_task_cron(task_id, cron):
+        updated[task_id] = cron
+
+    async def fake_refresh():
+        nonlocal refreshed
+        refreshed = True
+
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "get_task", fake_get_task)
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "update_task_cron", fake_update_task_cron)
+    monkeypatch.setattr(main_module.scheduler_service, "refresh", fake_refresh)
+    request = _make_post_request("/admin/scheduled-tasks/bulk-redistribute")
+
+    async def fake_form():
+        return FormData(
+            [
+                ("taskIds", "1"),
+                ("taskIds", "2"),
+                ("taskIds", "3"),
+                ("redistributeHour", "9"),
+                ("redistributeOffset", "58"),
+                ("_csrf", csrf_session.csrf_token),
+            ]
+        )
+
+    monkeypatch.setattr(request, "form", fake_form)
+
+    response = asyncio.run(main_module.admin_bulk_redistribute_scheduled_tasks(request))
+
+    assert response.status_code == 303
+    assert updated == {
+        1: "58 9 * * *",
+        2: "59 9 * * *",
+        3: "0 10 * * *",
+    }
+    assert refreshed is True
+
+
+def test_bulk_redistribute_rejects_invalid_offset(super_admin_context, csrf_session, monkeypatch):
+    """Bulk redistribute validates the requested minute offset before updating tasks."""
+    update_mock = AsyncMock()
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "update_task_cron", update_mock)
+    request = _make_post_request("/admin/scheduled-tasks/bulk-redistribute")
+
+    async def fake_form():
+        return FormData(
+            [
+                ("taskIds", "1"),
+                ("redistributeHour", "9"),
+                ("redistributeOffset", "60"),
+                ("_csrf", csrf_session.csrf_token),
+            ]
+        )
+
+    monkeypatch.setattr(request, "form", fake_form)
+
+    response = asyncio.run(main_module.admin_bulk_redistribute_scheduled_tasks(request))
+
+    assert response.status_code == 303
+    update_mock.assert_not_called()
+    flash_cookie = response.headers.get("set-cookie", "")
+    assert "_flash=" in flash_cookie
+    assert "error" in flash_cookie
 
 
 def test_bulk_redistribute_rejects_invalid_hour(super_admin_context, csrf_session, monkeypatch):

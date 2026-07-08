@@ -126,6 +126,7 @@
     >
       {% include "partials/csrf.html" %}
       <input type="hidden" name="redistributeHour" data-scheduled-tasks-redistribute-hour />
+      <input type="hidden" name="redistributeOffset" data-scheduled-tasks-redistribute-offset />
       {% if show_inactive %}<input type="hidden" name="show_inactive" value="1" />{% endif %}
     </form>
 
