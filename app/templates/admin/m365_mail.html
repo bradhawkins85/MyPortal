@@ -224,4 +224,97 @@
       </div>
     </section>
   </div>
+  {% if sync_result %}
+    {% set sync_account = sync_result.account or {} %}
+    {% set sync_actions = sync_result.message_actions or [] %}
+    <div class="modal" id="m365-mail-sync-details-modal" role="dialog" aria-modal="true" aria-labelledby="m365-mail-sync-details-title">
+      <div class="modal__dialog modal__dialog--wide">
+        <button type="button" class="modal__close" data-modal-close aria-label="Close sync details">
+          <span aria-hidden="true">&times;</span>
+          <span class="visually-hidden">Close sync details</span>
+        </button>
+        <h2 class="modal__title" id="m365-mail-sync-details-title">Office 365 mailbox sync details</h2>
+        <div class="modal__body stack-sm">
+          <p class="text-muted">
+            {{ sync_result.message }}
+            {% if sync_account.name or sync_account.user_principal_name %}
+              Mailbox: <strong>{{ sync_account.name or sync_account.user_principal_name }}</strong>.
+            {% endif %}
+          </p>
+          <div class="stats-grid stats-grid--compact">
+            <div class="stat-card"><span class="stat-card__label">Created</span><strong>{{ sync_result.created_count or 0 }}</strong></div>
+            <div class="stat-card"><span class="stat-card__label">Appended</span><strong>{{ sync_result.attached_count or 0 }}</strong></div>
+            <div class="stat-card"><span class="stat-card__label">Ignored</span><strong>{{ sync_result.ignored_count or 0 }}</strong></div>
+            <div class="stat-card"><span class="stat-card__label">Errors</span><strong>{{ (sync_result.errors or [])|length }}</strong></div>
+          </div>
+          {% if sync_actions %}
+            <div class="table-wrapper">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th scope="col">Received</th>
+                    <th scope="col">Subject</th>
+                    <th scope="col">From</th>
+                    <th scope="col">Result</th>
+                    <th scope="col">Ticket / reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for action in sync_actions %}
+                    <tr>
+                      <td>{{ action.received_at or '—' }}</td>
+                      <td>{{ action.subject or '(no subject)' }}</td>
+                      <td>{{ action.from_address or '—' }}</td>
+                      <td>
+                        {% if action.outcome == 'created_new_ticket' %}
+                          <span class="badge badge--success">New ticket</span>
+                        {% elif action.outcome == 'attached_to_existing_ticket' %}
+                          <span class="badge badge--info">Appended</span>
+                        {% elif action.outcome == 'ignored' %}
+                          <span class="badge badge--secondary">Ignored</span>
+                        {% else %}
+                          <span class="badge badge--warning">{{ action.outcome|replace('_', ' ')|title }}</span>
+                        {% endif %}
+                      </td>
+                      <td>
+                        {% if action.ticket_id %}
+                          <a href="/admin/tickets/{{ action.ticket_id }}">#{{ action.ticket_number or action.ticket_id }}</a>
+                          {% if action.ticket_subject %}<div class="table__meta">{{ action.ticket_subject }}</div>{% endif %}
+                          {% if action.reply_outcome %}<div class="table__meta">{{ action.reply_outcome|replace('_', ' ') }}</div>{% endif %}
+                        {% elif action.reason %}
+                          {{ action.reason|replace('_', ' ') }}
+                        {% elif action.error %}
+                          <span class="text-danger">{{ action.error }}</span>
+                        {% else %}
+                          —
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% else %}
+            <p class="text-muted">No mailbox messages were returned for this sync run.</p>
+          {% endif %}
+          {% if sync_result.errors %}
+            <h3 class="card__subtitle">Sync errors</h3>
+            <ul>
+              {% for err in sync_result.errors %}
+                <li class="text-danger">{{ err.error or err }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <script>
+      document.addEventListener('click', function (event) {
+        if (event.target.closest('[data-modal-close]')) {
+          document.getElementById('m365-mail-sync-details-modal')?.setAttribute('hidden', '');
+        }
+      });
+    </script>
+  {% endif %}
+
 {% endblock %}

@@ -42,6 +42,7 @@ async def _render_m365_mail_dashboard(
     success_message: str | None = None,
     error_message: str | None = None,
     status_code: int = status.HTTP_200_OK,
+    sync_result: dict[str, Any] | None = None,
 ) -> HTMLResponse:
     main_module = _main()
     accounts = await m365_mail_service.list_accounts()
@@ -61,6 +62,7 @@ async def _render_m365_mail_dashboard(
         "companies": companies,
         "success_message": success_message,
         "error_message": error_message,
+        "sync_result": sync_result,
     }
     response = await main_module._render_template("admin/m365_mail.html", request, user, extra=extra)
     response.status_code = status_code
@@ -307,20 +309,38 @@ async def admin_sync_m365_mail_account(account_id: int, request: Request):
         if message_actions
         else ""
     )
+    account = await m365_mail_service.get_account(account_id)
     if status_value in {"error"}:
         message = result.get("error") or "Office 365 mail synchronisation failed."
-        return flash_redirect("/admin/modules/m365-mail", message, "error")
-    if status_value == "skipped":
+        message_type = "error"
+    elif status_value == "skipped":
         message = result.get("reason") or "Office 365 mail synchronisation skipped."
-        return flash_redirect("/admin/modules/m365-mail", message, "error")
-    if status_value == "completed_with_errors" and error_count:
+        message_type = "error"
+    elif status_value == "completed_with_errors" and error_count:
         first_error = (result.get("errors") or [{}])[0].get("error") or "Office 365 mail sync completed with errors."
         if processed:
             first_error = f"{first_error} ({processed} message{'s' if processed != 1 else ''} imported.)"
-        first_error = f"{first_error}{detail_summary}"
-        return flash_redirect("/admin/modules/m365-mail", first_error, "error")
-    message = f"Office 365 mail sync imported {processed} message{'s' if processed != 1 else ''}.{detail_summary}"
-    return flash_redirect("/admin/modules/m365-mail", message, "success")
+        message = f"{first_error}{detail_summary}"
+        message_type = "error"
+    else:
+        message = f"Office 365 mail sync imported {processed} message{'s' if processed != 1 else ''}.{detail_summary}"
+        message_type = "success"
+    return await _render_m365_mail_dashboard(
+        request,
+        current_user,
+        success_message=message if message_type == "success" else None,
+        error_message=message if message_type == "error" else None,
+        sync_result={
+            **result,
+            "account": account,
+            "created_count": created_count,
+            "attached_count": attached_count,
+            "ignored_count": ignored_count,
+            "processed": processed,
+            "message": message,
+            "message_type": message_type,
+        },
+    )
 
 
 @router.get("/admin/modules/m365-mail/accounts/{account_id}/authorize")

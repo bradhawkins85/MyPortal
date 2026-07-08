@@ -1020,11 +1020,17 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 account_id=account_id,
                                 message_id=msg_id,
                             )
+                    existing_ticket_id = existing_message.get("ticket_id")
+                    existing_ticket = None
+                    if isinstance(existing_ticket_id, int):
+                        existing_ticket = await tickets_repo.get_ticket(existing_ticket_id)
                     _remember_message_action({
                         **message_log_base,
                         "outcome": "ignored",
                         "reason": "already_imported",
-                        "ticket_id": existing_message.get("ticket_id"),
+                        "ticket_id": existing_ticket_id,
+                        "ticket_number": existing_ticket.get("ticket_number") if isinstance(existing_ticket, Mapping) else None,
+                        "ticket_subject": existing_ticket.get("subject") if isinstance(existing_ticket, Mapping) else None,
                         "read_state_repaired": read_state_repaired,
                     })
                     continue
