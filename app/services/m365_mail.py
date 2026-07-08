@@ -4,7 +4,7 @@ import base64
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, unquote, urlencode
 
 import httpx
 
@@ -38,6 +38,7 @@ from app.services.imap import (
     _normalise_string,
     _resolve_ticket_entities,
     _save_email_attachment,
+    _CID_REFERENCE_PATTERN,
     _ticket_is_closed,
 )
 
@@ -933,6 +934,13 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 subject = msg.get("subject") or f"Email from {upn}"
                 body_content = msg.get("body", {})
                 body = body_content.get("content") or ""
+                if msg.get("hasAttachments") and body:
+                    body = await _embed_graph_inline_images(
+                        access_token=access_token,
+                        upn=upn,
+                        message_id=msg_id,
+                        html_body=body,
+                    )
 
                 from_data = msg.get("from", {})
                 from_email_data = from_data.get("emailAddress", {})
@@ -1194,6 +1202,82 @@ async def sync_account(account_id: int) -> dict[str, Any]:
     )
     status_value = "succeeded" if not errors else "completed_with_errors"
     return {"status": status_value, "processed": processed, "errors": errors}
+
+
+async def _embed_graph_inline_images(
+    *,
+    access_token: str,
+    upn: str,
+    message_id: str,
+    html_body: str,
+) -> str:
+    """Replace Graph ``cid:`` image references with safe data URIs.
+
+    Microsoft Graph returns inline email images as file attachments with
+    ``isInline`` and ``contentId`` metadata.  The ticket body otherwise keeps
+    ``cid:...`` references that browsers render as broken placeholders, so fetch
+    the matching inline images and embed them directly in the imported HTML.
+    """
+    if not html_body or "cid:" not in html_body.lower():
+        return html_body
+
+    message_id_encoded = quote(message_id, safe="")
+    url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/{message_id_encoded}/attachments"
+    try:
+        data = await _graph_get(access_token, url)
+    except Exception:
+        return html_body
+
+    inline_images: dict[str, tuple[str, bytes]] = {}
+    for attachment in data.get("value") or []:
+        if attachment.get("@odata.type") != "#microsoft.graph.fileAttachment":
+            continue
+        if not attachment.get("isInline"):
+            continue
+
+        content_type = str(attachment.get("contentType") or "").lower()
+        if not content_type.startswith("image/"):
+            continue
+
+        content_id = str(attachment.get("contentId") or "").strip().strip("<>")
+        if not content_id:
+            continue
+
+        payload: bytes | None = None
+        content_bytes_b64 = attachment.get("contentBytes") or ""
+        if content_bytes_b64:
+            try:
+                payload = base64.b64decode(content_bytes_b64)
+            except Exception:
+                payload = None
+
+        attachment_id = str(attachment.get("id") or "").strip()
+        if payload is None and attachment_id:
+            value_url = (
+                f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/{message_id_encoded}"
+                f"/attachments/{quote(attachment_id, safe='')}/$value"
+            )
+            try:
+                payload = await _graph_get_bytes(access_token, value_url)
+            except Exception:
+                payload = None
+
+        if payload:
+            inline_images[content_id.lower()] = (content_type, payload)
+
+    if not inline_images:
+        return html_body
+
+    def _replace_cid(match):
+        cid_value = unquote((match.group(1) or "").strip().strip("<>"))
+        resource = inline_images.get(cid_value.lower())
+        if not resource:
+            return match.group(0)
+        content_type, payload = resource
+        encoded = base64.b64encode(payload).decode("ascii")
+        return f"data:{content_type};base64,{encoded}"
+
+    return _CID_REFERENCE_PATTERN.sub(_replace_cid, html_body)
 
 
 async def _save_graph_attachments(
