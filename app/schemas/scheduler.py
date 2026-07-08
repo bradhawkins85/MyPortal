@@ -15,6 +15,7 @@ class ScheduledTaskBase(BaseModel):
     active: bool = True
     max_retries: int = Field(default=12, validation_alias="maxRetries")
     retry_backoff_seconds: int = Field(default=300, validation_alias="retryBackoffSeconds")
+    exclude_from_calendar: bool = Field(default=False, validation_alias="excludeFromCalendar")
 
     model_config = {
         "populate_by_name": True,
@@ -34,6 +35,7 @@ class ScheduledTaskUpdate(BaseModel):
     active: bool | None = None
     max_retries: int | None = Field(default=None, validation_alias="maxRetries")
     retry_backoff_seconds: int | None = Field(default=None, validation_alias="retryBackoffSeconds")
+    exclude_from_calendar: bool | None = Field(default=None, validation_alias="excludeFromCalendar")
 
     model_config = {
         "populate_by_name": True,
@@ -50,6 +52,7 @@ class ScheduledTaskResponse(BaseModel):
     active: bool
     max_retries: int = Field(serialization_alias="maxRetries")
     retry_backoff_seconds: int = Field(serialization_alias="retryBackoffSeconds")
+    exclude_from_calendar: bool = Field(serialization_alias="excludeFromCalendar")
     last_run_at: datetime | None = Field(default=None, serialization_alias="lastRunAt")
     last_status: str | None = Field(default=None, serialization_alias="lastStatus")
     last_error: str | None = Field(default=None, serialization_alias="lastError")

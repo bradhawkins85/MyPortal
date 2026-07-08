@@ -59,6 +59,7 @@ async def create_task(
         retry_backoff_seconds=int(
             raw_retry_backoff if raw_retry_backoff is not None else 300
         ),
+        exclude_from_calendar=bool(data.get("exclude_from_calendar", False)),
     )
     await scheduler_service.refresh()
     return ScheduledTaskResponse.model_validate(created)
@@ -106,6 +107,7 @@ async def update_task(
         retry_backoff_seconds=int(
             raw_retry_backoff if raw_retry_backoff is not None else 300
         ),
+        exclude_from_calendar=bool(merged.get("exclude_from_calendar", False)),
     )
     await scheduler_service.refresh()
     return ScheduledTaskResponse.model_validate(updated)

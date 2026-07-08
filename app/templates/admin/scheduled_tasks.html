@@ -155,6 +155,10 @@
                   <span class="form-checkbox-text">Active</span>
                 </label>
                 <label class="form-checkbox-label">
+                  <input type="checkbox" class="scheduled-task-column-toggle" data-column="calendar" checked />
+                  <span class="form-checkbox-text">Calendar</span>
+                </label>
+                <label class="form-checkbox-label">
                   <input type="checkbox" class="scheduled-task-column-toggle" data-column="last-run" checked />
                   <span class="form-checkbox-text">Last run</span>
                 </label>
@@ -187,6 +191,7 @@
               <th scope="col" data-sort="string" data-column="company" data-column-key="company">Company</th>
               <th scope="col" data-sort="string" data-column="cron" data-column-key="schedule">Schedule</th>
               <th scope="col" data-sort="string" data-column="active" data-column-key="active">Active</th>
+              <th scope="col" data-sort="string" data-column="calendar" data-column-key="calendar">Calendar</th>
               <th scope="col" data-sort="date" data-column="last-run" data-column-key="last_run">Last run</th>
               <th scope="col" data-sort="string" data-column="status" data-column-key="status">Status</th>
               <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
@@ -224,6 +229,9 @@
                   </td>
                   <td data-label="Active" data-column="active" data-column-key="active">
                     <span class="tag {{ 'tag--success' if task.active else 'tag--muted' }}">{{ 'Yes' if task.active else 'No' }}</span>
+                  </td>
+                  <td data-label="Calendar" data-column="calendar" data-column-key="calendar">
+                    <span class="tag {{ 'tag--muted' if task.exclude_from_calendar else 'tag--success' }}">{{ 'Hidden' if task.exclude_from_calendar else 'Shown' }}</span>
                   </td>
                   <td data-label="Last run" data-column="last-run" data-value="{{ task.last_run_iso or '' }}" data-column-key="last_run">
                     {% if task.last_run_iso %}
@@ -277,7 +285,7 @@
               {% endfor %}
             {% else %}
               <tr>
-                <td colspan="10" class="table__empty">
+                <td colspan="11" class="table__empty">
                   {% if show_inactive %}
                     No scheduled tasks configured yet.
                   {% else %}
@@ -368,6 +376,13 @@
             <input type="checkbox" id="task-active" name="active" checked />
             <span>Task active</span>
           </label>
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="form-checkbox">
+            <input type="checkbox" id="task-exclude-calendar" name="excludeFromCalendar" />
+            <span>Hide from cron calendar</span>
+          </label>
+          <p class="form-help">Use for high-frequency jobs such as M365 or IMAP imports that would otherwise fill the calendar.</p>
         </div>
         <div class="form-actions">
           <div class="form-actions__group">

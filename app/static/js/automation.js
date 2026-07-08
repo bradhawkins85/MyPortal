@@ -899,6 +899,7 @@
     const maxRetriesField = query('task-max-retries');
     const backoffField = query('task-backoff');
     const activeField = query('task-active');
+    const excludeCalendarField = query('task-exclude-calendar');
     const nameFields = getTaskNameFields();
     if (
       !idField ||
@@ -907,7 +908,8 @@
       !descriptionField ||
       !maxRetriesField ||
       !backoffField ||
-      !activeField
+      !activeField ||
+      !excludeCalendarField
     ) {
       return;
     }
@@ -993,6 +995,9 @@
     backoffField.value = backoffValue;
 
     activeField.checked = Boolean(taskData.active !== false);
+    excludeCalendarField.checked = Boolean(
+      taskData.exclude_from_calendar ?? taskData.excludeFromCalendar ?? false
+    );
 
     const existingName = taskData.name ? String(taskData.name) : '';
     if (nameFields.hidden) {
@@ -1292,6 +1297,7 @@
         cron: (formData.get('cron') || '').toString().trim(),
         description: description,
         active: formData.get('active') !== null,
+        excludeFromCalendar: formData.get('excludeFromCalendar') !== null,
         maxRetries: Number(formData.get('maxRetries') || formData.get('max_retries') || 12),
         retryBackoffSeconds: Number(
           formData.get('retryBackoffSeconds') || formData.get('retry_backoff_seconds') || 300
