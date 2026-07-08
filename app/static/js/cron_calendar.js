@@ -20,8 +20,6 @@
   function startOfDay(date) { const d = new Date(date); d.setHours(0, 0, 0, 0); return d; }
   function addDays(date, days) { const d = new Date(date); d.setDate(d.getDate() + days); return d; }
   function startOfWeek(date) { const d = startOfDay(date); d.setDate(d.getDate() - d.getDay()); return d; }
-  function startOfMonth(date) { return new Date(date.getFullYear(), date.getMonth(), 1); }
-  function addMonths(date, months) { return new Date(date.getFullYear(), date.getMonth() + months, 1); }
   function escapeHtml(value) { return String(value || '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
   function formatDate(date, opts) { return new Intl.DateTimeFormat(undefined, opts).format(date); }
   function formatTime(date) { return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(date); }
@@ -54,7 +52,6 @@
   }
 
   function rangeForView() {
-    if (state.view === 'month') { const start = startOfMonth(state.anchor); return { start, end: addMonths(start, 1) }; }
     if (state.view === 'week') { const start = startOfWeek(state.anchor); return { start, end: addDays(start, 7) }; }
     if (state.view === 'list') { const start = startOfDay(state.anchor); return { start, end: addDays(start, 30) }; }
     const start = startOfDay(state.anchor); return { start, end: addDays(start, 1) };
@@ -142,19 +139,12 @@
     if (state.view === 'day' || state.view === 'week') { renderTimeline(state.view === 'week' ? 7 : 1); return; }
     countLabel.textContent = String(events.length);
     grid.className = `cron-calendar__grid cron-calendar__grid--${state.view}`;
-    const { start } = rangeForView();
-    if (state.view === 'list') {
-      const byDay = new Map();
-      events.forEach(event => { const key = formatDate(new Date(event.start), { dateStyle: 'full' }); byDay.set(key, [...(byDay.get(key) || []), event]); });
-      grid.innerHTML = byDay.size ? Array.from(byDay.entries()).map(([label, items]) => renderPeriod(label, items)).join('') : renderPeriod('Upcoming 30 days', []);
-      return;
-    }
-    const days = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
-    grid.innerHTML = Array.from({ length: days }, (_, idx) => {
-      const day = addDays(start, idx);
-      const items = events.filter(event => isSameDay(new Date(event.start), day));
-      return renderPeriod(formatDate(day, { weekday: 'short', month: 'short', day: 'numeric' }), items);
-    }).join('');
+    const byDay = new Map();
+    events.forEach(event => {
+      const key = formatDate(new Date(event.start), { dateStyle: 'full' });
+      byDay.set(key, [...(byDay.get(key) || []), event]);
+    });
+    grid.innerHTML = byDay.size ? Array.from(byDay.entries()).map(([label, items]) => renderPeriod(label, items)).join('') : renderPeriod('Upcoming 30 days', []);
   }
 
   document.querySelectorAll('[data-calendar-view]').forEach(button => {
@@ -166,8 +156,8 @@
       loadEvents();
     });
   });
-  root.querySelector('[data-calendar-prev]').addEventListener('click', () => { state.anchor = state.view === 'month' ? addMonths(state.anchor, -1) : addDays(state.anchor, state.view === 'week' ? -7 : state.view === 'list' ? -30 : -1); loadEvents(); });
-  root.querySelector('[data-calendar-next]').addEventListener('click', () => { state.anchor = state.view === 'month' ? addMonths(state.anchor, 1) : addDays(state.anchor, state.view === 'week' ? 7 : state.view === 'list' ? 30 : 1); loadEvents(); });
+  root.querySelector('[data-calendar-prev]').addEventListener('click', () => { state.anchor = addDays(state.anchor, state.view === 'week' ? -7 : state.view === 'list' ? -30 : -1); loadEvents(); });
+  root.querySelector('[data-calendar-next]').addEventListener('click', () => { state.anchor = addDays(state.anchor, state.view === 'week' ? 7 : state.view === 'list' ? 30 : 1); loadEvents(); });
   root.querySelector('[data-calendar-today]').addEventListener('click', () => { state.anchor = new Date(); loadEvents(); });
   searchInput.addEventListener('input', () => { state.search = searchInput.value || ''; render(); });
   inactiveInput.addEventListener('change', () => { state.includeInactive = inactiveInput.checked; loadEvents(); });
