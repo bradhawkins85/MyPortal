@@ -318,6 +318,25 @@ async def send_email_via_api(
         if not api_key:
             raise SMTP2GoError("SMTP2Go API key not configured")
         
+        # Suppress blocklisted recipients before any SMTP2Go API attempt.
+        try:
+            from app.repositories import email_blocklist as email_blocklist_repo
+
+            to, blocked_to = await email_blocklist_repo.filter_allowed(to or [])
+            if cc:
+                cc, blocked_cc = await email_blocklist_repo.filter_allowed(cc)
+            else:
+                blocked_cc = []
+            if bcc:
+                bcc, blocked_bcc = await email_blocklist_repo.filter_allowed(bcc)
+            else:
+                blocked_bcc = []
+            blocked_addresses = blocked_to + blocked_cc + blocked_bcc
+            if blocked_addresses:
+                logger.info("SMTP2Go send suppressed blocklisted recipients", subject=subject, blocked_recipients=blocked_addresses)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("SMTP2Go email blocklist check failed; continuing with original recipients", subject=subject, error=str(exc))
+
         # Validate required fields
         if not to or len(to) == 0:
             raise SMTP2GoError("At least one recipient email address is required")
@@ -726,7 +745,7 @@ async def process_webhook_event(
             internal_event_type = 'bounce'
         elif normalized_event_type in ['spam', 'spam_complaint']:
             internal_event_type = 'spam'
-        elif normalized_event_type in ['rejected']:
+        elif normalized_event_type in ['rejected', 'reject']:
             internal_event_type = 'rejected'
 
         if not internal_event_type:
@@ -799,6 +818,26 @@ async def process_webhook_event(
                     WHERE id = :reply_id
                 """
                 await db.execute(update_query, {'occurred_at': occurred_at, 'reply_id': reply_id})
+
+        if internal_event_type in ('bounce', 'rejected') and recipient:
+            try:
+                from app.repositories import email_blocklist as email_blocklist_repo
+
+                reason = event_data.get('reason') or event_data.get('message') or event_data.get('description')
+                await email_blocklist_repo.upsert_entry(
+                    email=str(recipient),
+                    reason=str(reason) if reason else f"SMTP2Go {internal_event_type} webhook",
+                    source="smtp2go_webhook",
+                    last_event_type=internal_event_type,
+                    last_event_payload=json.dumps(event_data) if event_data else None,
+                )
+            except Exception as blocklist_exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "Failed to update email blocklist from SMTP2Go webhook",
+                    event_type=internal_event_type,
+                    recipient=recipient,
+                    error=str(blocklist_exc),
+                )
 
         # Update the per-recipient row so the delivery popup can break the
         # status down by recipient. For 'processed' events SMTP2Go provides a
