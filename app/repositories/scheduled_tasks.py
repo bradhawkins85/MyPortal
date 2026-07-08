@@ -241,6 +241,14 @@ async def rename_task(task_id: int, name: str) -> None:
     )
 
 
+async def update_task_cron(task_id: int, cron: str) -> None:
+    """Update only the cron expression of a scheduled task."""
+    await db.execute(
+        "UPDATE scheduled_tasks SET cron = %s WHERE id = %s",
+        (cron, task_id),
+    )
+
+
 async def set_task_active(task_id: int, active: bool) -> dict[str, Any] | None:
     await db.execute(
         "UPDATE scheduled_tasks SET active = %s WHERE id = %s",
