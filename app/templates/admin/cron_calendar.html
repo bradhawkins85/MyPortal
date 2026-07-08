@@ -4,8 +4,8 @@
 {% block header_actions %}
   <a class="button button--ghost" href="/admin/scheduled-tasks">Manage scheduled tasks</a>
   <div class="button-group" role="group" aria-label="Calendar views">
-    <button class="button button--primary" type="button" data-calendar-view="day">Day</button>
-    <button class="button button--ghost" type="button" data-calendar-view="week">Week</button>
+    <button class="button button--ghost" type="button" data-calendar-view="day">Day</button>
+    <button class="button button--primary" type="button" data-calendar-view="week">Week</button>
     <button class="button button--ghost" type="button" data-calendar-view="month">Month</button>
     <button class="button button--ghost" type="button" data-calendar-view="list">List</button>
   </div>
@@ -52,6 +52,8 @@
 {% block extra_head %}
 <style>
   .button-group { display: inline-flex; gap: .35rem; flex-wrap: wrap; }
+  .cron-calendar { min-height: 0; }
+  .cron-calendar .management__content { min-height: 0; }
   .cron-calendar__toolbar { display: flex; justify-content: space-between; gap: 1rem; align-items: center; margin-bottom: 1rem; }
   .cron-calendar__nav { display: flex; gap: .5rem; flex-wrap: wrap; }
   .cron-calendar__grid { display: grid; gap: .75rem; max-height: calc(100vh - 18rem); overflow: auto; }
@@ -62,9 +64,23 @@
   .cron-calendar__event-meta { display: flex; gap: .5rem; flex-wrap: wrap; font-size: .82rem; color: var(--text-muted, #64748b); }
   .cron-calendar__empty { padding: 1rem; color: var(--text-muted, #64748b); }
   .cron-calendar__grid--month { grid-template-columns: repeat(7, minmax(9rem, 1fr)); }
-  .cron-calendar__grid--week { grid-template-columns: repeat(7, minmax(10rem, 1fr)); }
-  .cron-calendar__grid--day, .cron-calendar__grid--list { grid-template-columns: 1fr; }
-  @media (max-width: 900px) { .cron-calendar__grid--month, .cron-calendar__grid--week { grid-template-columns: 1fr; } .cron-calendar__toolbar { align-items: stretch; flex-direction: column; } }
+  .cron-calendar__grid--list { grid-template-columns: 1fr; }
+  .cron-calendar__grid--timeline { display: block; border: 1px solid var(--border-color, #d8dee9); border-radius: .85rem; background: var(--surface-color, #fff); overflow: auto; }
+  .cron-calendar__timeline { display: grid; grid-template-columns: 4.5rem minmax(55rem, 1fr); grid-template-rows: 3rem var(--calendar-timeline-height); min-width: 62rem; }
+  .cron-calendar__corner { position: sticky; left: 0; top: 0; z-index: 5; background: var(--surface-color, #fff); border-right: 1px solid var(--border-color, #d8dee9); border-bottom: 1px solid var(--border-color, #d8dee9); }
+  .cron-calendar__day-headings { position: sticky; top: 0; z-index: 4; display: grid; grid-auto-columns: minmax(12rem, 1fr); grid-auto-flow: column; background: var(--surface-color, #fff); border-bottom: 1px solid var(--border-color, #d8dee9); }
+  .cron-calendar__day-heading { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; border-right: 1px solid var(--border-color, #d8dee9); color: var(--text-muted, #64748b); font-size: .78rem; text-transform: uppercase; }
+  .cron-calendar__day-heading strong { display: inline-grid; min-width: 1.45rem; min-height: 1.45rem; place-items: center; border-radius: 999px; color: var(--text-color, #111827); }
+  .cron-calendar__day-heading.is-today strong { color: #fff; background: var(--primary-color, #2563eb); }
+  .cron-calendar__time-axis { position: sticky; left: 0; z-index: 3; display: grid; grid-template-rows: repeat(19, var(--calendar-hour-height)); background: var(--surface-color, #fff); border-right: 1px solid var(--border-color, #d8dee9); }
+  .cron-calendar__time-axis span { transform: translateY(-.45rem); padding-right: .5rem; text-align: right; color: var(--text-muted, #64748b); font-size: .78rem; }
+  .cron-calendar__day-columns { display: grid; grid-auto-columns: minmax(12rem, 1fr); grid-auto-flow: column; min-height: var(--calendar-timeline-height); background-image: repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--calendar-hour-height) - 1px), var(--border-color, #d8dee9) calc(var(--calendar-hour-height) - 1px), var(--border-color, #d8dee9) var(--calendar-hour-height)); }
+  .cron-calendar__day-column { position: relative; border-right: 1px solid var(--border-color, #d8dee9); min-height: var(--calendar-timeline-height); }
+  .cron-calendar__day-column.is-today { background: color-mix(in srgb, var(--primary-color, #2563eb) 4%, transparent); }
+  .cron-calendar__timeline-event { position: absolute; left: .15rem; right: .15rem; display: grid; align-content: start; gap: .1rem; overflow: hidden; border-left: .2rem solid var(--accent-color, #ec4899); border-radius: .2rem; padding: .2rem .35rem; background: color-mix(in srgb, var(--surface-muted, #f1f5f9) 90%, var(--primary-color, #2563eb)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--border-color, #d8dee9) 70%, transparent); color: var(--text-color, #111827); font-size: .72rem; line-height: 1.15; text-decoration: none; }
+  .cron-calendar__timeline-event strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cron-calendar__timeline-event span { color: var(--text-muted, #64748b); }
+  @media (max-width: 900px) { .cron-calendar__grid--month { grid-template-columns: 1fr; } .cron-calendar__toolbar { align-items: stretch; flex-direction: column; } .cron-calendar__timeline { grid-template-columns: 3.75rem minmax(42rem, 1fr); min-width: 46rem; } }
 </style>
 <script src="{{ static_url('/static/js/cron_calendar.js') }}" defer></script>
 {% endblock %}
