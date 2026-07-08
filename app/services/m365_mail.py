@@ -50,7 +50,8 @@ _403_ERROR_MESSAGE = (
     "policy, the mailbox does not exist, or the enterprise app has not been "
     "granted access. Verify that the enterprise app has Mail.ReadWrite "
     "application permission and that no Exchange Online access policies "
-    "are blocking access, then retry the sync."
+    "are blocking access. A Global Administrator may need to grant admin "
+    "consent or update Exchange application access policies, then retry the sync."
 )
 
 # Delegated OAuth scope for the per-account sign-in flow.  Mail.ReadWrite
@@ -852,26 +853,6 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             try:
                 data = await _graph_get(access_token, full_url)
             except M365Error as exc:
-                if exc.http_status == 403 and using_unread_filter and not unread_filter_fallback_attempted:
-                    # Older tenants or restricted shared-mailbox policies may reject
-                    # filtered message queries.  Fall back to the previous full-folder
-                    # scan rather than failing the sync outright.
-                    unread_filter_fallback_attempted = True
-                    using_unread_filter = False
-                    fallback_params = dict(query_params)
-                    fallback_params.pop("$filter", None)
-                    fallback_params["$orderby"] = "receivedDateTime asc"
-                    full_url = messages_url + "?" + urlencode(
-                        fallback_params,
-                        quote_via=quote,
-                        safe="$,",
-                    )
-                    log_info(
-                        "M365 unread filter was denied; falling back to full mailbox scan",
-                        account_id=account_id,
-                        upn=upn,
-                    )
-                    continue
                 if exc.http_status == 403 and using_delegated and not delegated_fallback_attempted:
                     # Delegated token lacks access to this mailbox.
                     # Fall back to client_credentials (app-level permissions)
@@ -892,6 +873,13 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 int(auth_company_id), force_client_credentials=True
                             )
                             using_delegated = False
+                            # Retry the exact failed query with app-only permissions.
+                            # A delegated 403 usually means the signed-in user cannot
+                            # access the target/shared mailbox; it does not prove that
+                            # the unread OData filter is unsupported.  Keeping the
+                            # unread-filter URL avoids falling back to an expensive
+                            # full-folder scan that can miss new unread messages in
+                            # large mailboxes or time out under scheduler pressure.
                             continue
                         except Exception as fb_exc:
                             log_error(
@@ -909,6 +897,33 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         )
                     })
                     break
+                if (
+                    exc.http_status == 403
+                    and using_unread_filter
+                    and not unread_filter_fallback_attempted
+                    and not delegated_fallback_attempted
+                ):
+                    # Older tenants or restricted shared-mailbox policies may reject
+                    # filtered message queries.  Only use this fallback after any
+                    # delegated-token fallback has been exhausted, otherwise an
+                    # auth failure from the signed-in user can force app-only syncs
+                    # into slow full-folder scans.
+                    unread_filter_fallback_attempted = True
+                    using_unread_filter = False
+                    fallback_params = dict(query_params)
+                    fallback_params.pop("$filter", None)
+                    fallback_params["$orderby"] = "receivedDateTime asc"
+                    full_url = messages_url + "?" + urlencode(
+                        fallback_params,
+                        quote_via=quote,
+                        safe="$,",
+                    )
+                    log_info(
+                        "M365 unread filter was denied; falling back to full mailbox scan",
+                        account_id=account_id,
+                        upn=upn,
+                    )
+                    continue
                 if exc.http_status == 403 and not using_delegated:
                     log_error(
                         "Failed to fetch messages from M365 mailbox",
