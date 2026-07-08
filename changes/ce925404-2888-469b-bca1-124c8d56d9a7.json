@@ -1,0 +1,7 @@
+{
+  "guid": "ce925404-2888-469b-bca1-124c8d56d9a7",
+  "occurred_at": "2026-07-08T02:37:25.339405+00:00",
+  "change_type": "fix",
+  "summary": "Fix refreshed ticket dashboard rows so loaded column data aligns with ticket table headers.",
+  "content_hash": "63d1d28bd40ea9b4560463afcf4000722afc6f7dbcf79d9876e1956c326e8ccb"
+}
