@@ -94,9 +94,23 @@ jobs:
         shell: pwsh
         run: |
           $binDir = (Resolve-Path dist\windows).Path
+          $version = "${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}"
+          $msiVersion = ($version -replace '^v', '' -replace '[^0-9.].*$', '')
+          if ([string]::IsNullOrWhiteSpace($msiVersion)) {
+            $msiVersion = '0.0.0'
+          }
+          $versionParts = @($msiVersion.Split('.') | ForEach-Object {
+            if ($_ -match '^\d+$') { [int]$_ } else { 0 }
+          })
+          while ($versionParts.Count -lt 3) {
+            $versionParts += 0
+          }
+          $msiVersion = ($versionParts[0..2] -join '.')
+
           wix build -acceptEula wix7 installer\windows\myportal-tray.wxs `
             -arch x64 `
             -d "BinDir=$binDir" `
+            -d "ProductVersion=$msiVersion" `
             -o dist\windows\myportal-tray.msi
 
       - name: Upload MSI to release
