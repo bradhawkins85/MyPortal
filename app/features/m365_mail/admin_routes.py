@@ -41,6 +41,7 @@ async def _render_m365_mail_dashboard(
     editing_account_id: int | None = None,
     success_message: str | None = None,
     error_message: str | None = None,
+    sync_result: dict[str, Any] | None = None,
     status_code: int = status.HTTP_200_OK,
     sync_result: dict[str, Any] | None = None,
 ) -> HTMLResponse:
