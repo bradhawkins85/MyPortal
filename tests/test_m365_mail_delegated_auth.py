@@ -336,5 +336,48 @@ async def test_sync_delegated_403_fallback_then_client_creds_also_403(monkeypatc
     assert "403 Forbidden" in result["errors"][0]["error"]
     assert call_count["graph_get"] == 2
     assert call_count["acquire"] == 1
+
+
 async def _coro(val):
     return val
+
+
+async def test_sync_delegated_403_retries_unread_filter_with_client_credentials(monkeypatch):
+    """Delegated mailbox access failures should not disable the unread filter.
+
+    Shared mailboxes often deny the signed-in user's delegated token while the
+    tenant app token can still read the mailbox.  The app-token retry should use
+    the same unread-filtered query instead of switching to a full mailbox scan.
+    """
+    from app.services.m365 import M365Error
+
+    account = _fake_account(company_id=5, refresh_token="enc:refresh", tenant_id="tenant-123")
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", lambda _: _coro(account))
+
+    async def fake_acquire_delegated(acct):
+        return "delegated-token"
+
+    async def fake_acquire_token(company_id, **kwargs):
+        assert company_id == 5
+        return "client-creds-token"
+
+    seen_urls: list[tuple[str, str]] = []
+
+    async def fake_graph_get(token, url):
+        seen_urls.append((token, url))
+        if token == "delegated-token":
+            raise M365Error("Forbidden", http_status=403)
+        assert token == "client-creds-token"
+        return {"value": [], "@odata.nextLink": None}
+
+    monkeypatch.setattr(m365_mail, "_acquire_delegated_access_token", fake_acquire_delegated)
+    monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+
+    result = await m365_mail.sync_account(1)
+
+    assert result["status"] == "succeeded"
+    assert [token for token, _url in seen_urls] == ["delegated-token", "client-creds-token"]
+    assert all("$filter=isRead%20eq%20false" in url for _token, url in seen_urls)
+    assert all("$orderby=receivedDateTime%20asc" not in url for _token, url in seen_urls)

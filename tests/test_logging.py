@@ -114,3 +114,64 @@ def test_blank_application_log_path_disables_file_sink():
         settings = Settings()
 
     assert settings.app_log_path is None
+
+
+def test_uvicorn_access_filter_suppresses_heartbeat_when_not_verbose():
+    """Normal logging hides uvicorn's high-frequency tray heartbeat access entries."""
+    import logging
+
+    from app.core.logging import _configure_uvicorn_access_logging
+
+    access_logger = logging.getLogger("uvicorn.access")
+    original_filters = list(access_logger.filters)
+    try:
+        _configure_uvicorn_access_logging(verbose=False)
+        heartbeat_record = logging.LogRecord(
+            "uvicorn.access",
+            logging.INFO,
+            __file__,
+            1,
+            '%s - "%s %s HTTP/%s" %d',
+            ("127.0.0.1:1234", "POST", "/api/tray/heartbeat", "1.1", 200),
+            None,
+        )
+        normal_record = logging.LogRecord(
+            "uvicorn.access",
+            logging.INFO,
+            __file__,
+            1,
+            '%s - "%s %s HTTP/%s" %d',
+            ("127.0.0.1:1234", "GET", "/api/ping", "1.1", 200),
+            None,
+        )
+
+        assert not access_logger.filter(heartbeat_record)
+        assert access_logger.filter(normal_record)
+    finally:
+        access_logger.filters = original_filters
+
+
+def test_uvicorn_access_filter_allows_heartbeat_when_verbose():
+    """Verbose logging leaves uvicorn access logs unfiltered for troubleshooting."""
+    import logging
+
+    from app.core.logging import _configure_uvicorn_access_logging
+
+    access_logger = logging.getLogger("uvicorn.access")
+    original_filters = list(access_logger.filters)
+    try:
+        _configure_uvicorn_access_logging(verbose=False)
+        _configure_uvicorn_access_logging(verbose=True)
+        heartbeat_record = logging.LogRecord(
+            "uvicorn.access",
+            logging.INFO,
+            __file__,
+            1,
+            '%s - "%s %s HTTP/%s" %d',
+            ("127.0.0.1:1234", "POST", "/api/tray/heartbeat", "1.1", 200),
+            None,
+        )
+
+        assert access_logger.filter(heartbeat_record)
+    finally:
+        access_logger.filters = original_filters
