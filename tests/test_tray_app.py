@@ -1237,3 +1237,98 @@ def test_empty_chat_message_mentions_matrix_client_app():
     assert expected in popup_template
     assert "No messages yet. Say hello!" not in room_template
     assert "No messages yet. Say hello!" not in popup_template
+
+
+def _stub_magic_module():
+    import sys
+    import types
+
+    if "magic" not in sys.modules:
+        magic_stub = types.ModuleType("magic")
+        magic_stub.from_buffer = lambda *_args, **_kwargs: "application/octet-stream"
+        sys.modules["magic"] = magic_stub
+
+
+def test_ticket_form_submission_reference_uses_sid_and_legacy_token_hash():
+    _stub_magic_module()
+    from app.api.routes.tray import _ticket_form_submission_reference
+
+    assert (
+        _ticket_form_submission_reference({"sid": "abc123"}, "token-one")
+        == "tray-form:abc123"
+    )
+    legacy_one = _ticket_form_submission_reference({}, "token-one")
+    legacy_two = _ticket_form_submission_reference({}, "token-one")
+    assert legacy_one == legacy_two
+    assert legacy_one.startswith("tray-form:")
+    assert legacy_one != _ticket_form_submission_reference({}, "token-two")
+
+
+def test_tray_submit_ticket_passes_external_reference(monkeypatch, run):
+    _stub_magic_module()
+    from app.api.routes import tray as tray_routes
+    from app.schemas.tray import TrayTicketSubmitRequest
+
+    async def fake_get_device_by_uid(uid):
+        return {
+            "id": 1,
+            "device_uid": uid,
+            "company_id": None,
+            "asset_id": None,
+            "status": "active",
+        }
+
+    async def fake_get_user_by_email(email):
+        return None
+
+    async def fake_get_questions_for_company(company_id):
+        return []
+
+    async def fake_resolve_status_or_default(status):
+        return "open"
+
+    captured = {}
+
+    async def fake_create_ticket(**kwargs):
+        captured.update(kwargs)
+        return {"id": 77, "ticket_number": "TKT-77"}
+
+    monkeypatch.setattr(
+        tray_routes.tray_repo, "get_device_by_uid", fake_get_device_by_uid
+    )
+    monkeypatch.setattr(
+        tray_routes.users_repo, "get_user_by_email", fake_get_user_by_email
+    )
+    monkeypatch.setattr(
+        tray_routes.tq_service,
+        "get_questions_for_company",
+        fake_get_questions_for_company,
+    )
+    monkeypatch.setattr(
+        tray_routes.tickets_service,
+        "resolve_status_or_default",
+        fake_resolve_status_or_default,
+    )
+    monkeypatch.setattr(
+        tray_routes.tickets_service, "create_ticket", fake_create_ticket
+    )
+
+    class RequestWithoutAuth:
+        headers = {}
+
+    result = run(
+        tray_routes.tray_submit_ticket(
+            TrayTicketSubmitRequest(
+                device_uid="device-1",
+                name="Alice",
+                email="alice@example.com",
+                subject="Help",
+                description="Please help",
+            ),
+            RequestWithoutAuth(),
+            external_reference="tray-form:test-ref",
+        )
+    )
+
+    assert result.ticket_id == 77
+    assert captured["external_reference"] == "tray-form:test-ref"
