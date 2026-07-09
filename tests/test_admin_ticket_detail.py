@@ -263,7 +263,8 @@ async def test_admin_reply_saves_attachments(monkeypatch):
     monkeypatch.setattr(main.tickets_repo, "create_reply", AsyncMock(return_value=None))
     set_status_mock = AsyncMock(return_value={"id": 3, "status": "pending"})
     monkeypatch.setattr(main.tickets_repo, "set_ticket_status", set_status_mock)
-    monkeypatch.setattr(main.tickets_repo, "add_watcher", AsyncMock(return_value=None))
+    add_watcher_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(main.tickets_repo, "add_watcher", add_watcher_mock)
     monkeypatch.setattr(main.tickets_service, "refresh_ticket_ai_summary", AsyncMock(return_value=None))
     monkeypatch.setattr(main.tickets_service, "refresh_ticket_ai_tags", AsyncMock(return_value=None))
     monkeypatch.setattr(main.tickets_service, "broadcast_ticket_event", AsyncMock(return_value=None))
@@ -278,6 +279,7 @@ async def test_admin_reply_saves_attachments(monkeypatch):
     assert response.status_code == status.HTTP_303_SEE_OTHER
     assert "/admin/tickets/3" in response.headers.get("location", "")
     assert set_status_mock.await_args.args == (3, "pending")
+    add_watcher_mock.assert_not_awaited()
     assert save_mock.await_count == 1
     called_args = save_mock.await_args.kwargs
     assert called_args["ticket_id"] == 3

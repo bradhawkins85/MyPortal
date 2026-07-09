@@ -1575,8 +1575,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
                         ticket_id=ticket_id,
                     )
                     has_failed_attachments = True
-        if isinstance(author_id, int):
-            await tickets_repo.add_watcher(ticket_id, author_id)
+        # Technicians should not be automatically added as ticket watchers when replying.
         await tickets_repo.set_ticket_status(ticket_id, reply_status)
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
         await tickets_service.refresh_ticket_ai_tags(ticket_id)
