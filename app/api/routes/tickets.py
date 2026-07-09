@@ -3,7 +3,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.responses import FileResponse
 
 from app.api.dependencies.auth import (
@@ -14,7 +23,11 @@ from app.api.dependencies.auth import (
     require_super_admin,
 )
 from app.api.dependencies.api_keys import get_optional_api_key
-from app.core.errors import build_client_http_error, log_exception_with_error_id, new_error_id
+from app.core.errors import (
+    build_client_http_error,
+    log_exception_with_error_id,
+    new_error_id,
+)
 from app.core.logging import log_error
 from loguru import logger
 from app.repositories import company_memberships as membership_repo
@@ -139,10 +152,14 @@ async def _resolve_ticket_actor(
         return {"user": None, "api_key": api_key_record}
     if optional_user:
         return {"user": optional_user, "api_key": None}
-    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
+    )
 
 
-def _encode_ticket_cursor(updated_at: datetime | None, ticket_id: int | None) -> str | None:
+def _encode_ticket_cursor(
+    updated_at: datetime | None, ticket_id: int | None
+) -> str | None:
     if updated_at is None or ticket_id is None:
         return None
     return f"{updated_at.astimezone(timezone.utc).isoformat()}|{int(ticket_id)}"
@@ -160,13 +177,17 @@ def _decode_ticket_cursor(cursor: str | None) -> tuple[datetime | None, int | No
             updated_at = updated_at.astimezone(timezone.utc)
         return updated_at, int(id_raw)
     except (TypeError, ValueError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid cursor") from None
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid cursor"
+        ) from None
 
 
 async def _build_ticket_detail(ticket_id: int, current_user: dict) -> TicketDetail:
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
     has_helpdesk_access = await _has_helpdesk_permission(current_user)
     requester_id = ticket.get("requester_id")
     current_user_id = current_user.get("id")
@@ -178,18 +199,26 @@ async def _build_ticket_detail(ticket_id: int, current_user: dict) -> TicketDeta
         if requester_id != current_user_id_int:
             is_watcher = False
             if current_user_id_int is not None:
-                is_watcher = await tickets_repo.is_ticket_watcher(ticket_id, current_user_id_int)
+                is_watcher = await tickets_repo.is_ticket_watcher(
+                    ticket_id, current_user_id_int
+                )
             if not is_watcher:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+                )
 
     replies = await tickets_repo.list_replies(
         ticket_id, include_internal=has_helpdesk_access
     )
     if has_helpdesk_access:
-        replies = [*replies, *await tickets_repo.list_split_replies_for_original(ticket_id)]
+        replies = [
+            *replies,
+            *await tickets_repo.list_split_replies_for_original(ticket_id),
+        ]
     ordered_replies = sorted(
         replies,
-        key=lambda item: item.get("created_at") or datetime.min.replace(tzinfo=timezone.utc),
+        key=lambda item: item.get("created_at")
+        or datetime.min.replace(tzinfo=timezone.utc),
         reverse=True,
     )
     watcher_records = []
@@ -199,9 +228,15 @@ async def _build_ticket_detail(ticket_id: int, current_user: dict) -> TicketDeta
     for reply in ordered_replies:
         sanitised = sanitize_rich_text(str(reply.get("body") or ""))
         minutes_value = reply.get("minutes_spent")
-        minutes_spent = minutes_value if isinstance(minutes_value, int) and minutes_value >= 0 else None
+        minutes_spent = (
+            minutes_value
+            if isinstance(minutes_value, int) and minutes_value >= 0
+            else None
+        )
         billable_flag = bool(reply.get("is_billable"))
-        time_summary = tickets_service.format_reply_time_summary(minutes_spent, billable_flag)
+        time_summary = tickets_service.format_reply_time_summary(
+            minutes_spent, billable_flag
+        )
         payload = {
             **reply,
             "body": sanitised.html,
@@ -227,7 +262,9 @@ async def _build_ticket_detail(ticket_id: int, current_user: dict) -> TicketDeta
         **ticket,
         replies=[TicketReply(**reply) for reply in sanitised_replies],
         watchers=[TicketWatcher(**watcher) for watcher in watcher_records],
-        attachments=[TicketAttachment(**attachment) for attachment in attachment_records],
+        attachments=[
+            TicketAttachment(**attachment) for attachment in attachment_records
+        ],
     )
 
 
@@ -250,7 +287,9 @@ async def list_tickets(
 
     has_helpdesk_access = bool(api_key_record)
     if current_user:
-        has_helpdesk_access = has_helpdesk_access or await _has_helpdesk_permission(current_user)
+        has_helpdesk_access = has_helpdesk_access or await _has_helpdesk_permission(
+            current_user
+        )
 
     if has_helpdesk_access:
         tickets = await tickets_repo.list_tickets(
@@ -277,7 +316,9 @@ async def list_tickets(
         try:
             current_user_id = int(current_user["id"])
         except (TypeError, ValueError):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied") from None
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+            ) from None
         tickets = await tickets_repo.list_tickets_for_user(
             current_user_id,
             search=search,
@@ -293,7 +334,9 @@ async def list_tickets(
             status=status_filter,
         )
     else:  # pragma: no cover - defensive guard
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
+        )
     next_cursor = None
     if len(tickets) == limit:
         last = tickets[-1]
@@ -336,7 +379,11 @@ async def get_ticket_dashboard(
             continue
         ticket_ids.append(numeric_id)
 
-    automation_lookup = await tickets_repo.get_automation_filter_context_by_ticket_ids(ticket_ids) if ticket_ids else {}
+    automation_lookup = (
+        await tickets_repo.get_automation_filter_context_by_ticket_ids(ticket_ids)
+        if ticket_ids
+        else {}
+    )
     dashboard_now = datetime.now(timezone.utc)
 
     def _display_name(record: dict | None) -> str | None:
@@ -357,7 +404,9 @@ async def get_ticket_dashboard(
             return None
         if value.tzinfo is None:
             value = value.replace(tzinfo=timezone.utc)
-        return int((dashboard_now - value.astimezone(timezone.utc)).total_seconds() // 3600)
+        return int(
+            (dashboard_now - value.astimezone(timezone.utc)).total_seconds() // 3600
+        )
 
     for ticket in state.tickets:
         identifier = ticket.get("id")
@@ -379,7 +428,9 @@ async def get_ticket_dashboard(
             or ticket.get("requester_email")
         )
         assigned_display_name = _display_name(assigned_record)
-        ai_tags = ticket.get("ai_tags") if isinstance(ticket.get("ai_tags"), list) else []
+        ai_tags = (
+            ticket.get("ai_tags") if isinstance(ticket.get("ai_tags"), list) else []
+        )
         rows.append(
             TicketDashboardRow(
                 id=numeric_id,
@@ -387,18 +438,29 @@ async def get_ticket_dashboard(
                 status=str(ticket.get("status") or "open"),
                 priority=str(ticket.get("priority") or "normal"),
                 company_id=ticket.get("company_id"),
-                company_name=(company_record or {}).get("name") if isinstance(company_record, dict) else None,
+                company_name=(
+                    (company_record or {}).get("name")
+                    if isinstance(company_record, dict)
+                    else None
+                ),
                 assigned_user_id=ticket.get("assigned_user_id"),
-                assigned_user_email=(assigned_record or {}).get("email")
-                if isinstance(assigned_record, dict)
-                else None,
+                assigned_user_email=(
+                    (assigned_record or {}).get("email")
+                    if isinstance(assigned_record, dict)
+                    else None
+                ),
                 assigned_user_display_name=assigned_display_name,
                 module_slug=ticket.get("module_slug"),
                 requester_id=ticket.get("requester_id"),
                 requester_email=ticket.get("requester_email")
-                or ((requester_record or {}).get("email") if isinstance(requester_record, dict) else None),
+                or (
+                    (requester_record or {}).get("email")
+                    if isinstance(requester_record, dict)
+                    else None
+                ),
                 requester_label=requester_label,
-                requester_display_name=ticket.get("requester_display_name") or requester_label,
+                requester_display_name=ticket.get("requester_display_name")
+                or requester_label,
                 category=ticket.get("category"),
                 external_reference=ticket.get("external_reference"),
                 created_at=created_at,
@@ -408,7 +470,9 @@ async def get_ticket_dashboard(
                 ai_resolution_state=ticket.get("ai_resolution_state"),
                 ai_tags=ai_tags,
                 billable_minutes=int(automation_data.get("billable_minutes") or 0),
-                non_billable_minutes=int(automation_data.get("non_billable_minutes") or 0),
+                non_billable_minutes=int(
+                    automation_data.get("non_billable_minutes") or 0
+                ),
                 has_attachments=bool(automation_data.get("has_attachments")),
                 attachment_count=int(automation_data.get("attachment_count") or 0),
                 has_tasks=bool(automation_data.get("has_tasks")),
@@ -416,13 +480,19 @@ async def get_ticket_dashboard(
                 has_open_tasks=bool(automation_data.get("has_open_tasks")),
                 open_task_count=int(automation_data.get("open_task_count") or 0),
                 labels=ai_tags,
-                age_days=(_age_hours(created_at) // 24) if _age_hours(created_at) is not None else None,
+                age_days=(
+                    (_age_hours(created_at) // 24)
+                    if _age_hours(created_at) is not None
+                    else None
+                ),
                 updated_age_hours=_age_hours(updated_at),
                 in_status_age_hours=_age_hours(status_changed_at),
                 last_reply_age_hours=_age_hours(latest_reply_at),
-                latest_reply_is_internal=automation_data.get("latest_reply_is_internal")
-                if automation_data.get("latest_reply_id")
-                else None,
+                latest_reply_is_internal=(
+                    automation_data.get("latest_reply_is_internal")
+                    if automation_data.get("latest_reply_id")
+                    else None
+                ),
                 latest_reply_kind=automation_data.get("latest_reply_kind"),
             )
         )
@@ -449,7 +519,11 @@ async def list_ticket_statuses_endpoint(
 ) -> TicketStatusListResponse:
     definitions = await tickets_service.list_status_definitions()
     if not current_user.get("is_super_admin"):
-        definitions = [definition for definition in definitions if not definition.hide_from_technicians]
+        definitions = [
+            definition
+            for definition in definitions
+            if not definition.hide_from_technicians
+        ]
     items = [
         TicketStatusDefinitionModel(
             tech_status=definition.tech_status,
@@ -504,14 +578,18 @@ async def list_ticket_views(
     return TicketViewListResponse(items=[TicketViewModel(**view) for view in views])
 
 
-@router.post("/views", response_model=TicketViewModel, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/views", response_model=TicketViewModel, status_code=status.HTTP_201_CREATED
+)
 async def create_ticket_view(
     payload: TicketViewCreate,
     session: SessionData = Depends(get_current_session),
 ) -> TicketViewModel:
     """Create a new saved ticket view"""
     filters_dict = payload.filters.model_dump() if payload.filters else None
-    grouping_fields = payload.grouping_fields or ([payload.grouping_field] if payload.grouping_field else [])
+    grouping_fields = payload.grouping_fields or (
+        [payload.grouping_field] if payload.grouping_field else []
+    )
     view = await ticket_views_repo.create_view(
         user_id=session.user_id,
         name=payload.name,
@@ -533,7 +611,9 @@ async def get_ticket_view(
     """Get a specific saved ticket view"""
     view = await ticket_views_repo.get_view(view_id, session.user_id)
     if not view:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="View not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="View not found"
+        )
     return TicketViewModel(**view)
 
 
@@ -547,10 +627,12 @@ async def update_ticket_view(
     update_data = payload.model_dump(exclude_unset=True)
     if "grouping_fields" in update_data:
         update_data["grouping_field"] = update_data.pop("grouping_fields") or None
-    
+
     view = await ticket_views_repo.update_view(view_id, session.user_id, **update_data)
     if not view:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="View not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="View not found"
+        )
     return TicketViewModel(**view)
 
 
@@ -562,7 +644,9 @@ async def delete_ticket_view(
     """Delete a saved ticket view"""
     deleted = await ticket_views_repo.delete_view(view_id, session.user_id)
     if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="View not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="View not found"
+        )
 
 
 @router.post("/", response_model=TicketDetail, status_code=status.HTTP_201_CREATED)
@@ -593,12 +677,22 @@ async def create_ticket(
         if has_helpdesk_access and payload.requester_id is not None:
             requester_id = payload.requester_id
     else:  # pragma: no cover - defensive guard
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required"
+        )
 
-    company_id = payload.company_id if has_helpdesk_access else (current_user.get("company_id") if current_user else None)
+    company_id = (
+        payload.company_id
+        if has_helpdesk_access
+        else (current_user.get("company_id") if current_user else None)
+    )
 
     # Validate requester is an enabled staff member for the company (when company is specified)
-    if has_helpdesk_access and payload.requester_id is not None and company_id is not None:
+    if (
+        has_helpdesk_access
+        and payload.requester_id is not None
+        and company_id is not None
+    ):
         allowed_requesters = await staff_repo.list_enabled_staff_users(company_id)
         allowed_ids = {
             int(option.get("id"))
@@ -617,7 +711,10 @@ async def create_ticket(
     if has_helpdesk_access:
         if payload.status:
             try:
-                status_value = await tickets_service.validate_status_choice(payload.status, allow_hidden=bool(current_user.get("is_super_admin")))
+                status_value = await tickets_service.validate_status_choice(
+                    payload.status,
+                    allow_hidden=bool(current_user.get("is_super_admin")),
+                )
             except ValueError as exc:
                 error_id = new_error_id()
                 log_exception_with_error_id(
@@ -658,7 +755,10 @@ async def create_ticket(
     try:
         await tickets_service.refresh_ticket_ai_summary(ticket["id"])
     except RuntimeError as exc:
-        log_error(f"Failed to refresh AI summary for ticket {ticket['id']}: {exc}", exc_info=True)
+        log_error(
+            f"Failed to refresh AI summary for ticket {ticket['id']}: {exc}",
+            exc_info=True,
+        )
     await tickets_service.refresh_ticket_ai_tags(ticket["id"])
     # For API key requests, pass a minimal user dict for building ticket detail
     detail_user = current_user or {"id": requester_id, "is_super_admin": False}
@@ -670,13 +770,19 @@ async def create_ticket(
         entity_id=int(ticket["id"]) if ticket.get("id") is not None else None,
         before=None,
         after=_audit_ticket_view(ticket),
-        api_key=str(api_key_record.get("name") or api_key_record.get("id")) if api_key_record else None,
+        api_key=(
+            str(api_key_record.get("name") or api_key_record.get("id"))
+            if api_key_record
+            else None
+        ),
     )
     return await _build_ticket_detail(ticket["id"], detail_user)
 
 
 @router.get("/{ticket_id}", response_model=TicketDetail)
-async def get_ticket(ticket_id: int, current_user: dict = Depends(get_current_user)) -> TicketDetail:
+async def get_ticket(
+    ticket_id: int, current_user: dict = Depends(get_current_user)
+) -> TicketDetail:
     return await _build_ticket_detail(ticket_id, current_user)
 
 
@@ -689,13 +795,17 @@ async def update_ticket(
 ) -> TicketDetail:
     existing = await tickets_repo.get_ticket(ticket_id)
     if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
     fields = payload.model_dump(exclude_unset=True)
     description_marker = object()
     description_value = fields.pop("description", description_marker)
     if "status" in fields and fields["status"] is not None:
         try:
-            fields["status"] = await tickets_service.validate_status_choice(fields["status"], allow_hidden=bool(current_user.get("is_super_admin")))
+            fields["status"] = await tickets_service.validate_status_choice(
+                fields["status"], allow_hidden=bool(current_user.get("is_super_admin"))
+            )
         except ValueError as exc:
             error_id = new_error_id()
             log_exception_with_error_id(
@@ -740,7 +850,9 @@ async def update_ticket(
     audit_action = "ticket.update"
     if "status" in fields and existing.get("status") != fields.get("status"):
         audit_action = "ticket.status_change"
-    elif "assigned_user_id" in fields and existing.get("assigned_user_id") != fields.get("assigned_user_id"):
+    elif "assigned_user_id" in fields and existing.get(
+        "assigned_user_id"
+    ) != fields.get("assigned_user_id"):
         audit_action = "ticket.assign"
     await audit_service.record(
         action=audit_action,
@@ -762,7 +874,9 @@ async def delete_ticket(
 ) -> None:
     existing = await tickets_repo.get_ticket(ticket_id)
     if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
     await tickets_repo.delete_ticket(ticket_id)
     await tickets_service.broadcast_ticket_event(action="deleted", ticket_id=ticket_id)
     await audit_service.record(
@@ -807,7 +921,11 @@ async def import_syncro_tickets_endpoint(
     return SyncroTicketImportSummary(**summary.as_dict())
 
 
-@router.post("/{ticket_id}/replies", response_model=TicketReplyResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{ticket_id}/replies",
+    response_model=TicketReplyResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def add_reply(
     ticket_id: int,
     payload: TicketReplyCreate,
@@ -820,21 +938,25 @@ async def add_reply(
     if merged_target_id and merged_target_id != ticket_id:
         # Redirect to the merged target ticket
         ticket_id = merged_target_id
-    
+
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+
     # Prevent adding time to billed tickets
     if ticket.get("xero_invoice_number"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot add replies to a billed ticket. This ticket has been invoiced and closed.",
         )
-    
+
     has_helpdesk_access = await _has_helpdesk_permission(current_user)
     if not has_helpdesk_access and ticket.get("requester_id") != session.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
     sanitised_body = sanitize_rich_text(payload.body)
     if not sanitised_body.has_rich_content:
         raise HTTPException(
@@ -843,17 +965,24 @@ async def add_reply(
         )
 
     labour_type_id = payload.labour_type_id if has_helpdesk_access else None
-    
+
     # If time is being logged but no labour type specified, use the default labour type
-    if has_helpdesk_access and payload.minutes_spent and payload.minutes_spent > 0 and labour_type_id is None:
+    if (
+        has_helpdesk_access
+        and payload.minutes_spent
+        and payload.minutes_spent > 0
+        and labour_type_id is None
+    ):
         default_labour = await labour_types_service.get_default_labour_type()
         if default_labour:
             labour_type_id = default_labour.get("id")
-    
+
     if labour_type_id is not None:
         labour_record = await labour_types_service.get_labour_type(labour_type_id)
         if not labour_record:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Labour type not found")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Labour type not found"
+            )
 
     reply = await tickets_repo.create_reply(
         ticket_id=ticket_id,
@@ -885,10 +1014,14 @@ async def add_reply(
     sanitised_reply_payload = sanitize_rich_text(str(reply.get("body") or ""))
     reply_payload = {**reply, "body": sanitised_reply_payload.html}
     minutes_value = reply_payload.get("minutes_spent")
-    minutes_spent = minutes_value if isinstance(minutes_value, int) and minutes_value >= 0 else None
+    minutes_spent = (
+        minutes_value if isinstance(minutes_value, int) and minutes_value >= 0 else None
+    )
     billable_flag = bool(reply_payload.get("is_billable"))
     labour_type_name = reply_payload.get("labour_type_name")
-    time_summary = tickets_service.format_reply_time_summary(minutes_spent, billable_flag, labour_type_name)
+    time_summary = tickets_service.format_reply_time_summary(
+        minutes_spent, billable_flag, labour_type_name
+    )
     if time_summary:
         reply_payload["time_summary"] = time_summary
     await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
@@ -916,17 +1049,24 @@ async def add_reply(
             try:
                 from app.repositories import companies as company_repo
                 from app.services import trello as trello_service
+
                 trello_company: dict[str, Any] | None = None
                 trello_company_id = ticket_payload.get("company_id")
                 if trello_company_id is not None:
                     try:
-                        trello_company = await company_repo.get_company_by_id(int(trello_company_id))
+                        trello_company = await company_repo.get_company_by_id(
+                            int(trello_company_id)
+                        )
                     except (TypeError, ValueError):
                         pass
                 first_name = str(current_user.get("first_name") or "").strip()
                 last_name = str(current_user.get("last_name") or "").strip()
                 author_parts = [p for p in (first_name, last_name) if p]
-                author_display = " ".join(author_parts) if author_parts else str(current_user.get("email") or "Staff")
+                author_display = (
+                    " ".join(author_parts)
+                    if author_parts
+                    else str(current_user.get("email") or "Staff")
+                )
                 await trello_service.post_reply_comment(
                     card_id,
                     author_display,
@@ -934,7 +1074,9 @@ async def add_reply(
                     company=trello_company,
                 )
             except Exception as exc:
-                logger.debug("Trello reply sync failed for ticket {}: {}", ticket_id, exc)
+                logger.debug(
+                    "Trello reply sync failed for ticket {}: {}", ticket_id, exc
+                )
 
     # IMPORTANT: never store the reply body in the audit log. We capture only
     # metadata (id, author, visibility, length) so admins can confirm a reply
@@ -962,7 +1104,9 @@ async def add_reply(
         metadata=reply_metadata,
         sensitive_extra_keys=("body", "html", "text", "content"),
     )
-    return TicketReplyResponse(ticket=ticket_response, reply=TicketReply(**reply_payload))
+    return TicketReplyResponse(
+        ticket=ticket_response, reply=TicketReply(**reply_payload)
+    )
 
 
 @router.patch("/{ticket_id}/replies/{reply_id}", response_model=TicketReplyResponse)
@@ -974,18 +1118,22 @@ async def update_reply_time_entry(
 ) -> TicketReplyResponse:
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+
     # Prevent updating time on billed tickets
     if ticket.get("xero_invoice_number"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot update time entries on a billed ticket. This ticket has been invoiced and closed.",
         )
-    
+
     reply = await tickets_repo.get_reply_by_id(reply_id)
     if not reply or reply.get("ticket_id") != ticket_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reply not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Reply not found"
+        )
 
     fields_set = payload.model_fields_set
     update_kwargs: dict[str, Any] = {}
@@ -997,9 +1145,14 @@ async def update_reply_time_entry(
         if payload.labour_type_id is None:
             update_kwargs["labour_type_id"] = None
         else:
-            labour_record = await labour_types_service.get_labour_type(payload.labour_type_id)
+            labour_record = await labour_types_service.get_labour_type(
+                payload.labour_type_id
+            )
             if not labour_record:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Labour type not found")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Labour type not found",
+                )
             update_kwargs["labour_type_id"] = payload.labour_type_id
     if not update_kwargs:
         raise HTTPException(
@@ -1009,13 +1162,19 @@ async def update_reply_time_entry(
 
     updated = await tickets_repo.update_reply(reply_id, **update_kwargs)
     if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reply not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Reply not found"
+        )
 
     minutes_value = updated.get("minutes_spent")
-    minutes_spent = minutes_value if isinstance(minutes_value, int) and minutes_value >= 0 else None
+    minutes_spent = (
+        minutes_value if isinstance(minutes_value, int) and minutes_value >= 0 else None
+    )
     billable_flag = bool(updated.get("is_billable"))
     labour_type_name = updated.get("labour_type_name")
-    time_summary = tickets_service.format_reply_time_summary(minutes_spent, billable_flag, labour_type_name)
+    time_summary = tickets_service.format_reply_time_summary(
+        minutes_spent, billable_flag, labour_type_name
+    )
     reply_payload = {
         **updated,
         "minutes_spent": minutes_spent,
@@ -1043,7 +1202,9 @@ async def update_reply_time_entry(
         )
 
     ticket_payload = TicketResponse(**ticket)
-    return TicketReplyResponse(ticket=ticket_payload, reply=TicketReply(**reply_payload))
+    return TicketReplyResponse(
+        ticket=ticket_payload, reply=TicketReply(**reply_payload)
+    )
 
 
 @router.put("/{ticket_id}/watchers", response_model=TicketDetail)
@@ -1054,17 +1215,18 @@ async def update_watchers(
 ) -> TicketDetail:
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
     await tickets_repo.replace_watchers(ticket_id, payload.user_ids, payload.emails)
-    await tickets_service.emit_ticket_updated_event(
-        ticket_id,
-        actor_type="technician",
-        actor=current_user,
-    )
     return await _build_ticket_detail(ticket_id, current_user)
 
 
-@router.post("/{ticket_id}/watchers/{user_id}", response_model=TicketDetail, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{ticket_id}/watchers/{user_id}",
+    response_model=TicketDetail,
+    status_code=status.HTTP_201_CREATED,
+)
 async def add_watcher(
     ticket_id: int,
     user_id: int,
@@ -1073,13 +1235,10 @@ async def add_watcher(
 ) -> TicketDetail:
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
     await tickets_repo.add_watcher(ticket_id, user_id=user_id)
-    await tickets_service.emit_ticket_updated_event(
-        ticket_id,
-        actor_type="technician",
-        actor=current_user,
-    )
     await audit_service.record(
         action="ticket.watcher.add",
         request=request,
@@ -1093,7 +1252,11 @@ async def add_watcher(
     return await _build_ticket_detail(ticket_id, current_user)
 
 
-@router.post("/{ticket_id}/watchers/email", response_model=TicketDetail, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{ticket_id}/watchers/email",
+    response_model=TicketDetail,
+    status_code=status.HTTP_201_CREATED,
+)
 async def add_watcher_by_email(
     ticket_id: int,
     request: Request,
@@ -1103,21 +1266,17 @@ async def add_watcher_by_email(
     """Add a watcher to a ticket by email address."""
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+
     email_normalized = email.strip().lower()
     if not email_normalized or "@" not in email_normalized:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid email address"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid email address"
         )
-    
+
     await tickets_repo.add_watcher(ticket_id, email=email_normalized)
-    await tickets_service.emit_ticket_updated_event(
-        ticket_id,
-        actor_type="technician",
-        actor=current_user,
-    )
     await audit_service.record(
         action="ticket.watcher.add",
         request=request,
@@ -1131,7 +1290,9 @@ async def add_watcher_by_email(
     return await _build_ticket_detail(ticket_id, current_user)
 
 
-@router.delete("/{ticket_id}/watchers/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{ticket_id}/watchers/{user_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 async def remove_watcher(
     ticket_id: int,
     user_id: int,
@@ -1140,13 +1301,10 @@ async def remove_watcher(
 ) -> None:
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
     await tickets_repo.remove_watcher(ticket_id, user_id=user_id)
-    await tickets_service.emit_ticket_updated_event(
-        ticket_id,
-        actor_type="technician",
-        actor=current_user,
-    )
     await audit_service.record(
         action="ticket.watcher.remove",
         request=request,
@@ -1159,7 +1317,9 @@ async def remove_watcher(
     )
 
 
-@router.delete("/{ticket_id}/watchers/email/{email:path}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{ticket_id}/watchers/email/{email:path}", status_code=status.HTTP_204_NO_CONTENT
+)
 async def remove_watcher_by_email(
     ticket_id: int,
     email: str,
@@ -1169,15 +1329,12 @@ async def remove_watcher_by_email(
     """Remove a watcher from a ticket by email address."""
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+
     email_normalized = email.strip().lower()
     await tickets_repo.remove_watcher(ticket_id, email=email_normalized)
-    await tickets_service.emit_ticket_updated_event(
-        ticket_id,
-        actor_type="technician",
-        actor=current_user,
-    )
     await audit_service.record(
         action="ticket.watcher.remove",
         request=request,
@@ -1211,13 +1368,17 @@ async def list_labour_types_endpoint(
     return LabourTypeListResponse(labour_types=items)
 
 
-@router.post("/labour-types", response_model=LabourTypeModel, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/labour-types", response_model=LabourTypeModel, status_code=status.HTTP_201_CREATED
+)
 async def create_labour_type_endpoint(
     payload: LabourTypeCreateRequest,
     current_user: dict = Depends(require_super_admin),
 ) -> LabourTypeModel:
     try:
-        record = await labour_types_service.create_labour_type(code=payload.code, name=payload.name, rate=payload.rate)
+        record = await labour_types_service.create_labour_type(
+            code=payload.code, name=payload.name, rate=payload.rate
+        )
     except ValueError as exc:
         error_id = new_error_id()
         log_exception_with_error_id(
@@ -1260,7 +1421,9 @@ async def update_labour_type_endpoint(
             error_id=error_id,
         ) from exc
     if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Labour type not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Labour type not found"
+        )
     return LabourTypeModel(**record)
 
 
@@ -1271,7 +1434,9 @@ async def delete_labour_type_endpoint(
 ) -> None:
     existing = await labour_types_service.get_labour_type(labour_type_id)
     if not existing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Labour type not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Labour type not found"
+        )
     await labour_types_service.delete_labour_type(labour_type_id)
 
 
@@ -1282,8 +1447,10 @@ async def list_ticket_tasks(
 ) -> TicketTaskListResponse:
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+
     has_helpdesk_access = await _has_helpdesk_permission(current_user)
     requester_id = ticket.get("requester_id")
     current_user_id = current_user.get("id")
@@ -1291,20 +1458,26 @@ async def list_ticket_tasks(
         current_user_id_int = int(current_user_id)
     except (TypeError, ValueError):
         current_user_id_int = None
-    
+
     if not has_helpdesk_access:
         if requester_id != current_user_id_int:
             is_watcher = False
             if current_user_id_int is not None:
-                is_watcher = await tickets_repo.is_ticket_watcher(ticket_id, current_user_id_int)
+                is_watcher = await tickets_repo.is_ticket_watcher(
+                    ticket_id, current_user_id_int
+                )
             if not is_watcher:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+                )
+
     tasks = await ticket_tasks_repo.list_tasks(ticket_id)
     return TicketTaskListResponse(items=[TicketTask(**task) for task in tasks])
 
 
-@router.post("/{ticket_id}/tasks", response_model=TicketTask, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{ticket_id}/tasks", response_model=TicketTask, status_code=status.HTTP_201_CREATED
+)
 async def create_ticket_task(
     ticket_id: int,
     payload: TicketTaskCreate,
@@ -1312,8 +1485,10 @@ async def create_ticket_task(
 ) -> TicketTask:
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+
     has_helpdesk_access = await _has_helpdesk_permission(current_user)
     requester_id = ticket.get("requester_id")
     current_user_id = current_user.get("id")
@@ -1321,15 +1496,19 @@ async def create_ticket_task(
         current_user_id_int = int(current_user_id)
     except (TypeError, ValueError):
         current_user_id_int = None
-    
+
     if not has_helpdesk_access:
         if requester_id != current_user_id_int:
             is_watcher = False
             if current_user_id_int is not None:
-                is_watcher = await tickets_repo.is_ticket_watcher(ticket_id, current_user_id_int)
+                is_watcher = await tickets_repo.is_ticket_watcher(
+                    ticket_id, current_user_id_int
+                )
             if not is_watcher:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+                )
+
     task = await ticket_tasks_repo.create_task(
         ticket_id=ticket_id,
         task_name=payload.task_name,
@@ -1348,12 +1527,16 @@ async def update_ticket_task(
 ) -> TicketTask:
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+
     task = await ticket_tasks_repo.get_task(task_id)
     if not task or task.get("ticket_id") != ticket_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+
     has_helpdesk_access = await _has_helpdesk_permission(current_user)
     requester_id = ticket.get("requester_id")
     current_user_id = current_user.get("id")
@@ -1361,15 +1544,19 @@ async def update_ticket_task(
         current_user_id_int = int(current_user_id)
     except (TypeError, ValueError):
         current_user_id_int = None
-    
+
     if not has_helpdesk_access:
         if requester_id != current_user_id_int:
             is_watcher = False
             if current_user_id_int is not None:
-                is_watcher = await tickets_repo.is_ticket_watcher(ticket_id, current_user_id_int)
+                is_watcher = await tickets_repo.is_ticket_watcher(
+                    ticket_id, current_user_id_int
+                )
             if not is_watcher:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+                )
+
     update_kwargs = {}
     if payload.task_name is not None:
         update_kwargs["task_name"] = payload.task_name
@@ -1379,11 +1566,13 @@ async def update_ticket_task(
             update_kwargs["completed_by"] = session.user_id
     if payload.sort_order is not None:
         update_kwargs["sort_order"] = payload.sort_order
-    
+
     updated_task = await ticket_tasks_repo.update_task(task_id, **update_kwargs)
     if not updated_task:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+
     return TicketTask(**updated_task)
 
 
@@ -1395,12 +1584,16 @@ async def delete_ticket_task(
 ) -> None:
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+
     task = await ticket_tasks_repo.get_task(task_id)
     if not task or task.get("ticket_id") != ticket_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+
     has_helpdesk_access = await _has_helpdesk_permission(current_user)
     requester_id = ticket.get("requester_id")
     current_user_id = current_user.get("id")
@@ -1408,15 +1601,19 @@ async def delete_ticket_task(
         current_user_id_int = int(current_user_id)
     except (TypeError, ValueError):
         current_user_id_int = None
-    
+
     if not has_helpdesk_access:
         if requester_id != current_user_id_int:
             is_watcher = False
             if current_user_id_int is not None:
-                is_watcher = await tickets_repo.is_ticket_watcher(ticket_id, current_user_id_int)
+                is_watcher = await tickets_repo.is_ticket_watcher(
+                    ticket_id, current_user_id_int
+                )
             if not is_watcher:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+                )
+
     await ticket_tasks_repo.delete_task(task_id)
 
 
@@ -1431,10 +1628,12 @@ async def list_ticket_attachments(
     """List all attachments for a ticket"""
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+
     has_helpdesk_access = await _has_helpdesk_permission(current_user)
-    
+
     # Check access permissions
     if not has_helpdesk_access:
         requester_id = ticket.get("requester_id")
@@ -1442,13 +1641,19 @@ async def list_ticket_attachments(
         try:
             current_user_id_int = int(current_user_id)
         except (TypeError, ValueError):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-        
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+            )
+
         if requester_id != current_user_id_int:
-            is_watcher = await tickets_repo.is_ticket_watcher(ticket_id, current_user_id_int)
+            is_watcher = await tickets_repo.is_ticket_watcher(
+                ticket_id, current_user_id_int
+            )
             if not is_watcher:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+                )
+
     # Get attachments
     if has_helpdesk_access:
         attachments = await attachments_repo.list_attachments(ticket_id)
@@ -1457,7 +1662,7 @@ async def list_ticket_attachments(
         attachments = await attachments_repo.list_attachments(
             ticket_id, access_levels=("open", "closed")
         )
-    
+
     return TicketAttachmentListResponse(
         items=[TicketAttachment(**attachment) for attachment in attachments]
     )
@@ -1478,30 +1683,36 @@ async def upload_ticket_attachment(
     """Upload a file attachment to a ticket"""
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+
     has_helpdesk_access = await _has_helpdesk_permission(current_user)
-    
+
     # Check if user can add attachments
     if not has_helpdesk_access:
         requester_id = ticket.get("requester_id")
         if requester_id != session.user_id:
-            is_watcher = await tickets_repo.is_ticket_watcher(ticket_id, session.user_id)
+            is_watcher = await tickets_repo.is_ticket_watcher(
+                ticket_id, session.user_id
+            )
             if not is_watcher:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+                )
+
     # Validate access level
     valid_levels = {"open", "closed", "restricted"}
     if access_level not in valid_levels:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid access level. Must be one of: {', '.join(valid_levels)}"
+            detail=f"Invalid access level. Must be one of: {', '.join(valid_levels)}",
         )
-    
+
     # Only helpdesk technicians can set restricted or open access
     if not has_helpdesk_access and access_level in ("restricted", "open"):
         access_level = "closed"
-    
+
     # Save the file
     try:
         attachment = await attachments_service.save_uploaded_file(
@@ -1516,9 +1727,9 @@ async def upload_ticket_attachment(
         log_error(f"Failed to upload attachment: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to save file"
+            detail="Failed to save file",
         )
-    
+
     return TicketAttachment(**attachment)
 
 
@@ -1531,42 +1742,58 @@ async def download_ticket_attachment(
     """Download a ticket attachment (requires authentication)"""
     attachment = await attachments_repo.get_attachment(attachment_id)
     if not attachment or attachment.get("ticket_id") != ticket_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found"
+        )
+
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+
     has_helpdesk_access = await _has_helpdesk_permission(current_user)
     access_level = attachment.get("access_level")
-    
+
     # Check access permissions
     if access_level == "restricted" and not has_helpdesk_access:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        )
+
     if access_level == "closed" and not has_helpdesk_access:
         requester_id = ticket.get("requester_id")
         current_user_id = current_user.get("id")
         try:
             current_user_id_int = int(current_user_id)
         except (TypeError, ValueError):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-        
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+            )
+
         if requester_id != current_user_id_int:
-            is_watcher = await tickets_repo.is_ticket_watcher(ticket_id, current_user_id_int)
+            is_watcher = await tickets_repo.is_ticket_watcher(
+                ticket_id, current_user_id_int
+            )
             if not is_watcher:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+                )
+
     # Get file path
     file_path = attachments_service.get_attachment_file_path(attachment.get("filename"))
     if not file_path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+        )
+
     return FileResponse(
         path=file_path,
         filename=attachment.get("original_filename"),
         media_type=attachment.get("mime_type") or "application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{attachment.get("original_filename", "download")}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{attachment.get("original_filename", "download")}"'
+        },
     )
 
 
@@ -1577,32 +1804,41 @@ async def download_open_attachment(token: str):
     attachment_id = attachments_service.verify_open_access_token(token)
     if not attachment_id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid or expired token"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Invalid or expired token"
         )
-    
+
     attachment = await attachments_repo.get_attachment(attachment_id)
     if not attachment:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found"
+        )
+
     # Verify this is an open access attachment
     if attachment.get("access_level") != "open":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
+        )
+
     # Get file path
     file_path = attachments_service.get_attachment_file_path(attachment.get("filename"))
     if not file_path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+        )
+
     return FileResponse(
         path=file_path,
         filename=attachment.get("original_filename"),
         media_type=attachment.get("mime_type") or "application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{attachment.get("original_filename", "download")}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{attachment.get("original_filename", "download")}"'
+        },
     )
 
 
-@router.patch("/{ticket_id}/attachments/{attachment_id}", response_model=TicketAttachment)
+@router.patch(
+    "/{ticket_id}/attachments/{attachment_id}", response_model=TicketAttachment
+)
 async def update_ticket_attachment(
     ticket_id: int,
     attachment_id: int,
@@ -1612,20 +1848,26 @@ async def update_ticket_attachment(
     """Update attachment metadata (e.g., access level) - technicians only"""
     attachment = await attachments_repo.get_attachment(attachment_id)
     if not attachment or attachment.get("ticket_id") != ticket_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found"
+        )
+
     fields = payload.model_dump(exclude_unset=True)
     if fields:
         await attachments_repo.update_attachment(attachment_id, **fields)
-    
+
     updated_attachment = await attachments_repo.get_attachment(attachment_id)
     if not updated_attachment:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found"
+        )
+
     return TicketAttachment(**updated_attachment)
 
 
-@router.delete("/{ticket_id}/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{ticket_id}/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 async def delete_ticket_attachment(
     ticket_id: int,
     attachment_id: int,
@@ -1634,15 +1876,17 @@ async def delete_ticket_attachment(
     """Delete a ticket attachment - technicians only"""
     attachment = await attachments_repo.get_attachment(attachment_id)
     if not attachment or attachment.get("ticket_id") != ticket_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found"
+        )
+
     try:
         await attachments_service.delete_attachment_file(attachment)
     except Exception as e:
         log_error(f"Failed to delete attachment: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete attachment"
+            detail="Failed to delete attachment",
         )
 
 
@@ -1655,19 +1899,25 @@ async def get_open_access_token(
     """Generate an open access token for an attachment - technicians only"""
     attachment = await attachments_repo.get_attachment(attachment_id)
     if not attachment or attachment.get("ticket_id") != ticket_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found"
+        )
+
     if attachment.get("access_level") != "open":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Can only generate tokens for open access attachments"
+            detail="Can only generate tokens for open access attachments",
         )
-    
+
     token = attachments_service.generate_open_access_token(attachment_id)
     return {"token": token, "url": f"/api/tickets/attachments/open/{token}"}
 
 
-@router.post("/{ticket_id}/split", response_model=TicketSplitResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{ticket_id}/split",
+    response_model=TicketSplitResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def split_ticket(
     ticket_id: int,
     payload: TicketSplitRequest,
@@ -1682,8 +1932,10 @@ async def split_ticket(
     # Validate original ticket exists
     original_ticket = await tickets_repo.get_ticket(ticket_id)
     if not original_ticket:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+
     # Perform the split (validation happens in service layer)
     try:
         original, new_ticket, moved_count = await tickets_service.split_ticket(
@@ -1704,13 +1956,13 @@ async def split_ticket(
             "Unable to split ticket with the requested replies.",
             error_id=error_id,
         ) from exc
-    
+
     if not original or not new_ticket:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to split ticket"
+            detail="Failed to split ticket",
         )
-    
+
     await audit_service.record(
         action="ticket.split",
         request=request,
@@ -1747,7 +1999,9 @@ async def merge_tickets(
     moved_time_entry_count = 0
     for source_ticket_id in payload.ticket_ids:
         if source_ticket_id != payload.target_ticket_id:
-            moved_time_entry_count += await tickets_repo.count_time_entries(source_ticket_id)
+            moved_time_entry_count += await tickets_repo.count_time_entries(
+                source_ticket_id
+            )
 
     # Perform the merge (validation happens in service layer)
     try:
@@ -1768,13 +2022,13 @@ async def merge_tickets(
             "Unable to merge tickets with the requested inputs.",
             error_id=error_id,
         ) from exc
-    
+
     if not merged_ticket:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to merge tickets"
+            detail="Failed to merge tickets",
         )
-    
+
     return TicketMergeResponse(
         merged_ticket=TicketResponse(**merged_ticket),
         merged_ticket_ids=merged_ids,
