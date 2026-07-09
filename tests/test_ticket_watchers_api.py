@@ -1,4 +1,5 @@
 """Tests for ticket watcher add/remove API endpoints."""
+
 import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
@@ -11,6 +12,7 @@ from app.api.dependencies import auth as auth_dependencies
 from app.api.dependencies import database as database_dependencies
 from app.core.database import db
 from app import main as main_module
+from app.api.routes import tickets as ticket_routes
 from app.main import (
     app,
     automations_service,
@@ -54,9 +56,15 @@ def mock_startup(monkeypatch):
     monkeypatch.setattr(db, "run_migrations", fake_run_migrations)
     monkeypatch.setattr(scheduler_service, "start", fake_start)
     monkeypatch.setattr(scheduler_service, "stop", fake_stop)
-    monkeypatch.setattr(change_log_service, "sync_change_log_sources", fake_sync_change_log_sources)
-    monkeypatch.setattr(modules_service, "ensure_default_modules", fake_ensure_default_modules)
-    monkeypatch.setattr(automations_service, "refresh_all_schedules", fake_refresh_all_schedules)
+    monkeypatch.setattr(
+        change_log_service, "sync_change_log_sources", fake_sync_change_log_sources
+    )
+    monkeypatch.setattr(
+        modules_service, "ensure_default_modules", fake_ensure_default_modules
+    )
+    monkeypatch.setattr(
+        automations_service, "refresh_all_schedules", fake_refresh_all_schedules
+    )
 
 
 @pytest.fixture
@@ -102,7 +110,7 @@ def test_add_watcher_success(monkeypatch, active_session):
     ticket_id = 123
     user_id = 5
     now = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    
+
     # Mock ticket exists
     async def mock_get_ticket(tid):
         return {
@@ -130,49 +138,63 @@ def test_add_watcher_success(monkeypatch, active_session):
             "ai_tags_model": None,
             "ai_tags_updated_at": None,
         }
-    
+
     # Mock watcher operations
-    async def mock_add_watcher(tid, uid):
+    async def mock_add_watcher(tid, user_id=None, email=None):
         pass
-    
+
     async def mock_list_watchers(tid):
-        return [
-            {"id": 1, "ticket_id": tid, "user_id": user_id, "created_at": now}
-        ]
-    
+        return [{"id": 1, "ticket_id": tid, "user_id": user_id, "created_at": now}]
+
     async def mock_list_replies(tid, include_internal=False):
         return []
-    
-    async def mock_emit_event(tid, **kwargs):
-        pass
-    
+
+    async def mock_list_split_replies_for_original(tid):
+        return []
+
+    async def mock_list_attachments(tid, access_levels=None):
+        return []
+
+    mock_emit_event = AsyncMock()
+    mock_record_audit = AsyncMock()
+
     # Mock has permission
     async def mock_has_permission(uid, key):
         return True
-    
+
     from app.repositories import company_memberships as membership_repo
-    
+
     monkeypatch.setattr(tickets_repo, "get_ticket", mock_get_ticket)
     monkeypatch.setattr(tickets_repo, "add_watcher", mock_add_watcher)
     monkeypatch.setattr(tickets_repo, "list_watchers", mock_list_watchers)
     monkeypatch.setattr(tickets_repo, "list_replies", mock_list_replies)
+    monkeypatch.setattr(
+        tickets_repo,
+        "list_split_replies_for_original",
+        mock_list_split_replies_for_original,
+    )
+    monkeypatch.setattr(
+        ticket_routes.attachments_repo, "list_attachments", mock_list_attachments
+    )
     monkeypatch.setattr(membership_repo, "user_has_permission", mock_has_permission)
     monkeypatch.setattr(tickets_service, "emit_ticket_updated_event", mock_emit_event)
-    
+    monkeypatch.setattr(ticket_routes.audit_service, "record", mock_record_audit)
+
     _override_dependencies(active_session)
-    
+
     try:
         with TestClient(app) as client:
             response = client.post(
                 f"/api/tickets/{ticket_id}/watchers/{user_id}",
                 headers={"X-CSRF-Token": active_session.csrf_token},
             )
-        
+
         assert response.status_code == status.HTTP_201_CREATED
         data = response.json()
         assert data["id"] == ticket_id
         assert len(data["watchers"]) == 1
         assert data["watchers"][0]["user_id"] == user_id
+        mock_emit_event.assert_not_awaited()
     finally:
         _reset_overrides()
 
@@ -181,14 +203,14 @@ def test_add_watcher_ticket_not_found(monkeypatch, active_session):
     """Test adding a watcher to a non-existent ticket."""
     ticket_id = 999
     user_id = 5
-    
+
     async def mock_get_ticket(tid):
         return None
-    
+
     monkeypatch.setattr(tickets_repo, "get_ticket", mock_get_ticket)
-    
+
     _override_dependencies(active_session)
-    
+
     try:
         with TestClient(app) as client:
             response = client.post(
@@ -204,7 +226,7 @@ def test_remove_watcher_success(monkeypatch, active_session):
     """Test successfully removing a watcher from a ticket."""
     ticket_id = 123
     user_id = 5
-    
+
     async def mock_get_ticket(tid):
         return {
             "id": tid,
@@ -214,19 +236,20 @@ def test_remove_watcher_success(monkeypatch, active_session):
             "requester_id": 1,
             "company_id": 1,
         }
-    
-    async def mock_remove_watcher(tid, uid):
+
+    async def mock_remove_watcher(tid, user_id=None, email=None):
         pass
-    
-    async def mock_emit_event(tid, **kwargs):
-        pass
-    
+
+    mock_emit_event = AsyncMock()
+    mock_record_audit = AsyncMock()
+
     monkeypatch.setattr(tickets_repo, "get_ticket", mock_get_ticket)
     monkeypatch.setattr(tickets_repo, "remove_watcher", mock_remove_watcher)
     monkeypatch.setattr(tickets_service, "emit_ticket_updated_event", mock_emit_event)
-    
+    monkeypatch.setattr(ticket_routes.audit_service, "record", mock_record_audit)
+
     _override_dependencies(active_session)
-    
+
     try:
         with TestClient(app) as client:
             response = client.delete(
@@ -234,6 +257,7 @@ def test_remove_watcher_success(monkeypatch, active_session):
                 headers={"X-CSRF-Token": active_session.csrf_token},
             )
         assert response.status_code == status.HTTP_204_NO_CONTENT
+        mock_emit_event.assert_not_awaited()
     finally:
         _reset_overrides()
 
@@ -242,14 +266,14 @@ def test_remove_watcher_ticket_not_found(monkeypatch, active_session):
     """Test removing a watcher from a non-existent ticket."""
     ticket_id = 999
     user_id = 5
-    
+
     async def mock_get_ticket(tid):
         return None
-    
+
     monkeypatch.setattr(tickets_repo, "get_ticket", mock_get_ticket)
-    
+
     _override_dependencies(active_session)
-    
+
     try:
         with TestClient(app) as client:
             response = client.delete(
