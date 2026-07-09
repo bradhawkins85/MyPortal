@@ -854,25 +854,35 @@ async def _record_sync_history_safe(
 ) -> None:
     message_actions = list(result.get("message_actions") or [])
     errors = list(result.get("errors") or [])
+    processed = int(result.get("processed") or 0)
+    created_count = sum(
+        1 for action in message_actions if action.get("outcome") == "created_new_ticket"
+    )
+    attached_count = sum(
+        1
+        for action in message_actions
+        if action.get("outcome") == "attached_to_existing_ticket"
+    )
+    ignored_count = sum(
+        1 for action in message_actions if action.get("outcome") == "ignored"
+    )
+    error_count = len(errors)
+    if not any((processed, created_count, attached_count, ignored_count, error_count)):
+        log_info(
+            "Skipping empty M365 mail sync history record",
+            account_id=account_id,
+            status=_normalise_string(result.get("status"), default="unknown"),
+        )
+        return
     try:
         await mail_repo.record_sync_history(
             account_id=int(account_id),
             status=_normalise_string(result.get("status"), default="unknown"),
-            processed=int(result.get("processed") or 0),
-            created_count=sum(
-                1
-                for action in message_actions
-                if action.get("outcome") == "created_new_ticket"
-            ),
-            attached_count=sum(
-                1
-                for action in message_actions
-                if action.get("outcome") == "attached_to_existing_ticket"
-            ),
-            ignored_count=sum(
-                1 for action in message_actions if action.get("outcome") == "ignored"
-            ),
-            error_count=len(errors),
+            processed=processed,
+            created_count=created_count,
+            attached_count=attached_count,
+            ignored_count=ignored_count,
+            error_count=error_count,
             errors=errors,
             message_actions=message_actions,
             started_at=started_at,
