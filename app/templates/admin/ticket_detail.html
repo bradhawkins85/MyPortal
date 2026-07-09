@@ -478,65 +478,6 @@
             </article>
           {% endif %}
 
-          <details class="card card--panel card-collapsible" {% if not ticket_attachments %}open{% endif %}>
-            <summary class="card__header card__header--collapsible">
-              <h2 class="card__title">Attachments</h2>
-              <div class="card__collapsible-meta">
-                {% if ticket_attachments %}<span class="badge badge--muted">{{ ticket_attachments|length }}</span>{% endif %}
-                <span class="card__toggle-icon" aria-hidden="true"></span>
-              </div>
-            </summary>
-            <div class="card-collapsible__content card__body">
-              <div
-                class="attachments-grid"
-                data-attachments-grid
-                data-ticket-id="{{ ticket.id }}"
-              >
-                {% for attachment in ticket_attachments %}
-                  <article class="attachment-card" data-attachment-id="{{ attachment.id }}">
-                    <div class="attachment-card__icon" aria-hidden="true">📎</div>
-                    <div class="attachment-card__content">
-                      <div class="attachment-card__header">
-                        <p class="attachment-card__name">
-                          <a
-                            href="/api/tickets/{{ ticket.id }}/attachments/{{ attachment.id }}/download"
-                            title="{{ attachment.original_filename or attachment.filename }}"
-                          >
-                            {{ attachment.original_filename or attachment.filename }}
-                          </a>
-                        </p>
-                        <div class="attachment-card__actions">
-                          <button
-                            type="button"
-                            class="button button--ghost button--small attachment-card__action"
-                            data-remove-attachment
-                            data-attachment-id="{{ attachment.id }}"
-                            aria-label="Remove attachment"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                      <p class="attachment-card__meta">
-                        {{ attachment.file_size | filesizeformat }}
-                        {% if attachment.uploaded_iso %}
-                          · <span data-utc="{{ attachment.uploaded_iso }}"></span>
-                        {% endif %}
-                      </p>
-                    </div>
-                  </article>
-                {% endfor %}
-              </div>
-              <p
-                class="card__empty"
-                data-attachments-empty
-                {% if ticket_attachments %}hidden{% endif %}
-              >
-                No attachments have been added yet.
-              </p>
-            </div>
-          </details>
-
           <details
             class="card card--panel card-collapsible ticket-related"
             data-ticket-related
@@ -969,6 +910,65 @@
                 <button type="submit" class="button button--primary" form="ticket-details-form">Save asset changes</button>
               </div>
               </div>
+            </div>
+          </details>
+
+          <details class="card card--panel card-collapsible" {% if not ticket_attachments %}open{% endif %}>
+            <summary class="card__header card__header--collapsible">
+              <h2 class="card__title">Attachments</h2>
+              <div class="card__collapsible-meta">
+                {% if ticket_attachments %}<span class="badge badge--muted">{{ ticket_attachments|length }}</span>{% endif %}
+                <span class="card__toggle-icon" aria-hidden="true"></span>
+              </div>
+            </summary>
+            <div class="card-collapsible__content card__body">
+              <div
+                class="attachments-grid"
+                data-attachments-grid
+                data-ticket-id="{{ ticket.id }}"
+              >
+                {% for attachment in ticket_attachments %}
+                  <article class="attachment-card" data-attachment-id="{{ attachment.id }}">
+                    <div class="attachment-card__icon" aria-hidden="true">📎</div>
+                    <div class="attachment-card__content">
+                      <div class="attachment-card__header">
+                        <p class="attachment-card__name">
+                          <a
+                            href="/api/tickets/{{ ticket.id }}/attachments/{{ attachment.id }}/download"
+                            title="{{ attachment.original_filename or attachment.filename }}"
+                          >
+                            {{ attachment.original_filename or attachment.filename }}
+                          </a>
+                        </p>
+                        <div class="attachment-card__actions">
+                          <button
+                            type="button"
+                            class="button button--ghost button--small attachment-card__action"
+                            data-remove-attachment
+                            data-attachment-id="{{ attachment.id }}"
+                            aria-label="Remove attachment"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                      <p class="attachment-card__meta">
+                        {{ attachment.file_size | filesizeformat }}
+                        {% if attachment.uploaded_iso %}
+                          · <span data-utc="{{ attachment.uploaded_iso }}"></span>
+                        {% endif %}
+                      </p>
+                    </div>
+                  </article>
+                {% endfor %}
+              </div>
+              <p
+                class="card__empty"
+                data-attachments-empty
+                {% if ticket_attachments %}hidden{% endif %}
+              >
+                No attachments have been added yet.
+              </p>
             </div>
           </details>
 
