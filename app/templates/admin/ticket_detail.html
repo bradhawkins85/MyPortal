@@ -977,13 +977,16 @@
         <div class="management__column management__column--activity">
           <details class="card card--panel card-collapsible" open>
             <summary class="card__header card__header--collapsible">
-              <h2 class="card__title">Add a reply</h2>
+              <div class="card__title-group">
+                <h2 class="card__title">Add a reply</h2>
+                <button type="button" class="button button--secondary button--small" data-ticket-reply-cache-load data-ticket-reply-cache-target="ticket-reply-form" hidden>Load Previous Reply</button>
+              </div>
               <div class="card__collapsible-meta">
                 <span class="card__toggle-icon" aria-hidden="true"></span>
               </div>
             </summary>
             <div class="card-collapsible__content">
-            <form action="/admin/tickets/{{ ticket.id }}/replies" method="post" class="form card__form ticket-reply-form" enctype="multipart/form-data">
+            <form id="ticket-reply-form" action="/admin/tickets/{{ ticket.id }}/replies" method="post" class="form card__form ticket-reply-form" enctype="multipart/form-data" data-ticket-reply-cache data-ticket-reply-cache-ticket-id="{{ ticket.id }}">
               {% if csrf_token %}
                 <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
               {% endif %}
@@ -1557,6 +1560,7 @@
   <script src="{{ static_url('/static/js/suneditor.min.js') }}"></script>
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
   <script src="{{ static_url('/static/js/rich_text_editor.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/ticket_reply_cache.js') }}" defer></script>
   <script src="{{ static_url('/static/js/ticket_detail.js') }}" defer></script>
   <script src="{{ static_url('/static/js/email_recipients.js') }}" defer></script>
   <script>

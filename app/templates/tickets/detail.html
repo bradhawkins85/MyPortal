@@ -310,11 +310,14 @@
 
           <article class="card card--panel">
             <header class="card__header">
-              <h2 class="card__title">Reply</h2>
+              <div class="card__title-group">
+                <h2 class="card__title">Reply</h2>
+                <button type="button" class="button button--secondary button--small" data-ticket-reply-cache-load data-ticket-reply-cache-target="ticket-reply-form" hidden>Load Previous Reply</button>
+              </div>
             </header>
             <div class="card__body">
               {% if can_reply %}
-                <form action="/tickets/{{ ticket.id }}/replies" method="post" class="form" novalidate enctype="multipart/form-data" data-ticket-reply-form>
+                <form id="ticket-reply-form" action="/tickets/{{ ticket.id }}/replies" method="post" class="form" novalidate enctype="multipart/form-data" data-ticket-reply-form data-ticket-reply-cache data-ticket-reply-cache-ticket-id="{{ ticket.id }}">
                   {% include "partials/csrf.html" %}
                   <div class="form-field">
                     <span class="form-label" id="ticket-reply-label">Message</span>
@@ -645,6 +648,7 @@
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/rich_text_editor.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/ticket_reply_cache.js') }}" defer></script>
   <script src="{{ static_url('/static/js/ticket_detail.js') }}" defer></script>
   <script src="{{ static_url('/static/js/email_recipients.js') }}" defer></script>
   {% if matrix_chat_enabled and not ticket_chat_room and is_requester %}
