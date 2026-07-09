@@ -1297,6 +1297,59 @@ async def _find_existing_ticket_for_reply(
     return None
 
 
+async def _resolve_existing_reply_author_id(
+    ticket: Mapping[str, Any],
+    from_email: str | None,
+    requester_id: int | None,
+) -> int | None:
+    """Resolve the local user who authored an inbound reply to an existing ticket.
+
+    Mailboxes can match a reply by message-id or ticket number even when the
+    initial sender lookup did not produce a requester_id (for example when the
+    sender is a watcher, or when the display address casing/format differs).
+    In that case, look at the matched ticket requester and watchers so the
+    conversation entry and automation actor are the customer instead of System.
+    """
+
+    if requester_id is not None:
+        return requester_id
+
+    ticket_id = _int_or_none(ticket.get("id"))
+    normalised_email = _normalise_string(from_email).lower()
+    if ticket_id is None or not normalised_email:
+        return None
+
+    ticket_requester_id = _int_or_none(ticket.get("requester_id"))
+    if ticket_requester_id is not None:
+        try:
+            requester = await users_repo.get_user_by_id(ticket_requester_id)
+        except Exception:  # pragma: no cover - defensive lookup
+            requester = None
+        if requester and _normalise_string(requester.get("email")).lower() == normalised_email:
+            return ticket_requester_id
+
+    try:
+        watchers = await tickets_repo.list_watchers(ticket_id)
+    except Exception:  # pragma: no cover - defensive lookup
+        watchers = []
+
+    for watcher in watchers:
+        watcher_user_id = _int_or_none(watcher.get("user_id"))
+        watcher_email = _normalise_string(watcher.get("email")).lower()
+        if watcher_user_id is not None:
+            try:
+                watcher_user = await users_repo.get_user_by_id(watcher_user_id)
+            except Exception:  # pragma: no cover - defensive lookup
+                watcher_user = None
+            watcher_email = _normalise_string(
+                watcher_user.get("email") if watcher_user else watcher_email
+            ).lower()
+        if watcher_email == normalised_email:
+            return watcher_user_id
+
+    return None
+
+
 async def _record_message(
     *,
     account_id: int,
@@ -1693,8 +1746,11 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     sanitized = sanitize_rich_text(conversation_source)
                     if sanitized.has_rich_content:
                         reply_created_at = received_at or datetime.now(timezone.utc)
-                        # Determine the author - use requester_id if available
-                        reply_author_id = requester_id if requester_id is not None else None
+                        reply_author_id = await _resolve_existing_reply_author_id(
+                            ticket,
+                            from_email_addr,
+                            requester_id,
+                        )
                         reply_added = False
                         try:
                             await tickets_repo.create_reply(
