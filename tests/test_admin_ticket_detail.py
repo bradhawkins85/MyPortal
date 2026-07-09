@@ -98,7 +98,20 @@ async def test_render_ticket_detail_with_tactical_module_and_ai_tags(monkeypatch
         "list_users_with_permission",
         AsyncMock(return_value=[]),
     )
-    monkeypatch.setattr(main.staff_repo, "list_enabled_staff_users", AsyncMock(return_value=[]))
+    requester_staff_options = [
+        {
+            "id": 2,
+            "user_id": 2,
+            "first_name": "Requester",
+            "last_name": "Example",
+            "email": "requester@example.com",
+        }
+    ]
+    monkeypatch.setattr(
+        main.staff_repo,
+        "list_enabled_staff_users",
+        AsyncMock(return_value=requester_staff_options),
+    )
     monkeypatch.setattr(main.assets_repo, "list_company_assets", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         main.knowledge_base_repo,
@@ -143,6 +156,9 @@ async def test_render_ticket_detail_with_tactical_module_and_ai_tags(monkeypatch
     assert captured["extra"]["relevant_kb_articles"] == relevant_kb_articles
     # Verify tactical base URL was extracted correctly
     assert captured["extra"]["tacticalrmm_base_url"] == "https://tactical.example.com"
+    assert captured["extra"]["ticket_mention_staff_options"] == [
+        {"id": 2, "label": "Requester Example", "email": "requester@example.com"}
+    ]
 
 
 @pytest.mark.anyio("asyncio")
