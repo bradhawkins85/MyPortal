@@ -116,13 +116,14 @@ async def replace_chunks(document_id: int, chunks: Sequence[dict[str, Any]]) -> 
 
 
 async def list_active_chunks(
-    *, embedding_model: str, source_types: Sequence[str] | None = None
+    *, embedding_model: str, source_types: Sequence[str] | None = None, limit: int = 10000
 ) -> list[dict[str, Any]]:
     params: list[Any] = [embedding_model]
     where = ["d.is_active = 1", "c.is_active = 1", "c.embedding_model = ?"]
     if source_types:
         where.append("d.source_type IN (" + ",".join("?" for _ in source_types) + ")")
         params.extend(source_types)
+    params.append(limit)
     return await db.fetch_all(
         f"""
         SELECT c.id AS chunk_id, c.chunk_index, c.chunk_text, c.embedding_json,
@@ -132,7 +133,7 @@ async def list_active_chunks(
         JOIN rag_documents d ON d.id = c.document_id
         WHERE {" AND ".join(where)}
         ORDER BY d.indexed_at DESC, c.id DESC
-        LIMIT 2000
+        LIMIT ?
         """,
         tuple(params),
     )
