@@ -1,4 +1,77 @@
 (function () {
+
+  const TICKET_SECTION_STATE_STORAGE_KEY = 'myportal.admin.ticketDetail.sectionState.v1';
+
+  function readTicketSectionState() {
+    try {
+      const raw = window.localStorage.getItem(TICKET_SECTION_STATE_STORAGE_KEY);
+      if (!raw) {
+        return {};
+      }
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (error) {
+      console.warn('Unable to read ticket section preferences:', error);
+      return {};
+    }
+  }
+
+  function writeTicketSectionState(state) {
+    try {
+      window.localStorage.setItem(TICKET_SECTION_STATE_STORAGE_KEY, JSON.stringify(state));
+    } catch (error) {
+      console.warn('Unable to save ticket section preferences:', error);
+    }
+  }
+
+  function getTicketSectionStateKey(details, index) {
+    if (!(details instanceof HTMLDetailsElement)) {
+      return '';
+    }
+
+    const explicitKey = details.getAttribute('data-ticket-section-state-key');
+    if (explicitKey && explicitKey.trim()) {
+      return explicitKey.trim();
+    }
+
+    const title = details.querySelector('summary .card__title, summary h2, summary h3, summary');
+    const label = title ? title.textContent.replace(/\s+/g, ' ').trim().toLowerCase() : '';
+    const slug = label.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return slug || `section-${index + 1}`;
+  }
+
+  function initialisePersistentTicketSections() {
+    const sections = Array.from(document.querySelectorAll('details.card-collapsible'));
+    if (!sections.length || !window.localStorage) {
+      return;
+    }
+
+    const state = readTicketSectionState();
+
+    sections.forEach((section, index) => {
+      if (!(section instanceof HTMLDetailsElement)) {
+        return;
+      }
+
+      const key = getTicketSectionStateKey(section, index);
+      if (!key) {
+        return;
+      }
+
+      section.setAttribute('data-ticket-section-state-key', key);
+
+      if (Object.prototype.hasOwnProperty.call(state, key)) {
+        section.open = state[key] === true;
+      }
+
+      section.addEventListener('toggle', () => {
+        const latestState = readTicketSectionState();
+        latestState[key] = section.open;
+        writeTicketSectionState(latestState);
+      });
+    });
+  }
+
   function getLineHeightPx(element) {
     const computed = window.getComputedStyle(element);
     const lineHeight = parseFloat(computed.lineHeight);
@@ -2361,6 +2434,7 @@
       initialiseTimelineMessage(wrapper, toggle);
     });
 
+    initialisePersistentTicketSections();
     initialiseTicketSplit();
     initialiseReplyTimeEditing();
     initialiseCallRecordingTimeEditing();
