@@ -8215,6 +8215,28 @@ async def _render_portal_ticket_detail(
                 "email": watcher.get("email"),
             })
 
+    ticket_mention_staff_options: list[dict[str, Any]] = []
+    if has_helpdesk_access or is_super_admin:
+        try:
+            ticket_company_id = int(ticket.get("company_id")) if ticket.get("company_id") is not None else None
+        except (TypeError, ValueError):
+            ticket_company_id = None
+        if ticket_company_id is not None:
+            for staff_user in await staff_repo.list_enabled_staff_users(ticket_company_id):
+                user_id_value = staff_user.get("user_id")
+                if user_id_value is None:
+                    continue
+                try:
+                    user_id_int = int(user_id_value)
+                except (TypeError, ValueError):
+                    continue
+                label = _format_user_label(staff_user) or str(staff_user.get("email") or "").strip()
+                ticket_mention_staff_options.append({
+                    "id": user_id_int,
+                    "label": label,
+                    "email": str(staff_user.get("email") or "").strip(),
+                })
+
     # Get ticket attachments
     attachment_records: list[Mapping[str, Any]] = []
     try:
@@ -8301,6 +8323,7 @@ async def _render_portal_ticket_detail(
         "assigned_user": assigned_record,
         "ticket_replies": timeline_entries,
         "ticket_watchers": watchers,
+        "ticket_mention_staff_options": ticket_mention_staff_options,
         "ticket_attachments": formatted_attachments,
         "ticket_assets": ticket_assets,
         "ticket_status_definitions": [
@@ -8950,6 +8973,17 @@ async def _render_ticket_detail(
         # Get all enabled staff for the company as watcher options
         watcher_staff_options = await staff_repo.list_enabled_staff_users(ticket_company_id)
 
+
+    ticket_mention_staff_options = [
+        {
+            "id": int(option.get("user_id")),
+            "label": _format_user_label(option) or str(option.get("email") or "").strip(),
+            "email": str(option.get("email") or "").strip(),
+        }
+        for option in watcher_staff_options
+        if option.get("user_id") is not None
+    ]
+
     current_requester_id = ticket.get("requester_id")
     if isinstance(current_requester_id, int):
         existing_ids = {
@@ -9121,6 +9155,7 @@ async def _render_ticket_detail(
         "ticket_user_options": technician_users,
         "ticket_requester_options": requester_options,
         "ticket_watcher_staff_options": watcher_staff_options,
+        "ticket_mention_staff_options": ticket_mention_staff_options,
         "ticket_priority_options": priority_options,
         "ticket_return_url": request.url.path,
         "ticket_assets": ticket_assets,

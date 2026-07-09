@@ -2422,6 +2422,164 @@
     });
   }
 
+
+
+  function initialiseTicketMentions() {
+    document.querySelectorAll('[data-ticket-mention-users]').forEach((editor) => {
+      const surface = editor.querySelector('[data-rich-text-content]');
+      const form = editor.closest('form');
+      const hidden = form ? form.querySelector('[data-ticket-mention-user-ids]') : null;
+      if (!(surface instanceof HTMLElement) || !(hidden instanceof HTMLInputElement)) {
+        return;
+      }
+
+      let users = [];
+      try {
+        users = JSON.parse(editor.getAttribute('data-ticket-mention-users') || '[]');
+      } catch (error) {
+        users = [];
+      }
+      users = users
+        .map((user) => ({
+          id: Number(user.id),
+          label: String(user.label || user.email || '').trim(),
+          email: String(user.email || '').trim(),
+        }))
+        .filter((user) => Number.isInteger(user.id) && user.id > 0 && user.label);
+      if (!users.length) {
+        return;
+      }
+
+      const selected = new Set();
+      const menu = document.createElement('div');
+      menu.className = 'ticket-mention-menu';
+      menu.setAttribute('role', 'listbox');
+      menu.hidden = true;
+      editor.appendChild(menu);
+
+      let activeIndex = 0;
+      let currentRange = null;
+      let currentQuery = '';
+
+      function syncHidden() {
+        hidden.value = Array.from(selected).join(',');
+      }
+
+      function getMentionContext() {
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0 || !surface.contains(selection.anchorNode)) {
+          return null;
+        }
+        const range = selection.getRangeAt(0).cloneRange();
+        const prefixRange = range.cloneRange();
+        prefixRange.selectNodeContents(surface);
+        prefixRange.setEnd(range.endContainer, range.endOffset);
+        const text = prefixRange.toString();
+        const match = text.match(/(^|\s)@([\p{L}\p{N}._'-]{0,40})$/u);
+        if (!match) {
+          return null;
+        }
+        return { query: match[2].toLowerCase(), length: match[2].length + 1 };
+      }
+
+      function matchingUsers(query) {
+        return users.filter((user) => {
+          const haystack = `${user.label} ${user.email}`.toLowerCase();
+          return haystack.includes(query);
+        }).slice(0, 8);
+      }
+
+      function positionMenu() {
+        const rect = surface.getBoundingClientRect();
+        menu.style.left = '0px';
+        menu.style.top = `${rect.height + 6}px`;
+      }
+
+      function hideMenu() {
+        menu.hidden = true;
+        menu.innerHTML = '';
+        currentRange = null;
+      }
+
+      function renderMenu(matches) {
+        if (!matches.length) {
+          hideMenu();
+          return;
+        }
+        activeIndex = Math.min(activeIndex, matches.length - 1);
+        menu.innerHTML = matches.map((user, index) => `
+          <button type="button" class="ticket-mention-menu__item${index === activeIndex ? ' is-active' : ''}" data-mention-index="${index}" role="option" aria-selected="${index === activeIndex ? 'true' : 'false'}">
+            <span class="ticket-mention-menu__name"></span>
+            <span class="ticket-mention-menu__email"></span>
+          </button>
+        `).join('');
+        menu.querySelectorAll('[data-mention-index]').forEach((button) => {
+          const user = matches[Number(button.getAttribute('data-mention-index'))];
+          button.querySelector('.ticket-mention-menu__name').textContent = user.label;
+          button.querySelector('.ticket-mention-menu__email').textContent = user.email;
+          button.addEventListener('mousedown', (event) => {
+            event.preventDefault();
+            confirmMention(user);
+          });
+        });
+        menu.hidden = false;
+        positionMenu();
+      }
+
+      function updateMenu() {
+        const context = getMentionContext();
+        if (!context) {
+          hideMenu();
+          return;
+        }
+        currentQuery = context.query;
+        const selection = window.getSelection();
+        currentRange = selection && selection.rangeCount ? selection.getRangeAt(0).cloneRange() : null;
+        renderMenu(matchingUsers(currentQuery));
+      }
+
+      function confirmMention(user) {
+        if (!currentRange) {
+          return;
+        }
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(currentRange);
+        if (selection.modify) {
+          for (let i = 0; i < currentQuery.length + 1; i += 1) {
+            selection.modify('extend', 'backward', 'character');
+          }
+        }
+        document.execCommand('insertText', false, `@${user.label} `);
+        selected.add(user.id);
+        syncHidden();
+        surface.dispatchEvent(new Event('input', { bubbles: true }));
+        hideMenu();
+      }
+
+      surface.addEventListener('input', updateMenu);
+      surface.addEventListener('keyup', updateMenu);
+      surface.addEventListener('blur', () => window.setTimeout(hideMenu, 150));
+      surface.addEventListener('keydown', (event) => {
+        if (menu.hidden) {
+          return;
+        }
+        const matches = matchingUsers(currentQuery);
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          activeIndex = (activeIndex + (event.key === 'ArrowDown' ? 1 : -1) + matches.length) % matches.length;
+          renderMenu(matches);
+        } else if (event.key === 'Enter') {
+          event.preventDefault();
+          confirmMention(matches[activeIndex]);
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          hideMenu();
+        }
+      });
+    });
+  }
+
   function ready() {
     const messageWrappers = document.querySelectorAll('[data-timeline-message]');
 
@@ -2442,6 +2600,7 @@
     initialiseRequesterSelector();
     initialiseTaskManagement();
     initialiseWatcherManagement();
+    initialiseTicketMentions();
     initialiseAttachmentActions();
     initTicketRelated();
     convertUtcElements();

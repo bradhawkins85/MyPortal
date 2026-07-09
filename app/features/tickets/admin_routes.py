@@ -73,6 +73,50 @@ def _main():
     return main_module
 
 
+def _parse_mentioned_user_ids(form: Mapping[str, Any]) -> list[int]:
+    raw_values: list[Any] = []
+    getlist = getattr(form, "getlist", None)
+    if callable(getlist):
+        raw_values.extend(getlist("mentionedUserIds"))
+    else:
+        raw_values.append(form.get("mentionedUserIds"))
+    user_ids: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_values:
+        for token in str(raw or "").replace(";", ",").split(","):
+            token = token.strip()
+            if not token:
+                continue
+            try:
+                user_id = int(token)
+            except (TypeError, ValueError):
+                continue
+            if user_id > 0 and user_id not in seen:
+                seen.add(user_id)
+                user_ids.append(user_id)
+    return user_ids
+
+
+async def _valid_mentioned_user_ids(ticket: Mapping[str, Any] | dict[str, Any], requested_ids: list[int]) -> list[int]:
+    if not requested_ids:
+        return []
+    try:
+        company_id = int(ticket.get("company_id")) if ticket.get("company_id") is not None else None
+    except (TypeError, ValueError, AttributeError):
+        company_id = None
+    if company_id is None:
+        return []
+    allowed_ids: set[int] = set()
+    for staff_user in await staff_repo.list_enabled_staff_users(company_id):
+        try:
+            user_id = int(staff_user.get("user_id")) if staff_user.get("user_id") is not None else None
+        except (TypeError, ValueError):
+            user_id = None
+        if user_id is not None:
+            allowed_ids.add(user_id)
+    return [user_id for user_id in requested_ids if user_id in allowed_ids]
+
+
 def _strip_external_links(text: str) -> str:
     return re.sub(r"https?://\S+|www\.\S+", " ", text or "")
 
@@ -1549,6 +1593,9 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             is_billable=is_billable,
             labour_type_id=labour_type_id,
         )
+        mentioned_user_ids = await _valid_mentioned_user_ids(ticket, _parse_mentioned_user_ids(form))
+        if mentioned_user_ids:
+            await tickets_repo.bulk_add_watchers(ticket_id, mentioned_user_ids)
         attachments = form.getlist("attachments")
         if attachments:
             for attachment in attachments:
