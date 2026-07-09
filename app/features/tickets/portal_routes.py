@@ -17,6 +17,8 @@ from ``app.main`` and the existing service modules; see the pack
 
 from __future__ import annotations
 
+from typing import Any, Mapping
+
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
@@ -24,6 +26,7 @@ from app.core.logging import log_error
 from app.features.tickets.form_helpers import get_last_form_value
 from app.security.flash import flash_redirect
 from app.repositories import ticket_views as ticket_views_repo
+from app.repositories import staff as staff_repo
 from app.repositories import tickets as tickets_repo
 from app.services import ticket_attachments as attachments_service
 from app.services import tickets as tickets_service
@@ -31,6 +34,50 @@ from app.services.sanitization import sanitize_rich_text
 
 
 router = APIRouter(tags=["Tickets"])
+
+
+def _parse_mentioned_user_ids(form) -> list[int]:
+    raw_values: list[object] = []
+    getlist = getattr(form, "getlist", None)
+    if callable(getlist):
+        raw_values.extend(getlist("mentionedUserIds"))
+    else:
+        raw_values.append(form.get("mentionedUserIds"))
+    user_ids: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_values:
+        for token in str(raw or "").replace(";", ",").split(","):
+            token = token.strip()
+            if not token:
+                continue
+            try:
+                user_id = int(token)
+            except (TypeError, ValueError):
+                continue
+            if user_id > 0 and user_id not in seen:
+                seen.add(user_id)
+                user_ids.append(user_id)
+    return user_ids
+
+
+async def _valid_mentioned_user_ids(ticket: Mapping[str, Any] | dict[str, Any], requested_ids: list[int]) -> list[int]:
+    if not requested_ids:
+        return []
+    try:
+        company_id = int(ticket.get("company_id")) if ticket.get("company_id") is not None else None
+    except (TypeError, ValueError, AttributeError):
+        company_id = None
+    if company_id is None:
+        return []
+    allowed_ids: set[int] = set()
+    for staff_user in await staff_repo.list_enabled_staff_users(company_id):
+        try:
+            user_id = int(staff_user.get("user_id")) if staff_user.get("user_id") is not None else None
+        except (TypeError, ValueError):
+            user_id = None
+        if user_id is not None:
+            allowed_ids.add(user_id)
+    return [user_id for user_id in requested_ids if user_id in allowed_ids]
 
 
 def _main():
@@ -338,6 +385,10 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
             minutes_spent=None,
             is_billable=False,
         )
+        if has_helpdesk_access or is_super_admin:
+            mentioned_user_ids = await _valid_mentioned_user_ids(ticket, _parse_mentioned_user_ids(form))
+            if mentioned_user_ids:
+                await tickets_repo.bulk_add_watchers(ticket_id, mentioned_user_ids)
         if reply_status:
             await tickets_repo.set_ticket_status(ticket_id, reply_status)
 

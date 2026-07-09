@@ -995,6 +995,7 @@
                 <div
                   class="rich-text-editor"
                   data-rich-text-editor
+                  data-ticket-mention-users='{{ ticket_mention_staff_options | tojson | e }}'
                   aria-labelledby="ticket-reply-label"
                 >
                   <div class="rich-text-editor__toolbar" role="toolbar" aria-label="Formatting options">
@@ -1092,6 +1093,7 @@
                     aria-multiline="true"
                     data-placeholder="Write your reply..."
                   ></div>
+                  <input type="hidden" name="mentionedUserIds" data-ticket-mention-user-ids />
                   <textarea
                     name="body"
                     class="rich-text-editor__fallback"

@@ -324,6 +324,7 @@
                     <div
                       class="rich-text-editor"
                       data-rich-text-editor
+                      data-ticket-mention-users='{{ ticket_mention_staff_options | default([]) | tojson | e }}'
                       aria-labelledby="ticket-reply-label"
                     >
                       <div class="rich-text-editor__toolbar" role="toolbar" aria-label="Formatting options">
@@ -422,6 +423,7 @@
                         data-placeholder="Write your reply..."
                       >{{ reply_body }}</div>
                     </div>
+                    <input type="hidden" name="mentionedUserIds" data-ticket-mention-user-ids />
                     <textarea
                       id="ticket-reply-body-hidden"
                       name="body"
