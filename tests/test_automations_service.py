@@ -38,7 +38,9 @@ def test_calculate_next_run_for_event_automation():
 async def test_handle_event_executes_matching_automations(monkeypatch):
     contexts: list[tuple[int, dict[str, object] | None]] = []
 
-    async def fake_list_event_automations(trigger_event: str, *, limit: int | None = None):
+    async def fake_list_event_automations(
+        trigger_event: str, *, limit: int | None = None
+    ):
         assert limit is None
         if trigger_event == "tickets.created":
             return [
@@ -102,7 +104,9 @@ async def test_handle_event_includes_legacy_alias_automations(monkeypatch):
     contexts: list[tuple[int, dict[str, object] | None]] = []
     requested_events: list[str] = []
 
-    async def fake_list_event_automations(trigger_event: str, *, limit: int | None = None):
+    async def fake_list_event_automations(
+        trigger_event: str, *, limit: int | None = None
+    ):
         assert limit is None
         requested_events.append(trigger_event)
         if trigger_event == "tickets.created":
@@ -136,9 +140,13 @@ async def test_handle_event_includes_legacy_alias_automations(monkeypatch):
         fake_list_event_automations,
     )
     monkeypatch.setattr(automations_service, "_execute_automation", fake_execute)
-    monkeypatch.setattr(automations_service, "_schedule_background_execution", fake_schedule)
+    monkeypatch.setattr(
+        automations_service, "_schedule_background_execution", fake_schedule
+    )
 
-    results = await automations_service.handle_event("tickets.created", {"ticket": {"id": 1}})
+    results = await automations_service.handle_event(
+        "tickets.created", {"ticket": {"id": 1}}
+    )
 
     await asyncio.gather(*(task for _, task in scheduled_tasks))
 
@@ -149,7 +157,9 @@ async def test_handle_event_includes_legacy_alias_automations(monkeypatch):
 
 @pytest.mark.anyio
 async def test_handle_event_deduplicates_same_automation_from_aliases(monkeypatch):
-    async def fake_list_event_automations(trigger_event: str, *, limit: int | None = None):
+    async def fake_list_event_automations(
+        trigger_event: str, *, limit: int | None = None
+    ):
         if trigger_event in {"tickets.created", "ticket.created"}:
             return [{"id": 42, "trigger_filters": None}]
         return []
@@ -177,9 +187,13 @@ async def test_handle_event_deduplicates_same_automation_from_aliases(monkeypatc
         fake_list_event_automations,
     )
     monkeypatch.setattr(automations_service, "_execute_automation", fake_execute)
-    monkeypatch.setattr(automations_service, "_schedule_background_execution", fake_schedule)
+    monkeypatch.setattr(
+        automations_service, "_schedule_background_execution", fake_schedule
+    )
 
-    results = await automations_service.handle_event("tickets.created", {"ticket": {"id": 1}})
+    results = await automations_service.handle_event(
+        "tickets.created", {"ticket": {"id": 1}}
+    )
 
     assert scheduled_ids == [42]
     assert len(results) == 1
@@ -190,7 +204,9 @@ async def test_handle_event_deduplicates_same_automation_from_aliases(monkeypatc
 async def test_handle_event_returns_empty_for_blank_event(monkeypatch):
     called = False
 
-    async def fake_list_event_automations(*args, **kwargs):  # pragma: no cover - defensive
+    async def fake_list_event_automations(
+        *args, **kwargs
+    ):  # pragma: no cover - defensive
         nonlocal called
         called = True
         return []
@@ -455,6 +471,8 @@ async def test_execute_automation_supports_message_templates(monkeypatch):
     payload = captured[0]
     assert payload["title"] == "Welcome notification"
     assert "alice@example.com" in payload["message"]
+
+
 @pytest.mark.anyio
 async def test_execute_automation_injects_system_variables(monkeypatch):
     from app.core.config import get_settings
@@ -541,7 +559,10 @@ async def test_execute_automation_marks_failure_when_action_fails(monkeypatch):
     async def fake_trigger_module(module_slug, payload, *, background=False):
         assert module_slug == "smtp"
         assert background is False
-        return {"status": "failed", "last_error": "SMTP service declined to send message"}
+        return {
+            "status": "failed",
+            "last_error": "SMTP service declined to send message",
+        }
 
     async def fake_mark_started(*args, **kwargs):
         return None
@@ -630,11 +651,21 @@ async def test_execute_automation_runs_all_actions_of_same_type(monkeypatch):
     async def fake_set_next_run(*args, **kwargs):
         return None
 
-    monkeypatch.setattr(automations_service.modules_service, "trigger_module", fake_trigger_module)
-    monkeypatch.setattr(automations_service.automation_repo, "mark_started", fake_mark_started)
-    monkeypatch.setattr(automations_service.automation_repo, "record_run", fake_record_run)
-    monkeypatch.setattr(automations_service.automation_repo, "set_last_error", fake_set_last_error)
-    monkeypatch.setattr(automations_service.automation_repo, "set_next_run", fake_set_next_run)
+    monkeypatch.setattr(
+        automations_service.modules_service, "trigger_module", fake_trigger_module
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo, "mark_started", fake_mark_started
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo, "record_run", fake_record_run
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo, "set_last_error", fake_set_last_error
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo, "set_next_run", fake_set_next_run
+    )
 
     automation = {
         "id": 42,
@@ -700,11 +731,21 @@ async def test_execute_automation_continues_after_first_action_failure(monkeypat
     async def fake_set_next_run(*args, **kwargs):
         return None
 
-    monkeypatch.setattr(automations_service.modules_service, "trigger_module", fake_trigger_module)
-    monkeypatch.setattr(automations_service.automation_repo, "mark_started", fake_mark_started)
-    monkeypatch.setattr(automations_service.automation_repo, "record_run", fake_record_run)
-    monkeypatch.setattr(automations_service.automation_repo, "set_last_error", fake_set_last_error)
-    monkeypatch.setattr(automations_service.automation_repo, "set_next_run", fake_set_next_run)
+    monkeypatch.setattr(
+        automations_service.modules_service, "trigger_module", fake_trigger_module
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo, "mark_started", fake_mark_started
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo, "record_run", fake_record_run
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo, "set_last_error", fake_set_last_error
+    )
+    monkeypatch.setattr(
+        automations_service.automation_repo, "set_next_run", fake_set_next_run
+    )
 
     automation = {
         "id": 55,
@@ -713,11 +754,17 @@ async def test_execute_automation_continues_after_first_action_failure(monkeypat
             "actions": [
                 {
                     "module": "smtp2go",
-                    "payload": {"recipients": ["admin@example.com"], "subject": "Alert 1"},
+                    "payload": {
+                        "recipients": ["admin@example.com"],
+                        "subject": "Alert 1",
+                    },
                 },
                 {
                     "module": "smtp2go",
-                    "payload": {"recipients": ["user@example.com"], "subject": "Alert 2"},
+                    "payload": {
+                        "recipients": ["user@example.com"],
+                        "subject": "Alert 2",
+                    },
                 },
             ]
         },
@@ -728,7 +775,9 @@ async def test_execute_automation_continues_after_first_action_failure(monkeypat
     # Overall status is failed because first action failed
     assert result["status"] == "failed"
     # But BOTH actions must have been attempted
-    assert len(captured) == 2, f"Expected 2 invocations, got {len(captured)}: second action was skipped"
+    assert (
+        len(captured) == 2
+    ), f"Expected 2 invocations, got {len(captured)}: second action was skipped"
     assert captured[0][1].get("subject") == "Alert 1"
     assert captured[1][1].get("subject") == "Alert 2"
 
@@ -807,7 +856,9 @@ def test_filters_match_not_in_rejects_matching_sequence_members():
 
 
 @pytest.mark.anyio
-async def test_execute_scheduled_ticket_automation_runs_actions_for_matching_tickets(monkeypatch):
+async def test_execute_scheduled_ticket_automation_runs_actions_for_matching_tickets(
+    monkeypatch,
+):
     scanned_tickets = [
         {
             "id": 1,
@@ -909,8 +960,31 @@ def test_filters_match_supports_reply_internal_note_context():
     )
 
 
+def test_filters_match_supports_boolean_strings_from_builder():
+    public_context = {
+        "reply": {"is_internal": False},
+        "ticket": {"has_attachments": True},
+    }
+
+    assert automations_service._filters_match(
+        {
+            "all": [
+                {"match": {"reply.is_internal": "false"}},
+                {"match": {"ticket.has_attachments": "true"}},
+            ]
+        },
+        public_context,
+    )
+    assert not automations_service._filters_match(
+        {"match": {"reply.is_internal": "true"}},
+        public_context,
+    )
+
+
 @pytest.mark.anyio
-async def test_preview_scheduled_ticket_automation_returns_matches_without_actions(monkeypatch):
+async def test_preview_scheduled_ticket_automation_returns_matches_without_actions(
+    monkeypatch,
+):
     scanned_tickets = [
         {
             "id": 10,
@@ -939,7 +1013,9 @@ async def test_preview_scheduled_ticket_automation_returns_matches_without_actio
     async def fake_enrich(ticket):
         return dict(ticket)
 
-    async def fail_trigger_module(*args, **kwargs):  # pragma: no cover - should never be called
+    async def fail_trigger_module(
+        *args, **kwargs
+    ):  # pragma: no cover - should never be called
         raise AssertionError("preview must not execute automation actions")
 
     from app.services import tickets as tickets_service
@@ -950,7 +1026,9 @@ async def test_preview_scheduled_ticket_automation_returns_matches_without_actio
         fake_list_tickets_for_automation_scan,
     )
     monkeypatch.setattr(tickets_service, "_enrich_ticket_context", fake_enrich)
-    monkeypatch.setattr(automations_service.modules_service, "trigger_module", fail_trigger_module)
+    monkeypatch.setattr(
+        automations_service.modules_service, "trigger_module", fail_trigger_module
+    )
 
     result = await automations_service.preview_scheduled_ticket_automation(
         {
@@ -1028,19 +1106,33 @@ async def test_simulate_event_ticket_automation_processes_selected_matches(monke
 
     from app.services import tickets as tickets_service
 
-    monkeypatch.setattr(automations_service.automation_repo, "get_automation", fake_get_automation)
-    monkeypatch.setattr(automations_service.tickets_repo, "list_tickets_for_automation_scan", fake_list_tickets_for_automation_scan)
+    monkeypatch.setattr(
+        automations_service.automation_repo, "get_automation", fake_get_automation
+    )
+    monkeypatch.setattr(
+        automations_service.tickets_repo,
+        "list_tickets_for_automation_scan",
+        fake_list_tickets_for_automation_scan,
+    )
     monkeypatch.setattr(tickets_service, "_enrich_ticket_context", fake_enrich)
-    monkeypatch.setattr(automations_service.modules_service, "trigger_module", fake_trigger_module)
-    monkeypatch.setattr(automations_service, "_record_action_history", fake_record_action_history)
+    monkeypatch.setattr(
+        automations_service.modules_service, "trigger_module", fake_trigger_module
+    )
+    monkeypatch.setattr(
+        automations_service, "_record_action_history", fake_record_action_history
+    )
 
-    simulation = await automations_service.simulate_event_ticket_automation_by_id(13, limit=50)
+    simulation = await automations_service.simulate_event_ticket_automation_by_id(
+        13, limit=50
+    )
     assert simulation["mode"] == "event_ticket_simulation"
     assert simulation["matched"] == 1
     assert simulation["tickets"][0]["id"] == 20
     assert triggered == []
 
-    result = await automations_service.process_event_ticket_simulation_by_id(13, ticket_ids=[20], limit=50)
+    result = await automations_service.process_event_ticket_simulation_by_id(
+        13, ticket_ids=[20], limit=50
+    )
     assert result["matched"] == 1
     assert result["succeeded"] == 1
     assert triggered[0][0] == "test-module"
