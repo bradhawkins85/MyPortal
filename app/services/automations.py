@@ -735,20 +735,13 @@ async def _invoke_automation_actions_for_context(
     return {"status": "skipped", "reason": "No action module configured"}, None
 
 
-async def preview_scheduled_ticket_automation(
+async def _scan_tickets_for_automation(
     automation: Mapping[str, Any],
     *,
     limit: int = 1000,
+    preview: bool = True,
 ) -> dict[str, Any]:
-    """Return tickets that would be actioned by a scheduled ticket automation.
-
-    This mirrors the scheduled ticket scan path but never invokes automation
-    actions, so admins can safely inspect the next run impact before enabling
-    or manually executing an automation.
-    """
-
-    if str(automation.get("kind") or "").strip().lower() != "scheduled":
-        raise ValueError("Only scheduled automations can be previewed")
+    """Scan recent tickets against an automation's filter JSON without actions."""
 
     now = datetime.now(timezone.utc)
     raw_filters = automation.get("trigger_filters")
@@ -771,12 +764,13 @@ async def preview_scheduled_ticket_automation(
                 "actor_type": "automation",
                 "actor_label": "Automation",
                 "actor_user": None,
+                "simulated_event": automation.get("trigger_event"),
             },
             "schedule": {
                 "automation_id": automation.get("id"),
                 "automation_name": automation.get("name"),
                 "checked_at": now.isoformat(),
-                "preview": True,
+                "preview": preview,
             },
         }
         if not _filters_match(filters, context):
@@ -786,12 +780,13 @@ async def preview_scheduled_ticket_automation(
         match["last_activity_at"] = ticket_context.get("last_activity_at")
         match["age_days"] = ticket_context.get("age_days")
         match["last_activity_age_days"] = ticket_context.get("last_activity_age_days")
+        match["automation_context"] = context
         matches.append(match)
 
     return {
         "automation_id": automation.get("id"),
         "automation_name": automation.get("name"),
-        "mode": "scheduled_ticket_preview",
+        "mode": "event_ticket_simulation" if str(automation.get("kind") or "").strip().lower() == "event" else "scheduled_ticket_preview",
         "checked_at": now,
         "scan_limit": scan_limit,
         "scanned": len(scanned),
@@ -800,12 +795,98 @@ async def preview_scheduled_ticket_automation(
     }
 
 
+async def preview_scheduled_ticket_automation(
+    automation: Mapping[str, Any],
+    *,
+    limit: int = 1000,
+) -> dict[str, Any]:
+    """Return tickets that would be actioned by a scheduled ticket automation."""
+
+    if str(automation.get("kind") or "").strip().lower() != "scheduled":
+        raise ValueError("Only scheduled automations can be previewed")
+    return await _scan_tickets_for_automation(automation, limit=limit, preview=True)
+
+
+async def simulate_event_ticket_automation(
+    automation: Mapping[str, Any],
+    *,
+    limit: int = 1000,
+) -> dict[str, Any]:
+    """Return tickets an event automation would affect when simulated."""
+
+    if str(automation.get("kind") or "").strip().lower() != "event":
+        raise ValueError("Only event automations can be simulated")
+    event_name = str(automation.get("trigger_event") or "").strip()
+    if event_name and not event_name.startswith("tickets.") and not event_name.startswith("ticket."):
+        raise ValueError("Only ticket event automations can be simulated against tickets")
+    return await _scan_tickets_for_automation(automation, limit=limit, preview=True)
+
+
 async def preview_scheduled_ticket_automation_by_id(automation_id: int, *, limit: int = 1000) -> dict[str, Any]:
     automation = await automation_repo.get_automation(automation_id)
     if not automation:
         raise ValueError(f"Automation {automation_id} not found")
     return await preview_scheduled_ticket_automation(automation, limit=limit)
 
+
+
+
+async def simulate_event_ticket_automation_by_id(automation_id: int, *, limit: int = 1000) -> dict[str, Any]:
+    automation = await automation_repo.get_automation(automation_id)
+    if not automation:
+        raise ValueError(f"Automation {automation_id} not found")
+    return await simulate_event_ticket_automation(automation, limit=limit)
+
+
+async def process_event_ticket_simulation_by_id(
+    automation_id: int,
+    *,
+    ticket_ids: Sequence[int] | None = None,
+    limit: int = 1000,
+) -> dict[str, Any]:
+    automation = await automation_repo.get_automation(automation_id)
+    if not automation:
+        raise ValueError(f"Automation {automation_id} not found")
+    simulation = await simulate_event_ticket_automation(automation, limit=limit)
+    requested_ids: set[int] = set()
+    for ticket_id in ticket_ids or []:
+        try:
+            clean_id = int(ticket_id)
+        except (TypeError, ValueError):
+            continue
+        if clean_id > 0:
+            requested_ids.add(clean_id)
+    matched_tickets = simulation.get("tickets") if isinstance(simulation, Mapping) else []
+    if requested_ids:
+        matched_tickets = [ticket for ticket in matched_tickets if int(ticket.get("id") or 0) in requested_ids]
+
+    succeeded = 0
+    failed = 0
+    results: list[dict[str, Any]] = []
+    for ticket in matched_tickets if isinstance(matched_tickets, list) else []:
+        context = ticket.get("automation_context") if isinstance(ticket, Mapping) else None
+        action_result, action_error = await _invoke_automation_actions_for_context(automation, context=context)
+        result_entry: dict[str, Any] = {
+            "ticket_id": ticket.get("id"),
+            "status": "failed" if action_error else "succeeded",
+            "result": action_result,
+        }
+        if action_error:
+            failed += 1
+            result_entry["error"] = action_error
+        else:
+            succeeded += 1
+        results.append(result_entry)
+
+    return {
+        "mode": "event_ticket_simulation_process",
+        "scanned": simulation.get("scanned", 0),
+        "matched": len(matched_tickets) if isinstance(matched_tickets, list) else 0,
+        "succeeded": succeeded,
+        "failed": failed,
+        "skipped": max(0, int(simulation.get("matched", 0)) - (len(matched_tickets) if isinstance(matched_tickets, list) else 0)),
+        "results": results,
+    }
 
 async def _execute_scheduled_ticket_automation(automation: Mapping[str, Any]) -> dict[str, Any]:
     """Run a scheduled automation once for each ticket matching its filters."""

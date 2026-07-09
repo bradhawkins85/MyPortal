@@ -40,6 +40,18 @@ router.add_api_route(
     response_class=HTMLResponse,
 )
 router.add_api_route(
+    "/admin/automations/{automation_id}/simulate",
+    handlers.admin_simulate_automation,
+    methods=["GET"],
+    response_class=HTMLResponse,
+)
+router.add_api_route(
+    "/admin/automations/{automation_id}/simulate/process",
+    handlers.admin_process_simulated_automation,
+    methods=["POST"],
+    response_class=HTMLResponse,
+)
+router.add_api_route(
     "/admin/automations/{automation_id}/edit",
     handlers.admin_edit_automation_page,
     methods=["GET"],

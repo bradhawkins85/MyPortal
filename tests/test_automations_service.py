@@ -973,3 +973,75 @@ async def test_preview_scheduled_ticket_automation_returns_matches_without_actio
     assert result["matched"] == 1
     assert result["tickets"][0]["id"] == 10
     assert result["tickets"][0]["ticket_number"] == "T-10"
+
+
+@pytest.mark.anyio
+async def test_simulate_event_ticket_automation_processes_selected_matches(monkeypatch):
+    scanned_tickets = [
+        {
+            "id": 20,
+            "ticket_number": "T-20",
+            "status": "open",
+            "subject": "Matching ticket",
+            "created_at": datetime.now(timezone.utc) - timedelta(days=3),
+            "updated_at": datetime.now(timezone.utc) - timedelta(days=2),
+            "latest_reply_at": None,
+        },
+        {
+            "id": 21,
+            "ticket_number": "T-21",
+            "status": "closed",
+            "subject": "Filtered ticket",
+            "created_at": datetime.now(timezone.utc) - timedelta(days=3),
+            "updated_at": datetime.now(timezone.utc) - timedelta(days=2),
+            "latest_reply_at": None,
+        },
+    ]
+    automation = {
+        "id": 13,
+        "name": "Simulate ticket updates",
+        "kind": "event",
+        "trigger_event": "tickets.updated",
+        "trigger_filters": {"match": {"ticket.status": "open"}},
+        "action_module": "test-module",
+        "action_payload": {},
+    }
+    triggered = []
+
+    async def fake_get_automation(automation_id):
+        assert automation_id == 13
+        return automation
+
+    async def fake_list_tickets_for_automation_scan(*, limit: int = 1000):
+        assert limit == 50
+        return scanned_tickets
+
+    async def fake_enrich(ticket):
+        return dict(ticket)
+
+    async def fake_trigger_module(module_slug, payload, *, background=False):
+        triggered.append((module_slug, payload, background))
+        return {"status": "succeeded"}
+
+    async def fake_record_action_history(*args, **kwargs):
+        return None
+
+    from app.services import tickets as tickets_service
+
+    monkeypatch.setattr(automations_service.automation_repo, "get_automation", fake_get_automation)
+    monkeypatch.setattr(automations_service.tickets_repo, "list_tickets_for_automation_scan", fake_list_tickets_for_automation_scan)
+    monkeypatch.setattr(tickets_service, "_enrich_ticket_context", fake_enrich)
+    monkeypatch.setattr(automations_service.modules_service, "trigger_module", fake_trigger_module)
+    monkeypatch.setattr(automations_service, "_record_action_history", fake_record_action_history)
+
+    simulation = await automations_service.simulate_event_ticket_automation_by_id(13, limit=50)
+    assert simulation["mode"] == "event_ticket_simulation"
+    assert simulation["matched"] == 1
+    assert simulation["tickets"][0]["id"] == 20
+    assert triggered == []
+
+    result = await automations_service.process_event_ticket_simulation_by_id(13, ticket_ids=[20], limit=50)
+    assert result["matched"] == 1
+    assert result["succeeded"] == 1
+    assert triggered[0][0] == "test-module"
+    assert triggered[0][1]["context"]["ticket"]["id"] == 20
