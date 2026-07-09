@@ -96,6 +96,8 @@ def embed_text(text: str) -> list[float]:
     vector_size = embedding_dimensions()
     vector = [0.0] * vector_size
     tokens = tokenise(text)
+    # range(len(tokens) - 1) is empty for 0 or 1 tokens, so no bigrams are added in
+    # those edge cases and the loop below processes only the unigram tokens.
     bigrams = [f"{tokens[i]}\x00{tokens[i + 1]}" for i in range(len(tokens) - 1)]
     for token in tokens + bigrams:
         digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()

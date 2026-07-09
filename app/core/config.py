@@ -259,6 +259,11 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("RAG_BM25_WEIGHT", "BM25_WEIGHT"),
         ge=0.0,
         le=1.0,
+        description=(
+            "Weight applied to BM25 lexical scores. Together with "
+            "rag_vector_weight and rag_metadata_weight these three additive "
+            "components form the final hybrid score and should sum to 1.0."
+        ),
     )
     rag_metadata_weight: float = Field(
         default=0.10, validation_alias="RAG_METADATA_WEIGHT", ge=0.0, le=1.0

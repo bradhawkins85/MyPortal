@@ -123,6 +123,7 @@ async def list_active_chunks(
     if source_types:
         where.append("d.source_type IN (" + ",".join("?" for _ in source_types) + ")")
         params.extend(source_types)
+    params.append(limit)
     return await db.fetch_all(
         f"""
         SELECT c.id AS chunk_id, c.chunk_index, c.chunk_text, c.embedding_json,
@@ -134,7 +135,7 @@ async def list_active_chunks(
         ORDER BY d.indexed_at DESC, c.id DESC
         LIMIT ?
         """,
-        tuple(params) + (limit,),
+        tuple(params),
     )
 
 
