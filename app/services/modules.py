@@ -987,6 +987,14 @@ _ALWAYS_ON_TICKET_ACTION_MODULES: tuple[dict[str, Any], ...] = (
         "settings": {},
         "enabled": True,
     },
+    {
+        "slug": "smart-attachment-removal",
+        "name": "Smart Attachment Removal",
+        "description": "Remove duplicate ticket attachments by comparing file hashes and deleting redundant copies from storage.",
+        "icon": "🧹",
+        "settings": {},
+        "enabled": True,
+    },
 )
 _ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS = {
     module["slug"] for module in _ALWAYS_ON_TICKET_ACTION_MODULES
@@ -2230,6 +2238,27 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             {"name": "author_id", "label": "Author ID", "type": "string"},
         ],
     },
+    "smart-attachment-removal": {
+        "fields": [
+            {
+                "name": "ticket_id",
+                "label": "Ticket ID",
+                "type": "string",
+                "placeholder": "{{ticket.id}}",
+            },
+            {
+                "name": "hash_algorithm",
+                "label": "Hash algorithm",
+                "type": "string",
+                "enum": ["sha256", "md5"],
+            },
+            {
+                "name": "dry_run",
+                "label": "Dry run",
+                "type": "boolean",
+            },
+        ],
+    },
     "whisperx": {
         "fields": [
             {"name": "ticket_id", "label": "Ticket ID", "type": "string"},
@@ -2450,6 +2479,7 @@ async def trigger_module(
         "update-ticket-description": _invoke_update_ticket_description,
         "reprocess-ai": _invoke_reprocess_ai,
         "add-ticket-reply": _invoke_add_ticket_reply,
+        "smart-attachment-removal": _invoke_smart_attachment_removal,
         "whisperx": _invoke_whisperx,
         "password-pusher": _invoke_password_pusher,
         "hudu": _validate_hudu,
@@ -5688,6 +5718,138 @@ async def _invoke_add_ticket_reply(
             "is_internal": is_internal,
         },
     )
+
+
+def _resolve_ticket_id_from_payload(payload: Mapping[str, Any]) -> int:
+    """Resolve a ticket id from an action payload or automation context."""
+
+    raw_context = payload.get("context")
+    context = raw_context if isinstance(raw_context, Mapping) else {}
+    ticket_id = payload.get("ticket_id")
+    if ticket_id is None:
+        ticket_id = context.get("ticket_id")
+    if ticket_id is None:
+        ticket_context = context.get("ticket")
+        if isinstance(ticket_context, Mapping):
+            ticket_id = ticket_context.get("id")
+    if ticket_id is None:
+        raise ValueError("ticket_id is required")
+    try:
+        ticket_id_int = int(ticket_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("ticket_id must be a valid integer") from exc
+    if ticket_id_int <= 0:
+        raise ValueError("ticket_id must be a positive integer")
+    return ticket_id_int
+
+
+async def _invoke_smart_attachment_removal(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Remove duplicate ticket attachments by comparing content hashes."""
+
+    from app.repositories import tickets as tickets_repo
+    from app.repositories import ticket_attachments as attachments_repo
+    from app.services import ticket_attachments as attachments_service
+
+    ticket_id = _resolve_ticket_id_from_payload(payload)
+    existing = await tickets_repo.get_ticket(ticket_id)
+    if not existing:
+        raise ValueError(f"Ticket {ticket_id} not found")
+
+    algorithm = str(payload.get("hash_algorithm") or "sha256").strip().lower()
+    if algorithm not in {"sha256", "md5"}:
+        raise ValueError("hash_algorithm must be one of: sha256, md5")
+    dry_run = bool(payload.get("dry_run", False))
+
+    attachments = await attachments_repo.list_attachments(ticket_id)
+    seen: dict[str, dict[str, Any]] = {}
+    duplicates: list[dict[str, Any]] = []
+    missing_files: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+
+    for attachment in attachments:
+        filename = str(attachment.get("filename") or "").strip()
+        attachment_id = attachment.get("id")
+        if not filename or attachment_id is None:
+            errors.append(
+                {
+                    "attachment_id": attachment_id,
+                    "error": "Attachment record has no stored filename",
+                }
+            )
+            continue
+        file_path = attachments_service.get_attachment_file_path(filename)
+        if not file_path.exists() or not file_path.is_file():
+            missing_files.append(
+                {
+                    "attachment_id": attachment_id,
+                    "filename": filename,
+                    "original_filename": attachment.get("original_filename"),
+                }
+            )
+            continue
+        digest = hashlib.new(algorithm)
+        try:
+            with open(file_path, "rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        except OSError as exc:
+            errors.append(
+                {
+                    "attachment_id": attachment_id,
+                    "filename": filename,
+                    "error": str(exc),
+                }
+            )
+            continue
+        file_hash = digest.hexdigest()
+        original = seen.get(file_hash)
+        if original is None:
+            seen[file_hash] = attachment
+            continue
+        duplicate_entry = {
+            "attachment_id": attachment_id,
+            "original_attachment_id": original.get("id"),
+            "filename": filename,
+            "original_filename": attachment.get("original_filename"),
+            "hash": file_hash,
+        }
+        duplicates.append(duplicate_entry)
+        if dry_run:
+            continue
+        try:
+            await attachments_service.delete_attachment_file(attachment)
+        except Exception as exc:  # pragma: no cover - defensive per-file guard
+            duplicate_entry["deleted"] = False
+            duplicate_entry["error"] = str(exc)
+            errors.append(
+                {
+                    "attachment_id": attachment_id,
+                    "filename": filename,
+                    "error": str(exc),
+                }
+            )
+        else:
+            duplicate_entry["deleted"] = True
+
+    removed = sum(1 for entry in duplicates if entry.get("deleted"))
+    return {
+        "status": "succeeded" if not errors else "partial",
+        "ticket_id": ticket_id,
+        "hash_algorithm": algorithm,
+        "dry_run": dry_run,
+        "scanned": len(attachments),
+        "unique": len(seen),
+        "duplicates_found": len(duplicates),
+        "removed": 0 if dry_run else removed,
+        "missing_files": missing_files,
+        "duplicates": duplicates,
+        "errors": errors,
+    }
 
 
 # Audio MIME types accepted for WhisperX transcription

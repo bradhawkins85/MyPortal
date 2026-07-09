@@ -164,6 +164,102 @@ async def test_invoke_update_ticket_missing_ticket_id():
 
 
 @pytest.mark.asyncio
+async def test_smart_attachment_removal_deletes_duplicate_files(monkeypatch, tmp_path):
+    """Duplicate attachment files are removed from storage and the attachment list."""
+    from app.repositories import tickets as tickets_repo
+    from app.repositories import ticket_attachments as attachments_repo
+    from app.services import ticket_attachments as attachments_service
+
+    attachments = [
+        {
+            "id": 1,
+            "ticket_id": 10,
+            "filename": "first.png",
+            "original_filename": "logo.png",
+        },
+        {
+            "id": 2,
+            "ticket_id": 10,
+            "filename": "duplicate.png",
+            "original_filename": "logo-copy.png",
+        },
+        {
+            "id": 3,
+            "ticket_id": 10,
+            "filename": "unique.png",
+            "original_filename": "diagram.png",
+        },
+    ]
+    (tmp_path / "first.png").write_bytes(b"same-image-bytes")
+    (tmp_path / "duplicate.png").write_bytes(b"same-image-bytes")
+    (tmp_path / "unique.png").write_bytes(b"different-image-bytes")
+
+    monkeypatch.setattr(tickets_repo, "get_ticket", AsyncMock(return_value={"id": 10}))
+    monkeypatch.setattr(
+        attachments_repo, "list_attachments", AsyncMock(return_value=attachments)
+    )
+    monkeypatch.setattr(
+        attachments_service,
+        "get_attachment_file_path",
+        lambda filename: tmp_path / filename,
+    )
+    delete_mock = AsyncMock()
+    monkeypatch.setattr(attachments_service, "delete_attachment_file", delete_mock)
+
+    result = await modules._invoke_smart_attachment_removal(
+        {},
+        {"context": {"ticket": {"id": 10}}},
+        event_future=None,
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["scanned"] == 3
+    assert result["unique"] == 2
+    assert result["duplicates_found"] == 1
+    assert result["removed"] == 1
+    delete_mock.assert_awaited_once_with(attachments[1])
+
+
+@pytest.mark.asyncio
+async def test_smart_attachment_removal_dry_run_preserves_duplicates(monkeypatch, tmp_path):
+    """Dry runs report duplicates without deleting attachment files."""
+    from app.repositories import tickets as tickets_repo
+    from app.repositories import ticket_attachments as attachments_repo
+    from app.services import ticket_attachments as attachments_service
+
+    attachments = [
+        {"id": 1, "ticket_id": 10, "filename": "a.png", "original_filename": "a.png"},
+        {"id": 2, "ticket_id": 10, "filename": "b.png", "original_filename": "b.png"},
+    ]
+    (tmp_path / "a.png").write_bytes(b"signature")
+    (tmp_path / "b.png").write_bytes(b"signature")
+
+    monkeypatch.setattr(tickets_repo, "get_ticket", AsyncMock(return_value={"id": 10}))
+    monkeypatch.setattr(
+        attachments_repo, "list_attachments", AsyncMock(return_value=attachments)
+    )
+    monkeypatch.setattr(
+        attachments_service,
+        "get_attachment_file_path",
+        lambda filename: tmp_path / filename,
+    )
+    delete_mock = AsyncMock()
+    monkeypatch.setattr(attachments_service, "delete_attachment_file", delete_mock)
+
+    result = await modules._invoke_smart_attachment_removal(
+        {},
+        {"ticket_id": 10, "hash_algorithm": "md5", "dry_run": True},
+        event_future=None,
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["hash_algorithm"] == "md5"
+    assert result["duplicates_found"] == 1
+    assert result["removed"] == 0
+    delete_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_invoke_update_ticket_description(monkeypatch, mock_webhook_monitor, mock_record_success):
     """Test that update-ticket-description module changes description."""
     from app.services import tickets as tickets_service
