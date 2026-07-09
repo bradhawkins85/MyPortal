@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
 
-{% block header_title %}Automation preview{% endblock %}
+{% block header_title %}{{ 'Automation simulation' if is_simulation else 'Automation preview' }}{% endblock %}
 
 {% block header_actions %}
   {{ page_header_actions([
@@ -15,14 +15,18 @@
     <section class="management__content">
       <header class="management__header">
         <div>
-          <p class="eyebrow">Scheduled ticket automation</p>
+          <p class="eyebrow">{{ 'Event automation simulation' if is_simulation else 'Scheduled ticket automation' }}</p>
           <h1 class="page-title">{{ automation.name }}</h1>
-          <p class="page-subtitle">Preview the tickets that will be actioned the next time this automation runs. No actions are executed from this page.</p>
+          {% if is_simulation %}
+            <p class="page-subtitle">Simulate this event automation against recent tickets using its filters. Review the matches, then process the automation against the selected tickets only.</p>
+          {% else %}
+            <p class="page-subtitle">Preview the tickets that will be actioned the next time this automation runs. No actions are executed from this page.</p>
+          {% endif %}
         </div>
         <form method="get" class="management__filters">
           <label class="form-label" for="preview-limit">Scan limit</label>
           <input id="preview-limit" name="limit" type="number" min="1" max="5000" class="form-input" value="{{ limit }}" />
-          <button type="submit" class="button">Refresh preview</button>
+          <button type="submit" class="button">{{ 'Refresh simulation' if is_simulation else 'Refresh preview' }}</button>
         </form>
       </header>
 
@@ -37,8 +41,8 @@
             <p class="stat-card__value">{{ preview.matched }}</p>
           </article>
           <article class="stat-card">
-            <h3 class="stat-card__title">Next run</h3>
-            <p class="stat-card__value stat-card__value--small">{{ automation.next_run_at.astimezone().strftime('%Y-%m-%d %H:%M') if automation.next_run_at else '—' }}</p>
+            <h3 class="stat-card__title">{{ 'Trigger event' if is_simulation else 'Next run' }}</h3>
+            <p class="stat-card__value stat-card__value--small">{{ automation.trigger_event if is_simulation else (automation.next_run_at.astimezone().strftime('%Y-%m-%d %H:%M') if automation.next_run_at else '—') }}</p>
           </article>
           <article class="stat-card">
             <h3 class="stat-card__title">Checked</h3>
@@ -51,6 +55,17 @@
             <input type="search" class="form-input" placeholder="Filter preview tickets" aria-label="Filter preview tickets" data-table-filter="automation-preview-table" />
           </div>
         </div>
+
+        {% if is_simulation and preview.tickets %}
+          <form method="post" action="/admin/automations/{{ automation.id }}/simulate/process" class="management__toolbar" onsubmit="return confirm('Process this automation against the matched tickets?');">
+            {% include "partials/csrf.html" %}
+            <input type="hidden" name="limit" value="{{ limit }}" />
+            {% for ticket in preview.tickets %}
+              <input type="hidden" name="ticket_ids" value="{{ ticket.id }}" />
+            {% endfor %}
+            <button type="submit" class="button button--primary">Process automation against {{ preview.matched }} matched ticket{{ '' if preview.matched == 1 else 's' }}</button>
+          </form>
+        {% endif %}
 
         <div class="table-wrapper">
           <table class="table" id="automation-preview-table" data-table data-table-id="automation-preview">

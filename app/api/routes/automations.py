@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 
 from app.api.dependencies.auth import require_super_admin
 from app.repositories import automations as automation_repo
@@ -155,6 +155,41 @@ async def preview_scheduled_ticket_automation(
         status_code = status.HTTP_400_BAD_REQUEST if "Only scheduled" in message else status.HTTP_404_NOT_FOUND
         raise HTTPException(status_code=status_code, detail=message) from exc
     return AutomationTicketPreviewResponse(**result)
+
+
+@router.get("/{automation_id}/simulate", response_model=AutomationTicketPreviewResponse)
+async def simulate_event_ticket_automation(
+    automation_id: int,
+    limit: int = Query(default=1000, ge=1, le=5000),
+    current_user: dict = Depends(require_super_admin),
+) -> AutomationTicketPreviewResponse:
+    try:
+        result = await automation_service.simulate_event_ticket_automation_by_id(automation_id, limit=limit)
+    except ValueError as exc:
+        message = str(exc)
+        status_code = status.HTTP_400_BAD_REQUEST if "Only" in message else status.HTTP_404_NOT_FOUND
+        raise HTTPException(status_code=status_code, detail=message) from exc
+    return AutomationTicketPreviewResponse(**result)
+
+
+@router.post("/{automation_id}/simulate/process", response_model=dict[str, object])
+async def process_event_ticket_simulation(
+    automation_id: int,
+    ticket_ids: list[int] = Body(default_factory=list),
+    limit: int = Query(default=1000, ge=1, le=5000),
+    current_user: dict = Depends(require_super_admin),
+) -> dict[str, object]:
+    try:
+        result = await automation_service.process_event_ticket_simulation_by_id(
+            automation_id,
+            ticket_ids=ticket_ids,
+            limit=limit,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        status_code = status.HTTP_400_BAD_REQUEST if "Only" in message else status.HTTP_404_NOT_FOUND
+        raise HTTPException(status_code=status_code, detail=message) from exc
+    return result
 
 
 @router.get("/{automation_id}/runs", response_model=list[AutomationRunResponse])

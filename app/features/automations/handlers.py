@@ -595,6 +595,58 @@ async def admin_preview_automation(automation_id: int, request: Request, limit: 
     return await _main()._render_template("admin/automations_preview.html", request, current_user, extra=extra)
 
 
+
+
+async def admin_simulate_automation(automation_id: int, request: Request, limit: int = Query(default=1000, ge=1, le=5000)):
+    from app.repositories import automations as automation_repo
+    from app.services import automations as automations_service
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    automation = await automation_repo.get_automation(automation_id)
+    if not automation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
+    try:
+        preview = await automations_service.simulate_event_ticket_automation(automation, limit=limit)
+    except ValueError as exc:
+        return flash_redirect("/admin/automations", str(exc), "error")
+    extra = {
+        "title": f"Simulate automation #{automation_id}",
+        "automation": automation,
+        "preview": preview,
+        "limit": limit,
+        "is_simulation": True,
+    }
+    return await _main()._render_template("admin/automations_preview.html", request, current_user, extra=extra)
+
+
+async def admin_process_simulated_automation(automation_id: int, request: Request):
+    from app.services import automations as automations_service
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    ticket_ids = [int(value) for value in form.getlist("ticket_ids") if str(value).isdigit()]
+    try:
+        limit = int(form.get("limit") or 1000)
+    except (TypeError, ValueError):
+        limit = 1000
+    try:
+        result = await automations_service.process_event_ticket_simulation_by_id(
+            automation_id,
+            ticket_ids=ticket_ids,
+            limit=limit,
+        )
+    except ValueError as exc:
+        return flash_redirect("/admin/automations", str(exc), "error")
+    message = (
+        f"Simulated automation {automation_id} processed {result.get('matched', 0)} ticket(s): "
+        f"{result.get('succeeded', 0)} succeeded, {result.get('failed', 0)} failed."
+    )
+    return flash_redirect(f"/admin/automations/{automation_id}/simulate", message, "success")
+
 async def admin_execute_automation(automation_id: int, request: Request):
     from app.services import automations as automations_service
 
