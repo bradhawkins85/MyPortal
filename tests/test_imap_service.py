@@ -1006,3 +1006,57 @@ async def test_sync_account_marks_already_imported_unread_message_as_read(monkey
     assert result["processed"] == 0
     assert ("store", (b"42", "+FLAGS", "(\\Seen)")) in mailbox.commands
     assert not any(command == "fetch" for command, _args in mailbox.commands)
+
+
+async def test_resolve_existing_reply_author_id_matches_ticket_requester(monkeypatch):
+    async def fake_get_user_by_id(user_id: int):
+        assert user_id == 42
+        return {"id": 42, "email": "Requester@Example.com"}
+
+    async def fake_list_watchers(ticket_id: int):
+        raise AssertionError("watchers should not be queried after requester match")
+
+    monkeypatch.setattr(imap.users_repo, "get_user_by_id", fake_get_user_by_id)
+    monkeypatch.setattr(imap.tickets_repo, "list_watchers", fake_list_watchers)
+
+    author_id = await imap._resolve_existing_reply_author_id(
+        {"id": 10, "requester_id": 42},
+        "requester@example.com",
+        None,
+    )
+
+    assert author_id == 42
+
+
+async def test_resolve_existing_reply_author_id_matches_ticket_watcher(monkeypatch):
+    async def fake_get_user_by_id(user_id: int):
+        if user_id == 42:
+            return {"id": 42, "email": "requester@example.com"}
+        if user_id == 77:
+            return {"id": 77, "email": "Watcher@Example.com"}
+        raise AssertionError(f"unexpected user id {user_id}")
+
+    async def fake_list_watchers(ticket_id: int):
+        assert ticket_id == 10
+        return [{"ticket_id": 10, "user_id": 77, "email": None}]
+
+    monkeypatch.setattr(imap.users_repo, "get_user_by_id", fake_get_user_by_id)
+    monkeypatch.setattr(imap.tickets_repo, "list_watchers", fake_list_watchers)
+
+    author_id = await imap._resolve_existing_reply_author_id(
+        {"id": 10, "requester_id": 42},
+        "watcher@example.com",
+        None,
+    )
+
+    assert author_id == 77
+
+
+async def test_resolve_existing_reply_author_id_preserves_resolved_requester_id():
+    author_id = await imap._resolve_existing_reply_author_id(
+        {"id": 10, "requester_id": 42},
+        "someone@example.com",
+        99,
+    )
+
+    assert author_id == 99

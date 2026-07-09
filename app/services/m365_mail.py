@@ -30,6 +30,7 @@ from app.services.imap import (
     _extract_email_addresses,
     _extract_message_ids,
     _find_existing_ticket_for_reply,
+    _resolve_existing_reply_author_id,
     _int_or_none,
     _is_any_email_address_known,
     _normalise_bool,
@@ -1471,8 +1472,10 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         sanitized = sanitize_rich_text(conversation_source)
                         if sanitized.has_rich_content:
                             reply_created_at = received_at or datetime.now(timezone.utc)
-                            reply_author_id = (
-                                requester_id if requester_id is not None else None
+                            reply_author_id = await _resolve_existing_reply_author_id(
+                                ticket,
+                                from_email_addr,
+                                requester_id,
                             )
                             try:
                                 await tickets_repo.create_reply(
@@ -1508,12 +1511,15 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             if reply_added:
                                 reply_outcome = "reply_added"
                                 try:
-                                    actor_info: dict[str, Any] | None = None
+                                    actor_info: dict[str, Any] = {}
                                     if reply_author_id is not None:
-                                        actor_info = {"id": reply_author_id}
+                                        actor_info["id"] = reply_author_id
+                                    if from_email_addr:
+                                        actor_info["email"] = from_email_addr
+                                        actor_info["display_name"] = from_email_addr
                                     await tickets_service.emit_ticket_updated_event(
                                         ticket_id,
-                                        actor=actor_info,
+                                        actor=actor_info or None,
                                     )
                                 except (
                                     Exception
