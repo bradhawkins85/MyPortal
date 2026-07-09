@@ -7887,6 +7887,19 @@ def _format_attachment_uploaded_iso(uploaded_at: datetime | None) -> str | None:
     return uploaded_dt.isoformat()
 
 
+def _format_user_label(user_record: Mapping[str, Any] | None) -> str:
+    """Build a safe display label for a user or staff-like record."""
+    if not isinstance(user_record, Mapping):
+        return "System"
+    first = str(user_record.get("first_name") or "").strip()
+    last = str(user_record.get("last_name") or "").strip()
+    name_parts = [part for part in (first, last) if part]
+    if name_parts:
+        return " ".join(name_parts)
+    email = str(user_record.get("email") or "").strip()
+    return email or "System"
+
+
 async def _render_portal_ticket_detail(
     request: Request,
     user: dict[str, Any],
