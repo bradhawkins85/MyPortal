@@ -262,15 +262,35 @@
         if (badgeEl) badgeEl.textContent = row.querySelector('[data-node-type]').value;
       }
 
+      function getRowLevel(row) {
+        return Math.max(0, Math.min(MAX_LEVEL, Number(row.querySelector('[data-node-level]').value) || 0));
+      }
+
+      function updateRowIndent(row) {
+        const level = getRowLevel(row);
+        row.dataset.nodeLevel = String(level);
+        row.style.marginInlineStart = level ? `calc(${level} * 1.5rem)` : '0';
+        row.style.borderInlineStart = level ? '3px solid var(--color-primary, #2563eb)' : '';
+        row.style.width = level ? `calc(100% - (${level} * 1.5rem))` : '100%';
+        const levelBadge = row.querySelector('[data-node-level-badge]');
+        if (levelBadge) levelBadge.textContent = `Level ${level}`;
+      }
+
+      function updateAllRowIndents() {
+        Array.from(listEl.children).forEach(updateRowIndent);
+      }
+
       function createRow(node = {}, level = 0, expanded = false) {
         const rowId = `menu-node-${rowCounter++}`;
         const row = document.createElement('div');
         row.className = 'card card--panel';
         row.style.padding = '0.75rem';
+        row.style.transition = 'margin-inline-start 0.16s ease, width 0.16s ease';
         row.innerHTML = `
           <div data-node-header style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; user-select:none;">
             <button type="button" class="button button--ghost" data-collapse-toggle aria-expanded="${expanded}" aria-label="${expanded ? 'Collapse node' : 'Expand node'}" style="padding:0.25rem 0.5rem; min-width:2rem; flex-shrink:0;">${expanded ? '▼' : '▶'}</button>
             <span data-node-summary style="font-weight:500; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+            <span data-node-level-badge style="font-size:0.75em; opacity:0.65; flex-shrink:0;"></span>
             <span data-node-type-badge style="font-size:0.75em; opacity:0.6; flex-shrink:0;"></span>
           </div>
           <div data-node-body ${expanded ? '' : 'hidden'}>
@@ -336,6 +356,7 @@
             <div class="form-actions" style="justify-content:flex-start; gap:0.5rem;">
               <button type="button" class="button button--ghost" data-action-up aria-label="Move this node up">Move up</button>
               <button type="button" class="button button--ghost" data-action-down aria-label="Move this node down">Move down</button>
+              <button type="button" class="button button--ghost" data-action-clone aria-label="Clone this node">Clone</button>
               <button type="button" class="button button--danger" data-action-remove aria-label="Remove this node">Remove</button>
             </div>
           </div>
@@ -385,6 +406,7 @@
         });
 
         updateSummary(row);
+        updateRowIndent(row);
 
         const toggleBtn = row.querySelector('[data-collapse-toggle]');
         const body = row.querySelector('[data-node-body]');
@@ -407,11 +429,13 @@
         row.addEventListener('input', () => {
           setFieldVisibility(row);
           updateSummary(row);
+          updateRowIndent(row);
           scheduleSyncJsonFromRows();
         });
         row.addEventListener('change', () => {
           setFieldVisibility(row);
           updateSummary(row);
+          updateRowIndent(row);
           scheduleSyncJsonFromRows();
         });
         row.querySelector('[data-action-remove]').addEventListener('click', (e) => {
@@ -431,6 +455,14 @@
           e.stopPropagation();
           const next = row.nextElementSibling;
           if (next) listEl.insertBefore(next, row);
+          updateMoveButtons();
+          syncJsonFromRows();
+        });
+        row.querySelector('[data-action-clone]').addEventListener('click', (e) => {
+          e.stopPropagation();
+          const cloneData = readRow(row);
+          const clone = createRow(cloneData, cloneData.level, true);
+          row.insertAdjacentElement('afterend', clone);
           updateMoveButtons();
           syncJsonFromRows();
         });
@@ -472,6 +504,7 @@
           if (upBtn) upBtn.disabled = index === 0;
           if (downBtn) downBtn.disabled = index === rows.length - 1;
         });
+        updateAllRowIndents();
       }
 
       function appendDefaultRow() {
@@ -479,22 +512,24 @@
         updateMoveButtons();
       }
 
+      function readRow(row) {
+        const colorEl = row.querySelector('[data-node-color]');
+        return {
+          level: getRowLevel(row),
+          type: row.querySelector('[data-node-type]').value,
+          label: row.querySelector('[data-node-label]').value.trim(),
+          url: row.querySelector('[data-node-url]').value.trim(),
+          name: row.querySelector('[data-node-name]').value.trim(),
+          text: row.querySelector('[data-node-text]').value.trim(),
+          color: (colorEl && colorEl.dataset.active === '1') ? colorEl.value.trim() : '',
+          script_id: Number(row.querySelector('[data-node-script-id]').value) || 0,
+          visible_company_ids: getSelectedCompanyIDs(row.querySelector('[data-node-visible-company-ids]')),
+          hidden_company_ids: getSelectedCompanyIDs(row.querySelector('[data-node-hidden-company-ids]'))
+        };
+      }
+
       function readRows() {
-        return Array.from(listEl.children).map((row) => {
-          const colorEl = row.querySelector('[data-node-color]');
-          return {
-            level: Math.max(0, Math.min(MAX_LEVEL, Number(row.querySelector('[data-node-level]').value) || 0)),
-            type: row.querySelector('[data-node-type]').value,
-            label: row.querySelector('[data-node-label]').value.trim(),
-            url: row.querySelector('[data-node-url]').value.trim(),
-            name: row.querySelector('[data-node-name]').value.trim(),
-            text: row.querySelector('[data-node-text]').value.trim(),
-            color: (colorEl && colorEl.dataset.active === '1') ? colorEl.value.trim() : '',
-            script_id: Number(row.querySelector('[data-node-script-id]').value) || 0,
-            visible_company_ids: getSelectedCompanyIDs(row.querySelector('[data-node-visible-company-ids]')),
-            hidden_company_ids: getSelectedCompanyIDs(row.querySelector('[data-node-hidden-company-ids]'))
-          };
-        });
+        return Array.from(listEl.children).map(readRow);
       }
 
       function buildNodesFromRows(rows) {
