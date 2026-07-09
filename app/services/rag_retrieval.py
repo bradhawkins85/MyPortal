@@ -17,103 +17,14 @@ from app.services.rag_index import (
     embed_text,
     embedding_model,
     normalise_text,
+    tokenise,
 )
 from app.services.rag_permissions import can_access_candidate
 
-_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_.:#/@+-]{1,}", re.IGNORECASE)
 _EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 _ID_RE = re.compile(r"(?:#\d{3,}|\b\d{4,}\b|\b[A-Z]{2,}\d{2,}\b)", re.IGNORECASE)
 _HOST_RE = re.compile(r"\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b", re.IGNORECASE)
 _NAME_RE = re.compile(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b")
-_STOP_WORDS = {
-    "about",
-    "above",
-    "after",
-    "again",
-    "against",
-    "all",
-    "also",
-    "and",
-    "any",
-    "are",
-    "because",
-    "been",
-    "before",
-    "being",
-    "below",
-    "between",
-    "both",
-    "but",
-    "can",
-    "created",
-    "did",
-    "does",
-    "doing",
-    "don",
-    "down",
-    "during",
-    "each",
-    "few",
-    "for",
-    "from",
-    "further",
-    "had",
-    "has",
-    "have",
-    "having",
-    "here",
-    "how",
-    "into",
-    "its",
-    "just",
-    "more",
-    "not",
-    "now",
-    "off",
-    "once",
-    "only",
-    "other",
-    "our",
-    "out",
-    "over",
-    "own",
-    "same",
-    "she",
-    "should",
-    "some",
-    "such",
-    "than",
-    "that",
-    "the",
-    "their",
-    "them",
-    "then",
-    "there",
-    "these",
-    "they",
-    "think",
-    "this",
-    "those",
-    "through",
-    "too",
-    "under",
-    "until",
-    "usual",
-    "very",
-    "was",
-    "were",
-    "what",
-    "when",
-    "where",
-    "which",
-    "while",
-    "who",
-    "why",
-    "will",
-    "with",
-    "you",
-    "your",
-}
 _QUERY_EXPANSIONS = {
     "cmos": (
         "cmos battery",
@@ -189,11 +100,7 @@ def _loads(value: Any, fallback: Any) -> Any:
 
 
 def _tokens(text: str) -> list[str]:
-    return [
-        token.casefold().strip("#")
-        for token in _TOKEN_RE.findall(normalise_text(text))
-        if len(token.strip("#")) >= 2 and token.casefold() not in _STOP_WORDS
-    ]
+    return tokenise(text)
 
 
 def _extract_entities(query: str) -> dict[str, list[str]]:
@@ -472,9 +379,12 @@ async def retrieve_candidates(
     ) or await company_access.list_accessible_companies(user)
     query_embedding = embed_text(profile.expanded)
     rows: list[Mapping[str, Any]] = []
+    active_chunk_limit = int(settings.rag_active_chunk_limit)
     for source_type in requested_source_types:
         source_rows = await rag_repo.list_active_chunks(
-            embedding_model=embedding_model(), source_types=[source_type]
+            embedding_model=embedding_model(),
+            source_types=[source_type],
+            limit=active_chunk_limit,
         )
         rows.extend(source_rows)
     metadata_by_chunk = {

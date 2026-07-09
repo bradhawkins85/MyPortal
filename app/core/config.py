@@ -212,7 +212,7 @@ class Settings(BaseSettings):
     )
     disable_caching: bool = Field(default=True, validation_alias="DISABLE_CACHING")
     rag_embedding_model: str = Field(
-        default="myportal-hash-embedding-v1",
+        default="myportal-hash-embedding-v2",
         validation_alias="RAG_EMBEDDING_MODEL",
         description=(
             "Embedding model/version identifier stored with RAG chunks. Change this "
@@ -232,6 +232,16 @@ class Settings(BaseSettings):
     rag_candidate_limit: int = Field(
         default=8, validation_alias="RAG_CANDIDATE_LIMIT", ge=1, le=50
     )
+    rag_active_chunk_limit: int = Field(
+        default=10000,
+        validation_alias="RAG_ACTIVE_CHUNK_LIMIT",
+        ge=100,
+        le=100000,
+        description=(
+            "Maximum number of active chunks fetched per source type during retrieval. "
+            "Increase for large corpora to avoid excluding older but relevant documents."
+        ),
+    )
     rag_min_score: float = Field(
         default=0.35,
         validation_alias=AliasChoices("RAG_MIN_SCORE", "MIN_SIMILARITY"),
@@ -239,13 +249,13 @@ class Settings(BaseSettings):
         le=1.0,
     )
     rag_vector_weight: float = Field(
-        default=0.55,
+        default=0.45,
         validation_alias=AliasChoices("RAG_VECTOR_WEIGHT", "VECTOR_WEIGHT"),
         ge=0.0,
         le=1.0,
     )
     rag_bm25_weight: float = Field(
-        default=0.35,
+        default=0.45,
         validation_alias=AliasChoices("RAG_BM25_WEIGHT", "BM25_WEIGHT"),
         ge=0.0,
         le=1.0,

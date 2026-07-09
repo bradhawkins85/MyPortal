@@ -12,6 +12,22 @@ from app.repositories import rag_index as rag_repo
 from app.services import rag_relationships
 from app.services.sanitization import sanitize_rich_text
 
+# Shared token regex and stop-word set used by both embed_text and BM25 retrieval so
+# that indexed vectors and query scoring operate on an identical vocabulary.
+_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_.:#/@+-]{1,}", re.IGNORECASE)
+_STOP_WORDS = frozenset({
+    "about", "above", "after", "again", "against", "all", "also", "and",
+    "any", "are", "because", "been", "before", "being", "below", "between",
+    "both", "but", "can", "created", "did", "does", "doing", "don", "down",
+    "during", "each", "few", "for", "from", "further", "had", "has", "have",
+    "having", "here", "how", "into", "its", "just", "more", "not", "now",
+    "off", "once", "only", "other", "our", "out", "over", "own", "same",
+    "she", "should", "some", "such", "than", "that", "the", "their", "them",
+    "then", "there", "these", "they", "think", "this", "those", "through",
+    "too", "under", "until", "usual", "very", "was", "were", "what", "when",
+    "where", "which", "while", "who", "why", "will", "with", "you", "your",
+})
+
 
 def embedding_model() -> str:
     return get_settings().rag_embedding_model
@@ -51,15 +67,37 @@ def normalise_text(value: Any) -> str:
     return re.sub(r"\s+", " ", sanitized.text_content).strip()
 
 
+def tokenise(text: str) -> list[str]:
+    """Return normalised, stop-word-filtered tokens for both BM25 and embedding.
+
+    Uses the shared ``_TOKEN_RE`` and ``_STOP_WORDS`` so that vectors and BM25
+    scores are computed from the exact same vocabulary.
+    """
+    return [
+        t.casefold().strip("#")
+        for t in _TOKEN_RE.findall(normalise_text(text))
+        if len(t.strip("#")) >= 2 and t.casefold() not in _STOP_WORDS
+    ]
+
+
 def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def embed_text(text: str) -> list[float]:
+    """Hash-projection embedding with stop-word filtering and bigram augmentation.
+
+    Tokens are extracted using the same regex and stop-word list as BM25 retrieval
+    so that both signals operate on an identical vocabulary.  Bigrams (adjacent
+    token pairs joined by a null byte) are appended before hashing to give the
+    vector phrase-level discrimination (e.g. "password\x00reset" is a distinct
+    feature from "password" and "reset" appearing separately).
+    """
     vector_size = embedding_dimensions()
     vector = [0.0] * vector_size
-    tokens = re.findall(r"[a-z0-9][a-z0-9_.:-]{1,}", normalise_text(text).casefold())
-    for token in tokens:
+    tokens = tokenise(text)
+    bigrams = [f"{tokens[i]}\x00{tokens[i + 1]}" for i in range(len(tokens) - 1)]
+    for token in tokens + bigrams:
         digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
         bucket = int.from_bytes(digest[:4], "big") % vector_size
         sign = 1.0 if digest[4] & 1 else -1.0
