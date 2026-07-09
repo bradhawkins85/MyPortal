@@ -14,6 +14,8 @@ The websocket handler ``/ws/tray/{device_uid}`` is registered in
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import html as _html
 import json
 import secrets
@@ -427,6 +429,7 @@ async def get_ticket_questions(
 async def tray_submit_ticket(
     payload: TrayTicketSubmitRequest,
     request: Request,
+    external_reference: str | None = None,
 ) -> TrayTicketSubmitResponse:
     """Create a support ticket submitted via the tray icon.
 
@@ -535,7 +538,7 @@ async def tray_submit_ticket(
         status=status_value,
         category=None,
         module_slug=None,
-        external_reference=None,
+        external_reference=external_reference,
         trigger_automations=True,
         initial_reply_author_id=requester_id,
         requester_email=normalised_email if requester_id is None else None,
@@ -680,6 +683,16 @@ async def tray_submit_syncro_ticket(
 
 
 _TICKET_TOKEN_TTL_SECONDS = 300
+_TICKET_FORM_SUBMISSION_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _ticket_form_submission_reference(session: dict[str, Any], token: str) -> str:
+    """Return a stable idempotency reference for one tray ticket form token."""
+
+    sid = str(session.get("sid") or "").strip()
+    if not sid:
+        sid = hashlib.sha256(token.encode("utf-8")).hexdigest()[:32]
+    return f"tray-form:{sid}"
 
 
 def _issue_ticket_form_token(device: dict[str, Any], mode: str) -> tuple[str, str]:
@@ -692,6 +705,7 @@ def _issue_ticket_form_token(device: dict[str, Any], mode: str) -> tuple[str, st
             "device_id": int(device["id"]),
             "mode": "syncro" if mode == "syncro" else "myportal",
             "csrf": csrf,
+            "sid": secrets.token_urlsafe(18),
             "exp": exp,
         }
     )
@@ -946,11 +960,28 @@ async def tray_ticket_form_submit(request: Request) -> HTMLResponse:
     class _NoAuthRequest:
         headers: dict[str, str] = {}
 
+    submission_ref = _ticket_form_submission_reference(session, token)
+    lock = _TICKET_FORM_SUBMISSION_LOCKS.setdefault(submission_ref, asyncio.Lock())
+
     try:
-        if str(session.get("mode")) == "syncro":
-            result = await tray_submit_syncro_ticket(payload, _NoAuthRequest())
-        else:
-            result = await tray_submit_ticket(payload, _NoAuthRequest())
+        async with lock:
+            if str(session.get("mode")) == "syncro":
+                result = await tray_submit_syncro_ticket(payload, _NoAuthRequest())
+            else:
+                existing_ticket = await tickets_repo.get_ticket_by_external_reference(
+                    submission_ref
+                )
+                if existing_ticket:
+                    result = TrayTicketSubmitResponse(
+                        ticket_id=int(existing_ticket["id"]),
+                        ticket_number=existing_ticket.get("ticket_number"),
+                    )
+                else:
+                    result = await tray_submit_ticket(
+                        payload,
+                        _NoAuthRequest(),
+                        external_reference=submission_ref,
+                    )
     except HTTPException as exc:
         detail = (
             exc.detail
@@ -969,6 +1000,10 @@ async def tray_ticket_form_submit(request: Request) -> HTMLResponse:
             ),
             status_code=exc.status_code if exc.status_code < 500 else 200,
         )
+    finally:
+        if not lock.locked():
+            _TICKET_FORM_SUBMISSION_LOCKS.pop(submission_ref, None)
+
     ticket_number = result.ticket_number or (
         f"#{result.ticket_id}" if result.ticket_id else ""
     )
