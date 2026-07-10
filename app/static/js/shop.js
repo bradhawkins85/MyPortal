@@ -263,6 +263,10 @@
   }
 
   function buildRecommendationSection(title, items) {
+    if (!items || items.length === 0) {
+      return null;
+    }
+
     const section = document.createElement('section');
     section.className = 'product-details-modal__section product-details-modal__recommendations';
 
@@ -273,13 +277,7 @@
 
     const list = document.createElement('div');
     list.className = 'product-details-modal__recommendation-list';
-    (items || []).forEach((item) => list.appendChild(buildRecommendationCard(item)));
-    if (!items || items.length === 0) {
-      const empty = document.createElement('p');
-      empty.className = 'text-muted';
-      empty.textContent = 'No items configured yet.';
-      list.appendChild(empty);
-    }
+    items.forEach((item) => list.appendChild(buildRecommendationCard(item)));
     section.appendChild(list);
     return section;
   }
@@ -353,11 +351,19 @@
     details.appendChild(descriptionDiv);
     layout.appendChild(details);
 
-    const related = document.createElement('div');
-    related.className = 'product-details-modal__related-grid';
-    related.appendChild(buildRecommendationSection('Cross-sell items', product.cross_sell_products || []));
-    related.appendChild(buildRecommendationSection('Up-sell items', product.upsell_products || []));
-    layout.appendChild(related);
+    const recommendationSections = [
+      buildRecommendationSection('Goes well with this', product.cross_sell_products || []),
+      buildRecommendationSection('Need a little more?', product.upsell_products || []),
+    ].filter(Boolean);
+    if (recommendationSections.length > 0) {
+      const related = document.createElement('div');
+      related.className = 'product-details-modal__related-grid';
+      if (recommendationSections.length === 1) {
+        related.classList.add('product-details-modal__related-grid--single');
+      }
+      recommendationSections.forEach((section) => related.appendChild(section));
+      layout.appendChild(related);
+    }
 
     container.appendChild(layout);
   }
