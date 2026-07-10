@@ -11122,6 +11122,11 @@ a.shop-product-card {
   .shop-product-card--package .shop-product-card__media {
     min-height: 20rem;
   }
+
+  .shop-product-card--package .package-thumb-grid {
+    height: 18rem;
+    max-width: none;
+  }
 }
 
 @media (max-width: 640px) {
