@@ -11113,6 +11113,17 @@ a.shop-product-card {
   width: 4.5rem;
 }
 
+
+@media (min-width: 760px) {
+  .shop-product-card--package {
+    grid-column: span 2;
+  }
+
+  .shop-product-card--package .shop-product-card__media {
+    min-height: 20rem;
+  }
+}
+
 @media (max-width: 640px) {
   .shop-tile {
     grid-template-columns: 5rem 1fr;

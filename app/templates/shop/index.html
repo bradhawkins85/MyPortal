@@ -136,7 +136,7 @@
           </a>
         {% endif %}
         {% for product in products %}
-          <article class="shop-product-card" {% if product.is_package %}data-package-id="{{ product.id }}"{% else %}data-product-id="{{ product.id }}"{% endif %} data-stock="{{ product.stock }}">
+          <article class="shop-product-card{% if product.is_package %} shop-product-card--package{% endif %}" {% if product.is_package %}data-package-id="{{ product.id }}"{% else %}data-product-id="{{ product.id }}"{% endif %} data-stock="{{ product.stock }}">
             <div class="shop-product-card__media">
               {% if product.is_package %}
                 <div class="package-thumb-grid" aria-label="Included products in {{ product.name }}">
