@@ -745,15 +745,17 @@ async def emit_ticket_updated_event(
     *,
     actor_type: str | None = None,
     actor: Mapping[str, Any] | None = None,
+    reply: Mapping[str, Any] | None = None,
     trigger_automations: bool = True,
 ) -> None:
-    """Emit a ``tickets.updated`` automation event with actor metadata."""
+    """Emit a ``tickets.updated`` automation event with actor/reply metadata."""
 
     await _emit_ticket_event(
         "tickets.updated",
         ticket,
         actor_type=actor_type,
         actor=actor,
+        reply=reply,
         trigger_automations=trigger_automations,
     )
 

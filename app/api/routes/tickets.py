@@ -1011,11 +1011,13 @@ async def add_reply(
         ticket_id,
         actor_type="technician" if has_helpdesk_access else "requester",
         actor=current_user or api_key_record,
+        reply=reply,
     )
     await tickets_service.emit_ticket_replied_event(
         ticket_id,
         actor_type="technician" if has_helpdesk_access else "requester",
         actor=current_user or api_key_record,
+        reply=reply,
     )
     updated_ticket = await tickets_repo.get_ticket(ticket_id)
     ticket_payload = updated_ticket or ticket

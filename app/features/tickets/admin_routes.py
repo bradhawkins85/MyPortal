@@ -1631,6 +1631,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             ticket_id,
             actor_type="technician",
             actor=current_user,
+            reply=created_reply,
         )
         await tickets_service.emit_ticket_replied_event(
             ticket_id,

@@ -436,6 +436,7 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
         ticket_id,
         actor_type=actor_type,
         actor=user,
+        reply=created_reply,
     )
     await tickets_service.emit_ticket_replied_event(
         ticket_id,
