@@ -146,6 +146,82 @@ async def test_invoke_trello_add_comment_resolves_company_from_context(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_invoke_trello_add_comment_resolves_company_from_ticket_company_id(
+    monkeypatch,
+):
+    """Test company credentials are loaded when context only has ticket.company_id."""
+    captured_kwargs = {}
+
+    async def fake_add_comment(card_id, text, *, company=None):
+        captured_kwargs["company"] = company
+        return {"id": "xyz"}
+
+    async def fake_get_company_by_id(company_id):
+        assert company_id == 5
+        return {"id": 5, "name": "Acme", "trello_api_key": "key", "trello_token": "tok"}
+
+    monkeypatch.setattr("app.services.trello.add_comment_to_card", fake_add_comment)
+    monkeypatch.setattr(
+        "app.repositories.companies.get_company_by_id", fake_get_company_by_id
+    )
+
+    result = await modules._invoke_trello_add_comment(
+        {},
+        {
+            "card_id": "cardABC",
+            "text": "Comment text",
+            "context": {"ticket": {"id": 1, "company_id": 5}},
+        },
+        event_future=None,
+    )
+
+    assert result["status"] == "succeeded"
+    assert captured_kwargs["company"] == {
+        "id": 5,
+        "name": "Acme",
+        "trello_api_key": "key",
+        "trello_token": "tok",
+    }
+
+
+@pytest.mark.asyncio
+async def test_invoke_trello_add_comment_resolves_company_from_linked_card(
+    monkeypatch,
+):
+    """Test company credentials are loaded from the ticket linked to the card."""
+    captured_kwargs = {}
+
+    async def fake_add_comment(card_id, text, *, company=None):
+        captured_kwargs["company"] = company
+        return {"id": "xyz"}
+
+    async def fake_find_ticket_for_card(card_id):
+        assert card_id == "cardABC"
+        return {"id": 99, "company_id": 7}
+
+    async def fake_get_company_by_id(company_id):
+        assert company_id == 7
+        return {"id": 7, "name": "Globex", "trello_api_key": "key", "trello_token": "tok"}
+
+    monkeypatch.setattr("app.services.trello.add_comment_to_card", fake_add_comment)
+    monkeypatch.setattr(
+        "app.services.trello.find_ticket_for_card", fake_find_ticket_for_card
+    )
+    monkeypatch.setattr(
+        "app.repositories.companies.get_company_by_id", fake_get_company_by_id
+    )
+
+    result = await modules._invoke_trello_add_comment(
+        {},
+        {"card_id": "cardABC", "text": "Comment text"},
+        event_future=None,
+    )
+
+    assert result["status"] == "succeeded"
+    assert captured_kwargs["company"]["id"] == 7
+
+
+@pytest.mark.asyncio
 async def test_trello_is_included_in_trigger_action_modules(monkeypatch):
     """Test that trello appears in list_trigger_action_modules when enabled."""
     from app.repositories import integration_modules as module_repo

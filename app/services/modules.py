@@ -6640,16 +6640,7 @@ async def _invoke_trello_add_comment(
     if not text:
         raise ValueError("text is required for the Trello add-comment action")
 
-    # Resolve the company from the automation context so that per-company
-    # Trello credentials are used when posting the comment.
-    context = payload.get("context")
-    company: dict[str, Any] | None = None
-    if isinstance(context, Mapping):
-        ticket_ctx = context.get("ticket")
-        if isinstance(ticket_ctx, Mapping):
-            company_value = ticket_ctx.get("company")
-            if isinstance(company_value, Mapping):
-                company = dict(company_value)
+    company = await _resolve_trello_company_for_action(payload, card_id)
 
     if event_future and not event_future.done():
         event_future.set_result(None)
@@ -6668,6 +6659,95 @@ async def _invoke_trello_add_comment(
         "card_id": card_id,
         "comment_id": result.get("id"),
     }
+
+
+async def _resolve_trello_company_for_action(
+    payload: Mapping[str, Any],
+    card_id: str,
+) -> dict[str, Any] | None:
+    """Resolve company credentials for a Trello automation action.
+
+    Automation contexts are not guaranteed to include an embedded
+    ``ticket.company`` record. Some flows only provide ``company_id`` on the
+    ticket, while manually-triggered actions may provide only a Trello card
+    reference. Resolve those common shapes before posting so company-scoped
+    Trello credentials are still used.
+    """
+    context = payload.get("context")
+    ticket_ctx: Mapping[str, Any] | None = None
+    if isinstance(context, Mapping):
+        raw_ticket_ctx = context.get("ticket")
+        if isinstance(raw_ticket_ctx, Mapping):
+            ticket_ctx = raw_ticket_ctx
+
+    if ticket_ctx is not None:
+        company_value = ticket_ctx.get("company")
+        if isinstance(company_value, Mapping):
+            return dict(company_value)
+
+        company = await _resolve_company_by_id(ticket_ctx.get("company_id"))
+        if company is not None:
+            return company
+
+    if isinstance(context, Mapping):
+        company = await _resolve_company_by_id(context.get("company_id"))
+        if company is not None:
+            return company
+
+        ticket_id = context.get("ticket_id")
+        if ticket_id is None and ticket_ctx is not None:
+            ticket_id = ticket_ctx.get("id")
+        company = await _resolve_company_from_ticket_id(ticket_id)
+        if company is not None:
+            return company
+
+    # Last resort: use the linked Trello ticket to discover the company. This
+    # covers payloads that render only ``{{ticket.external_reference}}`` into
+    # ``card_id`` without carrying the full ticket context.
+    try:
+        from app.services import trello as trello_service
+
+        ticket = await trello_service.find_ticket_for_card(card_id)
+    except Exception as exc:  # pragma: no cover - defensive lookup fallback
+        logger.debug("Trello company lookup by card failed for {}: {}", card_id, exc)
+        ticket = None
+    if isinstance(ticket, Mapping):
+        return await _resolve_company_by_id(ticket.get("company_id"))
+
+    return None
+
+
+async def _resolve_company_from_ticket_id(ticket_id_value: Any) -> dict[str, Any] | None:
+    try:
+        ticket_id = int(ticket_id_value)
+    except (TypeError, ValueError):
+        return None
+    if ticket_id <= 0:
+        return None
+    try:
+        from app.repositories import tickets as tickets_repo
+
+        ticket = await tickets_repo.get_ticket(ticket_id)
+    except Exception as exc:  # pragma: no cover - defensive lookup fallback
+        logger.debug("Trello company lookup by ticket {} failed: {}", ticket_id, exc)
+        return None
+    if not isinstance(ticket, Mapping):
+        return None
+    return await _resolve_company_by_id(ticket.get("company_id"))
+
+
+async def _resolve_company_by_id(company_id_value: Any) -> dict[str, Any] | None:
+    try:
+        company_id = int(company_id_value)
+    except (TypeError, ValueError):
+        return None
+    if company_id <= 0:
+        return None
+    try:
+        return await company_repo.get_company_by_id(company_id)
+    except Exception as exc:  # pragma: no cover - defensive lookup fallback
+        logger.debug("Trello company lookup by company {} failed: {}", company_id, exc)
+        return None
 
 
 async def _invoke_solidtime_reconcile(
