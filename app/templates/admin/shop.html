@@ -74,6 +74,9 @@
   {%- if page_size -%}
     {%- set ns.params = ns.params + ['pageSize=' ~ page_size] -%}
   {%- endif -%}
+  {%- if search_term -%}
+    {%- set ns.params = ns.params + ['search=' ~ (search_term | urlencode)] -%}
+  {%- endif -%}
   {%- if target_page is not none and target_page > 1 -%}
     {%- set ns.params = ns.params + ['page=' ~ target_page] -%}
   {%- endif -%}
@@ -93,6 +96,9 @@
           class="form-input card__control"
           placeholder="Search products"
           aria-label="Search products"
+          name="search"
+          value="{{ search_term }}"
+          data-admin-product-search
           data-table-filter="admin-products-table"
         />
         <select class="form-input card__control" id="stock-filter">
