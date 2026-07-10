@@ -446,7 +446,8 @@
                     ('in-status-hours', 'ticket.in_status_age_hours'),
                     ('last-reply-age-hours', 'ticket.last_reply_age_hours'),
                     ('latest-reply-internal', 'reply.is_internal'),
-                    ('latest-reply-kind', 'reply.kind')
+                    ('latest-reply-kind', 'reply.kind'),
+                    ('ticket-update-actor-type', 'ticket_update.actor_type')
                   ] %}
                   {% for column_key, column_label in automation_column_options %}
                     <label class="ticket-columns__option">
@@ -537,6 +538,7 @@
                 <th scope="col" data-sort="int" data-column="last-reply-age-hours" class="tickets-table__column tickets-table__column--last-reply-age-hours">ticket.last_reply_age_hours</th>
                 <th scope="col" data-sort="string" data-column="latest-reply-internal" class="tickets-table__column tickets-table__column--latest-reply-internal">reply.is_internal</th>
                 <th scope="col" data-sort="string" data-column="latest-reply-kind" class="tickets-table__column tickets-table__column--latest-reply-kind">reply.kind</th>
+                <th scope="col" data-sort="string" data-column="ticket-update-actor-type" class="tickets-table__column tickets-table__column--ticket-update-actor-type">ticket_update.actor_type</th>
                 <th scope="col" class="table__actions tickets-table__column tickets-table__column--actions">Actions</th>
               </tr>
             </thead>
@@ -631,6 +633,7 @@
                     <td data-label="ticket.last_reply_age_hours" data-column="last-reply-age-hours" class="tickets-table__cell tickets-table__cell--last-reply-age-hours">{{ last_reply_age_hours if last_reply_age_hours != '' else '—' }}</td>
                     <td data-label="reply.is_internal" data-column="latest-reply-internal" class="tickets-table__cell tickets-table__cell--latest-reply-internal">{{ 'true' if automation_data.get('latest_reply_is_internal') else ('false' if automation_data.get('latest_reply_id') else '—') }}</td>
                     <td data-label="reply.kind" data-column="latest-reply-kind" class="tickets-table__cell tickets-table__cell--latest-reply-kind">{{ automation_data.get('latest_reply_kind') or '—' }}</td>
+                    <td data-label="ticket_update.actor_type" data-column="ticket-update-actor-type" class="tickets-table__cell tickets-table__cell--ticket-update-actor-type">{{ automation_data.get('ticket_update_actor_type') or '—' }}</td>
                     <td class="table__actions tickets-table__cell tickets-table__cell--actions">
                       <a href="/admin/tickets/{{ ticket.id }}" class="button button--ghost">Open</a>
                     </td>
@@ -638,7 +641,7 @@
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="{{ 37 + (1 if can_bulk_delete_tickets or can_merge_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
+                  <td colspan="{{ 38 + (1 if can_bulk_delete_tickets or can_merge_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
                 </tr>
               {% endif %}
             </tbody>

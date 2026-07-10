@@ -89,6 +89,14 @@ def test_table_cell_data_column_attributes():
         )
 
 
+
+def test_ticket_update_actor_type_column_is_available():
+    """The automation variable ticket_update.actor_type should be available as a ticket column."""
+    html = _template_html()
+    assert "('ticket-update-actor-type', 'ticket_update.actor_type')" in html
+    assert 'data-column="ticket-update-actor-type"' in html
+    assert 'data-label="ticket_update.actor_type"' in html
+
 def test_ticket_columns_js_included():
     """The ticket_columns.js script should be included in the page."""
     html = _template_html()

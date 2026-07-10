@@ -494,6 +494,7 @@ async def get_ticket_dashboard(
                     else None
                 ),
                 latest_reply_kind=automation_data.get("latest_reply_kind"),
+                ticket_update_actor_type=automation_data.get("ticket_update_actor_type"),
             )
         )
     filters = TicketSearchFilters(

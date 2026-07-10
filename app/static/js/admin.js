@@ -1220,6 +1220,7 @@
       appendTextCell('last-reply-age-hours', 'ticket.last_reply_age_hours', ticket.last_reply_age_hours ?? '—', { value: ticket.last_reply_age_hours ?? '' });
       appendTextCell('latest-reply-internal', 'reply.is_internal', ticket.latest_reply_is_internal ?? '—');
       appendTextCell('latest-reply-kind', 'reply.kind', ticket.latest_reply_kind || '—');
+      appendTextCell('ticket-update-actor-type', 'ticket_update.actor_type', ticket.ticket_update_actor_type || '—');
 
       return row;
     }

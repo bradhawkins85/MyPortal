@@ -1445,6 +1445,7 @@ async def get_automation_filter_context_by_ticket_ids(ticket_ids: list[int]) -> 
             "latest_reply_at": None,
             "latest_reply_is_internal": None,
             "latest_reply_kind": None,
+            "ticket_update_actor_type": None,
         }
         for ticket_id in unique_ids
     }
@@ -1509,7 +1510,8 @@ async def get_automation_filter_context_by_ticket_ids(ticket_ids: list[int]) -> 
             tr.id,
             tr.created_at,
             tr.is_internal,
-            CASE WHEN tr.is_internal = 1 THEN 'internal_note' ELSE 'message' END AS kind
+            CASE WHEN tr.is_internal = 1 THEN 'internal_note' ELSE 'message' END AS kind,
+            CASE WHEN tr.is_internal = 1 THEN 'technician' ELSE 'requester' END AS ticket_update_actor_type
         FROM ticket_replies AS tr
         INNER JOIN (
             SELECT ticket_id, MAX(id) AS latest_reply_id
@@ -1526,6 +1528,7 @@ async def get_automation_filter_context_by_ticket_ids(ticket_ids: list[int]) -> 
         result[ticket_id]["latest_reply_at"] = _make_aware(row.get("created_at"))
         result[ticket_id]["latest_reply_is_internal"] = bool(row.get("is_internal"))
         result[ticket_id]["latest_reply_kind"] = row.get("kind")
+        result[ticket_id]["ticket_update_actor_type"] = row.get("ticket_update_actor_type")
 
     return result
 
