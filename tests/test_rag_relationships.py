@@ -162,3 +162,124 @@ async def test_set_matching_paused_quotes_reserved_key_column_for_sqlite(monkeyp
     assert "INSERT INTO rag_matching_state (`key`, value, updated_at)" in query
     assert "ON CONFLICT(`key`)" in query
     assert params == ("1",)
+
+
+def test_relationship_evaluator_unavailable_reason_includes_skipped_reason():
+    from app.services.rag_relationships import (
+        _relationship_evaluator_unavailable_reason,
+    )
+
+    assert (
+        _relationship_evaluator_unavailable_reason(
+            {"status": "skipped", "reason": "Module disabled", "module": "ollama"}
+        )
+        == "Module disabled"
+    )
+    assert _relationship_evaluator_unavailable_reason({"status": "succeeded"}) is None
+
+
+@pytest.mark.anyio
+async def test_evaluate_next_batch_does_not_claim_jobs_when_ollama_disabled(
+    monkeypatch,
+):
+    from app.services import rag_relationships
+
+    claimed = False
+
+    async def fake_matching_paused():
+        return False
+
+    async def fake_get_module(slug, *, redact=True):
+        assert slug == "ollama"
+        return {"slug": "ollama", "enabled": False}
+
+    async def fake_claim_jobs(limit):
+        nonlocal claimed
+        claimed = True
+        return []
+
+    monkeypatch.setattr(rag_relationships, "_evaluator_retry_after", 0.0)
+    monkeypatch.setattr(
+        rag_relationships.rel_repo, "matching_paused", fake_matching_paused
+    )
+    monkeypatch.setattr(
+        rag_relationships.modules_service, "get_module", fake_get_module
+    )
+    monkeypatch.setattr(rag_relationships.rel_repo, "claim_jobs", fake_claim_jobs)
+
+    assert await rag_relationships.evaluate_next_batch(limit=1) == 0
+    assert claimed is False
+    assert rag_relationships._evaluator_retry_after > 0
+
+
+@pytest.mark.anyio
+async def test_evaluate_next_batch_requeues_evaluator_failures_without_retry_increment(
+    monkeypatch,
+):
+    from app.services import rag_relationships
+
+    reset_calls: list[tuple[int, str]] = []
+    failed_calls: list[tuple[int, str]] = []
+
+    async def fake_matching_paused():
+        return False
+
+    async def fake_get_module(slug, *, redact=True):
+        return {"slug": slug, "enabled": True}
+
+    async def fake_claim_jobs(limit):
+        return [{"id": 9, "source_document_id": 1, "target_document_id": 2}]
+
+    async def fake_get_document_with_content(document_id):
+        return {
+            "id": document_id,
+            "source_type": "knowledge_base",
+            "source_id": document_id,
+            "title": f"Doc {document_id}",
+            "content": "content",
+            "content_hash": f"hash-{document_id}",
+        }
+
+    async def fake_relationship_current(source_id, target_id):
+        return False
+
+    async def fake_trigger_module(*args, **kwargs):
+        return {"status": "failed", "last_error": "connection refused"}
+
+    async def fake_reset_queue_item(queue_id, note=None):
+        reset_calls.append((queue_id, note or ""))
+
+    async def fake_fail_queue_item(queue_id, error, *, max_retries):
+        failed_calls.append((queue_id, error))
+
+    monkeypatch.setattr(rag_relationships, "_evaluator_retry_after", 0.0)
+    monkeypatch.setattr(
+        rag_relationships.rel_repo, "matching_paused", fake_matching_paused
+    )
+    monkeypatch.setattr(
+        rag_relationships.modules_service, "get_module", fake_get_module
+    )
+    monkeypatch.setattr(rag_relationships.rel_repo, "claim_jobs", fake_claim_jobs)
+    monkeypatch.setattr(
+        rag_relationships.rel_repo,
+        "get_document_with_content",
+        fake_get_document_with_content,
+    )
+    monkeypatch.setattr(
+        rag_relationships.rel_repo, "relationship_current", fake_relationship_current
+    )
+    monkeypatch.setattr(
+        rag_relationships.modules_service, "trigger_module", fake_trigger_module
+    )
+    monkeypatch.setattr(
+        rag_relationships.rel_repo, "reset_queue_item", fake_reset_queue_item
+    )
+    monkeypatch.setattr(
+        rag_relationships.rel_repo, "fail_queue_item", fake_fail_queue_item
+    )
+
+    assert await rag_relationships.evaluate_next_batch(limit=1) == 0
+    assert reset_calls == [
+        (9, "Relationship evaluator unavailable: connection refused")
+    ]
+    assert failed_calls == []

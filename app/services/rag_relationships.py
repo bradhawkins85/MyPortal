@@ -50,6 +50,47 @@ _MATCH_ORDER = {
 }
 
 
+_EVALUATOR_BACKOFF_SECONDS = 60.0
+_evaluator_retry_after = 0.0
+_last_unavailable_log_at = 0.0
+
+
+class RelationshipEvaluatorUnavailable(RuntimeError):
+    """Raised when the configured relationship LLM cannot currently run."""
+
+
+def _relationship_evaluator_unavailable_reason(response: Any) -> str | None:
+    if not isinstance(response, Mapping):
+        return None
+    status = str(response.get("status") or "").lower()
+    if status not in {"error", "failed", "skipped"}:
+        return None
+    return str(
+        response.get("last_error")
+        or response.get("error")
+        or response.get("reason")
+        or "module did not complete"
+    )
+
+
+def _set_evaluator_backoff(reason: str) -> None:
+    global _evaluator_retry_after, _last_unavailable_log_at
+    now = time.monotonic()
+    _evaluator_retry_after = max(
+        _evaluator_retry_after, now + _EVALUATOR_BACKOFF_SECONDS
+    )
+    if now - _last_unavailable_log_at >= _EVALUATOR_BACKOFF_SECONDS:
+        logger.warning(
+            "RAG relationship evaluator unavailable; pausing relationship jobs briefly: {}",
+            reason,
+        )
+        _last_unavailable_log_at = now
+
+
+def _evaluator_in_backoff() -> bool:
+    return time.monotonic() < _evaluator_retry_after
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -239,7 +280,11 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
     settings = get_settings()
     if not settings.enable_background_relationships:
         return 0
-    if await rel_repo.matching_paused():
+    if await rel_repo.matching_paused() or _evaluator_in_backoff():
+        return 0
+    evaluator_module = await modules_service.get_module("ollama", redact=False)
+    if not evaluator_module or not evaluator_module.get("enabled"):
+        _set_evaluator_backoff("Ollama module disabled or not configured")
         return 0
     jobs = await rel_repo.claim_jobs(limit or settings.rag_relationship_batch_size)
     processed = 0
@@ -248,6 +293,12 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
     async def _one(job: Mapping[str, Any]) -> None:
         nonlocal processed
         async with semaphore:
+            if _evaluator_in_backoff():
+                await rel_repo.reset_queue_item(
+                    int(job["id"]),
+                    "Relationship evaluator unavailable: backoff active",
+                )
+                return
             started = time.perf_counter()
             try:
                 source = await rel_repo.get_document_with_content(
@@ -272,16 +323,11 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
                     },
                     background=False,
                 )
-                if isinstance(response, Mapping) and str(
-                    response.get("status") or ""
-                ).lower() in {"error", "failed", "skipped"}:
-                    reason = (
-                        response.get("last_error")
-                        or response.get("error")
-                        or response.get("reason")
-                        or "module did not complete"
-                    )
-                    raise RuntimeError(f"Relationship evaluator unavailable: {reason}")
+                unavailable_reason = _relationship_evaluator_unavailable_reason(
+                    response
+                )
+                if unavailable_reason:
+                    raise RelationshipEvaluatorUnavailable(unavailable_reason)
                 raw = _relationship_response_payload(response)
                 parsed = parse_relationship_response(
                     raw, min_score=settings.rag_relationship_min_score
@@ -297,6 +343,12 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
                 )
                 await rel_repo.complete_queue_item(int(job["id"]), "completed")
                 processed += 1
+            except RelationshipEvaluatorUnavailable as exc:
+                reason = str(exc) or "module did not complete"
+                _set_evaluator_backoff(reason)
+                await rel_repo.reset_queue_item(
+                    int(job["id"]), f"Relationship evaluator unavailable: {reason}"
+                )
             except Exception as exc:
                 await rel_repo.fail_queue_item(int(job["id"]), str(exc), max_retries=5)
                 logger.warning("RAG relationship job failed: {}", exc)

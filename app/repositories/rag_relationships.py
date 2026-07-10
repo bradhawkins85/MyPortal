@@ -178,6 +178,13 @@ async def complete_queue_item(queue_id: int, status: str) -> None:
     )
 
 
+async def reset_queue_item(queue_id: int, note: str | None = None) -> None:
+    await db.execute(
+        "UPDATE rag_relationship_queue SET status = 'PENDING', started_at = NULL, last_error = ? WHERE id = ?",
+        ((note or "")[:2000], queue_id),
+    )
+
+
 async def fail_queue_item(queue_id: int, error: str, *, max_retries: int) -> None:
     row = (
         await db.fetch_one(
