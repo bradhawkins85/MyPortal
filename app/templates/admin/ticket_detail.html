@@ -138,6 +138,17 @@
                 </select>
               </div>
               <div class="form-field">
+                <label class="form-label" for="ticket-company-detail">Company</label>
+                <select id="ticket-company-detail" name="companyId" class="form-input">
+                  <option value="">Not linked</option>
+                  {% for company_option in ticket_company_options %}
+                    <option value="{{ company_option.id }}" {% if company_option.id == ticket.company_id %}selected{% endif %}>
+                      {{ company_option.name }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="form-field">
                 <label class="form-label" for="ticket-requester-detail">Requester</label>
                 <select
                   id="ticket-requester-detail"
@@ -169,6 +180,10 @@
                 </p>
               </div>
               <div class="form-field">
+                <span class="form-label">Requester phone</span>
+                <p class="form-help">{{ ticket_requester_phone_display or '—' }}</p>
+              </div>
+              <div class="form-field">
                 <label class="form-label" for="ticket-assigned-detail">Assigned to</label>
                 <select id="ticket-assigned-detail" name="assignedUserId" class="form-input">
                   <option value="">Unassigned</option>
@@ -178,39 +193,6 @@
                     </option>
                   {% endfor %}
                 </select>
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="ticket-company-detail">Company</label>
-                <select id="ticket-company-detail" name="companyId" class="form-input">
-                  <option value="">Not linked</option>
-                  {% for company_option in ticket_company_options %}
-                    <option value="{{ company_option.id }}" {% if company_option.id == ticket.company_id %}selected{% endif %}>
-                      {{ company_option.name }}
-                    </option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="ticket-category-detail">Category</label>
-                <input
-                  id="ticket-category-detail"
-                  name="category"
-                  class="form-input"
-                  maxlength="64"
-                  value="{{ ticket.category or '' }}"
-                  placeholder="Networking, onboarding, escalation…"
-                />
-              </div>
-              <div class="form-field">
-                <label class="form-label" for="ticket-reference-detail">External reference</label>
-                <input
-                  id="ticket-reference-detail"
-                  name="externalReference"
-                  class="form-input"
-                  maxlength="128"
-                  value="{{ ticket.external_reference or '' }}"
-                  placeholder="Syncro ID or external case"
-                />
               </div>
               <div class="form-actions">
                 <button type="submit" class="button button--primary">Save changes</button>
@@ -307,6 +289,34 @@
                 <div class="definition-list__item">
                   <dt>Module</dt>
                   <dd>{{ ticket_module.name if ticket_module else (ticket.module_slug or '—') }}</dd>
+                </div>
+                <div class="definition-list__item">
+                  <dt><label class="form-label" for="ticket-category-detail">Category</label></dt>
+                  <dd>
+                    <input
+                      id="ticket-category-detail"
+                      name="category"
+                      form="ticket-details-form"
+                      class="form-input"
+                      maxlength="64"
+                      value="{{ ticket.category or '' }}"
+                      placeholder="Networking, onboarding, escalation…"
+                    />
+                  </dd>
+                </div>
+                <div class="definition-list__item">
+                  <dt><label class="form-label" for="ticket-reference-detail">External reference</label></dt>
+                  <dd>
+                    <input
+                      id="ticket-reference-detail"
+                      name="externalReference"
+                      form="ticket-details-form"
+                      class="form-input"
+                      maxlength="128"
+                      value="{{ ticket.external_reference or '' }}"
+                      placeholder="Syncro ID or external case"
+                    />
+                  </dd>
                 </div>
                 {% if ticket_assets %}
                   <div class="definition-list__item">

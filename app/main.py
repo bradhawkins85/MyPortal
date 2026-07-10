@@ -8656,6 +8656,19 @@ async def _load_ticket_stored_related_items(ticket_id: int, *, limit: int = 12) 
     return items
 
 
+def _format_ticket_requester_phone(phone_number: Any) -> str | None:
+    digits = re.sub(r"\D+", "", str(phone_number or ""))
+    if not digits:
+        return None
+    if digits.startswith("61") and len(digits) == 11:
+        digits = f"0{digits[2:]}"
+    if len(digits) == 10:
+        return f"{digits[:4]} {digits[4:7]} {digits[7:]}"
+    if len(digits) == 11:
+        return f"{digits[:5]} {digits[5:8]} {digits[8:]}"
+    return str(phone_number or "").strip() or None
+
+
 async def _render_ticket_detail(
     request: Request,
     user: dict[str, Any],
@@ -9020,6 +9033,34 @@ async def _render_ticket_detail(
 
         requester_options.sort(key=_requester_sort_key)
 
+    ticket_requester_phone_display: str | None = None
+    requester_staff_id = ticket.get("requester_staff_id")
+    requester_user_id = ticket.get("requester_id")
+    def _same_identifier(left: Any, right: Any) -> bool:
+        if left is None or right is None:
+            return False
+        try:
+            return int(left) == int(right)
+        except (TypeError, ValueError):
+            return str(left) == str(right)
+
+    for requester_option in requester_options:
+        if (
+            _same_identifier(requester_option.get("staff_id"), requester_staff_id)
+            or _same_identifier(requester_option.get("user_id"), requester_user_id)
+            or _same_identifier(requester_option.get("id"), requester_user_id)
+        ):
+            ticket_requester_phone_display = _format_ticket_requester_phone(
+                requester_option.get("mobile_phone")
+            )
+            break
+    if ticket_requester_phone_display is None:
+        requester_record = user_lookup.get(ticket.get("requester_id"))
+        if requester_record:
+            ticket_requester_phone_display = _format_ticket_requester_phone(
+                requester_record.get("mobile_phone")
+            )
+
     default_priorities = ["urgent", "high", "normal", "low"]
     current_priority = str(ticket.get("priority") or "normal")
     seen_priorities: set[str] = set()
@@ -9167,6 +9208,7 @@ async def _render_ticket_detail(
         "ticket_company_options": companies,
         "ticket_user_options": technician_users,
         "ticket_requester_options": requester_options,
+        "ticket_requester_phone_display": ticket_requester_phone_display,
         "ticket_watcher_staff_options": watcher_staff_options,
         "ticket_mention_staff_options": ticket_mention_staff_options,
         "ticket_priority_options": priority_options,
