@@ -544,6 +544,59 @@ class TestFindExistingTicket:
         
         assert result is None, "Closed tickets should not be matched for replies"
 
+    async def test_find_ticket_by_subject_for_known_user_not_watcher(self, monkeypatch):
+        """Known users who are not watchers can still match a ticket if their email
+        appears in the ticket description (e.g. tickets originally created from their
+        email before they had a local user account)."""
+        from app.services import imap
+        from app.core import database
+
+        captured: dict[str, object] = {}
+
+        async def mock_fetch_all(query, params):
+            captured["query"] = query
+            captured["params"] = params
+            if "ticket_number" in query:
+                return []
+            # Return a ticket where requester_id=None but description contains the
+            # sender's email (ticket was created from an email before user existed)
+            return [
+                {
+                    "id": 20,
+                    "ticket_number": "30001",
+                    "subject": "Printer not working",
+                    "description": "From: alice@example.com\n\nPrinter is jammed",
+                    "status": "open",
+                    "requester_id": None,
+                    "company_id": 4,
+                    "created_at": None,
+                    "updated_at": None,
+                    "closed_at": None,
+                    "ai_summary_updated_at": None,
+                    "ai_tags": None,
+                    "ai_tags_updated_at": None,
+                }
+            ]
+
+        monkeypatch.setattr(database.db, "fetch_all", mock_fetch_all)
+
+        # Sender is a known user (requester_id=99) but is NOT a watcher on the ticket.
+        # Their email appears in the ticket description so it should still match.
+        result = await imap._find_existing_ticket_for_reply(
+            subject="Re: Printer not working",
+            from_email="alice@example.com",
+            requester_id=99,
+        )
+
+        assert result is not None, (
+            "Ticket should be matched even when the known user is not a watcher, "
+            "provided their email appears in the ticket description"
+        )
+        assert result["id"] == 20
+        # The query must include the description fallback when requester_id is set
+        assert "COALESCE(t.description" in str(captured["query"])
+        assert "%alice@example.com%" in captured["params"]
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
