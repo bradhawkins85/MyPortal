@@ -11142,3 +11142,49 @@ a.shop-product-card {
     min-height: 22rem;
   }
 }
+
+.modal__icon-action-form {
+  position: absolute;
+  top: var(--space-gap-tight);
+  right: calc(var(--space-gap-roomy) + 3rem);
+  z-index: 2;
+  margin: 0;
+}
+
+.modal__icon-action-form[hidden] {
+  display: none;
+}
+
+.modal__icon-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.96);
+  color: #f8fafc;
+  cursor: pointer;
+  box-shadow: 0 12px 24px -16px rgba(15, 23, 42, 0.95);
+  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.modal__icon-action:hover,
+.modal__icon-action:focus-visible {
+  background: rgba(30, 41, 59, 1);
+  border-color: rgba(148, 163, 184, 0.55);
+  transform: scale(1.03);
+}
+
+.modal__icon-action:focus-visible {
+  outline: 2px solid rgba(96, 165, 250, 0.9);
+  outline-offset: 2px;
+}
+
+.modal__icon-action svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  pointer-events: none;
+}

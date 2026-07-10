@@ -275,12 +275,24 @@
 
 
     const detailsModal = document.getElementById('product-details-modal');
+    const refreshForm = detailsModal
+      ? detailsModal.querySelector('[data-product-refresh-form]')
+      : null;
 
     bindModalDismissal(detailsModal);
 
     container.querySelectorAll('[data-product-details]').forEach((button) => {
       button.addEventListener('click', async () => {
         const id = Number(button.getAttribute('data-product-details'));
+        if (refreshForm) {
+          if (Number.isFinite(id) && id > 0) {
+            refreshForm.action = `/shop/admin/product/${id}/refresh-description`;
+            refreshForm.hidden = false;
+          } else {
+            refreshForm.removeAttribute('action');
+            refreshForm.hidden = true;
+          }
+        }
         renderProductDetails(null);
         openModal(detailsModal);
         if (!Number.isFinite(id) || id <= 0) {
