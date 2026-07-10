@@ -1044,39 +1044,43 @@ async def add_reply(
 
     # Push public replies on Trello-linked tickets back to the Trello card as comments
     if not reply.get("is_internal") and ticket_payload.get("module_slug") == "trello":
-        card_id = str(ticket_payload.get("external_reference") or "").strip()
-        if card_id:
-            try:
-                from app.repositories import companies as company_repo
-                from app.services import trello as trello_service
+        try:
+            from app.repositories import companies as company_repo
+            from app.services import trello as trello_service
 
-                trello_company: dict[str, Any] | None = None
-                trello_company_id = ticket_payload.get("company_id")
-                if trello_company_id is not None:
-                    try:
-                        trello_company = await company_repo.get_company_by_id(
-                            int(trello_company_id)
-                        )
-                    except (TypeError, ValueError):
-                        pass
-                first_name = str(current_user.get("first_name") or "").strip()
-                last_name = str(current_user.get("last_name") or "").strip()
-                author_parts = [p for p in (first_name, last_name) if p]
-                author_display = (
-                    " ".join(author_parts)
-                    if author_parts
-                    else str(current_user.get("email") or "Staff")
-                )
-                await trello_service.post_reply_comment(
-                    card_id,
-                    author_display,
-                    sanitised_reply_payload.html,
-                    company=trello_company,
-                )
-            except Exception as exc:
-                logger.debug(
-                    "Trello reply sync failed for ticket {}: {}", ticket_id, exc
-                )
+            card_id = trello_service.card_id_from_external_reference(
+                ticket_payload.get("external_reference")
+            )
+            if not card_id:
+                return reply
+
+            trello_company: dict[str, Any] | None = None
+            trello_company_id = ticket_payload.get("company_id")
+            if trello_company_id is not None:
+                try:
+                    trello_company = await company_repo.get_company_by_id(
+                        int(trello_company_id)
+                    )
+                except (TypeError, ValueError):
+                    pass
+            first_name = str(current_user.get("first_name") or "").strip()
+            last_name = str(current_user.get("last_name") or "").strip()
+            author_parts = [p for p in (first_name, last_name) if p]
+            author_display = (
+                " ".join(author_parts)
+                if author_parts
+                else str(current_user.get("email") or "Staff")
+            )
+            await trello_service.post_reply_comment(
+                card_id,
+                author_display,
+                sanitised_reply_payload.html,
+                company=trello_company,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Trello reply sync failed for ticket {}: {}", ticket_id, exc
+            )
 
     # IMPORTANT: never store the reply body in the audit log. We capture only
     # metadata (id, author, visibility, length) so admins can confirm a reply

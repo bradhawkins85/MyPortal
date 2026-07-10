@@ -17,6 +17,7 @@ TRELLO_API_BASE = "https://api.trello.com/1"
 # Prefix added to every comment MyPortal posts to Trello.  The webhook handler
 # skips incoming comments that carry this prefix to prevent feedback loops.
 MYPORTAL_COMMENT_PREFIX = "[MyPortal]"
+TRELLO_EXTERNAL_REFERENCE_PREFIX = "trello:"
 
 _REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
@@ -340,9 +341,43 @@ async def get_company_for_board(board_id: str) -> dict[str, Any] | None:
     return row
 
 
+def card_external_reference(card_id: str) -> str:
+    """Return the canonical ticket external reference for a Trello card ID."""
+    card_id = str(card_id or "").strip()
+    if card_id.startswith(TRELLO_EXTERNAL_REFERENCE_PREFIX):
+        return card_id
+    return f"{TRELLO_EXTERNAL_REFERENCE_PREFIX}{card_id}"
+
+
+def card_id_from_external_reference(external_reference: Any) -> str | None:
+    """Extract a Trello card ID from a ticket external reference.
+
+    Trello ticket references are stored as ``trello:<card_id>`` so automation
+    rules can target Trello-specific references. Legacy tickets may still carry
+    only the raw card ID; callers that already know the ticket belongs to the
+    Trello module can fall back to that value.
+    """
+    value = str(external_reference or "").strip()
+    if not value:
+        return None
+    if value.startswith(TRELLO_EXTERNAL_REFERENCE_PREFIX):
+        card_id = value[len(TRELLO_EXTERNAL_REFERENCE_PREFIX):].strip()
+        return card_id or None
+    return value
+
+
 async def find_ticket_for_card(card_id: str) -> dict[str, Any] | None:
-    """Return the MyPortal ticket whose ``external_reference`` matches *card_id*."""
-    return await tickets_repo.get_ticket_by_external_reference(card_id)
+    """Return the MyPortal ticket linked to a Trello card ID."""
+    canonical_ref = card_external_reference(card_id)
+    ticket = await tickets_repo.get_ticket_by_external_reference(canonical_ref)
+    if ticket:
+        return ticket
+    # Backward compatibility for tickets created before Trello references were
+    # namespaced. This can be removed after legacy data has been migrated.
+    legacy_card_id = str(card_id or "").strip()
+    if legacy_card_id and legacy_card_id != canonical_ref:
+        return await tickets_repo.get_ticket_by_external_reference(legacy_card_id)
+    return None
 
 
 async def post_ticket_created_comment(
