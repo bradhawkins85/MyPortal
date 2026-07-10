@@ -10,6 +10,7 @@ import secrets
 from datetime import datetime, timezone
 from email.header import decode_header, make_header
 from email.utils import getaddresses, parsedate_to_datetime
+from html import escape
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -334,6 +335,63 @@ def _evaluate_filter(rule: Mapping[str, Any], context: Mapping[str, Any]) -> boo
         if any(_evaluate_filter(child, context) for child in none_group):
             return False
     return True
+
+
+def _sanitize_inbound_reply_body(value: str | None):
+    """Sanitize inbound email reply content without dropping real body text.
+
+    ``sanitize_rich_text`` trims quoted email headers before cleaning. Some
+    mailbox providers can deliver the current reply wrapped in header-like text,
+    which may leave an empty sanitized result even though the message had body
+    text. Fall back to escaped plain text so existing-ticket replies are still
+    recorded safely in the conversation history.
+    """
+
+    sanitized = sanitize_rich_text(value)
+    if sanitized.has_rich_content:
+        return sanitized
+
+    raw_text = (value or "").strip()
+    if not raw_text:
+        return sanitized
+
+    escaped_body = escape(raw_text).replace("\r\n", "\n").replace("\r", "\n")
+    escaped_body = escaped_body.replace("\n", "<br />")
+    return type(sanitized)(
+        html=escaped_body,
+        text_content=raw_text,
+        has_rich_content=True,
+    )
+
+
+def _build_attachment_only_reply_body(
+    *,
+    from_address: str | None = None,
+    subject: str | None = None,
+) -> str:
+    """Build a safe conversation entry when an inbound reply only has attachments.
+
+    Some mail clients and Graph/IMAP payloads contain no usable text body once
+    quoted history, signatures, and unsafe markup are removed.  If the message
+    still has attachments, add a concise public reply so the ticket conversation
+    records that the customer replied instead of only showing new files.
+    """
+
+    details: list[str] = []
+    sender = _normalise_string(from_address)
+    if sender:
+        details.append(f"<strong>From:</strong> {escape(sender)}")
+    reply_subject = _normalise_string(subject)
+    if reply_subject:
+        details.append(f"<strong>Subject:</strong> {escape(reply_subject)}")
+
+    detail_html = ""
+    if details:
+        detail_html = "<br />" + "<br />".join(details)
+    return (
+        "<p>Email reply received with attachment(s), but no message body was "
+        f"available after sanitisation.{detail_html}</p>"
+    )
 
 
 def _extract_domains(addresses: list[str]) -> list[str]:
@@ -1743,8 +1801,15 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 # For new tickets, create_ticket already adds the initial reply
                 if not is_new_ticket:
                     conversation_source = body or ""
-                    sanitized = sanitize_rich_text(conversation_source)
-                    if sanitized.has_rich_content:
+                    sanitized = _sanitize_inbound_reply_body(conversation_source)
+                    has_attachment_reply = bool(email_attachments)
+                    reply_body = sanitized.html
+                    if not sanitized.has_rich_content and has_attachment_reply:
+                        reply_body = _build_attachment_only_reply_body(
+                            from_address=from_address,
+                            subject=subject,
+                        )
+                    if sanitized.has_rich_content or has_attachment_reply:
                         reply_created_at = received_at or datetime.now(timezone.utc)
                         reply_author_id = await _resolve_existing_reply_author_id(
                             ticket,
@@ -1756,7 +1821,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             await tickets_repo.create_reply(
                                 ticket_id=int(ticket_id),
                                 author_id=reply_author_id,
-                                body=sanitized.html,
+                                body=reply_body,
                                 is_internal=False,
                                 external_reference=message_id if message_id else None,
                                 created_at=reply_created_at,
