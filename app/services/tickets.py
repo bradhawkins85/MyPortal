@@ -558,10 +558,10 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
         author_user = await _resolve_user_snapshot(author_value, author_id)
         author_snapshot = _build_user_snapshot(author_user)
         reply["author"] = author_snapshot
-        reply["author_email"] = author_snapshot.get("email") if author_snapshot else None
-        reply["author_display_name"] = (
-            author_snapshot.get("display_name") if author_snapshot else None
-        )
+        snapshot_email = author_snapshot.get("email") if author_snapshot else None
+        snapshot_display = author_snapshot.get("display_name") if author_snapshot else None
+        reply["author_email"] = snapshot_email or reply.get("author_email")
+        reply["author_display_name"] = snapshot_display or reply.get("author_display_name")
         latest_reply = reply
     enriched["latest_reply"] = latest_reply
 

@@ -1224,7 +1224,7 @@
                             {{ reply.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.created_at else '—' }}
                           </span>
                           <span class="timeline__action">
-                            {{ reply.author.email if reply.author else 'System' }}
+                            {{ reply.author.email if reply.author else (reply.author_display_name or reply.author_email or 'System') }}
                             {% if reply.is_internal %}
                               <span class="badge badge--muted">Internal</span>
                             {% endif %}
