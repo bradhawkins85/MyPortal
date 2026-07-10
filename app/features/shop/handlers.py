@@ -440,6 +440,9 @@ async def shop_page(
         "search_term": search_term,
         "cart_error": cart_error,
         "low_stock_threshold": _main().SHOP_LOW_STOCK_THRESHOLD,
+        "shop_product_name_min_visible_chars": (
+            _main().settings.shop_product_name_min_visible_chars
+        ),
         "active_subscription_product_ids": active_subscription_product_ids,
         "total_count": total_count,
         "page": page,

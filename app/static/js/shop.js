@@ -214,26 +214,27 @@
   }
 
 
-  function findSafeTitleTruncation(value, limit) {
+  function findSafeTitleTruncation(value, limit, minVisibleChars) {
     if (typeof value !== 'string' || value.length <= limit) {
       return value;
     }
+    const minimum = Number.isFinite(minVisibleChars) && minVisibleChars > 0 ? minVisibleChars : 1;
+    const effectiveLimit = Math.max(limit, minimum + 1);
     const commaIndex = value.indexOf(',');
     const dashIndex = value.indexOf('-');
-    const candidates = [commaIndex, dashIndex].filter((index) => index > 0);
+    const candidates = [commaIndex, dashIndex].filter((index) => index >= minimum);
     if (candidates.length > 0) {
       const safeIndex = Math.min(...candidates);
-      if (safeIndex >= 8) {
-        return `${value.slice(0, safeIndex).trim()}…`;
-      }
+      return `${value.slice(0, safeIndex).trim()}…`;
     }
-    return `${value.slice(0, Math.max(limit - 1, 1)).trim()}…`;
+    return `${value.slice(0, Math.max(effectiveLimit - 1, minimum)).trim()}…`;
   }
 
   function truncateSafeProductTitles(container) {
     container.querySelectorAll('[data-shop-safe-title]').forEach((title) => {
       const fullTitle = title.getAttribute('title') || title.textContent || '';
-      title.textContent = findSafeTitleTruncation(fullTitle.trim(), 58);
+      const minVisibleChars = Number(title.getAttribute('data-min-visible-chars'));
+      title.textContent = findSafeTitleTruncation(fullTitle.trim(), 58, minVisibleChars);
     });
   }
 
@@ -273,22 +274,9 @@
     truncateSafeProductTitles(container);
 
 
-    const imageModal = document.getElementById('product-image-modal');
     const detailsModal = document.getElementById('product-details-modal');
-    const imagePreview = document.getElementById('product-image-preview');
 
-    bindModalDismissal(imageModal);
     bindModalDismissal(detailsModal);
-
-    container.querySelectorAll('[data-image-preview]').forEach((button) => {
-      button.addEventListener('click', () => {
-        if (!imageModal || !imagePreview) {
-          return;
-        }
-        imagePreview.src = button.getAttribute('data-image-url') || '';
-        openModal(imageModal);
-      });
-    });
 
     container.querySelectorAll('[data-product-details]').forEach((button) => {
       button.addEventListener('click', async () => {
