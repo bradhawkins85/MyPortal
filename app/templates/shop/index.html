@@ -163,7 +163,19 @@
           <article class="shop-product-card" {% if product.is_package %}data-package-id="{{ product.id }}"{% else %}data-product-id="{{ product.id }}"{% endif %} data-stock="{{ product.stock }}">
             <div class="shop-product-card__media">
               {% if product.is_package %}
-                <span class="package-thumb" aria-hidden="true">🎁</span>
+                <div class="package-thumb-grid" aria-label="Included products in {{ product.name }}">
+                  {% for package_image in product.get('package_images', [])[:4] %}
+                    <span class="package-thumb-grid__item" title="{{ package_image.name }}{% if package_image.quantity and package_image.quantity > 1 %} × {{ package_image.quantity }}{% endif %}">
+                      {% if package_image.image_url %}
+                        <img src="{{ package_image.image_url }}" alt="" loading="lazy" />
+                      {% else %}
+                        <span class="package-thumb-grid__placeholder" aria-hidden="true">🛍</span>
+                      {% endif %}
+                    </span>
+                  {% else %}
+                    <span class="package-thumb" aria-hidden="true">🎁</span>
+                  {% endfor %}
+                </div>
               {% elif product.image_url %}
                 <button type="button" class="link-button" data-product-details="{{ product.id }}" aria-label="View details for {{ product.name }}">
                   <img src="{{ product.image_url }}" alt="" class="product-thumb" loading="lazy" />
