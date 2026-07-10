@@ -194,8 +194,8 @@
 </div>
 
 
-<div class="modal" id="product-details-modal" role="dialog" aria-modal="true" hidden>
-  <div class="modal__content" role="document">
+<div class="modal" id="product-details-modal" role="dialog" aria-modal="true" data-cart-allowed="{{ 'true' if cart_allowed else 'false' }}" hidden>
+  <div class="modal__content modal__content--product-details" role="document">
     {% if is_shop_super_admin %}
       <form
         method="post"

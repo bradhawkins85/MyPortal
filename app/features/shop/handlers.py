@@ -489,6 +489,26 @@ async def shop_product_detail_api(request: Request, product_id: int):
 
 
 def _public_shop_product_payload(product: Mapping[str, Any], *, is_vip: bool) -> dict[str, Any]:
+    def public_related_items(items: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
+        public_items: list[dict[str, Any]] = []
+        for item in items or []:
+            price = item.get("price")
+            if is_vip and item.get("vip_price") is not None:
+                price = item.get("vip_price")
+            public_items.append(
+                {
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "sku": item.get("sku"),
+                    "image_url": item.get("image_url"),
+                    "price": price,
+                    "stock": item.get("stock"),
+                    "category_id": item.get("category_id"),
+                    "category_name": item.get("category_name"),
+                }
+            )
+        return public_items
+
     sanitized_description = sanitize_rich_text(str(product.get("description") or ""))
     payload = {
         "id": product.get("id"),
@@ -507,9 +527,9 @@ def _public_shop_product_payload(product: Mapping[str, Any], *, is_vip: bool) ->
         "category_id": product.get("category_id"),
         "category_name": product.get("category_name"),
         "features": product.get("features") or [],
-        "cross_sell_products": product.get("cross_sell_products") or [],
+        "cross_sell_products": public_related_items(product.get("cross_sell_products")),
         "cross_sell_product_ids": product.get("cross_sell_product_ids") or [],
-        "upsell_products": product.get("upsell_products") or [],
+        "upsell_products": public_related_items(product.get("upsell_products")),
         "upsell_product_ids": product.get("upsell_product_ids") or [],
     }
 
