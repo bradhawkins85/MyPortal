@@ -134,6 +134,19 @@
     return row;
   }
 
+  function getCsrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    if (meta && meta.getAttribute('content')) {
+      return meta.getAttribute('content');
+    }
+    const input = document.querySelector('input[name="_csrf"]');
+    return input ? input.value : '';
+  }
+
+  function formatPrice(value) {
+    return `$${Number(value || 0).toFixed(2)}`;
+  }
+
   async function fetchProductDetails(productId) {
     const response = await fetch(`/api/shop/products/${productId}`, {
       headers: {
@@ -145,6 +158,130 @@
       throw new Error(`Unable to load product details (${response.status})`);
     }
     return response.json();
+  }
+
+  function buildModalAddToCart(product) {
+    const stock = Number(product && product.stock);
+    const modal = document.getElementById('product-details-modal');
+    const cartAllowed = modal && modal.getAttribute('data-cart-allowed') === 'true';
+    if (!cartAllowed || !Number.isFinite(stock) || stock <= 0) {
+      const status = document.createElement('span');
+      status.className = 'badge badge--muted';
+      status.textContent = stock <= 0 ? 'Out of stock' : 'Cart unavailable';
+      return status;
+    }
+
+    const form = document.createElement('form');
+    form.action = '/cart/add';
+    form.method = 'post';
+    form.className = 'inline-form product-details-modal__cart';
+
+    const csrfToken = getCsrfToken();
+    if (csrfToken) {
+      const csrf = document.createElement('input');
+      csrf.type = 'hidden';
+      csrf.name = '_csrf';
+      csrf.value = csrfToken;
+      form.appendChild(csrf);
+    }
+
+    const productId = document.createElement('input');
+    productId.type = 'hidden';
+    productId.name = 'productId';
+    productId.value = String(product.id);
+    form.appendChild(productId);
+
+    const label = document.createElement('label');
+    label.className = 'visually-hidden';
+    label.setAttribute('for', `modal-product-quantity-${product.id}`);
+    label.textContent = `Quantity for ${product.name}`;
+    form.appendChild(label);
+
+    const quantity = document.createElement('input');
+    quantity.className = 'form-input form-input--sm';
+    quantity.id = `modal-product-quantity-${product.id}`;
+    quantity.type = 'number';
+    quantity.name = 'quantity';
+    quantity.min = '1';
+    quantity.max = String(stock);
+    quantity.value = '1';
+    quantity.setAttribute('data-stock-limit', String(stock));
+    form.appendChild(quantity);
+
+    const button = document.createElement('button');
+    button.type = 'submit';
+    button.className = 'button button--primary';
+    button.textContent = 'Add to cart';
+    form.appendChild(button);
+    bindStockLimitInputs(form);
+    return form;
+  }
+
+  function buildRecommendationCard(item) {
+    const card = document.createElement('article');
+    card.className = 'product-details-recommendation-card';
+
+    if (item.image_url) {
+      const image = document.createElement('img');
+      image.src = item.image_url;
+      image.alt = '';
+      image.loading = 'lazy';
+      image.className = 'product-details-recommendation-card__image';
+      card.appendChild(image);
+    }
+
+    const body = document.createElement('div');
+    body.className = 'product-details-recommendation-card__body';
+
+    const name = document.createElement('strong');
+    name.textContent = item.name || 'Recommended product';
+    body.appendChild(name);
+
+    if (item.sku) {
+      const sku = document.createElement('span');
+      sku.className = 'text-muted';
+      sku.textContent = item.sku;
+      body.appendChild(sku);
+    }
+
+    if (item.price !== undefined && item.price !== null) {
+      const price = document.createElement('span');
+      price.className = 'product-details-recommendation-card__price';
+      price.textContent = formatPrice(item.price);
+      body.appendChild(price);
+    }
+
+    const detailsButton = document.createElement('button');
+    detailsButton.type = 'button';
+    detailsButton.className = 'button button--ghost button--sm';
+    detailsButton.setAttribute('data-product-details', String(item.id));
+    detailsButton.textContent = 'View';
+    body.appendChild(detailsButton);
+
+    card.appendChild(body);
+    return card;
+  }
+
+  function buildRecommendationSection(title, items) {
+    const section = document.createElement('section');
+    section.className = 'product-details-modal__section product-details-modal__recommendations';
+
+    const heading = document.createElement('h3');
+    heading.className = 'modal__subtitle';
+    heading.textContent = title;
+    section.appendChild(heading);
+
+    const list = document.createElement('div');
+    list.className = 'product-details-modal__recommendation-list';
+    (items || []).forEach((item) => list.appendChild(buildRecommendationCard(item)));
+    if (!items || items.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'text-muted';
+      empty.textContent = 'No items configured yet.';
+      list.appendChild(empty);
+    }
+    section.appendChild(list);
+    return section;
   }
 
   function renderProductDetails(product) {
@@ -161,34 +298,68 @@
       return;
     }
 
+    const layout = document.createElement('div');
+    layout.className = 'product-details-modal';
+
+    const hero = document.createElement('section');
+    hero.className = 'product-details-modal__hero product-details-modal__section';
+
+    const media = document.createElement('div');
+    media.className = 'product-details-modal__media';
     if (product.image_url) {
       const image = document.createElement('img');
       image.src = product.image_url;
       image.alt = `${product.name} image`;
-      image.className = 'modal__image';
-      container.appendChild(image);
+      image.className = 'modal__image product-details-modal__image';
+      media.appendChild(image);
+    } else {
+      const placeholder = document.createElement('span');
+      placeholder.className = 'shop-product-card__placeholder product-details-modal__placeholder';
+      placeholder.textContent = '🛍';
+      media.appendChild(placeholder);
     }
+    hero.appendChild(media);
 
-    container.appendChild(createDetailRow('Price', `$${Number(product.price || 0).toFixed(2)}`));
-    container.appendChild(createDetailRow('Availability', describeStockStatus(product.stock)));
+    const summary = document.createElement('div');
+    summary.className = 'product-details-modal__summary';
+    const title = document.createElement('h2');
+    title.className = 'modal__title product-details-modal__title';
+    title.textContent = product.name || 'Product details';
+    summary.appendChild(title);
+    summary.appendChild(createDetailRow('Price', formatPrice(product.price)));
+    summary.appendChild(createDetailRow('Availability', describeStockStatus(product.stock)));
+    const actions = document.createElement('div');
+    actions.className = 'product-details-modal__actions';
+    actions.appendChild(buildModalAddToCart(product));
+    summary.appendChild(actions);
+    hero.appendChild(summary);
+    layout.appendChild(hero);
 
+    const details = document.createElement('section');
+    details.className = 'product-details-modal__section product-details-modal__details';
+    const detailsTitle = document.createElement('h3');
+    detailsTitle.className = 'modal__subtitle';
+    detailsTitle.textContent = 'Product details';
+    details.appendChild(detailsTitle);
+    const descriptionDiv = document.createElement('div');
+    descriptionDiv.className = 'modal__description rich-text-viewer';
     const descriptionHtml = typeof product.description_html === 'string' ? product.description_html.trim() : '';
     const descriptionText = typeof product.description === 'string' ? product.description.trim() : '';
-    if (descriptionHtml || descriptionText) {
-      const descriptionTitle = document.createElement('h3');
-      descriptionTitle.className = 'modal__subtitle';
-      descriptionTitle.textContent = 'Description';
-      container.appendChild(descriptionTitle);
-
-      const descriptionDiv = document.createElement('div');
-      descriptionDiv.className = 'modal__description rich-text-viewer';
-      if (descriptionHtml) {
-        descriptionDiv.innerHTML = descriptionHtml;
-      } else {
-        descriptionDiv.textContent = descriptionText;
-      }
-      container.appendChild(descriptionDiv);
+    if (descriptionHtml) {
+      descriptionDiv.innerHTML = descriptionHtml;
+    } else {
+      descriptionDiv.textContent = descriptionText || 'No product details are available yet.';
     }
+    details.appendChild(descriptionDiv);
+    layout.appendChild(details);
+
+    const related = document.createElement('div');
+    related.className = 'product-details-modal__related-grid';
+    related.appendChild(buildRecommendationSection('Cross-sell items', product.cross_sell_products || []));
+    related.appendChild(buildRecommendationSection('Up-sell items', product.upsell_products || []));
+    layout.appendChild(related);
+
+    container.appendChild(layout);
   }
 
   function bindShopSearch(container) {
@@ -281,31 +452,37 @@
 
     bindModalDismissal(detailsModal);
 
-    container.querySelectorAll('[data-product-details]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const id = Number(button.getAttribute('data-product-details'));
-        if (refreshForm) {
-          if (Number.isFinite(id) && id > 0) {
-            refreshForm.action = `/shop/admin/product/${id}/refresh-description`;
-            refreshForm.hidden = false;
-          } else {
-            refreshForm.removeAttribute('action');
-            refreshForm.hidden = true;
-          }
+    async function openProductDetails(id) {
+      if (refreshForm) {
+        if (Number.isFinite(id) && id > 0) {
+          refreshForm.action = `/shop/admin/product/${id}/refresh-description`;
+          refreshForm.hidden = false;
+        } else {
+          refreshForm.removeAttribute('action');
+          refreshForm.hidden = true;
         }
+      }
+      renderProductDetails(null);
+      openModal(detailsModal);
+      if (!Number.isFinite(id) || id <= 0) {
+        return;
+      }
+      try {
+        const product = await fetchProductDetails(id);
+        renderProductDetails(product);
+      } catch (error) {
+        console.error('Unable to load product details', error);
         renderProductDetails(null);
-        openModal(detailsModal);
-        if (!Number.isFinite(id) || id <= 0) {
-          return;
-        }
-        try {
-          const product = await fetchProductDetails(id);
-          renderProductDetails(product);
-        } catch (error) {
-          console.error('Unable to load product details', error);
-          renderProductDetails(null);
-        }
-      });
+      }
+    }
+
+    container.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-product-details]');
+      if (!button) {
+        return;
+      }
+      event.preventDefault();
+      openProductDetails(Number(button.getAttribute('data-product-details')));
     });
   });
 })();

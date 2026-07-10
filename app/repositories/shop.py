@@ -2012,6 +2012,10 @@ async def _fetch_recommendation_map(
             p.name,
             p.sku,
             p.archived,
+            p.image_url,
+            p.price,
+            p.vip_price,
+            p.stock,
             p.category_id,
             c.name AS category_name
         FROM {table_name} AS rel
@@ -2033,6 +2037,10 @@ async def _fetch_recommendation_map(
             "id": related_id,
             "name": row.get("name"),
             "sku": row.get("sku"),
+            "image_url": row.get("image_url"),
+            "price": _coerce_decimal(row.get("price")),
+            "vip_price": _coerce_decimal(row.get("vip_price")),
+            "stock": _coerce_int(row.get("stock"), default=0),
             "category_id": _coerce_optional_int(row.get("category_id")),
             "category_name": row.get("category_name"),
             "archived": bool(_coerce_int(row.get("archived"), default=0)),
