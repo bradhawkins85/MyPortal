@@ -61,6 +61,7 @@ class ProductFilters:
     category_ids: list[int] | None = None
     search_term: str | None = None
     in_stock_only: bool = False
+    include_out_of_stock: bool = False
     limit: int | None = None
     offset: int | None = None
     sort: str = "name_asc"
@@ -342,7 +343,7 @@ async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
         conditions.append(f"p.category_id IN ({placeholders})")
         params.extend(filters.category_ids)
     _append_product_search_filter(conditions, params, filters.search_term)
-    if not include_out_of_stock:
+    if not filters.include_out_of_stock:
         conditions.append("p.stock > 0")
 
     if conditions:
@@ -419,7 +420,7 @@ async def list_products_summary(filters: ProductFilters) -> list[dict[str, Any]]
         conditions.append(f"p.category_id IN ({placeholders})")
         params.extend(filters.category_ids)
     _append_product_search_filter(conditions, params, filters.search_term)
-    if not include_out_of_stock:
+    if not filters.include_out_of_stock:
         conditions.append("p.stock > 0")
 
     if conditions:
@@ -476,7 +477,7 @@ async def count_products(filters: ProductFilters) -> int:
         conditions.append(f"p.category_id IN ({placeholders})")
         params.extend(filters.category_ids)
     _append_product_search_filter(conditions, params, filters.search_term)
-    if not include_out_of_stock:
+    if not filters.include_out_of_stock:
         conditions.append("p.stock > 0")
 
     if conditions:

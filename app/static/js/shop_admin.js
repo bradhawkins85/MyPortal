@@ -549,6 +549,42 @@
       });
     }
 
+    const adminProductSearch = document.querySelector('[data-admin-product-search]');
+    let adminProductSearchTimer = null;
+
+    function updateAdminProductSearch() {
+      if (!adminProductSearch) {
+        return;
+      }
+      const url = new URL(window.location.href);
+      const searchTerm = adminProductSearch.value.trim();
+      if (searchTerm) {
+        url.searchParams.set('search', searchTerm);
+      } else {
+        url.searchParams.delete('search');
+      }
+      url.searchParams.delete('page');
+      window.location.href = url.toString();
+    }
+
+    if (adminProductSearch) {
+      adminProductSearch.addEventListener('input', () => {
+        if (adminProductSearchTimer) {
+          window.clearTimeout(adminProductSearchTimer);
+        }
+        adminProductSearchTimer = window.setTimeout(updateAdminProductSearch, 450);
+      });
+      adminProductSearch.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          if (adminProductSearchTimer) {
+            window.clearTimeout(adminProductSearchTimer);
+          }
+          updateAdminProductSearch();
+        }
+      });
+    }
+
     if (stockFilter) {
       stockFilter.addEventListener('change', applyFilters);
     }
