@@ -165,7 +165,7 @@
               {% if product.is_package %}
                 <span class="package-thumb" aria-hidden="true">🎁</span>
               {% elif product.image_url %}
-                <button type="button" class="link-button" data-image-preview data-image-url="{{ product.image_url }}">
+                <button type="button" class="link-button" data-product-details="{{ product.id }}" aria-label="View details for {{ product.name }}">
                   <img src="{{ product.image_url }}" alt="" class="product-thumb" loading="lazy" />
                 </button>
               {% else %}
@@ -173,7 +173,7 @@
               {% endif %}
             </div>
             <div class="shop-product-card__body">
-              <h3 class="shop-product-card__title" title="{{ product.name }}" data-shop-safe-title>{{ product.name }}</h3>
+              <h3 class="shop-product-card__title" title="{{ product.name }}" data-shop-safe-title data-min-visible-chars="{{ shop_product_name_min_visible_chars }}">{{ product.name }}</h3>
               <p class="shop-product-card__sku">{{ product.sku }}</p>
               {% if product.is_package %}
                 {% set item_count = product.get('items', []) | sum(attribute='quantity') %}
@@ -231,15 +231,6 @@
   </section>
 </div>
 
-<div class="modal" id="product-image-modal" role="dialog" aria-modal="true" hidden>
-  <div class="modal__content" role="document">
-    <button type="button" class="modal__close" data-modal-close>
-      <span class="visually-hidden">Close image preview</span>
-      &times;
-    </button>
-    <img src="" alt="Selected product image" id="product-image-preview" />
-  </div>
-</div>
 
 <div class="modal" id="product-details-modal" role="dialog" aria-modal="true" hidden>
   <div class="modal__content" role="document">

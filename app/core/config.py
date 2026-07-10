@@ -130,6 +130,12 @@ class Settings(BaseSettings):
     shop_webhook_api_key: str | None = Field(
         default=None, validation_alias="SHOP_WEBHOOK_API_KEY"
     )
+    shop_product_name_min_visible_chars: int = Field(
+        default=24,
+        validation_alias="SHOP_PRODUCT_NAME_MIN_VISIBLE_CHARS",
+        ge=1,
+        le=120,
+    )
     quote_expiry_days: int = Field(
         default=7, validation_alias="QUOTE_EXPIRY_DAYS", ge=1
     )

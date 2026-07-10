@@ -10915,6 +10915,7 @@ a.stat-strip__stat:focus-visible {
   grid-template-columns: repeat(auto-fill, minmax(min(16rem, 100%), 1fr));
   gap: var(--space-gap-base);
   align-content: start;
+  grid-auto-rows: 1fr;
 }
 
 .shop-card-grid--categories {
@@ -10996,6 +10997,8 @@ a.stat-strip__stat:focus-visible {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 24rem;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -11064,5 +11067,9 @@ a.stat-strip__stat:focus-visible {
 
   .shop-product-card__media {
     min-height: 8rem;
+  }
+
+  .shop-product-card {
+    min-height: 22rem;
   }
 }
