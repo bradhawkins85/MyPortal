@@ -598,5 +598,60 @@ class TestFindExistingTicket:
         assert "%alice@example.com%" in captured["params"]
 
 
+
+def test_long_email_external_references_are_compacted_for_ticket_columns():
+    from app.services.imap import (
+        _expand_ticket_external_references,
+        _normalise_ticket_external_reference,
+    )
+
+    long_reference = "<" + "a" * 180 + "@example.com>"
+
+    stored = _normalise_ticket_external_reference(long_reference)
+
+    assert stored is not None
+    assert len(stored) == 128
+    assert ":sha256:" in stored
+    assert len(stored.rsplit(":sha256:", 1)[1]) == 32
+    assert long_reference in _expand_ticket_external_references([long_reference])
+    assert stored in _expand_ticket_external_references([long_reference])
+
+
+def test_short_email_external_references_are_stored_unchanged():
+    from app.services.imap import _normalise_ticket_external_reference
+
+    assert _normalise_ticket_external_reference("<short@example.com>") == "<short@example.com>"
+
+
+@pytest.mark.anyio
+async def test_add_email_cc_watchers_adds_users_and_external_addresses(monkeypatch):
+    """Original CC recipients should become ticket watchers for future replies."""
+    from app.services import imap
+
+    added: list[tuple[int, int | None, str | None]] = []
+
+    async def fake_get_user_by_email(email: str):
+        if email == "known@example.com":
+            return {"id": 42, "email": email}
+        return None
+
+    async def fake_add_watcher(ticket_id: int, user_id=None, email=None):
+        added.append((ticket_id, user_id, email))
+
+    monkeypatch.setattr(imap.users_repo, "get_user_by_email", fake_get_user_by_email)
+    monkeypatch.setattr(imap.tickets_repo, "add_watcher", fake_add_watcher)
+
+    await imap._add_email_cc_watchers(
+        123,
+        ["Known@Example.com", "external@example.com", "known@example.com", "requester@example.com"],
+        exclude_addresses=["requester@example.com"],
+    )
+
+    assert added == [
+        (123, 42, None),
+        (123, None, "external@example.com"),
+    ]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
