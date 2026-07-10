@@ -438,6 +438,19 @@ class Settings(BaseSettings):
         default=True,
         validation_alias="MCP_READONLY",
     )
+    general_rate_limit: int = Field(
+        default=1200,
+        validation_alias="GENERAL_RATE_LIMIT",
+        ge=1,
+        description="Maximum general HTTP requests per rate-limit window per session or IP.",
+    )
+    general_rate_limit_window_seconds: int = Field(
+        default=60,
+        validation_alias="GENERAL_RATE_LIMIT_WINDOW_SECONDS",
+        ge=1,
+        description="Window in seconds for the general HTTP request rate limit.",
+    )
+
     mcp_rate_limit: int = Field(
         default=60,
         validation_alias="MCP_RATE_LIMIT",

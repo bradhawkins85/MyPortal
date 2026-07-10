@@ -134,10 +134,17 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         *,
         rate_limiter: SimpleRateLimiter,
         exempt_paths: Iterable[str] | None = None,
+        key_func: Callable[[Request], str] | None = None,
     ) -> None:
         super().__init__(app)
         self.rate_limiter = rate_limiter
         self.exempt_paths = tuple(exempt_paths or ())
+        self.key_func = key_func or self._default_key_func
+
+    @staticmethod
+    def _default_key_func(request: Request) -> str:
+        client_ip = get_client_ip(request, default="anonymous")
+        return f"ip:{client_ip or 'anonymous'}"
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -145,8 +152,9 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         client_ip = get_client_ip(request, default="anonymous")
+        key = self.key_func(request)
 
-        allowed, retry_after = await self.rate_limiter.check(client_ip or "anonymous")
+        allowed, retry_after = await self.rate_limiter.check(key)
         if not allowed:
             log_warning(
                 "Rate limit exceeded",
