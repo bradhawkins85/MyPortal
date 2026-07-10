@@ -1060,3 +1060,15 @@ async def test_resolve_existing_reply_author_id_preserves_resolved_requester_id(
     )
 
     assert author_id == 99
+
+
+def test_m365_graph_recipient_extraction_normalizes_addresses():
+    from app.services import m365_mail
+
+    assert m365_mail._extract_graph_recipient_addresses(
+        [
+            {"emailAddress": {"address": "CC.One@Example.com"}},
+            {"emailAddress": {"address": " cc.two@example.com "}},
+            {"emailAddress": {"address": ""}},
+        ]
+    ) == ["cc.one@example.com", "cc.two@example.com"]

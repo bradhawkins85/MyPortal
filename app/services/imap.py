@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import email
+import hashlib
 import imaplib
 import io
 import json
@@ -30,7 +31,45 @@ from app.services import tickets as tickets_service
 from app.services.sanitization import sanitize_rich_text
 
 _MAX_FETCH_BYTES = 5 * 1024 * 1024
+_MAX_TICKET_EXTERNAL_REFERENCE_CHARS = 128
 _CID_REFERENCE_PATTERN = re.compile(r"(?i)cid:([^\"'>\s]+)")
+
+
+def _normalise_ticket_external_reference(value: str | None) -> str | None:
+    """Return a database-safe external reference for tickets/replies.
+
+    The ticket_replies.external_reference column is limited to 128 characters.
+    RFC 5322 Message-ID values and Graph internetMessageId values can exceed
+    that limit, especially for Exchange Online replies.  Store short values as
+    they are; for long values, keep a recognizable prefix and append a stable
+    hash so imports remain idempotent and future References/In-Reply-To lookups
+    can match the compacted value.
+    """
+
+    reference = _normalise_string(value)
+    if not reference:
+        return None
+    if len(reference) <= _MAX_TICKET_EXTERNAL_REFERENCE_CHARS:
+        return reference
+
+    digest = hashlib.sha256(reference.encode("utf-8")).hexdigest()[:32]
+    suffix = f":sha256:{digest}"
+    prefix_length = _MAX_TICKET_EXTERNAL_REFERENCE_CHARS - len(suffix)
+    return f"{reference[:prefix_length]}{suffix}"
+
+
+def _expand_ticket_external_references(values: list[str] | None) -> list[str]:
+    """Return raw and compacted reference variants without duplicates."""
+
+    references: list[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        for candidate in (value, _normalise_ticket_external_reference(value)):
+            reference = _normalise_string(candidate)
+            if reference and reference not in seen:
+                references.append(reference)
+                seen.add(reference)
+    return references
 
 
 def _redact_account(account: Mapping[str, Any]) -> dict[str, Any]:
@@ -392,6 +431,54 @@ def _build_attachment_only_reply_body(
         "<p>Email reply received with attachment(s), but no message body was "
         f"available after sanitisation.{detail_html}</p>"
     )
+
+async def _add_email_cc_watchers(
+    ticket_id: int,
+    cc_addresses: list[str],
+    *,
+    exclude_addresses: list[str] | None = None,
+) -> None:
+    """Add original email CC recipients as ticket watchers.
+
+    Inbound mail often includes interested customer contacts in Cc.  Persisting
+    them as watchers allows those contacts to reply later and ensures future
+    ticket notifications include the same audience.  Addresses are normalized,
+    de-duplicated, and added idempotently by local user id when possible, or by
+    email address otherwise.
+    """
+
+    excluded = {
+        _normalise_email_address(address)
+        for address in (exclude_addresses or [])
+        if _normalise_email_address(address)
+    }
+    seen: set[str] = set()
+    for raw_address in cc_addresses:
+        address = _normalise_email_address(raw_address)
+        if not address or address in seen or address in excluded:
+            continue
+        seen.add(address)
+
+        user_id: int | None = None
+        try:
+            user = await users_repo.get_user_by_email(address)
+        except Exception:
+            user = None
+        if user:
+            user_id = _extract_record_id(user)
+
+        try:
+            if user_id is not None:
+                await tickets_repo.add_watcher(ticket_id, user_id=user_id)
+            else:
+                await tickets_repo.add_watcher(ticket_id, email=address)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error(
+                "Failed to add email CC recipient as ticket watcher",
+                ticket_id=ticket_id,
+                email=address,
+                error=str(exc),
+            )
 
 
 def _extract_domains(addresses: list[str]) -> list[str]:
@@ -1204,7 +1291,7 @@ async def _find_existing_ticket_for_reply(
     Returns:
         Ticket record if found, None otherwise
     """
-    related_ids = [message_id for message_id in related_message_ids or [] if message_id]
+    related_ids = _expand_ticket_external_references(related_message_ids)
 
     if related_ids:
         from app.repositories.tickets import _normalise_ticket
@@ -1785,13 +1872,19 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         status=None,
                         category="email",
                         module_slug="imap",
-                        external_reference=message_id,
+                        external_reference=_normalise_ticket_external_reference(message_id),
                         initial_reply_author_id=requester_id,
                         requester_email=from_email_addr if requester_id is None else None,
                     )
                     is_new_ticket = True
                     ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None
                     if ticket_id is not None:
+                        cc_addresses = _extract_email_addresses(message.get("Cc"))
+                        await _add_email_cc_watchers(
+                            int(ticket_id),
+                            cc_addresses,
+                            exclude_addresses=[from_email_addr] if from_email_addr else None,
+                        )
                         try:
                             await tickets_service.refresh_ticket_ai_summary(int(ticket_id))
                         except RuntimeError:
@@ -1845,7 +1938,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 author_id=reply_author_id,
                                 body=reply_body,
                                 is_internal=False,
-                                external_reference=message_id if message_id else None,
+                                external_reference=_normalise_ticket_external_reference(message_id),
                                 created_at=reply_created_at,
                             )
                             reply_added = True
