@@ -11002,6 +11002,27 @@ a.stat-strip__stat:focus-visible {
   overflow: hidden;
 }
 
+a.shop-product-card {
+  color: inherit;
+  text-decoration: none;
+}
+
+.shop-product-card--navigation {
+  border-color: rgba(56, 189, 248, 0.32);
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.shop-product-card--navigation:hover,
+.shop-product-card--navigation:focus-visible {
+  transform: translateY(-2px);
+  border-color: rgba(56, 189, 248, 0.45);
+  background: rgba(15, 23, 42, 0.62);
+}
+
+.shop-product-card__media--navigation {
+  background: rgba(56, 189, 248, 0.12);
+}
+
 .shop-product-card__media {
   min-height: 10rem;
   padding: var(--space-gap-base);
