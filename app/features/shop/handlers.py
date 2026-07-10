@@ -339,8 +339,6 @@ async def shop_page(
 
         products.sort(key=lambda entry: str(entry.get("name") or "").lower())
         total_count = len(products)
-        offset = (page - 1) * page_size
-        products = products[offset: offset + page_size]
     else:
         if show_featured:
             products = _prepare_customer_products(
@@ -377,8 +375,6 @@ async def shop_page(
             products = _prepare_customer_products(await shop_repo.list_products_summary(filters))
 
         total_count = len(products)
-        offset = (page - 1) * page_size
-        products = products[offset: offset + page_size]
 
     products = _strip_internal_shop_product_fields(products)
     products = cast(list[dict[str, Any]], _main()._serialise_for_json(products))
@@ -460,9 +456,9 @@ async def shop_page(
         ),
         "active_subscription_product_ids": active_subscription_product_ids,
         "total_count": total_count,
-        "page": page,
-        "page_size": page_size,
-        "total_pages": max(1, math.ceil(total_count / page_size)) if page_size else 1,
+        "page": 1,
+        "page_size": total_count,
+        "total_pages": 1,
     }
     return await _main()._render_template("shop/index.html", request, user, extra=extra)
 
