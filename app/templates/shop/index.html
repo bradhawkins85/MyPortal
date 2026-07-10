@@ -64,13 +64,23 @@
       <span class="shop-categories__icon shop-categories__icon--packages" aria-hidden="true"></span>
       <span>Packages</span>
     </a>
+    <a
+      class="shop-categories__link {% if current_category == 'featured' %}is-active{% endif %}"
+      href="{{ request.url_for('shop_page') }}{{ shop_query('featured') }}"
+      {% if current_category == 'featured' %}aria-current="page"{% endif %}
+    >
+      <span class="shop-categories__icon shop-categories__icon--featured" aria-hidden="true"></span>
+      <span>Featured</span>
+    </a>
     <div class="shop-category-select-wrapper">
       <select
         class="form-input shop-category-select"
         aria-label="Select product category"
         onchange="(function(selectEl){var raw=selectEl.options[selectEl.selectedIndex].getAttribute('data-url');if(!raw){return;}try{var parsed=new URL(raw, window.location.origin);if((parsed.protocol==='http:'||parsed.protocol==='https:')&&parsed.origin===window.location.origin){window.location.assign(parsed.pathname+parsed.search+parsed.hash);}}catch(e){}})(this);"
       >
-        <option data-url="{{ request.url_for('shop_page') }}{{ shop_query() }}" {% if not current_category or current_category == 'packages' %}selected{% endif %}>All products</option>
+        <option data-url="{{ request.url_for('shop_page') }}{{ shop_query() }}" {% if not current_category %}selected{% endif %}>Product categories</option>
+        <option data-url="{{ request.url_for('shop_page') }}{{ shop_query('packages') }}" {% if current_category == 'packages' %}selected{% endif %}>Packages</option>
+        <option data-url="{{ request.url_for('shop_page') }}{{ shop_query('featured') }}" {% if current_category == 'featured' %}selected{% endif %}>Featured</option>
         {% for category in categories %}
           {% if category.children %}
             <option data-url="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}" {% if current_category == category.id %}selected{% endif %}>{{ category.name }}</option>
@@ -88,7 +98,7 @@
   <section class="card card--panel shop-layout__content">
     <header class="card__header">
       <div>
-        <h2 class="card__title">{{ 'Available packages' if show_packages else 'Available products' }}</h2>
+        <h2 class="card__title">{{ 'Product categories' if showing_category_cards else 'Available packages' if show_packages else 'Featured products' if show_featured else 'Available products' }}</h2>
       </div>
       <div class="card__controls shop-toolbar">
         <form method="get" action="{{ request.url_for('shop_page') }}" class="shop-search-form" role="search">
@@ -105,147 +115,102 @@
             type="search"
             name="q"
             class="form-input card__control"
-            placeholder="{{ 'Search packages' if show_packages else 'Search products' }}"
-            aria-label="{{ 'Search packages' if show_packages else 'Search products' }}"
+            placeholder="{{ 'Search packages' if show_packages else 'Search featured products' if show_featured else 'Search products' }}"
+            aria-label="{{ 'Search packages' if show_packages else 'Search featured products' if show_featured else 'Search products' }}"
             value="{{ search_term or '' }}"
             data-shop-search
           />
         </form>
       </div>
     </header>
-    <div class="table-wrapper">
-      <table class="table" id="shop-table" data-table data-table-id="shop">
-        <thead>
-          <tr>
-            <th scope="col" data-mobile-priority="supporting">Image</th>
-            <th scope="col" data-sort="string" data-mobile-priority="essential">Name</th>
-            <th scope="col" data-sort="string" data-mobile-priority="supporting">SKU</th>
-            <th scope="col" data-sort="number" data-mobile-priority="essential">Price</th>
-            <th scope="col" data-sort="number" data-mobile-priority="essential">Stock</th>
-            <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for product in products %}
-            {% if product.is_package %}
-              <tr data-package-id="{{ product.id }}" data-stock="{{ product.stock }}">
-                <td data-label="Image">
-                  <span class="package-thumb" aria-hidden="true">🎁</span>
-                  <span class="visually-hidden">Package</span>
-                </td>
-                <td data-label="Name">
-                  <div class="package-name">
-                    {% set item_count = product.get('items', []) | sum(attribute='quantity') %}
-                    {% if item_count == 0 %}
-                      {% set item_count = product.product_count %}
-                    {% endif %}
-                    <strong>{{ product.name }}</strong>
-                    <p class="package-meta">
-                      Includes {{ product.product_count }} {{ 'product' if product.product_count == 1 else 'products' }}
-                      ({{ item_count }} {{ 'item' if item_count == 1 else 'items' }})
-                    </p>
-                    <details class="package-details">
-                      <summary>Included products</summary>
-                      <ul class="list list--bullet">
-                        {% for item in product.get('items', []) %}
-                          <li>{{ item.product_name }} ({{ item.product_sku }}) × {{ item.quantity }}</li>
-                        {% endfor %}
-                      </ul>
-                    </details>
-                  </div>
-                </td>
-                <td data-label="SKU">{{ product.sku }}</td>
-                <td data-label="Price" data-value="{{ product.price }}">${{ '%.2f'|format(product.price) }}</td>
-                <td data-label="Stock" data-value="{{ product.stock }}">
-                  {{ stock_helpers.stock_status_badge(product.stock, low_stock_threshold) }}
-                </td>
-                <td class="table__actions">
-                  <div class="table__action-buttons">
-                    {% if product.stock > 0 %}
-                      {% if cart_allowed %}
-                        <form action="/cart/add-package" method="post" class="inline-form">
-                          {% include "partials/csrf.html" %}
-                          <input type="hidden" name="packageId" value="{{ product.id }}" />
-                          <label class="visually-hidden" for="package-qty-{{ product.id }}">Quantity for {{ product.name }}</label>
-                          <input
-                            class="form-input form-input--sm"
-                            id="package-qty-{{ product.id }}"
-                            type="number"
-                            name="quantity"
-                            min="1"
-                            max="{{ product.stock }}"
-                            value="1"
-                            data-stock-limit="{{ product.stock }}"
-                          />
-                          <button type="submit" class="button">Add to cart</button>
-                        </form>
-                      {% endif %}
-                    {% else %}
-                      <span class="badge badge--muted">Out of stock</span>
-                    {% endif %}
-                  </div>
-                </td>
-              </tr>
-            {% else %}
-              <tr data-product-id="{{ product.id }}" data-stock="{{ product.stock }}">
-                <td data-label="Image">
-                  {% if product.image_url %}
-                    <button type="button" class="link-button" data-image-preview data-image-url="{{ product.image_url }}">
-                      <img src="{{ product.image_url }}" alt="" class="product-thumb" loading="lazy" />
-                    </button>
-                  {% else %}
-                    <span class="text-muted">—</span>
-                  {% endif %}
-                </td>
-                <td data-label="Name">{{ product.name }}</td>
-                <td data-label="SKU">{{ product.sku }}</td>
-                <td data-label="Price" data-value="{{ product.price }}">${{ '%.2f'|format(product.price) }}</td>
-                <td data-label="Stock" data-value="{{ product.stock }}">
-                  {{ stock_helpers.stock_status_badge(product.stock, low_stock_threshold) }}
-                </td>
-                <td class="table__actions">
-                  <div class="table__action-buttons">
-                    <button type="button" class="button button--ghost" data-product-details="{{ product.id }}">Details</button>
-                    {% set is_subscription = product.subscription_category_id is not none %}
-                    {% set has_active_subscription = is_subscription and product.id in active_subscription_product_ids %}
-                    {% if has_active_subscription %}
-                      <a href="/subscriptions" class="button button--primary">Manage</a>
-                    {% elif product.stock > 0 %}
-                      {% if cart_allowed %}
-                        <form action="/cart/add" method="post" class="inline-form">
-                          {% include "partials/csrf.html" %}
-                          <input type="hidden" name="productId" value="{{ product.id }}" />
-                          <label class="visually-hidden" for="quantity-{{ product.id }}">Quantity for {{ product.name }}</label>
-                          <input
-                            class="form-input form-input--sm"
-                            id="quantity-{{ product.id }}"
-                            type="number"
-                            name="quantity"
-                            min="1"
-                            max="{{ product.stock }}"
-                            value="1"
-                            data-stock-limit="{{ product.stock }}"
-                          />
-                          <button type="submit" class="button">Add to cart</button>
-                        </form>
-                      {% endif %}
-                    {% else %}
-                      <span class="badge badge--muted">Out of stock</span>
-                    {% endif %}
-                  </div>
-                </td>
-              </tr>
-            {% endif %}
-          {% else %}
-            <tr>
-              <td colspan="6" class="table__empty">
-                {{ 'No packages are currently available.' if show_packages else 'No products are currently available.' }}
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+    {% if showing_category_cards %}
+      <div class="shop-card-grid shop-card-grid--categories">
+        <a class="shop-tile shop-tile--special" href="{{ request.url_for('shop_page') }}{{ shop_query('packages') }}">
+          <span class="shop-tile__media shop-tile__media--icon" aria-hidden="true">🎁</span>
+          <span class="shop-tile__body">
+            <strong class="shop-tile__title">Packages</strong>
+            <span class="shop-tile__meta">Bundled products ready to order</span>
+          </span>
+        </a>
+        <a class="shop-tile shop-tile--special" href="{{ request.url_for('shop_page') }}{{ shop_query('featured') }}">
+          <span class="shop-tile__media shop-tile__media--icon" aria-hidden="true">⭐</span>
+          <span class="shop-tile__body">
+            <strong class="shop-tile__title">Featured</strong>
+            <span class="shop-tile__meta">Products highlighted for your company</span>
+          </span>
+        </a>
+        {% for category in category_cards %}
+          <a class="shop-tile" href="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}">
+            <span class="shop-tile__media">
+              {% if category.image_url %}
+                <img src="{{ category.image_url }}" alt="" loading="lazy" />
+              {% else %}
+                <span class="shop-tile__placeholder" aria-hidden="true">🗂</span>
+              {% endif %}
+            </span>
+            <span class="shop-tile__body">
+              <strong class="shop-tile__title">{{ category.name }}</strong>
+              <span class="shop-tile__meta">View products</span>
+            </span>
+          </a>
+        {% else %}
+          <p class="text-muted">No product categories are currently available.</p>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="shop-card-grid">
+        {% for product in products %}
+          <article class="shop-product-card" {% if product.is_package %}data-package-id="{{ product.id }}"{% else %}data-product-id="{{ product.id }}"{% endif %} data-stock="{{ product.stock }}">
+            <div class="shop-product-card__media">
+              {% if product.is_package %}
+                <span class="package-thumb" aria-hidden="true">🎁</span>
+              {% elif product.image_url %}
+                <button type="button" class="link-button" data-image-preview data-image-url="{{ product.image_url }}">
+                  <img src="{{ product.image_url }}" alt="" class="product-thumb" loading="lazy" />
+                </button>
+              {% else %}
+                <span class="shop-product-card__placeholder" aria-hidden="true">🛍</span>
+              {% endif %}
+            </div>
+            <div class="shop-product-card__body">
+              <h3 class="shop-product-card__title" title="{{ product.name }}" data-shop-safe-title>{{ product.name }}</h3>
+              <p class="shop-product-card__sku">{{ product.sku }}</p>
+              {% if product.is_package %}
+                {% set item_count = product.get('items', []) | sum(attribute='quantity') %}
+                {% if item_count == 0 %}{% set item_count = product.product_count %}{% endif %}
+                <p class="package-meta">Includes {{ product.product_count }} {{ 'product' if product.product_count == 1 else 'products' }} ({{ item_count }} {{ 'item' if item_count == 1 else 'items' }})</p>
+              {% endif %}
+              <div class="shop-product-card__meta">
+                <strong>${{ '%.2f'|format(product.price) }}</strong>
+                {{ stock_helpers.stock_status_badge(product.stock, low_stock_threshold) }}
+              </div>
+            </div>
+            <div class="shop-product-card__actions">
+              {% if not product.is_package %}
+                <button type="button" class="button button--ghost" data-product-details="{{ product.id }}">Details</button>
+              {% endif %}
+              {% set is_subscription = product.subscription_category_id is defined and product.subscription_category_id is not none %}
+              {% set has_active_subscription = is_subscription and product.id in active_subscription_product_ids %}
+              {% if has_active_subscription %}
+                <a href="/subscriptions" class="button button--primary">Manage</a>
+              {% elif product.stock > 0 and cart_allowed %}
+                <form action="{{ '/cart/add-package' if product.is_package else '/cart/add' }}" method="post" class="inline-form shop-product-card__cart">
+                  {% include "partials/csrf.html" %}
+                  <input type="hidden" name="{{ 'packageId' if product.is_package else 'productId' }}" value="{{ product.id }}" />
+                  <label class="visually-hidden" for="quantity-{{ 'package' if product.is_package else 'product' }}-{{ product.id }}">Quantity for {{ product.name }}</label>
+                  <input class="form-input form-input--sm" id="quantity-{{ 'package' if product.is_package else 'product' }}-{{ product.id }}" type="number" name="quantity" min="1" max="{{ product.stock }}" value="1" data-stock-limit="{{ product.stock }}" />
+                  <button type="submit" class="button">Add</button>
+                </form>
+              {% elif product.stock <= 0 %}
+                <span class="badge badge--muted">Out of stock</span>
+              {% endif %}
+            </div>
+          </article>
+        {% else %}
+          <p class="text-muted">{{ 'No packages are currently available.' if show_packages else 'No featured products are currently available.' if show_featured else 'No products are currently available.' }}</p>
+        {% endfor %}
+      </div>
+    {% endif %}
     {% if total_count > 0 %}
       <div class="table-pagination table-pagination--active">
         <div class="table-pagination__group">
