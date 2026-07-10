@@ -1315,15 +1315,11 @@ async def _find_existing_ticket_for_reply(
                     AND (
                         t.requester_id = %s
                         OR tw.user_id = %s
-                        OR EXISTS (
-                            SELECT 1 FROM users ru
-                            WHERE ru.id = t.requester_id AND LOWER(ru.email) = LOWER(%s)
-                        )
                         OR LOWER(u.email) = LOWER(%s)
                         OR LOWER(COALESCE(t.description, '')) LIKE LOWER(%s)
                     )
                 """
-                params.extend([requester_id, requester_id, from_email, from_email, f"%{from_email}%"])
+                params.extend([requester_id, requester_id, from_email, f"%{from_email}%"])
             else:
                 query += """
                     AND (t.requester_id = %s OR tw.user_id = %s)
