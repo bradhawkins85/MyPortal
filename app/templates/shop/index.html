@@ -9,6 +9,7 @@
 
 {% set is_shop_super_admin = is_super_admin | default(current_user and current_user.get('is_super_admin')) %}
 {% set show_packages = show_packages | default(false) %}
+{% set showing_product_category = (current_category is number) and not show_packages and not show_featured %}
 
 {% block header_title_content %}
   <div class="header__title-content">
@@ -159,6 +160,21 @@
       </div>
     {% else %}
       <div class="shop-card-grid">
+        {% if showing_product_category %}
+          <a class="shop-product-card shop-product-card--navigation" href="{{ request.url_for('shop_page') }}{{ shop_query() }}">
+            <span class="shop-product-card__media shop-product-card__media--navigation" aria-hidden="true">
+              <span class="shop-product-card__placeholder">🏪</span>
+            </span>
+            <span class="shop-product-card__body">
+              <strong class="shop-product-card__title">Main shop</strong>
+              <span class="shop-product-card__sku">All categories</span>
+              <span class="shop-product-card__meta">Return to the main shop page</span>
+            </span>
+            <span class="shop-product-card__actions">
+              <span class="button button--ghost" aria-hidden="true">Back</span>
+            </span>
+          </a>
+        {% endif %}
         {% for product in products %}
           <article class="shop-product-card" {% if product.is_package %}data-package-id="{{ product.id }}"{% else %}data-product-id="{{ product.id }}"{% endif %} data-stock="{{ product.stock }}">
             <div class="shop-product-card__media">
