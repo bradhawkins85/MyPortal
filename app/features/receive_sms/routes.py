@@ -174,9 +174,14 @@ async def receive_sms(payload: ReceiveSMSPayload, request: Request, api_key_reco
                 action = "reopened"
             else:
                 action = "appended"
+            author_id = ticket.get("requester_id")
+            if author_id is None:
+                contact = await _find_contact(payload.from_number)
+                author_id = contact.get("requester_id")
             await tickets_repo.create_reply(
-                ticket_id=int(ticket["id"]), author_id=ticket.get("requester_id"), body=body,
+                ticket_id=int(ticket["id"]), author_id=author_id, body=body,
                 is_internal=False, external_reference=f"sms:{normalised_phone}:{sms_at.isoformat()}", created_at=sms_at,
+                author_display_name=(payload.name or payload.from_number) if author_id is None else None,
             )
         else:
             contact = await _find_contact(payload.from_number)

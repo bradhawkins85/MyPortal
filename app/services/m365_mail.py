@@ -1523,6 +1523,8 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                         _normalise_ticket_external_reference(internet_msg_id)
                                     ),
                                     created_at=reply_created_at,
+                                    author_email=from_email_addr if reply_author_id is None else None,
+                                    author_display_name=(from_header or from_address) if reply_author_id is None else None,
                                 )
                                 reply_added = True
                                 log_info(

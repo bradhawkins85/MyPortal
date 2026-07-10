@@ -1230,6 +1230,8 @@ async def create_reply(
     external_reference: str | None = None,
     created_at: datetime | None = None,
     labour_type_id: int | None = None,
+    author_email: str | None = None,
+    author_display_name: str | None = None,
 ) -> TicketRecord:
     labour_type_id = await _default_labour_type_for_time_entry(minutes_spent, labour_type_id)
 
@@ -1249,6 +1251,14 @@ async def create_reply(
         1 if is_internal else 0,
         1 if is_billable else 0,
     ]
+    clean_author_email = str(author_email or "").strip() or None
+    clean_author_display_name = str(author_display_name or "").strip() or None
+    if clean_author_email is not None:
+        columns.append("author_email")
+        params.append(clean_author_email[:255])
+    if clean_author_display_name is not None:
+        columns.append("author_display_name")
+        params.append(clean_author_display_name[:255])
     if minutes_spent is not None:
         columns.append("minutes_spent")
         params.append(minutes_spent)
@@ -1310,6 +1320,8 @@ async def create_reply(
         "external_reference": external_reference,
         "created_at": created_at,
         "labour_type_id": labour_type_id,
+        "author_email": clean_author_email,
+        "author_display_name": clean_author_display_name,
     }
     return _normalise_reply(fallback_row)
 

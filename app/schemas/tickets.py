@@ -69,6 +69,8 @@ class TicketReply(BaseModel):
     id: int
     ticket_id: int
     author_id: Optional[int]
+    author_email: Optional[str] = None
+    author_display_name: Optional[str] = None
     body: str
     is_internal: bool
     minutes_spent: Optional[int] = Field(default=None, ge=0)

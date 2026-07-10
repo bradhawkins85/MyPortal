@@ -104,6 +104,8 @@ def test_receive_sms_existing_ticket_reply_refreshes_ai(monkeypatch):
             return {"id": 456, "requester_id": 11, "status": "open"}
 
         async def fake_create_reply(**kwargs):
+            assert kwargs["author_id"] == 11
+            assert kwargs["author_display_name"] is None
             calls.append(("reply", int(kwargs["ticket_id"])))
             return {"id": 99}
 
@@ -135,6 +137,51 @@ def test_receive_sms_existing_ticket_reply_refreshes_ai(monkeypatch):
         assert result["status"] == "appended"
         assert result["ticket_id"] == 456
         assert calls == [("reply", 456), ("summary", 456), ("tags", 456)]
+
+    asyncio.run(run_test())
+
+
+def test_receive_sms_existing_ticket_without_requester_stores_sender_snapshot(monkeypatch):
+    async def run_test():
+        created_kwargs = {}
+
+        async def fake_find_sms_ticket(*_args, **_kwargs):
+            return {"id": 456, "requester_id": None, "status": "open"}
+
+        async def fake_find_contact(*_args, **_kwargs):
+            return {"requester_id": None, "requester_staff_id": None, "company_id": None}
+
+        async def fake_create_reply(**kwargs):
+            created_kwargs.update(kwargs)
+            return {"id": 99}
+
+        async def fake_refresh(*_args, **_kwargs):
+            return None
+
+        async def fake_emit(*_args, **_kwargs):
+            return None
+
+        monkeypatch.setattr(receive_sms_routes, "_find_sms_ticket", fake_find_sms_ticket)
+        monkeypatch.setattr(receive_sms_routes, "_find_contact", fake_find_contact)
+        monkeypatch.setattr(receive_sms_routes.tickets_repo, "create_reply", fake_create_reply)
+        monkeypatch.setattr(receive_sms_routes.tickets_service, "refresh_ticket_ai_summary", fake_refresh)
+        monkeypatch.setattr(receive_sms_routes.tickets_service, "refresh_ticket_ai_tags", fake_refresh)
+        monkeypatch.setattr(receive_sms_routes.tickets_service, "emit_ticket_updated_event", fake_emit)
+
+        payload = receive_sms_routes.ReceiveSMSPayload(
+            type="SMSIn",
+            **{"from": "+61 400 123 456"},
+            name="Customer",
+            message="SGVsbG8=",
+            date="2026-06-16",
+            time="15:00",
+        )
+
+        result = await receive_sms_routes.receive_sms(payload, request=None, api_key_record={"id": 7})
+
+        assert result["status"] == "appended"
+        assert created_kwargs["author_id"] is None
+        assert created_kwargs["author_display_name"] == "Customer"
 
     asyncio.run(run_test())
 
