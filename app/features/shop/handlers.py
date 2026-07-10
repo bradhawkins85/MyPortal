@@ -1177,6 +1177,7 @@ async def admin_remove_package_item(
 async def admin_shop_page(
     request: Request,
     show_archived: bool = Query(False, alias="showArchived"),
+    search: str = Query("", alias="search"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, alias="pageSize", ge=1, le=200),
 ):
@@ -1191,9 +1192,12 @@ async def admin_shop_page(
         return redirect
     categories_task = asyncio.create_task(shop_repo.list_all_categories_flat())
     filter_categories_task = asyncio.create_task(shop_repo.list_categories_with_products())
+    search_term = search.strip()
     offset = (page - 1) * page_size
     filters = shop_repo.ProductFilters(
         include_archived=show_archived,
+        search_term=search_term or None,
+        include_out_of_stock=True,
         limit=page_size,
         offset=offset,
         sort="name_asc",
@@ -1246,6 +1250,7 @@ async def admin_shop_page(
         "products": products,
         "all_companies": companies,
         "show_archived": show_archived,
+        "search_term": search_term,
         "subscription_categories": subscription_categories,
         "total_count": total_count,
         "page": page,

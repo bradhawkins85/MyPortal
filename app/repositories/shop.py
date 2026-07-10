@@ -61,6 +61,7 @@ class ProductFilters:
     category_ids: list[int] | None = None
     search_term: str | None = None
     in_stock_only: bool = False
+    include_out_of_stock: bool = False
     limit: int | None = None
     offset: int | None = None
     sort: str = "name_asc"
