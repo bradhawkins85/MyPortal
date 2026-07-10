@@ -194,3 +194,41 @@ def test_general_rate_limiter_exempts_upload_paths():
     assert client.get("/api/data").status_code == 200
     assert client.get("/api/data").status_code == 200
     assert client.get("/api/data").status_code == 429
+
+
+def test_general_rate_limiter_uses_custom_key_func():
+    """General rate limits can be keyed by session instead of shared IP."""
+    app = FastAPI()
+
+    @app.get("/api/data")
+    async def get_data():
+        return JSONResponse({"status": "ok"})
+
+    def key_func(request: Request) -> str:
+        session = request.cookies.get("myportal_session")
+        return f"session:{session}" if session else "ip:anonymous"
+
+    app.add_middleware(
+        RateLimiterMiddleware,
+        rate_limiter=SimpleRateLimiter(limit=2, window_seconds=60),
+        key_func=key_func,
+    )
+
+    client = TestClient(app)
+
+    assert (
+        client.get("/api/data", cookies={"myportal_session": "one"}).status_code == 200
+    )
+    assert (
+        client.get("/api/data", cookies={"myportal_session": "one"}).status_code == 200
+    )
+    assert (
+        client.get("/api/data", cookies={"myportal_session": "one"}).status_code == 429
+    )
+
+    assert (
+        client.get("/api/data", cookies={"myportal_session": "two"}).status_code == 200
+    )
+    assert (
+        client.get("/api/data", cookies={"myportal_session": "two"}).status_code == 200
+    )

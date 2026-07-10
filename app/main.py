@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import math
 import random
@@ -696,8 +697,20 @@ def _password_reset_key(request: Request) -> str:
     except Exception:
         return get_client_ip(request, default="anonymous") or "anonymous"
 
-endpoint_limiter.add_limit("/api/auth/password/forgot", "POST", limit=3, window_seconds=3600, key_func=_password_reset_key)
-endpoint_limiter.add_limit("/auth/password/forgot", "POST", limit=3, window_seconds=3600, key_func=_password_reset_key)
+endpoint_limiter.add_limit(
+    "/api/auth/password/forgot",
+    "POST",
+    limit=3,
+    window_seconds=3600,
+    key_func=_password_reset_key,
+)
+endpoint_limiter.add_limit(
+    "/auth/password/forgot",
+    "POST",
+    limit=3,
+    window_seconds=3600,
+    key_func=_password_reset_key,
+)
 
 # File upload: 10 files per hour per user
 def _user_upload_key(request: Request) -> str:
@@ -712,9 +725,21 @@ upload_paths = [
     "/api/business-continuity/attachments",
 ]
 for path in upload_paths:
-    endpoint_limiter.add_limit(path, "POST", limit=10, window_seconds=3600, key_func=_user_upload_key)
+    endpoint_limiter.add_limit(
+        path, "POST", limit=10, window_seconds=3600, key_func=_user_upload_key
+    )
 
-# API calls: 300 requests per minute per user (applied via general rate limiter)
+# General HTTP traffic: per authenticated browser session, with IP fallback for
+# unauthenticated requests. Keying authenticated traffic by IP caused busy NATs,
+# office networks, and reverse proxies to share a single bucket across many users.
+def _general_rate_limit_key(request: Request) -> str:
+    session_token = request.cookies.get(settings.session_cookie_name)
+    if session_token:
+        digest = hashlib.sha256(session_token.encode("utf-8")).hexdigest()
+        return f"session:{digest}"
+    ip = get_client_ip(request, default="anonymous") or "anonymous"
+    return f"ip:{ip}"
+
 
 app.add_middleware(
     EndpointRateLimiterMiddleware,
@@ -723,15 +748,24 @@ app.add_middleware(
 )
 
 general_rate_limiter = SimpleRateLimiter(
-    limit=300,
-    window_seconds=60,
+    limit=settings.general_rate_limit,
+    window_seconds=settings.general_rate_limit_window_seconds,
     redis_client=_rate_limit_redis,
     namespace="rate-limit:general",
 )
 app.add_middleware(
     RateLimiterMiddleware,
     rate_limiter=general_rate_limiter,
-    exempt_paths=(SWAGGER_UI_PATH, PROTECTED_OPENAPI_PATH, "/static", "/uploads", "/health", "/healthz", "/readyz"),
+    exempt_paths=(
+        SWAGGER_UI_PATH,
+        PROTECTED_OPENAPI_PATH,
+        "/static",
+        "/uploads",
+        "/health",
+        "/healthz",
+        "/readyz",
+    ),
+    key_func=_general_rate_limit_key,
 )
 
 app.add_middleware(
