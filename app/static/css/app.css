@@ -11214,6 +11214,10 @@ a.shop-product-card {
   align-items: stretch;
 }
 
+.product-details-modal__related-grid--single {
+  grid-template-columns: 1fr;
+}
+
 .product-details-modal__media {
   display: flex;
   align-items: center;
