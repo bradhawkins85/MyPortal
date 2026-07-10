@@ -130,7 +130,7 @@ def configure_logging() -> None:
         return file_log_format + "\n"
 
     settings = get_settings()
-    log_level = "DEBUG" if settings.verbose_logging else "INFO"
+    log_level = settings.log_level or ("DEBUG" if settings.verbose_logging else "INFO")
 
     logger.add(sink=lambda msg: print(msg, end=""), format=_format_console_record, level=log_level)
     _configure_uvicorn_access_logging(verbose=settings.verbose_logging)

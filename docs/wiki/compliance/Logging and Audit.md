@@ -23,6 +23,7 @@ list. The most useful ones:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `FAIL2BAN_LOG_PATH` | _unset_ | Path to the main disk log file. When set, the application writes a structured Loguru sink that Fail2ban / SIEM tools can tail. |
+| `LOG_LEVEL` | `INFO` (`DEBUG` when `VERBOSE_LOGGING=true`) | Minimum level for server console and `APP_LOG_PATH` output. Set `WARNING` to exclude DEBUG and INFO entries. Accepted values: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. |
 | `LOG_ROTATION` | `50 MB` | Loguru rotation policy. Accepts a size (`50 MB`), an interval (`1 day`), or a clock time (`00:00`). Set empty to disable. |
 | `LOG_RETENTION` | `30 days` | How long rotated log files are kept. |
 | `LOG_COMPRESSION` | `gz` | Compression format for rotated files. Set empty to keep them uncompressed. |
