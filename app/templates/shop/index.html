@@ -196,6 +196,28 @@
 
 <div class="modal" id="product-details-modal" role="dialog" aria-modal="true" hidden>
   <div class="modal__content" role="document">
+    {% if is_shop_super_admin %}
+      <form
+        method="post"
+        class="modal__icon-action-form product-details-refresh-form"
+        data-product-refresh-form
+        hidden
+      >
+        {% include "partials/csrf.html" %}
+        <button
+          type="submit"
+          class="modal__icon-action product-details-refresh-form__button"
+          data-product-refresh-button
+          aria-label="Refresh product details"
+          title="Refresh product details"
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+            <path fill="currentColor" d="M17.65 6.35A7.95 7.95 0 0 0 12 4a8 8 0 1 0 7.45 5.08 1 1 0 1 0-1.86.74A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L14 10h6V4z" />
+          </svg>
+          <span class="visually-hidden">Refresh product details</span>
+        </button>
+      </form>
+    {% endif %}
     <button type="button" class="modal__close" data-modal-close>
       <span class="visually-hidden">Close product details</span>
       &times;
