@@ -36,6 +36,12 @@ _add(
     response_class=JSONResponse,
 )
 _add(
+    "/api/admin/shop/products/{product_id}/featured-companies",
+    handlers.admin_shop_product_featured_companies_api,
+    ["GET"],
+    response_class=JSONResponse,
+)
+_add(
     "/api/admin/shop/products/{product_id}",
     handlers.admin_shop_product_detail_api,
     ["GET"],
@@ -252,6 +258,12 @@ _add(
 _add(
     "/shop/admin/product/{product_id}/visibility",
     handlers.admin_update_shop_product_visibility,
+    ["POST"],
+    status_code=303,
+)
+_add(
+    "/shop/admin/product/{product_id}/featured",
+    handlers.admin_update_shop_product_featured_companies,
     ["POST"],
     status_code=303,
 )

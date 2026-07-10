@@ -462,6 +462,17 @@ async def admin_shop_product_restrictions_api(request: Request, product_id: int)
     return JSONResponse(content=cast(list[dict[str, Any]], _main()._serialise_for_json(restrictions)))
 
 
+async def admin_shop_product_featured_companies_api(request: Request, product_id: int):
+    from app.repositories import shop as shop_repo
+
+    _current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    featured_companies = await shop_repo.list_product_featured_companies_for_product(product_id)
+    return JSONResponse(content=cast(list[dict[str, Any]], _main()._serialise_for_json(featured_companies)))
+
+
 async def admin_shop_product_detail_api(request: Request, product_id: int):
     from app.repositories import shop as shop_repo
 
@@ -2637,6 +2648,58 @@ async def admin_update_shop_product_visibility(
         entity_id=product_id,
         before={"excluded_company_ids": sorted(int(cid) for cid in (product.get("excluded_company_ids") or []))},
         after={"excluded_company_ids": sorted(excluded_ids)},
+    )
+    return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
+
+
+async def admin_update_shop_product_featured_companies(
+    request: Request,
+    product_id: int,
+    featured: list[str] = Form(default=[]),
+):
+    from app.repositories import companies as company_repo
+    from app.repositories import shop as shop_repo
+    from app.services import audit as audit_service
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    product = await shop_repo.get_product_by_id(product_id, include_archived=True)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    featured_ids: set[int] = set()
+    for value in featured:
+        if value in (None, ""):
+            continue
+        try:
+            company_id = int(value)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company selection")
+        featured_ids.add(company_id)
+
+    for company_id in featured_ids:
+        company = await company_repo.get_company_by_id(company_id)
+        if not company:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected company does not exist")
+
+    before_featured = await shop_repo.list_product_featured_companies_for_product(product_id)
+    await shop_repo.replace_product_featured_companies(product_id, featured_ids)
+
+    _main().log_info(
+        "Shop product featured companies updated",
+        product_id=product_id,
+        featured_companies=sorted(featured_ids),
+        updated_by=current_user["id"] if current_user else None,
+    )
+    await audit_service.record(
+        action="shop.product.featured_change",
+        request=request,
+        entity_type="shop.product",
+        entity_id=product_id,
+        before={"featured_company_ids": sorted(int(row["company_id"]) for row in before_featured)},
+        after={"featured_company_ids": sorted(featured_ids)},
     )
     return RedirectResponse(url="/admin/shop", status_code=status.HTTP_303_SEE_OTHER)
 

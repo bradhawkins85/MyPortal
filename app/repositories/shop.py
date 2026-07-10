@@ -342,7 +342,7 @@ async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
         conditions.append(f"p.category_id IN ({placeholders})")
         params.extend(filters.category_ids)
     _append_product_search_filter(conditions, params, filters.search_term)
-    if filters.in_stock_only:
+    if not include_out_of_stock:
         conditions.append("p.stock > 0")
 
     if conditions:
@@ -419,7 +419,7 @@ async def list_products_summary(filters: ProductFilters) -> list[dict[str, Any]]
         conditions.append(f"p.category_id IN ({placeholders})")
         params.extend(filters.category_ids)
     _append_product_search_filter(conditions, params, filters.search_term)
-    if filters.in_stock_only:
+    if not include_out_of_stock:
         conditions.append("p.stock > 0")
 
     if conditions:
@@ -476,7 +476,7 @@ async def count_products(filters: ProductFilters) -> int:
         conditions.append(f"p.category_id IN ({placeholders})")
         params.extend(filters.category_ids)
     _append_product_search_filter(conditions, params, filters.search_term)
-    if filters.in_stock_only:
+    if not include_out_of_stock:
         conditions.append("p.stock > 0")
 
     if conditions:
@@ -965,6 +965,57 @@ async def list_product_restrictions_for_product(
             }
         )
     return restrictions
+
+
+async def list_product_featured_companies_for_product(
+    product_id: int,
+) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT f.product_id, f.company_id, c.name AS company_name
+        FROM shop_product_featured_companies AS f
+        INNER JOIN companies AS c ON c.id = f.company_id
+        WHERE f.product_id = %s
+        ORDER BY c.name
+        """,
+        (product_id,),
+    )
+    return [
+        {
+            "product_id": _coerce_int(row.get("product_id")),
+            "company_id": _coerce_int(row.get("company_id")),
+            "company_name": row.get("company_name") or "",
+        }
+        for row in rows
+    ]
+
+
+async def list_featured_products_for_company(
+    company_id: int,
+    *,
+    include_out_of_stock: bool = True,
+) -> list[dict[str, Any]]:
+    query_parts: list[str] = [
+        "SELECT",
+        "    p.*,",
+        "    c.name AS category_name",
+        "FROM shop_product_featured_companies AS f",
+        "INNER JOIN shop_products AS p ON p.id = f.product_id",
+        "LEFT JOIN shop_categories AS c ON c.id = p.category_id",
+        "LEFT JOIN shop_product_exclusions AS e ON e.product_id = p.id AND e.company_id = %s",
+        "WHERE f.company_id = %s",
+        "  AND p.archived = 0",
+        "  AND e.product_id IS NULL",
+    ]
+    params: list[Any] = [company_id, company_id]
+    if not include_out_of_stock:
+        query_parts.append("  AND p.stock > 0")
+    query_parts.append("ORDER BY p.name ASC")
+    rows = await db.fetch_all(" ".join(query_parts), tuple(params))
+    products = [_normalise_product(row) for row in rows]
+    products = await _attach_features_to_products(products)
+    await _populate_product_recommendations(products)
+    return products
 
 
 async def list_optional_accessory_products() -> list[dict[str, Any]]:
@@ -2064,6 +2115,32 @@ async def replace_product_exclusions(
                     values = [(product_id, company_id) for company_id in ids]
                     await cursor.executemany(
                         "INSERT INTO shop_product_exclusions (product_id, company_id) VALUES (%s, %s)",
+                        values,
+                    )
+            except Exception:
+                await conn.rollback()
+                raise
+            else:
+                await conn.commit()
+
+
+async def replace_product_featured_companies(
+    product_id: int,
+    featured_company_ids: Iterable[int],
+) -> None:
+    ids = sorted({int(company_id) for company_id in featured_company_ids})
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await conn.begin()
+            try:
+                await cursor.execute(
+                    "DELETE FROM shop_product_featured_companies WHERE product_id = %s",
+                    (product_id,),
+                )
+                if ids:
+                    values = [(product_id, company_id) for company_id in ids]
+                    await cursor.executemany(
+                        "INSERT INTO shop_product_featured_companies (product_id, company_id) VALUES (%s, %s)",
                         values,
                     )
             except Exception:

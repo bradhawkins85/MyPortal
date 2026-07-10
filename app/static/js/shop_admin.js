@@ -180,6 +180,19 @@
       return response.json();
     }
 
+    async function fetchProductFeaturedCompanies(productId) {
+      const response = await fetch(`/api/admin/shop/products/${productId}/featured-companies`, {
+        headers: {
+          Accept: 'application/json',
+        },
+        credentials: 'same-origin',
+      });
+      if (!response.ok) {
+        throw new Error(`Unable to load product featured companies (${response.status})`);
+      }
+      return response.json();
+    }
+
     async function lookupProductBySku(sku) {
       const cleaned = sku.trim();
       if (!cleaned) {
@@ -584,11 +597,14 @@
     const importModal = document.getElementById('import-product-modal');
     const editModal = document.getElementById('product-edit-modal');
     const visibilityModal = document.getElementById('product-visibility-modal');
+    const featuredModal = document.getElementById('product-featured-modal');
     const descriptionEditorModal = document.getElementById('description-editor-modal');
     const priceHistoryModal = document.getElementById('price-history-modal');
     const editForm = document.getElementById('product-edit-form');
     const visibilityForm = document.getElementById('product-visibility-form');
+    const featuredForm = document.getElementById('product-featured-form');
     const visibilityLoadingStatus = document.getElementById('product-visibility-loading-status');
+    const featuredLoadingStatus = document.getElementById('product-featured-loading-status');
     const imageFilenameDisplay = document.getElementById('edit-product-image-filename');
     const editLoadingStatus = document.getElementById('edit-product-loading-status');
     const editIdField = document.getElementById('edit-product-id');
@@ -889,6 +905,7 @@
     bindModalDismissal(importModal);
     bindModalDismissal(editModal);
     bindModalDismissal(visibilityModal);
+    bindModalDismissal(featuredModal);
     bindModalDismissal(priceHistoryModal);
 
     // Edit form SKU list managers (modal)
@@ -1065,6 +1082,39 @@
           checkbox.checked = selected.includes(value);
         });
         setLoadingStatus(visibilityLoadingStatus, '');
+        setFormLoadingState(form, false);
+      });
+    });
+
+    container.querySelectorAll('[data-product-featured]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const id = Number(button.getAttribute('data-product-featured'));
+        const form = featuredForm;
+        if (!form) {
+          return;
+        }
+        closeParentHeaderMenu(button);
+        form.action = `/shop/admin/product/${id}/featured`;
+        setLoadingStatus(featuredLoadingStatus, 'Loading featured product settings…');
+        setFormLoadingState(form, true);
+        openModal(featuredModal);
+
+        let featuredCompanies = [];
+        try {
+          featuredCompanies = await fetchProductFeaturedCompanies(id);
+        } catch (error) {
+          console.error('Unable to load product featured companies', error);
+          setLoadingStatus(featuredLoadingStatus, 'Unable to load featured product settings. Please try again.');
+          setFormLoadingState(form, false);
+          return;
+        }
+
+        const selected = featuredCompanies.map((entry) => Number(entry.company_id));
+        form.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+          const value = Number(checkbox.value);
+          checkbox.checked = selected.includes(value);
+        });
+        setLoadingStatus(featuredLoadingStatus, '');
         setFormLoadingState(form, false);
       });
     });

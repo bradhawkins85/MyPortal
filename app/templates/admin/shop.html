@@ -270,6 +270,7 @@
                        hidden>
                     <button type="button" class="header-menu__item" role="menuitem" data-product-edit="{{ product.id }}">Edit</button>
                     <button type="button" class="header-menu__item" role="menuitem" data-product-visibility="{{ product.id }}">Visibility</button>
+                    <button type="button" class="header-menu__item" role="menuitem" data-product-featured="{{ product.id }}">Feature product</button>
                     <button type="button" class="header-menu__item" role="menuitem" data-product-price-history="{{ product.id }}" data-product-sku="{{ product.vendor_sku or product.sku }}">Price History</button>
                     <form action="/shop/admin/product/{{ product.id }}/refresh-description" method="post" class="header-menu__form">
                       {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
@@ -553,6 +554,35 @@
       
       <div class="form-actions">
         <button type="submit" class="button">Save product</button>
+        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="product-featured-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close featured product modal</span>
+      &times;
+    </button>
+    <h2 class="modal__title">Feature product</h2>
+    <p class="modal__subtitle">Tick a company to show this item in that company's featured products section when the store section is enabled.</p>
+    <p class="form-helper" id="product-featured-loading-status" hidden>Loading featured product settings…</p>
+    <form id="product-featured-form" method="post" class="form-grid">
+      {% if csrf_token %}
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+      {% endif %}
+      <div class="visibility-grid">
+        {% for company in all_companies %}
+          <label class="checkbox visibility-grid__item">
+            <input type="checkbox" name="featured" value="{{ company.id }}" />
+            <span>{{ company.name }}</span>
+          </label>
+        {% endfor %}
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button">Save featured companies</button>
         <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
       </div>
     </form>
