@@ -7,7 +7,8 @@ import json
 import os
 import string
 import wave
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as DefusedET
+from defusedxml.common import DefusedXmlException
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import asyncio
@@ -5752,15 +5753,18 @@ def _normalised_svg_bytes(contents: bytes) -> bytes | None:
 
     try:
         text = contents.decode("utf-8-sig")
-        root = ET.fromstring(text)
+        root = DefusedET.fromstring(text)
         for element in root.iter():
+            if element.attrib:
+                sorted_attributes = sorted(element.attrib.items())
+                element.attrib.clear()
+                element.attrib.update(sorted_attributes)
             if element.text and not element.text.strip():
                 element.text = None
             if element.tail and not element.tail.strip():
                 element.tail = None
-        normalised_text = ET.tostring(root, encoding="unicode", short_empty_elements=False)
-        return ET.canonicalize(normalised_text).encode("utf-8")
-    except (ET.ParseError, UnicodeDecodeError, ValueError):
+        return DefusedET.tostring(root, encoding="utf-8", short_empty_elements=False)
+    except (DefusedET.ParseError, DefusedXmlException, UnicodeDecodeError, ValueError):
         return None
 
 
