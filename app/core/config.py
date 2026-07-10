@@ -324,12 +324,21 @@ class Settings(BaseSettings):
             "high-frequency tray heartbeat events."
         ),
     )
+    log_level: str | None = Field(
+        default=None,
+        validation_alias="LOG_LEVEL",
+        description=(
+            "Minimum server log level for console and main application log output. "
+            "Accepted values: DEBUG, INFO, WARNING, ERROR, CRITICAL. "
+            "Defaults to DEBUG when VERBOSE_LOGGING is true, otherwise INFO."
+        ),
+    )
     app_log_path: Path | None = Field(
         default=Path("/var/log/myportal/myportal.log"),
         validation_alias="APP_LOG_PATH",
         description=(
-            "Main application log file. Receives the same INFO-and-above server "
-            "events sent to journald/stdout, with one entry per line and the "
+            "Main application log file. Receives server events at LOG_LEVEL and above "
+            "sent to journald/stdout, with one entry per line and the "
             "feature pack field included for filtering. Set empty to disable."
         ),
     )
@@ -650,6 +659,24 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             # Split on '#' and take the first part, then strip whitespace
             value = value.split("#")[0].strip()
+        return value
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def _normalize_log_level(cls, value: str | None) -> str | None:
+        """Normalize optional LOG_LEVEL values from environment files."""
+
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.split("#")[0].strip().upper()
+            if normalized == "":
+                return None
+            allowed = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+            if normalized not in allowed:
+                allowed_values = ", ".join(sorted(allowed))
+                raise ValueError(f"LOG_LEVEL must be one of: {allowed_values}")
+            return normalized
         return value
 
     @field_validator(

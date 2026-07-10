@@ -79,6 +79,54 @@ def test_configure_logging_writes_application_log_one_line_per_entry(tmp_path):
     logger.remove()
 
 
+def test_log_level_filters_application_log_entries(tmp_path):
+    """LOG_LEVEL controls the minimum level for the main application log sink."""
+    log_path = tmp_path / "myportal.log"
+
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    with patch.dict(
+        os.environ,
+        {
+            "SESSION_SECRET": "test-secret",
+            "TOTP_ENCRYPTION_KEY": "test-totp-key",
+            "APP_LOG_PATH": str(log_path),
+            "LOG_LEVEL": "WARNING",
+            "LOG_ROTATION": "",
+            "LOG_RETENTION": "",
+            "LOG_COMPRESSION": "",
+        },
+    ):
+        configure_logging()
+        logger.info("filtered info")
+        logger.warning("kept warning")
+        logger.complete()
+
+    contents = log_path.read_text(encoding="utf-8")
+    assert "filtered info" not in contents
+    assert "kept warning" in contents
+    get_settings.cache_clear()
+    logger.remove()
+
+
+def test_log_level_normalizes_env_value():
+    """LOG_LEVEL accepts lowercase values and inline comments from .env files."""
+    from app.core.config import Settings
+
+    with patch.dict(
+        os.environ,
+        {
+            "SESSION_SECRET": "test-secret",
+            "TOTP_ENCRYPTION_KEY": "test-totp-key",
+            "LOG_LEVEL": "warning  # quiet logs",
+        },
+        clear=True,
+    ):
+        settings = Settings()
+
+    assert settings.log_level == "WARNING"
+
 def test_default_application_log_rotation_and_retention():
     """Main file log defaults to daily rotation and seven-day retention."""
     from app.core.config import Settings
