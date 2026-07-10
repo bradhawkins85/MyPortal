@@ -598,6 +598,31 @@ class TestFindExistingTicket:
         assert "%alice@example.com%" in captured["params"]
 
 
+
+def test_long_email_external_references_are_compacted_for_ticket_columns():
+    from app.services.imap import (
+        _expand_ticket_external_references,
+        _normalise_ticket_external_reference,
+    )
+
+    long_reference = "<" + "a" * 180 + "@example.com>"
+
+    stored = _normalise_ticket_external_reference(long_reference)
+
+    assert stored is not None
+    assert len(stored) == 128
+    assert ":sha256:" in stored
+    assert len(stored.rsplit(":sha256:", 1)[1]) == 32
+    assert long_reference in _expand_ticket_external_references([long_reference])
+    assert stored in _expand_ticket_external_references([long_reference])
+
+
+def test_short_email_external_references_are_stored_unchanged():
+    from app.services.imap import _normalise_ticket_external_reference
+
+    assert _normalise_ticket_external_reference("<short@example.com>") == "<short@example.com>"
+
+
 @pytest.mark.anyio
 async def test_add_email_cc_watchers_adds_users_and_external_addresses(monkeypatch):
     """Original CC recipients should become ticket watchers for future replies."""

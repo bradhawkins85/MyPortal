@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import email
+import hashlib
 import imaplib
 import io
 import json
@@ -30,7 +31,45 @@ from app.services import tickets as tickets_service
 from app.services.sanitization import sanitize_rich_text
 
 _MAX_FETCH_BYTES = 5 * 1024 * 1024
+_MAX_TICKET_EXTERNAL_REFERENCE_CHARS = 128
 _CID_REFERENCE_PATTERN = re.compile(r"(?i)cid:([^\"'>\s]+)")
+
+
+def _normalise_ticket_external_reference(value: str | None) -> str | None:
+    """Return a database-safe external reference for tickets/replies.
+
+    The ticket_replies.external_reference column is limited to 128 characters.
+    RFC 5322 Message-ID values and Graph internetMessageId values can exceed
+    that limit, especially for Exchange Online replies.  Store short values as
+    they are; for long values, keep a recognizable prefix and append a stable
+    hash so imports remain idempotent and future References/In-Reply-To lookups
+    can match the compacted value.
+    """
+
+    reference = _normalise_string(value)
+    if not reference:
+        return None
+    if len(reference) <= _MAX_TICKET_EXTERNAL_REFERENCE_CHARS:
+        return reference
+
+    digest = hashlib.sha256(reference.encode("utf-8")).hexdigest()[:32]
+    suffix = f":sha256:{digest}"
+    prefix_length = _MAX_TICKET_EXTERNAL_REFERENCE_CHARS - len(suffix)
+    return f"{reference[:prefix_length]}{suffix}"
+
+
+def _expand_ticket_external_references(values: list[str] | None) -> list[str]:
+    """Return raw and compacted reference variants without duplicates."""
+
+    references: list[str] = []
+    seen: set[str] = set()
+    for value in values or []:
+        for candidate in (value, _normalise_ticket_external_reference(value)):
+            reference = _normalise_string(candidate)
+            if reference and reference not in seen:
+                references.append(reference)
+                seen.add(reference)
+    return references
 
 
 def _redact_account(account: Mapping[str, Any]) -> dict[str, Any]:
@@ -1252,7 +1291,7 @@ async def _find_existing_ticket_for_reply(
     Returns:
         Ticket record if found, None otherwise
     """
-    related_ids = [message_id for message_id in related_message_ids or [] if message_id]
+    related_ids = _expand_ticket_external_references(related_message_ids)
 
     if related_ids:
         from app.repositories.tickets import _normalise_ticket
@@ -1833,7 +1872,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         status=None,
                         category="email",
                         module_slug="imap",
-                        external_reference=message_id,
+                        external_reference=_normalise_ticket_external_reference(message_id),
                         initial_reply_author_id=requester_id,
                         requester_email=from_email_addr if requester_id is None else None,
                     )
@@ -1899,7 +1938,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 author_id=reply_author_id,
                                 body=reply_body,
                                 is_internal=False,
-                                external_reference=message_id if message_id else None,
+                                external_reference=_normalise_ticket_external_reference(message_id),
                                 created_at=reply_created_at,
                             )
                             reply_added = True

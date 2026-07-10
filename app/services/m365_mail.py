@@ -36,6 +36,7 @@ from app.services.imap import (
     _is_any_email_address_known,
     _normalise_bool,
     _normalise_filter,
+    _normalise_ticket_external_reference,
     _normalise_priority,
     _normalise_string,
     _sanitize_inbound_reply_body,
@@ -1430,7 +1431,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             status=None,
                             category="email",
                             module_slug=_MODULE_SLUG,
-                            external_reference=internet_msg_id,
+                            external_reference=_normalise_ticket_external_reference(internet_msg_id),
                             initial_reply_author_id=requester_id,
                             requester_email=(
                                 from_email_addr if requester_id is None else None
@@ -1519,7 +1520,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                     body=reply_body,
                                     is_internal=False,
                                     external_reference=(
-                                        internet_msg_id if internet_msg_id else None
+                                        _normalise_ticket_external_reference(internet_msg_id)
                                     ),
                                     created_at=reply_created_at,
                                 )
