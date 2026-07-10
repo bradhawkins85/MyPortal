@@ -22,10 +22,6 @@ from app.repositories.tickets import TicketRecord
 from app.services import automations as automations_service
 from app.repositories import users as user_repo
 from app.services import modules as modules_service
-from app.services import email as email_service
-from app.services import notification_event_settings
-from app.services import notifications as notifications_service
-from app.services import value_templates
 from app.services.tagging import filter_helpful_slugs, get_all_excluded_tags, is_helpful_slug, slugify_tag
 from app.services.sanitization import sanitize_rich_text
 from app.services.realtime import RefreshNotifier, refresh_notifier
@@ -1128,156 +1124,16 @@ async def _send_ticket_creation_email(
     *,
     requester_email_fallback: str | None = None,
 ) -> None:
-    """Send a confirmation email to the ticket requester.
+    """Do not send default ticket creation notifications.
 
-    Uses the notification service when the requester has a user account so that
-    their in-app and email preferences are respected.  Falls back to a direct
-    email send when only an email address is available (e.g. IMAP tickets whose
-    sender is not a registered user).
+    New ticket notifications are intentionally handled exclusively by ticket
+    automations (the ``tickets.created`` automation event emitted by
+    :func:`create_ticket`).  This no-op helper is retained for compatibility
+    with callers that still pass ``send_creation_notification=True`` while
+    preventing the platform notification service or fallback email sender from
+    producing default messages such as ``MyPortal notification: Your ticket``.
     """
-    requester_id: int | None = enriched_ticket.get("requester_id")  # type: ignore[assignment]
-    requester_email: str | None = enriched_ticket.get("requester_email") or requester_email_fallback  # type: ignore[assignment]
-    if requester_email is not None:
-        requester_email = requester_email.strip() or None
-
-    if not requester_email and not requester_id:
-        return
-
-    ticket_number = str(enriched_ticket.get("ticket_number") or enriched_ticket.get("id") or "")
-    subject_text = str(enriched_ticket.get("subject") or "")
-    notification_ticket = {
-        "id": enriched_ticket.get("id"),
-        "ticket_number": enriched_ticket.get("ticket_number"),
-        "subject": enriched_ticket.get("subject"),
-    }
-
-    if requester_id is not None:
-        # Use the notification service so user preferences are respected and an
-        # in-app notification is also recorded.
-        try:
-            await notifications_service.emit_notification(
-                event_type="tickets.created",
-                user_id=requester_id,
-                metadata={"ticket": notification_ticket},
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            log_error(
-                "Failed to emit ticket creation notification",
-                ticket_id=enriched_ticket.get("id"),
-                requester_id=requester_id,
-                error=str(exc),
-            )
-        return
-
-    # No user account – send a direct email to the known email address.
-    if not requester_email:
-        return
-
-    settings = get_settings()
-    app_name = settings.app_name or "Support"
-
-    # Render the email body using the configured notification template so that
-    # admin-configured JSON templates are honoured for external requesters too.
-    ticket_context = dict(enriched_ticket)
-    if requester_email and not ticket_context.get("requester_email"):
-        ticket_context["requester_email"] = requester_email
-    context: dict[str, Any] = {"ticket": ticket_context}
-    rendered_message: str | None = None
-    event_setting: dict[str, Any] = {}
-    try:
-        event_setting = await notification_event_settings.get_event_setting("tickets.created")
-        template = str(event_setting.get("message_template") or "")
-        if template:
-            rendered_message = str(await value_templates.render_string_async(template, context))
-    except Exception as exc:
-        log_error(
-            "Failed to render ticket creation notification template; using fallback",
-            ticket_id=enriched_ticket.get("id"),
-            error=str(exc),
-        )
-        rendered_message = None
-
-    # Fire any configured module_actions for the defined ticket creation notification.
-    # This honours admin-configured integrations (e.g. smtp2go, ntfy) for external
-    # requesters.  The fallback direct email is only sent when no email-delivery
-    # module action is configured, or when the email-delivery module action fails.
-    _module_actions = event_setting.get("module_actions") or [] if event_setting else []
-    _has_email_action = any(
-        str(action.get("module") or "").strip() in notifications_service._EMAIL_DELIVERY_MODULES
-        for action in _module_actions
-        if isinstance(action, Mapping)
-    )
-    _email_action_failed = False
-    if _module_actions:
-        _notification_context: dict[str, Any] = {
-            "event_type": "tickets.created",
-            "metadata": {"ticket": dict(enriched_ticket)},
-            "message": rendered_message,
-            "ticket": dict(ticket_context),
-        }
-        for _action in _module_actions:
-            _slug = str(_action.get("module") or "").strip()
-            if not _slug:
-                continue
-            _payload_source = _action.get("payload")
-            if isinstance(_payload_source, Mapping):
-                _payload_source = dict(_payload_source)
-            else:
-                _payload_source = _payload_source or {}
-            try:
-                _rendered_payload = await value_templates.render_value_async(
-                    _payload_source, _notification_context
-                )
-                if isinstance(_rendered_payload, Mapping):
-                    _payload_data: dict[str, Any] = dict(_rendered_payload)
-                else:
-                    _payload_data = {"value": _rendered_payload}
-                _payload_data.setdefault("context", _notification_context)
-                await modules_service.trigger_module(_slug, _payload_data, background=False)
-            except Exception as exc:
-                log_error(
-                    "Ticket creation notification module action failed",
-                    ticket_id=enriched_ticket.get("id"),
-                    module=_slug,
-                    error=str(exc),
-                )
-                if _slug in notifications_service._EMAIL_DELIVERY_MODULES:
-                    _email_action_failed = True
-
-    if _has_email_action and not _email_action_failed:
-        # The defined notification handled email delivery; skip the fallback.
-        return
-
-    if not rendered_message:
-        # Fallback when the defined notification did not deliver an email.
-        rendered_message = (
-            f"Your ticket #{ticket_number} has been created: {subject_text}"
-            if ticket_number
-            else f"Your ticket has been created: {subject_text}"
-        )
-
-    message_preview = rendered_message[:50].strip()
-    if len(rendered_message) > 50:
-        message_preview += "..."
-    email_subject = f"{app_name} notification: {message_preview}"
-
-    text_body = rendered_message
-    html_body = f"<p>{html.escape(rendered_message)}</p>"
-
-    try:
-        await email_service.send_email(
-            subject=email_subject,
-            recipients=[requester_email],
-            html_body=html_body,
-            text_body=text_body,
-        )
-    except email_service.EmailDispatchError as exc:  # pragma: no cover - defensive logging
-        log_error(
-            "Failed to send ticket creation email",
-            ticket_id=enriched_ticket.get("id"),
-            requester_email=requester_email,
-            error=str(exc),
-        )
+    return None
 
 
 async def create_ticket(
@@ -1361,18 +1217,9 @@ async def create_ticket(
 
     enriched_ticket = await _enrich_ticket_context(ticket)
 
-    if send_creation_notification:
-        try:
-            await _send_ticket_creation_email(
-                enriched_ticket,
-                requester_email_fallback=requester_email,
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            log_error(
-                "Failed to send ticket creation email",
-                ticket_id=ticket.get("id"),
-                error=str(exc),
-            )
+    # New ticket notifications must be handled by Ticket Automations only.
+    # ``send_creation_notification`` is retained for API compatibility but no
+    # longer triggers default platform notification/email delivery.
 
     if trigger_automations:
         try:
