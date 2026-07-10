@@ -393,6 +393,54 @@ def _build_attachment_only_reply_body(
         f"available after sanitisation.{detail_html}</p>"
     )
 
+async def _add_email_cc_watchers(
+    ticket_id: int,
+    cc_addresses: list[str],
+    *,
+    exclude_addresses: list[str] | None = None,
+) -> None:
+    """Add original email CC recipients as ticket watchers.
+
+    Inbound mail often includes interested customer contacts in Cc.  Persisting
+    them as watchers allows those contacts to reply later and ensures future
+    ticket notifications include the same audience.  Addresses are normalized,
+    de-duplicated, and added idempotently by local user id when possible, or by
+    email address otherwise.
+    """
+
+    excluded = {
+        _normalise_email_address(address)
+        for address in (exclude_addresses or [])
+        if _normalise_email_address(address)
+    }
+    seen: set[str] = set()
+    for raw_address in cc_addresses:
+        address = _normalise_email_address(raw_address)
+        if not address or address in seen or address in excluded:
+            continue
+        seen.add(address)
+
+        user_id: int | None = None
+        try:
+            user = await users_repo.get_user_by_email(address)
+        except Exception:
+            user = None
+        if user:
+            user_id = _extract_record_id(user)
+
+        try:
+            if user_id is not None:
+                await tickets_repo.add_watcher(ticket_id, user_id=user_id)
+            else:
+                await tickets_repo.add_watcher(ticket_id, email=address)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            log_error(
+                "Failed to add email CC recipient as ticket watcher",
+                ticket_id=ticket_id,
+                email=address,
+                error=str(exc),
+            )
+
 
 def _extract_domains(addresses: list[str]) -> list[str]:
     domains: list[str] = []
@@ -1792,6 +1840,12 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     is_new_ticket = True
                     ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None
                     if ticket_id is not None:
+                        cc_addresses = _extract_email_addresses(message.get("Cc"))
+                        await _add_email_cc_watchers(
+                            int(ticket_id),
+                            cc_addresses,
+                            exclude_addresses=[from_email_addr] if from_email_addr else None,
+                        )
                         try:
                             await tickets_service.refresh_ticket_ai_summary(int(ticket_id))
                         except RuntimeError:

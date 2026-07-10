@@ -25,6 +25,7 @@ from app.services.m365 import M365Error
 # Reuse filter helpers from the IMAP module so we share the same filter DSL.
 from app.services.imap import (
     _build_attachment_only_reply_body,
+    _add_email_cc_watchers,
     _evaluate_filter,
     _extract_domains,
     _extract_email_addresses,
@@ -753,6 +754,21 @@ async def _resolve_mail_folder_identifier(
 
     return await _resolve_top_level(folder_path)
 
+def _extract_graph_recipient_addresses(recipients: list[dict[str, Any]]) -> list[str]:
+    """Return normalized email addresses from Graph recipient objects."""
+
+    addresses: list[str] = []
+    for recipient in recipients:
+        email_addr = (
+            recipient.get("emailAddress", {}) if isinstance(recipient, Mapping) else {}
+        )
+        addr = _normalise_string(
+            email_addr.get("address") if isinstance(email_addr, Mapping) else None
+        )
+        if addr:
+            addresses.append(addr.lower())
+    return addresses
+
 
 def _build_filter_context(
     *,
@@ -778,19 +794,10 @@ def _build_filter_context(
     bcc_recipients = graph_message.get("bccRecipients") or []
     reply_to_list = graph_message.get("replyTo") or []
 
-    def _extract_recipient_addresses(recipients: list[dict[str, Any]]) -> list[str]:
-        addresses: list[str] = []
-        for r in recipients:
-            email_addr = r.get("emailAddress", {})
-            addr = (email_addr.get("address") or "").strip()
-            if addr:
-                addresses.append(addr)
-        return addresses
-
-    to_addresses = _extract_recipient_addresses(to_recipients)
-    cc_addresses = _extract_recipient_addresses(cc_recipients)
-    bcc_addresses = _extract_recipient_addresses(bcc_recipients)
-    reply_to_addresses = _extract_recipient_addresses(reply_to_list)
+    to_addresses = _extract_graph_recipient_addresses(to_recipients)
+    cc_addresses = _extract_graph_recipient_addresses(cc_recipients)
+    bcc_addresses = _extract_graph_recipient_addresses(bcc_recipients)
+    reply_to_addresses = _extract_graph_recipient_addresses(reply_to_list)
 
     # Build headers dict from internetMessageHeaders if available
     headers: dict[str, str] = {}
@@ -1047,7 +1054,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         query_params = {
             "$top": "50",
             "$select": (
-                "id,subject,body,from,toRecipients,ccRecipients,bccRecipients,"
+                "id,subject,body,bodyPreview,from,toRecipients,ccRecipients,bccRecipients,"
                 "replyTo,internetMessageHeaders,internetMessageId,isRead,receivedDateTime,"
                 "hasAttachments,conversationId"
             ),
@@ -1280,6 +1287,8 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 subject = msg.get("subject") or f"Email from {upn}"
                 body_content = msg.get("body", {})
                 body = body_content.get("content") or ""
+                if not body:
+                    body = msg.get("bodyPreview") or ""
                 if msg.get("hasAttachments") and body:
                     body = await _embed_graph_inline_images(
                         access_token=access_token,
@@ -1432,6 +1441,14 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             ticket.get("id") if isinstance(ticket, Mapping) else None
                         )
                         if ticket_id is not None:
+                            cc_addresses = _extract_graph_recipient_addresses(
+                                msg.get("ccRecipients") or []
+                            )
+                            await _add_email_cc_watchers(
+                                int(ticket_id),
+                                cc_addresses,
+                                exclude_addresses=[from_email_addr] if from_email_addr else None,
+                            )
                             try:
                                 await tickets_service.refresh_ticket_ai_summary(
                                     int(ticket_id)
