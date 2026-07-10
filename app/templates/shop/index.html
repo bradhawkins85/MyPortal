@@ -55,46 +55,6 @@
 {%- endmacro %}
 
 <div class="shop-layout">
-  <nav class="shop-categories" aria-label="Product categories">
-    <a
-      class="shop-categories__link {% if current_category == 'packages' %}is-active{% endif %}"
-      href="{{ request.url_for('shop_page') }}{{ shop_query('packages') }}"
-      {% if current_category == 'packages' %}aria-current="page"{% endif %}
-    >
-      <span class="shop-categories__icon shop-categories__icon--packages" aria-hidden="true"></span>
-      <span>Packages</span>
-    </a>
-    <a
-      class="shop-categories__link {% if current_category == 'featured' %}is-active{% endif %}"
-      href="{{ request.url_for('shop_page') }}{{ shop_query('featured') }}"
-      {% if current_category == 'featured' %}aria-current="page"{% endif %}
-    >
-      <span class="shop-categories__icon shop-categories__icon--featured" aria-hidden="true"></span>
-      <span>Featured</span>
-    </a>
-    <div class="shop-category-select-wrapper">
-      <select
-        class="form-input shop-category-select"
-        aria-label="Select product category"
-        onchange="(function(selectEl){var raw=selectEl.options[selectEl.selectedIndex].getAttribute('data-url');if(!raw){return;}try{var parsed=new URL(raw, window.location.origin);if((parsed.protocol==='http:'||parsed.protocol==='https:')&&parsed.origin===window.location.origin){window.location.assign(parsed.pathname+parsed.search+parsed.hash);}}catch(e){}})(this);"
-      >
-        <option data-url="{{ request.url_for('shop_page') }}{{ shop_query() }}" {% if not current_category %}selected{% endif %}>Product categories</option>
-        <option data-url="{{ request.url_for('shop_page') }}{{ shop_query('packages') }}" {% if current_category == 'packages' %}selected{% endif %}>Packages</option>
-        <option data-url="{{ request.url_for('shop_page') }}{{ shop_query('featured') }}" {% if current_category == 'featured' %}selected{% endif %}>Featured</option>
-        {% for category in categories %}
-          {% if category.children %}
-            <option data-url="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}" {% if current_category == category.id %}selected{% endif %}>{{ category.name }}</option>
-            {% for child in category.children %}
-              <option data-url="{{ request.url_for('shop_page') }}{{ shop_query(child.id) }}" {% if current_category == child.id %}selected{% endif %}>— {{ child.name }}</option>
-            {% endfor %}
-          {% else %}
-            <option data-url="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}" {% if current_category == category.id %}selected{% endif %}>{{ category.name }}</option>
-          {% endif %}
-        {% endfor %}
-      </select>
-    </div>
-  </nav>
-
   <section class="card card--panel shop-layout__content">
     <header class="card__header">
       <div>
