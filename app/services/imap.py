@@ -606,7 +606,13 @@ async def _resolve_ticket_entities(
             user_company_id = _int_or_none(
                 user.get("company_id") if isinstance(user, Mapping) else None
             )
-            return user_company_id or _int_or_none(default_company_id), requester_id
+            resolved_company_id = user_company_id or _int_or_none(default_company_id)
+            if resolved_company_id is None and "@" in email_address:
+                domain = email_address.rsplit("@", 1)[1].lower()
+                company = await company_repo.get_company_by_email_domain(domain)
+                if company:
+                    resolved_company_id = _int_or_none(company.get("id"))
+            return resolved_company_id, requester_id
 
     seen_domains: set[str] = set()
 
@@ -1297,12 +1303,32 @@ async def _find_existing_ticket_for_reply(
         params: list[Any] = []
         
         # If we have a requester_id, include tickets where they are the requester
-        # or a watcher
+        # or a watcher. When the sender's email is also available, extend the
+        # match to tickets originally created from their email address (captured
+        # in the leading "From:" line of the description). This covers the case
+        # where the ticket was created before the sender had a local user account,
+        # so the ticket has no requester_id but the sender's email is in the
+        # description – they should still be able to reply without being a watcher.
         if requester_id is not None:
-            query += """
-                AND (t.requester_id = %s OR tw.user_id = %s)
-            """
-            params.extend([requester_id, requester_id])
+            if from_email:
+                query += """
+                    AND (
+                        t.requester_id = %s
+                        OR tw.user_id = %s
+                        OR EXISTS (
+                            SELECT 1 FROM users ru
+                            WHERE ru.id = t.requester_id AND LOWER(ru.email) = LOWER(%s)
+                        )
+                        OR LOWER(u.email) = LOWER(%s)
+                        OR LOWER(COALESCE(t.description, '')) LIKE LOWER(%s)
+                    )
+                """
+                params.extend([requester_id, requester_id, from_email, from_email, f"%{from_email}%"])
+            else:
+                query += """
+                    AND (t.requester_id = %s OR tw.user_id = %s)
+                """
+                params.extend([requester_id, requester_id])
         elif from_email:
             # If no requester_id but we have an email, check watchers by email
             # and email-created ticket descriptions that captured the sender in
