@@ -191,3 +191,75 @@ The admin UI uses `GET /api/companies/{company_id}/assets` to populate the multi
 * `tactical_asset_id` / `syncro_asset_id` – Identifiers from upstream RMM systems.
 
 Assets are only returned for companies that the authenticated user is authorised to manage. Requests from non-super admin accounts receive `403 Forbidden`.
+
+## Search and reply from PowerShell
+
+Automation scripts can search tickets and post replies with an API key. This is useful when a PowerShell script gathers diagnostic output and needs to add the result back to the matching helpdesk ticket.
+
+### API key permissions
+
+Create an API key in **Admin → API Keys** and scope it to only the endpoints the script needs:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/tickets/` | Search for tickets by subject, description, or external reference. |
+| `POST` | `/api/tickets/{ticket_id}/replies` | Add a public or internal reply to a ticket. |
+
+Use IP restrictions where possible so the key only works from the automation host. Store the key outside the script, for example in an environment variable or a protected secret vault.
+
+### Search by subject and post script output
+
+The example below searches for the newest ticket matching a subject phrase, runs a local command, and posts the command output as a ticket reply. HTML is sent intentionally because ticket replies are rich text; command output is HTML-encoded before being wrapped in a `<pre>` block.
+
+```powershell
+$BaseUrl = "https://portal.example.com"
+$ApiKey = $env:MYPORTAL_API_KEY
+$Subject = "Device health check"
+
+if ([string]::IsNullOrWhiteSpace($ApiKey)) {
+    throw "MYPORTAL_API_KEY is not set."
+}
+
+$Headers = @{
+    "x-api-key" = $ApiKey
+    "Accept" = "application/json"
+}
+
+$SearchUri = "{0}/api/tickets/?search={1}&limit=1" -f $BaseUrl, [uri]::EscapeDataString($Subject)
+$SearchResult = Invoke-RestMethod -Method Get -Uri $SearchUri -Headers $Headers
+
+if (-not $SearchResult.items -or $SearchResult.items.Count -eq 0) {
+    throw "No ticket found for subject search: $Subject"
+}
+
+$Ticket = $SearchResult.items[0]
+
+$ScriptOutput = & {
+    hostname
+    Get-Date -AsUTC
+    Get-Service -Name Spooler | Format-List Name, Status, StartType | Out-String
+} | Out-String
+
+$EncodedOutput = [System.Net.WebUtility]::HtmlEncode($ScriptOutput)
+
+$ReplyBody = @{
+    body = "<p>Automated diagnostic results from $($env:COMPUTERNAME):</p><pre>$EncodedOutput</pre>"
+    is_internal = $false
+    minutes_spent = 0
+    is_billable = $false
+} | ConvertTo-Json -Depth 5
+
+$ReplyHeaders = $Headers.Clone()
+$ReplyHeaders["Content-Type"] = "application/json"
+
+$ReplyUri = "{0}/api/tickets/{1}/replies" -f $BaseUrl, $Ticket.id
+$Reply = Invoke-RestMethod -Method Post -Uri $ReplyUri -Headers $ReplyHeaders -Body $ReplyBody
+
+"Posted reply {0} to ticket {1}: {2}" -f $Reply.reply.id, $Reply.ticket.id, $Reply.ticket.subject
+```
+
+### Notes
+
+* API-key replies are treated as helpdesk replies and can set `is_internal`, `minutes_spent`, `is_billable`, and `labourTypeId`.
+* Public replies may trigger configured downstream integrations for the ticket, such as chat or Trello synchronisation.
+* The response includes the updated `ticket` object and created `reply` object, so scripts can log the reply ID for auditing.

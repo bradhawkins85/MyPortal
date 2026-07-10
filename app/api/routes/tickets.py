@@ -930,9 +930,12 @@ async def add_reply(
     ticket_id: int,
     payload: TicketReplyCreate,
     request: Request,
-    session: SessionData = Depends(get_current_session),
-    current_user: dict = Depends(get_current_user),
+    actor: dict = Depends(_resolve_ticket_actor),
 ) -> TicketReplyResponse:
+    current_user: dict | None = actor.get("user")
+    api_key_record: dict | None = actor.get("api_key")
+    session: SessionData | None = getattr(request.state, "session", None)
+
     # Check if this ticket has been merged into another
     merged_target_id = await tickets_repo.get_merged_target_ticket_id(ticket_id)
     if merged_target_id and merged_target_id != ticket_id:
@@ -952,8 +955,14 @@ async def add_reply(
             detail="Cannot add replies to a billed ticket. This ticket has been invoiced and closed.",
         )
 
-    has_helpdesk_access = await _has_helpdesk_permission(current_user)
-    if not has_helpdesk_access and ticket.get("requester_id") != session.user_id:
+    has_helpdesk_access = bool(api_key_record)
+    if current_user:
+        has_helpdesk_access = has_helpdesk_access or await _has_helpdesk_permission(
+            current_user
+        )
+
+    author_id = session.user_id if session else None
+    if not has_helpdesk_access and ticket.get("requester_id") != author_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
         )
@@ -986,7 +995,7 @@ async def add_reply(
 
     reply = await tickets_repo.create_reply(
         ticket_id=ticket_id,
-        author_id=session.user_id,
+        author_id=author_id,
         body=sanitised_body.html,
         is_internal=payload.is_internal if has_helpdesk_access else False,
         minutes_spent=payload.minutes_spent if has_helpdesk_access else None,
@@ -1001,12 +1010,12 @@ async def add_reply(
     await tickets_service.emit_ticket_updated_event(
         ticket_id,
         actor_type="technician" if has_helpdesk_access else "requester",
-        actor=current_user,
+        actor=current_user or api_key_record,
     )
     await tickets_service.emit_ticket_replied_event(
         ticket_id,
         actor_type="technician" if has_helpdesk_access else "requester",
-        actor=current_user,
+        actor=current_user or api_key_record,
     )
     updated_ticket = await tickets_repo.get_ticket(ticket_id)
     ticket_payload = updated_ticket or ticket
@@ -1051,32 +1060,38 @@ async def add_reply(
             card_id = trello_service.card_id_from_external_reference(
                 ticket_payload.get("external_reference")
             )
-            if not card_id:
-                return reply
-
-            trello_company: dict[str, Any] | None = None
-            trello_company_id = ticket_payload.get("company_id")
-            if trello_company_id is not None:
-                try:
-                    trello_company = await company_repo.get_company_by_id(
-                        int(trello_company_id)
+            if card_id:
+                trello_company: dict[str, Any] | None = None
+                trello_company_id = ticket_payload.get("company_id")
+                if trello_company_id is not None:
+                    try:
+                        trello_company = await company_repo.get_company_by_id(
+                            int(trello_company_id)
+                        )
+                    except (TypeError, ValueError):
+                        pass
+                actor_record = current_user or {}
+                first_name = str(actor_record.get("first_name") or "").strip()
+                last_name = str(actor_record.get("last_name") or "").strip()
+                author_parts = [p for p in (first_name, last_name) if p]
+                author_display = (
+                    " ".join(author_parts)
+                    if author_parts
+                    else str(
+                        actor_record.get("email")
+                        or (
+                            api_key_record.get("description")
+                            if api_key_record
+                            else "API"
+                        )
                     )
-                except (TypeError, ValueError):
-                    pass
-            first_name = str(current_user.get("first_name") or "").strip()
-            last_name = str(current_user.get("last_name") or "").strip()
-            author_parts = [p for p in (first_name, last_name) if p]
-            author_display = (
-                " ".join(author_parts)
-                if author_parts
-                else str(current_user.get("email") or "Staff")
-            )
-            await trello_service.post_reply_comment(
-                card_id,
-                author_display,
-                sanitised_reply_payload.html,
-                company=trello_company,
-            )
+                )
+                await trello_service.post_reply_comment(
+                    card_id,
+                    author_display,
+                    sanitised_reply_payload.html,
+                    company=trello_company,
+                )
         except Exception as exc:
             logger.debug(
                 "Trello reply sync failed for ticket {}: {}", ticket_id, exc
@@ -1090,22 +1105,26 @@ async def add_reply(
     # change accidentally adds it to the snapshot.
     reply_metadata: dict[str, object] = {
         "reply_id": reply.get("id"),
-        "author_id": session.user_id,
+        "author_id": author_id,
         "is_internal": bool(reply.get("is_internal")),
         "channel": "internal" if reply.get("is_internal") else "public",
         "minutes_spent": reply.get("minutes_spent"),
         "is_billable": bool(reply.get("is_billable")),
     }
+    if api_key_record:
+        reply_metadata["api_key_id"] = api_key_record.get("id")
+        reply_metadata["api_key_prefix"] = api_key_record.get("key_prefix")
     reply_metadata.update(summarise_reply_body(sanitised_body.html))
     await audit_service.record(
         action="ticket.replied",
         request=request,
-        user_id=int(session.user_id),
+        user_id=int(author_id) if author_id is not None else None,
         entity_type="ticket",
         entity_id=ticket_id,
         before=None,
         after=None,
         metadata=reply_metadata,
+        api_key=str(api_key_record.get("key_prefix")) if api_key_record else None,
         sensitive_extra_keys=("body", "html", "text", "content"),
     )
     return TicketReplyResponse(
