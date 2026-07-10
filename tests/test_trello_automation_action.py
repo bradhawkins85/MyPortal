@@ -62,6 +62,28 @@ async def test_invoke_trello_add_comment_success(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_invoke_trello_add_comment_strips_trello_reference_prefix(monkeypatch):
+    """Test that ticket external references become raw Trello card IDs."""
+    captured = {}
+
+    async def fake_add_comment(card_id, text, *, company=None):
+        captured["card_id"] = card_id
+        return {"id": "abc123"}
+
+    monkeypatch.setattr("app.services.trello.add_comment_to_card", fake_add_comment)
+
+    result = await modules._invoke_trello_add_comment(
+        {},
+        {"card_id": "trello:6a4f4fdbf84e81795e661259", "text": "Ticket updated"},
+        event_future=None,
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["card_id"] == "6a4f4fdbf84e81795e661259"
+    assert captured["card_id"] == "6a4f4fdbf84e81795e661259"
+
+
+@pytest.mark.asyncio
 async def test_invoke_trello_add_comment_missing_card_id():
     """Test that _invoke_trello_add_comment raises when card_id is missing."""
     with pytest.raises(ValueError, match="card_id is required"):

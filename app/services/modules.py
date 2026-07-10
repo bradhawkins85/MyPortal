@@ -6544,7 +6544,13 @@ async def _invoke_trello_add_comment(
     The comment is prefixed with ``[MyPortal]`` automatically by the Trello service
     to prevent feedback loops when the webhook handler processes incoming comments.
     """
-    card_id = str(payload.get("card_id") or "").strip()
+    card_id_input = str(payload.get("card_id") or "").strip()
+    if not card_id_input:
+        raise ValueError("card_id is required for the Trello add-comment action")
+
+    from app.services.trello import card_id_from_external_reference
+
+    card_id = card_id_from_external_reference(card_id_input)
     if not card_id:
         raise ValueError("card_id is required for the Trello add-comment action")
 
