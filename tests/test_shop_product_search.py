@@ -1,6 +1,7 @@
 """Tests for shop product search query construction."""
 
 import asyncio
+from pathlib import Path
 
 from app.repositories import shop as shop_repo
 
@@ -122,3 +123,14 @@ def test_count_products_honors_in_stock_only(monkeypatch):
 
     assert total == 0
     assert "p.stock > 0" in str(captured["query"])
+
+
+def test_product_filter_queries_use_shared_stock_filter_property():
+    """ProductFilter-driven queries should not reference a missing local stock flag."""
+    source = Path("app/repositories/shop.py").read_text()
+
+    query_section = source.split("async def list_products(filters: ProductFilters)", 1)[1]
+    query_section = query_section.split("async def list_featured_products_for_company", 1)[0]
+
+    assert "if not include_out_of_stock:" not in query_section
+    assert query_section.count("if filters.require_in_stock:") == 3
