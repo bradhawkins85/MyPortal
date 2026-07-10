@@ -260,6 +260,67 @@ async def test_smart_attachment_removal_dry_run_preserves_duplicates(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_smart_attachment_removal_hashes_canonical_svg_content(
+    monkeypatch, tmp_path
+):
+    """SVG attachments with the same XML content are matched despite formatting."""
+    from app.repositories import tickets as tickets_repo
+    from app.repositories import ticket_attachments as attachments_repo
+    from app.services import ticket_attachments as attachments_service
+
+    attachments = [
+        {
+            "id": 9965,
+            "ticket_id": 25063,
+            "filename": "first.svg",
+            "original_filename": "qr-code (1).svg",
+            "mime_type": "image/svg+xml",
+        },
+        {
+            "id": 9967,
+            "ticket_id": 25063,
+            "filename": "duplicate.svg",
+            "original_filename": "qr-code (1).svg",
+            "mime_type": "image/svg+xml",
+        },
+    ]
+    (tmp_path / "first.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg"><rect height="10" width="10"></rect></svg>',
+        encoding="utf-8",
+    )
+    (tmp_path / "duplicate.svg").write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg">\n'
+        '  <rect height="10" width="10"></rect>\n'
+        "</svg>\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(tickets_repo, "get_ticket", AsyncMock(return_value={"id": 25063}))
+    monkeypatch.setattr(
+        attachments_repo, "list_attachments", AsyncMock(return_value=attachments)
+    )
+    monkeypatch.setattr(
+        attachments_service,
+        "get_attachment_file_path",
+        lambda filename: tmp_path / filename,
+    )
+    delete_mock = AsyncMock()
+    monkeypatch.setattr(attachments_service, "delete_attachment_file", delete_mock)
+
+    result = await modules._invoke_smart_attachment_removal(
+        {},
+        {"ticket_id": 25063},
+        event_future=None,
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["unique"] == 1
+    assert result["duplicates_found"] == 1
+    assert result["duplicates"][0]["hash_type"] == "svg-c14n"
+    delete_mock.assert_awaited_once_with(attachments[1])
+
+
+@pytest.mark.asyncio
 async def test_invoke_update_ticket_description(monkeypatch, mock_webhook_monitor, mock_record_success):
     """Test that update-ticket-description module changes description."""
     from app.services import tickets as tickets_service

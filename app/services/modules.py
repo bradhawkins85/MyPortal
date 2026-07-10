@@ -7,6 +7,8 @@ import json
 import os
 import string
 import wave
+from defusedxml import ElementTree as DefusedET
+from defusedxml.common import DefusedXmlException
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import asyncio
@@ -38,6 +40,9 @@ from app.services.realtime import RefreshNotifier, refresh_notifier
 from app.services import tickets as tickets_service
 
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+
+_SMART_ATTACHMENT_POLL_ATTEMPTS = 5
+_SMART_ATTACHMENT_POLL_DELAY_SECONDS = 0.5
 
 _BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
 
@@ -5743,6 +5748,56 @@ def _resolve_ticket_id_from_payload(payload: Mapping[str, Any]) -> int:
     return ticket_id_int
 
 
+def _normalised_svg_bytes(contents: bytes) -> bytes | None:
+    """Return a stable SVG representation for hashing, if parsing succeeds."""
+
+    try:
+        text = contents.decode("utf-8-sig")
+        root = DefusedET.fromstring(text)
+        for element in root.iter():
+            if element.attrib:
+                sorted_attributes = sorted(element.attrib.items())
+                element.attrib.clear()
+                element.attrib.update(sorted_attributes)
+            if element.text and not element.text.strip():
+                element.text = None
+            if element.tail and not element.tail.strip():
+                element.tail = None
+        return DefusedET.tostring(root, encoding="utf-8", short_empty_elements=False)
+    except (DefusedET.ParseError, DefusedXmlException, UnicodeDecodeError, ValueError):
+        return None
+
+
+def _attachment_hash_key(
+    contents: bytes,
+    *,
+    algorithm: str,
+    filename: str,
+    original_filename: Any,
+    mime_type: Any,
+) -> tuple[str, str]:
+    """Build a content hash key for duplicate attachment detection.
+
+    Most attachments use an exact byte hash. SVG files are XML documents, so the
+    same content can be serialized with different insignificant whitespace. For
+    SVGs we hash a canonical XML representation so equal SVG content is treated
+    as a duplicate even if serialization differs.
+    """
+
+    extension_source = str(original_filename or filename).lower()
+    mime = str(mime_type or "").split(";", 1)[0].strip().lower()
+    if extension_source.endswith(".svg") or mime in {"image/svg+xml", "image/svg"}:
+        normalised = _normalised_svg_bytes(contents)
+        if normalised is not None:
+            digest = hashlib.new(algorithm)
+            digest.update(normalised)
+            return f"svg-c14n:{digest.hexdigest()}", "svg-c14n"
+
+    digest = hashlib.new(algorithm)
+    digest.update(contents)
+    return f"bytes:{digest.hexdigest()}", "bytes"
+
+
 async def _invoke_smart_attachment_removal(
     settings: Mapping[str, Any],
     payload: Mapping[str, Any],
@@ -5766,6 +5821,28 @@ async def _invoke_smart_attachment_removal(
     dry_run = bool(payload.get("dry_run", False))
 
     attachments = await attachments_repo.list_attachments(ticket_id)
+    for poll_attempt in range(_SMART_ATTACHMENT_POLL_ATTEMPTS):
+        missing_ready_files = []
+        for attachment in attachments:
+            filename = str(attachment.get("filename") or "").strip()
+            if not filename:
+                continue
+            file_path = attachments_service.get_attachment_file_path(filename)
+            if not file_path.exists() or not file_path.is_file():
+                missing_ready_files.append(filename)
+
+        if not missing_ready_files:
+            break
+
+        if poll_attempt < _SMART_ATTACHMENT_POLL_ATTEMPTS - 1:
+            logger.info(
+                "Ticket attachments found but files are not yet present; retrying",
+                ticket_id=ticket_id,
+                missing_files=len(missing_ready_files),
+                poll_attempt=poll_attempt + 1,
+            )
+            await asyncio.sleep(_SMART_ATTACHMENT_POLL_DELAY_SECONDS)
+
     seen: dict[str, dict[str, Any]] = {}
     duplicates: list[dict[str, Any]] = []
     missing_files: list[dict[str, Any]] = []
@@ -5792,11 +5869,9 @@ async def _invoke_smart_attachment_removal(
                 }
             )
             continue
-        digest = hashlib.new(algorithm)
         try:
             with open(file_path, "rb") as handle:
-                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                    digest.update(chunk)
+                contents = handle.read()
         except OSError as exc:
             errors.append(
                 {
@@ -5806,7 +5881,13 @@ async def _invoke_smart_attachment_removal(
                 }
             )
             continue
-        file_hash = digest.hexdigest()
+        file_hash, hash_type = _attachment_hash_key(
+            contents,
+            algorithm=algorithm,
+            filename=filename,
+            original_filename=attachment.get("original_filename"),
+            mime_type=attachment.get("mime_type"),
+        )
         original = seen.get(file_hash)
         if original is None:
             seen[file_hash] = attachment
@@ -5817,6 +5898,7 @@ async def _invoke_smart_attachment_removal(
             "filename": filename,
             "original_filename": attachment.get("original_filename"),
             "hash": file_hash,
+            "hash_type": hash_type,
         }
         duplicates.append(duplicate_entry)
         if dry_run:
