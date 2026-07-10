@@ -213,6 +213,30 @@
     });
   }
 
+
+  function findSafeTitleTruncation(value, limit) {
+    if (typeof value !== 'string' || value.length <= limit) {
+      return value;
+    }
+    const commaIndex = value.indexOf(',');
+    const dashIndex = value.indexOf('-');
+    const candidates = [commaIndex, dashIndex].filter((index) => index > 0);
+    if (candidates.length > 0) {
+      const safeIndex = Math.min(...candidates);
+      if (safeIndex >= 8) {
+        return `${value.slice(0, safeIndex).trim()}…`;
+      }
+    }
+    return `${value.slice(0, Math.max(limit - 1, 1)).trim()}…`;
+  }
+
+  function truncateSafeProductTitles(container) {
+    container.querySelectorAll('[data-shop-safe-title]').forEach((title) => {
+      const fullTitle = title.getAttribute('title') || title.textContent || '';
+      title.textContent = findSafeTitleTruncation(fullTitle.trim(), 58);
+    });
+  }
+
   function restoreShopSearchFocus(container) {
     const searchInput = container.querySelector('[data-shop-search]');
     if (!searchInput) {
@@ -246,6 +270,7 @@
     bindStockLimitInputs(container);
     bindShopSearch(container);
     restoreShopSearchFocus(container);
+    truncateSafeProductTitles(container);
 
 
     const imageModal = document.getElementById('product-image-modal');

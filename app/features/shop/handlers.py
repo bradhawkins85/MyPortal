@@ -215,10 +215,14 @@ async def shop_page(
 
     category_param = category.strip() if isinstance(category, str) and category.strip() else None
     show_packages = False
+    show_featured = False
     category_id: int | None = None
     if category_param:
-        if category_param.lower() == "packages":
+        category_key = category_param.lower()
+        if category_key == "packages":
             show_packages = True
+        elif category_key == "featured":
+            show_featured = True
         else:
             try:
                 parsed_category = int(category_param)
@@ -238,7 +242,32 @@ async def shop_page(
     )
 
     products: list[dict[str, Any]]
+    category_cards: list[dict[str, Any]] = []
     total_count = 0
+    showing_category_cards = not show_packages and not show_featured and category_id is None and not effective_search
+
+    def _product_has_price(product: Mapping[str, Any]) -> bool:
+        raw_price = product.get("price")
+        if raw_price is None:
+            return False
+        try:
+            return Decimal(str(raw_price)) > 0
+        except (InvalidOperation, TypeError, ValueError):
+            return False
+
+    def _prepare_customer_products(raw_products: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        prepared = [
+            dict(product)
+            for product in raw_products
+            if not shop_service.is_price_below_dbp_threshold(product, is_vip=is_vip)
+        ]
+        if is_vip:
+            for product in prepared:
+                vip_price = product.get("vip_price")
+                if vip_price is not None:
+                    product["price"] = vip_price
+        return [product for product in prepared if _product_has_price(product)]
+
     if show_packages:
         packages = await shop_packages_service.load_company_packages(
             company_id=company_id,
@@ -298,44 +327,40 @@ async def shop_page(
         offset = (page - 1) * page_size
         products = products[offset: offset + page_size]
     else:
-        # Get category IDs to filter by (including descendants)
-        category_ids = None
-        if category_id is not None:
-            category_ids = await shop_repo.get_category_descendants(category_id)
+        if show_featured:
+            products = _prepare_customer_products(
+                await shop_repo.list_featured_products_for_company(
+                    company_id=company_id,
+                    include_out_of_stock=show_out_of_stock,
+                )
+            )
+            if effective_search:
+                products = [
+                    product
+                    for product in products
+                    if search_term_lower
+                    and (
+                        search_term_lower in str(product.get("name") or "").lower()
+                        or search_term_lower in str(product.get("sku") or "").lower()
+                    )
+                ]
+        else:
+            # Get category IDs to filter by (including descendants)
+            category_ids = None
+            if category_id is not None:
+                category_ids = await shop_repo.get_category_descendants(category_id)
 
-        filters = shop_repo.ProductFilters(
-            include_archived=False,
-            company_id=company_id,
-            category_ids=category_ids,
-            search_term=effective_search,
-            in_stock_only=not show_out_of_stock,
-            sort="name_asc",
-        )
+            filters = shop_repo.ProductFilters(
+                include_archived=False,
+                company_id=company_id,
+                category_ids=category_ids,
+                search_term=effective_search,
+                in_stock_only=not show_out_of_stock,
+                sort="name_asc",
+            )
 
-        products = await shop_repo.list_products_summary(filters)
+            products = _prepare_customer_products(await shop_repo.list_products_summary(filters))
 
-        products = [
-            product
-            for product in products
-            if not shop_service.is_price_below_dbp_threshold(product, is_vip=is_vip)
-        ]
-
-        if is_vip:
-            for product in products:
-                vip_price = product.get("vip_price")
-                if vip_price is not None:
-                    product["price"] = vip_price
-
-        def _product_has_price(product: Mapping[str, Any]) -> bool:
-            raw_price = product.get("price")
-            if raw_price is None:
-                return False
-            try:
-                return Decimal(str(raw_price)) > 0
-            except (InvalidOperation, TypeError, ValueError):
-                return False
-
-        products = [product for product in products if _product_has_price(product)]
         total_count = len(products)
         offset = (page - 1) * page_size
         products = products[offset: offset + page_size]
@@ -358,6 +383,47 @@ async def shop_page(
 
     categories = _filter_categories(categories, available_category_ids)
 
+    if showing_category_cards:
+        category_preview_products = _prepare_customer_products(
+            await shop_repo.list_products_summary(
+                shop_repo.ProductFilters(
+                    include_archived=False,
+                    company_id=company_id,
+                    in_stock_only=not show_out_of_stock,
+                    sort="name_asc",
+                )
+            )
+        )
+        preview_by_category: dict[int, dict[str, Any]] = {}
+        for product in category_preview_products:
+            product_category_id = product.get("category_id")
+            if product_category_id is None:
+                continue
+            product_category_id = int(product_category_id)
+            existing = preview_by_category.get(product_category_id)
+            if existing is None or (not existing.get("image_url") and product.get("image_url")):
+                preview_by_category[product_category_id] = product
+
+        def _category_card_entries(cats: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+            cards: list[dict[str, Any]] = []
+            for cat in cats:
+                children = cat.get("children") or []
+                child_cards = _category_card_entries(children)
+                preview = preview_by_category.get(int(cat["id"]))
+                if preview is None and child_cards:
+                    preview = next((child.get("preview_product") for child in child_cards if child.get("image_url")), None)
+                count = (1 if int(cat["id"]) in available_category_ids else 0) + sum(int(child.get("count") or 0) for child in child_cards)
+                cards.append({
+                    "id": int(cat["id"]),
+                    "name": cat.get("name") or "Category",
+                    "count": count,
+                    "image_url": preview.get("image_url") if preview else None,
+                    "preview_product": preview,
+                })
+            return cards
+
+        category_cards = _category_card_entries(categories)
+
     # Get active subscription product IDs for the customer
     active_subscription_product_ids = await subscriptions_repo.get_active_subscription_product_ids(company_id)
 
@@ -365,8 +431,11 @@ async def shop_page(
         "title": "Shop",
         "categories": categories,
         "products": products,
-        "current_category": "packages" if show_packages else category_id,
+        "current_category": "packages" if show_packages else "featured" if show_featured else category_id,
         "show_packages": show_packages,
+        "show_featured": show_featured,
+        "showing_category_cards": showing_category_cards,
+        "category_cards": category_cards,
         "show_out_of_stock": show_out_of_stock,
         "search_term": search_term,
         "cart_error": cart_error,
