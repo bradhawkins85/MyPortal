@@ -67,3 +67,58 @@ def test_prepare_product_search_term_falls_back_to_prefix_like_without_fulltext_
 
     assert mode == "prefix"
     assert value == "a-%"
+
+
+def test_list_products_summary_defaults_do_not_reference_out_of_stock_flag(monkeypatch):
+    """Admin product summaries should not crash or filter stock by default."""
+    captured: dict[str, object] = {}
+
+    async def fake_fetch_all(query, params=None):
+        captured["query"] = query
+        captured["params"] = params
+        return []
+
+    monkeypatch.setattr(shop_repo.db, "fetch_all", fake_fetch_all)
+
+    filters = shop_repo.ProductFilters(include_archived=False)
+    products = asyncio.run(shop_repo.list_products_summary(filters))
+
+    assert products == []
+    assert "p.stock > 0" not in str(captured["query"])
+
+
+def test_list_products_summary_honors_in_stock_only(monkeypatch):
+    """Customer product summaries should filter stock when requested."""
+    captured: dict[str, object] = {}
+
+    async def fake_fetch_all(query, params=None):
+        captured["query"] = query
+        captured["params"] = params
+        return []
+
+    monkeypatch.setattr(shop_repo.db, "fetch_all", fake_fetch_all)
+
+    filters = shop_repo.ProductFilters(include_archived=False, in_stock_only=True)
+    products = asyncio.run(shop_repo.list_products_summary(filters))
+
+    assert products == []
+    assert "p.stock > 0" in str(captured["query"])
+
+
+def test_count_products_honors_in_stock_only(monkeypatch):
+    """Product counts should use the shared in-stock filter field."""
+    captured: dict[str, object] = {}
+
+    async def fake_fetch_one(query, params=None):
+        captured["query"] = query
+        captured["params"] = params
+        return {"total_count": 0}
+
+    monkeypatch.setattr(shop_repo.db, "fetch_one", fake_fetch_one)
+
+    total = asyncio.run(
+        shop_repo.count_products(shop_repo.ProductFilters(in_stock_only=True))
+    )
+
+    assert total == 0
+    assert "p.stock > 0" in str(captured["query"])
