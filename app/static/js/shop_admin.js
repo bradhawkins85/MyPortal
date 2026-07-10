@@ -619,7 +619,7 @@
           categoryFilter.value = state.category;
           categoryFilter.dispatchEvent(new Event('change', { bubbles: true }));
         }
-        const searchInput = document.querySelector('[data-table-filter="admin-products-table"]');
+        const searchInput = document.querySelector('[data-admin-product-search]');
         if (searchInput && state.search != null) {
           searchInput.value = state.search;
           searchInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1234,7 +1234,7 @@
         try {
           const actionUrl = new URL(editForm.action, window.location.href);
           const current = new URL(window.location.href);
-          ['showArchived', 'page', 'pageSize'].forEach((param) => {
+          ['showArchived', 'page', 'pageSize', 'search'].forEach((param) => {
             const value = current.searchParams.get(param);
             if (value !== null) {
               actionUrl.searchParams.set(param, value);
@@ -1253,7 +1253,7 @@
           if (categoryFilter) {
             state.category = categoryFilter.value;
           }
-          const searchInput = document.querySelector('[data-table-filter="admin-products-table"]');
+          const searchInput = document.querySelector('[data-admin-product-search]');
           if (searchInput) {
             state.search = searchInput.value;
           }
