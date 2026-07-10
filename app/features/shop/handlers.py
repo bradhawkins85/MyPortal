@@ -309,6 +309,20 @@ async def shop_page(
                 continue
             if price_value <= 0:
                 continue
+            package_images = []
+            for item in items:
+                resolved_product = item.get("resolved_product") or {}
+                package_images.append(
+                    {
+                        "name": resolved_product.get("product_name")
+                        or item.get("product_name")
+                        or "Included product",
+                        "image_url": resolved_product.get("product_image_url")
+                        or item.get("product_image_url"),
+                        "quantity": int(item.get("quantity") or 0),
+                    }
+                )
+
             products.append(
                 {
                     "id": package.get("id"),
@@ -318,6 +332,7 @@ async def shop_page(
                     "stock": stock_level,
                     "is_package": True,
                     "items": items,
+                    "package_images": package_images,
                     "product_count": int(package.get("product_count") or 0),
                 }
             )
