@@ -21,10 +21,10 @@ from app.services import modules as modules_service
 from app.services import system_state
 from app.services import tickets as tickets_service
 from app.services.m365 import M365Error
-from app.services.sanitization import sanitize_rich_text
 
 # Reuse filter helpers from the IMAP module so we share the same filter DSL.
 from app.services.imap import (
+    _build_attachment_only_reply_body,
     _evaluate_filter,
     _extract_domains,
     _extract_email_addresses,
@@ -37,6 +37,7 @@ from app.services.imap import (
     _normalise_filter,
     _normalise_priority,
     _normalise_string,
+    _sanitize_inbound_reply_body,
     _resolve_ticket_entities,
     _save_email_attachment,
     _CID_REFERENCE_PATTERN,
@@ -1479,8 +1480,15 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     # Add reply to existing ticket
                     if not is_new_ticket:
                         conversation_source = body or ""
-                        sanitized = sanitize_rich_text(conversation_source)
-                        if sanitized.has_rich_content:
+                        sanitized = _sanitize_inbound_reply_body(conversation_source)
+                        has_attachment_reply = bool(msg.get("hasAttachments"))
+                        reply_body = sanitized.html
+                        if not sanitized.has_rich_content and has_attachment_reply:
+                            reply_body = _build_attachment_only_reply_body(
+                                from_address=from_header or from_address,
+                                subject=subject,
+                            )
+                        if sanitized.has_rich_content or has_attachment_reply:
                             reply_created_at = received_at or datetime.now(timezone.utc)
                             reply_author_id = await _resolve_existing_reply_author_id(
                                 ticket,
@@ -1491,7 +1499,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 await tickets_repo.create_reply(
                                     ticket_id=int(ticket_id),
                                     author_id=reply_author_id,
-                                    body=sanitized.html,
+                                    body=reply_body,
                                     is_internal=False,
                                     external_reference=(
                                         internet_msg_id if internet_msg_id else None

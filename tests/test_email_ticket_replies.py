@@ -162,6 +162,37 @@ class TestSubjectNormalization:
         result = _normalize_subject_for_matching(subject)
         assert result == ""
 
+def test_inbound_reply_body_falls_back_when_header_stripping_removes_content():
+    """Inbound replies with real text should still create a safe body if header stripping is too aggressive."""
+    from app.services.imap import _sanitize_inbound_reply_body
+
+    body = _sanitize_inbound_reply_body(
+        "From: Customer <customer@example.com>\n"
+        "Sent: Friday, 10 July 2026 10:31 AM\n"
+        "Subject: Re: Website management\n"
+        "Please see the attached update <script>alert(1)</script>"
+    )
+
+    assert body.has_rich_content is True
+    assert "Please see the attached update" in body.html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body.html
+    assert "<script>" not in body.html
+
+
+def test_attachment_only_reply_body_escapes_sender_and_subject():
+    """Attachment-only inbound replies should still produce safe conversation text."""
+    from app.services.imap import _build_attachment_only_reply_body
+
+    body = _build_attachment_only_reply_body(
+        from_address='Customer <bad@example.com><script>alert(1)</script>',
+        subject='Re: Website <management>',
+    )
+
+    assert "Email reply received with attachment(s)" in body
+    assert "Customer &lt;bad@example.com&gt;&lt;script&gt;alert(1)&lt;/script&gt;" in body
+    assert "Re: Website &lt;management&gt;" in body
+    assert "<script>" not in body
+
 
 @pytest.mark.anyio
 class TestFindExistingTicket:
