@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 from collections.abc import Mapping, Sequence
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
@@ -1192,8 +1191,6 @@ async def admin_shop_page(
     request: Request,
     show_archived: bool = Query(False, alias="showArchived"),
     search: str = Query("", alias="search"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, alias="pageSize", ge=1, le=200),
 ):
     from app.repositories import companies as company_repo
     from app.repositories import shop as shop_repo
@@ -1207,30 +1204,26 @@ async def admin_shop_page(
     categories_task = asyncio.create_task(shop_repo.list_all_categories_flat())
     filter_categories_task = asyncio.create_task(shop_repo.list_categories_with_products())
     search_term = search.strip()
-    offset = (page - 1) * page_size
     filters = shop_repo.ProductFilters(
         include_archived=show_archived,
         search_term=search_term or None,
         include_out_of_stock=True,
-        limit=page_size,
-        offset=offset,
         sort="name_asc",
     )
     products_task = asyncio.create_task(
         shop_repo.list_products_summary(filters)
     )
-    total_count_task = asyncio.create_task(shop_repo.count_products(filters))
     companies_task = asyncio.create_task(company_repo.list_companies())
     subscription_categories_task = asyncio.create_task(subscription_categories_repo.list_categories())
 
-    categories, filter_categories, products, total_count, companies, subscription_categories = await asyncio.gather(
+    categories, filter_categories, products, companies, subscription_categories = await asyncio.gather(
         categories_task,
         filter_categories_task,
         products_task,
-        total_count_task,
         companies_task,
         subscription_categories_task,
     )
+    total_count = len(products)
 
     for product in products:
         product["price_below_threshold"] = shop_service.is_price_below_dbp_threshold(
@@ -1267,9 +1260,6 @@ async def admin_shop_page(
         "search_term": search_term,
         "subscription_categories": subscription_categories,
         "total_count": total_count,
-        "page": page,
-        "page_size": page_size,
-        "total_pages": max(1, math.ceil(total_count / page_size)) if page_size else 1,
     }
     return await _main()._render_template("admin/shop.html", request, current_user, extra=extra)
 
