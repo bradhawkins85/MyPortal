@@ -65,8 +65,18 @@ def test_handle_create_card_fetches_full_card_and_creates_ticket_with_link(monke
 
         assert created_payload["subject"] == "Full card title"
         assert created_payload["company_id"] == 42
-        assert created_payload["external_reference"] == "card-1"
+        assert created_payload["external_reference"] == "trello:card-1"
         assert "https://trello.com/c/full-card" in created_payload["description"]
         assert "Full card body" in created_payload["description"]
 
     asyncio.run(run_test())
+
+
+def test_trello_external_reference_helpers():
+    from app.services import trello as trello_service
+
+    assert trello_service.card_external_reference("card-1") == "trello:card-1"
+    assert trello_service.card_external_reference("trello:card-1") == "trello:card-1"
+    assert trello_service.card_id_from_external_reference("trello:card-1") == "card-1"
+    assert trello_service.card_id_from_external_reference("card-1") == "card-1"
+    assert trello_service.card_id_from_external_reference("") is None

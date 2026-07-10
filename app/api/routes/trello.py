@@ -321,7 +321,7 @@ async def _handle_create_card(
             status="open",
             category=None,
             module_slug=trello_service.TRELLO_MODULE_SLUG,
-            external_reference=card_id,
+            external_reference=trello_service.card_external_reference(card_id),
             trigger_automations=True,
         )
     except Exception as exc:
