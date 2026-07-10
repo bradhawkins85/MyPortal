@@ -16,7 +16,7 @@ def _make_request(path: str = "/shop") -> Request:
 
 
 @pytest.mark.anyio("asyncio")
-async def test_shop_page_pagination_counts_only_visible_products(monkeypatch):
+async def test_shop_page_shows_all_visible_products_without_pagination(monkeypatch):
     request = _make_request("/shop")
     user = {"id": 9, "company_id": 5}
     membership = {"can_access_shop": 1}
@@ -41,6 +41,8 @@ async def test_shop_page_pagination_counts_only_visible_products(monkeypatch):
                 {"id": 1, "name": "Visible", "price": "10.00", "vip_price": None},
                 {"id": 2, "name": "Below DBP", "price": "12.00", "vip_price": None},
                 {"id": 3, "name": "No Price", "price": "0", "vip_price": None},
+                {"id": 4, "name": "Visible Two", "price": "15.00", "vip_price": None},
+                {"id": 5, "name": "Visible Three", "price": "20.00", "vip_price": None},
             ]
         ),
     )
@@ -66,6 +68,8 @@ async def test_shop_page_pagination_counts_only_visible_products(monkeypatch):
     response = await main.shop_page(request, page=1, page_size=2)
 
     assert response == "ok"
-    assert captured_extra["total_count"] == 1
+    assert captured_extra["total_count"] == 3
     assert captured_extra["total_pages"] == 1
-    assert [product["id"] for product in captured_extra["products"]] == [1]
+    assert captured_extra["page"] == 1
+    assert captured_extra["page_size"] == 3
+    assert [product["id"] for product in captured_extra["products"]] == [1, 4, 5]
