@@ -955,6 +955,7 @@
             serial_number: record.serial_number,
             status: record.status,
             tactical_asset_id: record.tactical_asset_id,
+            tray_device_uid: record.tray_device_uid,
           };
         })
         .filter((option) => option !== null);

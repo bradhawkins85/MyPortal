@@ -993,8 +993,21 @@ async def list_ticket_assets(ticket_id: int) -> list[dict[str, Any]]:
             (
                 SELECT td.device_uid
                 FROM tray_devices AS td
-                WHERE td.asset_id = ta.asset_id AND td.status = 'active'
-                ORDER BY td.last_seen_utc DESC, td.updated_at DESC, td.id DESC
+                WHERE td.status = 'active'
+                  AND td.company_id = a.company_id
+                  AND (
+                    td.asset_id = ta.asset_id
+                    OR (
+                      (td.asset_id IS NULL OR td.asset_id = 0)
+                      AND (
+                        (a.serial_number IS NOT NULL AND a.serial_number <> '' AND LOWER(td.serial_number) = LOWER(a.serial_number))
+                        OR (a.name IS NOT NULL AND a.name <> '' AND LOWER(td.hostname) = LOWER(a.name))
+                      )
+                    )
+                  )
+                ORDER BY
+                    CASE WHEN td.asset_id = ta.asset_id THEN 0 ELSE 1 END,
+                    td.last_seen_utc DESC, td.updated_at DESC, td.id DESC
                 LIMIT 1
             ) AS tray_device_uid
         FROM ticket_assets AS ta
