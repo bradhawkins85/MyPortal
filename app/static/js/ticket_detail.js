@@ -445,6 +445,124 @@
     return parts.join(' · ');
   }
 
+
+  function initialiseTicketDetailsAutosave() {
+    const form = document.querySelector('[data-ticket-details-autosave]');
+    if (!(form instanceof HTMLFormElement)) {
+      return;
+    }
+
+    const statusElements = Array.from(document.querySelectorAll('[data-ticket-details-autosave-status]'));
+    const externalSubmitButtons = form.id
+      ? Array.from(document.querySelectorAll(`button[type="submit"][form="${form.id}"], input[type="submit"][form="${form.id}"]`))
+      : [];
+    const submitButtons = externalSubmitButtons.concat(
+      Array.from(form.querySelectorAll('button[type="submit"], input[type="submit"]')),
+    );
+    let lastSavedSnapshot = new URLSearchParams(new FormData(form)).toString();
+    let pendingTimer = null;
+    let inFlight = null;
+    let queued = false;
+
+    function setStatus(message, state) {
+      statusElements.forEach((element) => {
+        element.textContent = message;
+        element.classList.toggle('form-help--error', state === 'error');
+      });
+    }
+
+    function currentSnapshot() {
+      return new URLSearchParams(new FormData(form)).toString();
+    }
+
+    async function saveNow() {
+      if (!form.reportValidity()) {
+        setStatus('Fix the highlighted fields before changes can be saved.', 'error');
+        return;
+      }
+
+      const snapshot = currentSnapshot();
+      if (snapshot === lastSavedSnapshot) {
+        return;
+      }
+
+      if (inFlight) {
+        queued = true;
+        return inFlight;
+      }
+
+      setStatus('Saving changes…', 'saving');
+      submitButtons.forEach((button) => {
+        button.disabled = true;
+        button.setAttribute('aria-disabled', 'true');
+      });
+
+      inFlight = fetch(form.action, {
+        method: form.method || 'POST',
+        body: new FormData(form),
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'text/html',
+          'X-Requested-With': 'fetch',
+        },
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error((await response.text()) || `Save failed with status ${response.status}`);
+          }
+          lastSavedSnapshot = snapshot;
+          setStatus('Saved.', 'saved');
+        })
+        .catch((error) => {
+          console.error('Failed to autosave ticket details', error);
+          setStatus('Autosave failed. Use Save changes to retry.', 'error');
+        })
+        .finally(() => {
+          inFlight = null;
+          submitButtons.forEach((button) => {
+            button.disabled = false;
+            button.removeAttribute('aria-disabled');
+          });
+          if (queued) {
+            queued = false;
+            scheduleSave(0);
+          }
+        });
+
+      return inFlight;
+    }
+
+    function scheduleSave(delayMs = 250) {
+      window.clearTimeout(pendingTimer);
+      pendingTimer = window.setTimeout(() => {
+        saveNow();
+      }, delayMs);
+    }
+
+    function isAutosavedControl(target) {
+      if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement)) {
+        return false;
+      }
+      return target.form === form;
+    }
+
+    document.addEventListener('focusout', (event) => {
+      if (isAutosavedControl(event.target)) {
+        scheduleSave();
+      }
+    });
+
+    document.addEventListener('change', (event) => {
+      if (isAutosavedControl(event.target)) {
+        scheduleSave();
+      }
+    });
+
+    document.addEventListener('ticket:details-autosave', () => {
+      scheduleSave();
+    });
+  }
+
   function initialiseAssetSelector() {
     const select = document.querySelector('[data-ticket-asset-selector]');
     if (!(select instanceof HTMLSelectElement)) {
@@ -784,6 +902,7 @@
       });
       renderLinkedAssets();
       renderOptions();
+      document.dispatchEvent(new CustomEvent('ticket:details-autosave'));
     }
 
     function removeLinkedAssetById(assetId) {
@@ -797,6 +916,7 @@
       linkedMap.delete(id);
       renderLinkedAssets();
       renderOptions();
+      document.dispatchEvent(new CustomEvent('ticket:details-autosave'));
     }
 
     function clearLinkedAssets() {
@@ -2596,6 +2716,7 @@
     initialiseTicketSplit();
     initialiseReplyTimeEditing();
     initialiseCallRecordingTimeEditing();
+    initialiseTicketDetailsAutosave();
     initialiseAssetSelector();
     initialiseRequesterSelector();
     initialiseTaskManagement();
