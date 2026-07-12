@@ -96,7 +96,7 @@
               </div>
             </summary>
             <div class="card-collapsible__content">
-            <form id="ticket-details-form" action="/admin/tickets/{{ ticket.id }}/details" method="post" class="form card__form">
+            <form id="ticket-details-form" action="/admin/tickets/{{ ticket.id }}/details" method="post" class="form card__form" data-ticket-details-autosave>
               {% if csrf_token %}
                 <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
               {% endif %}
@@ -194,6 +194,7 @@
                   {% endfor %}
                 </select>
               </div>
+              <p class="form-help" data-ticket-details-autosave-status role="status" aria-live="polite">Changes save automatically when you leave a field.</p>
               <div class="form-actions">
                 <button type="submit" class="button button--primary">Save changes</button>
               </div>
@@ -916,6 +917,7 @@
                 </label>
                 <p class="form-help">Optionally notify linked tray devices that this ticket was updated.</p>
               </div>
+              <p class="form-help" data-ticket-details-autosave-status role="status" aria-live="polite">Asset changes save automatically.</p>
               <div class="form-actions">
                 <button type="submit" class="button button--primary" form="ticket-details-form">Save asset changes</button>
               </div>
