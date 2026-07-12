@@ -11,6 +11,7 @@ from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.repositories import staff as staff_repo
+from app.repositories import tray as tray_repo
 from app.schemas.assets import AssetResponse
 from app.schemas.companies import CompanyCreate, CompanyResponse, CompanyUpdate
 from app.schemas.company_recurring_invoice_items import (
@@ -281,9 +282,38 @@ async def list_company_assets(
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     rows = await assets_repo.list_company_assets(company_id)
+    asset_ids = []
+    for row in rows:
+        try:
+            asset_ids.append(int(row.get("id")))
+        except (AttributeError, TypeError, ValueError):
+            continue
+    tray_devices_by_asset = await tray_repo.list_active_devices_by_asset_ids(asset_ids)
+    active_tray_devices = await tray_repo.list_devices(company_id=company_id, status="active")
+
+    def _matching_tray_device(record: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            asset_id = int(record.get("id"))
+        except (TypeError, ValueError):
+            asset_id = None
+        if asset_id and asset_id in tray_devices_by_asset:
+            return tray_devices_by_asset[asset_id]
+        serial_number = str(record.get("serial_number") or "").strip().lower()
+        asset_name = str(record.get("name") or "").strip().lower()
+        for device in active_tray_devices:
+            if device.get("asset_id"):
+                continue
+            device_serial = str(device.get("serial_number") or "").strip().lower()
+            device_hostname = str(device.get("hostname") or "").strip().lower()
+            if (serial_number and device_serial == serial_number) or (asset_name and device_hostname == asset_name):
+                return device
+        return None
+
     assets: list[dict[str, Any]] = []
     for row in rows:
         record = dict(row)
+        tray_device = _matching_tray_device(record)
+        record["tray_device_uid"] = (str(tray_device.get("device_uid") or "").strip() or None) if tray_device else None
         for numeric_key in ("ram_gb", "approx_age", "performance_score"):
             value = record.get(numeric_key)
             if value is None or value == "":

@@ -28,3 +28,4 @@ class AssetResponse(BaseModel):
     warranty_end_date: Optional[date] = None
     syncro_asset_id: Optional[str] = None
     tactical_asset_id: Optional[str] = None
+    tray_device_uid: Optional[str] = None
