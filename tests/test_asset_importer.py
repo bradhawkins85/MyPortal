@@ -134,6 +134,61 @@ async def test_import_tactical_assets_truncates_long_hdd_size(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_import_tactical_assets_links_tray_device_from_trmm_custom_field(monkeypatch):
+    company_record = {"id": 11, "tacticalrmm_client_id": "client-11"}
+    agents = [
+        {
+            "id": 301,
+            "custom_fields": [
+                {"name": "TrayAgentID", "type": "text", "value": "tray-device-uid"}
+            ],
+        }
+    ]
+    linked: list[tuple[int, int]] = []
+
+    async def fake_get_company(company_id):
+        assert company_id == 11
+        return company_record
+
+    async def fake_fetch_agents(client_id):
+        assert client_id == "client-11"
+        return agents
+
+    def fake_extract(agent):
+        return {
+            "name": "BJP-PW0F631C",
+            "serial_number": "SERIAL-301",
+            "tactical_asset_id": "agent-301",
+        }
+
+    async def fake_upsert_asset(**kwargs):
+        return 42
+
+    async def fake_get_device_by_uid(device_uid):
+        assert device_uid == "tray-device-uid"
+        return {"id": 77, "company_id": 11, "device_uid": device_uid}
+
+    async def fake_link_device_to_asset(device_id, asset_id):
+        linked.append((device_id, asset_id))
+
+    async def fake_sync_fields(asset_id, trmm_agent_id, agent_data):
+        return None
+
+    monkeypatch.setattr(asset_importer.company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(asset_importer.tacticalrmm, "fetch_agents", fake_fetch_agents)
+    monkeypatch.setattr(asset_importer.tacticalrmm, "extract_agent_details", fake_extract)
+    monkeypatch.setattr(asset_importer.assets_repo, "upsert_asset", fake_upsert_asset)
+    monkeypatch.setattr(asset_importer.tray_repo, "get_device_by_uid", fake_get_device_by_uid)
+    monkeypatch.setattr(asset_importer.tray_repo, "link_device_to_asset", fake_link_device_to_asset)
+    monkeypatch.setattr(asset_importer, "_sync_tactical_asset_custom_fields", fake_sync_fields)
+
+    processed = await asset_importer.import_tactical_assets_for_company(11)
+
+    assert processed == 1
+    assert linked == [(77, 42)]
+
+
+@pytest.mark.anyio
 async def test_import_all_tactical_assets_summarises(monkeypatch):
     companies = [
         {"id": 1, "tacticalrmm_client_id": "c1"},
