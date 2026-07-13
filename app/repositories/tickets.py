@@ -1185,6 +1185,53 @@ async def set_ticket_status(
     return await update_ticket(ticket_id, **fields)
 
 
+async def set_tickets_status(
+    ticket_ids: Iterable[int],
+    status: str,
+    *,
+    closed_at: datetime | None = None,
+) -> int:
+    """Set the status for multiple tickets and return the number of rows changed."""
+
+    normalised_ids: list[int] = []
+    seen: set[int] = set()
+    for raw_id in ticket_ids:
+        try:
+            identifier = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if identifier <= 0 or identifier in seen:
+            continue
+        seen.add(identifier)
+        normalised_ids.append(identifier)
+
+    if not normalised_ids:
+        return 0
+
+    placeholders = ", ".join(["%s"] * len(normalised_ids))
+    params: list[Any] = [status, status]
+    closed_clause = "closed_at = NULL,"
+    if closed_at is not None:
+        closed_clause = "closed_at = %s,"
+        params.append(closed_at)
+    elif status in {"resolved", "closed"}:
+        closed_clause = "closed_at = COALESCE(closed_at, UTC_TIMESTAMP(6)),"
+
+    params.extend(normalised_ids)
+    return await db.execute_rowcount(
+        f"""
+        UPDATE tickets
+        SET status_changed_at = CASE WHEN status <> %s
+                THEN UTC_TIMESTAMP(6) ELSE COALESCE(status_changed_at, created_at) END,
+            status = %s,
+            {closed_clause}
+            updated_at = UTC_TIMESTAMP(6)
+        WHERE id IN ({placeholders})
+        """,
+        tuple(params),
+    )
+
+
 async def delete_ticket(ticket_id: int) -> None:
     log_info("Deleting ticket", ticket_id=ticket_id)
     await db.execute("DELETE FROM tickets WHERE id = %s", (ticket_id,))

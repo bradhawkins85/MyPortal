@@ -10,7 +10,8 @@
   {% set show_unbill_tickets = is_super_admin %}
   {% set show_email_blocklist = is_super_admin %}
   {% set can_merge_tickets = is_helpdesk_technician | default(false) %}
-  {% set show_ticket_tools = show_ticket_automations or show_syncro_import or show_ticket_status_editor or show_labour_type_editor or show_next_ticket_number or show_unbill_tickets or show_email_blocklist or show_tag_exclusions or can_bulk_delete_tickets or can_merge_tickets %}
+  {% set can_bulk_edit_tickets = is_helpdesk_technician | default(false) %}
+  {% set show_ticket_tools = show_ticket_automations or show_syncro_import or show_ticket_status_editor or show_labour_type_editor or show_next_ticket_number or show_unbill_tickets or show_email_blocklist or show_tag_exclusions or can_bulk_delete_tickets or can_merge_tickets or can_bulk_edit_tickets %}
   <div class="header-title-menu">
     <span class="header-title-menu__label">Ticketing workspace</span>
     <button
@@ -105,6 +106,22 @@
               <a href="/admin/tag-exclusions" class="header-title-menu__link" role="menuitem">AI tag exclusions</a>
             </li>
           {% endif %}
+          {% if can_bulk_edit_tickets %}
+            <li class="header-title-menu__item" role="none">
+              <button
+                type="button"
+                class="header-title-menu__link"
+                role="menuitem"
+                data-ticket-bulk-edit-open
+                aria-haspopup="dialog"
+                aria-controls="bulk-edit-tickets-modal"
+                disabled
+              >
+                Bulk Edit
+                <span data-ticket-bulk-edit-count hidden>(0)</span>
+              </button>
+            </li>
+          {% endif %}
           {% if can_merge_tickets %}
             <li class="header-title-menu__item" role="none">
               <button
@@ -154,6 +171,41 @@
       {% include "partials/csrf.html" %}
       <input type="hidden" name="cutoffDate" value="" data-unbill-tickets-date-input />
     </form>
+  {% endif %}
+
+  {% if can_bulk_edit_tickets %}
+    <div class="modal" id="bulk-edit-tickets-modal" data-ticket-bulk-edit-modal hidden role="dialog" aria-modal="true" aria-labelledby="bulk-edit-tickets-title">
+      <div class="modal__backdrop" data-ticket-bulk-edit-close></div>
+      <div class="modal__dialog">
+        <div class="modal__header">
+          <h2 id="bulk-edit-tickets-title">Bulk edit selected tickets</h2>
+          <button type="button" class="modal__close" data-ticket-bulk-edit-close aria-label="Close bulk edit tickets modal">×</button>
+        </div>
+        <form action="/admin/tickets/bulk-edit" method="post" data-ticket-bulk-edit-form>
+          {% include "partials/csrf.html" %}
+          <input type="hidden" name="returnUrl" value="{{ request.url.path }}{% if request.url.query %}?{{ request.url.query }}{% endif %}" />
+          <div data-ticket-bulk-edit-selected></div>
+          <div class="modal__body">
+            <p>Update the status for <strong data-ticket-bulk-edit-summary>0 selected tickets</strong>. Use this to quickly close excess notification tickets during an influx.</p>
+            <div class="form-field">
+              <label class="form-label" for="bulk-edit-ticket-status">Status</label>
+              <select id="bulk-edit-ticket-status" name="status" class="form-input" required>
+                {% for status_option in ticket_status_definitions %}
+                  <option value="{{ status_option.tech_status }}">{{ status_option.tech_label }}</option>
+                {% else %}
+                  <option value="closed">Closed</option>
+                {% endfor %}
+              </select>
+            </div>
+            <p class="form-help" data-ticket-bulk-edit-error hidden></p>
+          </div>
+          <div class="modal__footer">
+            <button type="button" class="button button--ghost" data-ticket-bulk-edit-close>Cancel</button>
+            <button type="submit" class="button button--primary" data-ticket-bulk-edit-submit>Update tickets</button>
+          </div>
+        </form>
+      </div>
+    </div>
   {% endif %}
 
   {% if can_merge_tickets %}
@@ -479,13 +531,14 @@
             data-csrf-token="{{ csrf_token or '' }}"
             data-can-bulk-delete="{{ 'true' if can_bulk_delete_tickets else 'false' }}"
             data-can-merge-tickets="{{ 'true' if can_merge_tickets else 'false' }}"
+            data-can-bulk-edit-tickets="{{ 'true' if can_bulk_edit_tickets else 'false' }}"
             data-bulk-delete-form-id="tickets-bulk-delete-form"
             data-table-empty-label="No tickets found for the selected filters."
             {% if ticket_autoload %}data-table-autoload{% endif %}
           >
             <thead>
               <tr>
-                {% if can_bulk_delete_tickets or can_merge_tickets %}
+                {% if can_bulk_delete_tickets or can_merge_tickets or can_bulk_edit_tickets %}
                   <th scope="col" class="table__select tickets-table__column tickets-table__column--select">
                     <input
                       type="checkbox"
@@ -553,7 +606,7 @@
                   {% set assigned_name = ([assigned.first_name, assigned.last_name] | select | join(' ')) | trim if assigned else '' %}
                   {% set assigned_label = assigned_name or (assigned.email if assigned else '—') %}
                   <tr>
-                    {% if can_bulk_delete_tickets or can_merge_tickets %}
+                    {% if can_bulk_delete_tickets or can_merge_tickets or can_bulk_edit_tickets %}
                       <td data-label="Select" class="table__select tickets-table__cell tickets-table__cell--select">
                         <input
                           type="checkbox"
@@ -641,7 +694,7 @@
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="{{ 38 + (1 if can_bulk_delete_tickets or can_merge_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
+                  <td colspan="{{ 38 + (1 if can_bulk_delete_tickets or can_merge_tickets or can_bulk_edit_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
                 </tr>
               {% endif %}
             </tbody>

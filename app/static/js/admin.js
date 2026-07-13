@@ -699,6 +699,8 @@
     const countLabel = document.querySelector('[data-bulk-delete-count]');
     const mergeButton = document.querySelector('[data-ticket-merge-open]');
     const mergeCountLabel = document.querySelector('[data-ticket-merge-count]');
+    const bulkEditButton = document.querySelector('[data-ticket-bulk-edit-open]');
+    const bulkEditCountLabel = document.querySelector('[data-ticket-bulk-edit-count]');
     const selectAll = table.querySelector('[data-bulk-select-all]');
     const filterInputs = document.querySelectorAll('[data-table-filter="tickets-table"]');
 
@@ -761,6 +763,14 @@
         const count = selected.length;
         mergeCountLabel.textContent = `${count} selected`;
         mergeCountLabel.hidden = count === 0;
+      }
+      if (bulkEditButton) {
+        bulkEditButton.disabled = selected.length === 0;
+      }
+      if (bulkEditCountLabel) {
+        const count = selected.length;
+        bulkEditCountLabel.textContent = `${count} selected`;
+        bulkEditCountLabel.hidden = count === 0;
       }
       if (selectAll) {
         if (!visible.length) {
@@ -830,6 +840,54 @@
           event.preventDefault();
         }
       });
+    }
+
+    if (bulkEditButton) {
+      const modal = document.querySelector('[data-ticket-bulk-edit-modal]');
+      const form = modal ? modal.querySelector('[data-ticket-bulk-edit-form]') : null;
+      const selectedContainer = modal ? modal.querySelector('[data-ticket-bulk-edit-selected]') : null;
+      const summary = modal ? modal.querySelector('[data-ticket-bulk-edit-summary]') : null;
+      const error = modal ? modal.querySelector('[data-ticket-bulk-edit-error]') : null;
+      const closeButtons = modal ? modal.querySelectorAll('[data-ticket-bulk-edit-close]') : [];
+      const closeModal = () => {
+        if (modal) modal.hidden = true;
+      };
+      closeButtons.forEach((button) => button.addEventListener('click', closeModal));
+      const populateSelectedInputs = () => {
+        const selected = getVisibleCheckboxes().filter((checkbox) => checkbox.checked);
+        if (selectedContainer) {
+          selectedContainer.replaceChildren(...selected.map((checkbox) => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'ticketIds';
+            input.value = checkbox.value;
+            return input;
+          }));
+        }
+        if (summary) {
+          summary.textContent = `${selected.length} selected ${selected.length === 1 ? 'ticket' : 'tickets'}`;
+        }
+        return selected.length;
+      };
+      bulkEditButton.addEventListener('click', () => {
+        if (!modal) return;
+        const count = populateSelectedInputs();
+        if (!count) return;
+        if (error) error.hidden = true;
+        modal.hidden = false;
+      });
+      if (form) {
+        form.addEventListener('submit', (event) => {
+          const count = populateSelectedInputs();
+          if (!count) {
+            event.preventDefault();
+            if (error) {
+              error.textContent = 'Select at least one ticket to update.';
+              error.hidden = false;
+            }
+          }
+        });
+      }
     }
 
     if (mergeButton) {
@@ -1014,7 +1072,8 @@
 
     const canBulkDelete = table.getAttribute('data-can-bulk-delete') === 'true';
     const canMergeTickets = table.getAttribute('data-can-merge-tickets') === 'true';
-    const canSelectTickets = canBulkDelete || canMergeTickets;
+    const canBulkEditTickets = table.getAttribute('data-can-bulk-edit-tickets') === 'true';
+    const canSelectTickets = canBulkDelete || canMergeTickets || canBulkEditTickets;
     const bulkDeleteFormId = table.getAttribute('data-bulk-delete-form-id') || '';
     const emptyMessage = table.getAttribute('data-table-empty-label') || 'No records found.';
 
