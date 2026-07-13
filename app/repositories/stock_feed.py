@@ -189,6 +189,7 @@ def _normalise_row(row: dict[str, Any]) -> dict[str, Any]:
         "warranty_length": row.get("warranty_length") or None,
         "manufacturer": row.get("manufacturer") or None,
         "image_url": row.get("image_url") or None,
+        "website_url": row.get("website_url") or None,
         "opt_accessori": row.get("opt_accessori") or None,
         "duplicate_sku_import": bool(_coerce_int(row.get("duplicate_sku_import"))),
         "duplicate_sku_count": _coerce_int(row.get("duplicate_sku_count")),
@@ -226,12 +227,12 @@ async def replace_feed(items: Sequence[Mapping[str, Any]]) -> None:
                             " sku, product_name, product_name2, rrp, category_name,"
                             " on_hand_nsw, on_hand_qld, on_hand_vic, on_hand_sa,"
                             " dbp, weight, length, width, height, pub_date,"
-                            " warranty_length, manufacturer, image_url, opt_accessori,"
+                            " warranty_length, manufacturer, image_url, website_url, opt_accessori,"
                             " duplicate_sku_import, duplicate_sku_count"
                             ") VALUES ("
                             " %s, %s, %s, %s, %s,"
                             " %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,"
-                            " %s, %s, %s, %s, %s, %s"
+                            " %s, %s, %s, %s, %s, %s, %s"
                             ")"
                         ),
                         [
@@ -254,6 +255,7 @@ async def replace_feed(items: Sequence[Mapping[str, Any]]) -> None:
                                 item.get("warranty_length"),
                                 item.get("manufacturer"),
                                 item.get("image_url"),
+                                item.get("website_url"),
                                 item.get("opt_accessori"),
                                 1 if item.get("duplicate_sku_import") else 0,
                                 item.get("duplicate_sku_count", 0),
