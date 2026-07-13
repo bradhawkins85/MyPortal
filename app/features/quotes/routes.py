@@ -128,9 +128,13 @@ def _build_quote_pdf_html(
         )
         detail_pages.append(
             "<section class='product-page page-break'>"
+            "<div class='product-hero'>"
+            "<div class='product-heading'>"
             "<p class='eyebrow'>Product Details</p>"
             f"<h1>{escape(str(item.get('product_name') or 'Product'))}</h1>"
-            f"{image_html}"
+            "</div>"
+            f"<div class='product-image-card'>{image_html}</div>"
+            "</div>"
             f"<div class='description rich-text-viewer'>{description}</div>"
             f"{product_link_html}"
             "</section>"
@@ -162,9 +166,12 @@ def _build_quote_pdf_html(
     .totals div {{ display: flex; justify-content: space-between; padding: 8px 0; }}
     .grand {{ border-top: 2px solid #172033; font-size: 16px; font-weight: 700; }}
     .page-break {{ page-break-before: always; }}
-    .product-page h1 {{ font-size: 26px; margin: 6px 0 16px; }}
-    .detail-image {{ border: 1px solid #e5e7eb; border-radius: 12px; display: block; max-height: 290px; max-width: 100%; object-fit: contain; padding: 12px; }}
-    .image-placeholder {{ background: #f4f7fb; border-radius: 12px; color: #6b7280; padding: 50px; text-align: center; }}
+    .product-hero {{ align-items: stretch; display: flex; gap: 18px; margin-bottom: 18px; }}
+    .product-heading {{ flex: 1 1 52%; min-width: 0; }}
+    .product-page h1 {{ font-size: 24px; line-height: 1.16; margin: 6px 0 0; overflow-wrap: anywhere; }}
+    .product-image-card {{ align-items: center; background: #e8f5e9; border: 2px solid #22c55e; border-radius: 12px; box-shadow: 0 1px 4px rgba(34, 197, 94, .35); display: flex; flex: 0 0 42%; justify-content: center; min-height: 150px; padding: 12px; }}
+    .detail-image {{ display: block; max-height: 170px; max-width: 100%; object-fit: contain; }}
+    .image-placeholder {{ color: #4b5563; font-weight: 700; padding: 36px 12px; text-align: center; }}
     .description {{ font-size: 12px; margin-top: 18px; }}
     .description p {{ margin: 0 0 8px; }}
     .description ul, .description ol {{ margin: 0 0 8px 18px; padding: 0; }}
