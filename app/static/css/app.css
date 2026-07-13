@@ -2455,6 +2455,19 @@ button.header-title-menu__link,
   min-width: 680px;
 }
 
+.table tbody tr {
+  transition: background-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.table tbody tr:hover {
+  background: rgba(56, 189, 248, 0.1);
+  box-shadow: inset 3px 0 0 rgba(56, 189, 248, 0.45);
+}
+
+.table tbody tr:has(a:hover, button:hover, input:hover, select:hover, textarea:hover) {
+  background: rgba(56, 189, 248, 0.12);
+}
+
 .tickets-table {
   min-width: 680px;
 }
@@ -6436,6 +6449,10 @@ dialog.modal:not([open]) {
   background: rgba(59, 130, 246, 0.18);
 }
 
+.table__row--active:hover {
+  background: rgba(59, 130, 246, 0.28);
+}
+
 .attempt-details {
   margin-top: 1.5rem;
   display: flex;
@@ -9314,6 +9331,10 @@ input.form-checkbox {
   font-size: 0.9375rem;
 }
 
+.data-table tbody tr {
+  transition: background-color 0.16s ease, box-shadow 0.16s ease;
+}
+
 .data-table--sticky thead {
   position: sticky;
   top: 0;
@@ -9381,7 +9402,12 @@ input.form-checkbox {
 }
 
 .data-table tbody tr:hover {
-  background: rgba(148, 163, 184, 0.05);
+  background: rgba(56, 189, 248, 0.1);
+  box-shadow: inset 3px 0 0 rgba(56, 189, 248, 0.45);
+}
+
+.data-table tbody tr:has(a:hover, button:hover, input:hover, select:hover, textarea:hover) {
+  background: rgba(56, 189, 248, 0.12);
 }
 
 /* Action Buttons */
