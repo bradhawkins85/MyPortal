@@ -103,8 +103,7 @@
               </td>
               <td class="table__actions">
                 <div class="table__action-buttons">
-                  {% if package.stock_level > 0 %}
-                    {% if cart_allowed %}
+                  {% if cart_allowed %}
                       <form action="/cart/add-package" method="post" class="inline-form">
                         {% include "partials/csrf.html" %}
                         <input type="hidden" name="packageId" value="{{ package.id }}" />
@@ -115,15 +114,11 @@
                           type="number"
                           name="quantity"
                           min="1"
-                          max="{{ package.stock_level }}"
+                          max="9999"
                           value="1"
-                          data-stock-limit="{{ package.stock_level }}"
                         />
                         <button type="submit" class="button">Add to cart</button>
                       </form>
-                    {% endif %}
-                  {% else %}
-                    <span class="badge badge--muted">Out of stock</span>
                   {% endif %}
                 </div>
               </td>

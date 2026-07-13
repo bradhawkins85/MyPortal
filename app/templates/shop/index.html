@@ -180,16 +180,14 @@
               {% set has_active_subscription = is_subscription and product.id in active_subscription_product_ids %}
               {% if has_active_subscription %}
                 <a href="/subscriptions" class="button button--primary">Manage</a>
-              {% elif product.stock > 0 and cart_allowed %}
+              {% elif cart_allowed %}
                 <form action="{{ '/cart/add-package' if product.is_package else '/cart/add' }}" method="post" class="inline-form shop-product-card__cart">
                   {% include "partials/csrf.html" %}
                   <input type="hidden" name="{{ 'packageId' if product.is_package else 'productId' }}" value="{{ product.id }}" />
                   <label class="visually-hidden" for="quantity-{{ 'package' if product.is_package else 'product' }}-{{ product.id }}">Quantity for {{ product.name }}</label>
-                  <input class="form-input form-input--sm" id="quantity-{{ 'package' if product.is_package else 'product' }}-{{ product.id }}" type="number" name="quantity" min="1" max="{{ product.stock }}" value="1" data-stock-limit="{{ product.stock }}" />
+                  <input class="form-input form-input--sm" id="quantity-{{ 'package' if product.is_package else 'product' }}-{{ product.id }}" type="number" name="quantity" min="1" max="9999" value="1" />
                   <button type="submit" class="button">Add</button>
                 </form>
-              {% elif product.stock <= 0 %}
-                <span class="badge badge--danger">Out Of Stock</span>
               {% endif %}
             </div>
           </article>

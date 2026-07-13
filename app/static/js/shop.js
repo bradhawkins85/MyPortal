@@ -203,9 +203,8 @@
     quantity.type = 'number';
     quantity.name = 'quantity';
     quantity.min = '1';
-    quantity.max = String(stock);
+    quantity.max = '9999';
     quantity.value = '1';
-    quantity.setAttribute('data-stock-limit', String(stock));
     form.appendChild(quantity);
 
     const button = document.createElement('button');
