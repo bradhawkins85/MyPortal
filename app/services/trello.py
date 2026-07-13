@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-import html
 import re
+from html.parser import HTMLParser
 from typing import Any
+from urllib.parse import urljoin
+
+from app.core.config import get_settings
 
 import httpx
 from loguru import logger
@@ -34,6 +37,7 @@ class TrelloAuthError(RuntimeError):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 async def _get_credentials_for_company(company: dict[str, Any]) -> tuple[str, str]:
     """Return ``(api_key, token)`` from a company record.
 
@@ -54,33 +58,111 @@ async def _get_module_enabled() -> bool:
     return bool(module and module.get("enabled"))
 
 
-def _strip_html(value: str) -> str:
-    """Convert simple HTML to plain text suitable for a Trello comment."""
+class _TrelloCommentHTMLParser(HTMLParser):
+    """Render ticket reply HTML as Trello-friendly Markdown/plain text."""
+
+    _BLOCK_TAGS = {
+        "address",
+        "article",
+        "aside",
+        "blockquote",
+        "div",
+        "footer",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "header",
+        "li",
+        "p",
+        "section",
+        "tr",
+    }
+
+    def __init__(self, *, image_base_url: str | None = None) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+        self._image_base_url = (image_base_url or "").strip().rstrip("/")
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag_name = tag.lower()
+        if tag_name == "br":
+            self._append_newline()
+            return
+        if tag_name == "img":
+            attr_map = {
+                name.lower(): value for name, value in attrs if value is not None
+            }
+            src = str(attr_map.get("src") or "").strip()
+            if not src:
+                return
+            image_url = self._absolute_image_url(src)
+            alt = str(attr_map.get("alt") or "image").strip() or "image"
+            self._append_newline()
+            self._parts.append(f"![{alt}]({image_url})")
+            self._append_newline()
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() in self._BLOCK_TAGS:
+            self._append_newline()
+
+    def handle_data(self, data: str) -> None:
+        self._parts.append(data)
+
+    def get_text(self) -> str:
+        text = "".join(self._parts).replace("\xa0", " ")
+        lines = [line.rstrip() for line in text.splitlines()]
+        result: list[str] = []
+        prev_blank = False
+        for line in lines:
+            if not line:
+                if not prev_blank:
+                    result.append("")
+                prev_blank = True
+            else:
+                result.append(line)
+                prev_blank = False
+        return "\n".join(result).strip()
+
+    def _append_newline(self) -> None:
+        if self._parts and not self._parts[-1].endswith("\n"):
+            self._parts.append("\n")
+
+    def _absolute_image_url(self, src: str) -> str:
+        if re.match(r"^[a-z][a-z0-9+.-]*://", src, flags=re.IGNORECASE):
+            return src
+        if self._image_base_url:
+            return urljoin(f"{self._image_base_url}/", src.lstrip("/"))
+        return src
+
+
+def _trello_image_base_url() -> str | None:
+    """Return a configured public base URL for Trello image Markdown."""
+    settings = get_settings()
+    public_base = (
+        str(settings.public_base_url or settings.portal_url or "").strip().rstrip("/")
+    )
+    if public_base and "://" not in public_base:
+        public_base = f"https://{public_base}"
+    return public_base or None
+
+
+def _strip_html(value: str, *, image_base_url: str | None = None) -> str:
+    """Convert HTML to plain text/Markdown suitable for a Trello comment."""
     if not value:
         return ""
-    text = re.sub(r"<br\s*/?>", "\n", value, flags=re.IGNORECASE)
-    text = re.sub(r"</(p|div|li|tr)>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", "", text)
-    text = html.unescape(text)
-    text = text.replace("\xa0", " ")
-    lines = [line.rstrip() for line in text.splitlines()]
-    # Collapse consecutive blank lines
-    result: list[str] = []
-    prev_blank = False
-    for line in lines:
-        if not line:
-            if not prev_blank:
-                result.append("")
-            prev_blank = True
-        else:
-            result.append(line)
-            prev_blank = False
-    return "\n".join(result).strip()
+    parser = _TrelloCommentHTMLParser(image_base_url=image_base_url)
+    parser.feed(value)
+    parser.close()
+    return parser.get_text()
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 async def add_comment_to_card(
     card_id: str,
@@ -154,9 +236,7 @@ async def get_card(
     url = f"{TRELLO_API_BASE}/cards/{card_id}"
     try:
         async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
-            response = await client.get(
-                url, params={"key": api_key, "token": token}
-            )
+            response = await client.get(url, params={"key": api_key, "token": token})
             response.raise_for_status()
             return response.json()
     except httpx.HTTPStatusError as exc:
@@ -295,7 +375,9 @@ async def register_webhook(
                             hook.get("id"),
                         )
                     try:
-                        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+                        async with httpx.AsyncClient(
+                            timeout=_REQUEST_TIMEOUT
+                        ) as client:
                             retry = await client.post(
                                 url,
                                 params={"key": api_key, "token": token},
@@ -315,7 +397,9 @@ async def register_webhook(
                         )
                         return None
                     except Exception as retry_exc:
-                        logger.error("Trello register_webhook retry error: {}", retry_exc)
+                        logger.error(
+                            "Trello register_webhook retry error: {}", retry_exc
+                        )
                         return None
             # Could not find the conflicting webhook – fall through to generic error.
             logger.error(
@@ -361,7 +445,7 @@ def card_id_from_external_reference(external_reference: Any) -> str | None:
     if not value:
         return None
     if value.startswith(TRELLO_EXTERNAL_REFERENCE_PREFIX):
-        card_id = value[len(TRELLO_EXTERNAL_REFERENCE_PREFIX):].strip()
+        card_id = value[len(TRELLO_EXTERNAL_REFERENCE_PREFIX) :].strip()
         return card_id or None
     return value
 
@@ -399,7 +483,7 @@ async def post_reply_comment(
     company: dict[str, Any] | None = None,
 ) -> None:
     """Post a ticket reply as a comment on a Trello card."""
-    plain_body = _strip_html(reply_html)
+    plain_body = _strip_html(reply_html, image_base_url=_trello_image_base_url())
     if not plain_body:
         logger.debug(
             "Trello post_reply_comment: skipping empty body for card {}", card_id
@@ -425,9 +509,7 @@ async def validate_credentials_for_company(company: dict[str, Any]) -> dict[str,
     url = f"{TRELLO_API_BASE}/members/me"
     try:
         async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
-            response = await client.get(
-                url, params={"key": api_key, "token": token}
-            )
+            response = await client.get(url, params={"key": api_key, "token": token})
         if response.status_code == 401:
             return {"status": "error", "message": "Invalid Trello API key or token"}
         response.raise_for_status()
