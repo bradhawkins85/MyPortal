@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import secrets
+import base64
+import mimetypes
 import re
+import secrets
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from html import escape
 from functools import lru_cache
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from weasyprint import HTML  # type: ignore
 
@@ -66,6 +68,40 @@ def _absolute_asset_url(request: Request, url: str | None) -> str | None:
     return f"{str(request.base_url).rstrip('/')}/{text.lstrip('/')}"
 
 
+def _private_upload_data_uri(url: str | None) -> str | None:
+    if not url:
+        return None
+    parsed = urlparse(str(url).strip())
+    if parsed.scheme or parsed.netloc or not parsed.path.startswith("/uploads/"):
+        return None
+
+    upload_path = parsed.path.removeprefix("/uploads/")
+    if not upload_path:
+        return None
+
+    try:
+        image_path = _main()._resolve_private_upload(upload_path)
+        image_bytes = image_path.read_bytes()
+    except Exception:
+        return None
+
+    mime_type = mimetypes.guess_type(image_path.name)[0] or "application/octet-stream"
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _pdf_image_src(request: Request, url: str | None) -> str | None:
+    data_uri = _private_upload_data_uri(url)
+    if data_uri:
+        return data_uri
+
+    text = str(url or "").strip()
+    if text.startswith("/uploads/"):
+        return None
+
+    return _absolute_asset_url(request, url)
+
+
 def _build_quote_pdf_html(
     *,
     request: Request,
@@ -104,7 +140,7 @@ def _build_quote_pdf_html(
     detail_pages = []
     for item in items:
         image_url = (
-            _absolute_asset_url(request, item.get("image_url"))
+            _pdf_image_src(request, item.get("image_url"))
             if include_line_images
             else None
         )

@@ -30,7 +30,18 @@ def _request() -> Request:
     )
 
 
-def test_quote_pdf_includes_product_image_but_removes_description_images():
+def test_quote_pdf_includes_product_image_but_removes_description_images(tmp_path, monkeypatch):
+    image_path = tmp_path / "shop" / "laptop.png"
+    image_path.parent.mkdir()
+    image_path.write_bytes(b"png-bytes")
+
+    class FakeMain:
+        @staticmethod
+        def _resolve_private_upload(file_path):
+            return tmp_path / str(file_path)
+
+    monkeypatch.setattr("app.features.quotes.routes._main", lambda: FakeMain)
+
     html = _build_quote_pdf_html(
         request=_request(),
         company={"name": "Example Co"},
@@ -56,7 +67,7 @@ def test_quote_pdf_includes_product_image_but_removes_description_images():
     details_index = html.index('class=\'description rich-text-viewer\'')
 
     assert name_index < image_index < details_index
-    assert "https://portal.example/uploads/shop/laptop.png" in html
+    assert "data:image/png;base64,cG5nLWJ5dGVz" in html
     assert 'alt="Laptop"' in html
     assert "#e8f5e9" not in html
     assert "#22c55e" not in html
@@ -87,3 +98,33 @@ def test_quote_pdf_omits_image_card_when_store_image_is_unavailable():
     assert "No image available" not in html
     assert "#e8f5e9" not in html
     assert "#22c55e" not in html
+
+
+def test_quote_pdf_omits_unreadable_private_upload_instead_of_showing_alt_text(monkeypatch):
+    class FakeMain:
+        @staticmethod
+        def _resolve_private_upload(file_path):
+            raise FileNotFoundError(str(file_path))
+
+    monkeypatch.setattr("app.features.quotes.routes._main", lambda: FakeMain)
+
+    html = _build_quote_pdf_html(
+        request=_request(),
+        company={"name": "Example Co"},
+        quote={"quote_number": "Q-3", "name": "Refresh"},
+        items=[
+            {
+                "product_name": "MeetingBar",
+                "sku": "MEET-1",
+                "quantity": 1,
+                "price": Decimal("999.00"),
+                "image_url": "/uploads/shop/missing.png",
+                "description": "<p>Video bar</p>",
+            }
+        ],
+        include_line_images=True,
+    )
+
+    assert 'class="product-image-card"' not in html
+    assert 'alt="MeetingBar"' not in html
+    assert "https://portal.example/uploads/shop/missing.png" not in html
