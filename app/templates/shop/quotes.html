@@ -95,7 +95,7 @@
         <tbody>
           {% for quote in quotes %}
             {% set is_admin = is_company_admin|default(false) %}
-            {% set has_actions = (not quote.is_expired) or is_admin %}
+            {% set has_actions = true %}
             <tr data-status="{{ quote.status_value }}">
               <td data-label="Quote">
                 <button type="button" class="button-link" data-quote-view data-quote-number="{{ quote.quote_number }}" data-company-id="{{ quote.company_id }}">
@@ -154,6 +154,12 @@
                           </li>
                         {% endif %}
                       {% endif %}
+                      <li class="header-title-menu__item" role="none">
+                        <a class="header-title-menu__link" role="menuitem" href="/quotes/export/{{ quote.quote_number }}?withImages=false">Export Quote (no images)</a>
+                      </li>
+                      <li class="header-title-menu__item" role="none">
+                        <a class="header-title-menu__link" role="menuitem" href="/quotes/export/{{ quote.quote_number }}?withImages=true">Export Quote (with images)</a>
+                      </li>
                       {% if is_admin %}
                         <li class="header-title-menu__item" role="none">
                           <button
