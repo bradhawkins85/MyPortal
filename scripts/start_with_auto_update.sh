@@ -21,6 +21,59 @@ detect_bool() {
   esac
 }
 
+
+normalize_log_level() {
+  local value="${1:-}"
+  value="${value%%#*}"
+  # Trim leading/trailing whitespace.
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  if [[ -z "$value" ]]; then
+    return 1
+  fi
+  case "${value,,}" in
+    debug|info|warning|error|critical|trace)
+      printf '%s' "${value,,}"
+      return 0
+      ;;
+    warn)
+      printf 'warning'
+      return 0
+      ;;
+    fatal)
+      printf 'critical'
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+has_uvicorn_log_level_arg() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --log-level|--log-level=*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+build_uvicorn_command() {
+  UVICORN_COMMAND=("$@")
+  local resolved_log_level=""
+  if resolved_log_level=$(normalize_log_level "${UVICORN_LOG_LEVEL:-}"); then
+    :
+  elif resolved_log_level=$(normalize_log_level "${LOG_LEVEL:-}"); then
+    :
+  fi
+
+  if [[ -n "$resolved_log_level" ]] && ! has_uvicorn_log_level_arg "$@"; then
+    UVICORN_COMMAND+=(--log-level "$resolved_log_level")
+  fi
+}
+
 numeric_or_default() {
   local input="$1"
   local fallback="$2"
@@ -59,7 +112,8 @@ trap 'forward_signal INT' INT
 trap 'forward_signal QUIT' QUIT
 
 run_uvicorn() {
-  "$@" &
+  build_uvicorn_command "$@"
+  "${UVICORN_COMMAND[@]}" &
   uvicorn_pid=$!
   wait "$uvicorn_pid"
   local status=$?
