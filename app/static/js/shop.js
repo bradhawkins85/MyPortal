@@ -327,6 +327,15 @@
     summary.appendChild(createDetailRow('Availability', describeStockStatus(product.stock)));
     const actions = document.createElement('div');
     actions.className = 'product-details-modal__actions';
+    if (product.product_link) {
+      const productLink = document.createElement('a');
+      productLink.className = 'button button--ghost';
+      productLink.href = product.product_link;
+      productLink.target = '_blank';
+      productLink.rel = 'noopener noreferrer';
+      productLink.textContent = 'Open product link';
+      actions.appendChild(productLink);
+    }
     actions.appendChild(buildModalAddToCart(product));
     summary.appendChild(actions);
     hero.appendChild(summary);
