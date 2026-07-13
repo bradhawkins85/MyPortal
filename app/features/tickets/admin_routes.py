@@ -14,6 +14,7 @@ Mirrors the routes that used to live in ``app/main.py``:
 * ``POST /admin/tickets/{ticket_id}/ai/reprocess``
 * ``POST /admin/tickets/{ticket_id}/delete``
 * ``POST /admin/tickets/bulk-delete``
+* ``POST /admin/tickets/bulk-edit``
 * ``POST /admin/tickets/{ticket_id}/replies``
 """
 
@@ -1372,6 +1373,79 @@ async def admin_delete_ticket(ticket_id: int, request: Request):
 
     message = f"Ticket {ticket_id} deleted."
     return flash_redirect("/admin/tickets", message, "success")
+
+
+@router.post("/admin/tickets/bulk-edit", response_class=HTMLResponse)
+async def admin_bulk_edit_tickets(request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+    raw_ids = form.getlist("ticketIds")
+    ticket_ids: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_ids:
+        try:
+            identifier = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if identifier <= 0 or identifier in seen:
+            continue
+        seen.add(identifier)
+        ticket_ids.append(identifier)
+
+    if not ticket_ids:
+        return await main_module._render_tickets_dashboard(
+            request,
+            current_user,
+            error_message="Select at least one ticket to update.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    status_raw = str(form.get("status", "")).strip()
+    try:
+        status_value = await tickets_service.validate_status_choice(
+            status_raw,
+            allow_hidden=bool(current_user.get("is_super_admin")),
+        )
+    except ValueError as exc:
+        return await main_module._render_tickets_dashboard(
+            request,
+            current_user,
+            error_message=str(exc),
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        updated_count = await tickets_repo.set_tickets_status(ticket_ids, status_value)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error("Failed to bulk edit tickets", ticket_ids=ticket_ids, status=status_value, error=str(exc))
+        return await main_module._render_tickets_dashboard(
+            request,
+            current_user,
+            error_message="Unable to update the selected tickets. Please try again.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    for ticket_id in ticket_ids:
+        await tickets_service.broadcast_ticket_event(action="updated", ticket_id=ticket_id)
+        await tickets_service.emit_ticket_updated_event(
+            ticket_id,
+            actor_type="technician",
+            actor=current_user,
+        )
+
+    message_suffix = "ticket" if updated_count == 1 else "tickets"
+    redirect_message = f"Updated {updated_count} {message_suffix}."
+    if updated_count < len(ticket_ids):
+        redirect_message += " Some selected tickets were not found."
+
+    return_url_raw = form.get("returnUrl")
+    return_url = str(return_url_raw) if isinstance(return_url_raw, str) else ""
+    destination = _safe_local_redirect_target(return_url, fallback="") or "/admin/tickets"
+    return flash_redirect(destination, redirect_message, "success")
 
 
 @router.post("/admin/tickets/bulk-delete", response_class=HTMLResponse)
