@@ -98,19 +98,8 @@ def _build_quote_pdf_html(
             "</tr>"
         )
 
-    def _absolutise_rich_text_assets(html_value: str) -> str:
-        def replace_src(match: re.Match[str]) -> str:
-            src = _absolute_asset_url(request, match.group(2))
-            if not src:
-                return match.group(0)
-            return f"{match.group(1)}{escape(src, quote=True)}{match.group(3)}"
-
-        return re.sub(
-            r"(<(?:img|iframe)\b[^>]*?\bsrc=[\"\'])(.*?)([\"\'])",
-            replace_src,
-            html_value,
-            flags=re.IGNORECASE,
-        )
+    def _remove_rich_text_images(html_value: str) -> str:
+        return re.sub(r"<img\b[^>]*>", "", html_value, flags=re.IGNORECASE)
 
     detail_pages = []
     for item in items:
@@ -126,7 +115,7 @@ def _build_quote_pdf_html(
         )
         sanitized_description = sanitize_rich_text(str(item.get("description") or ""))
         description = (
-            _absolutise_rich_text_assets(sanitized_description.html)
+            _remove_rich_text_images(sanitized_description.html)
             if sanitized_description.html
             else "<p>No description available.</p>"
         )
@@ -179,7 +168,6 @@ def _build_quote_pdf_html(
     .description {{ font-size: 12px; margin-top: 18px; }}
     .description p {{ margin: 0 0 8px; }}
     .description ul, .description ol {{ margin: 0 0 8px 18px; padding: 0; }}
-    .description img {{ max-height: 240px; max-width: 100%; object-fit: contain; }}
     .description iframe {{ border: 1px solid #e5e7eb; min-height: 260px; width: 100%; }}
     .product-link {{ border-top: 1px solid #e5e7eb; font-size: 12px; margin-top: 18px; padding-top: 10px; overflow-wrap: anywhere; }}
     .product-link a {{ color: #2563eb; }}
