@@ -561,7 +561,16 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
             replies = [record for record in fetched_replies if isinstance(record, Mapping)]
 
     latest_reply: dict[str, Any] | None = None
+    initial_body: str | None = None
     if replies:
+        for reply_record in replies:
+            if bool(reply_record.get("is_internal")):
+                continue
+            reply_body = reply_record.get("body")
+            if reply_body is None:
+                continue
+            initial_body = str(reply_body)
+            break
         reply = dict(replies[-1])
         author_value = reply.get("author") if isinstance(reply.get("author"), Mapping) else None
         author_id = reply.get("author_id")
@@ -574,6 +583,9 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
         reply["author_display_name"] = snapshot_display or reply.get("author_display_name")
         latest_reply = reply
     enriched["latest_reply"] = latest_reply
+    if initial_body is None and enriched.get("description") is not None:
+        initial_body = str(enriched.get("description"))
+    enriched["body"] = initial_body or ""
 
     if isinstance(ticket_id, int):
         filter_context = await _safely_call(tickets_repo.get_automation_filter_context, ticket_id)

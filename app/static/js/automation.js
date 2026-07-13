@@ -1887,6 +1887,7 @@
           datalist.id = 'automation-filter-field-suggestions';
           [
             'ticket.subject',
+            'ticket.body',
             'ticket.status',
             'ticket.priority',
             'ticket.requester_email',

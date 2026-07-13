@@ -444,6 +444,7 @@ async def test_enrich_ticket_context_includes_relationship_details(monkeypatch):
     ]
     assert enriched["watchers"][0]["email"] == "watcher.one@example.com"
     assert enriched["watchers"][1]["display_name"] == "Quinn Patil"
+    assert enriched["body"] == "Printer restored"
     assert enriched["latest_reply"]
     assert enriched["latest_reply"]["body"] == "Printer restored"
     assert enriched["latest_reply"]["author_email"] == "tech@example.com"

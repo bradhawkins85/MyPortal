@@ -19,6 +19,8 @@ Use dotted paths in automation filters to reference specific ticket fields. Key
 paths now available include:
 
 - `ticket.number` / `ticket.ticket_number` - Ticket number (e.g., "TKT-123")
+- `ticket.body` - Initial request body, using the first public conversation
+  entry when available and falling back to the ticket description
 - `ticket.requester.email` / `ticket.requester.display_name`
 - `ticket.assigned_user.email` / `ticket.assigned_user.display_name`
 - `ticket.company.name`
