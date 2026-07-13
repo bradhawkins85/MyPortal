@@ -229,6 +229,8 @@ def test_build_ticket_status_payloads_marks_new_default():
         ["Awaiting reply"],
         ["Awaiting reply"],
         [""],
+        [""],
+        [""],
         "awaiting_reply",
     )
 

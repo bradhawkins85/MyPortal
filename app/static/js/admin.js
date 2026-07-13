@@ -2536,6 +2536,11 @@
         if (hiddenInput && checkbox) {
           hiddenInput.value = checkbox.checked ? '1' : '0';
         }
+        const adminHiddenInput = row.querySelector('[data-status-admin-hidden-input]');
+        const adminCheckbox = row.querySelector('[data-status-admin-hidden-checkbox]');
+        if (adminHiddenInput && adminCheckbox) {
+          adminHiddenInput.value = adminCheckbox.checked ? '1' : '0';
+        }
       });
     }
 
@@ -2590,6 +2595,14 @@
       }
       if (checkbox) {
         checkbox.checked = false;
+      }
+      const adminHiddenInput = row.querySelector('[data-status-admin-hidden-input]');
+      const adminCheckbox = row.querySelector('[data-status-admin-hidden-checkbox]');
+      if (adminHiddenInput) {
+        adminHiddenInput.value = '0';
+      }
+      if (adminCheckbox) {
+        adminCheckbox.checked = false;
       }
       list.appendChild(row);
       updateRowIdentifiers();

@@ -800,6 +800,7 @@
                 <th scope="col">Tech status (technician label)</th>
                 <th scope="col">Public status (customer label)</th>
                 <th scope="col">Hide from technicians</th>
+                <th scope="col">Hide from admins</th>
                 <th scope="col" class="table__actions">Actions</th>
               </tr>
             </thead>
@@ -848,6 +849,13 @@
                         <span>Hide</span>
                       </label>
                     </td>
+                    <td data-label="Hide from admins">
+                      <input type="hidden" name="hideFromAdmins" value="{% if status_option.hide_from_admins %}1{% else %}0{% endif %}" data-status-admin-hidden-input />
+                      <label class="checkbox">
+                        <input type="checkbox" data-status-admin-hidden-checkbox {% if status_option.hide_from_admins %}checked{% endif %} />
+                        <span>Hide</span>
+                      </label>
+                    </td>
                     <td class="table__actions">
                       <button
                         type="button"
@@ -889,6 +897,13 @@
                       <span>Hide</span>
                     </label>
                   </td>
+                  <td data-label="Hide from admins">
+                    <input type="hidden" name="hideFromAdmins" value="0" data-status-admin-hidden-input />
+                    <label class="checkbox">
+                      <input type="checkbox" data-status-admin-hidden-checkbox />
+                      <span>Hide</span>
+                    </label>
+                  </td>
                   <td class="table__actions">
                     <button type="button" class="button button--ghost" data-status-remove disabled>Remove</button>
                   </td>
@@ -924,6 +939,13 @@
         <input type="hidden" name="hideFromTechnicians" value="0" data-status-hidden-input />
         <label class="checkbox">
           <input type="checkbox" data-status-hidden-checkbox />
+          <span>Hide</span>
+        </label>
+      </td>
+      <td data-label="Hide from admins">
+        <input type="hidden" name="hideFromAdmins" value="0" data-status-admin-hidden-input />
+        <label class="checkbox">
+          <input type="checkbox" data-status-admin-hidden-checkbox />
           <span>Hide</span>
         </label>
       </td>

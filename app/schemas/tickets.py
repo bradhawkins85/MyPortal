@@ -237,6 +237,7 @@ class TicketStatusDefinitionModel(BaseModel):
     public_status: str = Field(alias="publicStatus")
     is_default: bool = Field(default=False, alias="isDefault")
     hide_from_technicians: bool = Field(default=False, alias="hideFromTechnicians")
+    hide_from_admins: bool = Field(default=False, alias="hideFromAdmins")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -248,6 +249,7 @@ class TicketStatusUpdateInput(BaseModel):
     tech_status: str | None = Field(default=None, alias="techStatus", max_length=64)
     is_default: bool = Field(default=False, alias="isDefault")
     hide_from_technicians: bool = Field(default=False, alias="hideFromTechnicians")
+    hide_from_admins: bool = Field(default=False, alias="hideFromAdmins")
 
     model_config = ConfigDict(populate_by_name=True)
 

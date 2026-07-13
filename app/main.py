@@ -7999,7 +7999,7 @@ async def _render_portal_ticket_detail(
     selectable_status_definitions = [
         definition
         for definition in status_definitions
-        if is_super_admin or not definition.hide_from_technicians
+        if (is_super_admin and not definition.hide_from_admins) or (not is_super_admin and not definition.hide_from_technicians)
     ]
     status_label_map = {definition.tech_status: definition.public_status for definition in status_definitions}
     available_statuses = [definition.tech_status for definition in selectable_status_definitions]
@@ -8380,6 +8380,7 @@ async def _render_portal_ticket_detail(
                 "public_status": definition.public_status,
                 "is_default": definition.is_default,
                 "hide_from_technicians": definition.hide_from_technicians,
+                "hide_from_admins": definition.hide_from_admins,
             }
             for definition in status_definitions
         ],
@@ -8560,7 +8561,7 @@ async def _render_tickets_dashboard(
     selectable_status_definitions = [
         definition
         for definition in dashboard.status_definitions
-        if bool(user.get("is_super_admin")) or not definition.hide_from_technicians
+        if (bool(user.get("is_super_admin")) and not definition.hide_from_admins) or (not bool(user.get("is_super_admin")) and not definition.hide_from_technicians)
     ]
     status_definitions_payload = [
         {
@@ -8569,6 +8570,7 @@ async def _render_tickets_dashboard(
             "public_status": definition.public_status,
             "is_default": definition.is_default,
             "hide_from_technicians": definition.hide_from_technicians,
+            "hide_from_admins": definition.hide_from_admins,
         }
         for definition in selectable_status_definitions
     ]
@@ -9010,7 +9012,7 @@ async def _render_ticket_detail(
     selectable_status_definitions = [
         definition
         for definition in status_definitions
-        if bool(user.get("is_super_admin")) or not definition.hide_from_technicians
+        if (bool(user.get("is_super_admin")) and not definition.hide_from_admins) or (not bool(user.get("is_super_admin")) and not definition.hide_from_technicians)
     ]
     status_label_map = {definition.tech_status: definition.tech_label for definition in status_definitions}
     public_status_map = {definition.tech_status: definition.public_status for definition in status_definitions}
@@ -9233,6 +9235,7 @@ async def _render_ticket_detail(
                 "public_status": definition.public_status,
                 "is_default": definition.is_default,
                 "hide_from_technicians": definition.hide_from_technicians,
+                "hide_from_admins": definition.hide_from_admins,
             }
             for definition in selectable_status_definitions
         ],
