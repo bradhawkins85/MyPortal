@@ -187,7 +187,7 @@ def test_update_cart_zero_quantity_removes_item(monkeypatch, active_session, car
     assert recorded_removals == [(active_session.id, {7})]
 
 
-def test_update_cart_exceeds_stock(monkeypatch, active_session, cart_context):
+def test_update_cart_exceeds_stock_allows_quote_quantity(monkeypatch, active_session, cart_context):
     recorded_updates: list[tuple[int, int, int]] = []
     recorded_removals: list[tuple[int, set[int]]] = []
 
@@ -225,12 +225,53 @@ def test_update_cart_exceeds_stock(monkeypatch, active_session, cart_context):
     assert response.status_code == 303
     location = response.headers.get("location")
     params = parse_qs(urlparse(location).query)
-    assert params.get("cartError") == [
-        "Unable to increase some quantities due to limited stock."
-    ]
-    assert "cartMessage" not in params
-    assert recorded_updates == []
+    assert params.get("cartMessage") == ["Quantities updated."]
+    assert "cartError" not in params
+    assert recorded_updates == [(active_session.id, 9, 5)]
     assert recorded_removals == []
+
+
+def test_place_order_blocks_out_of_stock_cart_item(monkeypatch, active_session, cart_context):
+    create_order_calls: list[int] = []
+
+    async def fake_list_items(session_id):
+        return [
+            {
+                "product_id": 5,
+                "quantity": 3,
+                "unit_price": "25.00",
+                "product_name": "Widget",
+                "product_sku": "WID-001",
+            }
+        ]
+
+    async def fake_get_product_by_id(product_id, company_id=None):
+        return {"id": product_id, "stock": 0, "name": "Widget"}
+
+    async def fake_create_order(**kwargs):
+        create_order_calls.append(int(kwargs["product_id"]))
+        return 0, 0
+
+    monkeypatch.setattr(main_module.cart_repo, "list_items", fake_list_items)
+    monkeypatch.setattr(main_module.shop_repo, "get_product_by_id", fake_get_product_by_id)
+    monkeypatch.setattr(main_module.shop_repo, "create_order", fake_create_order)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/cart/place-order",
+            data={"_csrf": active_session.csrf_token},
+        )
+
+    assert response.status_code == 303
+    location = response.headers.get("location")
+    assert location is not None
+    parsed = urlparse(location)
+    assert parsed.path == "/cart"
+    params = parse_qs(parsed.query)
+    assert params.get("orderMessage") == [
+        "Cannot place order because Widget is out of stock or exceeds available stock. You can still save the cart as a quote."
+    ]
+    assert create_order_calls == []
 
 
 def test_add_to_cart_redirects_to_cart(monkeypatch, active_session, cart_context):

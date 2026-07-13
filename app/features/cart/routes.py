@@ -165,15 +165,6 @@ async def add_to_cart(request: Request) -> RedirectResponse:
                 selected_upgrade_source = candidate
                 break
 
-    available_stock = int(product.get("stock") or 0)
-    if available_stock <= 0 or existing_quantity + requested_quantity > available_stock:
-        remaining = max(available_stock - existing_quantity, 0)
-        message = quote(f"Cannot add item. Only {remaining} left in stock.")
-        return RedirectResponse(
-            url=f"{request.url_for('cart_page')}?cartError={message}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-
     unit_price = main_module.shop_service.get_product_price(product, is_vip=is_vip)
     new_quantity = existing_quantity + requested_quantity
 
@@ -245,7 +236,7 @@ async def add_package_to_cart(request: Request) -> RedirectResponse:
         is_vip=is_vip,
     )
     selected_package = next((pkg for pkg in packages if int(pkg.get("id") or 0) == package_id), None)
-    if not selected_package or not selected_package.get("is_available"):
+    if not selected_package or selected_package.get("archived") or selected_package.get("is_restricted"):
         message = quote("Selected package is not currently available.")
         return RedirectResponse(
             url=f"{request.url_for('shop_packages_page')}?cart_error={message}",
@@ -298,19 +289,8 @@ async def add_package_to_cart(request: Request) -> RedirectResponse:
                 status_code=status.HTTP_303_SEE_OTHER,
             )
 
-        stock_available = int(product.get("stock") or 0)
         existing_item = await main_module.cart_repo.get_item(session.id, product_id)
         existing_quantity = existing_item.get("quantity") if existing_item else 0
-        if stock_available <= 0 or existing_quantity + required_quantity > stock_available:
-            remaining = max(stock_available - existing_quantity, 0)
-            product_name = str(product.get("name") or "the product")
-            message = quote(
-                f"Cannot add package. {product_name} has only {remaining} left in stock."
-            )
-            return RedirectResponse(
-                url=f"{request.url_for('shop_packages_page')}?cart_error={message}",
-                status_code=status.HTTP_303_SEE_OTHER,
-            )
 
         unit_price = main_module.shop_service.get_product_price(product, is_vip=is_vip)
         new_quantity = existing_quantity + required_quantity
@@ -764,23 +744,6 @@ async def update_cart_items(request: Request) -> RedirectResponse:
             removals.add(product_id)
             continue
 
-        raw_stock = product.get("stock")
-        try:
-            available_stock = int(raw_stock)
-        except (TypeError, ValueError):
-            available_stock = 0
-
-        if available_stock <= 0:
-            stock_conflicts.add(product_id)
-            removals.add(product_id)
-            invalid_entries = True
-            continue
-
-        if desired_quantity > available_stock:
-            stock_conflicts.add(product_id)
-            invalid_entries = True
-            continue
-
         await main_module.cart_repo.update_item_quantity(
             session_id=session.id,
             product_id=product_id,
@@ -943,6 +906,39 @@ async def place_order(request: Request) -> RedirectResponse:
     items = await main_module.cart_repo.list_items(session.id)
     if not items:
         return RedirectResponse(url=request.url_for("cart_page"), status_code=status.HTTP_303_SEE_OTHER)
+
+    out_of_stock_names: list[str] = []
+    for item in items:
+        try:
+            product_id = int(item.get("product_id") or 0)
+            quantity = int(item.get("quantity") or 0)
+        except (TypeError, ValueError):
+            continue
+        product = await main_module.shop_repo.get_product_by_id(
+            product_id,
+            company_id=company_id,
+        )
+        if not product:
+            out_of_stock_names.append(str(item.get("product_name") or "an unavailable item"))
+            continue
+        try:
+            available_stock = int(product.get("stock") or 0)
+        except (TypeError, ValueError):
+            available_stock = 0
+        if available_stock <= 0 or quantity > available_stock:
+            out_of_stock_names.append(str(product.get("name") or item.get("product_name") or "an item"))
+
+    if out_of_stock_names:
+        unique_names = sorted({name for name in out_of_stock_names if name})
+        if len(unique_names) == 1:
+            stock_message = f"Cannot place order because {unique_names[0]} is out of stock or exceeds available stock. You can still save the cart as a quote."
+        else:
+            stock_message = "Cannot place order because some cart items are out of stock or exceed available stock: " + ", ".join(unique_names) + ". You can still save the cart as a quote."
+        message = quote(stock_message)
+        return RedirectResponse(
+            url=f"{request.url_for('cart_page')}?orderMessage={message}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
 
     order_number = "ORD" + "".join(secrets.choice("0123456789") for _ in range(12))
 
