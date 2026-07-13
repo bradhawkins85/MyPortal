@@ -181,6 +181,7 @@
     'hr',
     'i',
     'img',
+    'iframe',
     'li',
     'ol',
     'p',
@@ -202,6 +203,7 @@
   const RICH_TEXT_ALLOWED_ATTRIBUTES = {
     a: new Set(['href', 'title', 'target', 'rel']),
     img: new Set(['src', 'alt', 'title', 'width', 'height', 'loading', 'decoding']),
+    iframe: new Set(['src', 'title', 'width', 'height', 'loading', 'allow', 'allowfullscreen', 'referrerpolicy']),
     span: new Set(['data-mention']),
     table: new Set(['role']),
   };
@@ -242,6 +244,9 @@
       return;
     }
     if ((attributeName === 'width' || attributeName === 'height') && !/^\d{1,4}$/.test(value)) {
+      return;
+    }
+    if (attributeName === 'allowfullscreen' && value && !['allowfullscreen', 'true'].includes(value)) {
       return;
     }
     if (attributeName === 'target' && value !== '_blank') {
