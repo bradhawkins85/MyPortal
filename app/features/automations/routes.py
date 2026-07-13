@@ -16,6 +16,11 @@ router.add_api_route(
     response_class=HTMLResponse,
 )
 router.add_api_route(
+    "/admin/automations/reorder",
+    handlers.admin_reorder_automations,
+    methods=["POST"],
+)
+router.add_api_route(
     "/admin/automations/create/scheduled",
     handlers.admin_create_scheduled_automation_page,
     methods=["GET"],
