@@ -3,6 +3,7 @@
   let taskModal = null;
   let logsModal = null;
   let previewModal = null;
+  let bulkTaskModal = null;
   let activeTaskContext = { id: '', name: '' };
 
   function toJsonTemplate(data) {
@@ -1456,6 +1457,63 @@
     }
   }
 
+
+  function bindBulkTaskCreateForm() {
+    const openButtons = document.querySelectorAll('[data-bulk-task-create]');
+    openButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        if (bulkTaskModal) {
+          openModal(bulkTaskModal);
+        }
+      });
+    });
+
+    const form = query('bulk-scheduled-task-form');
+    if (!form) {
+      return;
+    }
+
+    const commandField = query('bulk-task-command');
+    const descriptionField = query('bulk-task-description-field');
+    const jsonPayloadField = query('bulk-task-json-payload-field');
+    const jsonPayloadInput = query('bulk-task-json-payload');
+
+    const togglePayload = () => {
+      const requiresPayload = commandField && commandField.value === 'create_scheduled_ticket';
+      if (descriptionField) {
+        descriptionField.hidden = Boolean(requiresPayload);
+      }
+      if (jsonPayloadField) {
+        jsonPayloadField.hidden = !requiresPayload;
+      }
+      if (jsonPayloadInput) {
+        jsonPayloadInput.required = Boolean(requiresPayload);
+      }
+    };
+
+    if (commandField) {
+      commandField.addEventListener('change', togglePayload);
+      togglePayload();
+    }
+
+    form.addEventListener('submit', (event) => {
+      const selectedCompanies = form.querySelectorAll('input[name="companyIds"]:checked');
+      if (selectedCompanies.length < 1) {
+        event.preventDefault();
+        window.alert('Select at least one active company.');
+        return;
+      }
+      if (commandField && commandField.value === 'create_scheduled_ticket' && jsonPayloadInput) {
+        try {
+          JSON.parse(jsonPayloadInput.value || '');
+        } catch (error) {
+          event.preventDefault();
+          window.alert('Invalid JSON payload. Please check your JSON syntax.');
+        }
+      }
+    });
+  }
+
   function bindTaskActions() {
     document.querySelectorAll('[data-task-edit]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -2686,11 +2744,14 @@
     taskModal = query('task-editor-modal');
     logsModal = query('task-logs-modal');
     previewModal = query('task-preview-modal');
+    bulkTaskModal = query('bulk-task-create-modal');
     bindModalDismissal(taskModal);
     bindModalDismissal(logsModal);
     bindModalDismissal(previewModal);
+    bindModalDismissal(bulkTaskModal);
     clearTaskForm();
     bindTaskForm();
+    bindBulkTaskCreateForm();
     bindTaskActions();
     bindScheduledTaskRowDropdowns();
     bindAutomationDeleteActions();

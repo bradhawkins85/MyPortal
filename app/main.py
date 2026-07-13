@@ -5775,6 +5775,12 @@ async def admin_scheduled_tasks(
     for cid in sorted(missing_company_ids):
         company_options.append({"value": str(cid), "label": f"Company #{cid}"})
 
+    bulk_company_options = [
+        {"value": option["value"], "label": option["label"]}
+        for option in company_options
+        if option.get("value")
+    ]
+
     extra = {
         "title": "Scheduled Tasks",
         "tasks": prepared_tasks,
@@ -5782,8 +5788,129 @@ async def admin_scheduled_tasks(
         "upgrade_status": system_state_service.get_upgrade_status(),
         "command_options": command_options,
         "company_options": company_options,
+        "bulk_company_options": bulk_company_options,
     }
     return await _render_template("admin/scheduled_tasks.html", request, current_user, extra=extra)
+
+
+
+@app.post("/admin/scheduled-tasks/bulk-create", response_class=HTMLResponse)
+async def admin_bulk_create_scheduled_tasks(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+
+    form = await request.form()
+    command = str(form.get("command") or "").strip()
+    cron = str(form.get("cron") or "").strip()
+    raw_company_ids = form.getlist("companyIds")
+    description = str(form.get("description") or "").strip() or None
+
+    if command == "create_scheduled_ticket":
+        json_payload = str(form.get("jsonPayload") or "").strip()
+        if not json_payload:
+            return flash_redirect("/admin/scheduled-tasks", "JSON payload is required for scheduled ticket tasks.", "error")
+        try:
+            json.loads(json_payload)
+        except json.JSONDecodeError:
+            return flash_redirect("/admin/scheduled-tasks", "JSON payload is not valid JSON.", "error")
+        description = json_payload
+
+    if not command:
+        return flash_redirect("/admin/scheduled-tasks", "Select a task option to bulk create.", "error")
+
+    cron_fields = cron.split()
+    if len(cron_fields) not in {5, 6}:
+        return flash_redirect("/admin/scheduled-tasks", "Enter a valid five- or six-field cron expression.", "error")
+    try:
+        start_minute = int(cron_fields[0])
+        start_hour = int(cron_fields[1])
+    except (TypeError, ValueError):
+        return flash_redirect("/admin/scheduled-tasks", "Bulk create requires numeric minute and hour cron fields.", "error")
+    if start_minute < 0 or start_minute > 59 or start_hour < 0 or start_hour > 23:
+        return flash_redirect("/admin/scheduled-tasks", "Cron start time must be between 00:00 and 23:59 UTC.", "error")
+
+    company_ids: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_company_ids:
+        try:
+            company_id = int(str(raw).strip())
+        except (TypeError, ValueError):
+            continue
+        if company_id <= 0 or company_id in seen:
+            continue
+        seen.add(company_id)
+        company_ids.append(company_id)
+
+    if not company_ids:
+        return flash_redirect("/admin/scheduled-tasks", "Select at least one active company.", "error")
+
+    companies = await company_repo.list_companies()
+    active_company_lookup: dict[int, str] = {}
+    for company in companies:
+        try:
+            cid = int(company.get("id")) if company.get("id") is not None else None
+        except (TypeError, ValueError):
+            cid = None
+        if cid is not None:
+            active_company_lookup[cid] = str(company.get("name") or f"Company #{cid}")
+
+    invalid_company_ids = [cid for cid in company_ids if cid not in active_company_lookup]
+    if invalid_company_ids:
+        return flash_redirect("/admin/scheduled-tasks", "One or more selected companies are no longer active.", "error")
+
+    try:
+        max_retries = int(str(form.get("maxRetries") or "12").strip())
+        retry_backoff_seconds = int(str(form.get("retryBackoffSeconds") or "300").strip())
+    except (TypeError, ValueError):
+        return flash_redirect("/admin/scheduled-tasks", "Retry settings must be numeric.", "error")
+    if max_retries < 0:
+        return flash_redirect("/admin/scheduled-tasks", "Max retries must be zero or a positive number.", "error")
+    if retry_backoff_seconds < 30:
+        return flash_redirect("/admin/scheduled-tasks", "Retry backoff must be at least 30 seconds.", "error")
+
+    command_label = TASK_COMMAND_LABELS.get(command, command)
+    active = form.get("active") is not None
+    exclude_from_calendar = form.get("excludeFromCalendar") is not None
+    created_count = 0
+    for offset, company_id in enumerate(company_ids):
+        fields = list(cron_fields)
+        total_minutes = start_hour * 60 + start_minute + offset
+        fields[0] = str(total_minutes % 60)
+        fields[1] = str((total_minutes // 60) % 24)
+        company_name = active_company_lookup[company_id]
+        await scheduled_tasks_repo.create_task(
+            name=f"{company_name} — {command_label}",
+            command=command,
+            cron=" ".join(fields),
+            company_id=company_id,
+            description=description,
+            active=active,
+            max_retries=max_retries,
+            retry_backoff_seconds=retry_backoff_seconds,
+            exclude_from_calendar=exclude_from_calendar,
+        )
+        created_count += 1
+
+    if created_count:
+        await scheduler_service.refresh()
+
+    log_info(
+        "Scheduled tasks bulk created",
+        created_count=created_count,
+        command=command,
+        start_cron=cron,
+        created_by=current_user.get("id") if current_user else None,
+        company_ids=company_ids,
+    )
+
+    noun = "task" if created_count == 1 else "tasks"
+    show_inactive_param = "1" if form.get("show_inactive") else ""
+    base_url = "/admin/scheduled-tasks"
+    redirect_url = f"{base_url}?show_inactive={show_inactive_param}" if show_inactive_param else base_url
+    response = RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
+    set_flash(response, f"Created {created_count} scheduled {noun} from {start_hour:02d}:{start_minute:02d} UTC.", "success")
+    return response
 
 
 @app.post("/admin/scheduled-tasks/bulk-delete", response_class=HTMLResponse)
