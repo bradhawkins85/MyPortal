@@ -772,11 +772,18 @@ def _build_ticket_status_payloads(
     public_labels: Sequence[str],
     existing_slugs: Sequence[str],
     hidden_flags: Sequence[str],
+    admin_hidden_flags: Sequence[str],
     default_status_value: str,
 ) -> list[dict[str, Any]]:
     statuses: list[dict[str, Any]] = []
     max_length = (
-        max(len(tech_labels), len(public_labels), len(existing_slugs), len(hidden_flags))
+        max(
+            len(tech_labels),
+            len(public_labels),
+            len(existing_slugs),
+            len(hidden_flags),
+            len(admin_hidden_flags),
+        )
         if (tech_labels or public_labels or existing_slugs)
         else 0
     )
@@ -784,7 +791,18 @@ def _build_ticket_status_payloads(
         tech_label = tech_labels[index] if index < len(tech_labels) else ""
         public_status = public_labels[index] if index < len(public_labels) else ""
         existing_slug = existing_slugs[index] if index < len(existing_slugs) else None
-        hide_from_technicians = index < len(hidden_flags) and str(hidden_flags[index]).strip().lower() in {"1", "true", "on", "yes"}
+        hide_from_technicians = index < len(hidden_flags) and str(hidden_flags[index]).strip().lower() in {
+            "1",
+            "true",
+            "on",
+            "yes",
+        }
+        hide_from_admins = index < len(admin_hidden_flags) and str(admin_hidden_flags[index]).strip().lower() in {
+            "1",
+            "true",
+            "on",
+            "yes",
+        }
         if not tech_label and not public_status:
             continue
         candidate_slug = ticket_status_repo.slugify_status_label(tech_label)
@@ -802,6 +820,7 @@ def _build_ticket_status_payloads(
                 "existingSlug": existing_slug,
                 "isDefault": is_default,
                 "hideFromTechnicians": hide_from_technicians,
+                "hideFromAdmins": hide_from_admins,
             }
         )
     return statuses
@@ -819,6 +838,7 @@ async def admin_replace_ticket_statuses(request: Request):
     public_labels = form.getlist("publicLabel")
     existing_slugs = form.getlist("existingSlug")
     hidden_flags = form.getlist("hideFromTechnicians")
+    admin_hidden_flags = form.getlist("hideFromAdmins")
     default_status_value = ticket_status_repo.slugify_status_label(str(form.get("defaultStatus") or ""))
 
     statuses = _build_ticket_status_payloads(
@@ -826,6 +846,7 @@ async def admin_replace_ticket_statuses(request: Request):
         public_labels,
         existing_slugs,
         hidden_flags,
+        admin_hidden_flags,
         default_status_value,
     )
 
@@ -1519,7 +1540,13 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
     selectable_status_definitions = [
         definition
         for definition in status_definitions
-        if bool(current_user.get("is_super_admin")) or not definition.hide_from_technicians
+        if (
+            bool(current_user.get("is_super_admin"))
+            and not definition.hide_from_admins
+        ) or (
+            not bool(current_user.get("is_super_admin"))
+            and not definition.hide_from_technicians
+        )
     ]
     valid_reply_statuses = {definition.tech_status for definition in selectable_status_definitions}
     default_reply_status = next((definition.tech_status for definition in selectable_status_definitions if definition.is_default), None)

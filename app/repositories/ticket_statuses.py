@@ -37,18 +37,20 @@ def _normalise_row(row: dict[str, Any]) -> dict[str, Any]:
     public = str(row.get("public_status") or "").strip()
     is_default = bool(row.get("is_default", False))
     hide_from_technicians = bool(row.get("hide_from_technicians", False))
+    hide_from_admins = bool(row.get("hide_from_admins", False))
     return {
         "tech_status": slug,
         "tech_label": label or slug.replace("_", " ").title(),
         "public_status": public or label or slug.replace("_", " ").title(),
         "is_default": is_default,
         "hide_from_technicians": hide_from_technicians,
+        "hide_from_admins": hide_from_admins,
     }
 
 
 async def list_statuses() -> list[dict[str, Any]]:
     rows = await db.fetch_all(
-        "SELECT tech_status, tech_label, public_status, is_default, hide_from_technicians FROM ticket_statuses ORDER BY tech_label ASC"
+        "SELECT tech_status, tech_label, public_status, is_default, hide_from_technicians, hide_from_admins FROM ticket_statuses ORDER BY tech_label ASC"
     )
     return [_normalise_row(row) for row in rows]
 
@@ -64,12 +66,13 @@ async def ensure_default_statuses() -> list[dict[str, str]]:
                 for definition in DEFAULT_STATUS_DEFINITIONS:
                     await cursor.execute(
                         """
-                        INSERT INTO ticket_statuses (tech_status, tech_label, public_status, hide_from_technicians, created_at, updated_at)
-                        VALUES (%s, %s, %s, %s, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                        INSERT INTO ticket_statuses (tech_status, tech_label, public_status, hide_from_technicians, hide_from_admins, created_at, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
                         ON DUPLICATE KEY UPDATE
                             tech_label = VALUES(tech_label),
                             public_status = VALUES(public_status),
                             hide_from_technicians = VALUES(hide_from_technicians),
+                            hide_from_admins = VALUES(hide_from_admins),
                             updated_at = UTC_TIMESTAMP(6)
                         """,
                         (
@@ -77,6 +80,7 @@ async def ensure_default_statuses() -> list[dict[str, str]]:
                             definition["tech_label"],
                             definition["public_status"],
                             int(bool(definition.get("hide_from_technicians", False))),
+                            int(bool(definition.get("hide_from_admins", False))),
                         ),
                     )
                 await conn.commit()
@@ -144,10 +148,11 @@ async def replace_statuses(definitions: Sequence[dict[str, Any]]) -> list[dict[s
                                     public_status = %s,
                                     is_default = %s,
                                     hide_from_technicians = %s,
+                                    hide_from_admins = %s,
                                     updated_at = UTC_TIMESTAMP(6)
                                 WHERE tech_status = %s
                                 """,
-                                (label, public_status, is_default, int(bool(definition.get("hide_from_technicians", False))), original_slug),
+                                (label, public_status, is_default, int(bool(definition.get("hide_from_technicians", False))), int(bool(definition.get("hide_from_admins", False))), original_slug),
                             )
                         else:
                             if slug in current_slugs and slug != original_slug:
@@ -162,10 +167,11 @@ async def replace_statuses(definitions: Sequence[dict[str, Any]]) -> list[dict[s
                                     public_status = %s,
                                     is_default = %s,
                                     hide_from_technicians = %s,
+                                    hide_from_admins = %s,
                                     updated_at = UTC_TIMESTAMP(6)
                                 WHERE tech_status = %s
                                 """,
-                                (slug, label, public_status, is_default, int(bool(definition.get("hide_from_technicians", False))), original_slug),
+                                (slug, label, public_status, is_default, int(bool(definition.get("hide_from_technicians", False))), int(bool(definition.get("hide_from_admins", False))), original_slug),
                             )
                             await cursor.execute(
                                 "UPDATE tickets SET status = %s WHERE status = %s",
@@ -178,10 +184,10 @@ async def replace_statuses(definitions: Sequence[dict[str, Any]]) -> list[dict[s
                             raise ValueError("Tech status values must be unique.")
                         await cursor.execute(
                             """
-                            INSERT INTO ticket_statuses (tech_status, tech_label, public_status, is_default, hide_from_technicians, created_at, updated_at)
-                            VALUES (%s, %s, %s, %s, %s, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+                            INSERT INTO ticket_statuses (tech_status, tech_label, public_status, is_default, hide_from_technicians, hide_from_admins, created_at, updated_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
                             """,
-                            (slug, label, public_status, is_default, int(bool(definition.get("hide_from_technicians", False))),)
+                            (slug, label, public_status, is_default, int(bool(definition.get("hide_from_technicians", False))), int(bool(definition.get("hide_from_admins", False))),)
                         )
                         current_slugs.add(slug)
 
@@ -226,7 +232,7 @@ async def get_status_definition(slug: str) -> dict[str, Any] | None:
     if not slug:
         return None
     row = await db.fetch_one(
-        "SELECT tech_status, tech_label, public_status, is_default, hide_from_technicians FROM ticket_statuses WHERE tech_status = %s",
+        "SELECT tech_status, tech_label, public_status, is_default, hide_from_technicians, hide_from_admins FROM ticket_statuses WHERE tech_status = %s",
         (slug,),
     )
     return _normalise_row(row) if row else None
@@ -235,6 +241,6 @@ async def get_status_definition(slug: str) -> dict[str, Any] | None:
 async def get_default_status() -> dict[str, Any] | None:
     """Get the default status definition."""
     row = await db.fetch_one(
-        "SELECT tech_status, tech_label, public_status, is_default, hide_from_technicians FROM ticket_statuses WHERE is_default = 1",
+        "SELECT tech_status, tech_label, public_status, is_default, hide_from_technicians, hide_from_admins FROM ticket_statuses WHERE is_default = 1",
     )
     return _normalise_row(row) if row else None

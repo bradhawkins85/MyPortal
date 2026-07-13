@@ -519,7 +519,13 @@ async def list_ticket_statuses_endpoint(
     current_user: dict = Depends(require_helpdesk_technician),
 ) -> TicketStatusListResponse:
     definitions = await tickets_service.list_status_definitions()
-    if not current_user.get("is_super_admin"):
+    if current_user.get("is_super_admin"):
+        definitions = [
+            definition
+            for definition in definitions
+            if not definition.hide_from_admins
+        ]
+    else:
         definitions = [
             definition
             for definition in definitions
@@ -532,6 +538,7 @@ async def list_ticket_statuses_endpoint(
             public_status=definition.public_status,
             is_default=definition.is_default,
             hide_from_technicians=definition.hide_from_technicians,
+            hide_from_admins=definition.hide_from_admins,
         )
         for definition in definitions
     ]
@@ -564,6 +571,7 @@ async def replace_ticket_statuses_endpoint(
             public_status=definition.public_status,
             is_default=definition.is_default,
             hide_from_technicians=definition.hide_from_technicians,
+            hide_from_admins=definition.hide_from_admins,
         )
         for definition in definitions
     ]

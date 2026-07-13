@@ -116,6 +116,7 @@ class TicketStatusDefinition:
     public_status: str
     is_default: bool = False
     hide_from_technicians: bool = False
+    hide_from_admins: bool = False
 
 
 def _build_status_definitions(records: Sequence[Mapping[str, Any]]) -> list[TicketStatusDefinition]:
@@ -128,6 +129,7 @@ def _build_status_definitions(records: Sequence[Mapping[str, Any]]) -> list[Tick
         public_status = str(record.get("public_status") or "").strip() or label
         is_default = bool(record.get("is_default", False))
         hide_from_technicians = bool(record.get("hide_from_technicians", False))
+        hide_from_admins = bool(record.get("hide_from_admins", False))
         definitions.append(
             TicketStatusDefinition(
                 tech_status=slug,
@@ -135,6 +137,7 @@ def _build_status_definitions(records: Sequence[Mapping[str, Any]]) -> list[Tick
                 public_status=public_status,
                 is_default=is_default,
                 hide_from_technicians=hide_from_technicians,
+                hide_from_admins=hide_from_admins,
             )
         )
     return definitions
@@ -147,6 +150,7 @@ def _default_status_records() -> list[dict[str, str]]:
             "tech_label": item["tech_label"],
             "public_status": item["public_status"],
             "hide_from_technicians": item.get("hide_from_technicians", False),
+            "hide_from_admins": item.get("hide_from_admins", False),
         }
         for item in ticket_status_repo.DEFAULT_STATUS_DEFINITIONS
     ]
@@ -231,6 +235,11 @@ async def replace_ticket_statuses(status_inputs: Sequence[Mapping[str, Any]]) ->
             or definition.get("hideFromTechnicians")
             or False
         )
+        hide_from_admins = bool(
+            definition.get("hide_from_admins")
+            or definition.get("hideFromAdmins")
+            or False
+        )
 
         if is_default:
             if has_default:
@@ -263,6 +272,7 @@ async def replace_ticket_statuses(status_inputs: Sequence[Mapping[str, Any]]) ->
                 "original_slug": original_slug or slug,
                 "is_default": is_default,
                 "hide_from_technicians": hide_from_technicians,
+                "hide_from_admins": hide_from_admins,
             }
         )
 
