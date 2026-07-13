@@ -3429,7 +3429,30 @@ button.header-title-menu__link,
 
 .shop-toolbar {
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
+}
+
+.shop-card-header {
+  justify-content: flex-start;
+}
+
+.shop-card-header__title {
+  flex: 0 0 auto;
+}
+
+.shop-search-form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-gap-base);
+  flex-wrap: wrap;
+}
+
+.shop-search-form .form-input[type="search"] {
+  min-width: min(18rem, 100%);
+}
+
+.shop-out-of-stock-toggle {
+  white-space: nowrap;
 }
 
 .cart-card .table-wrapper {

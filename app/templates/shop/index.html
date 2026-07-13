@@ -52,17 +52,14 @@
 
 <div class="shop-layout">
   <section class="card card--panel shop-layout__content">
-    <header class="card__header">
-      <div>
+    <header class="card__header shop-card-header">
+      <div class="shop-card-header__title">
         <h2 class="card__title">{{ 'Product categories' if showing_category_cards else 'Available packages' if show_packages else 'Featured products' if show_featured else 'Available products' }}</h2>
       </div>
       <div class="card__controls shop-toolbar">
         <form method="get" action="{{ request.url_for('shop_page') }}" class="shop-search-form" role="search">
           {% if current_category is not none %}
             <input type="hidden" name="category" value="{{ 'packages' if show_packages else current_category }}" />
-          {% endif %}
-          {% if show_out_of_stock %}
-            <input type="hidden" name="showOutOfStock" value="1" />
           {% endif %}
           <input
             type="search"
@@ -73,6 +70,16 @@
             value="{{ search_term or '' }}"
             data-shop-search
           />
+          <label class="checkbox card__control shop-out-of-stock-toggle">
+            <input
+              type="checkbox"
+              name="showOutOfStock"
+              value="1"
+              {% if show_out_of_stock %}checked{% endif %}
+              data-submit-on-change
+            />
+            <span>Show Out Of Stock Items</span>
+          </label>
         </form>
       </div>
     </header>
@@ -162,7 +169,7 @@
               {% endif %}
               <div class="shop-product-card__meta">
                 <strong>${{ '%.2f'|format(product.price) }}</strong>
-                {{ stock_helpers.stock_status_badge(product.stock, low_stock_threshold) }}
+                {{ stock_helpers.stock_status_badge(product.stock, low_stock_threshold, product.stock <= 0) }}
               </div>
             </div>
             <div class="shop-product-card__actions">
@@ -182,7 +189,7 @@
                   <button type="submit" class="button">Add</button>
                 </form>
               {% elif product.stock <= 0 %}
-                <span class="badge badge--muted">Out of stock</span>
+                <span class="badge badge--danger">Out Of Stock</span>
               {% endif %}
             </div>
           </article>
