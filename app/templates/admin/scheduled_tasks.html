@@ -5,6 +5,15 @@
   <a class="button button--ghost" href="/admin/cron-calendar">Schedule calendar</a>
   <button
     type="button"
+    class="button button--ghost"
+    data-bulk-task-create
+    aria-haspopup="dialog"
+    aria-controls="bulk-task-create-modal"
+  >
+    Bulk create
+  </button>
+  <button
+    type="button"
     class="button button--primary"
     data-task-create
     aria-haspopup="dialog"
@@ -336,6 +345,81 @@
       </div>
     </div>
   </section>
+</div>
+
+<div class="modal" id="bulk-task-create-modal" role="dialog" aria-modal="true" hidden>
+  <div class="modal__content" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close bulk task creator</span>
+    </button>
+    <h2 class="modal__title">Bulk create scheduled tasks</h2>
+    <div class="modal__body">
+      <form id="bulk-scheduled-task-form" class="form" method="post" action="/admin/scheduled-tasks/bulk-create" autocomplete="off">
+        {% include "partials/csrf.html" %}
+        {% if show_inactive %}<input type="hidden" name="show_inactive" value="1" />{% endif %}
+        <div class="form-field">
+          <label class="form-label" for="bulk-task-command">Task option</label>
+          <select class="form-input" id="bulk-task-command" name="command" required>
+            {% for option in command_options %}
+              <option value="{{ option.value }}">{{ option.label }}</option>
+            {% endfor %}
+          </select>
+          <p class="form-help">One scheduled task will be created for each selected company.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="bulk-task-cron">Desired start cron expression</label>
+          <input class="form-input" id="bulk-task-cron" name="cron" required placeholder="0 2 * * *" pattern="^[^\s]+(\s+[^\s]+){4,5}$" />
+          <p class="form-help">The minute and hour are auto-incremented by one minute per company, starting from this UTC time.</p>
+        </div>
+        <div class="form-field" id="bulk-task-description-field">
+          <label class="form-label" for="bulk-task-description">Description</label>
+          <textarea class="form-input form-input--textarea" id="bulk-task-description" name="description" rows="3"></textarea>
+          <p class="form-help">Optional description or notes copied to each created task.</p>
+        </div>
+        <div class="form-field" id="bulk-task-json-payload-field" hidden>
+          <label class="form-label" for="bulk-task-json-payload">JSON Payload</label>
+          <textarea class="form-input form-input--textarea" id="bulk-task-json-payload" name="jsonPayload" rows="8" placeholder='{"subject": "Example ticket", "description": "Ticket details", "priority": "normal", "status": "open"}'></textarea>
+          <p class="form-help">Required when bulk creating scheduled ticket tasks. The same payload is copied to each company task.</p>
+        </div>
+        <div class="form-field form-field--inline">
+          <label class="form-label" for="bulk-task-max-retries">Max retries</label>
+          <input class="form-input" id="bulk-task-max-retries" name="maxRetries" type="number" min="0" value="12" />
+        </div>
+        <div class="form-field form-field--inline">
+          <label class="form-label" for="bulk-task-backoff">Retry backoff (seconds)</label>
+          <input class="form-input" id="bulk-task-backoff" name="retryBackoffSeconds" type="number" min="30" value="300" />
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="form-checkbox">
+            <input type="checkbox" id="bulk-task-active" name="active" checked />
+            <span>Tasks active</span>
+          </label>
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="form-checkbox">
+            <input type="checkbox" id="bulk-task-exclude-calendar" name="excludeFromCalendar" />
+            <span>Hide from cron calendar</span>
+          </label>
+        </div>
+        <fieldset class="form-field">
+          <legend class="form-label">Active companies</legend>
+          <div class="checkbox-list">
+            {% for option in bulk_company_options %}
+              <label class="form-checkbox-label">
+                <input type="checkbox" class="form-checkbox" name="companyIds" value="{{ option.value }}" />
+                <span class="form-checkbox-text">{{ option.label }}</span>
+              </label>
+            {% endfor %}
+          </div>
+          <p class="form-help">Tick every company that should receive this scheduled task.</p>
+        </fieldset>
+        <div class="form-actions">
+          <button type="submit" class="button button--primary">Create tasks</button>
+          <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 
 <div class="modal" id="task-editor-modal" role="dialog" aria-modal="true" hidden>
