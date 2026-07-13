@@ -130,12 +130,20 @@ def _build_quote_pdf_html(
             if sanitized_description.html
             else "<p>No description available.</p>"
         )
+        product_link = str(item.get("product_link") or "").strip()
+        product_link_html = (
+            "<p class='product-link'><strong>Product Link:</strong> "
+            f"<a href='{escape(product_link, quote=True)}'>{escape(product_link)}</a></p>"
+            if product_link
+            else ""
+        )
         detail_pages.append(
             "<section class='product-page page-break'>"
             "<p class='eyebrow'>Product Details</p>"
             f"<h1>{escape(str(item.get('product_name') or 'Product'))}</h1>"
             f"{image_html}"
             f"<div class='description rich-text-viewer'>{description}</div>"
+            f"{product_link_html}"
             "</section>"
         )
 
@@ -173,6 +181,8 @@ def _build_quote_pdf_html(
     .description ul, .description ol {{ margin: 0 0 8px 18px; padding: 0; }}
     .description img {{ max-height: 240px; max-width: 100%; object-fit: contain; }}
     .description iframe {{ border: 1px solid #e5e7eb; min-height: 260px; width: 100%; }}
+    .product-link {{ border-top: 1px solid #e5e7eb; font-size: 12px; margin-top: 18px; padding-top: 10px; overflow-wrap: anywhere; }}
+    .product-link a {{ color: #2563eb; }}
   </style>
 </head>
 <body>

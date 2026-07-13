@@ -1034,6 +1034,10 @@
         editForm.querySelector('#edit-product-sku').value = product.sku || '';
         editForm.querySelector('#edit-product-vendor').value = product.vendor_sku || '';
         editForm.querySelector('#edit-product-description').value = product.description || '';
+        const productLinkField = editForm.querySelector('#edit-product-link');
+        if (productLinkField) {
+          productLinkField.value = product.product_link || '';
+        }
         editForm.querySelector('#edit-product-price').value = product.price != null ? product.price : '';
         editForm.querySelector('#edit-product-vip').value = product.vip_price != null ? product.vip_price : '';
         editForm.querySelector('#edit-product-stock').value = product.stock != null ? product.stock : '';

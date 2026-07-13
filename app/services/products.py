@@ -306,6 +306,7 @@ def _parse_feed_item(element: Element) -> dict[str, Any] | None:
         _get_feed_value(element, "Manufacturer", "manufacturer")
     )
     image_url = _optional_text(_get_feed_value(element, "ImageUrl", "image_url"))
+    website_url = _optional_text(_get_feed_value(element, "WebsiteUrl", "website_url"))
 
     pub_date_raw = _get_feed_value(element, "pubDate", "pub_date")
     pub_date = _parse_stock_date(pub_date_raw)
@@ -341,6 +342,7 @@ def _parse_feed_item(element: Element) -> dict[str, Any] | None:
         "warranty_length": warranty_length,
         "manufacturer": manufacturer,
         "image_url": image_url,
+        "website_url": website_url,
         "opt_accessori": opt_accessori,
     }
 
@@ -690,6 +692,11 @@ async def _process_feed_item(
         str(current_product.get("image_url") or "").strip() if current_product else ""
     )
     feed_image_url = str(item.get("image_url") or "").strip()
+    feed_website_url = str(item.get("website_url") or "").strip()
+    existing_product_link = (
+        str(current_product.get("product_link") or "").strip() if current_product else ""
+    )
+    product_link = feed_website_url if feed_website_url and not existing_product_link else None
     image_url: str | None = None
     if existing_image_url:
         image_url = None
@@ -719,6 +726,7 @@ async def _process_feed_item(
         stock_at=stock_at,
         warranty_length=warranty_length,
         manufacturer=manufacturer,
+        product_link=product_link,
     )
 
     if update_recommendations:

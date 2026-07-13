@@ -1385,6 +1385,7 @@ async def create_product(
     price_monthly_commitment: Decimal | None = None,
     price_annual_monthly_payment: Decimal | None = None,
     price_annual_annual_payment: Decimal | None = None,
+    product_link: str | None = None,
 ) -> dict[str, Any]:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
@@ -1393,8 +1394,9 @@ async def create_product(
                 INSERT INTO shop_products
                     (name, sku, vendor_sku, description, image_url, price, vip_price, stock,
                      category_id, subscription_category_id, commitment_type, payment_frequency,
-                     price_monthly_commitment, price_annual_monthly_payment, price_annual_annual_payment)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     price_monthly_commitment, price_annual_monthly_payment, price_annual_annual_payment,
+                     product_link)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     name,
@@ -1412,6 +1414,7 @@ async def create_product(
                     price_monthly_commitment,
                     price_annual_monthly_payment,
                     price_annual_annual_payment,
+                    product_link,
                 ),
             )
             product_id = int(cursor.lastrowid)
@@ -1678,6 +1681,7 @@ async def list_order_items(order_number: str, company_id: int) -> list[dict[str,
             p.sku,
             p.description,
             p.image_url,
+            p.product_link,
             p.stock,
             p.stock_nsw,
             p.stock_qld,
@@ -1783,6 +1787,7 @@ async def update_product(
     scheduled_vip_price: Decimal | None = None,
     scheduled_buy_price: Decimal | None = None,
     price_change_date: Any | None = None,
+    product_link: str | None = None,
 ) -> dict[str, Any] | None:
     async with db.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
@@ -1795,6 +1800,7 @@ async def update_product(
                     vendor_sku = %s,
                     description = %s,
                     image_url = %s,
+                    product_link = %s,
                     price = %s,
                     vip_price = %s,
                     stock = %s,
@@ -1822,6 +1828,7 @@ async def update_product(
                     vendor_sku,
                     description,
                     image_url,
+                    product_link,
                     price,
                     vip_price,
                     stock,
@@ -2278,15 +2285,16 @@ async def upsert_product_from_feed(
     stock_at: date | None,
     warranty_length: str | None,
     manufacturer: str | None,
+    product_link: str | None = None,
 ) -> None:
     await db.execute(
         """
         INSERT INTO shop_products
             (name, sku, vendor_sku, description, image_url, price, vip_price, stock,
              category_id, stock_nsw, stock_qld, stock_vic, stock_sa, stock_wa, buy_price,
-             weight, length, width, height, stock_at, warranty_length, manufacturer)
+             weight, length, width, height, stock_at, warranty_length, manufacturer, product_link)
         VALUES
-            (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             name = VALUES(name),
             sku = VALUES(sku),
@@ -2308,7 +2316,11 @@ async def upsert_product_from_feed(
             height = VALUES(height),
             stock_at = VALUES(stock_at),
             warranty_length = VALUES(warranty_length),
-            manufacturer = VALUES(manufacturer)
+            manufacturer = VALUES(manufacturer),
+            product_link = CASE
+                WHEN COALESCE(NULLIF(product_link, ''), '') = '' THEN VALUES(product_link)
+                ELSE product_link
+            END
         """,
         (
             name,
@@ -2333,6 +2345,7 @@ async def upsert_product_from_feed(
             stock_at,
             warranty_length,
             manufacturer,
+            product_link,
         ),
     )
 
@@ -2834,6 +2847,7 @@ async def list_quote_items(quote_number: str, company_id: int) -> list[dict[str,
             p.sku,
             p.description,
             p.image_url,
+            p.product_link,
             p.stock,
             p.stock_nsw,
             p.stock_qld,

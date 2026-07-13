@@ -334,7 +334,7 @@
       <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
       {% endif %}
       <input type="hidden" id="edit-product-id" />
-      
+
       <!-- Row 1: Name, SKU, Vendor SKU, Category -->
       <div class="form-field">
         <label class="form-label" for="edit-product-name">Name</label>
@@ -357,7 +357,7 @@
           {% endfor %}
         </select>
       </div>
-      
+
       <!-- Row 2: Price, VIP Price, Stock, Image -->
       <div class="form-field" data-field-type="standard-price">
         <label class="form-label" for="edit-product-price">Price</label>
@@ -376,7 +376,7 @@
         <input class="form-input" id="edit-product-image" name="image" type="file" accept="image/*" />
         <p class="form-helper" id="edit-product-image-filename" hidden></p>
       </div>
-      
+
       <!-- Row 3: Description -->
       <div class="form-field form-field--wide">
         <div class="form-label-row">
@@ -385,7 +385,7 @@
         </div>
         <textarea class="form-input form-input--textarea" id="edit-product-description" name="description"></textarea>
       </div>
-      
+
       <!-- Row 4: Cross-sell and Up-sell products -->
       <div class="form-field form-field--wide">
         <label class="form-label">Cross-sell products</label>
@@ -421,7 +421,7 @@
         <ul class="tag-list" id="edit-product-upsell-list" aria-label="Up-sell products"></ul>
         <p class="form-helper">Add SKUs for upgrade options to suggest at checkout.</p>
       </div>
-      
+
       <!-- Row 5: Subscription-related fields -->
       <div class="form-field">
         <label class="form-label" for="edit-product-subscription-category">Subscription category</label>
@@ -496,7 +496,7 @@
           </div>
         </div>
       </details>
-      
+
       <!-- Features section (keeping at the end) -->
       <div class="form-field form-field--wide">
         <label class="form-label" for="edit-product-features-filter">Features</label>
@@ -525,7 +525,13 @@
         </div>
         <input type="hidden" name="features" id="edit-product-features-data" value="[]" />
       </div>
-      
+
+      <div class="form-field form-field--wide">
+        <label class="form-label" for="edit-product-link">Product Link</label>
+        <input class="form-input" id="edit-product-link" name="product_link" type="url" placeholder="https://example.com/product" />
+        <p class="form-helper">Optional vendor or product page URL shown on PDF quotes.</p>
+      </div>
+
       <div class="form-actions">
         <button type="submit" class="button">Save product</button>
         <button type="button" class="button button--ghost" data-modal-close>Cancel</button>

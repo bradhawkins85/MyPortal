@@ -32,7 +32,7 @@
           {% if csrf_token %}
           <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
           {% endif %}
-          
+
           <!-- Row 1: Name, SKU, Vendor SKU, Category -->
           <div class="form-field">
             <label class="form-label" for="product-name">Name</label>
@@ -55,7 +55,7 @@
               {% endfor %}
             </select>
           </div>
-          
+
           <!-- Row 2: Price, VIP Price, Stock, Image -->
           <div class="form-field" data-field-type="standard-price">
             <label class="form-label" for="product-price">Price</label>
@@ -73,13 +73,19 @@
             <label class="form-label" for="product-image">Image</label>
             <input class="form-input" id="product-image" name="image" type="file" accept="image/*" />
           </div>
-          
+
+          <div class="form-field form-field--wide">
+            <label class="form-label" for="product-link">Product Link</label>
+            <input class="form-input" id="product-link" name="product_link" type="url" placeholder="https://example.com/product" />
+            <p class="form-helper">Optional vendor or product page URL shown on PDF quotes.</p>
+          </div>
+
           <!-- Row 3: Description -->
           <div class="form-field form-field--wide">
             <label class="form-label" for="product-description">Description</label>
             <textarea class="form-input" id="product-description" name="description" rows="4"></textarea>
           </div>
-          
+
           <!-- Row 4: Cross-sell and Up-sell products -->
           <div class="form-field form-field--wide">
             <label class="form-label">Cross-sell products</label>
@@ -113,7 +119,7 @@
             <ul class="tag-list" id="product-upsell-list" aria-label="Up-sell products"></ul>
             <p class="form-helper">Add SKUs for upgrade options to suggest at checkout.</p>
           </div>
-          
+
           <!-- Row 5: Subscription-related fields -->
           <div class="form-field">
             <label class="form-label" for="product-subscription-category">Subscription category</label>
@@ -158,7 +164,7 @@
             <input class="form-input" id="product-price-annual-annual" name="price_annual_annual_payment" type="number" step="0.01" />
             <p class="form-helper">Price for annual commitment with annual payment (full year).</p>
           </div>
-          
+
           <div class="form-actions">
             <button type="submit" class="button">Add product</button>
             <a class="button button--ghost" href="/admin/shop">Cancel</a>
