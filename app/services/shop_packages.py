@@ -4,6 +4,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Sequence
 
 from app.repositories import shop as shop_repo
+from app.services.sanitization import sanitize_rich_text
 
 
 def _quantise_price(value: Decimal) -> Decimal:
@@ -35,6 +36,9 @@ def _build_product_candidate(
         "product_vendor_sku": source.get("product_vendor_sku"),
         "product_image_url": source.get("product_image_url"),
         "product_description": source.get("product_description"),
+        "product_description_html": sanitize_rich_text(
+            str(source.get("product_description") or "")
+        ).html,
         "product_archived": bool(source.get("product_archived")),
         "priority": priority,
         "substitution_type": substitution_type,
@@ -42,7 +46,9 @@ def _build_product_candidate(
     price = source.get("product_price")
     candidate["product_price"] = _to_decimal(price)
     vip_price = source.get("product_vip_price")
-    candidate["product_vip_price"] = None if vip_price is None else _to_decimal(vip_price)
+    candidate["product_vip_price"] = (
+        None if vip_price is None else _to_decimal(vip_price)
+    )
     stock_value = source.get("product_stock")
     try:
         candidate["product_stock"] = int(stock_value)
@@ -114,6 +120,9 @@ def _prepare_package_items(
             available_per_package = 0
 
         prepared_item = dict(item)
+        prepared_item["product_description_html"] = sanitize_rich_text(
+            str(item.get("product_description") or "")
+        ).html
         prepared_item["quantity"] = quantity
         prepared_item["primary_product"] = primary_candidate
         prepared_item["resolved_product"] = selected
@@ -155,7 +164,9 @@ def _compute_package_metrics(
         if (
             resolved_archived
             or resolved_restricted
-            or (restricted_product_ids and resolved_product_id in restricted_product_ids)
+            or (
+                restricted_product_ids and resolved_product_id in restricted_product_ids
+            )
         ):
             restricted = True
 
@@ -178,7 +189,9 @@ def _compute_package_metrics(
     return _quantise_price(running_total), stock_level, restricted
 
 
-async def load_admin_packages(*, include_archived: bool = False) -> list[dict[str, Any]]:
+async def load_admin_packages(
+    *, include_archived: bool = False
+) -> list[dict[str, Any]]:
     filters = shop_repo.PackageFilters(include_archived=include_archived)
     packages = await shop_repo.list_packages(filters)
     package_ids = [package["id"] for package in packages]

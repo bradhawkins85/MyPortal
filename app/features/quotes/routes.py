@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from html import escape
@@ -21,7 +22,7 @@ from app.repositories import cart as cart_repo
 from app.repositories import shop as shop_repo
 from app.repositories import users as user_repo
 from app.security.session import session_manager
-
+from app.services.sanitization import sanitize_rich_text
 
 router = APIRouter(tags=["Quotes"])
 
@@ -77,24 +78,18 @@ def _build_quote_pdf_html(
     company_name = escape(str((company or {}).get("name") or ""))
     quote_name = escape(str(quote.get("name") or ""))
     po_number = escape(str(quote.get("po_number") or ""))
-    subtotal = sum(Decimal(str(item.get("price") or "0")) * int(item.get("quantity") or 0) for item in items)
+    subtotal = sum(
+        Decimal(str(item.get("price") or "0")) * int(item.get("quantity") or 0)
+        for item in items
+    )
 
-    image_header = '<th class="thumb-col">Image</th>' if include_line_images else ""
     rows = []
     for item in items:
         qty = int(item.get("quantity") or 0)
         unit_price = Decimal(str(item.get("price") or "0"))
         line_total = unit_price * qty
-        image_cell = ""
-        if include_line_images:
-            image_url = _absolute_asset_url(request, item.get("image_url"))
-            image_cell = (
-                f'<td class="thumb-col"><img class="line-thumb" src="{escape(image_url, quote=True)}" alt=""></td>'
-                if image_url else '<td class="thumb-col text-muted">—</td>'
-            )
         rows.append(
             "<tr>"
-            f"{image_cell}"
             f"<td><strong>{escape(str(item.get('product_name') or 'Product'))}</strong><br>"
             f"<span class='muted'>SKU: {escape(str(item.get('sku') or '—'))}</span></td>"
             f"<td class='num'>{qty}</td>"
@@ -103,20 +98,44 @@ def _build_quote_pdf_html(
             "</tr>"
         )
 
+    def _absolutise_rich_text_assets(html_value: str) -> str:
+        def replace_src(match: re.Match[str]) -> str:
+            src = _absolute_asset_url(request, match.group(2))
+            if not src:
+                return match.group(0)
+            return f"{match.group(1)}{escape(src, quote=True)}{match.group(3)}"
+
+        return re.sub(
+            r"(<(?:img|iframe)\b[^>]*?\bsrc=[\"\'])(.*?)([\"\'])",
+            replace_src,
+            html_value,
+            flags=re.IGNORECASE,
+        )
+
     detail_pages = []
     for item in items:
-        image_url = _absolute_asset_url(request, item.get("image_url"))
+        image_url = (
+            _absolute_asset_url(request, item.get("image_url"))
+            if include_line_images
+            else None
+        )
         image_html = (
             f'<img class="detail-image" src="{escape(image_url, quote=True)}" alt="">'
-            if image_url else '<div class="image-placeholder">No image available</div>'
+            if image_url
+            else '<div class="image-placeholder">No image available</div>'
         )
-        description = escape(str(item.get("description") or "No description available."))
+        sanitized_description = sanitize_rich_text(str(item.get("description") or ""))
+        description = (
+            _absolutise_rich_text_assets(sanitized_description.html)
+            if sanitized_description.html
+            else "<p>No description available.</p>"
+        )
         detail_pages.append(
             "<section class='product-page page-break'>"
             "<p class='eyebrow'>Product Details</p>"
             f"<h1>{escape(str(item.get('product_name') or 'Product'))}</h1>"
             f"{image_html}"
-            f"<div class='description'>{description.replace(chr(10), '<br>')}</div>"
+            f"<div class='description rich-text-viewer'>{description}</div>"
             "</section>"
         )
 
@@ -131,7 +150,7 @@ def _build_quote_pdf_html(
     h1, h2, p {{ margin: 0; }}
     .hero {{ border-bottom: 3px solid #2563eb; display: flex; justify-content: space-between; margin-bottom: 22px; padding-bottom: 18px; }}
     .eyebrow {{ color: #2563eb; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }}
-    .hero h1 {{ font-size: 32px; margin-top: 4px; }}
+    .hero h1 {{ font-size: 22px; margin-top: 4px; overflow-wrap: anywhere; }}
     .meta {{ background: #f4f7fb; border-radius: 10px; padding: 14px; width: 220px; }}
     .meta div {{ display: flex; justify-content: space-between; margin: 5px 0; }}
     .section-title {{ font-size: 16px; margin: 20px 0 8px; }}
@@ -150,6 +169,10 @@ def _build_quote_pdf_html(
     .detail-image {{ border: 1px solid #e5e7eb; border-radius: 12px; display: block; max-height: 290px; max-width: 100%; object-fit: contain; padding: 12px; }}
     .image-placeholder {{ background: #f4f7fb; border-radius: 12px; color: #6b7280; padding: 50px; text-align: center; }}
     .description {{ font-size: 12px; margin-top: 18px; }}
+    .description p {{ margin: 0 0 8px; }}
+    .description ul, .description ol {{ margin: 0 0 8px 18px; padding: 0; }}
+    .description img {{ max-height: 240px; max-width: 100%; object-fit: contain; }}
+    .description iframe {{ border: 1px solid #e5e7eb; min-height: 260px; width: 100%; }}
   </style>
 </head>
 <body>
@@ -165,7 +188,7 @@ def _build_quote_pdf_html(
     </div>
     <h2 class="section-title">Quote Items</h2>
     <table>
-      <thead><tr>{image_header}<th>Product</th><th class="num">Qty</th><th class="num">Unit</th><th class="num">Total</th></tr></thead>
+      <thead><tr><th>Product</th><th class="num">Qty</th><th class="num">Unit</th><th class="num">Total</th></tr></thead>
       <tbody>{''.join(rows)}</tbody>
     </table>
     <div class="totals"><div class="grand"><span>Total</span><span>{_format_money(subtotal)}</span></div></div>
@@ -248,7 +271,10 @@ async def quotes_page(
         enriched_quotes.append(record)
 
     status_options = sorted(
-        {(record["status_value"], record["status_label"]) for record in enriched_quotes},
+        {
+            (record["status_value"], record["status_label"])
+            for record in enriched_quotes
+        },
         key=lambda item: item[1].lower(),
     )
 
@@ -282,7 +308,9 @@ async def quotes_page(
         "quotes_total_all": total_quotes,
         "filters_active": bool(status_key),
     }
-    return await main_module._render_template("shop/quotes.html", request, user, extra=extra)
+    return await main_module._render_template(
+        "shop/quotes.html", request, user, extra=extra
+    )
 
 
 @router.get(
@@ -313,7 +341,9 @@ async def export_quote_pdf(
     quote_summary = await shop_repo.get_quote_summary(quote_number, company_id)
     quote_items = await shop_repo.list_quote_items(quote_number, company_id)
     if not quote_summary or not quote_items:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found"
+        )
 
     html = _build_quote_pdf_html(
         request=request,
@@ -420,26 +450,36 @@ async def save_as_quote(request: Request) -> RedirectResponse:
     if not session:
         return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
     if company_id is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active company selected")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No active company selected"
+        )
 
     form = await request.form()
     po_number_raw = form.get("poNumber")
-    po_number = (str(po_number_raw).strip() or None) if po_number_raw is not None else None
+    po_number = (
+        (str(po_number_raw).strip() or None) if po_number_raw is not None else None
+    )
     if po_number and len(po_number) > 100:
         po_number = po_number[:100]
 
     quote_name_raw = form.get("quoteName")
-    quote_name = (str(quote_name_raw).strip() or None) if quote_name_raw is not None else None
+    quote_name = (
+        (str(quote_name_raw).strip() or None) if quote_name_raw is not None else None
+    )
     if quote_name and len(quote_name) > 255:
         quote_name = quote_name[:255]
 
     items = await cart_repo.list_items(session.id)
     if not items:
-        return RedirectResponse(url=request.url_for("cart_page"), status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(
+            url=request.url_for("cart_page"), status_code=status.HTTP_303_SEE_OTHER
+        )
 
     quote_number = "QUO" + "".join(secrets.choice("0123456789") for _ in range(12))
 
-    expires_at = datetime.now(timezone.utc) + timedelta(days=get_settings().quote_expiry_days)
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        days=get_settings().quote_expiry_days
+    )
 
     for item in items:
         await shop_repo.create_quote(

@@ -8,49 +8,64 @@ from typing import Mapping
 
 import nh3
 
-_ALLOWED_TAGS: frozenset[str] = frozenset((
-    "a",
-    "b",
-    "blockquote",
-    "br",
-    "code",
-    "img",
-    "div",
-    "em",
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "h5",
-    "h6",
-    "hr",
-    "i",
-    "li",
-    "ol",
-    "p",
-    "pre",
-    "span",
-    "strong",
-    "sub",
-    "sup",
-    "table",
-    "tbody",
-    "td",
-    "th",
-    "thead",
-    "tr",
-    "u",
-    "ul",
-))
+_ALLOWED_TAGS: frozenset[str] = frozenset(
+    (
+        "a",
+        "b",
+        "blockquote",
+        "br",
+        "code",
+        "img",
+        "div",
+        "em",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+        "i",
+        "iframe",
+        "li",
+        "ol",
+        "p",
+        "pre",
+        "span",
+        "strong",
+        "sub",
+        "sup",
+        "table",
+        "tbody",
+        "td",
+        "th",
+        "thead",
+        "tr",
+        "u",
+        "ul",
+    )
+)
 
 _ALLOWED_ATTRIBUTES: dict[str, set[str]] = {
     "a": {"href", "title", "target"},
     "img": {"src", "alt", "title", "width", "height", "loading", "decoding"},
+    "iframe": {
+        "src",
+        "title",
+        "width",
+        "height",
+        "loading",
+        "allow",
+        "allowfullscreen",
+        "referrerpolicy",
+    },
     "span": {"data-mention"},
     "table": {"role"},
 }
 
-_ALLOWED_PROTOCOLS: frozenset[str] = frozenset(("http", "https", "mailto", "tel", "data"))
+_ALLOWED_PROTOCOLS: frozenset[str] = frozenset(
+    ("http", "https", "mailto", "tel", "data")
+)
 
 _STYLE_BLOCK_PATTERN = re.compile(r"(?is)<style.*?>.*?</style>")
 _INLINE_CSS_PATTERN = re.compile(r"(?is)^(?:\s*[a-z0-9._#-]+\s*\{[^}]*\}\s*)+")
@@ -93,7 +108,9 @@ def _strip_quoted_email_headers(value: str) -> str:
             # metadata such as Subject, Sent, or Date. This avoids trimming legitimate
             # content (e.g. voicemail summaries) that happen to include simple From/To
             # lines within the body.
-            if header_hits >= 2 and header_prefixes.intersection({"subject", "sent", "date"}):
+            if header_hits >= 2 and header_prefixes.intersection(
+                {"subject", "sent", "date"}
+            ):
                 return "\n".join(lines[:idx]).rstrip()
     return value
 
@@ -127,11 +144,15 @@ def sanitize_rich_text(value: str | None) -> SanitizedRichText:
     else:
         html_value = ""
     text_content = nh3.clean(html_value, tags=frozenset()).strip()
-    contains_media = bool(re.search(r"<img\b[^>]*\bsrc=", html_value, flags=re.IGNORECASE))
+    contains_media = bool(
+        re.search(r"<(?:img|iframe)\b[^>]*\bsrc=", html_value, flags=re.IGNORECASE)
+    )
     if not text_content and not contains_media:
         html_value = ""
     has_content = bool(text_content) or contains_media
-    return SanitizedRichText(html=html_value, text_content=text_content, has_rich_content=has_content)
+    return SanitizedRichText(
+        html=html_value, text_content=text_content, has_rich_content=has_content
+    )
 
 
 __all__ = ["SanitizedRichText", "sanitize_rich_text"]

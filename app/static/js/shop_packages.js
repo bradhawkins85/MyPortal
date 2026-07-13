@@ -215,21 +215,22 @@
       }
     }
 
-    if (item.product_description) {
+    const descriptionHtml = typeof item.product_description_html === 'string' ? item.product_description_html.trim() : '';
+    const descriptionText = typeof item.product_description === 'string' ? item.product_description.trim() : '';
+    if (descriptionHtml || descriptionText) {
       const descriptionTitle = document.createElement('h3');
       descriptionTitle.className = 'modal__subtitle';
       descriptionTitle.textContent = 'Description';
       container.appendChild(descriptionTitle);
 
-      item.product_description.split(/\r?\n/).forEach((line) => {
-        const trimmed = line.trim();
-        if (!trimmed) {
-          return;
-        }
-        const paragraph = document.createElement('p');
-        paragraph.textContent = trimmed;
-        container.appendChild(paragraph);
-      });
+      const descriptionDiv = document.createElement('div');
+      descriptionDiv.className = 'modal__description rich-text-viewer';
+      if (descriptionHtml) {
+        descriptionDiv.innerHTML = descriptionHtml;
+      } else {
+        descriptionDiv.textContent = descriptionText;
+      }
+      container.appendChild(descriptionDiv);
     }
   }
 
@@ -281,6 +282,8 @@
             resolved.product_image_url || item.product_image_url,
           product_description:
             resolved.product_description || item.product_description,
+          product_description_html:
+            resolved.product_description_html || item.product_description_html,
         };
         const key = `${packageId}:${itemId}`;
         itemsByKey.set(key, {
