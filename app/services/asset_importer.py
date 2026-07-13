@@ -7,7 +7,11 @@ from app.core.logging import log_error, log_info
 from app.repositories import asset_custom_fields as acf_repo
 from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
+from app.repositories import tray as tray_repo
 from app.services import company_id_lookup, syncro, tacticalrmm
+
+
+TRMM_TRAY_AGENT_ID_FIELD = "TrayAgentID"
 
 
 def _clean_string(value: Any, *, max_length: int | None = None) -> str | None:
@@ -179,6 +183,66 @@ async def _sync_tactical_asset_custom_fields(
             )
 
 
+async def _sync_tactical_tray_device_link(
+    *,
+    company_id: int,
+    asset_id: int,
+    agent: Mapping[str, Any],
+) -> None:
+    """Link a MyPortal tray device to an imported TRMM asset.
+
+    The tray installer can write its MyPortal ``device_uid`` into the Tactical
+    RMM agent custom field named ``TrayAgentID``.  When Tactical assets are
+    imported, use that value to attach the already-enrolled tray device to the
+    matching MyPortal asset so ticket detail chat buttons can resolve the tray
+    device directly.
+    """
+
+    trmm_fields = tacticalrmm.extract_trmm_custom_fields(agent)
+    trmm_fields_lower = {name.lower(): field for name, field in trmm_fields.items()}
+    tray_field = trmm_fields.get(TRMM_TRAY_AGENT_ID_FIELD) or trmm_fields_lower.get(
+        TRMM_TRAY_AGENT_ID_FIELD.lower()
+    )
+    if not tray_field:
+        return
+
+    tray_device_uid = _clean_string(tray_field.get("value"))
+    if not tray_device_uid:
+        return
+
+    device = await tray_repo.get_device_by_uid(tray_device_uid)
+    if not device:
+        log_info(
+            "Tactical RMM TrayAgentID did not match an enrolled tray device",
+            company_id=company_id,
+            asset_id=asset_id,
+            tray_device_uid=tray_device_uid,
+        )
+        return
+
+    device_company_id = device.get("company_id")
+    if device_company_id not in (None, "", company_id):
+        try:
+            if int(device_company_id) != int(company_id):
+                log_error(
+                    "Tactical RMM TrayAgentID matched a tray device from another company",
+                    company_id=company_id,
+                    device_company_id=device_company_id,
+                    asset_id=asset_id,
+                    tray_device_uid=tray_device_uid,
+                )
+                return
+        except (TypeError, ValueError):
+            return
+
+    device_id = device.get("id")
+    try:
+        device_id_int = int(device_id)
+    except (TypeError, ValueError):
+        return
+    await tray_repo.link_device_to_asset(device_id_int, asset_id)
+
+
 async def import_tactical_assets_for_company(
     company_id: int,
     *,
@@ -247,6 +311,20 @@ async def import_tactical_assets_for_company(
             except Exception as exc:  # noqa: BLE001 – database/unexpected errors must not abort import
                 log_error(
                     "Unexpected error syncing custom fields for Tactical RMM asset",
+                    asset_id=asset_id,
+                    tactical_asset_id=tactical_id,
+                    error=str(exc),
+                )
+        if asset_id:
+            try:
+                await _sync_tactical_tray_device_link(
+                    company_id=company_id,
+                    asset_id=asset_id,
+                    agent=agent,
+                )
+            except Exception as exc:  # noqa: BLE001 – tray linking must not abort import
+                log_error(
+                    "Failed to sync Tactical RMM tray device link",
                     asset_id=asset_id,
                     tactical_asset_id=tactical_id,
                     error=str(exc),
