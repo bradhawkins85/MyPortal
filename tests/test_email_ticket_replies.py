@@ -653,5 +653,62 @@ async def test_add_email_cc_watchers_adds_users_and_external_addresses(monkeypat
     ]
 
 
+
+def test_extract_body_embeds_url_encoded_content_id_image():
+    """Inline images referenced by URL-encoded cid values should render in ticket bodies."""
+    from email.message import EmailMessage
+
+    from app.services.imap import _extract_body_and_attachments
+
+    message = EmailMessage()
+    message.set_content("Please see photo of the back of her phone.")
+    message.add_alternative(
+        (
+            '<p>Please see photo of the back of her phone.</p>'
+            '<img src="cid:image001.png%40abc123" width="480" height="640">'
+        ),
+        subtype="html",
+    )
+    html_part = message.get_payload()[1]
+    html_part.add_related(
+        b"fake-png-data",
+        maintype="image",
+        subtype="png",
+        cid="<image001.png@abc123>",
+        filename="image001.png",
+    )
+
+    body, attachments = _extract_body_and_attachments(message)
+
+    assert 'src="data:image/png;base64,' in body
+    assert "cid:image001" not in body
+    assert attachments == []
+
+
+def test_extract_body_embeds_content_location_image():
+    """Some clients identify inline body images by Content-Location instead of Content-ID."""
+    from email.message import EmailMessage
+    from email.mime.image import MIMEImage
+
+    from app.services.imap import _extract_body_and_attachments
+
+    message = EmailMessage()
+    message.set_content("Please see photo.")
+    message.add_alternative(
+        '<p>Please see photo.</p><img src="cid:phone-back.png">', subtype="html"
+    )
+    image = MIMEImage(b"fake-png-data", _subtype="png")
+    image.add_header("Content-Disposition", "inline", filename="phone-back.png")
+    image.add_header("Content-Location", "phone-back.png")
+    message.get_payload()[1].make_related()
+    message.get_payload()[1].attach(image)
+
+    body, attachments = _extract_body_and_attachments(message)
+
+    assert 'src="data:image/png;base64,' in body
+    assert "cid:phone-back.png" not in body
+    assert attachments == []
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
