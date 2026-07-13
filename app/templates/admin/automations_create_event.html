@@ -117,7 +117,7 @@
                   >{{ values.get('triggerFiltersRaw', '') }}</textarea>
                 </div>
                 <p class="form-help" data-filter-builder-error hidden></p>
-                <p class="form-help">Build common trigger filters with structured conditions. Use in/not in with comma-separated values such as Resolved, Closed for multi-value ticket status filters. Use Advanced JSON for complex nested logic.</p>
+                <p class="form-help">Build common trigger filters with structured conditions. Use <code>ticket.body</code> to match the initial request body, and use in/not in with comma-separated values such as Resolved, Closed for multi-value ticket status filters. Use Advanced JSON for complex nested logic.</p>
               </div>
               <div class="form-field" data-automation-actions>
                 <label class="form-label">Trigger actions</label>

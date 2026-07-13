@@ -22,6 +22,18 @@ def test_filters_match_subject_like_infix():
     assert automations_service._filters_match(filters, context)
 
 
+def test_filters_match_ticket_body_contains_spam_phrase():
+    context = {
+        "ticket": {
+            "subject": "Hello",
+            "body": "Limited offer: buy followers and boost your rankings today.",
+        }
+    }
+    filters = {"contains": {"ticket.body": "buy followers"}}
+
+    assert automations_service._filters_match(filters, context)
+
+
 def test_filters_like_handles_escape_sequences():
     context = {"ticket": {"subject": "CPU at 100%"}}
     filters = {"match": {"ticket.subject": r"CPU at 100\%"}}
