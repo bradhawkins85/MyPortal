@@ -517,6 +517,7 @@ def _public_shop_product_payload(product: Mapping[str, Any], *, is_vip: bool) ->
         "description": product.get("description"),
         "description_html": sanitized_description.html,
         "image_url": product.get("image_url"),
+        "product_link": product.get("product_link"),
         "price": product.get("price"),
         "vip_price": product.get("vip_price"),
         "stock": product.get("stock"),

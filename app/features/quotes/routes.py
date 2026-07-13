@@ -122,7 +122,8 @@ def _build_quote_pdf_html(
         product_link = str(item.get("product_link") or "").strip()
         product_link_html = (
             "<p class='product-link'><strong>Product Link:</strong> "
-            f"<a href='{escape(product_link, quote=True)}'>{escape(product_link)}</a></p>"
+            f"<a href='{escape(product_link, quote=True)}' target='_blank' "
+            f"rel='noopener noreferrer'>{escape(product_link)}</a></p>"
             if product_link
             else ""
         )
