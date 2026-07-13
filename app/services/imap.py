@@ -9,6 +9,7 @@ import json
 import re
 import secrets
 from datetime import datetime, timezone
+from urllib.parse import unquote
 from email.header import decode_header, make_header
 from email.utils import getaddresses, parsedate_to_datetime
 from html import escape
@@ -33,6 +34,40 @@ from app.services.sanitization import sanitize_rich_text
 _MAX_FETCH_BYTES = 5 * 1024 * 1024
 _MAX_TICKET_EXTERNAL_REFERENCE_CHARS = 128
 _CID_REFERENCE_PATTERN = re.compile(r"(?i)cid:([^\"'>\s]+)")
+
+
+def _normalise_content_reference(value: str | None) -> str:
+    """Normalise Content-ID/Content-Location values for cid: lookups."""
+
+    reference = _normalise_string(value)
+    if not reference:
+        return ""
+    reference = reference.strip("<>")
+    try:
+        reference = unquote(reference)
+    except Exception:  # pragma: no cover - unquote is defensive here
+        pass
+    return reference.strip().lower()
+
+
+def _content_reference_keys(part: email.message.Message) -> set[str]:
+    """Return lookup keys that may identify an inline MIME resource."""
+
+    keys: set[str] = set()
+    for header_name in ("Content-ID", "Content-Location"):
+        key = _normalise_content_reference(part.get(header_name))
+        if key:
+            keys.add(key)
+    filename = part.get_filename()
+    if filename:
+        try:
+            filename = str(make_header(decode_header(filename)))
+        except Exception:
+            pass
+        key = _normalise_content_reference(filename)
+        if key:
+            keys.add(key)
+    return keys
 
 
 def _normalise_ticket_external_reference(value: str | None) -> str | None:
@@ -1067,6 +1102,7 @@ def _extract_body_and_attachments(message: email.message.Message) -> tuple[str, 
         plain_parts: list[str] = []
         html_parts: list[str] = []
         inline_images: dict[str, tuple[str, bytes]] = {}
+        referenced_inline_keys: set[str] = set()
         attachments: list[dict[str, Any]] = []
 
         for part in message.walk():
@@ -1083,21 +1119,30 @@ def _extract_body_and_attachments(message: email.message.Message) -> tuple[str, 
                     plain_parts.append(text)
                 else:
                     html_parts.append(text)
+                    referenced_inline_keys.update(
+                        _normalise_content_reference(match.group(1))
+                        for match in _CID_REFERENCE_PATTERN.finditer(text)
+                    )
+                    referenced_inline_keys.discard("")
                 continue
 
-            content_id = part.get("Content-ID")
-            
-            # Handle inline images (embed as base64)
-            if content_id and disposition != "attachment" and content_type.startswith("image/"):
+            content_reference_keys = _content_reference_keys(part)
+
+            # Handle inline images (embed as base64). Some clients mark images as
+            # attachments or omit Content-ID while still referencing Content-Location
+            # or the filename from the HTML body, so collect every image with a
+            # usable reference key before deciding whether it should also be saved
+            # as a regular ticket attachment.
+            if content_type.startswith("image/") and content_reference_keys:
                 payload = part.get_payload(decode=True) or b""
                 if payload and len(payload) <= _MAX_FETCH_BYTES:
-                    normalised_id = content_id.strip().strip("<>").lower()
-                    if normalised_id:
-                        inline_images[normalised_id] = (content_type, payload)
-                continue
-            
+                    for reference_key in content_reference_keys:
+                        inline_images[reference_key] = (content_type, payload)
+                if disposition != "attachment" or content_reference_keys.intersection(referenced_inline_keys):
+                    continue
+
             # Handle non-inline attachments (files to save)
-            if disposition == "attachment" or (part.get_filename() and not content_id):
+            if disposition == "attachment" or (part.get_filename() and not content_reference_keys):
                 payload = part.get_payload(decode=True) or b""
                 if not payload or len(payload) > _MAX_FETCH_BYTES:
                     continue
@@ -1129,7 +1174,7 @@ def _extract_body_and_attachments(message: email.message.Message) -> tuple[str, 
                     cid_value = match.group(1)
                     if not cid_value:
                         return match.group(0)
-                    lookup_key = cid_value.strip().strip("<>").lower()
+                    lookup_key = _normalise_content_reference(cid_value)
                     resource = inline_images.get(lookup_key)
                     if not resource:
                         return match.group(0)
