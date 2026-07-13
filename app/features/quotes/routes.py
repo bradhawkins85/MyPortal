@@ -109,9 +109,12 @@ def _build_quote_pdf_html(
             else None
         )
         image_html = (
-            f'<img class="detail-image" src="{escape(image_url, quote=True)}" alt="">'
+            f'<div class="product-image-card">'
+            f'<img class="detail-image" src="{escape(image_url, quote=True)}" '
+            f'alt="{escape(str(item.get("product_name") or "Product"), quote=True)}">'
+            f'</div>'
             if image_url
-            else '<div class="image-placeholder">No image available</div>'
+            else ""
         )
         sanitized_description = sanitize_rich_text(str(item.get("description") or ""))
         description = (
@@ -134,7 +137,7 @@ def _build_quote_pdf_html(
             "<p class='eyebrow'>Product Details</p>"
             f"<h1>{escape(str(item.get('product_name') or 'Product'))}</h1>"
             "</div>"
-            f"<div class='product-image-card'>{image_html}</div>"
+            f"{image_html}"
             "</div>"
             f"<div class='description rich-text-viewer'>{description}</div>"
             f"{product_link_html}"
@@ -170,9 +173,8 @@ def _build_quote_pdf_html(
     .product-hero {{ align-items: stretch; display: flex; gap: 18px; margin-bottom: 18px; }}
     .product-heading {{ flex: 1 1 52%; min-width: 0; }}
     .product-page h1 {{ font-size: 24px; line-height: 1.16; margin: 6px 0 0; overflow-wrap: anywhere; }}
-    .product-image-card {{ align-items: center; background: #e8f5e9; border: 2px solid #22c55e; border-radius: 12px; box-shadow: 0 1px 4px rgba(34, 197, 94, .35); display: flex; flex: 0 0 42%; justify-content: center; min-height: 150px; padding: 12px; }}
+    .product-image-card {{ align-items: center; display: flex; flex: 0 0 42%; justify-content: center; min-height: 150px; padding: 0; }}
     .detail-image {{ display: block; max-height: 170px; max-width: 100%; object-fit: contain; }}
-    .image-placeholder {{ color: #4b5563; font-weight: 700; padding: 36px 12px; text-align: center; }}
     .description {{ font-size: 12px; margin-top: 18px; }}
     .description p {{ margin: 0 0 8px; }}
     .description ul, .description ol {{ margin: 0 0 8px 18px; padding: 0; }}
@@ -328,7 +330,7 @@ async def quotes_page(
 async def export_quote_pdf(
     request: Request,
     quote_number: str,
-    with_images: bool = Query(False, alias="withImages"),
+    with_images: bool = Query(True, alias="withImages"),
 ) -> Response:
     main_module = _main()
     (

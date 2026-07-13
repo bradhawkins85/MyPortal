@@ -155,10 +155,7 @@
                         {% endif %}
                       {% endif %}
                       <li class="header-title-menu__item" role="none">
-                        <a class="header-title-menu__link" role="menuitem" href="/quotes/export/{{ quote.quote_number }}?withImages=false">Export Quote (no images)</a>
-                      </li>
-                      <li class="header-title-menu__item" role="none">
-                        <a class="header-title-menu__link" role="menuitem" href="/quotes/export/{{ quote.quote_number }}?withImages=true">Export Quote (with images)</a>
+                        <a class="header-title-menu__link" role="menuitem" href="/quotes/export/{{ quote.quote_number }}?withImages=true">Export Quote PDF</a>
                       </li>
                       {% if is_admin %}
                         <li class="header-title-menu__item" role="none">

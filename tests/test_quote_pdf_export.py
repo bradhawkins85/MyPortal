@@ -57,5 +57,33 @@ def test_quote_pdf_includes_product_image_but_removes_description_images():
 
     assert name_index < image_index < details_index
     assert "https://portal.example/uploads/shop/laptop.png" in html
+    assert 'alt="Laptop"' in html
+    assert "#e8f5e9" not in html
+    assert "#22c55e" not in html
+    assert "No image available" not in html
     assert "/uploads/details/internal.png" not in html
     assert "<img src" not in html
+
+
+def test_quote_pdf_omits_image_card_when_store_image_is_unavailable():
+    html = _build_quote_pdf_html(
+        request=_request(),
+        company={"name": "Example Co"},
+        quote={"quote_number": "Q-2", "name": "Refresh"},
+        items=[
+            {
+                "product_name": "Dock",
+                "sku": "DOCK-1",
+                "quantity": 1,
+                "price": Decimal("199.00"),
+                "image_url": None,
+                "description": "<p>USB-C dock</p>",
+            }
+        ],
+        include_line_images=True,
+    )
+
+    assert 'class="product-image-card"' not in html
+    assert "No image available" not in html
+    assert "#e8f5e9" not in html
+    assert "#22c55e" not in html
