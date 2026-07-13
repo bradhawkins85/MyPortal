@@ -63,7 +63,9 @@ def _content_reference_keys(part: email.message.Message) -> set[str]:
         try:
             filename = str(make_header(decode_header(filename)))
         except Exception:
-            pass
+            # Malformed/unknown encoded filenames are tolerated; fall back to
+            # the raw filename value for reference key normalization.
+            filename = filename
         key = _normalise_content_reference(filename)
         if key:
             keys.add(key)
