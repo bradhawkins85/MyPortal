@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import array
+import base64
 import hashlib
 import re
 import json
@@ -485,6 +486,98 @@ def _ensure_list(value: Any) -> list[str]:
         return [part.strip() for part in value.split(",") if part.strip()]
     return []
 
+
+def _extract_ticket_id_from_email_payload(payload: Mapping[str, Any]) -> int | None:
+    context = payload.get("context")
+    candidates: list[Any] = [payload.get("ticket_id")]
+    if isinstance(context, Mapping):
+        metadata = context.get("metadata")
+        ticket = context.get("ticket")
+        if isinstance(metadata, Mapping):
+            candidates.append(metadata.get("ticket_id"))
+        if isinstance(ticket, Mapping):
+            candidates.extend([ticket.get("id"), ticket.get("ticket_id")])
+    for candidate in candidates:
+        try:
+            ticket_id = int(candidate)
+        except (TypeError, ValueError):
+            continue
+        if ticket_id > 0:
+            return ticket_id
+    return None
+
+
+async def _load_ticket_email_attachments(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Load ticket attachments for automation email modules when possible.
+
+    Explicit payload attachments are respected by callers; this helper only supplies
+    attachments automatically when the automation context identifies a ticket.
+    """
+    ticket_id = _extract_ticket_id_from_email_payload(payload)
+    if ticket_id is None:
+        return []
+
+    from app.repositories import ticket_attachments as attachments_repo
+    from app.services import ticket_attachments as attachments_service
+
+    email_attachments: list[dict[str, Any]] = []
+    try:
+        attachments = await attachments_repo.list_attachments(
+            ticket_id, access_levels=("open", "closed")
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning(
+            "Unable to load ticket attachments for automation email",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
+        return []
+
+    for attachment in attachments:
+        filename = str(attachment.get("filename") or "").strip()
+        if not filename:
+            continue
+        file_path = attachments_service.get_attachment_file_path(filename)
+        try:
+            content = file_path.read_bytes()
+        except OSError as exc:
+            logger.warning(
+                "Ticket attachment unavailable for automation email",
+                ticket_id=ticket_id,
+                attachment_id=attachment.get("id"),
+                filename=filename,
+                error=str(exc),
+            )
+            continue
+        email_attachments.append(
+            {
+                "filename": str(attachment.get("original_filename") or filename),
+                "content": content,
+                "mime_type": attachment.get("mime_type") or "application/octet-stream",
+            }
+        )
+    return email_attachments
+
+
+def _attachments_for_smtp2go(attachments: list[dict[str, Any]]) -> list[dict[str, str]]:
+    formatted: list[dict[str, str]] = []
+    for attachment in attachments:
+        content = attachment.get("content")
+        if isinstance(content, str):
+            encoded = content
+        elif isinstance(content, bytes):
+            encoded = base64.b64encode(content).decode("ascii")
+        elif isinstance(content, bytearray):
+            encoded = base64.b64encode(bytes(content)).decode("ascii")
+        else:
+            continue
+        formatted.append(
+            {
+                "filename": str(attachment.get("filename") or "attachment"),
+                "content": encoded,
+            }
+        )
+    return formatted
 
 def _coerce_int(
     value: Any, *, minimum: int | None = None, maximum: int | None = None
@@ -2891,6 +2984,11 @@ async def _invoke_smtp(
     text_body = payload.get("text") or payload.get("text_body")
     # Payload sender takes precedence over settings from_address
     sender = str(payload.get("sender") or settings.get("from_address") or "") or None
+    attachments = (
+        payload.get("attachments") if isinstance(payload.get("attachments"), list) else None
+    )
+    if attachments is None:
+        attachments = await _load_ticket_email_attachments(payload)
 
     # Extract ticket reply ID from context if present, to enable email tracking
     enable_tracking = False
@@ -2955,6 +3053,7 @@ async def _invoke_smtp(
             sender=sender,
             enable_tracking=enable_tracking,
             ticket_reply_id=ticket_reply_id,
+            attachments=attachments,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         updated_event = await _record_failure(
@@ -3108,6 +3207,8 @@ async def _invoke_smtp2go(
         if isinstance(payload.get("attachments"), list)
         else None
     )
+    if attachments is None:
+        attachments = _attachments_for_smtp2go(await _load_ticket_email_attachments(payload))
     template_id = str(payload.get("template_id") or "").strip() or None
     template_data = (
         payload.get("template_data")

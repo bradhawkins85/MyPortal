@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
+import mimetypes
 import smtplib
 import ssl
 from email.message import EmailMessage
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from loguru import logger
 
@@ -15,6 +17,31 @@ from app.services import webhook_monitor
 
 class EmailDispatchError(Exception):
     """Raised when an email fails to send via SMTP."""
+
+
+def _normalise_attachment(attachment: Mapping[str, Any]) -> tuple[str, bytes, str | None]:
+    filename = (
+        str(attachment.get("filename") or attachment.get("name") or "attachment").strip()
+        or "attachment"
+    )
+    content = attachment.get("content")
+    if isinstance(content, str):
+        content_bytes = base64.b64decode(content)
+    elif isinstance(content, bytes):
+        content_bytes = content
+    elif isinstance(content, bytearray):
+        content_bytes = bytes(content)
+    else:
+        raise ValueError(f"Attachment {filename!r} does not include bytes or base64 content")
+    mime_type = str(
+        attachment.get("mime_type")
+        or attachment.get("mimetype")
+        or attachment.get("content_type")
+        or ""
+    ).strip()
+    if not mime_type:
+        mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    return filename, content_bytes, mime_type
 
 
 def _normalise_recipients(recipients: Iterable[str]) -> list[str]:
@@ -41,6 +68,7 @@ async def send_email(
     timeout: float = 30.0,
     enable_tracking: bool = False,
     ticket_reply_id: int | None = None,
+    attachments: Sequence[Mapping[str, Any]] | None = None,
 ) -> tuple[bool, dict[str, Any] | None]:
     """Send an email using the configured SMTP server.
 
@@ -54,6 +82,7 @@ async def send_email(
         timeout: SMTP connection timeout in seconds
         enable_tracking: Enable email tracking (opens and clicks)
         ticket_reply_id: ID of the ticket reply being sent (required for tracking)
+        attachments: Optional file attachments. Content may be bytes or base64 text.
 
     Returns a tuple where the first element indicates if delivery was attempted and
     succeeded, and the second element contains the webhook monitor event metadata
@@ -112,6 +141,10 @@ async def send_email(
                 sender=sender,
                 reply_to=reply_to,
                 tracking_id=tracking_id,
+                attachments=[
+                    {"filename": name, "content": base64.b64encode(content).decode("ascii")}
+                    for name, content, _mime in (_normalise_attachment(item) for item in (attachments or []))
+                ] or None,
             )
 
             # Record tracking metadata if ticket reply ID provided
@@ -270,6 +303,18 @@ async def send_email(
             message.add_alternative(modified_html_body, subtype="html")
     else:
         message.set_content(modified_html_body, subtype="html")
+
+    for attachment in attachments or []:
+        filename, content_bytes, mime_type = _normalise_attachment(attachment)
+        maintype, _, subtype = mime_type.partition("/")
+        if not maintype or not subtype:
+            maintype, subtype = "application", "octet-stream"
+        message.add_attachment(
+            content_bytes,
+            maintype=maintype,
+            subtype=subtype,
+            filename=filename,
+        )
 
     port_segment = f":{settings.smtp_port}" if settings.smtp_port else ""
     endpoint = f"smtp://{settings.smtp_host}{port_segment}"
