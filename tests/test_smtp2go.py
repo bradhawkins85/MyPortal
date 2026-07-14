@@ -804,3 +804,71 @@ def test_send_email_records_response_tracking(monkeypatch):
         "tracking_id": "resp-track-456",
         "smtp2go_message_id": "smtp2go-123",
     }
+
+
+def test_normalise_attachment_payloads_uses_fileblob_for_legacy_content():
+    """SMTP2Go attachments must use fileblob rather than MyPortal's content key."""
+    payload = smtp2go._normalise_attachment_payloads(
+        [
+            {"filename": "note.txt", "content": b"hello"},
+            {"filename": "already.pdf", "fileblob": "cGRm"},
+            {"filename": "remote.png", "url": "https://example.com/remote.png"},
+        ]
+    )
+
+    assert payload == [
+        {"filename": "note.txt", "fileblob": "aGVsbG8="},
+        {"filename": "already.pdf", "fileblob": "cGRm"},
+        {"filename": "remote.png", "url": "https://example.com/remote.png"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_email_via_api_posts_fileblob_attachments(monkeypatch):
+    """Legacy content attachments are normalised before the SMTP2Go API call."""
+    captured = {}
+
+    class MockResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": {"error_code": "SUCCESS", "email_id": "msg-1"}}
+
+    class MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def post(self, url, json=None):
+            captured["json"] = json
+            return MockResponse()
+
+    async def mock_get_module_settings(slug):
+        return {"api_key": "test-api-key-123"}
+
+    from app.services import modules as modules_service
+    import httpx
+
+    monkeypatch.setattr(modules_service, "get_module_settings", mock_get_module_settings)
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+
+    await smtp2go.send_email_via_api(
+        to=["user@example.com"],
+        subject="Attachment Test",
+        html_body="<p>Body</p>",
+        sender="sender@example.com",
+        attachments=[{"filename": "note.txt", "content": b"hello"}],
+    )
+
+    assert captured["json"]["attachments"] == [
+        {"filename": "note.txt", "fileblob": "aGVsbG8="}
+    ]
+    assert "content" not in captured["json"]["attachments"][0]
