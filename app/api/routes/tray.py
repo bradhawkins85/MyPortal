@@ -273,7 +273,7 @@ async def get_device_config(
     if device.get("company_id"):
         company = await companies_repo.get_company_by_id(int(device["company_id"]))
         chat_enabled = bool(
-            company and company.get("tray_chat_enabled") and _settings.matrix_enabled
+            company and company.get("tray_chat_enabled", True) and _settings.matrix_enabled
         )
     return TrayConfigResponse(
         version=int(config.get("version") or 1),
@@ -2103,7 +2103,7 @@ async def issue_chat_token(
     if company_id:
         company = await companies_repo.get_company_by_id(int(company_id))
         if not (
-            company and company.get("tray_chat_enabled") and _settings.matrix_enabled
+            company and company.get("tray_chat_enabled", True) and _settings.matrix_enabled
         ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

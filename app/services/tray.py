@@ -664,7 +664,7 @@ async def push_notification_to_company_devices(
     if company_id is None:
         return {"targeted": 0, "delivered": 0, "queued": 0}
     company = await companies_repo.get_company_by_id(int(company_id))
-    if not company or not company.get("tray_notifications_enabled"):
+    if not company or not company.get("tray_notifications_enabled", True):
         return {"targeted": 0, "delivered": 0, "queued": 0}
 
     active_devices = await tray_repo.list_devices(
@@ -737,6 +737,6 @@ def technician_can_initiate(
         return True
     if not company:
         return False
-    if not company.get("tray_chat_enabled"):
+    if not company.get("tray_chat_enabled", True):
         return False
     return bool(user.get("is_helpdesk_technician"))
