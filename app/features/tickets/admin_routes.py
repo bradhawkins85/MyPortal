@@ -1721,11 +1721,11 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
                         )
                         has_failed_attachments = True
                 else:
-                    log_error(
-                        "Skipped attachment without filename; treating as failed upload",
-                        ticket_id=ticket_id,
-                    )
-                    has_failed_attachments = True
+                    # Browsers include an empty multipart field for the file input
+                    # when no files are selected. That is not an upload failure;
+                    # only named files that fail during save should affect the
+                    # success message.
+                    continue
         # Technicians should not be automatically added as ticket watchers when replying.
         await tickets_repo.set_ticket_status(ticket_id, reply_status)
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
