@@ -1259,42 +1259,6 @@ async def update_watchers(
 
 
 @router.post(
-    "/{ticket_id}/watchers/{user_id}",
-    response_model=TicketDetail,
-    status_code=status.HTTP_201_CREATED,
-)
-async def add_watcher(
-    ticket_id: int,
-    user_id: int,
-    request: Request,
-    current_user: dict = Depends(require_helpdesk_technician),
-) -> TicketDetail:
-    ticket = await tickets_repo.get_ticket(ticket_id)
-    if not ticket:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
-        )
-    watcher_user = await user_repo.get_user_by_id(user_id)
-    if not watcher_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Watcher user not found"
-        )
-
-    await tickets_repo.add_watcher(ticket_id, user_id=user_id)
-    await audit_service.record(
-        action="ticket.watcher.add",
-        request=request,
-        user_id=int(current_user["id"]),
-        entity_type="ticket",
-        entity_id=ticket_id,
-        before=None,
-        after=None,
-        metadata={"watcher_user_id": user_id},
-    )
-    return await _build_ticket_detail(ticket_id, current_user)
-
-
-@router.post(
     "/{ticket_id}/watchers/email",
     response_model=TicketDetail,
     status_code=status.HTTP_201_CREATED,
@@ -1328,6 +1292,42 @@ async def add_watcher_by_email(
         before=None,
         after=None,
         metadata={"watcher_email": email_normalized},
+    )
+    return await _build_ticket_detail(ticket_id, current_user)
+
+
+@router.post(
+    "/{ticket_id}/watchers/{user_id}",
+    response_model=TicketDetail,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_watcher(
+    ticket_id: int,
+    user_id: int,
+    request: Request,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> TicketDetail:
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
+        )
+    watcher_user = await user_repo.get_user_by_id(user_id)
+    if not watcher_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Watcher user not found"
+        )
+
+    await tickets_repo.add_watcher(ticket_id, user_id=user_id)
+    await audit_service.record(
+        action="ticket.watcher.add",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="ticket",
+        entity_id=ticket_id,
+        before=None,
+        after=None,
+        metadata={"watcher_user_id": user_id},
     )
     return await _build_ticket_detail(ticket_id, current_user)
 
