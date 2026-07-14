@@ -166,6 +166,7 @@ async def receive_sms(payload: ReceiveSMSPayload, request: Request, api_key_reco
     body = sanitize_rich_text(message_text).html
     ticket = await _find_sms_ticket(normalised_phone, sms_day)
     action = "created"
+    reply: dict[str, Any] | None = None
     try:
         if ticket:
             if str(ticket.get("status") or "").lower() in {"closed", "resolved"}:
@@ -178,7 +179,7 @@ async def receive_sms(payload: ReceiveSMSPayload, request: Request, api_key_reco
             if author_id is None:
                 contact = await _find_contact(payload.from_number)
                 author_id = contact.get("requester_id")
-            await tickets_repo.create_reply(
+            reply = await tickets_repo.create_reply(
                 ticket_id=int(ticket["id"]), author_id=author_id, body=body,
                 is_internal=False, external_reference=f"sms:{normalised_phone}:{sms_at.isoformat()}", created_at=sms_at,
                 author_display_name=(payload.name or payload.from_number) if author_id is None else None,
@@ -203,7 +204,17 @@ async def receive_sms(payload: ReceiveSMSPayload, request: Request, api_key_reco
             )
         ticket_id = int(ticket["id"])
         await _refresh_sms_ticket_ai(ticket_id)
-        await tickets_service.emit_ticket_updated_event(ticket, actor_type="api_key", actor={"id": api_key_record.get("id")})
+        if reply is not None:
+            await tickets_service.emit_ticket_replied_event(
+                ticket,
+                actor_type="requester",
+                reply=reply,
+            )
+            await tickets_service.emit_ticket_updated_event(
+                ticket,
+                actor_type="requester",
+                reply=reply,
+            )
     except Exception as exc:
         log_error("Failed to process inbound SMS", error=str(exc), from_number=payload.from_number)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to process inbound SMS") from exc

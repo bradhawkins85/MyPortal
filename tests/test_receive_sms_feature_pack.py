@@ -76,6 +76,7 @@ def test_receive_sms_created_ticket_refreshes_ai(monkeypatch):
         monkeypatch.setattr(receive_sms_routes.db, "execute", fake_execute)
         monkeypatch.setattr(receive_sms_routes.tickets_service, "refresh_ticket_ai_summary", fake_summary)
         monkeypatch.setattr(receive_sms_routes.tickets_service, "refresh_ticket_ai_tags", fake_tags)
+        monkeypatch.setattr(receive_sms_routes.tickets_service, "emit_ticket_replied_event", fake_emit)
         monkeypatch.setattr(receive_sms_routes.tickets_service, "emit_ticket_updated_event", fake_emit)
 
         payload = receive_sms_routes.ReceiveSMSPayload(
@@ -115,14 +116,20 @@ def test_receive_sms_existing_ticket_reply_refreshes_ai(monkeypatch):
         async def fake_tags(ticket_id):
             calls.append(("tags", ticket_id))
 
-        async def fake_emit(*_args, **_kwargs):
-            return None
+        emit_calls: list[tuple[str, tuple, dict]] = []
+
+        async def fake_emit_replied(*args, **kwargs):
+            emit_calls.append(("replied", args, kwargs))
+
+        async def fake_emit_updated(*args, **kwargs):
+            emit_calls.append(("updated", args, kwargs))
 
         monkeypatch.setattr(receive_sms_routes, "_find_sms_ticket", fake_find_sms_ticket)
         monkeypatch.setattr(receive_sms_routes.tickets_repo, "create_reply", fake_create_reply)
         monkeypatch.setattr(receive_sms_routes.tickets_service, "refresh_ticket_ai_summary", fake_summary)
         monkeypatch.setattr(receive_sms_routes.tickets_service, "refresh_ticket_ai_tags", fake_tags)
-        monkeypatch.setattr(receive_sms_routes.tickets_service, "emit_ticket_updated_event", fake_emit)
+        monkeypatch.setattr(receive_sms_routes.tickets_service, "emit_ticket_replied_event", fake_emit_replied)
+        monkeypatch.setattr(receive_sms_routes.tickets_service, "emit_ticket_updated_event", fake_emit_updated)
 
         payload = receive_sms_routes.ReceiveSMSPayload(
             type="SMSIn",
@@ -137,6 +144,11 @@ def test_receive_sms_existing_ticket_reply_refreshes_ai(monkeypatch):
         assert result["status"] == "appended"
         assert result["ticket_id"] == 456
         assert calls == [("reply", 456), ("summary", 456), ("tags", 456)]
+        assert [call[0] for call in emit_calls] == ["replied", "updated"]
+        for _event_name, args, kwargs in emit_calls:
+            assert args == ({"id": 456, "requester_id": 11, "status": "open"},)
+            assert kwargs["actor_type"] == "requester"
+            assert kwargs["reply"] == {"id": 99}
 
     asyncio.run(run_test())
 
@@ -166,6 +178,7 @@ def test_receive_sms_existing_ticket_without_requester_stores_sender_snapshot(mo
         monkeypatch.setattr(receive_sms_routes.tickets_repo, "create_reply", fake_create_reply)
         monkeypatch.setattr(receive_sms_routes.tickets_service, "refresh_ticket_ai_summary", fake_refresh)
         monkeypatch.setattr(receive_sms_routes.tickets_service, "refresh_ticket_ai_tags", fake_refresh)
+        monkeypatch.setattr(receive_sms_routes.tickets_service, "emit_ticket_replied_event", fake_emit)
         monkeypatch.setattr(receive_sms_routes.tickets_service, "emit_ticket_updated_event", fake_emit)
 
         payload = receive_sms_routes.ReceiveSMSPayload(
