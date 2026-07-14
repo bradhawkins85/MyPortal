@@ -15,6 +15,7 @@ import json
 import secrets
 from datetime import datetime, timezone
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 import httpx
 from loguru import logger
@@ -168,10 +169,19 @@ def _normalise_attachment_payloads(
             or "attachment"
         ).strip() or "attachment"
 
-        url = str(attachment.get("url") or "").strip()
-        if url:
-            normalised.append({"filename": filename, "url": url})
-            continue
+        raw_url = attachment.get("url")
+        if isinstance(raw_url, str):
+            url = raw_url.strip()
+            if url:
+                parsed = urlparse(url)
+                if parsed.scheme in {"http", "https"} and parsed.netloc:
+                    normalised.append({"filename": filename, "url": url})
+                    continue
+                logger.warning(
+                    "Skipping SMTP2Go attachment with invalid url; expected absolute http(s) URL",
+                    filename=filename,
+                    url=url,
+                )
 
         fileblob = attachment.get("fileblob")
         if isinstance(fileblob, str) and fileblob.strip():
