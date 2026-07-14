@@ -393,17 +393,20 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
             await tickets_repo.set_ticket_status(ticket_id, reply_status)
 
         # Handle file attachments
+        reply_attachments: list[dict[str, Any]] = []
         attachments = form.getlist("attachments")
         if attachments:
             for attachment in attachments:
                 if hasattr(attachment, "filename") and attachment.filename:
                     try:
-                        await attachments_service.save_uploaded_file(
+                        saved_attachment = await attachments_service.save_uploaded_file(
                             ticket_id=ticket_id,
                             file=attachment,
                             access_level="closed",
                             uploaded_by_user_id=user_id,
                         )
+                        if saved_attachment:
+                            reply_attachments.append(saved_attachment)
                     except Exception as exc:
                         log_error(
                             "Failed to save attachment",
@@ -432,17 +435,20 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
         pass
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
     actor_type = "technician" if has_helpdesk_access or is_super_admin else "requester"
+    reply_event_payload = dict(created_reply)
+    if reply_attachments:
+        reply_event_payload["attachments"] = reply_attachments
     await tickets_service.emit_ticket_updated_event(
         ticket_id,
         actor_type=actor_type,
         actor=user,
-        reply=created_reply,
+        reply=reply_event_payload,
     )
     await tickets_service.emit_ticket_replied_event(
         ticket_id,
         actor_type=actor_type,
         actor=user,
-        reply=created_reply,
+        reply=reply_event_payload,
     )
     await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
 

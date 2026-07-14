@@ -1697,18 +1697,21 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
         mentioned_user_ids = await _valid_mentioned_user_ids(ticket, _parse_mentioned_user_ids(form))
         if mentioned_user_ids:
             await tickets_repo.bulk_add_watchers(ticket_id, mentioned_user_ids)
+        reply_attachments: list[dict[str, Any]] = []
         attachments = form.getlist("attachments")
         if attachments:
             for attachment in attachments:
                 filename = (attachment.filename or "") if attachment else ""
                 if filename:
                     try:
-                        await attachments_service.save_uploaded_file(
+                        saved_attachment = await attachments_service.save_uploaded_file(
                             ticket_id=ticket_id,
                             file=attachment,
                             access_level="closed",
                             uploaded_by_user_id=author_id,
                         )
+                        if saved_attachment:
+                            reply_attachments.append(saved_attachment)
                     except Exception as exc:  # pragma: no cover - defensive logging
                         log_error(
                             "Failed to save attachment",
@@ -1728,17 +1731,20 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
         await tickets_service.refresh_ticket_ai_tags(ticket_id)
         await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)
+        reply_event_payload = dict(created_reply)
+        if reply_attachments:
+            reply_event_payload["attachments"] = reply_attachments
         await tickets_service.emit_ticket_updated_event(
             ticket_id,
             actor_type="technician",
             actor=current_user,
-            reply=created_reply,
+            reply=reply_event_payload,
         )
         await tickets_service.emit_ticket_replied_event(
             ticket_id,
             actor_type="technician",
             actor=current_user,
-            reply=created_reply,
+            reply=reply_event_payload,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create ticket reply", error=str(exc))
