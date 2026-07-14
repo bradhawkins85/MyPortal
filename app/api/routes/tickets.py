@@ -36,6 +36,7 @@ from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import ticket_tasks as ticket_tasks_repo
 from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import users as user_repo
 from app.schemas.tickets import (
     LabourTypeCreateRequest,
     LabourTypeListResponse,
@@ -1272,6 +1273,12 @@ async def add_watcher(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
         )
+    watcher_user = await user_repo.get_user_by_id(user_id)
+    if not watcher_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Watcher user not found"
+        )
+
     await tickets_repo.add_watcher(ticket_id, user_id=user_id)
     await audit_service.record(
         action="ticket.watcher.add",
