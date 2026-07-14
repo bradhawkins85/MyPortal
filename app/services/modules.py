@@ -511,28 +511,38 @@ async def _load_ticket_email_attachments(payload: Mapping[str, Any]) -> list[dic
     """Load ticket attachments for automation email modules when possible.
 
     Explicit payload attachments are respected by callers; this helper only supplies
-    attachments automatically when the automation context identifies a ticket.
+    attachments automatically when the automation context identifies a ticket. Reply
+    events can provide the attachments uploaded with that reply so the outgoing
+    email does not have to fall back to every attachment on the ticket.
     """
     ticket_id = _extract_ticket_id_from_email_payload(payload)
-    if ticket_id is None:
-        return []
+    context = payload.get("context")
 
     from app.repositories import ticket_attachments as attachments_repo
     from app.services import ticket_attachments as attachments_service
 
-    email_attachments: list[dict[str, Any]] = []
-    try:
-        attachments = await attachments_repo.list_attachments(
-            ticket_id, access_levels=("open", "closed")
-        )
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.warning(
-            "Unable to load ticket attachments for automation email",
-            ticket_id=ticket_id,
-            error=str(exc),
-        )
-        return []
+    attachments: list[Mapping[str, Any]] = []
+    if isinstance(context, Mapping):
+        reply = context.get("reply")
+        if isinstance(reply, Mapping) and isinstance(reply.get("attachments"), list):
+            attachments = [item for item in reply["attachments"] if isinstance(item, Mapping)]
 
+    if not attachments:
+        if ticket_id is None:
+            return []
+        try:
+            attachments = await attachments_repo.list_attachments(
+                ticket_id, access_levels=("open", "closed")
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning(
+                "Unable to load ticket attachments for automation email",
+                ticket_id=ticket_id,
+                error=str(exc),
+            )
+            return []
+
+    email_attachments: list[dict[str, Any]] = []
     for attachment in attachments:
         filename = str(attachment.get("filename") or "").strip()
         if not filename:
