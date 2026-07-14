@@ -30,6 +30,7 @@ _ASSET_TABLE_COLUMNS: list[dict[str, str]] = [
     {"key": "ram_gb", "label": "RAM (GB)", "sort": "number"},
     {"key": "hdd_size", "label": "Storage", "sort": "string"},
     {"key": "last_sync", "label": "Last sync", "sort": "date", "priority": "essential"},
+    {"key": "tray_agent_synced", "label": "TrayAgentID synced", "sort": "number", "field_type": "checkbox"},
     {"key": "motherboard_manufacturer", "label": "Motherboard", "sort": "string"},
     {"key": "form_factor", "label": "Form factor", "sort": "string"},
     {"key": "last_user", "label": "Last user", "sort": "string", "priority": "essential"},
@@ -222,6 +223,7 @@ async def assets_page(request: Request):
         tray_device = tray_devices_by_asset.get(int(record["id"])) if record.get("id") else None
         record["tray_device_uid"] = tray_device.get("device_uid") if tray_device else None
         record["tray_device_hostname"] = tray_device.get("hostname") if tray_device else None
+        record["tray_agent_synced"] = bool(record["tray_device_uid"])
         record["can_open_chat"] = bool(record["tray_device_uid"] and main_module.settings.matrix_enabled)
         asset_id = record.get("id")
         asset_cf = cf_values_by_asset.get(asset_id, {})

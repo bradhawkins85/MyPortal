@@ -83,3 +83,77 @@ async def test_assets_page_redirects_when_menu_permission_is_none(monkeypatch):
 
     assert response.status_code == 303
     assert response.headers["location"] == "/"
+
+
+@pytest.mark.anyio
+async def test_assets_page_adds_tray_agent_sync_column(monkeypatch):
+    user = {"id": 7, "company_id": 42, "is_super_admin": False}
+    membership = {
+        "company_id": 42,
+        "can_manage_assets": False,
+        "menu_permissions": {"menu.assets": "read"},
+    }
+
+    async def fake_require_authenticated_user(request):
+        return user, None
+
+    async def fake_get_user_company(user_id, company_id):
+        return membership
+
+    async def fake_get_company_by_id(company_id):
+        return {"id": company_id, "name": "Acme"}
+
+    async def fake_list_company_assets(company_id):
+        return [
+            {
+                "id": 100,
+                "company_id": company_id,
+                "name": "Workstation-100",
+                "type": "workstation",
+                "status": "active",
+            },
+            {
+                "id": 200,
+                "company_id": company_id,
+                "name": "Workstation-200",
+                "type": "workstation",
+                "status": "active",
+            },
+        ]
+
+    async def fake_list_field_definitions():
+        return []
+
+    async def fake_get_all_asset_field_values(asset_ids):
+        return {}
+
+    async def fake_list_active_devices_by_asset_ids(asset_ids):
+        assert asset_ids == [100, 200]
+        return {100: {"id": 1, "asset_id": 100, "device_uid": "tray-100", "hostname": "pc-100"}}
+
+    async def fake_render_template(template, request, current_user, *, extra=None):
+        assert template == "assets/index.html"
+        column = next(column for column in extra["columns"] if column["key"] == "tray_agent_synced")
+        assert column == {
+            "key": "tray_agent_synced",
+            "label": "TrayAgentID synced",
+            "sort": "number",
+            "field_type": "checkbox",
+        }
+        assets_by_id = {asset["id"]: asset for asset in extra["assets"]}
+        assert assets_by_id[100]["tray_agent_synced"] is True
+        assert assets_by_id[200]["tray_agent_synced"] is False
+        return HTMLResponse("assets page")
+
+    monkeypatch.setattr(main_module, "_require_authenticated_user", fake_require_authenticated_user)
+    monkeypatch.setattr(assets_routes.user_company_repo, "get_user_company", fake_get_user_company)
+    monkeypatch.setattr(assets_routes.company_repo, "get_company_by_id", fake_get_company_by_id)
+    monkeypatch.setattr(assets_routes.asset_repo, "list_company_assets", fake_list_company_assets)
+    monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "list_field_definitions", fake_list_field_definitions)
+    monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "get_all_asset_field_values", fake_get_all_asset_field_values)
+    monkeypatch.setattr(assets_routes.tray_repo, "list_active_devices_by_asset_ids", fake_list_active_devices_by_asset_ids)
+    monkeypatch.setattr(main_module, "_render_template", fake_render_template)
+
+    response = await assets_routes.assets_page(_request())
+
+    assert response.status_code == 200
