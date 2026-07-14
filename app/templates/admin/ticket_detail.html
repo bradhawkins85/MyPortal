@@ -389,7 +389,11 @@
                                   {% endif %}
                                 {% endfor %}
                                 {% if not is_watching.value %}
-                                  <option value="{{ staff_user.id }}">{{ staff_user.email }}</option>
+                                  {% if staff_user.user_id %}
+                                    <option value="{{ staff_user.user_id }}" data-watcher-kind="user">{{ staff_user.email }}</option>
+                                  {% else %}
+                                    <option value="{{ staff_user.email }}" data-watcher-kind="email">{{ staff_user.email }}</option>
+                                  {% endif %}
                                 {% endif %}
                               {% endfor %}
                             {% endif %}

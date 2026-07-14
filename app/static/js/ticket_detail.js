@@ -2073,20 +2073,24 @@
 
     // Handle add watcher by user ID
     addButton.addEventListener('click', async () => {
-      const userId = selectElement.value;
-      if (!userId) {
+      const watcherValue = selectElement.value;
+      if (!watcherValue) {
         return;
       }
 
       const selectedOption = selectElement.options[selectElement.selectedIndex];
+      const watcherKind = selectedOption.dataset.watcherKind || 'user';
       const userEmail = selectedOption.textContent || '';
+      const watcherUrl = watcherKind === 'email'
+        ? `/api/tickets/${ticketId}/watchers/email?email=${encodeURIComponent(watcherValue)}`
+        : `/api/tickets/${ticketId}/watchers/${watcherValue}`;
 
       addButton.disabled = true;
       addButton.setAttribute('aria-busy', 'true');
 
       try {
         const csrfToken = getCsrfToken();
-        const response = await fetch(`/api/tickets/${ticketId}/watchers/${userId}`, {
+        const response = await fetch(watcherUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -2104,7 +2108,11 @@
         selectElement.value = '';
 
         // Add to watchers list
-        addWatcherToList(userId, userEmail, null);
+        addWatcherToList(
+          watcherKind === 'user' ? watcherValue : null,
+          userEmail,
+          watcherKind === 'email' ? watcherValue : null,
+        );
       } catch (error) {
         console.error('Failed to add watcher:', error);
         alert(error instanceof Error ? error.message : 'Failed to add watcher');

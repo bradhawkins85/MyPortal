@@ -166,6 +166,11 @@ def test_add_watcher_success(monkeypatch, active_session):
 
     monkeypatch.setattr(tickets_repo, "get_ticket", mock_get_ticket)
     monkeypatch.setattr(tickets_repo, "add_watcher", mock_add_watcher)
+    monkeypatch.setattr(
+        ticket_routes.user_repo,
+        "get_user_by_id",
+        AsyncMock(return_value={"id": user_id, "email": "watcher@example.com"}),
+    )
     monkeypatch.setattr(tickets_repo, "list_watchers", mock_list_watchers)
     monkeypatch.setattr(tickets_repo, "list_replies", mock_list_replies)
     monkeypatch.setattr(
@@ -218,6 +223,39 @@ def test_add_watcher_ticket_not_found(monkeypatch, active_session):
                 headers={"X-CSRF-Token": active_session.csrf_token},
             )
         assert response.status_code == status.HTTP_404_NOT_FOUND
+    finally:
+        _reset_overrides()
+
+
+def test_add_watcher_user_not_found(monkeypatch, active_session):
+    """Adding a watcher by user ID returns 404 before hitting the database FK."""
+    ticket_id = 123
+    user_id = 9876
+
+    async def mock_get_ticket(tid):
+        return {"id": tid, "subject": "Test ticket"}
+
+    mock_add_watcher = AsyncMock()
+
+    monkeypatch.setattr(tickets_repo, "get_ticket", mock_get_ticket)
+    monkeypatch.setattr(tickets_repo, "add_watcher", mock_add_watcher)
+    monkeypatch.setattr(
+        ticket_routes.user_repo,
+        "get_user_by_id",
+        AsyncMock(return_value=None),
+    )
+
+    _override_dependencies(active_session)
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/api/tickets/{ticket_id}/watchers/{user_id}",
+                headers={"X-CSRF-Token": active_session.csrf_token},
+            )
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert response.json()["detail"] == "Watcher user not found"
+        mock_add_watcher.assert_not_awaited()
     finally:
         _reset_overrides()
 
