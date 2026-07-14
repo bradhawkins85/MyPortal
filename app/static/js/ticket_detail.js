@@ -2,6 +2,57 @@
 
   const TICKET_SECTION_STATE_STORAGE_KEY = 'myportal.admin.ticketDetail.sectionState.v1';
 
+  function formatApiErrorDetail(detail) {
+    if (typeof detail === 'string' && detail.trim()) {
+      return detail;
+    }
+
+    if (Array.isArray(detail)) {
+      const messages = detail
+        .map(formatApiErrorDetail)
+        .filter(Boolean);
+      return messages.join('; ');
+    }
+
+    if (detail && typeof detail === 'object') {
+      if (typeof detail.message === 'string' && detail.message.trim()) {
+        return detail.message;
+      }
+      if (typeof detail.msg === 'string' && detail.msg.trim()) {
+        return detail.msg;
+      }
+      if (typeof detail.error === 'string' && detail.error.trim()) {
+        return detail.error;
+      }
+      try {
+        return JSON.stringify(detail);
+      } catch (error) {
+        return '';
+      }
+    }
+
+    return '';
+  }
+
+  async function getApiErrorMessage(response, fallback) {
+    const fallbackMessage = fallback || 'Request failed';
+    const contentType = response.headers && response.headers.get
+      ? response.headers.get('content-type') || ''
+      : '';
+
+    if (contentType.includes('application/json')) {
+      const errorData = await response.json().catch(() => ({}));
+      return (
+        formatApiErrorDetail(errorData.detail)
+        || formatApiErrorDetail(errorData)
+        || fallbackMessage
+      );
+    }
+
+    const text = await response.text().catch(() => '');
+    return text.trim() || fallbackMessage;
+  }
+
   function readTicketSectionState() {
     try {
       const raw = window.localStorage.getItem(TICKET_SECTION_STATE_STORAGE_KEY);
@@ -2105,8 +2156,7 @@
         });
 
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.detail || 'Failed to add watcher');
+          throw new Error(await getApiErrorMessage(response, 'Failed to add watcher'));
         }
 
         // Remove the option from select
@@ -2150,8 +2200,7 @@
           });
 
           if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.detail || 'Failed to add watcher');
+            throw new Error(await getApiErrorMessage(response, 'Failed to add watcher'));
           }
 
           // Clear the input

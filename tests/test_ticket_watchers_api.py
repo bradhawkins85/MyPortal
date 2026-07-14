@@ -204,6 +204,108 @@ def test_add_watcher_success(monkeypatch, active_session):
         _reset_overrides()
 
 
+def test_add_watcher_by_email_uses_email_route(monkeypatch, active_session):
+    """Adding by email should hit the email route, not the user-id route."""
+    ticket_id = 123
+    watcher_email = "External.Watcher@Example.com"
+    now = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    captured = {}
+
+    async def mock_get_ticket(tid):
+        return {
+            "id": tid,
+            "subject": "Test Ticket",
+            "status": "open",
+            "priority": "normal",
+            "requester_id": 1,
+            "company_id": 1,
+            "created_at": now,
+            "updated_at": now,
+            "closed_at": None,
+            "assigned_user_id": None,
+            "category": None,
+            "module_slug": None,
+            "external_reference": None,
+            "description": None,
+            "ai_summary": None,
+            "ai_summary_status": None,
+            "ai_summary_model": None,
+            "ai_resolution_state": None,
+            "ai_summary_updated_at": None,
+            "ai_tags": [],
+            "ai_tags_status": None,
+            "ai_tags_model": None,
+            "ai_tags_updated_at": None,
+        }
+
+    async def mock_add_watcher(tid, user_id=None, email=None):
+        captured["ticket_id"] = tid
+        captured["user_id"] = user_id
+        captured["email"] = email
+
+    async def mock_list_watchers(tid):
+        return [
+            {
+                "id": 1,
+                "ticket_id": tid,
+                "user_id": None,
+                "email": watcher_email.lower(),
+                "created_at": now,
+            }
+        ]
+
+    async def mock_list_replies(tid, include_internal=False):
+        return []
+
+    async def mock_list_split_replies_for_original(tid):
+        return []
+
+    async def mock_list_attachments(tid, access_levels=None):
+        return []
+
+    async def mock_has_permission(uid, key):
+        return True
+
+    from app.repositories import company_memberships as membership_repo
+
+    monkeypatch.setattr(tickets_repo, "get_ticket", mock_get_ticket)
+    monkeypatch.setattr(tickets_repo, "add_watcher", mock_add_watcher)
+    monkeypatch.setattr(tickets_repo, "list_watchers", mock_list_watchers)
+    monkeypatch.setattr(tickets_repo, "list_replies", mock_list_replies)
+    monkeypatch.setattr(
+        tickets_repo,
+        "list_split_replies_for_original",
+        mock_list_split_replies_for_original,
+    )
+    monkeypatch.setattr(
+        ticket_routes.attachments_repo, "list_attachments", mock_list_attachments
+    )
+    monkeypatch.setattr(membership_repo, "user_has_permission", mock_has_permission)
+    monkeypatch.setattr(tickets_service, "emit_ticket_updated_event", AsyncMock())
+    monkeypatch.setattr(ticket_routes.audit_service, "record", AsyncMock())
+
+    _override_dependencies(active_session)
+
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/api/tickets/{ticket_id}/watchers/email",
+                params={"email": watcher_email},
+                headers={"X-CSRF-Token": active_session.csrf_token},
+            )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert captured == {
+            "ticket_id": ticket_id,
+            "user_id": None,
+            "email": watcher_email.lower(),
+        }
+        data = response.json()
+        assert data["watchers"][0]["email"] == watcher_email.lower()
+    finally:
+        _reset_overrides()
+
+
 def test_add_watcher_ticket_not_found(monkeypatch, active_session):
     """Test adding a watcher to a non-existent ticket."""
     ticket_id = 999
