@@ -646,6 +646,11 @@
         typeof tacticalIdRaw === 'string' || typeof tacticalIdRaw === 'number'
           ? String(tacticalIdRaw).trim()
           : '';
+      const trayDeviceUidRaw = option.tray_device_uid ?? option.device_uid ?? option.trayDeviceUid;
+      const trayDeviceUid =
+        typeof trayDeviceUidRaw === 'string' || typeof trayDeviceUidRaw === 'number'
+          ? String(trayDeviceUidRaw).trim()
+          : '';
       let name = '';
       if (typeof option.name === 'string' && option.name.trim() !== '') {
         name = option.name.trim();
@@ -672,6 +677,7 @@
         serial_number: serialNumber || null,
         status: statusValue || null,
         tactical_asset_id: tacticalId || null,
+        tray_device_uid: trayDeviceUid || null,
       };
     }
 

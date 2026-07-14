@@ -32,3 +32,14 @@ def test_admin_ticket_detail_form_enables_autosave_for_details_and_assets():
     assert "document.addEventListener('focusout'" in script
     assert "document.addEventListener('change'" in script
     assert "ticket:details-autosave" in script
+
+
+def test_admin_ticket_asset_picker_preserves_tray_device_uid_for_chat():
+    main_source = Path("app/main.py").read_text()
+    script = Path("app/static/js/ticket_detail.js").read_text()
+
+    assert "tray_repo.list_active_devices_by_asset_ids(company_asset_ids)" in main_source
+    assert '"tray_device_uid": (' in main_source
+    assert "option.tray_device_uid ?? option.device_uid ?? option.trayDeviceUid" in script
+    assert "tray_device_uid: trayDeviceUid || null" in script
+    assert "if (record.tray_device_uid)" in script
