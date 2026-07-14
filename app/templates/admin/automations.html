@@ -58,9 +58,10 @@
         </div>
 
         <div class="table-wrapper">
-          <table class="table" id="automations-table" data-table data-table-id="automations">
+          <table class="table" id="automations-table" data-table data-table-id="automations" data-automation-reorder-table>
             <thead>
               <tr>
+                <th scope="col" data-column-key="reorder">Reorder</th>
                 <th scope="col" data-sort="int" data-column-key="id">ID</th>
                 <th scope="col" data-sort="int" data-column-key="order">Order</th>
                 <th scope="col" data-sort="string" data-column-key="name">Name</th>
@@ -76,7 +77,15 @@
             <tbody>
               {% if automations %}
                 {% for automation in automations %}
-                  <tr>
+                  {% set can_reorder = (automation.execution_order if automation.execution_order is not none else 0) > 0 %}
+                  <tr data-automation-row data-automation-id="{{ automation.id }}" data-automation-order="{{ automation.execution_order if automation.execution_order is not none else 0 }}" draggable="{{ 'true' if can_reorder else 'false' }}">
+                    <td data-label="Reorder" data-column-key="reorder">
+                      {% if can_reorder %}
+                        <button type="button" class="button button--ghost button--small" data-automation-drag-handle aria-label="Drag {{ automation.name }} to reorder">☰</button>
+                      {% else %}
+                        <span title="Order 0 automations keep their current order and are not changed by drag reordering.">Locked</span>
+                      {% endif %}
+                    </td>
                     <td data-label="ID" data-column-key="id">{{ automation.id }}</td>
                     <td data-label="Order" data-column-key="order">{{ automation.execution_order if automation.execution_order is not none else 0 }}</td>
                     <td data-label="Name" data-column-key="name">{{ automation.name }}</td>
@@ -162,7 +171,7 @@
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="10" class="table__empty">No automations configured.</td>
+                  <td colspan="11" class="table__empty">No automations configured.</td>
                 </tr>
               {% endif %}
             </tbody>
@@ -225,6 +234,78 @@
         menu.addEventListener('toggle', function () {
           wrapper.style.overflow = menu.open ? 'visible' : '';
         });
+      });
+
+      const table = document.querySelector('[data-automation-reorder-table]');
+      if (!table) return;
+      const tbody = table.querySelector('tbody');
+      let draggedRow = null;
+
+      function reorderableRows() {
+        return Array.from(tbody.querySelectorAll('[data-automation-row][draggable="true"]'));
+      }
+
+      function orderedIds() {
+        return Array.from(tbody.querySelectorAll('[data-automation-row]')).map(function (row) {
+          return Number(row.dataset.automationId);
+        }).filter(Boolean);
+      }
+
+      async function saveOrder() {
+        const response = await fetch('/admin/automations/reorder', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ ordered_ids: orderedIds() }),
+        });
+        if (!response.ok) {
+          throw new Error('Failed to save automation order.');
+        }
+        const data = await response.json();
+        (data.automations || []).forEach(function (automation) {
+          const row = tbody.querySelector('[data-automation-id="' + automation.id + '"]');
+          if (!row) return;
+          row.dataset.automationOrder = String(automation.execution_order || 0);
+          const orderCell = row.querySelector('[data-column-key="order"]');
+          if (orderCell) orderCell.textContent = String(automation.execution_order || 0);
+        });
+      }
+
+      table.addEventListener('dragstart', function (event) {
+        const row = event.target.closest('[data-automation-row][draggable="true"]');
+        if (!row) return;
+        draggedRow = row;
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', row.dataset.automationId || '');
+        row.classList.add('is-dragging');
+      });
+
+      table.addEventListener('dragend', function () {
+        if (draggedRow) draggedRow.classList.remove('is-dragging');
+        draggedRow = null;
+      });
+
+      table.addEventListener('dragover', function (event) {
+        if (!draggedRow) return;
+        const target = event.target.closest('[data-automation-row][draggable="true"]');
+        if (!target || target === draggedRow) return;
+        event.preventDefault();
+        const rect = target.getBoundingClientRect();
+        const insertAfter = event.clientY > rect.top + rect.height / 2;
+        tbody.insertBefore(draggedRow, insertAfter ? target.nextSibling : target);
+      });
+
+      table.addEventListener('drop', async function (event) {
+        if (!draggedRow) return;
+        event.preventDefault();
+        try {
+          await saveOrder();
+        } catch (error) {
+          window.location.reload();
+        }
+      });
+
+      reorderableRows().forEach(function (row) {
+        row.title = 'Drag to reorder automation execution order.';
       });
     });
   </script>

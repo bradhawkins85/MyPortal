@@ -16,6 +16,7 @@ EXPECTED = {
     ("GET", "/admin/automations/create/scheduled"),
     ("GET", "/admin/automations/create/event"),
     ("POST", "/admin/automations"),
+    ("POST", "/admin/automations/reorder"),
     ("GET", "/admin/automations/{automation_id}/preview"),
     ("GET", "/admin/automations/{automation_id}/simulate"),
     ("POST", "/admin/automations/{automation_id}/simulate/process"),

@@ -253,12 +253,62 @@ async def list_automations(
         SELECT *
         FROM automations
         {where_clause}
-        ORDER BY updated_at DESC
+        ORDER BY
+            CASE WHEN execution_order = 0 THEN 1 ELSE 0 END ASC,
+            CASE WHEN execution_order = 0 THEN NULL ELSE execution_order END ASC,
+            CASE WHEN execution_order = 0 THEN updated_at ELSE NULL END DESC,
+            id ASC
         LIMIT %s OFFSET %s
         """,
         tuple(params),
     )
     return [_normalise_automation(row) for row in rows]
+
+
+async def update_automation_order(ordered_ids: list[int]) -> list[AutomationRecord]:
+    """Update display order for ordered automations without changing legacy order-0 rows."""
+
+    await _ensure_connection()
+    unique_ids: list[int] = []
+    seen: set[int] = set()
+    for automation_id in ordered_ids:
+        try:
+            normalised_id = int(automation_id)
+        except (TypeError, ValueError):
+            continue
+        if normalised_id > 0 and normalised_id not in seen:
+            unique_ids.append(normalised_id)
+            seen.add(normalised_id)
+
+    if not unique_ids:
+        return []
+
+    placeholders = ", ".join(["%s"] * len(unique_ids))
+    rows = await db.fetch_all(
+        f"SELECT id, execution_order FROM automations WHERE id IN ({placeholders})",
+        tuple(unique_ids),
+    )
+    existing_orders = {
+        int(row_dict["id"]): int(row_dict.get("execution_order") or 0)
+        for row_dict in (dict(row) for row in rows)
+    }
+    ordered_existing_ids = [automation_id for automation_id in unique_ids if automation_id in existing_orders]
+    reorderable_ids = [automation_id for automation_id in ordered_existing_ids if existing_orders[automation_id] > 0]
+
+    for order, automation_id in enumerate(reorderable_ids, start=1):
+        if existing_orders.get(automation_id) == order:
+            continue
+        await db.execute(
+            "UPDATE automations SET execution_order = %s, updated_at = UTC_TIMESTAMP(6) WHERE id = %s AND execution_order <> 0",
+            (order, automation_id),
+        )
+
+    refreshed_rows = await db.fetch_all(
+        f"SELECT * FROM automations WHERE id IN ({placeholders})",
+        tuple(unique_ids),
+    )
+    by_id = {int(row["id"]): _normalise_automation(row) for row in refreshed_rows}
+    return [by_id[automation_id] for automation_id in unique_ids if automation_id in by_id]
 
 
 async def update_automation(automation_id: int, **fields: Any) -> AutomationRecord | None:

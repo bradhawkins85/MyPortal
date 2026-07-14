@@ -411,6 +411,29 @@ async def admin_automations_page(
     )
 
 
+async def admin_reorder_automations(request: Request):
+    from app.repositories import automations as automation_repo
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return JSONResponse({"detail": "Authentication required"}, status_code=status.HTTP_401_UNAUTHORIZED)
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse({"detail": "Invalid JSON payload."}, status_code=status.HTTP_400_BAD_REQUEST)
+    ordered_ids = payload.get("ordered_ids") if isinstance(payload, Mapping) else None
+    if not isinstance(ordered_ids, list):
+        return JSONResponse({"detail": "ordered_ids must be a list."}, status_code=status.HTTP_400_BAD_REQUEST)
+    updated = await automation_repo.update_automation_order(ordered_ids)
+    return JSONResponse({
+        "success": True,
+        "automations": [
+            {"id": int(record["id"]), "execution_order": int(record.get("execution_order") or 0)}
+            for record in updated
+        ],
+    })
+
+
 async def admin_create_scheduled_automation_page(
     request: Request,
 ):
