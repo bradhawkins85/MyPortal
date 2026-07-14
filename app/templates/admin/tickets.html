@@ -278,7 +278,7 @@
               <div class="ticket-filters__section">
                 <h3 class="ticket-filters__section-title">Filter by Status</h3>
                 <div class="ticket-filters__status-grid">
-                  {% for status_option in ticket_status_definitions %}
+                  {% for status_option in ticket_filter_status_definitions | default(ticket_status_definitions) %}
                     <label class="ticket-filters__status-item">
                       <input 
                         type="checkbox" 
