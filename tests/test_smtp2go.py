@@ -823,6 +823,23 @@ def test_normalise_attachment_payloads_uses_fileblob_for_legacy_content():
     ]
 
 
+def test_normalise_attachment_payloads_rejects_invalid_urls():
+    """Relative/non-http URLs should not be forwarded as SMTP2Go attachment URLs."""
+    payload = smtp2go._normalise_attachment_payloads(
+        [
+            {"filename": "relative.txt", "url": "/api/tickets/attachments/1", "content": b"hello"},
+            {"filename": "invalid-scheme.txt", "url": "ftp://example.com/file.txt", "content": b"world"},
+            {"filename": "good-url.txt", "url": "https://example.com/file.txt"},
+        ]
+    )
+
+    assert payload == [
+        {"filename": "relative.txt", "fileblob": "aGVsbG8="},
+        {"filename": "invalid-scheme.txt", "fileblob": "d29ybGQ="},
+        {"filename": "good-url.txt", "url": "https://example.com/file.txt"},
+    ]
+
+
 @pytest.mark.asyncio
 async def test_send_email_via_api_posts_fileblob_attachments(monkeypatch):
     """Legacy content attachments are normalised before the SMTP2Go API call."""
