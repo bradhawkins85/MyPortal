@@ -441,6 +441,10 @@
                     <span>Updated</span>
                   </label>
                   <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="review-date" />
+                    <span>Review Date</span>
+                  </label>
+                  <label class="ticket-columns__option">
                     <input type="checkbox" class="ticket-column-toggle" data-column="category" />
                     <span>Category</span>
                   </label>
@@ -563,6 +567,7 @@
                 <th scope="col" data-sort="string" data-column="company" class="tickets-table__column tickets-table__column--company">Company</th>
                 <th scope="col" data-sort="string" data-column="assigned" class="tickets-table__column tickets-table__column--assigned">Assigned</th>
                 <th scope="col" data-sort="string" data-column="updated" class="tickets-table__column tickets-table__column--updated">Updated</th>
+                <th scope="col" data-sort="string" data-column="review-date" class="tickets-table__column tickets-table__column--review-date">Review Date</th>
                 <th scope="col" data-sort="string" data-column="category" class="tickets-table__column tickets-table__column--category">Category</th>
                 <th scope="col" data-sort="string" data-column="requester" class="tickets-table__column tickets-table__column--requester">Requester</th>
                 <th scope="col" data-sort="string" data-column="module" class="tickets-table__column tickets-table__column--module">Module</th>
@@ -644,6 +649,9 @@
                     <td data-label="Company" data-column="company" class="tickets-table__cell tickets-table__cell--company">{{ company.name if company else (ticket.company_id or '—') }}</td>
                     <td data-label="Assigned" data-column="assigned" class="tickets-table__cell tickets-table__cell--assigned">{{ assigned_label }}</td>
                     <td data-label="Updated" data-column="updated" class="tickets-table__cell tickets-table__cell--updated">{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</td>
+                    {% set review_date = ticket.review_date %}
+                    {% set review_date_class = 'ticket-review-date--past' if review_date and review_date < ticket_dashboard_now.date() else ('ticket-review-date--future' if review_date and review_date > ticket_dashboard_now.date() else '') %}
+                    <td data-label="Review Date" data-column="review-date" class="tickets-table__cell tickets-table__cell--review-date {{ review_date_class }}">{{ review_date.isoformat() if review_date else '—' }}</td>
                     <td data-label="Category" data-column="category" class="tickets-table__cell tickets-table__cell--category">{{ ticket.category or '—' }}</td>
                     {% set requester = user_lookup.get(ticket.requester_id) %}
                     {% set requester_name = ([requester.first_name, requester.last_name] | select | join(' ')) | trim if requester else '' %}
@@ -694,7 +702,7 @@
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="{{ 38 + (1 if can_bulk_delete_tickets or can_merge_tickets or can_bulk_edit_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
+                  <td colspan="{{ 39 + (1 if can_bulk_delete_tickets or can_merge_tickets or can_bulk_edit_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
                 </tr>
               {% endif %}
             </tbody>

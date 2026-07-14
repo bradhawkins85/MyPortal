@@ -464,6 +464,7 @@ async def get_ticket_dashboard(
                 or requester_label,
                 category=ticket.get("category"),
                 external_reference=ticket.get("external_reference"),
+                review_date=ticket.get("review_date"),
                 created_at=created_at,
                 updated_at=updated_at,
                 closed_at=ticket.get("closed_at"),
