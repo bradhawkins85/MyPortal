@@ -9273,6 +9273,15 @@ async def _render_ticket_detail(
     asset_options: list[dict[str, Any]] = []
     if ticket_company_id is not None:
         company_assets = await assets_repo.list_company_assets(ticket_company_id)
+        company_asset_ids: list[int] = []
+        for asset_row in company_assets:
+            try:
+                company_asset_ids.append(int(asset_row.get("id")))
+            except (AttributeError, TypeError, ValueError):
+                continue
+        from app.repositories import tray as tray_repo
+
+        tray_devices_by_asset = await tray_repo.list_active_devices_by_asset_ids(company_asset_ids)
 
         def _format_asset_label(asset_row: Mapping[str, Any]) -> str:
             asset_name = str(asset_row.get("name") or "").strip() or "Asset"
@@ -9293,6 +9302,7 @@ async def _render_ticket_detail(
                 asset_id_int = int(asset_id)
             except (TypeError, ValueError):
                 continue
+            tray_device = tray_devices_by_asset.get(asset_id_int)
             asset_options.append(
                 {
                     "id": asset_id_int,
@@ -9301,6 +9311,10 @@ async def _render_ticket_detail(
                     "serial_number": str(asset_row.get("serial_number") or "").strip() or None,
                     "status": str(asset_row.get("status") or "").strip() or None,
                     "tactical_asset_id": str(asset_row.get("tactical_asset_id") or "").strip() or None,
+                    "tray_device_uid": (
+                        str((tray_device or {}).get("device_uid") or asset_row.get("tray_device_uid") or "").strip()
+                        or None
+                    ),
                 }
             )
 
