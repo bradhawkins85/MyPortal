@@ -1138,6 +1138,29 @@
       }
     }
 
+    function formatReviewDate(value) {
+      if (!value) {
+        return '—';
+      }
+      const dateText = String(value).slice(0, 10);
+      return /^\d{4}-\d{2}-\d{2}$/.test(dateText) ? dateText : '—';
+    }
+
+    function reviewDateClass(value) {
+      const dateText = formatReviewDate(value);
+      if (dateText === '—') {
+        return '';
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      if (dateText < today) {
+        return ' ticket-review-date--past';
+      }
+      if (dateText > today) {
+        return ' ticket-review-date--future';
+      }
+      return '';
+    }
+
     function formatUpdatedAt(value) {
       if (!value) {
         return '—';
@@ -1216,7 +1239,7 @@
         const cell = document.createElement('td');
         cell.dataset.label = label;
         cell.dataset.column = column;
-        cell.className = `tickets-table__cell tickets-table__cell--${column}`;
+        cell.className = `tickets-table__cell tickets-table__cell--${column}${options && options.className ? options.className : ''}`;
         if (options && options.value !== undefined) {
           cell.dataset.value = String(options.value || '');
         }
@@ -1251,6 +1274,7 @@
       appendTextCell('company', 'Company', companyDisplay);
       appendTextCell('assigned', 'Assigned', ticket.assigned_user_email || '—');
       appendTextCell('updated', 'Updated', formatUpdatedAt(ticket.updated_at), { value: ticket.updated_at || '' });
+      appendTextCell('review-date', 'Review Date', formatReviewDate(ticket.review_date), { value: ticket.review_date || '', className: reviewDateClass(ticket.review_date) });
       appendTextCell('category', 'Category', ticket.category || '—');
       appendTextCell('requester', 'Requester', ticket.requester_label || ticket.requester_email || ticket.requester_id || '—');
       appendTextCell('module', 'Module', ticket.module_slug || '—');

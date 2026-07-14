@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Optional
 
@@ -17,6 +17,7 @@ class TicketBase(BaseModel):
     company_id: Optional[int] = None
     assigned_user_id: Optional[int] = None
     external_reference: Optional[str] = Field(default=None, max_length=128)
+    review_date: Optional[date] = None
 
 
 class TicketCreate(TicketBase):
@@ -33,6 +34,7 @@ class TicketUpdate(BaseModel):
     company_id: Optional[int] = None
     assigned_user_id: Optional[int] = None
     external_reference: Optional[str] = Field(default=None, max_length=128)
+    review_date: Optional[date] = None
 
 
 class TicketReplyCreate(BaseModel):
@@ -151,6 +153,7 @@ class TicketDashboardRow(BaseModel):
     requester_display_name: Optional[str] = None
     category: Optional[str] = None
     external_reference: Optional[str] = None
+    review_date: Optional[date] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     closed_at: Optional[datetime] = None

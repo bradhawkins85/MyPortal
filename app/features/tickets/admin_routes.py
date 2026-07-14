@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
@@ -1040,6 +1040,19 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     company_raw = form.get("companyId")
     category_value = _clean_text(form.get("category")) or None
     external_reference = _clean_text(form.get("externalReference")) or None
+    review_date_raw = _clean_text(form.get("reviewDate"))
+    review_date_value: date | None = None
+    if review_date_raw:
+        try:
+            review_date_value = date.fromisoformat(review_date_raw)
+        except ValueError:
+            return await main_module._render_ticket_detail(
+                request,
+                current_user,
+                ticket_id=ticket_id,
+                error_message="Select a valid review date.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
     return_url_raw = form.get("returnUrl")
     return_url = _clean_text(return_url_raw)
 
@@ -1230,6 +1243,7 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
         "company_id": company_id,
         "category": category_value,
         "external_reference": external_reference,
+        "review_date": review_date_value,
     }
 
     raw_asset_values = form.getlist("assetIds") if hasattr(form, "getlist") else []

@@ -11371,3 +11371,13 @@ a.shop-product-card {
     min-height: 14rem;
   }
 }
+
+.ticket-review-date--past {
+  color: var(--color-danger, #dc2626);
+  font-weight: 600;
+}
+
+.ticket-review-date--future {
+  color: var(--color-success, #16a34a);
+  font-weight: 600;
+}

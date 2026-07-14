@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Iterable, Sequence
 
 from app.core.database import db
@@ -207,6 +207,15 @@ def _normalise_ticket(row: dict[str, Any]) -> TicketRecord:
     for key in ("id", "company_id", "requester_id", "requester_staff_id", "assigned_user_id", "merged_into_ticket_id", "split_from_ticket_id"):
         if key in record and record[key] is not None:
             record[key] = int(record[key])
+    if "review_date" in record:
+        review_date = record.get("review_date")
+        if isinstance(review_date, datetime):
+            record["review_date"] = review_date.date()
+        elif isinstance(review_date, str) and review_date.strip():
+            try:
+                record["review_date"] = date.fromisoformat(review_date.strip()[:10])
+            except ValueError:
+                record["review_date"] = None
     for key in (
         "created_at",
         "updated_at",
@@ -379,6 +388,7 @@ async def create_ticket(
         "module_slug": module_slug,
         "external_reference": external_reference,
         "ticket_number": ticket_number,
+        "review_date": None,
         "ai_summary": None,
         "ai_summary_status": None,
         "ai_summary_model": None,

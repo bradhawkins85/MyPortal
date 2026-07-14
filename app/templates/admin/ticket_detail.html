@@ -184,6 +184,17 @@
                 <p class="form-help">{{ ticket_requester_phone_display or '—' }}</p>
               </div>
               <div class="form-field">
+                <label class="form-label" for="ticket-review-date-detail">Review Date</label>
+                <input
+                  id="ticket-review-date-detail"
+                  name="reviewDate"
+                  type="date"
+                  class="form-input"
+                  value="{{ ticket.review_date.isoformat() if ticket.review_date else '' }}"
+                />
+                <p class="form-help">Flag when this ticket should be reviewed again.</p>
+              </div>
+              <div class="form-field">
                 <label class="form-label" for="ticket-assigned-detail">Assigned to</label>
                 <select id="ticket-assigned-detail" name="assignedUserId" class="form-input">
                   <option value="">Unassigned</option>
