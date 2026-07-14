@@ -584,7 +584,7 @@ def _attachments_for_smtp2go(attachments: list[dict[str, Any]]) -> list[dict[str
         formatted.append(
             {
                 "filename": str(attachment.get("filename") or "attachment"),
-                "content": encoded,
+                "fileblob": encoded,
             }
         )
     return formatted

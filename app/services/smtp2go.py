@@ -9,6 +9,7 @@ Provides functionality for:
 
 from __future__ import annotations
 
+import base64
 from html import escape as html_escape
 import json
 import secrets
@@ -141,6 +142,59 @@ def _extract_tracking_identifier(event_data: dict[str, Any] | None) -> str | Non
             return value.strip()[:64]
 
     return None
+
+
+def _normalise_attachment_payloads(
+    attachments: list[dict[str, Any]] | None,
+) -> list[dict[str, str]] | None:
+    """Return SMTP2Go-compatible attachment payloads.
+
+    SMTP2Go's email/send endpoint requires each attachment to include either
+    ``fileblob`` (base64 file content) or ``url``.  Other parts of MyPortal and
+    legacy automation payloads use ``content`` for base64/bytes content, so
+    normalise that field before sending to avoid API model-validation errors.
+    """
+    if not attachments:
+        return None
+
+    normalised: list[dict[str, str]] = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+
+        filename = str(
+            attachment.get("filename")
+            or attachment.get("name")
+            or "attachment"
+        ).strip() or "attachment"
+
+        url = str(attachment.get("url") or "").strip()
+        if url:
+            normalised.append({"filename": filename, "url": url})
+            continue
+
+        fileblob = attachment.get("fileblob")
+        if isinstance(fileblob, str) and fileblob.strip():
+            normalised.append({"filename": filename, "fileblob": fileblob.strip()})
+            continue
+
+        content = attachment.get("content")
+        if isinstance(content, str) and content.strip():
+            encoded = content.strip()
+        elif isinstance(content, bytes):
+            encoded = base64.b64encode(content).decode("ascii")
+        elif isinstance(content, bytearray):
+            encoded = base64.b64encode(bytes(content)).decode("ascii")
+        else:
+            logger.warning(
+                "Skipping SMTP2Go attachment without url, fileblob, or content",
+                filename=filename,
+            )
+            continue
+
+        normalised.append({"filename": filename, "fileblob": encoded})
+
+    return normalised or None
 
 
 def get_email_template(template_type: EmailTemplateType) -> dict[str, Any]:
@@ -276,7 +330,7 @@ async def send_email_via_api(
     cc: list[str] | None = None,
     bcc: list[str] | None = None,
     custom_headers: dict[str, str] | None = None,
-    attachments: list[dict[str, str]] | None = None,
+    attachments: list[dict[str, Any]] | None = None,
     template_id: str | None = None,
     template_data: dict[str, Any] | None = None,
     tracking_id: str | None = None,
@@ -293,7 +347,7 @@ async def send_email_via_api(
         cc: List of CC recipient email addresses (optional)
         bcc: List of BCC recipient email addresses (optional)
         custom_headers: Additional email headers (optional)
-        attachments: List of attachment dicts with 'filename' and 'content' (base64) (optional)
+        attachments: List of attachment dicts with 'filename' plus 'fileblob', 'url', or legacy 'content' (optional)
         template_id: SMTP2Go template ID to use (optional)
         template_data: Template variables for SMTP2Go template (optional)
         tracking_id: Internal tracking ID to associate with this email (optional)
@@ -377,8 +431,9 @@ async def send_email_via_api(
             payload["bcc"] = bcc
         
         # Add attachments
-        if attachments and len(attachments) > 0:
-            payload["attachments"] = attachments
+        normalised_attachments = _normalise_attachment_payloads(attachments)
+        if normalised_attachments:
+            payload["attachments"] = normalised_attachments
         
         # Add SMTP2Go template fields
         if template_id:
