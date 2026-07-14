@@ -8690,8 +8690,8 @@ async def _render_tickets_dashboard(
         for definition in dashboard.status_definitions
         if (bool(user.get("is_super_admin")) and not definition.hide_from_admins) or (not bool(user.get("is_super_admin")) and not definition.hide_from_technicians)
     ]
-    status_definitions_payload = [
-        {
+    def _status_definition_payload(definition: tickets_service.TicketStatusDefinition) -> dict[str, Any]:
+        return {
             "tech_status": definition.tech_status,
             "tech_label": definition.tech_label,
             "public_status": definition.public_status,
@@ -8699,7 +8699,14 @@ async def _render_tickets_dashboard(
             "hide_from_technicians": definition.hide_from_technicians,
             "hide_from_admins": definition.hide_from_admins,
         }
+
+    status_definitions_payload = [
+        _status_definition_payload(definition)
         for definition in selectable_status_definitions
+    ]
+    filter_status_definitions_payload = [
+        _status_definition_payload(definition)
+        for definition in dashboard.status_definitions
     ]
     status_label_map = {
         definition.tech_status: definition.tech_label for definition in dashboard.status_definitions
@@ -8725,6 +8732,7 @@ async def _render_tickets_dashboard(
         "ticket_status_counts": global_status_counts,
         "ticket_available_statuses": dashboard.available_statuses,
         "ticket_status_definitions": status_definitions_payload,
+        "ticket_filter_status_definitions": filter_status_definitions_payload,
         "ticket_status_label_map": status_label_map,
         "ticket_public_status_map": public_status_map,
         "ticket_reply_default_status": reply_default_status,
