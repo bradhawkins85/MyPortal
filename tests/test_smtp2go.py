@@ -156,6 +156,64 @@ async def test_send_email_via_api_success(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_send_email_via_api_splits_comma_separated_cc(monkeypatch):
+    """Ensure SMTP2Go CC payloads contain one address per list item."""
+
+    captured_payload = {}
+
+    class MockResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "data": {
+                    "error_code": "SUCCESS",
+                    "email_id": "test-message-id-123",
+                }
+            }
+
+    class MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def post(self, url, json=None):
+            captured_payload.update(json)
+            return MockResponse()
+
+    async def mock_get_module_settings(slug):
+        return {"api_key": "test-api-key-123"}
+
+    from app.services import modules as modules_service
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
+    monkeypatch.setattr(modules_service, "get_module_settings", mock_get_module_settings)
+
+    await smtp2go.send_email_via_api(
+        to=["customer@example.com"],
+        cc=["nathan@biomecentric.com.au, shaun@biomecentric.com.au"],
+        subject="Test Subject",
+        html_body="<p>Test body</p>",
+        sender="sender@example.com",
+    )
+
+    assert captured_payload["cc"] == [
+        "nathan@biomecentric.com.au",
+        "shaun@biomecentric.com.au",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_send_email_via_api_flattens_response_envelope(monkeypatch):
     """Ensure nested response envelopes expose tracking identifiers."""
 

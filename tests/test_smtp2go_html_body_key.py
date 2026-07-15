@@ -68,6 +68,40 @@ async def test_invoke_smtp2go_with_html_key(monkeypatch, mock_smtp2go_dependenci
 
 
 @pytest.mark.asyncio
+async def test_invoke_smtp2go_splits_rendered_watcher_cc_list_item(
+    monkeypatch, mock_smtp2go_dependencies
+):
+    """Rendered watcher emails in one CC list item are split before sending."""
+
+    settings = {
+        "api_key": "test-api-key",
+        "enable_tracking": True,
+    }
+    payload = {
+        "cc": [
+            "nathan@biomecentric.com.au, shaun@biomecentric.com.au",
+        ],
+        "html_body": "<p>Reply body</p>",
+        "sender": "Hawkins IT Solutions <support@hawkinsit.au>",
+        "subject": "RE: Ticket #123 - Example",
+        "to": [
+            "requester@example.com",
+        ],
+    }
+
+    await modules._invoke_smtp2go(settings, payload)
+
+    assert mock_smtp2go_dependencies["to"] == ["requester@example.com"]
+    assert mock_smtp2go_dependencies["cc"] == [
+        "nathan@biomecentric.com.au",
+        "shaun@biomecentric.com.au",
+    ]
+    assert mock_smtp2go_dependencies["sender"] == (
+        "Hawkins IT Solutions <support@hawkinsit.au>"
+    )
+
+
+@pytest.mark.asyncio
 async def test_invoke_smtp2go_with_html_body_key(monkeypatch, mock_smtp2go_dependencies):
     """Test _invoke_smtp2go with 'html_body' key (new format)."""
     

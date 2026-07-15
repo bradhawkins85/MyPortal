@@ -10,6 +10,7 @@ Provides functionality for:
 from __future__ import annotations
 
 import base64
+from email.utils import formataddr, getaddresses
 from html import escape as html_escape
 import json
 import secrets
@@ -207,6 +208,38 @@ def _normalise_attachment_payloads(
     return normalised or None
 
 
+def _normalise_email_address_list(addresses: list[str] | str | None) -> list[str]:
+    """Return a flat list of SMTP2Go-compatible RFC 5322 addresses.
+
+    Some callers and form payloads provide multiple recipients as a single
+    comma-separated string (for example, ``["a@example.com, b@example.com"]``).
+    SMTP2Go validates each list item as one RFC 5322 mailbox, so split those
+    combined entries before the API request while preserving display-name
+    address formatting where possible.
+    """
+    if not addresses:
+        return []
+
+    raw_addresses: list[str]
+    if isinstance(addresses, str):
+        raw_addresses = [addresses]
+    else:
+        raw_addresses = [str(address) for address in addresses if address is not None]
+
+    parsed_addresses = getaddresses(raw_addresses)
+    normalised: list[str] = []
+    for display_name, email_address in parsed_addresses:
+        email_address = email_address.strip()
+        if not email_address:
+            continue
+
+        if display_name:
+            normalised.append(formataddr((display_name.strip(), email_address)))
+        else:
+            normalised.append(email_address)
+
+    return normalised
+
 def get_email_template(template_type: EmailTemplateType) -> dict[str, Any]:
     """Get an email template by type.
     
@@ -382,11 +415,17 @@ async def send_email_via_api(
         if not api_key:
             raise SMTP2GoError("SMTP2Go API key not configured")
         
+        # Normalise recipient fields before validation and blocklist checks so
+        # SMTP2Go receives one RFC 5322 address per list item.
+        to = _normalise_email_address_list(to)
+        cc = _normalise_email_address_list(cc)
+        bcc = _normalise_email_address_list(bcc)
+
         # Suppress blocklisted recipients before any SMTP2Go API attempt.
         try:
             from app.repositories import email_blocklist as email_blocklist_repo
 
-            to, blocked_to = await email_blocklist_repo.filter_allowed(to or [])
+            to, blocked_to = await email_blocklist_repo.filter_allowed(to)
             if cc:
                 cc, blocked_cc = await email_blocklist_repo.filter_allowed(cc)
             else:
