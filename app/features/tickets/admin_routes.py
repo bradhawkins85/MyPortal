@@ -1043,7 +1043,7 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     external_reference = _clean_text(form.get("externalReference")) or None
     shipment_tracking_url = _clean_text(form.get("shipmentTrackingUrl")) or None
     shipment_poll_interval_raw = _clean_text(form.get("shipmentPollIntervalSeconds"))
-    shipment_monitoring_raw = _clean_text(form.get("shipmentMonitoringEnabled")).lower()
+    shipment_monitoring_raw = (_clean_text(form.get("shipmentMonitoringEnabled")) or "").lower()
     shipment_monitoring_enabled = shipment_monitoring_raw in {"1", "true", "on", "yes"}
     shipment_poll_interval_seconds = 900
     if shipment_poll_interval_raw:
