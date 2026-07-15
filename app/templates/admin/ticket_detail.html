@@ -365,16 +365,32 @@
                       max="86400"
                       value="{{ ticket_shipment_watch.poll_interval_seconds if ticket_shipment_watch else 900 }}"
                     />
-                    <label class="form-help" style="display: inline-flex; align-items: center; gap: 8px; margin-top: 8px;">
-                      <input
-                        type="checkbox"
-                        name="shipmentMonitoringEnabled"
-                        value="1"
-                        form="ticket-details-form"
-                        {% if not ticket_shipment_watch or ticket_shipment_watch.active %}checked{% endif %}
-                      />
-                      Enable shipment monitoring for this ticket
-                    </label>
+                    <div class="form-field form-field--checkbox">
+                      <label class="checkbox" for="ticket-shipment-monitoring-enabled">
+                        <input
+                          id="ticket-shipment-monitoring-enabled"
+                          type="checkbox"
+                          name="shipmentMonitoringEnabled"
+                          value="1"
+                          form="ticket-details-form"
+                          {% if not ticket_shipment_watch or ticket_shipment_watch.active %}checked{% endif %}
+                        />
+                        <span>Enable shipment monitoring for this ticket</span>
+                      </label>
+                    </div>
+                    <div class="form-field form-field--checkbox">
+                      <label class="checkbox" for="ticket-shipment-public-comments-enabled">
+                        <input
+                          id="ticket-shipment-public-comments-enabled"
+                          type="checkbox"
+                          name="shipmentPublicCommentsEnabled"
+                          value="1"
+                          form="ticket-details-form"
+                          {% if not ticket_shipment_watch or ticket_shipment_watch.public_comments_enabled %}checked{% endif %}
+                        />
+                        <span>Post shipping updates as public ticket comments</span>
+                      </label>
+                    </div>
                   </dd>
                 </div>
                 {% if ticket_assets %}

@@ -1441,6 +1441,7 @@ async def upsert_shipment_watch(
             tracking_url=payload.tracking_url,
             poll_interval_seconds=payload.poll_interval_seconds,
             active=payload.active,
+            public_comments_enabled=payload.public_comments_enabled,
         )
     except ValueError as exc:
         raise HTTPException(

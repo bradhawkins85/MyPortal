@@ -306,6 +306,61 @@ async def test_admin_reply_saves_attachments(monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
+async def test_admin_update_ticket_details_persists_shipment_public_comments_flag(monkeypatch):
+    form_data = FormData(
+        [
+            ("subject", "Shipment ticket"),
+            ("status", "open"),
+            ("priority", "normal"),
+            ("shipmentTrackingUrl", "https://www.startrack.com.au/track/ABC123"),
+            ("shipmentPollIntervalSeconds", "900"),
+            ("shipmentMonitoringEnabled", "1"),
+            ("shipmentPublicCommentsEnabled", "1"),
+        ]
+    )
+
+    class DummyRequest:
+        url = type("url", (), {"path": "/admin/tickets/12/details"})()
+
+        async def form(self):
+            return form_data
+
+    monkeypatch.setattr(
+        main, "_require_helpdesk_page", AsyncMock(return_value=({"id": 9, "is_super_admin": True}, None))
+    )
+    monkeypatch.setattr(
+        main.tickets_repo,
+        "get_ticket",
+        AsyncMock(
+            return_value={
+                "id": 12,
+                "subject": "Shipment ticket",
+                "priority": "normal",
+                "status": "open",
+                "company_id": None,
+            }
+        ),
+    )
+    monkeypatch.setattr(main.tickets_service, "validate_status_choice", AsyncMock(return_value="open"))
+    monkeypatch.setattr(main.tickets_repo, "update_ticket", AsyncMock(return_value=None))
+    monkeypatch.setattr(main.tickets_repo, "set_ticket_status", AsyncMock(return_value=None))
+    monkeypatch.setattr(main.tickets_repo, "replace_ticket_assets", AsyncMock(return_value=None))
+    upsert_watch_mock = AsyncMock(return_value={"id": 1})
+    monkeypatch.setattr(admin_routes.shipment_watch_service, "upsert_watch", upsert_watch_mock)
+    monkeypatch.setattr(main.tickets_service, "update_ticket_description", AsyncMock(return_value=None))
+    monkeypatch.setattr(main.tickets_service, "refresh_ticket_ai_summary", AsyncMock(return_value=None))
+    monkeypatch.setattr(main.tickets_service, "refresh_ticket_ai_tags", AsyncMock(return_value=None))
+    monkeypatch.setattr(main.tickets_service, "broadcast_ticket_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(main.tickets_service, "emit_ticket_details_updated_event", AsyncMock(return_value=None))
+
+    response = await admin_routes.admin_update_ticket_details(12, DummyRequest())
+
+    assert response.status_code == status.HTTP_303_SEE_OTHER
+    upsert_watch_mock.assert_awaited_once()
+    assert upsert_watch_mock.await_args.kwargs["public_comments_enabled"] is True
+
+
+@pytest.mark.anyio("asyncio")
 async def test_admin_reply_uses_last_duplicate_reply_status(monkeypatch):
     """A selected split-button status should win over the primary default status."""
 
