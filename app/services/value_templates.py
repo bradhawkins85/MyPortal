@@ -147,6 +147,8 @@ def _stringify_template_value(value: Any) -> str:
         except TypeError:
             return str(coerced)
     if isinstance(coerced, Sequence) and not isinstance(coerced, (str, bytes, bytearray)):
+        if all(isinstance(item, str) for item in coerced):
+            return ", ".join(item for item in coerced if item)
         try:
             return json.dumps(coerced)
         except TypeError:
@@ -162,7 +164,7 @@ _FIELD_ALIASES: dict[str, str] = {
 }
 
 
-def _project_sequence_field(value: Sequence[Any], field: str) -> str | None:
+def _project_sequence_field(value: Sequence[Any], field: str) -> list[str] | None:
     projected: list[str] = []
     for item in value:
         item_value: Any = None
@@ -177,7 +179,7 @@ def _project_sequence_field(value: Sequence[Any], field: str) -> str | None:
             projected.append(rendered)
     if not projected:
         return None
-    return ", ".join(projected)
+    return projected
 
 
 def _resolve_context_value(context: Mapping[str, Any] | None, path: str) -> Any:
@@ -320,10 +322,14 @@ def render_value(
             for key, item in value.items()
         }
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [
-            render_value(item, context, base_tokens=base_tokens, include_templates=include_templates)
-            for item in value
-        ]
+        result: list[Any] = []
+        for item in value:
+            rendered = render_value(item, context, base_tokens=base_tokens, include_templates=include_templates)
+            if isinstance(rendered, list):
+                result.extend(rendered)
+            else:
+                result.append(rendered)
+        return result
     return value
 
 
