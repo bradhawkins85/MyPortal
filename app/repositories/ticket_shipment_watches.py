@@ -153,8 +153,9 @@ async def update_watch_check_state(
 
     params.append(watch_id)
     # ``assignments`` is built from a fixed internal allowlist above (never from
-    # user input), so interpolating the joined column fragment is safe here.
+    # user input), so joining the column fragment remains safe here.
+    query = "UPDATE ticket_shipment_watches SET " + ", ".join(assignments) + " WHERE id = %s"
     await db.execute(
-        f"UPDATE ticket_shipment_watches SET {', '.join(assignments)} WHERE id = %s",
+        query,
         tuple(params),
     )

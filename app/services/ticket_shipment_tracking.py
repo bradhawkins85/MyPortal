@@ -197,13 +197,14 @@ def _extract_json_object(raw_text: str) -> dict[str, Any] | None:
                 except json.JSONDecodeError:
                     pass
 
-    for start, end in ((text.find("{"), text.rfind("}")),):
-        if start != -1 and end != -1 and end > start:
-            try:
-                parsed = json.loads(text[start : end + 1])
-                return parsed if isinstance(parsed, dict) else None
-            except json.JSONDecodeError:
-                continue
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            parsed = json.loads(text[start : end + 1])
+            return parsed if isinstance(parsed, dict) else None
+        except json.JSONDecodeError:
+            pass
     return None
 
 
@@ -237,7 +238,7 @@ async def _fetch_with_retries(url: str, *, timeout_seconds: float = 15.0, retrie
     for attempt in range(1, retries + 1):
         try:
             async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
-                response = await client.get(url, headers={"User-Agent": "MyPortal Shipment Monitor/1.0"})
+                response = await client.get(url, headers={"User-Agent": "MyPortal/1.0 (ticket-shipment-watch)"})
             response.raise_for_status()
             return response.text
         except (httpx.HTTPError, asyncio.TimeoutError, OSError, RuntimeError) as exc:
