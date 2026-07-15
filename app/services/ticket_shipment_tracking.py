@@ -181,13 +181,21 @@ def _extract_json_object(raw_text: str) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         pass
 
-    wrapped = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
-    if wrapped:
-        try:
-            parsed = json.loads(wrapped.group(1))
-            return parsed if isinstance(parsed, dict) else None
-        except json.JSONDecodeError:
-            pass
+    fence_start = text.find("```")
+    if fence_start != -1:
+        fence_end = text.find("```", fence_start + 3)
+        if fence_end != -1:
+            fenced = text[fence_start + 3 : fence_end].strip()
+            if fenced.lower().startswith("json"):
+                fenced = fenced[4:].strip()
+            start = fenced.find("{")
+            end = fenced.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                try:
+                    parsed = json.loads(fenced[start : end + 1])
+                    return parsed if isinstance(parsed, dict) else None
+                except json.JSONDecodeError:
+                    pass
 
     for start, end in ((text.find("{"), text.rfind("}")),):
         if start != -1 and end != -1 and end > start:
@@ -577,14 +585,15 @@ async def process_due_shipment_watches(*, limit: int = 200) -> dict[str, int]:
                 skipped += 1
                 continue
 
-            checked += 1
             try:
                 refreshed = await shipment_watch_repo.get_watch_by_id(watch_id)
                 if not refreshed or not bool(refreshed.get("active")):
+                    skipped += 1
                     continue
                 if not _is_watch_due(refreshed, now_utc=now):
                     skipped += 1
                     continue
+                checked += 1
 
                 provider = detect_provider(str(refreshed.get("tracking_url") or ""))
                 if provider is None:

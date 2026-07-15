@@ -636,9 +636,15 @@
       }
 
       providerLabel.textContent = 'Detecting…';
+      const csrfToken = getCsrfToken();
+      const headers = { Accept: 'application/json' };
+      if (csrfToken) {
+        headers['X-CSRF-Token'] = csrfToken;
+      }
+
       inFlight = fetch(`/api/tickets/shipment-watch/detect?url=${encodeURIComponent(url)}`, {
         method: 'GET',
-        headers: { Accept: 'application/json' },
+        headers,
         credentials: 'same-origin',
       })
         .then(async (response) => {
