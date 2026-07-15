@@ -647,7 +647,7 @@ async def process_due_shipment_watches(*, limit: int = 200) -> dict[str, int]:
                 changed_detected = changed_now or first_success
                 if not changed_detected:
                     continue
-                # ``changed`` tracks detected shipment state changes even when
+                # The `changed` counter tracks detected shipment state changes even when
                 # public comment posting is disabled for this watch.
                 changed += 1
 
