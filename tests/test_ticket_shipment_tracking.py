@@ -218,3 +218,19 @@ async def test_process_due_shipment_watches_skips_not_due(monkeypatch):
     assert result["posted"] == 1
     assert any(entry["watch_id"] == 1 for entry in updates)
     assert all(entry["watch_id"] != 2 for entry in updates)
+
+
+@pytest.mark.anyio
+async def test_llm_extraction_handles_trigger_errors(monkeypatch):
+    async def fake_trigger(*args, **kwargs):
+        raise RuntimeError("network error")
+
+    monkeypatch.setattr(svc.modules_service, "trigger_module", fake_trigger)
+    snapshot = await svc._extract_snapshot_with_llm(
+        provider="startrack",
+        tracking_url="https://www.startrack.com.au/track/ABC123",
+        consignment_id="ABC123",
+        text_excerpt="in transit",
+        html_excerpt="<html></html>",
+    )
+    assert snapshot is None

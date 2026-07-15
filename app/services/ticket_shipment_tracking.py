@@ -232,7 +232,7 @@ async def _fetch_with_retries(url: str, *, timeout_seconds: float = 15.0, retrie
                 response = await client.get(url, headers={"User-Agent": "MyPortal Shipment Monitor/1.0"})
             response.raise_for_status()
             return response.text
-        except Exception as exc:  # noqa: BLE001
+        except (httpx.HTTPError, asyncio.TimeoutError, OSError, RuntimeError) as exc:
             last_error = exc
             if attempt >= retries:
                 break
@@ -645,6 +645,7 @@ async def process_due_shipment_watches(*, limit: int = 200) -> dict[str, int]:
                     ticket_id=ticket_id,
                     provider=watch.get("provider"),
                     error=str(exc),
+                    error_type=type(exc).__name__,
                 )
                 await shipment_watch_repo.update_watch_check_state(
                     watch_id,
