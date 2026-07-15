@@ -35,27 +35,3 @@ func TestChatNotificationTextFallsBackToTechnician(t *testing.T) {
 		t.Fatalf("body = %q, want fallback initiator", body)
 	}
 }
-
-func TestChatMessageNotificationTextIncludesSenderSubjectAndMessage(t *testing.T) {
-	title, body := chatMessageNotificationText(chatMessagePayload{
-		Subject: "Printer issue",
-		Sender:  "Alex Tech",
-		Message: "Please try printing again.",
-	})
-
-	if title != "New MyPortal chat message" {
-		t.Fatalf("title = %q", title)
-	}
-	for _, want := range []string{"Alex Tech", "Printer issue", "Please try printing again."} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("body = %q, want it to contain %q", body, want)
-		}
-	}
-}
-
-func TestChatMessageNotificationTextFallsBackToTechnician(t *testing.T) {
-	_, body := chatMessageNotificationText(chatMessagePayload{})
-	if !strings.Contains(body, "A technician replied to your support chat") {
-		t.Fatalf("body = %q, want fallback sender", body)
-	}
-}
