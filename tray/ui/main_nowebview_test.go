@@ -12,19 +12,15 @@ import (
 	"github.com/bradhawkins85/myportal-tray/internal/ipc"
 )
 
-func TestHandleIPCMessageDispatchesChatMessageNotification(t *testing.T) {
+func TestHandleIPCMessageOpensChatMessageWithoutNotification(t *testing.T) {
 	previousNotify := showChatSessionNotificationFunc
 	previousOpen := openChatWindowFunc
 	previousRequest := requestChatTokenFunc
 	previousPortalURL := gPortalURL
 	gPortalURL = "https://portal.example.test"
-	var gotTitle string
-	var gotBody string
-	var gotURL string
+	notified := false
 	showChatSessionNotificationFunc = func(title, body, chatURL string) {
-		gotTitle = title
-		gotBody = body
-		gotURL = chatURL
+		notified = true
 	}
 	requestChatTokenFunc = func(roomID int) string {
 		return gPortalURL + "/tray/chat?token=test-token&room=" + itoa(roomID)
@@ -52,16 +48,8 @@ func TestHandleIPCMessageDispatchesChatMessageNotification(t *testing.T) {
 
 	handleIPCMessage(ipc.Message{Type: "chat_message", Payload: payload})
 
-	if gotTitle != "New MyPortal chat message" {
-		t.Fatalf("title = %q", gotTitle)
-	}
-	for _, want := range []string{"Alex Tech", "Printer offline", "Please try printing again."} {
-		if !strings.Contains(gotBody, want) {
-			t.Fatalf("body = %q, want it to contain %q", gotBody, want)
-		}
-	}
-	if gotURL == "" {
-		t.Fatalf("chat notification action URL should not be empty")
+	if notified {
+		t.Fatal("chat_message should not display a popup notification")
 	}
 	select {
 	case chatURL := <-opened:

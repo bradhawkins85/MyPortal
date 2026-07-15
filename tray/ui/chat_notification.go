@@ -63,40 +63,14 @@ func handleChatOpen(payload chatOpenPayload) {
 }
 
 func handleChatMessage(payload chatMessagePayload) {
-	actionURL := registerChatOpenAction(payload.RoomID)
-	if actionURL == "" {
-		logger.Warn("handleChatMessage: could not register chat notification action for room_id=%d", payload.RoomID)
-	}
-
-	// Replies should bring an active chat back to the user's attention. Closed
-	// rooms are rejected by the popup/token endpoints so stale notifications do
-	// not create a fresh "Chat from <device>" room.
+	// Incoming chat replies should open or focus the tray chat window without
+	// also displaying a desktop popup. The chat window itself is the active
+	// conversation surface and continues polling the room while open. Closed
+	// rooms are rejected by the popup/token endpoints so stale messages do not
+	// create a fresh "Chat from <device>" room.
 	if chatURL := chatOpenURL(payload.RoomID); chatURL != "" {
 		go openChatWindowFunc(chatURL, gConfig)
 	}
-
-	title, body := chatMessageNotificationText(payload)
-	showChatSessionNotificationFunc(title, body, actionURL)
-}
-
-func chatMessageNotificationText(payload chatMessagePayload) (string, string) {
-	sender := strings.TrimSpace(payload.Sender)
-	if sender == "" {
-		sender = "A technician"
-	}
-
-	subject := strings.TrimSpace(payload.Subject)
-	message := summarizeChatMessage(payload.Message)
-
-	title := "New MyPortal chat message"
-	body := sender + " replied to your support chat"
-	if subject != "" {
-		body += ": " + subject
-	}
-	if message != "" {
-		body += "\n" + message
-	}
-	return title, body
 }
 
 func chatNotificationText(payload chatOpenPayload) (string, string) {
