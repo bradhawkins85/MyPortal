@@ -124,13 +124,14 @@ async def test_watcher_emails_expand_in_list_context():
     )
     assert result_one == ["only@example.com"]
 
-    # No watchers: list must be empty (or contain a single empty string that
-    # _ensure_list will strip out before sending).
+    # No watchers: render_value returns [""] because the token resolves to the
+    # empty string "".  The downstream _ensure_list call strips empty entries, so
+    # the final cc list sent to SMTP2Go is [].
     context_none = {"ticket": {"watchers": []}}
     result_none = await value_templates.render_value_async(
         ["{{ticket.watchers.email}}"], context_none
     )
-    assert result_none == [""] or result_none == []
+    assert result_none == [""]
 
 
 @pytest.mark.anyio
