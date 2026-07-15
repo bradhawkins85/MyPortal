@@ -362,11 +362,9 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
     if has_helpdesk_access or is_super_admin:
         status_definitions = await tickets_service.list_status_definitions()
         valid_reply_statuses = {definition.tech_status for definition in status_definitions}
-        default_reply_status = next((definition.tech_status for definition in status_definitions if definition.is_default), None)
-        if not default_reply_status:
-            default_reply_status = "pending" if "pending" in valid_reply_statuses else (next(iter(valid_reply_statuses), "open"))
-        reply_status = str(get_last_form_value(form, "replyStatus", default_reply_status) or default_reply_status).strip().lower()
-        if reply_status not in valid_reply_statuses:
+        selected_reply_status = get_last_form_value(form, "replyStatus")
+        reply_status = str(selected_reply_status or "").strip().lower() or None
+        if reply_status is not None and reply_status not in valid_reply_statuses:
             return await main_module._render_portal_ticket_detail(
                 request,
                 user,
