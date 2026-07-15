@@ -78,6 +78,7 @@ from app.schemas.tickets import (
     TicketMergeRequest,
     TicketMergeResponse,
 )
+from app.services import ticket_shipment_tracking as shipment_watch_service
 from app.security.session import SessionData
 from app.services import audit as audit_service
 from app.services import labour_types as labour_types_service
@@ -1387,6 +1388,66 @@ async def remove_watcher_by_email(
         after=None,
         metadata={"watcher_email": email_normalized},
     )
+
+
+@router.get("/shipment-watch/detect")
+async def detect_shipment_provider(
+    url: str = Query(..., min_length=1, max_length=500),
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> dict[str, Any]:
+    try:
+        shipment_watch_service.validate_tracking_url(url)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from None
+    provider = await shipment_watch_service.detect_provider_slug(url)
+    return {"provider": provider, "supported": bool(provider)}
+
+
+@router.get("/{ticket_id}/shipment-watch")
+async def get_shipment_watch(
+    ticket_id: int,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> dict[str, Any]:
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket not found",
+        )
+    watch = await shipment_watch_service.get_watch_for_ticket(ticket_id)
+    if not watch:
+        return {"watch": None}
+    return {"watch": shipment_watch_service.TicketShipmentWatchResponse.model_validate(watch).model_dump()}
+
+
+@router.put("/{ticket_id}/shipment-watch")
+async def upsert_shipment_watch(
+    ticket_id: int,
+    payload: shipment_watch_service.TicketShipmentWatchPayload,
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> dict[str, Any]:
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket not found",
+        )
+    try:
+        watch = await shipment_watch_service.upsert_watch(
+            ticket_id=ticket_id,
+            tracking_url=payload.tracking_url,
+            poll_interval_seconds=payload.poll_interval_seconds,
+            active=payload.active,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from None
+    return {"watch": shipment_watch_service.TicketShipmentWatchResponse.model_validate(watch).model_dump()}
 
 
 @router.get("/labour-types", response_model=LabourTypeListResponse)

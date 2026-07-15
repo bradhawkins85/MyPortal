@@ -50,6 +50,7 @@ from app.services import labour_types as labour_types_service
 from app.services import ticket_attachments as attachments_service
 from app.services import rag_retrieval
 from app.services import tickets as tickets_service
+from app.services import ticket_shipment_tracking as shipment_watch_service
 from app.services import unbill_tickets as unbill_tickets_service
 from app.services import tray as tray_service
 from app.services.sanitization import sanitize_rich_text
@@ -1040,6 +1041,23 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     company_raw = form.get("companyId")
     category_value = _clean_text(form.get("category")) or None
     external_reference = _clean_text(form.get("externalReference")) or None
+    shipment_tracking_url = _clean_text(form.get("shipmentTrackingUrl")) or None
+    shipment_poll_interval_raw = _clean_text(form.get("shipmentPollIntervalSeconds"))
+    shipment_monitoring_raw = _clean_text(form.get("shipmentMonitoringEnabled")).lower()
+    shipment_monitoring_enabled = shipment_monitoring_raw in {"1", "true", "on", "yes"}
+    shipment_poll_interval_seconds = 900
+    if shipment_poll_interval_raw:
+        try:
+            shipment_poll_interval_seconds = int(shipment_poll_interval_raw)
+        except ValueError:
+            return await main_module._render_ticket_detail(
+                request,
+                current_user,
+                ticket_id=ticket_id,
+                error_message="Shipment poll interval must be a whole number of seconds.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+    shipment_poll_interval_seconds = max(60, min(86_400, shipment_poll_interval_seconds))
     review_date_raw = _clean_text(form.get("reviewDate"))
     review_date_value: date | None = None
     if review_date_raw:
@@ -1125,6 +1143,15 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
             current_user,
             ticket_id=ticket_id,
             error_message="External reference must be 128 characters or fewer.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if shipment_tracking_url and len(shipment_tracking_url) > 500:
+        return await main_module._render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="Shipment tracking URL must be 500 characters or fewer.",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -1277,6 +1304,24 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
 
     await tickets_repo.update_ticket(ticket_id, **update_fields)
     await tickets_repo.set_ticket_status(ticket_id, status_value)
+    if shipment_tracking_url:
+        try:
+            await shipment_watch_service.upsert_watch(
+                ticket_id=ticket_id,
+                tracking_url=shipment_tracking_url,
+                poll_interval_seconds=shipment_poll_interval_seconds,
+                active=shipment_monitoring_enabled,
+            )
+        except ValueError as exc:
+            return await main_module._render_ticket_detail(
+                request,
+                current_user,
+                ticket_id=ticket_id,
+                error_message=str(exc),
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+    else:
+        await shipment_watch_service.set_watch_active(ticket_id, False)
     if description_raw is not None:
         await tickets_service.update_ticket_description(ticket_id, description_value)
     await tickets_service.refresh_ticket_ai_summary(ticket_id)

@@ -37,6 +37,7 @@ from app.services import value_templates
 from app.services import webhook_monitor
 from app.services import xero as xero_service
 from app.services import service_status as service_status_service
+from app.services import ticket_shipment_tracking as shipment_watch_service
 from app.services import backup_jobs as backup_jobs_service
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import rag_relationships as rag_relationship_repo
@@ -261,6 +262,16 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
+        if not self._scheduler.get_job("ticket-shipment-watch-runner"):
+            self._scheduler.add_job(
+                self._run_ticket_shipment_watch_runner,
+                "interval",
+                seconds=60,
+                id="ticket-shipment-watch-runner",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
         # Run subscription renewal job daily at 02:00 (store timezone)
         if not self._scheduler.get_job("subscription-renewals"):
             self._scheduler.add_job(
@@ -424,6 +435,23 @@ class SchedulerService:
                     log_info("Service status AI lookup completed", **result)
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error("Service status AI lookup failed", error=str(exc))
+
+    async def _run_ticket_shipment_watch_runner(self) -> None:
+        """Poll due ticket shipment watches with distributed lock."""
+        async with db.acquire_lock(
+            "ticket_shipment_watch_runner", timeout=1
+        ) as lock_acquired:
+            if not lock_acquired:
+                log_info(
+                    "Ticket shipment watch runner already running on another worker, skipping"
+                )
+                return
+            try:
+                result = await shipment_watch_service.process_due_shipment_watches()
+                if result.get("checked", 0) or result.get("errors", 0):
+                    log_info("Ticket shipment watch runner completed", **result)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                log_error("Ticket shipment watch runner failed", error=str(exc))
 
     async def _run_subscription_renewals(self) -> None:
         """Run subscription renewal invoice creation (T-60 job) with distributed lock."""

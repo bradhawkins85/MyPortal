@@ -614,6 +614,66 @@
     });
   }
 
+  function initialiseShipmentWatchProviderDetection() {
+    const urlInput = document.querySelector('[data-shipment-watch-url]');
+    const providerLabel = document.querySelector('[data-shipment-watch-provider]');
+    if (!(urlInput instanceof HTMLInputElement) || !(providerLabel instanceof HTMLElement)) {
+      return;
+    }
+
+    let inFlight = null;
+
+    async function detectProvider() {
+      const url = urlInput.value.trim();
+      if (!url) {
+        providerLabel.textContent = 'Not detected';
+        urlInput.setCustomValidity('');
+        return;
+      }
+
+      if (inFlight) {
+        return;
+      }
+
+      providerLabel.textContent = 'Detecting…';
+      inFlight = fetch(`/api/tickets/shipment-watch/detect?url=${encodeURIComponent(url)}`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            const message = await getApiErrorMessage(response, 'Unable to validate tracking URL');
+            throw new Error(message);
+          }
+          const payload = await response.json();
+          if (!payload || !payload.supported || !payload.provider) {
+            urlInput.setCustomValidity('Unsupported tracking provider URL.');
+            providerLabel.textContent = 'Unsupported provider';
+            return;
+          }
+          urlInput.setCustomValidity('');
+          providerLabel.textContent = String(payload.provider || '').trim() || 'Not detected';
+        })
+        .catch((error) => {
+          providerLabel.textContent = 'Invalid URL';
+          urlInput.setCustomValidity(error instanceof Error ? error.message : 'Invalid tracking URL');
+        })
+        .finally(() => {
+          inFlight = null;
+        });
+
+      return inFlight;
+    }
+
+    urlInput.addEventListener('blur', () => {
+      detectProvider();
+    });
+    urlInput.addEventListener('change', () => {
+      detectProvider();
+    });
+  }
+
   function initialiseAssetSelector() {
     const select = document.querySelector('[data-ticket-asset-selector]');
     if (!(select instanceof HTMLSelectElement)) {
@@ -2789,6 +2849,7 @@
     initialiseReplyTimeEditing();
     initialiseCallRecordingTimeEditing();
     initialiseTicketDetailsAutosave();
+    initialiseShipmentWatchProviderDetection();
     initialiseAssetSelector();
     initialiseRequesterSelector();
     initialiseTaskManagement();
