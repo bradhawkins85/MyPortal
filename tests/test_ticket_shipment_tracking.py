@@ -334,9 +334,11 @@ async def test_process_due_shipment_watches_skips_public_reply_when_disabled(mon
 
     monkeypatch.setattr(svc.db, "acquire_lock", fake_lock)
     create_reply_mock = AsyncMock(return_value={"id": 100})
+    emit_replied_mock = AsyncMock(return_value=None)
+    emit_updated_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(svc.tickets_repo, "create_reply", create_reply_mock)
-    monkeypatch.setattr(svc.tickets_service, "emit_ticket_replied_event", AsyncMock(return_value=None))
-    monkeypatch.setattr(svc.tickets_service, "emit_ticket_updated_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(svc.tickets_service, "emit_ticket_replied_event", emit_replied_mock)
+    monkeypatch.setattr(svc.tickets_service, "emit_ticket_updated_event", emit_updated_mock)
 
     result = await svc.process_due_shipment_watches(limit=10)
 
@@ -344,6 +346,8 @@ async def test_process_due_shipment_watches_skips_public_reply_when_disabled(mon
     assert result["changed"] == 1
     assert result["posted"] == 0
     create_reply_mock.assert_not_awaited()
+    emit_replied_mock.assert_not_awaited()
+    emit_updated_mock.assert_not_awaited()
     assert any(entry["watch_id"] == 1 for entry in updates)
 
 

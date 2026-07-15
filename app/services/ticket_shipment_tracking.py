@@ -647,8 +647,9 @@ async def process_due_shipment_watches(*, limit: int = 200) -> dict[str, int]:
                 has_update = changed_now or first_success
                 if not has_update:
                     continue
-                # Count the detected shipment update before deciding whether it
-                # should also be posted publicly on the ticket.
+                # `changed` tracks detected shipment updates, while `posted`
+                # only tracks the subset that are emitted as public ticket
+                # comments.
                 changed += 1
 
                 if not refreshed["public_comments_enabled"]:
