@@ -60,7 +60,7 @@ class TicketShipmentWatchPayload(BaseModel):
     tracking_url: str = Field(min_length=1, max_length=500)
     poll_interval_seconds: int = Field(default=900, ge=60, le=86_400)
     active: bool = True
-    public_comments_enabled: bool = False
+    public_comments_enabled: bool = True
 
 
 class TicketShipmentWatchResponse(BaseModel):
@@ -547,7 +547,7 @@ async def upsert_watch(
     tracking_url: str,
     poll_interval_seconds: int,
     active: bool,
-    public_comments_enabled: bool,
+    public_comments_enabled: bool = True,
 ) -> dict[str, Any]:
     clean_url = _validate_tracking_url(str(tracking_url).strip())
     provider = detect_provider(clean_url)
@@ -647,6 +647,8 @@ async def process_due_shipment_watches(*, limit: int = 200) -> dict[str, int]:
                 changed_detected = changed_now or first_success
                 if not changed_detected:
                     continue
+                # ``changed`` tracks detected shipment state changes even when
+                # public comment posting is disabled for this watch.
                 changed += 1
 
                 if not bool(refreshed.get("public_comments_enabled")):

@@ -66,7 +66,7 @@ async def upsert_watch(
     consignment_id: str | None,
     poll_interval_seconds: int,
     active: bool,
-    public_comments_enabled: bool,
+    public_comments_enabled: bool = True,
 ) -> WatchRecord:
     existing = await get_watch_by_ticket(ticket_id)
     if existing:
