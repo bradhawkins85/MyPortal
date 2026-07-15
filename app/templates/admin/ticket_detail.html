@@ -1062,6 +1062,59 @@
             </div>
           </details>
 
+          <details class="card card--panel card-collapsible" {% if not ticket_expenses %}open{% endif %}>
+            <summary class="card__header card__header--collapsible">
+              <h2 class="card__title">Expenses</h2>
+              <div class="card__collapsible-meta">
+                {% if ticket_expenses %}<span class="badge badge--muted">{{ ticket_expenses|length }} · {{ ticket_expense_total }}</span>{% endif %}
+                <span class="card__toggle-icon" aria-hidden="true"></span>
+              </div>
+            </summary>
+            <div class="card-collapsible__content card__body">
+              <form action="/admin/tickets/{{ ticket.id }}/expenses" method="post" class="form card__form">
+                <div class="form-grid form-grid--2">
+                  <div class="form-field">
+                    <label class="form-label" for="ticket-expense-description">Description</label>
+                    <input class="form-input" id="ticket-expense-description" name="description" type="text" placeholder="Parking, freight, tolls" required>
+                  </div>
+                  <div class="form-field">
+                    <label class="form-label" for="ticket-expense-amount">Amount</label>
+                    <input class="form-input" id="ticket-expense-amount" name="amount" type="number" min="0.01" step="0.01" required>
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="button button--secondary">Add expense</button>
+                </div>
+              </form>
+              {% if ticket_expenses %}
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead><tr><th>Description</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+                    <tbody>
+                      {% for expense in ticket_expenses %}
+                        <tr>
+                          <td>{{ expense.description }}</td>
+                          <td>{{ expense.amount }}</td>
+                          <td>{% if expense.billed_at %}Billed{% else %}Unbilled{% endif %}</td>
+                          <td>
+                            {% if not expense.billed_at %}
+                              <form method="post" action="/admin/tickets/{{ ticket.id }}/expenses/{{ expense.id }}/delete" onsubmit="return confirm('Remove this expense?');">
+                                <button type="submit" class="button button--ghost button--small">Remove</button>
+                              </form>
+                            {% endif %}
+                          </td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              {% else %}
+                <p class="card__empty">No expenses have been added yet.</p>
+              {% endif %}
+            </div>
+          </details>
+
+
         </div>
 
         <div class="management__column management__column--activity">

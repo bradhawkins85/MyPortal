@@ -24,6 +24,7 @@ import asyncio
 import re
 from collections.abc import Sequence
 from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
@@ -41,6 +42,7 @@ from app.repositories import company_memberships as membership_repo
 from app.repositories import staff as staff_repo
 from app.repositories import ticket_statuses as ticket_status_repo
 from app.repositories import ticket_attachments as attachments_repo
+from app.repositories import ticket_expenses as expenses_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import email_blocklist as email_blocklist_repo
 from app.repositories import users as user_repo
@@ -425,6 +427,43 @@ async def admin_ticket_detail(
         current_user,
         ticket_id=ticket_id,
     )
+
+
+@router.post("/admin/tickets/{ticket_id:int}/expenses", response_class=HTMLResponse)
+async def admin_add_ticket_expense(ticket_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    description = str(form.get("description") or "").strip()
+    amount_raw = str(form.get("amount") or "").strip()
+    if not description:
+        return flash_redirect(f"/admin/tickets/{ticket_id}", "Enter an expense description.", "error")
+    try:
+        amount = Decimal(amount_raw).quantize(Decimal("0.01"))
+    except (InvalidOperation, ValueError):
+        return flash_redirect(f"/admin/tickets/{ticket_id}", "Enter a valid expense amount.", "error")
+    if amount <= 0:
+        return flash_redirect(f"/admin/tickets/{ticket_id}", "Expense amount must be greater than zero.", "error")
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    await expenses_repo.create_expense(ticket_id, description, amount, int(current_user.get("id") or 0) or None)
+    return flash_redirect(f"/admin/tickets/{ticket_id}", "Expense added.", "success")
+
+
+@router.post("/admin/tickets/{ticket_id:int}/expenses/{expense_id:int}/delete", response_class=HTMLResponse)
+async def admin_delete_ticket_expense(ticket_id: int, expense_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    await expenses_repo.delete_expense(expense_id, ticket_id)
+    return flash_redirect(f"/admin/tickets/{ticket_id}", "Expense removed.", "success")
 
 
 @router.get("/admin/tickets/{ticket_id:int}/automation-history", response_class=JSONResponse)

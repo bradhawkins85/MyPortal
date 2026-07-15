@@ -17,6 +17,7 @@ from app.repositories import invoice_lines as invoice_lines_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.repositories import ticket_billed_time_entries as billed_time_repo
+from app.repositories import ticket_expenses as expenses_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as users_repo
 from app.services import modules as modules_service
@@ -203,7 +204,9 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
             continue
 
         unbilled_reply_ids = await billed_time_repo.get_unbilled_reply_ids(ticket_id)
-        if not unbilled_reply_ids:
+        unbilled_expenses = await expenses_repo.list_expenses(ticket_id, unbilled_only=True)
+        expense_total = sum((_to_decimal(expense.get("amount")) or Decimal("0")) for expense in unbilled_expenses)
+        if not unbilled_reply_ids and expense_total <= 0:
             continue
 
         billable_tickets_found += 1
@@ -235,9 +238,6 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
                 }
                 labour_map[key] = bucket
             bucket["minutes"] += minutes
-
-        if billable_minutes <= 0:
-            continue
 
         labour_groups = list(labour_map.values())
         requester_name, requester_email = await resolve_ticket_requester(ticket)
@@ -282,8 +282,31 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
                 "labour_groups": labour_groups,
                 "requester_name": requester_name,
                 "requester_email": requester_email,
+                "expense_ids": [int(expense["id"]) for expense in unbilled_expenses if expense.get("id")],
             }
         )
+
+        if expense_total > 0:
+            expense_lines = [
+                f"{str(expense.get('description') or 'Expense').strip()}: {(_to_decimal(expense.get('amount')) or Decimal('0')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)}"
+                for expense in unbilled_expenses
+            ]
+            base_description = _build_ticket_line_description(
+                line_item_template,
+                ticket,
+                {"minutes": billable_minutes, "code": None, "name": "Expenses", "rate": None},
+                billable_minutes,
+                billable_minutes=billable_minutes,
+                requester_name=requester_name,
+                requester_email=requester_email,
+            )
+            ticket_line_items.append({
+                "Description": base_description + "\n" + "\n".join(expense_lines),
+                "Quantity": 1.0,
+                "UnitAmount": float(expense_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+                "ItemCode": "",
+                "MyPortalTicketExpenseIds": [int(expense["id"]) for expense in unbilled_expenses if expense.get("id")],
+            })
 
         ticket_num = str(ticket_id)
         if ticket_num not in ticket_numbers:
@@ -418,6 +441,11 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
                     reply_id=reply_id,
                     error=str(exc),
                 )
+
+        try:
+            await expenses_repo.mark_expenses_billed(list(ticket_ctx.get("expense_ids") or []), invoice_number=invoice_number, billed_at=now)
+        except Exception as exc:
+            logger.error("Failed to mark ticket expenses billed", ticket_id=ticket_id, error=str(exc))
 
         # Update ticket: mark as billed and move to the configured invoiced status.
         invoiced_status = xero_service.resolve_invoiced_ticket_status()

@@ -139,6 +139,7 @@ from app.repositories import tickets as tickets_repo
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import rag_relationships as rag_relationship_repo
 from app.repositories import ticket_attachments as attachments_repo
+from app.repositories import ticket_expenses as expenses_repo
 from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import ticket_statuses as ticket_status_repo
 from app.repositories import automations as automation_repo
@@ -9324,6 +9325,8 @@ async def _render_ticket_detail(
     asset_options.sort(key=lambda option: option["label"].lower())
 
     ticket_related_items = await _load_ticket_stored_related_items(ticket_id)
+    ticket_expenses = await expenses_repo.list_expenses(ticket_id)
+    ticket_expense_total = sum(Decimal(str(expense.get("amount") or 0)) for expense in ticket_expenses)
 
     # Find relevant knowledge base articles based on AI tag matching
     relevant_articles: list[dict[str, Any]] = []
@@ -9374,6 +9377,8 @@ async def _render_ticket_detail(
         "ticket_watchers": enriched_watchers,
         "ticket_shipment_watch": shipment_watch,
         "ticket_attachments": formatted_attachments,
+        "ticket_expenses": ticket_expenses,
+        "ticket_expense_total": ticket_expense_total,
         "ticket_related_auto_scan": False,
         "ticket_related_items": ticket_related_items,
         "ticket_labour_types": labour_types,

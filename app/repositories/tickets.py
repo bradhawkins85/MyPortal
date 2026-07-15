@@ -1471,6 +1471,10 @@ async def get_automation_filter_context(ticket_id: int) -> dict[str, int | bool]
         "SELECT COUNT(*) AS attachment_count FROM ticket_attachments WHERE ticket_id = %s",
         (ticket_id,),
     )
+    expense_row = await db.fetch_one(
+        "SELECT COALESCE(SUM(amount), 0) AS expense_total, COUNT(*) AS expense_count FROM ticket_expenses WHERE ticket_id = %s AND billed_at IS NULL",
+        (ticket_id,),
+    )
     task_row = await db.fetch_one(
         """
         SELECT
@@ -1490,6 +1494,9 @@ async def get_automation_filter_context(ticket_id: int) -> dict[str, int | bool]
         "non_billable_minutes": int((time_row or {}).get("non_billable_minutes") or 0),
         "attachment_count": attachment_count,
         "has_attachments": attachment_count > 0,
+        "expense_total": float((expense_row or {}).get("expense_total") or 0),
+        "expense_count": int((expense_row or {}).get("expense_count") or 0),
+        "has_expenses": int((expense_row or {}).get("expense_count") or 0) > 0,
         "task_count": task_count,
         "has_tasks": task_count > 0,
         "open_task_count": open_task_count,
@@ -1519,6 +1526,9 @@ async def get_automation_filter_context_by_ticket_ids(ticket_ids: list[int]) -> 
             "non_billable_minutes": 0,
             "attachment_count": 0,
             "has_attachments": False,
+            "expense_total": 0.0,
+            "expense_count": 0,
+            "has_expenses": False,
             "task_count": 0,
             "has_tasks": False,
             "open_task_count": 0,
@@ -1563,6 +1573,23 @@ async def get_automation_filter_context_by_ticket_ids(ticket_ids: list[int]) -> 
         attachment_count = int(row.get("attachment_count") or 0)
         result[ticket_id]["attachment_count"] = attachment_count
         result[ticket_id]["has_attachments"] = attachment_count > 0
+
+
+    expense_rows = await db.fetch_all(
+        f"""
+        SELECT ticket_id, COALESCE(SUM(amount), 0) AS expense_total, COUNT(*) AS expense_count
+        FROM ticket_expenses
+        WHERE ticket_id IN ({placeholders}) AND billed_at IS NULL
+        GROUP BY ticket_id
+        """,
+        tuple(unique_ids),
+    )
+    for row in expense_rows:
+        ticket_id = int(row["ticket_id"])
+        expense_count = int(row.get("expense_count") or 0)
+        result[ticket_id]["expense_total"] = float(row.get("expense_total") or 0)
+        result[ticket_id]["expense_count"] = expense_count
+        result[ticket_id]["has_expenses"] = expense_count > 0
 
     task_rows = await db.fetch_all(
         f"""
