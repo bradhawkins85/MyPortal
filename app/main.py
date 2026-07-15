@@ -8864,6 +8864,9 @@ async def _render_ticket_detail(
     split_replies = await tickets_repo.list_split_replies_for_original(ticket_id)
     replies = [*replies, *split_replies]
     watchers = await tickets_repo.list_watchers(ticket_id)
+    from app.services import ticket_shipment_tracking as shipment_watch_service
+
+    shipment_watch = await shipment_watch_service.get_watch_for_ticket(ticket_id)
 
     related_user_ids: set[int] = set()
     for key in ("assigned_user_id", "requester_id"):
@@ -9369,6 +9372,7 @@ async def _render_ticket_detail(
         "ticket_replies": enriched_replies,
         "ticket_call_recordings": enriched_recordings,
         "ticket_watchers": enriched_watchers,
+        "ticket_shipment_watch": shipment_watch,
         "ticket_attachments": formatted_attachments,
         "ticket_related_auto_scan": False,
         "ticket_related_items": ticket_related_items,
