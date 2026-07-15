@@ -644,11 +644,11 @@ async def process_due_shipment_watches(*, limit: int = 200) -> dict[str, int]:
                 )
 
                 first_success = previous_hash is None
-                changed_detected = changed_now or first_success
-                if not changed_detected:
+                has_update = changed_now or first_success
+                if not has_update:
                     continue
-                # The `changed` counter tracks detected shipment state changes even when
-                # public comment posting is disabled for this watch.
+                # Count the detected shipment update even if public comment
+                # posting is disabled for this watch.
                 changed += 1
 
                 if not refreshed["public_comments_enabled"]:
