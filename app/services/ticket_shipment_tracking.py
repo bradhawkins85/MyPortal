@@ -116,6 +116,10 @@ def _safe_iso(value: Any) -> str | None:
     return text or None
 
 
+def _is_missing_scalar(value: Any) -> bool:
+    return value in (None, "")
+
+
 def _snapshot_payload(snapshot: CanonicalShipmentSnapshot | Mapping[str, Any] | None) -> dict[str, Any] | None:
     if snapshot is None:
         return None
@@ -291,15 +295,33 @@ class StarTrackProviderAdapter(ProviderAdapter):
         if llm_snapshot is None:
             return CanonicalShipmentSnapshot.model_validate(fallback_payload)
 
-        merged = {
-            **fallback_payload,
-            **{key: value for key, value in llm_snapshot.model_dump().items() if value not in (None, "")},
-        }
+        merged = dict(fallback_payload)
+        llm_payload = llm_snapshot.model_dump()
+
+        for key in ("status", "eta_date", "proof_of_delivery_date", "signatory"):
+            fallback_value = merged.get(key)
+            llm_value = llm_payload.get(key)
+            if _is_missing_scalar(fallback_value) and not _is_missing_scalar(llm_value):
+                merged[key] = llm_value
+
+        for key in ("items_in_transit", "onboard_for_delivery", "items_delivered"):
+            fallback_count = int(merged.get(key) or 0)
+            llm_count = int(llm_payload.get(key) or 0)
+            if fallback_count <= 0 and llm_count > 0:
+                merged[key] = llm_count
+
+        fallback_events = merged.get("tracking_events") or []
+        llm_events = llm_payload.get("tracking_events") or []
+        if not fallback_events and llm_events:
+            merged["tracking_events"] = llm_events
+
         return CanonicalShipmentSnapshot.model_validate(merged)
 
 
 def _extract_status_fallback(text: str) -> str | None:
     lowered = text.lower()
+    if re.search(r"(?:quality\s+control\s+status\s+)?ready\s+for\s+pick(?:\s*|-)?up(?:\s+scan)?", lowered):
+        return "Ready for Pickup"
     if re.search(r"status\s*[:\-]?\s*in\s+transit", lowered):
         return "In transit"
     if re.search(r"status\s*[:\-]?\s*delivered", lowered):

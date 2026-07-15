@@ -135,6 +135,59 @@ async def test_startrack_normalize_from_second_variant(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_startrack_normalize_prefers_fallback_when_llm_is_incorrect(monkeypatch):
+    provider = svc.StarTrackProviderAdapter()
+
+    async def fake_llm(**kwargs):
+        return svc.CanonicalShipmentSnapshot.model_validate(
+            {
+                "status": "Delivered",
+                "eta_date": "2026-07-22",
+                "proof_of_delivery_date": "2026-07-15",
+                "signatory": "Wrong Person",
+                "items_in_transit": 0,
+                "onboard_for_delivery": 0,
+                "items_delivered": 1,
+                "tracking_events": [
+                    {
+                        "occurred_at": "2026-07-15 09:00",
+                        "status": "Delivered",
+                        "description": "Delivered",
+                        "location": "Brisbane",
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(svc, "_extract_snapshot_with_llm", fake_llm)
+
+    raw = {
+        "url": "https://msto.startrack.com.au/track-trace/?id=UDWZ50125918",
+        "html": "<html><body></body></html>",
+        "text": (
+            "Consignment : UDWZ50125918 "
+            "Created Ready for Pick-up Picked Up In Transit Delivered "
+            "Consignment Summary Type Despatch Service FIXED PRICE PREMIUM(FPP) "
+            "Despatch Depot BRISBANE Despatch Date 15/07/2026 Delivery Depot BRISBANE "
+            "ETA Date 16/07/2026 Proof of Delivery Quality Control Status Ready for Pickup Scan "
+            "Depot Scan Date & Time"
+        ),
+    }
+
+    snapshot = await provider.normalize(raw)
+    payload = snapshot.model_dump()
+
+    assert payload["status"] == "Ready for Pickup"
+    assert payload["eta_date"] == "16/07/2026"
+    assert payload["proof_of_delivery_date"] is None
+    assert payload["signatory"] is None
+    assert payload["items_in_transit"] == 0
+    assert payload["onboard_for_delivery"] == 0
+    assert payload["items_delivered"] == 0
+    assert payload["tracking_events"] == []
+
+
+@pytest.mark.anyio
 async def test_process_due_shipment_watches_skips_not_due(monkeypatch):
     now = datetime.now(timezone.utc)
     due_watch = {
