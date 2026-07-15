@@ -480,11 +480,21 @@ def _ensure_bool(value: Any, default: bool) -> bool:
 def _ensure_list(value: Any) -> list[str]:
     if value is None:
         return []
+
     if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    if isinstance(value, str):
-        return [part.strip() for part in value.split(",") if part.strip()]
-    return []
+        values = value
+    elif isinstance(value, str):
+        values = [value]
+    else:
+        return []
+
+    result: list[str] = []
+    for item in values:
+        for part in str(item).split(","):
+            part = part.strip()
+            if part:
+                result.append(part)
+    return result
 
 
 def _extract_ticket_id_from_email_payload(payload: Mapping[str, Any]) -> int | None:
