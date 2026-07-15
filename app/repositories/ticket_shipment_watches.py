@@ -26,6 +26,7 @@ def _normalise_watch(row: dict[str, Any]) -> WatchRecord:
         if record.get(key) is not None:
             record[key] = int(record[key])
     record["active"] = bool(int(record.get("active") or 0))
+    record["public_comments_enabled"] = bool(int(record.get("public_comments_enabled") or 0))
     for key in ("created_at", "updated_at", "last_checked_at", "last_posted_update_at"):
         record[key] = _make_aware(record.get(key))
     snapshot_raw = record.get("last_snapshot_json")
@@ -65,6 +66,7 @@ async def upsert_watch(
     consignment_id: str | None,
     poll_interval_seconds: int,
     active: bool,
+    public_comments_enabled: bool,
 ) -> WatchRecord:
     existing = await get_watch_by_ticket(ticket_id)
     if existing:
@@ -75,7 +77,8 @@ async def upsert_watch(
                 provider = %s,
                 consignment_id = %s,
                 poll_interval_seconds = %s,
-                active = %s
+                active = %s,
+                public_comments_enabled = %s
             WHERE ticket_id = %s
             """,
             (
@@ -84,6 +87,7 @@ async def upsert_watch(
                 consignment_id,
                 max(60, int(poll_interval_seconds)),
                 1 if active else 0,
+                1 if public_comments_enabled else 0,
                 ticket_id,
             ),
         )
@@ -91,8 +95,8 @@ async def upsert_watch(
         await db.execute(
             """
             INSERT INTO ticket_shipment_watches
-                (ticket_id, tracking_url, provider, consignment_id, poll_interval_seconds, active)
-            VALUES (%s, %s, %s, %s, %s, %s)
+                (ticket_id, tracking_url, provider, consignment_id, poll_interval_seconds, active, public_comments_enabled)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 ticket_id,
@@ -101,6 +105,7 @@ async def upsert_watch(
                 consignment_id,
                 max(60, int(poll_interval_seconds)),
                 1 if active else 0,
+                1 if public_comments_enabled else 0,
             ),
         )
     refreshed = await get_watch_by_ticket(ticket_id)

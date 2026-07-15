@@ -375,6 +375,16 @@
                       />
                       Enable shipment monitoring for this ticket
                     </label>
+                    <label class="form-help" style="display: inline-flex; align-items: center; gap: 8px; margin-top: 8px;">
+                      <input
+                        type="checkbox"
+                        name="shipmentPublicCommentsEnabled"
+                        value="1"
+                        form="ticket-details-form"
+                        {% if ticket_shipment_watch and ticket_shipment_watch.public_comments_enabled %}checked{% endif %}
+                      />
+                      Enable Public Comments for Shipping Updates
+                    </label>
                   </dd>
                 </div>
                 {% if ticket_assets %}

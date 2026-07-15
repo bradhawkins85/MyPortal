@@ -60,6 +60,7 @@ class TicketShipmentWatchPayload(BaseModel):
     tracking_url: str = Field(min_length=1, max_length=500)
     poll_interval_seconds: int = Field(default=900, ge=60, le=86_400)
     active: bool = True
+    public_comments_enabled: bool = False
 
 
 class TicketShipmentWatchResponse(BaseModel):
@@ -70,6 +71,7 @@ class TicketShipmentWatchResponse(BaseModel):
     consignment_id: str | None = None
     poll_interval_seconds: int = 900
     active: bool = False
+    public_comments_enabled: bool = False
     last_checked_at: datetime | None = None
     last_posted_update_at: datetime | None = None
 
@@ -545,6 +547,7 @@ async def upsert_watch(
     tracking_url: str,
     poll_interval_seconds: int,
     active: bool,
+    public_comments_enabled: bool,
 ) -> dict[str, Any]:
     clean_url = _validate_tracking_url(str(tracking_url).strip())
     provider = detect_provider(clean_url)
@@ -559,6 +562,7 @@ async def upsert_watch(
         consignment_id=consignment_id,
         poll_interval_seconds=max(60, int(poll_interval_seconds)),
         active=bool(active),
+        public_comments_enabled=bool(public_comments_enabled),
     )
     return watch
 
@@ -578,6 +582,7 @@ async def set_watch_active(ticket_id: int, active: bool) -> dict[str, Any] | Non
         consignment_id=watch.get("consignment_id"),
         poll_interval_seconds=int(watch.get("poll_interval_seconds") or 900),
         active=active,
+        public_comments_enabled=bool(watch.get("public_comments_enabled")),
     )
 
 
@@ -639,8 +644,12 @@ async def process_due_shipment_watches(*, limit: int = 200) -> dict[str, int]:
                 )
 
                 first_success = previous_hash is None
-                should_post = changed_now or first_success
-                if not should_post:
+                changed_detected = changed_now or first_success
+                if not changed_detected:
+                    continue
+                changed += 1
+
+                if not bool(refreshed.get("public_comments_enabled")):
                     continue
 
                 reply_external_ref = f"shipment-watch:{provider.slug}:{current_hash[:32]}"
@@ -667,7 +676,6 @@ async def process_due_shipment_watches(*, limit: int = 200) -> dict[str, int]:
                     actor_type="system",
                     reply=reply,
                 )
-                changed += 1
                 posted += 1
             except Exception as exc:  # noqa: BLE001
                 errors += 1

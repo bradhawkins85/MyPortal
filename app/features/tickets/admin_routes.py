@@ -1045,6 +1045,8 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     shipment_poll_interval_raw = _clean_text(form.get("shipmentPollIntervalSeconds"))
     shipment_monitoring_raw = (_clean_text(form.get("shipmentMonitoringEnabled")) or "").lower()
     shipment_monitoring_enabled = shipment_monitoring_raw in {"1", "true", "on", "yes"}
+    shipment_public_comments_raw = (_clean_text(form.get("shipmentPublicCommentsEnabled")) or "").lower()
+    shipment_public_comments_enabled = shipment_public_comments_raw in {"1", "true", "on", "yes"}
     shipment_poll_interval_seconds = 900
     if shipment_poll_interval_raw:
         try:
@@ -1311,6 +1313,7 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
                 tracking_url=shipment_tracking_url,
                 poll_interval_seconds=shipment_poll_interval_seconds,
                 active=shipment_monitoring_enabled,
+                public_comments_enabled=shipment_public_comments_enabled,
             )
         except ValueError as exc:
             return await main_module._render_ticket_detail(
