@@ -821,6 +821,8 @@
                   data-tactical-base-url="{{ tacticalrmm_base_url or '' }}"
                   data-empty-message="No assets are linked to this ticket yet."
                   data-details-form-id="ticket-details-form"
+                  data-ticket-number="{{ ticket.ticket_number or ticket.id }}"
+                  data-ticket-subject="{{ ticket.subject | e }}"
                 >
                   <ul class="ticket-assets-linked__list" data-linked-assets-list>
                     {% for asset in ticket_assets %}
@@ -899,6 +901,7 @@
                             class="button button--ghost button--icon ticket-assets-linked__action"
                             data-linked-asset-chat
                             data-device-uid="{{ asset.tray_device_uid or '' }}"
+                            data-asset-name="{{ display_name | e }}"
                             {% if not asset.tray_device_uid %}disabled aria-disabled="true"{% endif %}
                             title="Open chat"
                             aria-label="Open chat with {{ display_name }}"

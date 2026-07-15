@@ -242,6 +242,9 @@
         if (!deviceUid) {
           return;
         }
+        const row = button.closest('[data-asset-id]');
+        const assetName = (button.getAttribute('data-asset-name') || (row ? row.getAttribute('data-asset-name') : '') || 'Asset').trim();
+        const chatSubject = `${assetName} - Helpdesk chat`;
         button.disabled = true;
         try {
           const response = await fetch(`/api/tray/${encodeURIComponent(deviceUid)}/chat/start`, {
@@ -251,7 +254,7 @@
               'Content-Type': 'application/json',
               'X-CSRF-Token': getCsrfToken(),
             },
-            body: JSON.stringify({ subject: 'Helpdesk chat' }),
+            body: JSON.stringify({ subject: chatSubject }),
           });
           if (!response.ok) {
             throw new Error(await response.text());
