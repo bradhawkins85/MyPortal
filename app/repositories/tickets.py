@@ -1575,19 +1575,17 @@ async def get_automation_filter_context_by_ticket_ids(ticket_ids: list[int]) -> 
         result[ticket_id]["has_attachments"] = attachment_count > 0
 
 
-    expense_rows = await db.fetch_all(
-        f"""
-        SELECT ticket_id, COALESCE(SUM(amount), 0) AS expense_total, COUNT(*) AS expense_count
-        FROM ticket_expenses
-        WHERE ticket_id IN ({placeholders}) AND billed_at IS NULL
-        GROUP BY ticket_id
-        """,
-        tuple(unique_ids),
-    )
-    for row in expense_rows:
-        ticket_id = int(row["ticket_id"])
-        expense_count = int(row.get("expense_count") or 0)
-        result[ticket_id]["expense_total"] = float(row.get("expense_total") or 0)
+    for ticket_id in unique_ids:
+        expense_row = await db.fetch_one(
+            """
+            SELECT COALESCE(SUM(amount), 0) AS expense_total, COUNT(*) AS expense_count
+            FROM ticket_expenses
+            WHERE ticket_id = %s AND billed_at IS NULL
+            """,
+            (ticket_id,),
+        )
+        expense_count = int((expense_row or {}).get("expense_count") or 0)
+        result[ticket_id]["expense_total"] = float((expense_row or {}).get("expense_total") or 0)
         result[ticket_id]["expense_count"] = expense_count
         result[ticket_id]["has_expenses"] = expense_count > 0
 

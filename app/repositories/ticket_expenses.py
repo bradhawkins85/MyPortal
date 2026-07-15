@@ -49,13 +49,11 @@ async def delete_expense(expense_id: int, ticket_id: int) -> None:
 
 
 async def mark_expenses_billed(expense_ids: list[int], *, invoice_number: str, billed_at: Any) -> None:
-    if not expense_ids:
-        return
-    placeholders = ", ".join("?" for _ in expense_ids)
-    await db.execute(
-        f"UPDATE ticket_expenses SET billed_at = ?, xero_invoice_number = ? WHERE id IN ({placeholders})",
-        (billed_at, invoice_number, *expense_ids),
-    )
+    for expense_id in expense_ids:
+        await db.execute(
+            "UPDATE ticket_expenses SET billed_at = ?, xero_invoice_number = ? WHERE id = ?",
+            (billed_at, invoice_number, expense_id),
+        )
 
 
 async def get_unbilled_total(ticket_id: int) -> Decimal:
