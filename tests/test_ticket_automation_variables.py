@@ -79,6 +79,62 @@ async def test_ticket_variables_are_rendered_in_automation_payload():
 
 
 @pytest.mark.anyio
+async def test_watcher_emails_expand_in_list_context():
+    """Test that {{ticket.watchers.email}} expands to individual list items in a list template.
+
+    This is the root cause of the SMTP2Go CC bug: when multiple watchers are present,
+    the cc field must be a list of individual email addresses, not a single
+    comma-separated string.
+    """
+    context = {
+        "ticket": {
+            "watchers": [
+                {"email": "nathan@biomecentric.com.au", "display_name": "Nathan"},
+                {"email": "shaun@biomecentric.com.au", "display_name": "Shaun"},
+            ],
+        }
+    }
+
+    # List context: each watcher email must become its own list item.
+    result = await value_templates.render_value_async(
+        ["{{ticket.watchers.email}}"], context
+    )
+    assert result == [
+        "nathan@biomecentric.com.au",
+        "shaun@biomecentric.com.au",
+    ], f"Expected individual email entries, got: {result!r}"
+
+    # String context: watcher emails should still be rendered as a human-readable
+    # comma-separated string (e.g. for use in a plain-text body).
+    string_result = await value_templates.render_string_async(
+        "CC: {{ticket.watchers.email}}", context
+    )
+    assert string_result == "CC: nathan@biomecentric.com.au, shaun@biomecentric.com.au"
+
+    # Single watcher: list must still contain exactly one item.
+    context_one = {
+        "ticket": {
+            "watchers": [
+                {"email": "only@example.com", "display_name": "Only Watcher"},
+            ],
+        }
+    }
+    result_one = await value_templates.render_value_async(
+        ["{{ticket.watchers.email}}"], context_one
+    )
+    assert result_one == ["only@example.com"]
+
+    # No watchers: render_value returns [""] because the token resolves to the
+    # empty string "".  The downstream _ensure_list call strips empty entries, so
+    # the final cc list sent to SMTP2Go is [].
+    context_none = {"ticket": {"watchers": []}}
+    result_none = await value_templates.render_value_async(
+        ["{{ticket.watchers.email}}"], context_none
+    )
+    assert result_none == [""]
+
+
+@pytest.mark.anyio
 async def test_uppercase_ticket_tokens_are_rendered():
     """Test that uppercase ticket tokens like {{TICKET_NUMBER}} work."""
     context = {
