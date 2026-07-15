@@ -386,7 +386,7 @@
                           name="shipmentPublicCommentsEnabled"
                           value="1"
                           form="ticket-details-form"
-                          {% if ticket_shipment_watch and ticket_shipment_watch.public_comments_enabled %}checked{% endif %}
+                          {% if not ticket_shipment_watch or ticket_shipment_watch.public_comments_enabled %}checked{% endif %}
                         />
                         <span>Enable public comments for shipping updates</span>
                       </label>
