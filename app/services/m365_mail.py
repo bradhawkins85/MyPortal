@@ -1396,7 +1396,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     default_company_id=default_company_id,
                 )
 
-                # Find existing ticket for reply
+                # Find existing ticket for reply. The shared matcher allows
+                # deterministic ticket-number/header references to attach to
+                # resolved tickets, matching IMAP behaviour.
                 from_email_addr = from_address if from_address else None
                 existing_ticket = await _find_existing_ticket_for_reply(
                     subject=subject,
