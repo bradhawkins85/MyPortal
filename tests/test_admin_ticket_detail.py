@@ -294,7 +294,7 @@ async def test_admin_reply_saves_attachments(monkeypatch):
 
     assert response.status_code == status.HTTP_303_SEE_OTHER
     assert "/admin/tickets/3" in response.headers.get("location", "")
-    assert set_status_mock.await_args.args == (3, "pending")
+    set_status_mock.assert_not_awaited()
     add_watcher_mock.assert_not_awaited()
     assert save_mock.await_count == 1
     called_args = save_mock.await_args.kwargs
