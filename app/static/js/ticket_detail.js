@@ -641,6 +641,8 @@
     const detailsFormId = linkedContainer.dataset.detailsFormId || '';
     const tacticalBaseUrlRaw = linkedContainer.dataset.tacticalBaseUrl || '';
     const initialCompanyId = select.dataset.initialCompanyId || '';
+    const ticketNumber = (linkedContainer.dataset.ticketNumber || '').trim();
+    const ticketSubject = (linkedContainer.dataset.ticketSubject || '').trim();
 
     const tacticalBaseUrl = tacticalBaseUrlRaw.replace(/\/+$/, '');
     const optionLookup = new Map();
@@ -874,6 +876,7 @@
         chatButton.type = 'button';
         chatButton.className = 'button button--ghost button--icon ticket-assets-linked__action';
         chatButton.setAttribute('data-linked-asset-chat', '');
+        chatButton.setAttribute('data-asset-name', displayName);
         chatButton.title = 'Open chat';
         chatButton.setAttribute('aria-label', `Open chat with ${displayName}`);
         if (record.tray_device_uid) {
@@ -1100,6 +1103,11 @@
         if (!uid) {
           return;
         }
+        const assetElement = chatButton.closest('[data-linked-asset]');
+        const nameEl = assetElement ? assetElement.querySelector('[data-linked-asset-name]') : null;
+        const assetName = (chatButton.getAttribute('data-asset-name') || (nameEl ? nameEl.textContent : '') || 'Asset').trim();
+        const ticketLabel = ticketNumber ? `#${ticketNumber}` : 'ticket';
+        const chatSubject = [assetName, ticketLabel, ticketSubject].filter(Boolean).join(' - ');
         chatButton.disabled = true;
         fetch(`/api/tray/${encodeURIComponent(uid)}/chat/start`, {
           method: 'POST',
@@ -1108,7 +1116,7 @@
             'X-CSRF-Token': getCsrfToken(),
             Accept: 'application/json',
           },
-          body: JSON.stringify({ subject: 'Helpdesk chat' }),
+          body: JSON.stringify({ subject: chatSubject || 'Helpdesk chat' }),
         })
           .then(async (response) => {
             if (!response.ok) {

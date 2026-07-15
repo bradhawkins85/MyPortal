@@ -1320,7 +1320,7 @@ async def start_device_chat(
         try:
             matrix_resp = await matrix_service.create_room(
                 name=subject,
-                topic=f"Tray-initiated support chat: {subject}",
+                topic=f"Technician-initiated tray support chat for {subject}",
             )
             matrix_room_id = matrix_resp.get("room_id", "")
         except Exception as exc:

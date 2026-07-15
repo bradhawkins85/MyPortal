@@ -106,7 +106,7 @@
         </thead>
         <tbody>
           {% for asset in assets %}
-            <tr id="asset-{{ asset.id }}" data-asset-id="{{ asset.id }}">
+            <tr id="asset-{{ asset.id }}" data-asset-id="{{ asset.id }}" data-asset-name="{{ (asset.name or asset.hostname or ('Asset ' ~ asset.id)) | e }}">
               {% for column in columns %}
                 {% set key = column.key %}
                 {% set value = asset.get(key) %}
@@ -221,6 +221,7 @@
                             role="menuitem"
                             data-tray-chat
                             data-device-uid="{{ asset.tray_device_uid }}"
+                            data-asset-name="{{ (asset.name or asset.hostname or ('Asset ' ~ asset.id)) | e }}"
                           >Open Chat</button>
                         </li>
                       {% endif %}
