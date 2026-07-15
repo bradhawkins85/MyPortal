@@ -291,12 +291,29 @@ class StarTrackProviderAdapter(ProviderAdapter):
 
 def _extract_status_fallback(text: str) -> str | None:
     lowered = text.lower()
-    if "delivered" in lowered:
+    if re.search(r"status\\s*[:\\-]?\\s*in\\s+transit", lowered):
+        return "In transit"
+    if re.search(r"status\\s*[:\\-]?\\s*delivered", lowered):
         return "Delivered"
-    if "onboard" in lowered and "delivery" in lowered:
+    if re.search(r"status\\s*[:\\-]?\\s*onboard\\s+for\\s+delivery", lowered):
         return "Onboard for delivery"
+
+    in_transit = _extract_count(text, "in transit")
+    delivered = _extract_count(text, "delivered")
+    onboard = _extract_count(text, "onboard for delivery")
+    if in_transit > 0:
+        return "In transit"
+    if delivered > 0:
+        return "Delivered"
+    if onboard > 0:
+        return "Onboard for delivery"
+
+    if re.search(r"\\bdelivered\\b", lowered):
+        return "Delivered"
     if "in transit" in lowered:
         return "In transit"
+    if "onboard" in lowered and "delivery" in lowered:
+        return "Onboard for delivery"
     return None
 
 
