@@ -651,7 +651,7 @@ async def process_due_shipment_watches(*, limit: int = 200) -> dict[str, int]:
                 # public comment posting is disabled for this watch.
                 changed += 1
 
-                if not refreshed.get("public_comments_enabled"):
+                if not refreshed["public_comments_enabled"]:
                     continue
 
                 reply_external_ref = f"shipment-watch:{provider.slug}:{current_hash[:32]}"
