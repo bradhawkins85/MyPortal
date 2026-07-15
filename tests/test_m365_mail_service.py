@@ -6,7 +6,7 @@ from urllib.parse import unquote
 
 import pytest
 
-from app.services import m365_mail
+from app.services import imap, m365_mail
 
 
 pytestmark = pytest.mark.anyio("asyncio")
@@ -1192,7 +1192,7 @@ async def test_sync_account_matches_existing_ticket(monkeypatch):
     monkeypatch.setattr(m365_mail.tickets_service, "emit_ticket_updated_event", fake_emit_ticket_updated_event)
     monkeypatch.setattr(m365_mail.mail_repo, "upsert_message", fake_upsert_message)
     monkeypatch.setattr(m365_mail.mail_repo, "update_account", fake_update_account)
-    monkeypatch.setattr(m365_mail, "sanitize_rich_text", lambda text: FakeSanitized())
+    monkeypatch.setattr(imap, "sanitize_rich_text", lambda text: FakeSanitized())
 
     result = await m365_mail.sync_account(1)
 
@@ -1200,6 +1200,119 @@ async def test_sync_account_matches_existing_ticket(monkeypatch):
     assert result["processed"] == 1
     assert len(replies_added) == 1
     assert replies_added[0]["ticket_id"] == 50
+
+
+async def test_sync_account_attaches_m365_reply_to_resolved_ticket_number(monkeypatch):
+    """Graph mail replies should use the shared ticket matcher for resolved tickets."""
+    monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
+
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        assert slug == "m365-mail"
+        return {"enabled": True}
+
+    async def fake_get_account(account_id: int):
+        return {
+            "id": account_id,
+            "active": True,
+            "company_id": 5,
+            "user_principal_name": "support@example.com",
+            "folder": "Inbox",
+            "process_unread_only": True,
+            "mark_as_read": False,
+            "filter_query": None,
+            "sync_known_only": False,
+        }
+
+    async def fake_acquire_token(company_id, **kwargs):
+        return "fake-token"
+
+    async def fake_graph_get(access_token: str, url: str):
+        return {
+            "value": [
+                {
+                    "id": "msg-24417",
+                    "internetMessageId": "<reply-24417@example.com>",
+                    "subject": "Re: Ticket #24417 - Onboard New Laptops - 6a3b13ea7a831560a1a26d8e",
+                    "body": {"content": "<p>We have replied</p>"},
+                    "from": {"emailAddress": {"address": "customer@example.com", "name": "Customer"}},
+                    "toRecipients": [],
+                    "ccRecipients": [],
+                    "bccRecipients": [],
+                    "replyTo": [],
+                    "isRead": False,
+                    "receivedDateTime": "2026-01-15T12:00:00Z",
+                    "hasAttachments": False,
+                    "internetMessageHeaders": [],
+                }
+            ]
+        }
+
+    async def fake_get_message(account_id: int, message_uid: str):
+        return None
+
+    async def fake_resolve_ticket_entities(from_header, *, default_company_id=None):
+        return 5, 42
+
+    async def fake_get_ticket_by_external_reference(_reference: str):
+        return None
+
+    async def fake_fetch_all(query: str, params: tuple[object, ...]):
+        if "ticket_number" in query:
+            return [
+                {
+                    "id": 24417,
+                    "ticket_number": "24417",
+                    "subject": "Onboard New Laptops",
+                    "status": "resolved",
+                    "requester_id": 42,
+                }
+            ]
+        return []
+
+    created_tickets: list[dict[str, Any]] = []
+
+    async def fake_create_ticket(**kwargs):
+        created_tickets.append(kwargs)
+        return {"id": 999}
+
+    replies_added: list[dict[str, Any]] = []
+
+    async def fake_create_reply(**kwargs):
+        replies_added.append(kwargs)
+
+    async def fake_emit_ticket_updated_event(ticket_id, actor=None):
+        pass
+
+    recorded_messages: list[dict[str, Any]] = []
+
+    async def fake_upsert_message(**kwargs):
+        recorded_messages.append(kwargs)
+
+    async def fake_update_account(account_id: int, **fields):
+        return None
+
+    monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_message", fake_get_message)
+    monkeypatch.setattr(m365_mail.mail_repo, "upsert_message", fake_upsert_message)
+    monkeypatch.setattr(m365_mail.mail_repo, "update_account", fake_update_account)
+    monkeypatch.setattr(m365_mail, "_resolve_ticket_entities", fake_resolve_ticket_entities)
+    monkeypatch.setattr(imap.tickets_repo, "get_ticket_by_external_reference", fake_get_ticket_by_external_reference)
+    monkeypatch.setattr(imap.db, "fetch_all", fake_fetch_all)
+    monkeypatch.setattr(m365_mail.tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(m365_mail.tickets_repo, "create_reply", fake_create_reply)
+    monkeypatch.setattr(m365_mail.tickets_service, "emit_ticket_updated_event", fake_emit_ticket_updated_event)
+
+    result = await m365_mail.sync_account(1)
+
+    assert result["status"] == "succeeded"
+    assert result["processed"] == 1
+    assert created_tickets == []
+    assert len(replies_added) == 1
+    assert replies_added[0]["ticket_id"] == 24417
+    assert recorded_messages[-1]["ticket_id"] == 24417
 
 async def test_embed_graph_inline_images_replaces_cid_with_data_uri(monkeypatch):
     async def fake_graph_get(access_token: str, url: str):

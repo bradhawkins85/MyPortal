@@ -471,8 +471,8 @@ class TestFindExistingTicket:
         assert result is not None
         assert result["external_reference"] == "101748802"
 
-    async def test_closed_ticket_skipped_for_syncro_message_id(self, monkeypatch):
-        """Ensure closed Syncro tickets are not matched by embedded message id."""
+    async def test_closed_ticket_matched_for_syncro_message_id(self, monkeypatch):
+        """Ensure closed Syncro tickets are matched by embedded message id."""
 
         from app.services import imap
 
@@ -507,10 +507,12 @@ class TestFindExistingTicket:
             message_body="Following up (message id: 222333444)",
         )
 
-        assert result is None
+        assert result is not None
+        assert result["id"] == 12
+        assert result["status"] == "closed"
 
-    async def test_closed_ticket_not_matched(self, monkeypatch):
-        """Test that closed tickets are not matched, forcing creation of new ticket."""
+    async def test_closed_ticket_matched_by_ticket_number(self, monkeypatch):
+        """Test that closed tickets are matched by explicit ticket number."""
         from app.services import imap
         from app.core import database
         
@@ -535,14 +537,16 @@ class TestFindExistingTicket:
         
         monkeypatch.setattr(database.db, "fetch_all", mock_fetch_all)
         
-        # Test that closed ticket is not matched
+        # Test that closed ticket is matched by deterministic ticket number
         result = await imap._find_existing_ticket_for_reply(
             subject="RE: Resolved Issue #789",
             from_email="user@example.com",
             requester_id=5,
         )
         
-        assert result is None, "Closed tickets should not be matched for replies"
+        assert result is not None
+        assert result["id"] == 3
+        assert result["status"] == "closed"
 
     async def test_find_ticket_by_subject_for_known_user_not_watcher(self, monkeypatch):
         """Known users who are not watchers can still match a ticket if their email

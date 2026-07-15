@@ -1326,7 +1326,7 @@ async def _find_existing_ticket_for_reply(
 
     Priority order:
     1. Match In-Reply-To/References message IDs against ticket and reply external references
-    2. Extract ticket number from subject
+    2. Extract ticket number from subject, including resolved tickets
     3. Fuzzy subject match for non-closed tickets where sender is requester or watcher.
 
     Args:
@@ -1346,7 +1346,7 @@ async def _find_existing_ticket_for_reply(
         for message_id in related_ids:
             try:
                 ticket = await tickets_repo.get_ticket_by_external_reference(message_id)
-                if ticket and not _ticket_is_closed(ticket):
+                if ticket:
                     return ticket
             except Exception:  # pragma: no cover - defensive logging
                 pass
@@ -1364,8 +1364,7 @@ async def _find_existing_ticket_for_reply(
                 )
                 if rows:
                     ticket = _normalise_ticket(rows[0])
-                    if not _ticket_is_closed(ticket):
-                        return ticket
+                    return ticket
             except Exception:  # pragma: no cover - defensive logging
                 pass
 
@@ -1374,7 +1373,7 @@ async def _find_existing_ticket_for_reply(
     if syncro_external_id:
         try:
             ticket = await tickets_repo.get_ticket_by_external_reference(syncro_external_id)
-            if ticket and not _ticket_is_closed(ticket):
+            if ticket:
                 return ticket
         except Exception:  # pragma: no cover - defensive logging
             pass
@@ -1391,9 +1390,6 @@ async def _find_existing_ticket_for_reply(
             if rows:
                 from app.repositories.tickets import _normalise_ticket
                 ticket = _normalise_ticket(rows[0])
-                # Don't match closed tickets - create a new ticket instead
-                if _ticket_is_closed(ticket):
-                    return None
                 return ticket
         except Exception:  # pragma: no cover - defensive
             pass
@@ -1408,9 +1404,6 @@ async def _find_existing_ticket_for_reply(
             if rows:
                 from app.repositories.tickets import _normalise_ticket
                 ticket = _normalise_ticket(rows[0])
-                # Don't match closed tickets - create a new ticket instead
-                if _ticket_is_closed(ticket):
-                    return None
                 return ticket
         except (ValueError, Exception):  # pragma: no cover - defensive
             pass
