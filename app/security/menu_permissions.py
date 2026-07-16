@@ -54,6 +54,7 @@ MENU_PERMISSIONS: tuple[MenuPermission, ...] = (
     MenuPermission("menu.admin.profile", "My Profile", "Administration", "View and update the user's administration profile."),
     MenuPermission("menu.admin.impersonation", "Impersonation", "Administration", "Access impersonation administration.", admin_only=True),
     MenuPermission("menu.admin.call_recordings", "Call Recordings", "Administration", "Access call recordings administration.", admin_only=True),
+    MenuPermission("menu.admin.calls", "Calls", "Administration", "Access phone call webhook logs.", admin_only=True),
     MenuPermission("menu.admin.scheduled_tasks", "Scheduled Tasks", "Administration", "Access scheduled task administration.", admin_only=True),
     MenuPermission("menu.admin.backup_history", "Backup History", "Administration", "Access backup history.", admin_only=True),
     MenuPermission("menu.admin.backup_summary", "Backup Summary", "Administration", "Access backup summary.", admin_only=True),

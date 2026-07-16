@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="page-header">
+  <div>
+    <p class="eyebrow">Administration</p>
+    <h1>Calls</h1>
+    <p class="page-header__subtitle">Central log of phone ActionURL webhook events received by MyPortal.</p>
+  </div>
+</section>
+
+<section class="card stack gap-md">
+  <div>
+    <h2>Phone webhook endpoint</h2>
+    <p>
+      Configure phones to send an HTTP GET request to
+      <code>/phonewebhook/&lt;obscure_static_id_for_security&gt;/</code> with supported query parameters.
+      Example: <code>/phonewebhook/obscure_static_id_for_security/?number=$remote&amp;remote=$remote&amp;call-id=$call-id</code>.
+    </p>
+  </div>
+  <details>
+    <summary>Supported events and dynamic variables</summary>
+    <div class="grid grid--two gap-md mt-md">
+      <div>
+        <h3>Events</h3>
+        <ul class="tag-list">
+          {% for event in supported_events %}
+            <li><code>{{ event }}</code></li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div>
+        <h3>Dynamic variables recorded</h3>
+        <ul class="tag-list">
+          {% for variable in supported_variables %}
+            <li><code>{{ variable }}</code></li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </details>
+</section>
+
+<section class="card mt-lg">
+  <div class="table-wrapper">
+    <table class="table" data-table data-table-id="admin_calls">
+      <thead>
+        <tr>
+          <th>Received</th>
+          <th>Event</th>
+          <th>Remote</th>
+          <th>Local</th>
+          <th>Direction</th>
+          <th>Duration</th>
+          <th>Call ID</th>
+          <th>Supported data</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in call_events %}
+          <tr>
+            <td>{{ event.received_at|datetime if event.received_at else '—' }}</td>
+            <td>{{ event.event_name or 'Unspecified' }}</td>
+            <td>{{ event.remote_number or '—' }}</td>
+            <td>{{ event.local_number or '—' }}</td>
+            <td>{{ event.direction or '—' }}</td>
+            <td>{% if event.duration_seconds is not none %}{{ event.duration_seconds }}s{% else %}—{% endif %}</td>
+            <td><code>{{ event.call_id or '—' }}</code></td>
+            <td><code>{{ event.supported_params|tojson }}</code></td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="8" class="muted">No call webhook events have been logged yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
