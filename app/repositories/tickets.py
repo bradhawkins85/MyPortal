@@ -567,7 +567,7 @@ async def list_tickets_for_automation_scan(*, limit: int = 1000) -> list[TicketR
             ) AS latest_reply_at
         FROM tickets t
         WHERE t.merged_into_ticket_id IS NULL
-        ORDER BY t.updated_at ASC, t.id ASC
+        ORDER BY COALESCE(t.status_changed_at, t.created_at, t.updated_at) ASC, t.updated_at ASC, t.id ASC
         LIMIT %s
         """,
         (safe_limit,),
