@@ -543,7 +543,6 @@ def _render_ticket_reply(snapshot: Mapping[str, Any], watch: Mapping[str, Any]) 
     tracking_url = str(watch.get("tracking_url") or "").strip()
 
     lines = [
-        "Hi {{requester}}",
         f"Your order for this ticket is currently {status}, the estimated delivery date is {eta_date}.",
     ]
     if tracking_url:

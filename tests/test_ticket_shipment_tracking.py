@@ -119,7 +119,6 @@ def test_reply_template_contains_customer_friendly_tracking_summary():
     body = svc._render_ticket_reply(snapshot, watch)
 
     assert body == (
-        "Hi {{requester}}\n"
         "Your order for this ticket is currently On Board for Delivery, the estimated delivery date is 16/07/2026.\n"
         "For full tracking details please see the couriers website at "
         "https://msto.startrack.com.au/track-trace/?id=UDWZ50125918"
