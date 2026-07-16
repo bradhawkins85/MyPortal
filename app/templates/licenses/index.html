@@ -335,8 +335,20 @@
         } else {
           data.forEach((member) => {
             const li = document.createElement('li');
+            li.classList.add('license-allocation-item');
+            if (member.enabled === false) {
+              li.classList.add('license-allocation-item--disabled');
+            } else if (member.is_shared_mailbox) {
+              li.classList.add('license-allocation-item--shared');
+            }
+
+            const name = `${member.first_name || ''} ${member.last_name || ''}`.trim();
             const email = member.email ? ` (${member.email})` : '';
-            li.textContent = `${member.first_name || ''} ${member.last_name || ''}${email}`.trim();
+            const labels = [];
+            if (member.enabled === false) labels.push('Disabled');
+            if (member.is_shared_mailbox) labels.push('Shared mailbox');
+            const suffix = labels.length ? ` — ${labels.join(', ')}` : '';
+            li.textContent = `${name}${email}${suffix}`.trim();
             allocatedList.appendChild(li);
           });
         }
