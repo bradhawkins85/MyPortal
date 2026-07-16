@@ -2874,21 +2874,31 @@
       return loadedResponses;
     }
 
+    function cannedResponseTextToHtml(text) {
+      return String(text)
+        .replace(/\r\n?/g, '\n')
+        .trim()
+        .split(/\n{2,}/)
+        .map((paragraph) => paragraph
+          .split('\n')
+          .map((line) => escapeHtml(line))
+          .join('<br>'))
+        .map((paragraph) => `<p>${paragraph || '<br>'}</p>`)
+        .join('');
+    }
+
     function appendResponse(text) {
-      const responseText = typeof text === 'string' ? text.trim() : '';
+      const responseText = typeof text === 'string' ? text.replace(/\r\n?/g, '\n').trim() : '';
       if (!responseText) {
         return;
       }
       if (editor instanceof HTMLElement) {
         const current = editor.innerHTML.trim();
-        const escaped = responseText
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/\n/g, '<br>');
-        editor.innerHTML = current ? `${current}<p>${escaped}</p>` : `<p>${escaped}</p>`;
+        const responseHtml = cannedResponseTextToHtml(responseText);
+        editor.innerHTML = current ? `${current}${responseHtml}` : responseHtml;
         editor.dispatchEvent(new Event('input', { bubbles: true }));
         editor.focus();
+        return;
       }
       if (fallback instanceof HTMLTextAreaElement) {
         fallback.value = fallback.value.trim() ? `${fallback.value}\n\n${responseText}` : responseText;
