@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 import os
+import re
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
@@ -61,6 +62,59 @@ async def _get_xero_line_item_template() -> str:
     except RuntimeError:
         settings = {}
     return str(settings.get("line_item_description_template") or "").strip() or DEFAULT_XERO_LINE_ITEM_TEMPLATE
+
+
+def _strip_empty_description_segments(description: str) -> str:
+    """Clean up punctuation left by invoice template placeholders removed for expenses."""
+
+    cleaned = re.sub(r"\s*\(\s*\)", "", description)
+    cleaned = re.sub(r"\s+-\s*(?=$|\n)", "", cleaned)
+    cleaned = re.sub(r"\s+·\s*(?=$|\n)", "", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    return cleaned.strip(" -·")
+
+
+def _build_expense_line_description(
+    template: str,
+    ticket: dict[str, Any],
+    expenses: list[dict[str, Any]],
+    *,
+    requester_name: str = "",
+    requester_email: str = "",
+) -> str:
+    """Build an expense invoice description without time or amount details."""
+
+    expense_template = template
+    for placeholder in (
+        "{labour_duration}",
+        "{labour_minutes}",
+        "{labour_hours}",
+        "{billable_minutes}",
+        "{non_billable_minutes}",
+    ):
+        expense_template = expense_template.replace(placeholder, "")
+
+    base_description = _build_ticket_line_description(
+        expense_template,
+        ticket,
+        {"minutes": 0, "code": None, "name": "Expenses", "rate": None},
+        0,
+        billable_minutes=0,
+        requester_name=requester_name,
+        requester_email=requester_email,
+    )
+    base_description = _strip_empty_description_segments(base_description)
+
+    expense_descriptions = [
+        str(expense.get("description") or "Expense").strip() or "Expense"
+        for expense in expenses
+    ]
+    if not expense_descriptions:
+        return base_description
+    if len(expense_descriptions) == 1:
+        return f"{base_description} - {expense_descriptions[0]}" if base_description else expense_descriptions[0]
+    expenses_text = "\n".join(expense_descriptions)
+    return f"{base_description}\n{expenses_text}" if base_description else expenses_text
 
 
 def _build_ticket_line_description(
@@ -287,21 +341,15 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
         )
 
         if expense_total > 0:
-            expense_lines = [
-                f"{str(expense.get('description') or 'Expense').strip()}: {(_to_decimal(expense.get('amount')) or Decimal('0')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)}"
-                for expense in unbilled_expenses
-            ]
-            base_description = _build_ticket_line_description(
+            description = _build_expense_line_description(
                 line_item_template,
                 ticket,
-                {"minutes": billable_minutes, "code": None, "name": "Expenses", "rate": None},
-                billable_minutes,
-                billable_minutes=billable_minutes,
+                unbilled_expenses,
                 requester_name=requester_name,
                 requester_email=requester_email,
             )
             ticket_line_items.append({
-                "Description": base_description + "\n" + "\n".join(expense_lines),
+                "Description": description,
                 "Quantity": 1.0,
                 "UnitAmount": float(expense_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
                 "ItemCode": "",
