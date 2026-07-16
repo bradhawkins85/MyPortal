@@ -70,7 +70,6 @@
               Solidtime
             </a>
           {% endif %}
-          <button type="button" class="button button--ghost" data-canned-response-create-open>Create canned response</button>
           {% if can_delete_ticket %}
             <form
               action="/admin/tickets/{{ ticket.id }}/delete"
@@ -1587,30 +1586,6 @@
         {% endfor %}
       </div>
       <p class="form-help" data-canned-responses-error hidden></p>
-    </div>
-  </div>
-
-  <div class="modal" id="canned-response-create-modal" role="dialog" aria-modal="true" aria-labelledby="canned-response-create-title" hidden data-canned-response-create-modal>
-    <div class="modal__content" role="document">
-      <button type="button" class="modal__close" data-canned-response-create-close aria-label="Close">×</button>
-      <h2 class="modal__title" id="canned-response-create-title">Create canned response</h2>
-      <form action="/admin/tickets/{{ ticket.id }}/canned-responses" method="post" class="form">
-        {% if csrf_token %}
-          <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-        {% endif %}
-        <div class="form-field">
-          <label class="form-label required" for="canned-response-title">Title</label>
-          <input id="canned-response-title" name="title" class="form-input" maxlength="255" required />
-        </div>
-        <div class="form-field">
-          <label class="form-label required" for="canned-response-body">Reply text</label>
-          <textarea id="canned-response-body" name="body" class="form-input" rows="8" required placeholder="Use variables like {{ '{{ ticket.ticket_number }}' }}, {{ '{{ ticket.subject }}' }}, {{ '{{ requester.name }}' }}, or {{ '{{ company.name }}' }}."></textarea>
-          <p class="form-help">Variables are enriched when the canned response is inserted into a ticket reply.</p>
-        </div>
-        <div class="form-actions">
-          <button type="submit" class="button button--primary">Save response</button>
-        </div>
-      </form>
     </div>
   </div>
 

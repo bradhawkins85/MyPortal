@@ -16,6 +16,7 @@ Mirrors the routes that used to live in ``app/main.py``:
 * ``POST /admin/tickets/bulk-delete``
 * ``POST /admin/tickets/bulk-edit``
 * ``POST /admin/tickets/{ticket_id}/replies``
+* ``POST /admin/tickets/canned-responses``
 """
 
 from __future__ import annotations
@@ -1641,33 +1642,46 @@ def _ticket_template_context(ticket: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+async def _create_ticket_canned_response_from_form(request: Request, current_user: Mapping[str, Any]) -> str | None:
+    form = await request.form()
+    title = str(form.get("title") or "").strip()
+    body = str(form.get("body") or "").strip()
+    if not title or not body:
+        return "Enter both a title and reply text for the canned response."
+    if len(title) > 255:
+        return "Canned response title cannot exceed 255 characters."
+    user_id = _main()._get_current_user_id(current_user)
+    await canned_responses_repo.create_response(title=title, body=body, created_by_user_id=user_id)
+    return None
+
+
+@router.post("/admin/tickets/canned-responses", response_class=HTMLResponse)
+async def admin_create_global_ticket_canned_response(request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    error_message = await _create_ticket_canned_response_from_form(request, current_user)
+    if error_message:
+        return flash_redirect("/admin/tickets", error_message, "error")
+    return flash_redirect("/admin/tickets", "Canned response created.", "success")
+
+
 @router.post("/admin/tickets/{ticket_id:int}/canned-responses", response_class=HTMLResponse)
 async def admin_create_ticket_canned_response(ticket_id: int, request: Request):
     main_module = _main()
     current_user, redirect = await main_module._require_helpdesk_page(request)
     if redirect:
         return redirect
-    form = await request.form()
-    title = str(form.get("title") or "").strip()
-    body = str(form.get("body") or "").strip()
-    if not title or not body:
+    error_message = await _create_ticket_canned_response_from_form(request, current_user)
+    if error_message:
         return await main_module._render_ticket_detail(
             request,
             current_user,
             ticket_id=ticket_id,
-            error_message="Enter both a title and reply text for the canned response.",
+            error_message=error_message,
             status_code=status.HTTP_400_BAD_REQUEST,
         )
-    if len(title) > 255:
-        return await main_module._render_ticket_detail(
-            request,
-            current_user,
-            ticket_id=ticket_id,
-            error_message="Canned response title cannot exceed 255 characters.",
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
-    user_id = main_module._get_current_user_id(current_user)
-    await canned_responses_repo.create_response(title=title, body=body, created_by_user_id=user_id)
     return RedirectResponse(f"/admin/tickets/{ticket_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
