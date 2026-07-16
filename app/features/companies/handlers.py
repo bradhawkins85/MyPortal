@@ -517,6 +517,19 @@ async def _render_company_edit_page(
         ),
         "email_domains": _string_value("email_domains", default_email_domains),
         "is_vip": _bool_value("is_vip", bool(company_record.get("is_vip"))),
+        "default_ticket_replies_billable": _bool_value(
+            "default_ticket_replies_billable",
+            bool(
+                int(
+                    company_record.get(
+                        "default_ticket_replies_billable",
+                        1,
+                    )
+                    if company_record.get("default_ticket_replies_billable") is not None
+                    else 1
+                )
+            ),
+        ),
         "payment_method": _string_value(
             "payment_method",
             (company_record.get("payment_method") or "invoice_prepay").strip(),
@@ -1369,6 +1382,7 @@ async def admin_update_company(company_id: int, request: Request):
     offboarding_email_forwarding_enabled = bool(
         form.get("offboardingEmailForwardingEnabled")
     )
+    default_ticket_replies_billable = bool(form.get("defaultTicketRepliesBillable"))
     onedrive_export_selection_raw = str(form.get("onedriveExportSite") or "").strip()
     onedrive_export_site_id_raw = ""
     onedrive_export_drive_id_raw = ""
@@ -1432,6 +1446,7 @@ async def admin_update_company(company_id: int, request: Request):
         "payment_method": payment_method,
         "require_po": require_po,
         "offboarding_email_forwarding_enabled": offboarding_email_forwarding_enabled,
+        "default_ticket_replies_billable": default_ticket_replies_billable,
         "onedrive_export_site_id": onedrive_export_site_id_raw,
         "onedrive_export_drive_id": onedrive_export_drive_id_raw,
         "onedrive_export_site_name": onedrive_export_site_name_raw,
@@ -1497,6 +1512,9 @@ async def admin_update_company(company_id: int, request: Request):
         "require_po": 1 if require_po else 0,
         "offboarding_email_forwarding_enabled": (
             1 if offboarding_email_forwarding_enabled else 0
+        ),
+        "default_ticket_replies_billable": (
+            1 if default_ticket_replies_billable else 0
         ),
         "onedrive_export_site_id": onedrive_export_site_id_raw or None,
         "onedrive_export_site_name": onedrive_export_site_name_raw or None,

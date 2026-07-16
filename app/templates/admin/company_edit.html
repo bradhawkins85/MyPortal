@@ -257,6 +257,19 @@
             </label>
           </div>
           <div class="form-field form-field--checkbox">
+            <label class="checkbox" for="edit-company-default-ticket-replies-billable">
+              <input
+                id="edit-company-default-ticket-replies-billable"
+                type="checkbox"
+                name="defaultTicketRepliesBillable"
+                value="1"
+                {% if form_data.default_ticket_replies_billable %}checked{% endif %}
+              />
+              <span>Default ticket replies to Billable</span>
+            </label>
+            <p class="form-help">When enabled, the Billable checkbox is ticked automatically for new technician ticket replies. Technicians can untick it on individual replies when needed.</p>
+          </div>
+          <div class="form-field form-field--checkbox">
             <label class="checkbox" for="edit-company-offboarding-email-forwarding">
               <input
                 id="edit-company-offboarding-email-forwarding"
