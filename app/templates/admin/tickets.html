@@ -9,9 +9,10 @@
   {% set show_next_ticket_number = is_super_admin %}
   {% set show_unbill_tickets = is_super_admin %}
   {% set show_email_blocklist = is_super_admin %}
+  {% set can_create_canned_response = is_helpdesk_technician | default(false) %}
   {% set can_merge_tickets = is_helpdesk_technician | default(false) %}
   {% set can_bulk_edit_tickets = is_helpdesk_technician | default(false) %}
-  {% set show_ticket_tools = show_ticket_automations or show_syncro_import or show_ticket_status_editor or show_labour_type_editor or show_next_ticket_number or show_unbill_tickets or show_email_blocklist or show_tag_exclusions or can_bulk_delete_tickets or can_merge_tickets or can_bulk_edit_tickets %}
+  {% set show_ticket_tools = show_ticket_automations or show_syncro_import or show_ticket_status_editor or show_labour_type_editor or show_next_ticket_number or show_unbill_tickets or show_email_blocklist or show_tag_exclusions or can_bulk_delete_tickets or can_merge_tickets or can_bulk_edit_tickets or can_create_canned_response %}
   <div class="header-title-menu">
     <span class="header-title-menu__label">Ticketing workspace</span>
     <button
@@ -33,6 +34,20 @@
           <span class="visually-hidden">Toggle ticket tools menu</span>
         </summary>
         <ul class="header-title-menu__list" role="menu">
+          {% if can_create_canned_response %}
+            <li class="header-title-menu__item" role="none">
+              <button
+                type="button"
+                class="header-title-menu__link"
+                role="menuitem"
+                data-canned-response-create-open
+                aria-haspopup="dialog"
+                aria-controls="canned-response-create-modal"
+              >
+                Create canned response
+              </button>
+            </li>
+          {% endif %}
           {% if show_ticket_automations %}
             <li class="header-title-menu__item" role="none">
               <a href="/admin/automations" class="header-title-menu__link" role="menuitem">Ticket automations</a>
@@ -157,6 +172,31 @@
       </details>
     {% endif %}
   </div>
+
+  {% if can_create_canned_response %}
+    <div class="modal" id="canned-response-create-modal" role="dialog" aria-modal="true" aria-labelledby="canned-response-create-title" hidden>
+      <div class="modal__content" role="document">
+        <button type="button" class="modal__close" data-modal-close aria-label="Close">×</button>
+        <h2 class="modal__title" id="canned-response-create-title">Create canned response</h2>
+        <form action="/admin/tickets/canned-responses" method="post" class="form">
+          {% include "partials/csrf.html" %}
+          <div class="form-field">
+            <label class="form-label required" for="canned-response-title">Title</label>
+            <input id="canned-response-title" name="title" class="form-input" maxlength="255" required />
+          </div>
+          <div class="form-field">
+            <label class="form-label required" for="canned-response-body">Reply text</label>
+            <textarea id="canned-response-body" name="body" class="form-input" rows="8" required placeholder="Use variables like {{ '{{ ticket.ticket_number }}' }}, {{ '{{ ticket.subject }}' }}, {{ '{{ requester.name }}' }}, or {{ '{{ company.name }}' }}."></textarea>
+            <p class="form-help">Variables are enriched when the canned response is inserted into a ticket reply.</p>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+            <button type="submit" class="button button--primary">Save response</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  {% endif %}
 
   {% if show_next_ticket_number %}
     <form action="/admin/tickets/next-number" method="post" data-next-ticket-number-form hidden>
