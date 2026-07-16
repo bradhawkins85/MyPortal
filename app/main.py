@@ -8999,6 +8999,7 @@ async def _render_ticket_detail(
 
     # Fetch call recordings linked to this ticket
     from app.repositories import call_recordings as call_recordings_repo
+    from app.repositories import ticket_canned_responses as canned_responses_repo
     call_recordings = await call_recordings_repo.list_ticket_call_recordings(ticket_id)
 
     attachment_records: list[Mapping[str, Any]] = []
@@ -9326,6 +9327,7 @@ async def _render_ticket_detail(
 
     ticket_related_items = await _load_ticket_stored_related_items(ticket_id)
     ticket_expenses = await expenses_repo.list_expenses(ticket_id)
+    ticket_canned_responses = await canned_responses_repo.list_responses()
     ticket_expense_total = sum(Decimal(str(expense.get("amount") or 0)) for expense in ticket_expenses)
 
     # Find relevant knowledge base articles based on AI tag matching
@@ -9378,6 +9380,7 @@ async def _render_ticket_detail(
         "ticket_shipment_watch": shipment_watch,
         "ticket_attachments": formatted_attachments,
         "ticket_expenses": ticket_expenses,
+        "ticket_canned_responses": ticket_canned_responses,
         "ticket_expense_total": ticket_expense_total,
         "ticket_related_auto_scan": False,
         "ticket_related_items": ticket_related_items,

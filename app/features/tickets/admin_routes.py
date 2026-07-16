@@ -42,6 +42,7 @@ from app.repositories import company_memberships as membership_repo
 from app.repositories import staff as staff_repo
 from app.repositories import ticket_statuses as ticket_status_repo
 from app.repositories import ticket_attachments as attachments_repo
+from app.repositories import ticket_canned_responses as canned_responses_repo
 from app.repositories import ticket_expenses as expenses_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import email_blocklist as email_blocklist_repo
@@ -53,6 +54,7 @@ from app.services import ticket_attachments as attachments_service
 from app.services import rag_retrieval
 from app.services import tickets as tickets_service
 from app.services import ticket_shipment_tracking as shipment_watch_service
+from app.services import message_templates as message_template_service
 from app.services import unbill_tickets as unbill_tickets_service
 from app.services import tray as tray_service
 from app.services.sanitization import sanitize_rich_text
@@ -1627,6 +1629,66 @@ async def admin_bulk_delete_tickets(request: Request):
 
     return flash_redirect(destination, redirect_message, "success")
 
+
+
+def _ticket_template_context(ticket: Mapping[str, Any]) -> dict[str, Any]:
+    requester_name = str(ticket.get("requester_name") or ticket.get("requester_display_name") or "").strip()
+    requester_email = str(ticket.get("requester_email") or "").strip()
+    return {
+        "ticket": dict(ticket),
+        "requester": {"name": requester_name, "email": requester_email},
+        "company": {"name": str(ticket.get("company_name") or "").strip()},
+    }
+
+
+@router.post("/admin/tickets/{ticket_id:int}/canned-responses", response_class=HTMLResponse)
+async def admin_create_ticket_canned_response(ticket_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    title = str(form.get("title") or "").strip()
+    body = str(form.get("body") or "").strip()
+    if not title or not body:
+        return await main_module._render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="Enter both a title and reply text for the canned response.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    if len(title) > 255:
+        return await main_module._render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message="Canned response title cannot exceed 255 characters.",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    user_id = main_module._get_current_user_id(current_user)
+    await canned_responses_repo.create_response(title=title, body=body, created_by_user_id=user_id)
+    return RedirectResponse(f"/admin/tickets/{ticket_id}", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.get("/admin/tickets/{ticket_id:int}/canned-responses", response_class=JSONResponse)
+async def admin_list_ticket_canned_responses(ticket_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return JSONResponse({"detail": "Authentication required"}, status_code=status.HTTP_401_UNAUTHORIZED)
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    context = _ticket_template_context(ticket)
+    responses = []
+    for response in await canned_responses_repo.list_responses():
+        responses.append({
+            "id": response["id"],
+            "title": response["title"],
+            "body": message_template_service.render_content(str(response.get("body") or ""), context),
+        })
+    return JSONResponse({"responses": responses})
 
 @router.post("/admin/tickets/{ticket_id:int}/replies", response_class=HTMLResponse)
 async def admin_create_ticket_reply(ticket_id: int, request: Request):
