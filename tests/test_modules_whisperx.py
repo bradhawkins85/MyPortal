@@ -1,4 +1,5 @@
 """Tests for the WhisperX automation module handler."""
+
 import array
 import asyncio
 import json
@@ -18,6 +19,7 @@ async def _noop(*args, **kwargs):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class _FakeResponse:
     """Minimal httpx.Response stand-in."""
@@ -41,7 +43,9 @@ class _FakeResponse:
     def raise_for_status(self):
         if self.status_code >= 400:
             raise httpx.HTTPStatusError(
-                "error", request=self.request, response=self,
+                "error",
+                request=self.request,
+                response=self,
             )
 
 
@@ -59,7 +63,15 @@ class _AsyncClientFactory:
         return False
 
     async def post(self, url, *, files=None, data=None, params=None, headers=None):
-        self.calls.append({"url": url, "files": files, "data": data, "params": params, "headers": headers})
+        self.calls.append(
+            {
+                "url": url,
+                "files": files,
+                "data": data,
+                "params": params,
+                "headers": headers,
+            }
+        )
         return self._response
 
 
@@ -73,7 +85,9 @@ def _webhook_helpers(monkeypatch):
     async def fake_record_attempt(**kwargs):
         fake_event_state["attempt_count"] = kwargs.get("attempt_number", 1)
 
-    async def fake_mark_completed(event_id, *, attempt_number, response_status, response_body):
+    async def fake_mark_completed(
+        event_id, *, attempt_number, response_status, response_body
+    ):
         fake_event_state.update(
             status="succeeded",
             attempt_count=attempt_number,
@@ -81,7 +95,9 @@ def _webhook_helpers(monkeypatch):
             response_body=response_body,
         )
 
-    async def fake_mark_failed(event_id, *, attempt_number, error_message, response_status, response_body):
+    async def fake_mark_failed(
+        event_id, *, attempt_number, error_message, response_status, response_body
+    ):
         fake_event_state.update(
             status="failed",
             attempt_count=attempt_number,
@@ -91,9 +107,13 @@ def _webhook_helpers(monkeypatch):
     async def fake_get_event(event_id):
         return dict(fake_event_state)
 
-    monkeypatch.setattr(modules.webhook_monitor, "create_manual_event", fake_create_event)
+    monkeypatch.setattr(
+        modules.webhook_monitor, "create_manual_event", fake_create_event
+    )
     monkeypatch.setattr(modules.webhook_repo, "record_attempt", fake_record_attempt)
-    monkeypatch.setattr(modules.webhook_repo, "mark_event_completed", fake_mark_completed)
+    monkeypatch.setattr(
+        modules.webhook_repo, "mark_event_completed", fake_mark_completed
+    )
     monkeypatch.setattr(modules.webhook_repo, "mark_event_failed", fake_mark_failed)
     monkeypatch.setattr(modules.webhook_repo, "get_event", fake_get_event)
 
@@ -128,6 +148,7 @@ def test_whisperx_module_settings_load_from_env(monkeypatch):
         "language": "cy",
         "stereo_split": True,
     }
+
 
 def test_invoke_whisperx_transcribes_and_adds_note(monkeypatch, tmp_path):
     """Happy path: one WAV attachment → transcription → internal note."""
@@ -170,7 +191,9 @@ def test_invoke_whisperx_transcribes_and_adds_note(monkeypatch, tmp_path):
     monkeypatch.setattr(tickets_repo_mod, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(attach_repo_mod, "list_attachments", fake_list_attachments)
     monkeypatch.setattr(tickets_repo_mod, "create_reply", fake_create_reply)
-    monkeypatch.setattr(modules.tickets_service, "emit_ticket_updated_event", fake_emit_event)
+    monkeypatch.setattr(
+        modules.tickets_service, "emit_ticket_updated_event", fake_emit_event
+    )
 
     # Fake HTTP client
     whisperx_response = _FakeResponse({"text": "Hello this is a voicemail message."})
@@ -187,7 +210,11 @@ def test_invoke_whisperx_transcribes_and_adds_note(monkeypatch, tmp_path):
         created_target = True
 
     try:
-        settings = {"base_url": "http://whisperx.local", "api_key": "test-key", "language": "en"}
+        settings = {
+            "base_url": "http://whisperx.local",
+            "api_key": "test-key",
+            "language": "en",
+        }
         payload = {"ticket_id": 10}
 
         result = asyncio.run(modules._invoke_whisperx(settings, payload))
@@ -237,6 +264,7 @@ def test_invoke_whisperx_no_audio_attachments(monkeypatch):
 
     import app.repositories.tickets as tickets_repo_mod
     import app.repositories.ticket_attachments as attach_repo_mod
+
     monkeypatch.setattr(tickets_repo_mod, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(attach_repo_mod, "list_attachments", fake_list_attachments)
 
@@ -303,10 +331,13 @@ def test_invoke_whisperx_add_note_false(monkeypatch, tmp_path):
 
     import app.repositories.tickets as tickets_repo_mod
     import app.repositories.ticket_attachments as attach_repo_mod
+
     monkeypatch.setattr(tickets_repo_mod, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(attach_repo_mod, "list_attachments", fake_list_attachments)
     monkeypatch.setattr(tickets_repo_mod, "create_reply", fake_create_reply)
-    monkeypatch.setattr(modules.tickets_service, "emit_ticket_updated_event", fake_emit_event)
+    monkeypatch.setattr(
+        modules.tickets_service, "emit_ticket_updated_event", fake_emit_event
+    )
 
     whisperx_response = _FakeResponse({"text": "Transcribed text"})
     client_factory = _AsyncClientFactory(whisperx_response)
@@ -327,7 +358,9 @@ def test_invoke_whisperx_add_note_false(monkeypatch, tmp_path):
 
         result = asyncio.run(modules._invoke_whisperx(settings, payload))
 
-        assert result["status"] == "succeeded", f"result={result}, last_error={fake_event_state.get('last_error')}"
+        assert (
+            result["status"] == "succeeded"
+        ), f"result={result}, last_error={fake_event_state.get('last_error')}"
         assert result["transcription_count"] == 1
         assert result["reply_id"] is None
         assert reply_created["called"] is False
@@ -348,6 +381,7 @@ def test_invoke_whisperx_ticket_id_from_context(monkeypatch):
 
     import app.repositories.tickets as tickets_repo_mod
     import app.repositories.ticket_attachments as attach_repo_mod
+
     monkeypatch.setattr(tickets_repo_mod, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(attach_repo_mod, "list_attachments", fake_list_attachments)
 
@@ -363,19 +397,37 @@ def test_invoke_whisperx_ticket_id_from_context(monkeypatch):
 
 def test_is_audio_attachment_by_mime():
     """_is_audio_attachment matches common audio MIME types."""
-    assert modules._is_audio_attachment({"mime_type": "audio/wav", "original_filename": "f.wav"})
-    assert modules._is_audio_attachment({"mime_type": "audio/mpeg", "original_filename": "f.mp3"})
-    assert modules._is_audio_attachment({"mime_type": "audio/ogg", "original_filename": "f.ogg"})
-    assert not modules._is_audio_attachment({"mime_type": "application/pdf", "original_filename": "f.pdf"})
-    assert not modules._is_audio_attachment({"mime_type": "image/png", "original_filename": "f.png"})
+    assert modules._is_audio_attachment(
+        {"mime_type": "audio/wav", "original_filename": "f.wav"}
+    )
+    assert modules._is_audio_attachment(
+        {"mime_type": "audio/mpeg", "original_filename": "f.mp3"}
+    )
+    assert modules._is_audio_attachment(
+        {"mime_type": "audio/ogg", "original_filename": "f.ogg"}
+    )
+    assert not modules._is_audio_attachment(
+        {"mime_type": "application/pdf", "original_filename": "f.pdf"}
+    )
+    assert not modules._is_audio_attachment(
+        {"mime_type": "image/png", "original_filename": "f.png"}
+    )
 
 
 def test_is_audio_attachment_by_extension():
     """_is_audio_attachment falls back to file extension."""
-    assert modules._is_audio_attachment({"mime_type": "", "original_filename": "voicemail.wav"})
-    assert modules._is_audio_attachment({"mime_type": None, "original_filename": "recording.mp3"})
-    assert modules._is_audio_attachment({"mime_type": "application/octet-stream", "original_filename": "call.flac"})
-    assert not modules._is_audio_attachment({"mime_type": "", "original_filename": "document.txt"})
+    assert modules._is_audio_attachment(
+        {"mime_type": "", "original_filename": "voicemail.wav"}
+    )
+    assert modules._is_audio_attachment(
+        {"mime_type": None, "original_filename": "recording.mp3"}
+    )
+    assert modules._is_audio_attachment(
+        {"mime_type": "application/octet-stream", "original_filename": "call.flac"}
+    )
+    assert not modules._is_audio_attachment(
+        {"mime_type": "", "original_filename": "document.txt"}
+    )
 
 
 def test_invoke_whisperx_waits_for_attachment_file(monkeypatch, tmp_path):
@@ -401,10 +453,14 @@ def test_invoke_whisperx_waits_for_attachment_file(monkeypatch, tmp_path):
         # First poll: no attachments yet, second poll: attachment appears
         return [] if call_count["calls"] == 1 else [attachment]
 
+    from app.services import ticket_attachments as attachments_service
+
     # Prepare upload directory but do not create the file yet
-    upload_dir = Path(modules.__file__).parent.parent / "static" / "uploads" / "tickets"
+    upload_dir = attachments_service.get_attachment_file_path(
+        attachment["filename"]
+    ).parent
     upload_dir.mkdir(parents=True, exist_ok=True)
-    delayed_file = upload_dir / attachment["filename"]
+    delayed_file = attachments_service.get_attachment_file_path(attachment["filename"])
     if delayed_file.exists():
         delayed_file.unlink()
 
@@ -424,8 +480,10 @@ def test_invoke_whisperx_waits_for_attachment_file(monkeypatch, tmp_path):
     monkeypatch.setattr(tickets_repo_mod, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(attach_repo_mod, "list_attachments", fake_list_attachments)
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
     async def fake_create_reply(**kw):
         return {"id": 123}
+
     monkeypatch.setattr(tickets_repo_mod, "create_reply", fake_create_reply)
     monkeypatch.setattr(modules.tickets_service, "emit_ticket_updated_event", _noop)
 
@@ -435,7 +493,9 @@ def test_invoke_whisperx_waits_for_attachment_file(monkeypatch, tmp_path):
     try:
         result = asyncio.run(modules._invoke_whisperx(settings, payload))
 
-        assert result["status"] == "succeeded", f"result={result}, last_error={fake_event_state.get('last_error')}"
+        assert (
+            result["status"] == "succeeded"
+        ), f"result={result}, last_error={fake_event_state.get('last_error')}"
         assert result["transcription_count"] == 1
         assert call_count["calls"] >= 2  # ensured we polled at least twice
     finally:
@@ -443,9 +503,80 @@ def test_invoke_whisperx_waits_for_attachment_file(monkeypatch, tmp_path):
             delayed_file.unlink()
 
 
+def test_invoke_whisperx_uses_newest_wav_attachment(monkeypatch):
+    """When multiple WAV files are attached, only the newest WAV is transcribed."""
+    _webhook_helpers(monkeypatch)
+
+    async def fake_get_ticket(tid):
+        return {"id": tid}
+
+    attachments = [
+        {
+            "id": 11,
+            "ticket_id": 25147,
+            "filename": "older.wav",
+            "original_filename": "Older voicemail.wav",
+            "mime_type": "audio/wav",
+            "file_size": 10,
+            "uploaded_at": "2026-07-16T10:00:00",
+        },
+        {
+            "id": 9994,
+            "ticket_id": 25147,
+            "filename": "newer.wav",
+            "original_filename": "Voicemail sound attachment.wav",
+            "mime_type": "audio/wav",
+            "file_size": 10,
+            "uploaded_at": "2026-07-16T11:00:00",
+        },
+    ]
+
+    async def fake_list_attachments(tid, *, access_levels=None):
+        return attachments
+
+    from app.services import ticket_attachments as attachments_service
+    import app.repositories.tickets as tickets_repo_mod
+    import app.repositories.ticket_attachments as attach_repo_mod
+
+    older_file = attachments_service.get_attachment_file_path("older.wav")
+    newer_file = attachments_service.get_attachment_file_path("newer.wav")
+    older_file.parent.mkdir(parents=True, exist_ok=True)
+    older_file.write_bytes(b"RIFF older")
+    newer_file.write_bytes(b"RIFF newer")
+
+    client_factory = _AsyncClientFactory(_FakeResponse({"text": "new message"}))
+    monkeypatch.setattr(modules.httpx, "AsyncClient", lambda *a, **kw: client_factory)
+    monkeypatch.setattr(tickets_repo_mod, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(attach_repo_mod, "list_attachments", fake_list_attachments)
+
+    async def fake_create_reply(**kw):
+        return {"id": 123}
+
+    monkeypatch.setattr(tickets_repo_mod, "create_reply", fake_create_reply)
+    monkeypatch.setattr(modules.tickets_service, "emit_ticket_updated_event", _noop)
+
+    try:
+        result = asyncio.run(
+            modules._invoke_whisperx(
+                {"base_url": "http://whisperx.local"}, {"ticket_id": 25147}
+            )
+        )
+
+        assert result["status"] == "succeeded"
+        assert result["transcription_count"] == 1
+        assert (
+            client_factory.calls[0]["files"]["audio_file"][0]
+            == "Voicemail sound attachment.wav"
+        )
+    finally:
+        older_file.unlink(missing_ok=True)
+        newer_file.unlink(missing_ok=True)
+
+
 # ---------------------------------------------------------------------------
 # Stereo split integration tests
 # ---------------------------------------------------------------------------
+
 
 def _make_stereo_wav(path, n_frames=50, sample_rate=8000):
     """Write a minimal 2-channel 16-bit PCM WAV file to *path*."""
@@ -455,8 +586,8 @@ def _make_stereo_wav(path, n_frames=50, sample_rate=8000):
         w.setframerate(sample_rate)
         samples = array.array("h")
         for _ in range(n_frames):
-            samples.append(100)   # left  / callee
-            samples.append(200)   # right / caller
+            samples.append(100)  # left  / callee
+            samples.append(200)  # right / caller
         w.writeframes(samples.tobytes())
 
 
@@ -499,7 +630,9 @@ def test_invoke_whisperx_stereo_split(monkeypatch, tmp_path):
     monkeypatch.setattr(tickets_repo_mod, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(attach_repo_mod, "list_attachments", fake_list_attachments)
     monkeypatch.setattr(tickets_repo_mod, "create_reply", fake_create_reply)
-    monkeypatch.setattr(modules.tickets_service, "emit_ticket_updated_event", fake_emit_event)
+    monkeypatch.setattr(
+        modules.tickets_service, "emit_ticket_updated_event", fake_emit_event
+    )
 
     caller_resp = _FakeResponse({"text": "Caller says hello."})
     callee_resp = _FakeResponse({"text": "Callee says hi."})
@@ -590,7 +723,9 @@ def test_invoke_whisperx_stereo_split_mono_falls_back(monkeypatch, tmp_path):
     monkeypatch.setattr(tickets_repo_mod, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(attach_repo_mod, "list_attachments", fake_list_attachments)
     monkeypatch.setattr(tickets_repo_mod, "create_reply", fake_create_reply)
-    monkeypatch.setattr(modules.tickets_service, "emit_ticket_updated_event", fake_emit_event)
+    monkeypatch.setattr(
+        modules.tickets_service, "emit_ticket_updated_event", fake_emit_event
+    )
 
     class _CountingClient:
         def __init__(self):
