@@ -38,8 +38,12 @@ async def _render_automations_dashboard(
         kind=kind_filter,
         limit=200,
     )
-    status_counts = Counter((automation.get("status") or "inactive").lower() for automation in automations)
-    kind_counts = Counter((automation.get("kind") or "scheduled").lower() for automation in automations)
+    status_counts = Counter(
+        (automation.get("status") or "inactive").lower() for automation in automations
+    )
+    kind_counts = Counter(
+        (automation.get("kind") or "scheduled").lower() for automation in automations
+    )
     extra = {
         "title": "Automation orchestration",
         "automations": automations,
@@ -49,7 +53,9 @@ async def _render_automations_dashboard(
         "success_message": success_message,
         "error_message": error_message,
     }
-    response = await _main()._render_template("admin/automations.html", request, user, extra=extra)
+    response = await _main()._render_template(
+        "admin/automations.html", request, user, extra=extra
+    )
     response.status_code = status_code
     return response
 
@@ -109,10 +115,10 @@ async def _render_automation_form(
         else "admin/automations_create_scheduled.html"
     )
     if kind_normalised == "event":
-        page_title = "Edit event automation" if is_edit_mode else "Create event automation"
-        page_subtitle = (
-            "Link webhook payloads and application events to integration modules for immediate processing."
+        page_title = (
+            "Edit event automation" if is_edit_mode else "Create event automation"
         )
+        page_subtitle = "Link webhook payloads and application events to integration modules for immediate processing."
         alternate_link = None
         if not is_edit_mode:
             alternate_link = {
@@ -120,10 +126,12 @@ async def _render_automation_form(
                 "label": "Switch to scheduled automation",
             }
     else:
-        page_title = "Edit scheduled automation" if is_edit_mode else "Create scheduled automation"
-        page_subtitle = (
-            "Configure cadence, triggers, and action payloads to run on a predictable rhythm."
+        page_title = (
+            "Edit scheduled automation"
+            if is_edit_mode
+            else "Create scheduled automation"
         )
+        page_subtitle = "Configure cadence, triggers, and action payloads to run on a predictable rhythm."
         alternate_link = None
         if not is_edit_mode:
             alternate_link = {
@@ -222,7 +230,9 @@ def _parse_automation_form_submission(
     trigger_event_raw = _get_str_value("triggerEvent").strip()
     trigger_filters_raw = _get_str_value("triggerFilters").strip()
     trigger_filters_mode_raw = _get_str_value("triggerFiltersMode").strip().lower()
-    trigger_filters_mode = "advanced" if trigger_filters_mode_raw == "advanced" else "builder"
+    trigger_filters_mode = (
+        "advanced" if trigger_filters_mode_raw == "advanced" else "builder"
+    )
     action_module_raw = _get_str_value("actionModule").strip()
     action_payload_raw = _get_str_value("actionPayload").strip()
 
@@ -243,7 +253,12 @@ def _parse_automation_form_submission(
     }
 
     if not name:
-        return None, form_state, "Enter an automation name.", status.HTTP_400_BAD_REQUEST
+        return (
+            None,
+            form_state,
+            "Enter an automation name.",
+            status.HTTP_400_BAD_REQUEST,
+        )
 
     cadence = cadence_raw or None
     cron_expression = cron_raw or None
@@ -263,7 +278,9 @@ def _parse_automation_form_submission(
             scheduled_time = datetime.fromisoformat(scheduled_time_raw)
             if scheduled_time.tzinfo is None:
                 local_tz = datetime.now().astimezone().tzinfo
-                scheduled_time = scheduled_time.replace(tzinfo=local_tz).astimezone(timezone.utc)
+                scheduled_time = scheduled_time.replace(tzinfo=local_tz).astimezone(
+                    timezone.utc
+                )
         except (ValueError, TypeError):
             return (
                 None,
@@ -273,9 +290,15 @@ def _parse_automation_form_submission(
             )
 
     try:
-        trigger_filters = json.loads(trigger_filters_raw) if trigger_filters_raw else None
+        trigger_filters = (
+            json.loads(trigger_filters_raw) if trigger_filters_raw else None
+        )
     except json.JSONDecodeError:
-        invalid_section = "Advanced JSON trigger filters" if trigger_filters_mode == "advanced" else "Trigger filter builder payload"
+        invalid_section = (
+            "Advanced JSON trigger filters"
+            if trigger_filters_mode == "advanced"
+            else "Trigger filter builder payload"
+        )
         return (
             None,
             form_state,
@@ -284,7 +307,11 @@ def _parse_automation_form_submission(
         )
     if trigger_filters is not None:
         if not isinstance(trigger_filters, dict):
-            invalid_section = "Advanced JSON trigger filters" if trigger_filters_mode == "advanced" else "Trigger filter builder payload"
+            invalid_section = (
+                "Advanced JSON trigger filters"
+                if trigger_filters_mode == "advanced"
+                else "Trigger filter builder payload"
+            )
             return (
                 None,
                 form_state,
@@ -348,7 +375,10 @@ def _parse_automation_form_submission(
                     f"Trigger action {index}: {exc}",
                     status.HTTP_400_BAD_REQUEST,
                 )
-            action_entry: dict[str, Any] = {"module": module_value, "payload": payload_value}
+            action_entry: dict[str, Any] = {
+                "module": module_value,
+                "payload": payload_value,
+            }
             raw_order = entry.get("order")
             if raw_order is not None:
                 try:
@@ -416,22 +446,35 @@ async def admin_reorder_automations(request: Request):
 
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
-        return JSONResponse({"detail": "Authentication required"}, status_code=status.HTTP_401_UNAUTHORIZED)
+        return JSONResponse(
+            {"detail": "Authentication required"},
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
     try:
         payload = await request.json()
     except json.JSONDecodeError:
-        return JSONResponse({"detail": "Invalid JSON payload."}, status_code=status.HTTP_400_BAD_REQUEST)
+        return JSONResponse(
+            {"detail": "Invalid JSON payload."}, status_code=status.HTTP_400_BAD_REQUEST
+        )
     ordered_ids = payload.get("ordered_ids") if isinstance(payload, Mapping) else None
     if not isinstance(ordered_ids, list):
-        return JSONResponse({"detail": "ordered_ids must be a list."}, status_code=status.HTTP_400_BAD_REQUEST)
+        return JSONResponse(
+            {"detail": "ordered_ids must be a list."},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
     updated = await automation_repo.update_automation_order(ordered_ids)
-    return JSONResponse({
-        "success": True,
-        "automations": [
-            {"id": int(record["id"]), "execution_order": int(record.get("execution_order") or 0)}
-            for record in updated
-        ],
-    })
+    return JSONResponse(
+        {
+            "success": True,
+            "automations": [
+                {
+                    "id": int(record["id"]),
+                    "execution_order": int(record.get("execution_order") or 0),
+                }
+                for record in updated
+            ],
+        }
+    )
 
 
 async def admin_create_scheduled_automation_page(
@@ -471,7 +514,9 @@ async def admin_create_automation(request: Request):
     form = await request.form()
     kind_raw = str(form.get("kind", "")).strip()
     kind = "event" if kind_raw.lower() == "event" else "scheduled"
-    data, form_state, error_message, error_status = _parse_automation_form_submission(form, kind=kind)
+    data, form_state, error_message, error_status = _parse_automation_form_submission(
+        form, kind=kind
+    )
     if error_message:
         return await _render_automation_form(
             request,
@@ -535,7 +580,9 @@ async def admin_update_automation(automation_id: int, request: Request):
         return flash_redirect("/admin/automations", "Automation not found.", "error")
     form = await request.form()
     kind = str(automation.get("kind") or "scheduled")
-    data, form_state, error_message, error_status = _parse_automation_form_submission(form, kind=kind)
+    data, form_state, error_message, error_status = _parse_automation_form_submission(
+        form, kind=kind
+    )
     if error_message:
         return await _render_automation_form(
             request,
@@ -553,7 +600,9 @@ async def admin_update_automation(automation_id: int, request: Request):
     try:
         await automation_repo.update_automation(automation_id, **update_fields)
     except Exception as exc:  # pragma: no cover - defensive logging
-        log_error("Failed to update automation", automation_id=automation_id, error=str(exc))
+        log_error(
+            "Failed to update automation", automation_id=automation_id, error=str(exc)
+        )
         return await _render_automation_form(
             request,
             current_user,
@@ -589,13 +638,21 @@ async def admin_update_automation_status(automation_id: int, request: Request):
         )
     automation = await automation_repo.get_automation(automation_id)
     if not automation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found"
+        )
     await automation_repo.update_automation(automation_id, status=status_value)
     await automations_service.refresh_schedule(automation_id)
-    return flash_redirect("/admin/automations", f"Automation {automation_id} updated.", "success")
+    return flash_redirect(
+        "/admin/automations", f"Automation {automation_id} updated.", "success"
+    )
 
 
-async def admin_preview_automation(automation_id: int, request: Request, limit: int = Query(default=1000, ge=1, le=5000)):
+async def admin_preview_automation(
+    automation_id: int,
+    request: Request,
+    limit: int = Query(default=1000, ge=1, le=5000),
+):
     from app.repositories import automations as automation_repo
     from app.services import automations as automations_service
 
@@ -604,9 +661,13 @@ async def admin_preview_automation(automation_id: int, request: Request, limit: 
         return redirect
     automation = await automation_repo.get_automation(automation_id)
     if not automation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found"
+        )
     try:
-        preview = await automations_service.preview_scheduled_ticket_automation(automation, limit=limit)
+        preview = await automations_service.preview_scheduled_ticket_automation(
+            automation, limit=limit
+        )
     except ValueError as exc:
         return flash_redirect("/admin/automations", str(exc), "error")
     extra = {
@@ -615,12 +676,16 @@ async def admin_preview_automation(automation_id: int, request: Request, limit: 
         "preview": preview,
         "limit": limit,
     }
-    return await _main()._render_template("admin/automations_preview.html", request, current_user, extra=extra)
+    return await _main()._render_template(
+        "admin/automations_preview.html", request, current_user, extra=extra
+    )
 
 
-
-
-async def admin_simulate_automation(automation_id: int, request: Request, limit: int = Query(default=1000, ge=1, le=5000)):
+async def admin_simulate_automation(
+    automation_id: int,
+    request: Request,
+    limit: int = Query(default=1000, ge=1, le=5000),
+):
     from app.repositories import automations as automation_repo
     from app.services import automations as automations_service
 
@@ -629,9 +694,13 @@ async def admin_simulate_automation(automation_id: int, request: Request, limit:
         return redirect
     automation = await automation_repo.get_automation(automation_id)
     if not automation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found"
+        )
     try:
-        preview = await automations_service.simulate_event_ticket_automation(automation, limit=limit)
+        preview = await automations_service.simulate_event_ticket_automation(
+            automation, limit=limit
+        )
     except ValueError as exc:
         return flash_redirect("/admin/automations", str(exc), "error")
     extra = {
@@ -641,7 +710,9 @@ async def admin_simulate_automation(automation_id: int, request: Request, limit:
         "limit": limit,
         "is_simulation": True,
     }
-    return await _main()._render_template("admin/automations_preview.html", request, current_user, extra=extra)
+    return await _main()._render_template(
+        "admin/automations_preview.html", request, current_user, extra=extra
+    )
 
 
 async def admin_process_simulated_automation(automation_id: int, request: Request):
@@ -651,7 +722,9 @@ async def admin_process_simulated_automation(automation_id: int, request: Reques
     if redirect:
         return redirect
     form = await request.form()
-    ticket_ids = [int(value) for value in form.getlist("ticket_ids") if str(value).isdigit()]
+    ticket_ids = [
+        int(value) for value in form.getlist("ticket_ids") if str(value).isdigit()
+    ]
     try:
         limit = int(form.get("limit") or 1000)
     except (TypeError, ValueError):
@@ -668,7 +741,10 @@ async def admin_process_simulated_automation(automation_id: int, request: Reques
         f"Simulated automation {automation_id} processed {result.get('matched', 0)} ticket(s): "
         f"{result.get('succeeded', 0)} succeeded, {result.get('failed', 0)} failed."
     )
-    return flash_redirect(f"/admin/automations/{automation_id}/simulate", message, "success")
+    return flash_redirect(
+        f"/admin/automations/{automation_id}/simulate", message, "success"
+    )
+
 
 async def admin_execute_automation(automation_id: int, request: Request):
     from app.services import automations as automations_service
@@ -679,7 +755,9 @@ async def admin_execute_automation(automation_id: int, request: Request):
     try:
         result = await automations_service.execute_now(automation_id)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
     message = f"Automation {automation_id} executed with status {result.get('status')}."
     return flash_redirect("/admin/automations", message, "success")
 
@@ -695,16 +773,22 @@ async def admin_clone_automation(automation_id: int, request: Request):
 
     automation = await automation_repo.get_automation(automation_id)
     if not automation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found"
+        )
 
     next_run = None
     if automation.get("status") == "active":
         next_run = automations_service.calculate_next_run(automation)
 
     try:
-        cloned = await automation_repo.clone_automation(automation_id, next_run_at=next_run)
+        cloned = await automation_repo.clone_automation(
+            automation_id, next_run_at=next_run
+        )
     except Exception as exc:  # pragma: no cover - defensive logging
-        log_error("Failed to clone automation", automation_id=automation_id, error=str(exc))
+        log_error(
+            "Failed to clone automation", automation_id=automation_id, error=str(exc)
+        )
         return await _render_automations_dashboard(
             request,
             current_user,
@@ -713,7 +797,9 @@ async def admin_clone_automation(automation_id: int, request: Request):
         )
 
     if not cloned:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found"
+        )
 
     if cloned.get("status") == "active":
         await automations_service.refresh_schedule(int(cloned["id"]))
@@ -738,7 +824,9 @@ async def admin_delete_automation(automation_id: int, request: Request):
 
     automation = await automation_repo.get_automation(automation_id)
     if not automation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found"
+        )
 
     try:
         await automation_repo.delete_automation(automation_id)
@@ -758,22 +846,75 @@ async def admin_delete_automation(automation_id: int, request: Request):
     log_info(
         "Automation deleted",
         automation_id=automation_id,
-        deleted_by=current_user.get("id") if isinstance(current_user, Mapping) else None,
+        deleted_by=(
+            current_user.get("id") if isinstance(current_user, Mapping) else None
+        ),
     )
 
     message = f"Automation {automation_id} deleted."
     return flash_redirect("/admin/automations", message, "success")
 
 
-async def admin_automation_history(automation_id: int, request: Request, limit: int = Query(default=200, ge=1, le=1000)):
+async def admin_test_automation(automation_id: int, request: Request):
+    from app.services import automations as automations_service
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return JSONResponse(
+            {"detail": "Authentication required"},
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse(
+            {"detail": "Invalid JSON payload."}, status_code=status.HTTP_400_BAD_REQUEST
+        )
+    if not isinstance(payload, Mapping):
+        return JSONResponse(
+            {"detail": "Payload must be an object."},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    ticket_number = str(payload.get("ticket_number") or "").strip()
+    if not ticket_number:
+        return JSONResponse(
+            {"detail": "Ticket number is required."},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    apply_action = bool(payload.get("apply"))
+    try:
+        result = await automations_service.test_ticket_automation_by_id(
+            automation_id,
+            ticket_number=ticket_number,
+            apply=apply_action,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        status_code = (
+            status.HTTP_404_NOT_FOUND
+            if "not found" in message.lower()
+            else status.HTTP_400_BAD_REQUEST
+        )
+        return JSONResponse({"detail": message}, status_code=status_code)
+    return JSONResponse(_main()._serialise_for_json(result))
+
+
+async def admin_automation_history(
+    automation_id: int, request: Request, limit: int = Query(default=200, ge=1, le=1000)
+):
     from app.repositories import automations as automation_repo
 
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
-        return JSONResponse({"detail": "Authentication required"}, status_code=status.HTTP_401_UNAUTHORIZED)
+        return JSONResponse(
+            {"detail": "Authentication required"},
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
     automation = await automation_repo.get_automation(automation_id)
     if not automation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found"
+        )
     rows = await automation_repo.list_history(automation_id, limit=limit)
 
     def encode(value: Any) -> Any:
@@ -785,7 +926,9 @@ async def admin_automation_history(automation_id: int, request: Request, limit: 
             return [encode(item) for item in value]
         return value
 
-    return JSONResponse({
-        "automation": {"id": automation_id, "name": automation.get("name")},
-        "history": [encode(row) for row in rows],
-    })
+    return JSONResponse(
+        {
+            "automation": {"id": automation_id, "name": automation.get("name")},
+            "history": [encode(row) for row in rows],
+        }
+    )

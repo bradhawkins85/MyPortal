@@ -101,7 +101,9 @@ def _append_ticket_search_filter(
     ]
     like_params: list[Any] = [value, value]
     if include_external_reference:
-        like_clause.append(f"LOWER(COALESCE({prefixed_external_reference}, '')) LIKE LOWER(%s)")
+        like_clause.append(
+            f"LOWER(COALESCE({prefixed_external_reference}, '')) LIKE LOWER(%s)"
+        )
         like_params.append(value)
     where.append(f"({' OR '.join(like_clause)})")
     params.extend(like_params)
@@ -119,7 +121,9 @@ def _append_ticket_cursor_filter(
         return
     updated_column = f"{column_prefix}updated_at"
     id_column = f"{column_prefix}id"
-    where.append(f"({updated_column} < %s OR ({updated_column} = %s AND {id_column} < %s))")
+    where.append(
+        f"({updated_column} < %s OR ({updated_column} = %s AND {id_column} < %s))"
+    )
     params.extend([cursor_updated_at, cursor_updated_at, int(cursor_id)])
 
 
@@ -155,7 +159,11 @@ def _deserialise_tags(value: Any) -> list[str]:
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError:
-            parts = [segment.strip() for segment in re.split(r"[,\n;]+", text) if segment.strip()]
+            parts = [
+                segment.strip()
+                for segment in re.split(r"[,\n;]+", text)
+                if segment.strip()
+            ]
             return parts
         if isinstance(parsed, list):
             return [str(item).strip() for item in parsed if str(item).strip()]
@@ -204,7 +212,15 @@ def _make_aware(value: Any) -> datetime | None:
 
 def _normalise_ticket(row: dict[str, Any]) -> TicketRecord:
     record = dict(row)
-    for key in ("id", "company_id", "requester_id", "requester_staff_id", "assigned_user_id", "merged_into_ticket_id", "split_from_ticket_id"):
+    for key in (
+        "id",
+        "company_id",
+        "requester_id",
+        "requester_staff_id",
+        "assigned_user_id",
+        "merged_into_ticket_id",
+        "split_from_ticket_id",
+    ):
         if key in record and record[key] is not None:
             record[key] = int(record[key])
     if "review_date" in record:
@@ -238,12 +254,19 @@ def _normalise_reply(row: dict[str, Any]) -> TicketRecord:
             record[key] = int(record[key])
     record["created_at"] = _make_aware(record.get("created_at"))
     # Normalise email tracking datetime fields
-    for key in ("email_sent_at", "email_opened_at", "email_delivered_at", "email_bounced_at"):
+    for key in (
+        "email_sent_at",
+        "email_opened_at",
+        "email_delivered_at",
+        "email_bounced_at",
+    ):
         record[key] = _make_aware(record.get(key))
     if "is_billable" in record:
         record["is_billable"] = bool(record.get("is_billable"))
     if not record.get("kind"):
-        record["kind"] = "internal_note" if bool(record.get("is_internal")) else "message"
+        record["kind"] = (
+            "internal_note" if bool(record.get("is_internal")) else "message"
+        )
     labour_name = record.get("labour_type_name")
     if labour_name is not None:
         record["labour_type_name"] = str(labour_name)
@@ -294,7 +317,9 @@ async def create_ticket(
 
     configured_next_ticket_number: int | None = None
     if id is None:
-        configured_next_ticket_number = await site_settings_repo.get_next_ticket_number()
+        configured_next_ticket_number = (
+            await site_settings_repo.get_next_ticket_number()
+        )
         if configured_next_ticket_number is not None:
             max_id_row = await db.fetch_one("SELECT MAX(id) as max_id FROM tickets")
             max_id_value = max_id_row.get("max_id") if max_id_row else None
@@ -341,8 +366,14 @@ async def create_ticket(
                     f"ALTER TABLE tickets AUTO_INCREMENT = {int(max_id) + 1}"
                 )
         except Exception as exc:  # pragma: no cover - defensive
-            log_debug("Failed to update AUTO_INCREMENT after explicit ID insert", error=str(exc))
-        if configured_next_ticket_number is not None and ticket_id >= configured_next_ticket_number:
+            log_debug(
+                "Failed to update AUTO_INCREMENT after explicit ID insert",
+                error=str(exc),
+            )
+        if (
+            configured_next_ticket_number is not None
+            and ticket_id >= configured_next_ticket_number
+        ):
             await site_settings_repo.set_next_ticket_number(ticket_id + 1)
     else:
         # Use normal auto-increment behavior
@@ -367,7 +398,10 @@ async def create_ticket(
                 ticket_number,
             ),
         )
-        if configured_next_ticket_number is not None and ticket_id >= configured_next_ticket_number:
+        if (
+            configured_next_ticket_number is not None
+            and ticket_id >= configured_next_ticket_number
+        ):
             await site_settings_repo.set_next_ticket_number(ticket_id + 1)
     if ticket_id:
         log_info("Ticket created successfully", ticket_id=ticket_id)
@@ -915,7 +949,30 @@ async def is_ticket_watcher(ticket_id: int, user_id: int) -> bool:
     return bool(row)
 
 
-async def get_ticket_by_external_reference(external_reference: str) -> TicketRecord | None:
+async def get_ticket_by_number_or_id(ticket_number: str) -> TicketRecord | None:
+    """Return a ticket by display ticket number, falling back to numeric ID."""
+
+    value = str(ticket_number or "").strip().lstrip("#")
+    if not value:
+        return None
+    row = await db.fetch_one(
+        "SELECT * FROM tickets WHERE ticket_number = %s LIMIT 1",
+        (value,),
+    )
+    if row:
+        return _normalise_ticket(row)
+    try:
+        ticket_id = int(value)
+    except (TypeError, ValueError):
+        return None
+    if ticket_id <= 0:
+        return None
+    return await get_ticket(ticket_id)
+
+
+async def get_ticket_by_external_reference(
+    external_reference: str,
+) -> TicketRecord | None:
     row = await db.fetch_one(
         "SELECT * FROM tickets WHERE external_reference = %s",
         (external_reference,),
@@ -923,7 +980,9 @@ async def get_ticket_by_external_reference(external_reference: str) -> TicketRec
     return _normalise_ticket(row) if row else None
 
 
-async def find_open_ticket_by_external_reference(external_reference: str) -> TicketRecord | None:
+async def find_open_ticket_by_external_reference(
+    external_reference: str,
+) -> TicketRecord | None:
     """Return the first non-closed ticket with the given external_reference, or None."""
     row = await db.fetch_one(
         "SELECT * FROM tickets WHERE external_reference = %s AND closed_at IS NULL LIMIT 1",
@@ -948,7 +1007,7 @@ async def list_tickets_by_requester_phone(
         return []
 
     # Normalize phone number by removing common formatting characters
-    normalized_phone = re.sub(r'[\s\-\(\)\+]', '', phone_number.strip())
+    normalized_phone = re.sub(r"[\s\-\(\)\+]", "", phone_number.strip())
 
     where_clauses = [
         "("
@@ -1041,7 +1100,8 @@ async def list_ticket_assets(ticket_id: int) -> list[dict[str, Any]]:
             "status": str(row.get("status") or "").strip() or None,
             "type": str(row.get("type") or "").strip() or None,
             "os_name": str(row.get("os_name") or "").strip() or None,
-            "tactical_asset_id": str(row.get("tactical_asset_id") or "").strip() or None,
+            "tactical_asset_id": str(row.get("tactical_asset_id") or "").strip()
+            or None,
             "tray_device_uid": str(row.get("tray_device_uid") or "").strip() or None,
             "linked_at": _make_aware(row.get("created_at")),
         }
@@ -1049,7 +1109,9 @@ async def list_ticket_assets(ticket_id: int) -> list[dict[str, Any]]:
     return assets
 
 
-async def replace_ticket_assets(ticket_id: int, asset_ids: Iterable[int]) -> list[dict[str, Any]]:
+async def replace_ticket_assets(
+    ticket_id: int, asset_ids: Iterable[int]
+) -> list[dict[str, Any]]:
     normalised_ids: list[int] = []
     seen: set[int] = set()
     for raw_id in asset_ids:
@@ -1095,7 +1157,9 @@ async def replace_ticket_assets(ticket_id: int, asset_ids: Iterable[int]) -> lis
     return await list_ticket_assets(ticket_id)
 
 
-async def list_billed_tickets_older_than(cutoff: datetime, *, limit: int = 10000) -> list[TicketRecord]:
+async def list_billed_tickets_older_than(
+    cutoff: datetime, *, limit: int = 10000
+) -> list[TicketRecord]:
     """Return billed, unmerged tickets created before the supplied UTC cutoff."""
     rows = await db.fetch_all(
         """
@@ -1167,7 +1231,10 @@ async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
     query = f"UPDATE tickets SET {', '.join(assignments)} WHERE id = %s"
     params.append(ticket_id)
     await db.execute(query, tuple(params))
-    if str(fields.get("status") or "").casefold() == "closed" or fields.get("closed_at") is not None:
+    if (
+        str(fields.get("status") or "").casefold() == "closed"
+        or fields.get("closed_at") is not None
+    ):
         await _disable_shipment_watch(ticket_id)
     log_info("Ticket updated successfully", ticket_id=ticket_id)
     return await get_ticket(ticket_id)
@@ -1319,7 +1386,9 @@ async def create_reply(
     author_email: str | None = None,
     author_display_name: str | None = None,
 ) -> TicketRecord:
-    labour_type_id = await _default_labour_type_for_time_entry(minutes_spent, labour_type_id)
+    labour_type_id = await _default_labour_type_for_time_entry(
+        minutes_spent, labour_type_id
+    )
 
     log_info(
         "Creating ticket reply",
@@ -1366,7 +1435,9 @@ async def create_reply(
         tuple(params),
     )
     if reply_id:
-        log_info("Ticket reply created successfully", reply_id=reply_id, ticket_id=ticket_id)
+        log_info(
+            "Ticket reply created successfully", reply_id=reply_id, ticket_id=ticket_id
+        )
         row = await db.fetch_one(
             """
             SELECT tr.*, lt.name AS labour_type_name, lt.code AS labour_type_code
@@ -1379,7 +1450,9 @@ async def create_reply(
         if row:
             normalised = _normalise_reply(row)
             reply_external = str(normalised.get("external_reference") or "")
-            if not normalised.get("is_internal") and not reply_external.startswith("chat:"):
+            if not normalised.get("is_internal") and not reply_external.startswith(
+                "chat:"
+            ):
                 try:
                     from app.services import chat_ticket_sync
 
@@ -1412,7 +1485,9 @@ async def create_reply(
     return _normalise_reply(fallback_row)
 
 
-async def list_replies(ticket_id: int, *, include_internal: bool = True) -> list[TicketRecord]:
+async def list_replies(
+    ticket_id: int, *, include_internal: bool = True
+) -> list[TicketRecord]:
     where = "ticket_id = %s"
     params: list[Any] = [ticket_id]
     if not include_internal:
@@ -1443,7 +1518,9 @@ async def count_time_entries(ticket_id: int) -> int:
     return int(row["count"]) if row else 0
 
 
-async def get_time_totals_by_ticket_ids(ticket_ids: list[int]) -> dict[int, dict[str, int]]:
+async def get_time_totals_by_ticket_ids(
+    ticket_ids: list[int],
+) -> dict[int, dict[str, int]]:
     """Return billable and non-billable minute totals keyed by ticket ID."""
     if not ticket_ids:
         return {}
@@ -1520,7 +1597,9 @@ async def get_automation_filter_context(ticket_id: int) -> dict[str, int | bool]
     }
 
 
-async def get_automation_filter_context_by_ticket_ids(ticket_ids: list[int]) -> dict[int, dict[str, Any]]:
+async def get_automation_filter_context_by_ticket_ids(
+    ticket_ids: list[int],
+) -> dict[int, dict[str, Any]]:
     """Return automation filter helper values keyed by ticket ID for ticket lists."""
 
     parsed_ids: set[int] = set()
@@ -1573,7 +1652,9 @@ async def get_automation_filter_context_by_ticket_ids(ticket_ids: list[int]) -> 
     for row in time_rows:
         ticket_id = int(row["ticket_id"])
         result[ticket_id]["billable_minutes"] = int(row.get("billable_minutes") or 0)
-        result[ticket_id]["non_billable_minutes"] = int(row.get("non_billable_minutes") or 0)
+        result[ticket_id]["non_billable_minutes"] = int(
+            row.get("non_billable_minutes") or 0
+        )
 
     attachment_rows = await db.fetch_all(
         f"""
@@ -1590,7 +1671,6 @@ async def get_automation_filter_context_by_ticket_ids(ticket_ids: list[int]) -> 
         result[ticket_id]["attachment_count"] = attachment_count
         result[ticket_id]["has_attachments"] = attachment_count > 0
 
-
     for ticket_id in unique_ids:
         expense_row = await db.fetch_one(
             """
@@ -1601,7 +1681,9 @@ async def get_automation_filter_context_by_ticket_ids(ticket_ids: list[int]) -> 
             (ticket_id,),
         )
         expense_count = int((expense_row or {}).get("expense_count") or 0)
-        result[ticket_id]["expense_total"] = float((expense_row or {}).get("expense_total") or 0)
+        result[ticket_id]["expense_total"] = float(
+            (expense_row or {}).get("expense_total") or 0
+        )
         result[ticket_id]["expense_count"] = expense_count
         result[ticket_id]["has_expenses"] = expense_count > 0
 
@@ -1651,16 +1733,22 @@ async def get_automation_filter_context_by_ticket_ids(ticket_ids: list[int]) -> 
     )
     for row in latest_reply_rows:
         ticket_id = int(row["ticket_id"])
-        result[ticket_id]["latest_reply_id"] = int(row.get("id")) if row.get("id") is not None else None
+        result[ticket_id]["latest_reply_id"] = (
+            int(row.get("id")) if row.get("id") is not None else None
+        )
         result[ticket_id]["latest_reply_at"] = _make_aware(row.get("created_at"))
         result[ticket_id]["latest_reply_is_internal"] = bool(row.get("is_internal"))
         result[ticket_id]["latest_reply_kind"] = row.get("kind")
-        result[ticket_id]["ticket_update_actor_type"] = row.get("ticket_update_actor_type")
+        result[ticket_id]["ticket_update_actor_type"] = row.get(
+            "ticket_update_actor_type"
+        )
 
     return result
 
 
-async def validate_replies_belong_to_ticket(reply_ids: list[int], ticket_id: int) -> tuple[bool, str | None]:
+async def validate_replies_belong_to_ticket(
+    reply_ids: list[int], ticket_id: int
+) -> tuple[bool, str | None]:
     """
     Validate that all reply IDs belong to the specified ticket.
     Returns (is_valid, error_message).
@@ -1733,15 +1821,25 @@ async def update_reply(
             current = await get_reply_by_id(reply_id)
             if effective_minutes is _UNSET:
                 current_minutes = current.get("minutes_spent") if current else None
-                effective_minutes = current_minutes if isinstance(current_minutes, int) else None
+                effective_minutes = (
+                    current_minutes if isinstance(current_minutes, int) else None
+                )
             if effective_labour_type_id is _UNSET:
-                current_labour_type_id = current.get("labour_type_id") if current else None
+                current_labour_type_id = (
+                    current.get("labour_type_id") if current else None
+                )
                 effective_labour_type_id = (
-                    current_labour_type_id if isinstance(current_labour_type_id, int) else None
+                    current_labour_type_id
+                    if isinstance(current_labour_type_id, int)
+                    else None
                 )
         default_labour_type_id = await _default_labour_type_for_time_entry(
             effective_minutes if isinstance(effective_minutes, int) else None,
-            effective_labour_type_id if isinstance(effective_labour_type_id, int) else None,
+            (
+                effective_labour_type_id
+                if isinstance(effective_labour_type_id, int)
+                else None
+            ),
         )
         if effective_labour_type_id is None:
             if default_labour_type_id is not None:
@@ -1761,7 +1859,9 @@ async def update_reply(
     return await get_reply_by_id(reply_id)
 
 
-async def add_watcher(ticket_id: int, user_id: int | None = None, email: str | None = None) -> None:
+async def add_watcher(
+    ticket_id: int, user_id: int | None = None, email: str | None = None
+) -> None:
     """Add a watcher to a ticket by user_id or email.
 
     At least one of user_id or email must be provided.
@@ -1795,7 +1895,9 @@ async def add_watcher(ticket_id: int, user_id: int | None = None, email: str | N
         )
 
 
-async def remove_watcher(ticket_id: int, user_id: int | None = None, email: str | None = None) -> None:
+async def remove_watcher(
+    ticket_id: int, user_id: int | None = None, email: str | None = None
+) -> None:
     """Remove a watcher from a ticket by user_id or email.
 
     At least one of user_id or email must be provided.
@@ -1849,7 +1951,9 @@ async def bulk_add_watchers(ticket_id: int, user_ids: Iterable[int]) -> None:
     )
 
 
-async def replace_watchers(ticket_id: int, user_ids: Iterable[int], emails: Iterable[str] | None = None) -> None:
+async def replace_watchers(
+    ticket_id: int, user_ids: Iterable[int], emails: Iterable[str] | None = None
+) -> None:
     """Replace all watchers for a ticket with new user_ids and emails."""
     await db.execute("DELETE FROM ticket_watchers WHERE ticket_id = %s", (ticket_id,))
     await bulk_add_watchers(ticket_id, user_ids)
@@ -1861,7 +1965,9 @@ async def replace_watchers(ticket_id: int, user_ids: Iterable[int], emails: Iter
                 await add_watcher(ticket_id, email=email_normalized)
 
 
-async def move_replies_to_ticket(reply_ids: Iterable[int], target_ticket_id: int) -> int:
+async def move_replies_to_ticket(
+    reply_ids: Iterable[int], target_ticket_id: int
+) -> int:
     """Move specified replies to a different ticket. Returns count of moved replies."""
     reply_list = list(reply_ids)
     if not reply_list:
@@ -1945,7 +2051,9 @@ async def split_ticket(
     return original_ticket, new_ticket, moved_count
 
 
-async def list_split_replies_for_original(original_ticket_id: int) -> list[TicketRecord]:
+async def list_split_replies_for_original(
+    original_ticket_id: int,
+) -> list[TicketRecord]:
     """Return replies moved to child tickets split from the original ticket."""
     rows = await db.fetch_all(
         """
@@ -2008,7 +2116,9 @@ async def merge_tickets(
                 user_id=watcher.get("user_id"),
                 email=watcher.get("email"),
             )
-        await db.execute("DELETE FROM ticket_watchers WHERE ticket_id = %s", (source_id,))
+        await db.execute(
+            "DELETE FROM ticket_watchers WHERE ticket_id = %s", (source_id,)
+        )
 
     # Move all replies from source tickets to target ticket
     for source_id in source_ticket_ids:
@@ -2050,6 +2160,7 @@ async def list_merged_child_tickets(parent_ticket_id: int) -> list[TicketRecord]
         (parent_ticket_id,),
     )
     return [_normalise_ticket(row) for row in rows]
+
 
 async def get_merged_target_ticket_id(ticket_id: int) -> int | None:
     """

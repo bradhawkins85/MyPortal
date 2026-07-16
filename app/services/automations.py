@@ -940,6 +940,91 @@ async def _scan_tickets_for_automation(
     }
 
 
+async def _build_ticket_test_context(
+    automation: Mapping[str, Any],
+    ticket: Mapping[str, Any],
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    checked_at = now or datetime.now(timezone.utc)
+    ticket_context = _attach_ticket_age_context(ticket, now=checked_at)
+    try:
+        from app.services import tickets as tickets_service
+
+        enriched_ticket = await tickets_service._enrich_ticket_context(ticket_context)
+    except Exception:  # pragma: no cover - defensive fallback for test action
+        enriched_ticket = ticket_context
+    return {
+        "ticket": _attach_ticket_age_context(enriched_ticket, now=checked_at),
+        "ticket_update": {
+            "actor_type": "automation_test",
+            "actor_label": "Automation test",
+            "actor_user": None,
+            "simulated_event": automation.get("trigger_event"),
+        },
+        "schedule": {
+            "automation_id": automation.get("id"),
+            "automation_name": automation.get("name"),
+            "checked_at": checked_at.isoformat(),
+            "test": True,
+        },
+    }
+
+
+async def test_ticket_automation_by_id(
+    automation_id: int,
+    *,
+    ticket_number: str,
+    apply: bool = False,
+) -> dict[str, Any]:
+    """Evaluate one ticket against an automation and optionally run matching actions."""
+
+    automation = await automation_repo.get_automation(automation_id)
+    if not automation:
+        raise ValueError(f"Automation {automation_id} not found")
+    kind = str(automation.get("kind") or "").strip().lower()
+    if kind not in {"scheduled", "event"}:
+        raise ValueError("Only scheduled and event automations can be tested")
+    ticket = await tickets_repo.get_ticket_by_number_or_id(ticket_number)
+    if not ticket:
+        raise ValueError(f"Ticket {ticket_number} not found")
+    context = await _build_ticket_test_context(automation, ticket)
+    filters = automation.get("trigger_filters")
+    filters_mapping = filters if isinstance(filters, Mapping) else None
+    applies = _filters_match(filters_mapping, context)
+    result: dict[str, Any] = {
+        "automation_id": automation_id,
+        "automation_name": automation.get("name"),
+        "kind": kind,
+        "ticket": {
+            "id": ticket.get("id"),
+            "ticket_number": ticket.get("ticket_number"),
+            "subject": ticket.get("subject"),
+            "status": ticket.get("status"),
+        },
+        "applies": applies,
+        "applied": False,
+    }
+    if not applies:
+        result["reason"] = "Automation filters did not match the ticket."
+        return result
+    if apply:
+        action_result, action_error = await _invoke_automation_actions_for_context(
+            automation,
+            context=context,
+        )
+        result.update(
+            {
+                "applied": True,
+                "status": "failed" if action_error else "succeeded",
+                "result": action_result,
+            }
+        )
+        if action_error:
+            result["error"] = action_error
+    return result
+
+
 async def preview_scheduled_ticket_automation(
     automation: Mapping[str, Any],
     *,
