@@ -45,6 +45,25 @@ ALLOWED_MIME_TYPES = {
     "application/x-7z-compressed",
     "application/x-tar",
     "application/gzip",
+    # Audio (safe binary media used by voicemail/transcription workflows)
+    "audio/wav",
+    "audio/x-wav",
+    "audio/wave",
+    "audio/vnd.wave",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/ogg",
+    "audio/flac",
+    "audio/x-flac",
+    "audio/webm",
+    "audio/mp4",
+    "audio/x-m4a",
+    # Video (safe binary media)
+    "video/mp4",
+    "video/mpeg",
+    "video/ogg",
+    "video/webm",
+    "video/quicktime",
     # Other
     "application/json",
 }
