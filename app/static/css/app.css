@@ -4537,10 +4537,11 @@ dialog.modal:not([open]) {
   border-radius: 1rem;
   padding: calc(var(--space-gap-roomy) * 2.5);
   position: relative;
+  box-sizing: border-box;
   width: 90vw;
   max-width: 90vw;
-  height: 90vh;
-  max-height: 90vh;
+  height: auto;
+  max-height: min(90vh, calc(100vh - (var(--space-gap-roomy) * 5)));
   overflow-x: hidden;
   overflow-y: auto;
   border: 1px solid rgba(148, 163, 184, 0.25);
