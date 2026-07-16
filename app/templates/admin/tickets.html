@@ -342,14 +342,29 @@
                 </div>
               </div>
 
+              <!-- Search Section -->
+              <div class="ticket-filters__section ticket-filters__section--horizontal">
+                <div class="ticket-filters__search-control">
+                  <label class="form-label" for="ticket-quick-filter">Quick search</label>
+                  <input
+                    id="ticket-quick-filter"
+                    type="search"
+                    class="form-input"
+                    placeholder="Filter tickets"
+                    aria-label="Filter tickets"
+                    data-table-filter="tickets-table" data-ticket-dashboard-search
+                  />
+                </div>
+              </div>
+
               <!-- Filters Section -->
               <div class="ticket-filters__section">
                 <h3 class="ticket-filters__section-title">Filter by Status</h3>
                 <div class="ticket-filters__status-grid">
                   {% for status_option in ticket_filter_status_definitions | default(ticket_status_definitions) %}
                     <label class="ticket-filters__status-item">
-                      <input 
-                        type="checkbox" 
+                      <input
+                        type="checkbox"
                         value="{{ status_option.tech_status }}"
                         data-status-filter
                         checked
@@ -357,21 +372,6 @@
                       <span class="ticket-filters__status-label">{{ status_option.tech_label }}</span>
                     </label>
                   {% endfor %}
-                </div>
-              </div>
-
-              <!-- Search Section -->
-              <div class="ticket-filters__section ticket-filters__section--horizontal">
-                <div class="ticket-filters__search-control">
-                  <label class="form-label" for="ticket-quick-filter">Quick search</label>
-                  <input 
-                    id="ticket-quick-filter"
-                    type="search" 
-                    class="form-input" 
-                    placeholder="Filter tickets" 
-                    aria-label="Filter tickets" 
-                    data-table-filter="tickets-table" data-ticket-dashboard-search 
-                  />
                 </div>
               </div>
 
