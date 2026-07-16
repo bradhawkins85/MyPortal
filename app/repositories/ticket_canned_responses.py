@@ -44,6 +44,18 @@ async def list_responses() -> list[CannedResponseRecord]:
     return [record for row in rows if (record := _normalise_record(row))]
 
 
+async def get_response(response_id: int) -> CannedResponseRecord | None:
+    row = await db.fetch_one(
+        """
+        SELECT id, title, body, created_by_user_id, created_at, updated_at
+        FROM ticket_canned_responses
+        WHERE id = %s
+        """,
+        (response_id,),
+    )
+    return _normalise_record(row)
+
+
 async def create_response(*, title: str, body: str, created_by_user_id: int | None) -> CannedResponseRecord:
     response_id = await db.execute_returning_lastrowid(
         """
@@ -64,3 +76,29 @@ async def create_response(*, title: str, body: str, created_by_user_id: int | No
     if record is None:
         raise RuntimeError("Unable to load created canned response")
     return record
+
+
+async def update_response(*, response_id: int, title: str, body: str) -> CannedResponseRecord | None:
+    await db.execute(
+        """
+        UPDATE ticket_canned_responses
+        SET title = %s, body = %s, updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s
+        """,
+        (title, body, response_id),
+    )
+    return await get_response(response_id)
+
+
+async def delete_response(response_id: int) -> bool:
+    existing = await get_response(response_id)
+    if existing is None:
+        return False
+    await db.execute(
+        """
+        DELETE FROM ticket_canned_responses
+        WHERE id = %s
+        """,
+        (response_id,),
+    )
+    return True

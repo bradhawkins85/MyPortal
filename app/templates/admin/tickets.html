@@ -44,7 +44,7 @@
                 aria-haspopup="dialog"
                 aria-controls="canned-response-create-modal"
               >
-                Create canned response
+                Manage canned responses
               </button>
             </li>
           {% endif %}
@@ -177,23 +177,51 @@
     <div class="modal" id="canned-response-create-modal" role="dialog" aria-modal="true" aria-labelledby="canned-response-create-title" hidden>
       <div class="modal__content" role="document">
         <button type="button" class="modal__close" data-modal-close aria-label="Close">×</button>
-        <h2 class="modal__title" id="canned-response-create-title">Create canned response</h2>
-        <form action="/admin/tickets/canned-responses" method="post" class="form">
-          {% include "partials/csrf.html" %}
-          <div class="form-field">
-            <label class="form-label required" for="canned-response-title">Title</label>
-            <input id="canned-response-title" name="title" class="form-input" maxlength="255" required />
-          </div>
-          <div class="form-field">
-            <label class="form-label required" for="canned-response-body">Reply text</label>
-            <textarea id="canned-response-body" name="body" class="form-input" rows="8" required placeholder="Use variables like {{ '{{ ticket.ticket_number }}' }}, {{ '{{ ticket.subject }}' }}, {{ '{{ requester.name }}' }}, or {{ '{{ company.name }}' }}."></textarea>
-            <p class="form-help">Variables are enriched when the canned response is inserted into a ticket reply.</p>
-          </div>
-          <div class="form-actions">
-            <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
-            <button type="submit" class="button button--primary">Save response</button>
-          </div>
-        </form>
+        <h2 class="modal__title" id="canned-response-create-title">Manage canned responses</h2>
+        <details class="card" open>
+          <summary class="card__title">Add canned response</summary>
+          <form action="/admin/tickets/canned-responses" method="post" class="form">
+            {% include "partials/csrf.html" %}
+            <div class="form-field">
+              <label class="form-label required" for="canned-response-title">Title</label>
+              <input id="canned-response-title" name="title" class="form-input" maxlength="255" required />
+            </div>
+            <div class="form-field">
+              <label class="form-label required" for="canned-response-body">Reply text</label>
+              <textarea id="canned-response-body" name="body" class="form-input" rows="8" required placeholder="Use variables like {{ '{{ ticket.ticket_number }}' }}, {{ '{{ ticket.subject }}' }}, {{ '{{ requester.name }}' }}, or {{ '{{ company.name }}' }}."></textarea>
+              <p class="form-help">Variables are enriched when the canned response is inserted into a ticket reply.</p>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
+              <button type="submit" class="button button--primary">Save response</button>
+            </div>
+          </form>
+        </details>
+        <div class="form-section">
+          <h3 class="form-section__title">Existing responses</h3>
+          {% for response in ticket_canned_responses %}
+            <details class="card">
+              <summary class="card__title">{{ response.title }}</summary>
+              <form action="/admin/tickets/canned-responses/{{ response.id }}" method="post" class="form">
+                {% include "partials/csrf.html" %}
+                <div class="form-field">
+                  <label class="form-label required" for="canned-response-title-{{ response.id }}">Title</label>
+                  <input id="canned-response-title-{{ response.id }}" name="title" class="form-input" maxlength="255" required value="{{ response.title }}" />
+                </div>
+                <div class="form-field">
+                  <label class="form-label required" for="canned-response-body-{{ response.id }}">Reply text</label>
+                  <textarea id="canned-response-body-{{ response.id }}" name="body" class="form-input" rows="8" required>{{ response.body }}</textarea>
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="button button--primary">Update response</button>
+                  <button type="submit" class="button button--danger" formaction="/admin/tickets/canned-responses/{{ response.id }}/delete" formnovalidate onclick="return window.confirm('Delete this canned response?')">Delete response</button>
+                </div>
+              </form>
+            </details>
+          {% else %}
+            <p class="card__empty">No canned responses have been created yet.</p>
+          {% endfor %}
+        </div>
       </div>
     </div>
   {% endif %}
