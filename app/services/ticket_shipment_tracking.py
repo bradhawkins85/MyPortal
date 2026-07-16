@@ -177,6 +177,25 @@ def _extract_visible_text(html_text: str, *, limit: int = 14_000) -> str:
     return text[:limit]
 
 
+def _extract_startrack_essential_fields(html_text: str) -> str:
+    """Return only the StarTrack fields needed for shipment status updates."""
+    essential_ids = (
+        "__c1_lblConsignmentNumber",
+        "__c1_lblStatus",
+        "__c1_lblETADate",
+    )
+    lines: list[str] = []
+    for element_id in essential_ids:
+        pattern = rf'<[^>]+id=["\']{re.escape(element_id)}["\'][^>]*>(.*?)</[^>]+>'
+        match = re.search(pattern, html_text, flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            continue
+        value = _extract_visible_text(match.group(1), limit=500)
+        if value:
+            lines.append(f"{element_id}: {value}")
+    return "\n".join(lines)
+
+
 def _extract_json_object(raw_text: str) -> dict[str, Any] | None:
     text = str(raw_text or "").strip()
     if not text:
@@ -264,10 +283,11 @@ class StarTrackProviderAdapter(ProviderAdapter):
 
     async def fetch(self, url: str) -> dict[str, Any]:
         html_text = await _fetch_with_retries(url)
+        essential_text = _extract_startrack_essential_fields(html_text)
         return {
             "url": url,
-            "html": html_text,
-            "text": _extract_visible_text(html_text),
+            "html": essential_text,
+            "text": essential_text or _extract_visible_text(html_text),
             "consignment_id": _extract_consignment_id(url, html_text),
         }
 
@@ -300,22 +320,11 @@ class StarTrackProviderAdapter(ProviderAdapter):
         merged = dict(fallback_payload)
         llm_payload = llm_snapshot.model_dump()
 
-        for key in ("status", "eta_date", "proof_of_delivery_date", "signatory"):
+        for key in ("status", "eta_date"):
             fallback_value = merged.get(key)
             llm_value = llm_payload.get(key)
             if _is_missing_scalar(fallback_value) and not _is_missing_scalar(llm_value):
                 merged[key] = llm_value
-
-        for key in ("items_in_transit", "onboard_for_delivery", "items_delivered"):
-            fallback_count = int(merged.get(key) or 0)
-            llm_count = int(llm_payload.get(key) or 0)
-            if fallback_count <= 0 and llm_count > 0:
-                merged[key] = llm_count
-
-        fallback_events = merged.get("tracking_events") or []
-        llm_events = llm_payload.get("tracking_events") or []
-        if not fallback_events and llm_events:
-            merged["tracking_events"] = llm_events
 
         return CanonicalShipmentSnapshot.model_validate(merged)
 
@@ -429,8 +438,9 @@ async def _extract_snapshot_with_llm(
         f"Provider: {provider}\n"
         f"Tracking URL: {tracking_url}\n"
         f"Consignment ID: {consignment_id}\n"
-        f"Visible text excerpt:\n{text_excerpt[:10000]}\n\n"
-        f"HTML excerpt:\n{html_excerpt[:6000]}\n"
+        "Selected CSS/JSONPath/JQ/XPath filter results only:\n"
+        "#__c1_lblConsignmentNumber\n#__c1_lblStatus\n#__c1_lblETADate\n"
+        f"Filter result text:\n{text_excerpt[:2000]}\n"
     )
 
     try:

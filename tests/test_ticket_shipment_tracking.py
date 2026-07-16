@@ -15,6 +15,48 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+def test_startrack_essential_fields_extracts_only_selected_filters():
+    html = """
+    <span id="__c1_lblConsignmentNumber">UDWZ50125918</span>
+    <span id="__c1_lblStatus">Ready for Pickup</span>
+    <span id="__c1_lblETADate">16/07/2026</span>
+    <span id="__c1_lblProofOfDelivery">Should not be included</span>
+    """
+
+    text = svc._extract_startrack_essential_fields(html)
+
+    assert "__c1_lblConsignmentNumber: UDWZ50125918" in text
+    assert "__c1_lblStatus: Ready for Pickup" in text
+    assert "__c1_lblETADate: 16/07/2026" in text
+    assert "ProofOfDelivery" not in text
+
+
+@pytest.mark.anyio
+async def test_startrack_fetch_sends_only_selected_filter_results(monkeypatch):
+    provider = svc.StarTrackProviderAdapter()
+    html = """
+    <span id="__c1_lblConsignmentNumber">UDWZ50125918</span>
+    <span id="__c1_lblStatus">In Transit</span>
+    <span id="__c1_lblETADate">16/07/2026</span>
+    <section>Large confusing page content Delivered signed by Wrong Person</section>
+    """
+
+    async def fake_fetch(url):
+        return html
+
+    monkeypatch.setattr(svc, "_fetch_with_retries", fake_fetch)
+
+    raw = await provider.fetch("https://msto.startrack.com.au/track-trace/?id=UDWZ50125918")
+
+    assert raw["text"] == (
+        "__c1_lblConsignmentNumber: UDWZ50125918\n"
+        "__c1_lblStatus: In Transit\n"
+        "__c1_lblETADate: 16/07/2026"
+    )
+    assert raw["html"] == raw["text"]
+    assert "Wrong Person" not in raw["text"]
+
+
 def test_detect_provider_slug_startrack():
     provider = svc.detect_provider("https://www.startrack.com.au/track/ABC123")
     assert provider is not None
