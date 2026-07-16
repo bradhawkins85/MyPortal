@@ -9,7 +9,7 @@ import secrets
 from pathlib import Path
 from typing import Any
 
-import magic
+import importlib
 from fastapi import UploadFile
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
@@ -101,7 +101,8 @@ def _sniff_mime_type(header_bytes: bytes) -> str | None:
     spoofable.
     """
     try:
-        return magic.from_buffer(header_bytes, mime=True)
+        magic_module = importlib.import_module("magic")
+        return magic_module.from_buffer(header_bytes, mime=True)
     except Exception as exc:
         log_error(f"MIME sniffing failed: {exc}")
         return None
@@ -361,10 +362,28 @@ async def delete_attachment_file(attachment: dict[str, Any]) -> None:
             # Don't raise - file might already be gone, record is deleted
 
 
+def _safe_attachment_path(base_dir: Path, filename: str) -> Path:
+    """Resolve an attachment path under *base_dir* without allowing traversal."""
+    if not filename:
+        return base_dir / "__invalid_attachment_filename__"
+    candidate = (base_dir / filename).resolve()
+    try:
+        candidate.relative_to(base_dir.resolve())
+    except ValueError:
+        return base_dir / "__invalid_attachment_filename__"
+    return candidate
+
+
 def get_attachment_file_path(filename: str) -> Path:
-    """Get the full path to an attachment file."""
+    """Get the full path to an attachment file in private storage."""
     upload_dir = _get_upload_directory()
-    return upload_dir / filename
+    return _safe_attachment_path(upload_dir, filename)
+
+
+def get_legacy_attachment_file_path(filename: str) -> Path:
+    """Get the pre-private-storage path used by older email attachment saves."""
+    legacy_dir = Path(__file__).resolve().parents[1] / "static" / "uploads" / "tickets"
+    return _safe_attachment_path(legacy_dir, filename)
 
 
 def generate_open_access_token(attachment_id: int, expires_in_seconds: int = 86400) -> str:

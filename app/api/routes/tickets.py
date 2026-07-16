@@ -1884,12 +1884,20 @@ async def download_ticket_attachment(
                     status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
                 )
 
-    # Get file path
-    file_path = attachments_service.get_attachment_file_path(attachment.get("filename"))
+    # Get file path. Email ingestion previously wrote files to the legacy
+    # static uploads directory while records pointed at ticket attachments.
+    # Prefer private storage, but fall back so existing requester-reply
+    # attachments remain downloadable after the storage move.
+    filename = attachment.get("filename")
+    file_path = attachments_service.get_attachment_file_path(filename)
     if not file_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
-        )
+        legacy_file_path = attachments_service.get_legacy_attachment_file_path(filename)
+        if legacy_file_path.exists():
+            file_path = legacy_file_path
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+            )
 
     return FileResponse(
         path=file_path,
@@ -1923,12 +1931,20 @@ async def download_open_attachment(token: str):
             status_code=status.HTTP_403_FORBIDDEN, detail="Access denied"
         )
 
-    # Get file path
-    file_path = attachments_service.get_attachment_file_path(attachment.get("filename"))
+    # Get file path. Email ingestion previously wrote files to the legacy
+    # static uploads directory while records pointed at ticket attachments.
+    # Prefer private storage, but fall back so existing requester-reply
+    # attachments remain downloadable after the storage move.
+    filename = attachment.get("filename")
+    file_path = attachments_service.get_attachment_file_path(filename)
     if not file_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
-        )
+        legacy_file_path = attachments_service.get_legacy_attachment_file_path(filename)
+        if legacy_file_path.exists():
+            file_path = legacy_file_path
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
+            )
 
     return FileResponse(
         path=file_path,

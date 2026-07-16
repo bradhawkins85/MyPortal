@@ -179,3 +179,76 @@ def test_resolve_private_upload_complex_traversal_attempts(temp_upload_dir):
     for malicious_path in malicious_paths:
         with pytest.raises((HTTPException, FileNotFoundError)):
             _resolve_private_upload(malicious_path)
+
+@pytest.mark.anyio("asyncio")
+async def test_download_ticket_attachment_falls_back_to_legacy_email_storage(monkeypatch, tmp_path):
+    from app.api.routes import tickets as tickets_route
+    from app.services import ticket_attachments as attachment_service
+
+    private_dir = tmp_path / "private"
+    legacy_dir = tmp_path / "legacy"
+    private_dir.mkdir()
+    legacy_dir.mkdir()
+    legacy_file = legacy_dir / "legacy-token.pdf"
+    legacy_file.write_bytes(b"legacy attachment")
+
+    async def fake_get_attachment(attachment_id):
+        return {
+            "id": attachment_id,
+            "ticket_id": 25020,
+            "filename": "legacy-token.pdf",
+            "original_filename": "reply.pdf",
+            "mime_type": "application/pdf",
+            "access_level": "open",
+        }
+
+    async def fake_get_ticket(ticket_id):
+        return {"id": ticket_id, "requester_id": 123}
+
+    async def fake_has_helpdesk_permission(user):
+        return True
+
+    monkeypatch.setattr(tickets_route.attachments_repo, "get_attachment", fake_get_attachment)
+    monkeypatch.setattr(tickets_route.tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(tickets_route, "_has_helpdesk_permission", fake_has_helpdesk_permission)
+    monkeypatch.setattr(
+        attachment_service,
+        "get_attachment_file_path",
+        lambda filename: private_dir / filename,
+    )
+    monkeypatch.setattr(
+        attachment_service,
+        "get_legacy_attachment_file_path",
+        lambda filename: legacy_dir / filename,
+    )
+
+    response = await tickets_route.download_ticket_attachment(25020, 9991, {"id": 1})
+
+    assert Path(response.path) == legacy_file
+
+
+@pytest.mark.anyio("asyncio")
+async def test_save_email_attachment_uses_shared_private_store(monkeypatch):
+    from app.services import imap
+
+    calls = []
+
+    async def fake_save_file_bytes(**kwargs):
+        calls.append(kwargs)
+        return {"id": 9991, "filename": "private-token.pdf", "access_level": kwargs["access_level"]}
+
+    monkeypatch.setattr(imap.attachments_service, "save_file_bytes", fake_save_file_bytes)
+
+    result = await imap._save_email_attachment(25020, "reply.pdf", "application/pdf", b"pdf")
+
+    assert result == {"id": 9991, "filename": "private-token.pdf", "access_level": "closed"}
+    assert calls == [
+        {
+            "ticket_id": 25020,
+            "contents": b"pdf",
+            "original_filename": "reply.pdf",
+            "mime_type": "application/pdf",
+            "access_level": "closed",
+            "uploaded_by_user_id": None,
+        }
+    ]
