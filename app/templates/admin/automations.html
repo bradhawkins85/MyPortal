@@ -139,6 +139,11 @@
                             <a class="header-title-menu__link" role="menuitem" href="/admin/automations/{{ automation.id }}/simulate">Simulate</a>
                           </li>
                           {% endif %}
+                          {% if automation.kind in ['scheduled', 'event'] %}
+                          <li class="header-title-menu__item" role="none">
+                            <button type="button" class="header-title-menu__link" role="menuitem" data-automation-test data-automation-id="{{ automation.id }}" data-automation-name="{{ automation.name }}">Test</button>
+                          </li>
+                          {% endif %}
                           <li class="header-title-menu__item" role="none">
                             <form action="/admin/automations/{{ automation.id }}/execute" method="post" class="inline-form">
                               {% include "partials/csrf.html" %}

@@ -80,6 +80,11 @@ router.add_api_route(
     methods=["GET"],
 )
 router.add_api_route(
+    "/admin/automations/{automation_id}/test",
+    handlers.admin_test_automation,
+    methods=["POST"],
+)
+router.add_api_route(
     "/admin/automations/{automation_id}/execute",
     handlers.admin_execute_automation,
     methods=["POST"],

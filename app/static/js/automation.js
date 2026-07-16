@@ -2878,4 +2878,45 @@
       });
     });
   });
+
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('[data-automation-test]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const automationId = button.getAttribute('data-automation-id');
+        const automationName = button.getAttribute('data-automation-name') || `#${automationId}`;
+        const ticketNumber = window.prompt(`Enter a ticket number to test "${automationName}" against:`);
+        if (!ticketNumber || !ticketNumber.trim()) return;
+
+        async function runTest(apply) {
+          const response = await fetch(`/admin/automations/${encodeURIComponent(automationId)}/test`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ ticket_number: ticketNumber.trim(), apply }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(payload.detail || `Request failed with ${response.status}`);
+          }
+          return payload;
+        }
+
+        try {
+          const evaluation = await runTest(false);
+          const ticketLabel = evaluation.ticket?.ticket_number || evaluation.ticket?.id || ticketNumber.trim();
+          if (!evaluation.applies) {
+            window.alert(`Automation does not apply to ticket #${ticketLabel}.\n\n${evaluation.reason || 'The filters did not match.'}`);
+            return;
+          }
+          const shouldApply = window.confirm(`Automation applies to ticket #${ticketLabel}. Run/apply this automation immediately?`);
+          if (!shouldApply) return;
+          const applied = await runTest(true);
+          window.alert(`Automation test ${applied.status || 'completed'} for ticket #${ticketLabel}.`);
+        } catch (error) {
+          window.alert(`Unable to test automation: ${error.message}`);
+        }
+      });
+    });
+  });
+
 }());
