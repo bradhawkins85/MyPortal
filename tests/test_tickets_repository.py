@@ -100,6 +100,10 @@ class _AutomationContextDB:
     def __init__(self):
         self.fetch_calls = []
 
+    async def fetch_one(self, sql, params):
+        self.fetch_calls.append((sql.strip(), params))
+        return {"expense_total": 0, "expense_count": 0}
+
     async def fetch_all(self, sql, params):
         self.fetch_calls.append((sql.strip(), params))
         if "SUM(CASE WHEN is_billable" in sql:
@@ -116,6 +120,7 @@ class _AutomationContextDB:
                     "created_at": None,
                     "is_internal": 1,
                     "kind": "internal_note",
+                    "ticket_update_actor_type": "technician",
                 }
             ]
         return []
@@ -366,6 +371,18 @@ async def test_automation_filter_context_derives_latest_reply_kind(monkeypatch):
     )
     assert context[5]["latest_reply_id"] == 12
     assert context[5]["latest_reply_kind"] == "internal_note"
+    assert context[5]["ticket_update_actor_type"] == "technician"
+
+
+@pytest.mark.anyio
+async def test_automation_filter_context_treats_shipment_reply_as_system(monkeypatch):
+    dummy_db = _AutomationContextDB()
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    await tickets.get_automation_filter_context_by_ticket_ids([5])
+
+    latest_query = dummy_db.fetch_calls[-1][0]
+    assert "WHEN tr.external_reference LIKE 'shipment-watch:%' THEN 'system'" in latest_query
 
 
 @pytest.mark.anyio

@@ -405,7 +405,10 @@ async def test_process_due_shipment_watches_skips_not_due(monkeypatch):
     async def fake_create_reply(**kwargs):
         return {"id": 100, **kwargs}
 
+    emit_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
     async def fake_emit(*args, **kwargs):
+        emit_calls.append((args, kwargs))
         return None
 
     monkeypatch.setattr(svc.tickets_repo, "create_reply", fake_create_reply)
@@ -416,6 +419,7 @@ async def test_process_due_shipment_watches_skips_not_due(monkeypatch):
 
     assert result["checked"] == 1
     assert result["posted"] == 1
+    assert [kwargs.get("actor_type") for _, kwargs in emit_calls] == ["system", "system"]
     assert any(entry["watch_id"] == 1 for entry in updates)
     assert all(entry["watch_id"] != 2 for entry in updates)
 
