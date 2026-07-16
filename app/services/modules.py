@@ -87,6 +87,21 @@ DEFAULT_CHATGPT_TOOLS = [
 ]
 
 
+def _default_whisperx_settings() -> dict[str, Any]:
+    """Return WhisperX module defaults sourced from the environment.
+
+    These values are evaluated after the project ``.env`` file is loaded at
+    module import time, allowing operators to configure both ticket attachment
+    and call recording transcription from the same environment keys.
+    """
+
+    return {
+        "base_url": str(os.getenv("WHISPERX_BASE_URL", "")).strip().rstrip("/"),
+        "api_key": str(os.getenv("WHISPERX_API_KEY", "")).strip(),
+        "language": str(os.getenv("WHISPERX_LANGUAGE", "")).strip() or "en",
+        "stereo_split": _ensure_bool(os.getenv("WHISPERX_STEREO_SPLIT"), False),
+    }
+
 def _get_tacticalrmm_calls_per_second() -> float:
     """Return the configured TacticalRMM request rate limit.
 
@@ -968,6 +983,13 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         },
     },
     {
+        "slug": "whisperx",
+        "name": "WhisperX",
+        "description": "Transcribe ticket audio attachments and call recordings with a WhisperX-compatible ASR service.",
+        "icon": "🎙️",
+        "settings": _default_whisperx_settings(),
+    },
+    {
         "slug": "unifi-talk",
         "name": "Unifi Talk",
         "description": "Import call recordings from Unifi Talk server via SFTP. Downloads MP3 recordings to local storage for transcription processing.",
@@ -1225,6 +1247,7 @@ _ENV_BACKED_MODULE_FIELDS: dict[str, tuple[str, ...]] = {
         "port",
     ),
     "uptimekuma": ("shared_secret_hash", "sync_service_status"),
+    "whisperx": ("base_url", "api_key", "language", "stereo_split"),
     "xero": (
         "client_id",
         "client_secret",
@@ -1878,6 +1901,21 @@ def _coerce_settings(
         _env = os.getenv("CALL_RECORDINGS_PHONE_SYSTEM", "").strip().lower()
         if _env and _env in CALL_RECORDINGS_PHONE_SYSTEM_TYPES:
             merged["phone_system_type"] = _env
+    elif slug == "whisperx":
+        env_settings = _default_whisperx_settings()
+        merged.update(
+            {
+                "base_url": str(merged.get("base_url") or "").strip().rstrip("/"),
+                "api_key": str(merged.get("api_key") or "").strip(),
+                "language": str(merged.get("language") or "").strip() or "en",
+                "stereo_split": _ensure_bool(merged.get("stereo_split"), False),
+            }
+        )
+        for key in ("base_url", "api_key", "language"):
+            if env_settings[key]:
+                merged[key] = env_settings[key]
+        if os.getenv("WHISPERX_STEREO_SPLIT") is not None:
+            merged["stereo_split"] = env_settings["stereo_split"]
     elif slug == "unifi-talk":
         overrides = payload or {}
         password_override = overrides.get("password")

@@ -104,6 +104,31 @@ def _webhook_helpers(monkeypatch):
 # Tests
 # ---------------------------------------------------------------------------
 
+
+def test_whisperx_module_settings_load_from_env(monkeypatch):
+    """WhisperX runtime settings should use .env/environment values."""
+    monkeypatch.setenv("WHISPERX_BASE_URL", "http://env-whisperx.local/")
+    monkeypatch.setenv("WHISPERX_API_KEY", "env-key")
+    monkeypatch.setenv("WHISPERX_LANGUAGE", "cy")
+    monkeypatch.setenv("WHISPERX_STEREO_SPLIT", "true")
+
+    settings = modules._coerce_settings(
+        "whisperx",
+        {
+            "base_url": "http://stored-whisperx.local",
+            "api_key": "stored-key",
+            "language": "en",
+            "stereo_split": False,
+        },
+    )
+
+    assert settings == {
+        "base_url": "http://env-whisperx.local",
+        "api_key": "env-key",
+        "language": "cy",
+        "stereo_split": True,
+    }
+
 def test_invoke_whisperx_transcribes_and_adds_note(monkeypatch, tmp_path):
     """Happy path: one WAV attachment → transcription → internal note."""
     fake_event_state = _webhook_helpers(monkeypatch)
