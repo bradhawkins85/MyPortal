@@ -100,27 +100,54 @@ def test_meaningful_change_logic():
     assert svc._has_meaningful_change(None, current_changed) is True
 
 
-def test_reply_template_contains_required_fields():
+def test_reply_template_contains_customer_friendly_tracking_summary():
     snapshot = {
-        "status": "In transit",
-        "eta_date": "2026-07-20",
+        "status": "On Board for Delivery",
+        "eta_date": "16/07/2026",
         "proof_of_delivery_date": None,
-        "signatory": "J Smith",
-        "items_in_transit": 2,
+        "signatory": None,
+        "items_in_transit": 0,
         "onboard_for_delivery": 1,
         "items_delivered": 0,
-        "tracking_events": [{"occurred_at": "2026-07-15 10:00", "description": "Processed", "location": "Sydney"}],
+        "tracking_events": [],
     }
-    watch = {"provider": "startrack", "consignment_id": "ABC123", "tracking_url": "https://www.startrack.com.au/track/ABC123"}
+    watch = {
+        "provider": "startrack",
+        "consignment_id": "UDWZ50125918",
+        "tracking_url": "https://msto.startrack.com.au/track-trace/?id=UDWZ50125918",
+    }
     body = svc._render_ticket_reply(snapshot, watch)
 
-    assert "ETA" in body
-    assert "POD date" in body
-    assert "Status" in body
-    assert "Items in transit" in body
-    assert "Onboard for delivery" in body
-    assert "Items delivered" in body
-    assert "Signatory" in body
+    assert body == (
+        "Hi {{requester}}\n"
+        "Your order for this ticket is currently On Board for Delivery, the estimated delivery date is 16/07/2026.\n"
+        "For full tracking details please see the couriers website at "
+        "https://msto.startrack.com.au/track-trace/?id=UDWZ50125918"
+    )
+
+
+@pytest.mark.anyio
+async def test_startrack_normalize_bypasses_llm_when_selected_fields_are_available(monkeypatch):
+    provider = svc.StarTrackProviderAdapter()
+
+    async def fail_llm(**kwargs):
+        raise AssertionError("LLM should not be called for selected StarTrack status and ETA fields")
+
+    monkeypatch.setattr(svc, "_extract_snapshot_with_llm", fail_llm)
+
+    raw = {
+        "url": "https://msto.startrack.com.au/track-trace/?id=UDWZ50125918",
+        "html": "__c1_lblConsignmentNumber: UDWZ50125918\n__c1_lblStatus: On Board for Delivery\n__c1_lblETADate: 16/07/2026",
+        "text": "__c1_lblConsignmentNumber: UDWZ50125918\n__c1_lblStatus: On Board for Delivery\n__c1_lblETADate: 16/07/2026",
+    }
+
+    snapshot = await provider.normalize(raw)
+    payload = snapshot.model_dump()
+
+    assert payload["status"] == "On Board for Delivery"
+    assert payload["eta_date"] == "16/07/2026"
+    assert payload["onboard_for_delivery"] == 1
+    assert payload["tracking_events"] == []
 
 
 @pytest.mark.anyio
