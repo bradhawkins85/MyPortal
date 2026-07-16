@@ -1314,6 +1314,60 @@ async def test_sync_account_attaches_m365_reply_to_resolved_ticket_number(monkey
     assert replies_added[0]["ticket_id"] == 24417
     assert recorded_messages[-1]["ticket_id"] == 24417
 
+
+async def test_persist_m365_inline_images_for_ticket_rewrites_data_uri(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    async def fake_persist(ticket_id, body, *, access_level, uploaded_by_user_id):
+        captured.update(
+            {
+                "ticket_id": ticket_id,
+                "body": body,
+                "access_level": access_level,
+                "uploaded_by_user_id": uploaded_by_user_id,
+            }
+        )
+        return '<img src="/api/tickets/123/attachments/77/download">', [{"id": 77}]
+
+    monkeypatch.setattr(
+        m365_mail.ticket_attachments_service,
+        "persist_inline_images_for_ticket_body",
+        fake_persist,
+    )
+
+    body = '<img src="data:image/png;base64,cG5n">'
+    rewritten = await m365_mail._persist_m365_inline_images_for_ticket(123, body)
+
+    assert rewritten == '<img src="/api/tickets/123/attachments/77/download">'
+    assert captured == {
+        "ticket_id": 123,
+        "body": body,
+        "access_level": "closed",
+        "uploaded_by_user_id": None,
+    }
+
+
+async def test_persist_m365_inline_images_for_ticket_ignores_plain_body(monkeypatch):
+    calls = 0
+
+    async def fake_persist(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return "unused", []
+
+    monkeypatch.setattr(
+        m365_mail.ticket_attachments_service,
+        "persist_inline_images_for_ticket_body",
+        fake_persist,
+    )
+
+    body = '<img src="cid:image001@example.com">'
+    rewritten = await m365_mail._persist_m365_inline_images_for_ticket(123, body)
+
+    assert rewritten == body
+    assert calls == 0
+
+
 async def test_embed_graph_inline_images_replaces_cid_with_data_uri(monkeypatch):
     async def fake_graph_get(access_token: str, url: str):
         return {
