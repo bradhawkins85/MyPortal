@@ -28,6 +28,7 @@ from app.repositories import ticket_attachments as attachments_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import modules as modules_service
 from app.services import system_state
+from app.services import ticket_attachments as attachments_service
 from app.services import tickets as tickets_service
 from app.services.sanitization import sanitize_rich_text
 
@@ -1606,49 +1607,16 @@ async def _save_email_attachment(
     content_type: str,
     payload: bytes,
 ) -> dict[str, Any] | None:
-    """
-    Save an email attachment to disk and create a database record.
-    
-    Args:
-        ticket_id: The ticket ID to attach the file to
-        filename: Original filename from the email
-        content_type: MIME type of the attachment
-        payload: File content as bytes
-    
-    Returns:
-        The created attachment record or None if save failed
-    """
+    """Save an email attachment using the shared private attachment store."""
     try:
-        # Generate secure filename
-        secure_filename = _generate_secure_filename(filename)
-        
-        # Get upload directory
-        upload_dir = _get_upload_directory()
-        file_path = upload_dir / secure_filename
-        
-        # Save file to disk
-        file_size = len(payload)
-        with open(file_path, "wb") as f:
-            f.write(payload)
-        
-        log_info(
-            f"Saved email attachment {secure_filename} ({file_size} bytes) for ticket {ticket_id}",
+        return await attachments_service.save_file_bytes(
             ticket_id=ticket_id,
-            original_filename=filename,
-            secure_filename=secure_filename,
-        )
-        
-        # Create database record with "restricted" access level
-        attachment = await attachments_repo.create_attachment(
-            ticket_id=ticket_id,
-            filename=secure_filename,
-            original_filename=filename,
-            file_size=file_size,
+            contents=payload,
+            original_filename=filename or "attachment",
             mime_type=content_type,
-            access_level="restricted",
+            access_level="closed",
             uploaded_by_user_id=None,
         )
-        return attachment
     except Exception as e:
         log_error(
             f"Failed to save email attachment: {e}",
@@ -1656,12 +1624,6 @@ async def _save_email_attachment(
             filename=filename,
             error=str(e),
         )
-        # Clean up file if it was created
-        if file_path.exists():
-            try:
-                file_path.unlink()
-            except Exception:
-                pass
         return None
 
 
