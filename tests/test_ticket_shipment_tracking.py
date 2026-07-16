@@ -256,6 +256,82 @@ async def test_startrack_normalize_prefers_fallback_when_llm_is_incorrect(monkey
     assert payload["tracking_events"] == []
 
 
+def test_delivered_in_full_status_detection_is_exact_case_insensitive():
+    assert svc._is_delivered_in_full({"status": "Delivered in Full"}) is True
+    assert svc._is_delivered_in_full({"status": " delivered in full "}) is True
+    assert svc._is_delivered_in_full({"status": "Delivered"}) is False
+
+
+@pytest.mark.anyio
+async def test_process_due_shipment_watches_disables_delivered_in_full_watch(monkeypatch):
+    now = datetime.now(timezone.utc)
+    due_watch = {
+        "id": 1,
+        "ticket_id": 10,
+        "provider": "startrack",
+        "tracking_url": "https://www.startrack.com.au/track/ABC123",
+        "poll_interval_seconds": 60,
+        "last_checked_at": now - timedelta(minutes=5),
+        "last_snapshot": {"status": "In transit"},
+        "last_snapshot_hash": "old",
+        "active": True,
+        "public_comments_enabled": False,
+    }
+
+    async def fake_list(limit=200):
+        return [due_watch]
+
+    async def fake_get(watch_id):
+        return due_watch
+
+    async def fake_update(watch_id, **kwargs):
+        return None
+
+    disabled_ticket_ids: list[int] = []
+
+    async def fake_disable(ticket_id):
+        disabled_ticket_ids.append(ticket_id)
+
+    monkeypatch.setattr(svc.shipment_watch_repo, "list_active_watches", fake_list)
+    monkeypatch.setattr(svc.shipment_watch_repo, "get_watch_by_id", fake_get)
+    monkeypatch.setattr(svc.shipment_watch_repo, "update_watch_check_state", fake_update)
+    monkeypatch.setattr(svc.shipment_watch_repo, "disable_watch", fake_disable)
+
+    provider = svc.StarTrackProviderAdapter()
+
+    async def fake_fetch(url: str):
+        return {"url": url, "html": "", "text": "Delivered in Full"}
+
+    async def fake_normalize(raw):
+        return svc.CanonicalShipmentSnapshot(
+            status="Delivered in Full",
+            eta_date=None,
+            proof_of_delivery_date="2026-07-16",
+            signatory=None,
+            items_in_transit=0,
+            onboard_for_delivery=0,
+            items_delivered=1,
+            tracking_events=[],
+        )
+
+    monkeypatch.setattr(provider, "fetch", fake_fetch)
+    monkeypatch.setattr(provider, "normalize", fake_normalize)
+    monkeypatch.setattr(svc, "detect_provider", lambda url: provider)
+
+    @asynccontextmanager
+    async def fake_lock(name, timeout=1):
+        yield True
+
+    monkeypatch.setattr(svc.db, "acquire_lock", fake_lock)
+
+    result = await svc.process_due_shipment_watches(limit=10)
+
+    assert result["checked"] == 1
+    assert result["changed"] == 1
+    assert result["posted"] == 0
+    assert disabled_ticket_ids == [10]
+
+
 @pytest.mark.anyio
 async def test_process_due_shipment_watches_skips_not_due(monkeypatch):
     now = datetime.now(timezone.utc)
@@ -329,7 +405,10 @@ async def test_process_due_shipment_watches_skips_not_due(monkeypatch):
     async def fake_create_reply(**kwargs):
         return {"id": 100, **kwargs}
 
+    emit_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
     async def fake_emit(*args, **kwargs):
+        emit_calls.append((args, kwargs))
         return None
 
     monkeypatch.setattr(svc.tickets_repo, "create_reply", fake_create_reply)
@@ -340,6 +419,7 @@ async def test_process_due_shipment_watches_skips_not_due(monkeypatch):
 
     assert result["checked"] == 1
     assert result["posted"] == 1
+    assert [kwargs.get("actor_type") for _, kwargs in emit_calls] == ["system", "system"]
     assert any(entry["watch_id"] == 1 for entry in updates)
     assert all(entry["watch_id"] != 2 for entry in updates)
 

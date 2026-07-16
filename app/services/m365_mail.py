@@ -19,6 +19,7 @@ from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import m365 as m365_service
 from app.services import modules as modules_service
 from app.services import system_state
+from app.services import ticket_attachments as ticket_attachments_service
 from app.services import tickets as tickets_service
 from app.services.m365 import M365Error
 
@@ -1411,6 +1412,10 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 ticket: Mapping[str, Any] | None = None
                 is_new_ticket = False
 
+                create_initial_reply_after_inline_persist = (
+                    "data:image/" in description.lower() if description else False
+                )
+
                 try:
                     if existing_ticket:
                         ticket = existing_ticket
@@ -1438,12 +1443,41 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             requester_email=(
                                 from_email_addr if requester_id is None else None
                             ),
+                            record_initial_reply=not create_initial_reply_after_inline_persist,
                         )
                         is_new_ticket = True
                         ticket_id = (
                             ticket.get("id") if isinstance(ticket, Mapping) else None
                         )
                         if ticket_id is not None:
+                            if create_initial_reply_after_inline_persist:
+                                description = await _persist_m365_inline_images_for_ticket(
+                                    int(ticket_id),
+                                    description,
+                                )
+                                await tickets_service.update_ticket_description(
+                                    int(ticket_id),
+                                    description or None,
+                                )
+                                if description:
+                                    await tickets_repo.create_reply(
+                                        ticket_id=int(ticket_id),
+                                        author_id=requester_id,
+                                        body=description,
+                                        is_internal=False,
+                                        external_reference=(
+                                            _normalise_ticket_external_reference(internet_msg_id)
+                                        ),
+                                        created_at=received_at or datetime.now(timezone.utc),
+                                        author_email=(
+                                            from_email_addr if requester_id is None else None
+                                        ),
+                                        author_display_name=(
+                                            (from_header or from_address)
+                                            if requester_id is None
+                                            else None
+                                        ),
+                                    )
                             cc_addresses = _extract_graph_recipient_addresses(
                                 msg.get("ccRecipients") or []
                             )
@@ -1509,6 +1543,10 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 subject=subject,
                             )
                         if sanitized.has_rich_content or has_attachment_reply:
+                            reply_body = await _persist_m365_inline_images_for_ticket(
+                                int(ticket_id),
+                                reply_body,
+                            )
                             reply_created_at = received_at or datetime.now(timezone.utc)
                             reply_author_id = await _resolve_existing_reply_author_id(
                                 ticket,
@@ -1691,6 +1729,35 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         account_id=account_id, started_at=started_at, result=result
     )
     return result
+
+
+async def _persist_m365_inline_images_for_ticket(ticket_id: int, body: str) -> str:
+    """Persist Graph inline image data URIs as ticket attachments.
+
+    Graph inline CID images are first converted to data URIs so they survive
+    sanitisation. Persisting those data URIs to normal ticket attachments keeps
+    the rendered ticket body small and avoids browser/client policies that do
+    not display large inline data URLs reliably.
+    """
+    if not body or "data:image/" not in body.lower():
+        return body
+    try:
+        rewritten_body, _attachments = (
+            await ticket_attachments_service.persist_inline_images_for_ticket_body(
+                ticket_id,
+                body,
+                access_level="closed",
+                uploaded_by_user_id=None,
+            )
+        )
+        return rewritten_body
+    except Exception as exc:  # pragma: no cover - defensive logging
+        log_error(
+            "Failed to persist M365 inline email images",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
+        return body
 
 
 async def _embed_graph_inline_images(
