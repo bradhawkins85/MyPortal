@@ -23,6 +23,9 @@ from app.services import modules as modules_service
 from app.services import tickets as tickets_service
 
 
+DELIVERED_IN_FULL_STATUS = "delivered in full"
+
+
 _BLOCKED_NETWORKS = [
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("10.0.0.0/8"),
@@ -120,6 +123,12 @@ def _safe_iso(value: Any) -> str | None:
 
 def _is_missing_scalar(value: Any) -> bool:
     return value in (None, "")
+
+
+def _is_delivered_in_full(snapshot_payload: Mapping[str, Any] | None) -> bool:
+    if not snapshot_payload:
+        return False
+    return str(snapshot_payload.get("status") or "").strip().casefold() == DELIVERED_IN_FULL_STATUS
 
 
 def _snapshot_payload(snapshot: CanonicalShipmentSnapshot | Mapping[str, Any] | None) -> dict[str, Any] | None:
@@ -654,6 +663,10 @@ async def process_due_shipment_watches(*, limit: int = 200) -> dict[str, int]:
                     last_snapshot_json=snapshot_payload,
                 )
 
+                delivered_in_full = _is_delivered_in_full(snapshot_payload)
+                if delivered_in_full:
+                    await shipment_watch_repo.disable_watch(ticket_id)
+
                 first_success = previous_hash is None
                 has_update = changed_now or first_success
                 if not has_update:
@@ -735,6 +748,7 @@ __all__ = [
     "process_due_shipment_watches",
     "upsert_watch",
     "_has_meaningful_change",
+    "_is_delivered_in_full",
     "_is_watch_due",
     "_render_ticket_reply",
     "_validate_tracking_url",

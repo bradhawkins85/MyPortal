@@ -1129,6 +1129,14 @@ async def clear_ticket_billing_fields(ticket_ids: list[int]) -> int:
         (datetime.now(timezone.utc), *clean_ids),
     )
 
+
+async def _disable_shipment_watch(ticket_id: int) -> None:
+    await db.execute(
+        "UPDATE ticket_shipment_watches SET active = 0 WHERE ticket_id = %s",
+        (ticket_id,),
+    )
+
+
 async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
     if not fields:
         return await get_ticket(ticket_id)
@@ -1159,6 +1167,8 @@ async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
     query = f"UPDATE tickets SET {', '.join(assignments)} WHERE id = %s"
     params.append(ticket_id)
     await db.execute(query, tuple(params))
+    if str(fields.get("status") or "").casefold() == "closed" or fields.get("closed_at") is not None:
+        await _disable_shipment_watch(ticket_id)
     log_info("Ticket updated successfully", ticket_id=ticket_id)
     return await get_ticket(ticket_id)
 
@@ -1228,7 +1238,7 @@ async def set_tickets_status(
         closed_clause = "closed_at = COALESCE(closed_at, UTC_TIMESTAMP(6)),"
 
     params.extend(normalised_ids)
-    return await db.execute_rowcount(
+    affected = await db.execute_rowcount(
         f"""
         UPDATE tickets
         SET status_changed_at = CASE WHEN status <> %s
@@ -1240,6 +1250,12 @@ async def set_tickets_status(
         """,
         tuple(params),
     )
+    if status.casefold() == "closed" or closed_at is not None:
+        await db.execute(
+            f"UPDATE ticket_shipment_watches SET active = 0 WHERE ticket_id IN ({placeholders})",
+            tuple(normalised_ids),
+        )
+    return affected
 
 
 async def delete_ticket(ticket_id: int) -> None:
