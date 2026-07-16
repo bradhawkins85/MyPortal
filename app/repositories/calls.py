@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import secrets
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
 from app.core.database import db
+from app.repositories import integration_modules as module_repo
 
 SUPPORTED_EVENTS: tuple[str, ...] = (
     "Incoming Call",
@@ -50,6 +52,56 @@ SUPPORTED_VARIABLES: tuple[str, ...] = (
 
 _SUPPORTED_VARIABLE_SET = frozenset(SUPPORTED_VARIABLES)
 _SUPPORTED_EVENT_BY_KEY = {event.lower(): event for event in SUPPORTED_EVENTS}
+
+_PLACEHOLDER_WEBHOOK_TOKEN = "obscure_static_id_for_security"
+_WEBHOOK_TOKEN_BYTES = 24
+
+
+def _generate_webhook_token() -> str:
+    return secrets.token_urlsafe(_WEBHOOK_TOKEN_BYTES)
+
+
+def _token_needs_replacement(value: Any) -> bool:
+    token = str(value or "").strip()
+    return (
+        not token
+        or token == _PLACEHOLDER_WEBHOOK_TOKEN
+        or "<" in token
+        or ">" in token
+        or "{" in token
+        or "}" in token
+    )
+
+
+def _normalise_settings(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+async def get_or_create_webhook_token() -> str:
+    """Return the per-instance calls webhook token, creating one if needed."""
+    await _ensure_connection()
+    module = await module_repo.get_module("calls")
+    settings = _normalise_settings((module or {}).get("settings"))
+    token = str(settings.get("webhook_token") or "").strip()
+    path = str(settings.get("webhook_path") or "").strip()
+    if _token_needs_replacement(token):
+        token = _generate_webhook_token()
+    desired_path = f"/phonewebhook/{token}/"
+    if path != desired_path or settings.get("webhook_token") != token:
+        settings["webhook_token"] = token
+        settings["webhook_path"] = desired_path
+        if module:
+            await module_repo.update_module("calls", settings=settings)
+        else:
+            await module_repo.upsert_module(
+                slug="calls",
+                name="Calls",
+                description="Receive ActionURL-compatible phone events over HTTP GET and log supported call metadata in a central list.",
+                icon="📞",
+                enabled=True,
+                settings=settings,
+            )
+    return token
 
 
 async def _ensure_connection() -> None:
