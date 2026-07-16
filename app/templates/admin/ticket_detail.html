@@ -1295,7 +1295,12 @@
                 </div>
                 <div class="form-field form-field--checkbox">
                   <label class="checkbox">
-                    <input type="checkbox" name="isBillable" value="true" />
+                    <input
+                      type="checkbox"
+                      name="isBillable"
+                      value="true"
+                      {% if ticket_company is none or ticket_company.default_ticket_replies_billable is not defined or ticket_company.default_ticket_replies_billable %}checked{% endif %}
+                    />
                     <span>Billable</span>
                   </label>
                 </div>
