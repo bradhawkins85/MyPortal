@@ -695,3 +695,18 @@ async def test_update_reply_defaults_labour_type_when_time_entry_has_none(monkey
 
     assert "labour_type_id = %s" in dummy_db.execute_sql
     assert dummy_db.execute_params == (15, 1, 12, 7)
+
+
+@pytest.mark.anyio
+async def test_automation_scan_orders_by_status_age_candidates(monkeypatch):
+    dummy_db = _ListTicketsDB()
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    records = await tickets.list_tickets_for_automation_scan(limit=250)
+
+    assert records == []
+    assert dummy_db.fetch_params == (250,)
+    assert (
+        "ORDER BY COALESCE(t.status_changed_at, t.created_at, t.updated_at) ASC, "
+        "t.updated_at ASC, t.id ASC"
+    ) in dummy_db.fetch_sql
