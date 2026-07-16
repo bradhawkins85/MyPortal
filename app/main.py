@@ -8726,6 +8726,12 @@ async def _render_tickets_dashboard(
             else (dashboard.available_statuses[0] if dashboard.available_statuses else "open")
         )
     labour_types = await labour_types_service.list_labour_types()
+    from app.repositories import ticket_canned_responses as canned_responses_repo
+
+    if await _is_helpdesk_technician(user, request):
+        ticket_canned_responses = await canned_responses_repo.list_responses()
+    else:
+        ticket_canned_responses = []
     extra = {
         "title": "Ticketing workspace",
         "tickets": tickets,
@@ -8743,6 +8749,7 @@ async def _render_tickets_dashboard(
         "ticket_company_lookup": reference_data["company_lookup"],
         "ticket_user_lookup": reference_data["user_lookup"],
         "ticket_labour_types": labour_types,
+        "ticket_canned_responses": ticket_canned_responses,
         "ticket_time_lookup": ticket_time_lookup,
         "ticket_automation_filter_lookup": ticket_automation_filter_lookup,
         "ticket_dashboard_now": datetime.now(timezone.utc),

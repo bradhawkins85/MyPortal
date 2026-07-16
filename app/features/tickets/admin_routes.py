@@ -1642,16 +1642,23 @@ def _ticket_template_context(ticket: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-async def _create_ticket_canned_response_from_form(request: Request, current_user: Mapping[str, Any]) -> str | None:
+async def _ticket_canned_response_form_values(request: Request) -> tuple[str | None, str | None, str | None]:
     form = await request.form()
     title = str(form.get("title") or "").strip()
     body = str(form.get("body") or "").strip()
     if not title or not body:
-        return "Enter both a title and reply text for the canned response."
+        return None, None, "Enter both a title and reply text for the canned response."
     if len(title) > 255:
-        return "Canned response title cannot exceed 255 characters."
+        return None, None, "Canned response title cannot exceed 255 characters."
+    return title, body, None
+
+
+async def _create_ticket_canned_response_from_form(request: Request, current_user: Mapping[str, Any]) -> str | None:
+    title, body, error_message = await _ticket_canned_response_form_values(request)
+    if error_message:
+        return error_message
     user_id = _main()._get_current_user_id(current_user)
-    await canned_responses_repo.create_response(title=title, body=body, created_by_user_id=user_id)
+    await canned_responses_repo.create_response(title=str(title), body=str(body), created_by_user_id=user_id)
     return None
 
 
@@ -1665,6 +1672,37 @@ async def admin_create_global_ticket_canned_response(request: Request):
     if error_message:
         return flash_redirect("/admin/tickets", error_message, "error")
     return flash_redirect("/admin/tickets", "Canned response created.", "success")
+
+
+@router.post("/admin/tickets/canned-responses/{response_id:int}", response_class=HTMLResponse)
+async def admin_update_global_ticket_canned_response(response_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    title, body, error_message = await _ticket_canned_response_form_values(request)
+    if error_message:
+        return flash_redirect("/admin/tickets", error_message, "error")
+    updated = await canned_responses_repo.update_response(
+        response_id=response_id,
+        title=str(title),
+        body=str(body),
+    )
+    if updated is None:
+        return flash_redirect("/admin/tickets", "Canned response not found.", "error")
+    return flash_redirect("/admin/tickets", "Canned response updated.", "success")
+
+
+@router.post("/admin/tickets/canned-responses/{response_id:int}/delete", response_class=HTMLResponse)
+async def admin_delete_global_ticket_canned_response(response_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    deleted = await canned_responses_repo.delete_response(response_id)
+    if not deleted:
+        return flash_redirect("/admin/tickets", "Canned response not found.", "error")
+    return flash_redirect("/admin/tickets", "Canned response deleted.", "success")
 
 
 @router.post("/admin/tickets/{ticket_id:int}/canned-responses", response_class=HTMLResponse)
