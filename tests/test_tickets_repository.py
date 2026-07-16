@@ -382,7 +382,7 @@ async def test_automation_filter_context_treats_shipment_reply_as_system(monkeyp
     await tickets.get_automation_filter_context_by_ticket_ids([5])
 
     latest_query = dummy_db.fetch_calls[-1][0]
-    assert "WHEN tr.external_reference LIKE 'shipment-watch:%' THEN 'system'" in latest_query
+    assert "WHEN tr.external_reference LIKE 'shipment-watch:%%' THEN 'system'" in latest_query
 
 
 @pytest.mark.anyio
