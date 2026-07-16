@@ -2838,6 +2838,108 @@
     });
   }
 
+
+  function initialiseCannedResponses() {
+    const pickerModal = document.querySelector('[data-canned-responses-modal]');
+    const createModal = document.querySelector('[data-canned-response-create-modal]');
+    const editor = document.querySelector('[data-rich-text-content]');
+    const fallback = document.querySelector('[data-rich-text-value]');
+    const ticketId = pickerModal ? pickerModal.getAttribute('data-ticket-id') : '';
+    let loadedResponses = null;
+
+    function show(modal) {
+      if (modal instanceof HTMLElement) {
+        modal.hidden = false;
+      }
+    }
+
+    function hide(modal) {
+      if (modal instanceof HTMLElement) {
+        modal.hidden = true;
+      }
+    }
+
+    async function loadResponses() {
+      if (loadedResponses || !ticketId) {
+        return loadedResponses || [];
+      }
+      const response = await fetch(`/admin/tickets/${ticketId}/canned-responses`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        throw new Error(await getApiErrorMessage(response, 'Unable to load canned responses.'));
+      }
+      const data = await response.json();
+      loadedResponses = Array.isArray(data.responses) ? data.responses : [];
+      return loadedResponses;
+    }
+
+    function appendResponse(text) {
+      const responseText = typeof text === 'string' ? text.trim() : '';
+      if (!responseText) {
+        return;
+      }
+      if (editor instanceof HTMLElement) {
+        const current = editor.innerHTML.trim();
+        const escaped = responseText
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\n/g, '<br>');
+        editor.innerHTML = current ? `${current}<p>${escaped}</p>` : `<p>${escaped}</p>`;
+        editor.dispatchEvent(new Event('input', { bubbles: true }));
+        editor.focus();
+      }
+      if (fallback instanceof HTMLTextAreaElement) {
+        fallback.value = fallback.value.trim() ? `${fallback.value}\n\n${responseText}` : responseText;
+        fallback.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+
+    document.querySelectorAll('[data-canned-responses-open]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        show(pickerModal);
+        const error = pickerModal ? pickerModal.querySelector('[data-canned-responses-error]') : null;
+        if (error instanceof HTMLElement) {
+          error.hidden = true;
+          error.textContent = '';
+        }
+        try {
+          await loadResponses();
+        } catch (loadError) {
+          if (error instanceof HTMLElement) {
+            error.textContent = loadError instanceof Error ? loadError.message : 'Unable to load canned responses.';
+            error.hidden = false;
+          }
+        }
+      });
+    });
+
+    document.querySelectorAll('[data-canned-response-insert]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const id = button.getAttribute('data-response-id');
+        try {
+          const responses = await loadResponses();
+          const selected = responses.find((response) => String(response.id) === String(id));
+          appendResponse(selected ? selected.body : '');
+          hide(pickerModal);
+        } catch (error) {
+          console.error('Unable to insert canned response:', error);
+        }
+      });
+    });
+
+    document.querySelectorAll('[data-canned-responses-close]').forEach((button) => {
+      button.addEventListener('click', () => hide(pickerModal));
+    });
+    document.querySelectorAll('[data-canned-response-create-open]').forEach((button) => {
+      button.addEventListener('click', () => show(createModal));
+    });
+    document.querySelectorAll('[data-canned-response-create-close]').forEach((button) => {
+      button.addEventListener('click', () => hide(createModal));
+    });
+  }
+
   function ready() {
     const messageWrappers = document.querySelectorAll('[data-timeline-message]');
 
@@ -2861,6 +2963,7 @@
     initialiseTaskManagement();
     initialiseWatcherManagement();
     initialiseTicketMentions();
+    initialiseCannedResponses();
     initialiseAttachmentActions();
     initTicketRelated();
     convertUtcElements();
