@@ -4513,7 +4513,7 @@ dialog.modal:not([open]) {
   .modal__dialog,
   .modal__panel {
     width: 100%;
-    max-height: calc(100vh - (var(--space-gap-base) * 2));
+    max-height: calc(100dvh - (var(--space-gap-base) * 2));
   }
 
   .modal__dialog .modal__header,
@@ -4541,7 +4541,8 @@ dialog.modal:not([open]) {
   width: 90vw;
   max-width: 90vw;
   height: auto;
-  max-height: min(90vh, calc(100vh - (var(--space-gap-roomy) * 5)));
+  max-height: calc(100dvh - (var(--space-gap-roomy) * 5));
+  margin: auto;
   overflow-x: hidden;
   overflow-y: auto;
   border: 1px solid rgba(148, 163, 184, 0.25);

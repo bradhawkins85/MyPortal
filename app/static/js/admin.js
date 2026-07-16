@@ -2504,6 +2504,10 @@
       modal.hidden = false;
       modal.classList.add('is-visible');
       modal.setAttribute('aria-hidden', 'false');
+      const modalContent = modal.querySelector('.modal__content, .modal__panel, .modal__dialog, .modal-content');
+      if (modalContent) {
+        modalContent.scrollTop = 0;
+      }
       if (activeTrigger) {
         activeTrigger.setAttribute('aria-expanded', 'true');
       }
