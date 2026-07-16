@@ -196,6 +196,32 @@ def _extract_startrack_essential_fields(html_text: str) -> str:
     return "\n".join(lines)
 
 
+def _extract_labeled_filter_value(text: str, element_id: str) -> str | None:
+    pattern = rf"(?:^|\n)\s*{re.escape(element_id)}\s*:\s*([^\n\r]+)"
+    match = re.search(pattern, text, flags=re.IGNORECASE)
+    return _safe_iso(match.group(1) if match else None)
+
+
+def _startrack_snapshot_from_selected_fields(text: str) -> CanonicalShipmentSnapshot | None:
+    status = _extract_labeled_filter_value(text, "__c1_lblStatus")
+    eta_date = _extract_labeled_filter_value(text, "__c1_lblETADate")
+    if not status and not eta_date:
+        return None
+
+    status_text = (status or "").lower()
+    return CanonicalShipmentSnapshot(
+        status=status,
+        eta_date=eta_date,
+        proof_of_delivery_date=None,
+        signatory=None,
+        items_in_transit=1 if "in transit" in status_text else 0,
+        onboard_for_delivery=(
+            1 if re.search(r"on\s*board|onboard", status_text) and "deliver" in status_text else 0
+        ),
+        items_delivered=1 if "delivered" in status_text and "delivery" not in status_text else 0,
+        tracking_events=[],
+    )
+
 def _extract_json_object(raw_text: str) -> dict[str, Any] | None:
     text = str(raw_text or "").strip()
     if not text:
@@ -294,6 +320,10 @@ class StarTrackProviderAdapter(ProviderAdapter):
     async def normalize(self, raw: Mapping[str, Any]) -> CanonicalShipmentSnapshot:
         raw_text = str(raw.get("text") or "")
         html_text = str(raw.get("html") or "")
+
+        selected_fields_snapshot = _startrack_snapshot_from_selected_fields(raw_text)
+        if selected_fields_snapshot is not None:
+            return selected_fields_snapshot
 
         fallback_payload: dict[str, Any] = {
             "status": _extract_status_fallback(raw_text),
@@ -508,46 +538,17 @@ def _has_meaningful_change(
 
 
 def _render_ticket_reply(snapshot: Mapping[str, Any], watch: Mapping[str, Any]) -> str:
-    events = snapshot.get("tracking_events") or []
-    event_lines: list[str] = []
-    for event in events[:8]:
-        if not isinstance(event, Mapping):
-            continue
-        occurred_at = str(event.get("occurred_at") or "").strip() or "Unknown time"
-        description = str(event.get("description") or event.get("status") or "Update").strip()
-        location = str(event.get("location") or "").strip()
-        detail = f"- {occurred_at}: {description}"
-        if location:
-            detail = f"{detail} ({location})"
-        event_lines.append(detail)
-
-    provider = str(watch.get("provider") or "Unknown provider").strip()
-    consignment = str(watch.get("consignment_id") or "").strip() or "Not available"
+    status = str(snapshot.get("status") or "Unknown").strip() or "Unknown"
+    eta_date = str(snapshot.get("eta_date") or "Not available").strip() or "Not available"
+    tracking_url = str(watch.get("tracking_url") or "").strip()
 
     lines = [
-        "Shipment tracking update",
-        "",
-        f"- Provider: {provider}",
-        f"- Consignment: {consignment}",
-        f"- Status: {snapshot.get('status') or 'Unknown'}",
-        f"- ETA: {snapshot.get('eta_date') or 'Not available'}",
-        f"- POD date: {snapshot.get('proof_of_delivery_date') or 'Not available'}",
-        f"- Signatory: {snapshot.get('signatory') or 'Not available'}",
-        f"- Items in transit: {snapshot.get('items_in_transit') or 0}",
-        f"- Onboard for delivery: {snapshot.get('onboard_for_delivery') or 0}",
-        f"- Items delivered: {snapshot.get('items_delivered') or 0}",
+        f"Your order for this ticket is currently {status}, the estimated delivery date is {eta_date}.",
     ]
-
-    if event_lines:
-        lines.append("")
-        lines.append("Recent tracking events:")
-        lines.extend(event_lines)
-
-    tracking_url = str(watch.get("tracking_url") or "").strip()
     if tracking_url:
-        lines.append("")
-        lines.append(f"Tracking URL: {tracking_url}")
-
+        lines.append(f"For full tracking details please see the couriers website at {tracking_url}")
+    else:
+        lines.append("For full tracking details please see the couriers website.")
     return "\n".join(lines)
 
 
