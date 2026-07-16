@@ -223,6 +223,18 @@ async def test_handle_event_returns_empty_for_blank_event(monkeypatch):
     assert called is False
 
 
+def test_filters_match_accepts_human_readable_operator_keys():
+    context = {"ticket": {"subject": "New voicemail from 6175550123"}}
+
+    assert automations_service._filters_match(
+        {"starts with": {"ticket.subject": "New voicemail from 61"}},
+        context,
+    )
+    assert automations_service._filters_match(
+        {"equals": {"ticket.subject": "New voicemail from 6175550123"}},
+        context,
+    )
+
 @pytest.mark.anyio
 async def test_execute_automation_interpolates_context(monkeypatch):
     captured: list[tuple[str, dict[str, object]]] = []
