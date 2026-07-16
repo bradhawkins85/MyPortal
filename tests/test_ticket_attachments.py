@@ -249,6 +249,38 @@ def test_validate_file_upload_too_large():
     assert "exceeds maximum" in error
 
 
+def test_validate_file_upload_allows_voicemail_wav():
+    """Office 365 voicemail WAV attachments should pass upload validation."""
+    mock_file = MagicMock()
+    mock_file.filename = "voicemail.wav"
+    mock_file.content_type = "audio/wav"
+    mock_file.size = 1000
+
+    is_valid, error = attachments_service.validate_file_upload(mock_file)
+
+    assert is_valid is True
+    assert error is None
+
+
+def test_allowed_mime_types_include_whisperx_audio_formats():
+    """All audio formats that WhisperX can process should be safe attachments."""
+    whisperx_audio_types = {
+        "audio/wav",
+        "audio/x-wav",
+        "audio/wave",
+        "audio/mpeg",
+        "audio/mp3",
+        "audio/ogg",
+        "audio/flac",
+        "audio/x-flac",
+        "audio/webm",
+        "audio/mp4",
+        "audio/x-m4a",
+    }
+
+    assert whisperx_audio_types <= attachments_service.ALLOWED_MIME_TYPES
+
+
 def test_validate_file_upload_invalid_mime_type():
     """Test validation fails with invalid MIME type."""
     mock_file = MagicMock()
