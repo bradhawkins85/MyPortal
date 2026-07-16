@@ -44,6 +44,9 @@ async def admin_calls_page(request: Request):
     if redirect:
         return redirect
 
+    webhook_token = await calls_repo.get_or_create_webhook_token()
+    webhook_path = f"/phonewebhook/{webhook_token}/"
+    webhook_url = str(request.url_for("receive_phone_webhook", webhook_token=webhook_token))
     events = await calls_repo.list_call_events()
     return await main_module._render_template(
         "admin/calls.html",
@@ -52,6 +55,9 @@ async def admin_calls_page(request: Request):
         extra={
             "title": "Calls",
             "call_events": events,
+            "webhook_path": webhook_path,
+            "webhook_url": webhook_url,
+            "webhook_example_path": f"{webhook_path}?number=$remote&remote=$remote&call-id=$call-id",
             "supported_events": calls_repo.SUPPORTED_EVENTS,
             "supported_variables": calls_repo.SUPPORTED_VARIABLES,
         },

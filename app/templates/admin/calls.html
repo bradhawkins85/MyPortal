@@ -13,10 +13,17 @@
   <div>
     <h2>Phone webhook endpoint</h2>
     <p>
-      Configure phones to send an HTTP GET request to
-      <code>/phonewebhook/&lt;obscure_static_id_for_security&gt;/</code> with supported query parameters.
-      Example: <code>/phonewebhook/obscure_static_id_for_security/?number=$remote&amp;remote=$remote&amp;call-id=$call-id</code>.
+      Configure phones to send an HTTP GET request to this MyPortal instance's unique webhook endpoint
+      with supported query parameters.
     </p>
+    <dl class="definition-list">
+      <dt>Webhook URL</dt>
+      <dd><code>{{ webhook_url }}</code></dd>
+      <dt>Webhook path</dt>
+      <dd><code>{{ webhook_path }}</code></dd>
+      <dt>Example</dt>
+      <dd><code>{{ webhook_example_path }}</code></dd>
+    </dl>
   </div>
   <details>
     <summary>Supported events and dynamic variables</summary>
