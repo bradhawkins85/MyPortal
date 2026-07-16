@@ -102,6 +102,7 @@ def _default_whisperx_settings() -> dict[str, Any]:
         "stereo_split": _ensure_bool(os.getenv("WHISPERX_STEREO_SPLIT"), False),
     }
 
+
 def _get_tacticalrmm_calls_per_second() -> float:
     """Return the configured TacticalRMM request rate limit.
 
@@ -532,7 +533,9 @@ def _extract_ticket_id_from_email_payload(payload: Mapping[str, Any]) -> int | N
     return None
 
 
-async def _load_ticket_email_attachments(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+async def _load_ticket_email_attachments(
+    payload: Mapping[str, Any],
+) -> list[dict[str, Any]]:
     """Load ticket attachments for automation email modules when possible.
 
     Explicit payload attachments are respected by callers; this helper only supplies
@@ -550,7 +553,9 @@ async def _load_ticket_email_attachments(payload: Mapping[str, Any]) -> list[dic
     if isinstance(context, Mapping):
         reply = context.get("reply")
         if isinstance(reply, Mapping) and isinstance(reply.get("attachments"), list):
-            attachments = [item for item in reply["attachments"] if isinstance(item, Mapping)]
+            attachments = [
+                item for item in reply["attachments"] if isinstance(item, Mapping)
+            ]
 
     if not attachments:
         if ticket_id is None:
@@ -613,6 +618,7 @@ def _attachments_for_smtp2go(attachments: list[dict[str, Any]]) -> list[dict[str
             }
         )
     return formatted
+
 
 def _coerce_int(
     value: Any, *, minimum: int | None = None, maximum: int | None = None
@@ -3043,7 +3049,9 @@ async def _invoke_smtp(
     # Payload sender takes precedence over settings from_address
     sender = str(payload.get("sender") or settings.get("from_address") or "") or None
     attachments = (
-        payload.get("attachments") if isinstance(payload.get("attachments"), list) else None
+        payload.get("attachments")
+        if isinstance(payload.get("attachments"), list)
+        else None
     )
     if attachments is None:
         attachments = await _load_ticket_email_attachments(payload)
@@ -3266,7 +3274,9 @@ async def _invoke_smtp2go(
         else None
     )
     if attachments is None:
-        attachments = _attachments_for_smtp2go(await _load_ticket_email_attachments(payload))
+        attachments = _attachments_for_smtp2go(
+            await _load_ticket_email_attachments(payload)
+        )
     template_id = str(payload.get("template_id") or "").strip() or None
     template_data = (
         payload.get("template_data")
@@ -6138,6 +6148,46 @@ def _is_audio_attachment(attachment: Mapping[str, Any]) -> bool:
     return f".{ext}" in _WHISPERX_AUDIO_EXTENSIONS
 
 
+def _is_wav_attachment(attachment: Mapping[str, Any]) -> bool:
+    """Return True when an attachment is a WAV file."""
+    mime = (attachment.get("mime_type") or "").lower().strip()
+    if mime in {"audio/wav", "audio/x-wav", "audio/wave"}:
+        return True
+    original = attachment.get("original_filename") or attachment.get("filename") or ""
+    return Path(str(original)).suffix.lower() == ".wav"
+
+
+def _attachment_sort_key(attachment: Mapping[str, Any]) -> tuple[str, int]:
+    """Sort attachments chronologically, using id as a stable tie breaker."""
+    uploaded_at = attachment.get("uploaded_at")
+    uploaded_key = (
+        uploaded_at.isoformat()
+        if hasattr(uploaded_at, "isoformat")
+        else str(uploaded_at or "")
+    )
+    try:
+        attachment_id = int(attachment.get("id") or 0)
+    except (TypeError, ValueError):
+        attachment_id = 0
+    return uploaded_key, attachment_id
+
+
+def _resolve_ticket_attachment_path(
+    attachments_service: Any, attachment: Mapping[str, Any]
+) -> Path | None:
+    """Return the existing storage path for an attachment, including legacy storage."""
+    filename = attachment.get("filename")
+    if not filename:
+        return None
+    file_path = attachments_service.get_attachment_file_path(filename)
+    if file_path.exists():
+        return file_path
+    legacy_file_path = attachments_service.get_legacy_attachment_file_path(filename)
+    if legacy_file_path.exists():
+        return legacy_file_path
+    return None
+
+
 def _split_stereo_wav(file_path: Path) -> tuple[Path, Path] | None:
     """Split a stereo WAV file into two temporary mono channel files.
 
@@ -6293,6 +6343,7 @@ async def _invoke_whisperx(
     """
     from app.repositories import tickets as tickets_repo
     from app.repositories import ticket_attachments as attachments_repo
+    from app.services import ticket_attachments as attachments_service
 
     raw_context = payload.get("context")
     context = raw_context if isinstance(raw_context, Mapping) else {}
@@ -6351,20 +6402,27 @@ async def _invoke_whisperx(
         if not existing:
             raise ValueError(f"Ticket {ticket_id_int} not found")
 
-        upload_dir = Path(__file__).parent.parent / "static" / "uploads" / "tickets"
-
         # -- list attachments and filter audio files (with short polling) --
         audio_attachments: list[Mapping[str, Any]] = []
-        ready_attachments: list[Mapping[str, Any]] = []
+        ready_attachment_paths: list[tuple[Mapping[str, Any], Path]] = []
         for poll_attempt in range(_WHISPERX_ATTACHMENT_POLL_ATTEMPTS):
             all_attachments = await attachments_repo.list_attachments(ticket_id_int)
             audio_attachments = [a for a in all_attachments if _is_audio_attachment(a)]
 
-            ready_attachments = [
-                a for a in audio_attachments if (upload_dir / a["filename"]).exists()
+            wav_attachments = [a for a in audio_attachments if _is_wav_attachment(a)]
+            if wav_attachments:
+                # Voicemail tickets can collect multiple WAV attachments; process only
+                # the newest WAV to avoid transcribing stale voicemail copies.
+                audio_attachments = [max(wav_attachments, key=_attachment_sort_key)]
+
+            ready_attachment_paths = [
+                (a, path)
+                for a in audio_attachments
+                if (path := _resolve_ticket_attachment_path(attachments_service, a))
+                is not None
             ]
 
-            if ready_attachments:
+            if ready_attachment_paths:
                 break
 
             if poll_attempt < _WHISPERX_ATTACHMENT_POLL_ATTEMPTS - 1:
@@ -6380,7 +6438,7 @@ async def _invoke_whisperx(
         if not audio_attachments:
             raise ValueError(f"No audio attachments found on ticket {ticket_id_int}")
 
-        if not ready_attachments:
+        if not ready_attachment_paths:
             raise ValueError(
                 f"Audio attachments not yet available on disk for ticket {ticket_id_int}"
             )
@@ -6394,8 +6452,7 @@ async def _invoke_whisperx(
         stereo_split = settings.get("stereo_split", False)
 
         async with httpx.AsyncClient(timeout=300.0) as client:
-            for attachment in ready_attachments:
-                file_path = upload_dir / attachment["filename"]
+            for attachment, file_path in ready_attachment_paths:
                 original_name = (
                     attachment.get("original_filename") or attachment["filename"]
                 )
@@ -6876,7 +6933,9 @@ async def _resolve_trello_company_for_action(
     return None
 
 
-async def _resolve_company_from_ticket_id(ticket_id_value: Any) -> dict[str, Any] | None:
+async def _resolve_company_from_ticket_id(
+    ticket_id_value: Any,
+) -> dict[str, Any] | None:
     try:
         ticket_id = int(ticket_id_value)
     except (TypeError, ValueError):
