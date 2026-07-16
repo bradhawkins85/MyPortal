@@ -184,7 +184,9 @@ async def list_staff_by_license_for_company(company_id: int) -> dict[int, list[d
     """Return a mapping of license_id -> list of assigned staff for a company."""
     rows = await db.fetch_all(
         """
-        SELECT DISTINCT l.id AS license_id, s.id AS staff_id, s.first_name, s.last_name, s.email
+        SELECT DISTINCT l.id AS license_id, s.id AS staff_id, s.first_name, s.last_name, s.email,
+               s.enabled,
+               CASE WHEN mb.user_principal_name IS NULL THEN 0 ELSE 1 END AS is_shared_mailbox
         FROM licenses AS l
         INNER JOIN (
             SELECT sl.license_id, sl.staff_id
@@ -195,6 +197,10 @@ async def list_staff_by_license_for_company(company_id: int) -> dict[int, list[d
             INNER JOIN office_group_members AS ogm ON ogm.group_id = gl.group_id
         ) AS la ON la.license_id = l.id
         INNER JOIN staff AS s ON s.id = la.staff_id
+        LEFT JOIN m365_mailboxes AS mb
+          ON mb.company_id = l.company_id
+         AND LOWER(mb.user_principal_name) = LOWER(s.email)
+         AND mb.mailbox_type = 'SharedMailbox'
         WHERE l.company_id = %s
         ORDER BY l.id, s.last_name, s.first_name
         """,
@@ -209,6 +215,8 @@ async def list_staff_by_license_for_company(company_id: int) -> dict[int, list[d
                 "first_name": row["first_name"],
                 "last_name": row["last_name"],
                 "email": row["email"],
+                "enabled": bool(row.get("enabled", True)),
+                "is_shared_mailbox": bool(row.get("is_shared_mailbox", False)),
             }
         )
     return result
@@ -217,8 +225,14 @@ async def list_staff_by_license_for_company(company_id: int) -> dict[int, list[d
 async def list_staff_for_license(license_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """
-        SELECT DISTINCT s.id, s.first_name, s.last_name, s.email
+        SELECT DISTINCT s.id, s.first_name, s.last_name, s.email, s.enabled,
+               CASE WHEN mb.user_principal_name IS NULL THEN 0 ELSE 1 END AS is_shared_mailbox
         FROM staff AS s
+        INNER JOIN licenses AS l ON l.id = %s
+        LEFT JOIN m365_mailboxes AS mb
+          ON mb.company_id = l.company_id
+         AND LOWER(mb.user_principal_name) = LOWER(s.email)
+         AND mb.mailbox_type = 'SharedMailbox'
         WHERE s.id IN (
             SELECT sl.staff_id FROM staff_licenses AS sl WHERE sl.license_id = %s
             UNION
@@ -229,7 +243,7 @@ async def list_staff_for_license(license_id: int) -> list[dict[str, Any]]:
         )
         ORDER BY s.last_name, s.first_name
         """,
-        (license_id, license_id),
+        (license_id, license_id, license_id),
     )
     return [dict(row) for row in rows]
 

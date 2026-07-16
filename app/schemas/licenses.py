@@ -41,4 +41,6 @@ class LicenseStaffResponse(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     email: Optional[str] = None
+    enabled: bool = True
+    is_shared_mailbox: bool = False
 
