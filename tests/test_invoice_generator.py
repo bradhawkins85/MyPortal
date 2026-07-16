@@ -38,6 +38,15 @@ def _make_recurring_items() -> list[dict[str, Any]]:
     ]
 
 
+@pytest.fixture(autouse=True)
+def _mock_ticket_expenses(monkeypatch):
+    """Keep invoice generator tests isolated from the ticket expense database."""
+
+    monkeypatch.delenv("XERO_LINE_ITEM_TEMPLATE", raising=False)
+    monkeypatch.setattr(invoice_generator.expenses_repo, "list_expenses", AsyncMock(return_value=[]))
+    monkeypatch.setattr(invoice_generator.expenses_repo, "mark_expenses_billed", AsyncMock())
+
+
 # ---------------------------------------------------------------------------
 # _generate_invoice_number
 # ---------------------------------------------------------------------------
@@ -269,7 +278,7 @@ def test_generate_invoice_billable_ticket_uses_hours_and_minutes(monkeypatch):
     result = asyncio.run(invoice_generator.generate_invoice(1))
 
     assert result["status"] == "succeeded"
-    assert created_lines[0]["description"] == "Ticket 55: VPN help · Remote (2 Hours 30 Mins)"
+    assert created_lines[0]["description"] == "Ticket 55: VPN help Remote (2 Hours 30 Mins)"
 
 
 def test_generate_invoice_resolves_requester_name_for_template(monkeypatch):
@@ -310,6 +319,53 @@ def test_generate_invoice_resolves_requester_name_for_template(monkeypatch):
 
     assert result["status"] == "succeeded"
     assert created_lines[0]["description"] == "Ticket 55: VPN help - Jane Requester"
+
+
+def test_generate_invoice_expense_description_excludes_minutes_and_amount(monkeypatch):
+    created_lines: list[dict[str, Any]] = []
+
+    async def fake_create_invoice(**kwargs):
+        return {"id": 505, **kwargs}
+
+    async def fake_create_line(**kwargs):
+        created_lines.append(kwargs)
+        return {"id": len(created_lines), **kwargs}
+
+    monkeypatch.setenv(
+        "XERO_LINE_ITEM_TEMPLATE",
+        "Ticket #{ticket_id}: {ticket_subject} - {labour_name} - ({labour_duration})",
+    )
+    monkeypatch.setattr(invoice_generator.company_repo, "get_company_by_id", AsyncMock(return_value=_make_company()))
+    monkeypatch.setattr(invoice_generator.xero_service, "build_invoice_context", AsyncMock(return_value={}))
+    monkeypatch.setattr(invoice_generator.xero_service, "build_recurring_invoice_items", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        invoice_generator.tickets_repo,
+        "list_tickets",
+        AsyncMock(return_value=[{"id": 25136, "subject": "Expenses test 2"}]),
+    )
+    monkeypatch.setattr(invoice_generator.billed_time_repo, "get_unbilled_reply_ids", AsyncMock(return_value=[1]))
+    monkeypatch.setattr(
+        invoice_generator.expenses_repo,
+        "list_expenses",
+        AsyncMock(return_value=[{"id": 10, "description": "Laptop return freight 2", "amount": "43.75"}]),
+    )
+    monkeypatch.setattr(invoice_generator.tickets_repo, "list_replies", AsyncMock(return_value=[
+        {"id": 1, "minutes_spent": 10, "is_billable": True, "labour_type_name": "Remote", "labour_type_code": "REMOTE", "labour_type_rate": "100"},
+    ]))
+    monkeypatch.setattr(invoice_generator.invoice_repo, "create_invoice", fake_create_invoice)
+    monkeypatch.setattr(invoice_generator.invoice_repo, "get_max_invoice_seq", AsyncMock(return_value=0))
+    monkeypatch.setattr(invoice_generator.invoice_lines_repo, "create_invoice_line", fake_create_line)
+    monkeypatch.setattr(invoice_generator.billed_time_repo, "create_billed_time_entry", AsyncMock())
+    monkeypatch.setattr(invoice_generator.expenses_repo, "mark_expenses_billed", AsyncMock())
+    monkeypatch.setattr(invoice_generator.tickets_repo, "update_ticket", AsyncMock())
+
+    result = asyncio.run(invoice_generator.generate_invoice(1))
+
+    assert result["status"] == "succeeded"
+    expense_line = next(line for line in created_lines if line["unit_amount"] == Decimal("43.75"))
+    assert expense_line["description"] == "Ticket #25136: Expenses test 2 - Expenses - Laptop return freight 2"
+    assert "10 Mins" not in expense_line["description"]
+    assert "43.75" not in expense_line["description"]
 
 
 # ---------------------------------------------------------------------------
