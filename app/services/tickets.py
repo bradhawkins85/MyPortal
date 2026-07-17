@@ -621,6 +621,20 @@ def _normalise_email_for_compare(value: Any) -> str | None:
     return candidate or None
 
 
+async def _remove_assigned_user_from_watchers(ticket: Mapping[str, Any]) -> None:
+    """Keep the assigned technician out of the ticket's watcher list."""
+
+    try:
+        assigned_user_id = int(ticket.get("assigned_user_id"))
+        ticket_id = int(ticket.get("id"))
+    except (TypeError, ValueError):
+        return
+    if assigned_user_id <= 0 or ticket_id <= 0:
+        return
+
+    await tickets_repo.remove_watcher(ticket_id, user_id=assigned_user_id)
+
+
 def _auto_detect_ticket_update_actor(
     ticket: Mapping[str, Any],
     actor: Mapping[str, Any] | None,
@@ -692,6 +706,9 @@ async def _emit_ticket_event(
 
     if ticket_record.get("merged_into_ticket_id"):
         return
+
+    if trigger_automations:
+        await _remove_assigned_user_from_watchers(ticket_record)
 
     enriched = await _enrich_ticket_context(ticket_record)
 
@@ -1238,6 +1255,9 @@ async def create_ticket(
                 ticket_id=ticket_id,
                 error=str(exc),
             )
+
+    if trigger_automations:
+        await _remove_assigned_user_from_watchers(ticket)
 
     enriched_ticket = await _enrich_ticket_context(ticket)
 

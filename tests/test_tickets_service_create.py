@@ -114,6 +114,63 @@ async def test_create_ticket_can_skip_automations(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_create_ticket_removes_assigned_technician_watcher_before_automations(
+    monkeypatch,
+):
+    events: list[str] = []
+
+    async def fake_create_ticket(**kwargs):
+        return {
+            "id": 78,
+            **{key: value for key, value in kwargs.items() if key != "id"},
+        }
+
+    async def fake_get_company(company_id):
+        return None
+
+    async def fake_get_user(user_id):
+        return {"id": user_id, "email": "tech@example.com"}
+
+    async def fake_resolve_status(value):
+        return value or "open"
+
+    async def fake_remove_watcher(ticket_id, *, user_id=None, email=None):
+        assert (ticket_id, user_id, email) == (78, 10, None)
+        events.append("watcher_removed")
+
+    async def fake_handle_event(event_name, context):
+        assert events == ["watcher_removed"]
+        events.append(event_name)
+        return []
+
+    monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(tickets_repo, "remove_watcher", fake_remove_watcher)
+    monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
+    monkeypatch.setattr(
+        tickets_service.company_repo, "get_company_by_id", fake_get_company
+    )
+    monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
+    monkeypatch.setattr(
+        tickets_service, "resolve_status_or_default", fake_resolve_status
+    )
+
+    await tickets_service.create_ticket(
+        subject="Assigned ticket",
+        description=None,
+        requester_id=None,
+        company_id=None,
+        assigned_user_id=10,
+        priority="normal",
+        status="open",
+        category=None,
+        module_slug=None,
+        external_reference=None,
+    )
+
+    assert events == ["watcher_removed", "tickets.created"]
+
+
+@pytest.mark.anyio
 async def test_create_ticket_truncates_long_description(monkeypatch):
     captured: dict[str, object] = {}
 
