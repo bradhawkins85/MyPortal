@@ -1009,6 +1009,9 @@ async def test_ticket_automation_by_id(
         result["reason"] = "Automation filters did not match the ticket."
         return result
     if apply:
+        from app.services import tickets as tickets_service
+
+        await tickets_service._remove_assigned_user_from_watchers(ticket)
         action_result, action_error = await _invoke_automation_actions_for_context(
             automation,
             context=context,
@@ -1161,6 +1164,7 @@ async def _execute_scheduled_ticket_automation(
     from app.services import tickets as tickets_service
 
     for ticket in scanned:
+        await tickets_service._remove_assigned_user_from_watchers(ticket)
         ticket_context = _attach_ticket_age_context(ticket, now=now)
         try:
             enriched_ticket = await tickets_service._enrich_ticket_context(
