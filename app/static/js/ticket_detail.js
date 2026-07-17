@@ -279,6 +279,95 @@
     return getCookie('myportal_session_csrf');
   }
 
+  function initialiseTicketPageClock() {
+    const clock = document.querySelector('[data-ticket-page-clock]');
+    if (!clock) return;
+
+    const ticketId = clock.dataset.ticketId;
+    const display = clock.querySelector('[data-ticket-page-clock-display]');
+    const historyButton = clock.querySelector('[data-ticket-page-clock-history]');
+    const dialog = document.querySelector('[data-ticket-page-clock-dialog]');
+    const historyContent = dialog && dialog.querySelector('[data-ticket-page-clock-history-content]');
+    const closeButton = dialog && dialog.querySelector('[data-ticket-page-clock-close]');
+    let clockId = null;
+    const openedAt = Date.now();
+
+    const headers = () => {
+      const result = { Accept: 'application/json' };
+      const csrfToken = getCsrfToken();
+      if (csrfToken) result['X-CSRF-Token'] = csrfToken;
+      return result;
+    };
+    const formatDuration = (seconds) => {
+      const total = Math.max(0, Math.floor(seconds));
+      const hours = Math.floor(total / 3600);
+      const minutes = Math.floor((total % 3600) / 60);
+      const secs = total % 60;
+      return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    };
+    const tick = () => { if (display) display.textContent = formatDuration((Date.now() - openedAt) / 1000); };
+    tick();
+    window.setInterval(tick, 1000);
+
+    async function send(path, keepalive) {
+      return fetch(`/admin/tickets/${encodeURIComponent(ticketId)}/page-clocks${path}`, {
+        method: 'POST', headers: headers(), keepalive: Boolean(keepalive), credentials: 'same-origin',
+      });
+    }
+    async function start() {
+      try {
+        const response = await send('');
+        if (!response.ok) return;
+        const payload = await response.json();
+        clockId = payload.clockId;
+      } catch (error) { console.warn('Unable to start ticket clock:', error); }
+    }
+    function heartbeat() {
+      if (clockId) send(`/${encodeURIComponent(clockId)}/heartbeat`).catch(() => {});
+    }
+    function stop() {
+      if (clockId) send(`/${encodeURIComponent(clockId)}/stop`, true).catch(() => {});
+    }
+    start();
+    window.setInterval(heartbeat, 60000);
+    window.addEventListener('pagehide', stop, { once: true });
+
+    // A screen wake lock reduces the chance of an actively viewed ticket page
+    // being suspended. Browsers may still suspend background tabs by design.
+    let wakeLock = null;
+    async function requestWakeLock() {
+      if (document.visibilityState !== 'visible' || !navigator.wakeLock) return;
+      try { wakeLock = await navigator.wakeLock.request('screen'); } catch (error) { /* permission/device dependent */ }
+    }
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') requestWakeLock(); });
+    requestWakeLock();
+
+    if (historyButton && dialog && historyContent) {
+      historyButton.addEventListener('click', async () => {
+        dialog.showModal();
+        historyContent.textContent = 'Loading clock history…';
+        try {
+          const response = await fetch(`/admin/tickets/${encodeURIComponent(ticketId)}/page-clocks`, { headers: headers(), credentials: 'same-origin' });
+          if (!response.ok) throw new Error('Unable to load clock history.');
+          const payload = await response.json();
+          const rows = Array.isArray(payload.clocks) ? payload.clocks : [];
+          if (!rows.length) { historyContent.textContent = 'No ticket clock history yet.'; return; }
+          const table = document.createElement('table'); table.className = 'ticket-page-clock-history';
+          table.innerHTML = '<thead><tr><th>Technician</th><th>Opened</th><th>Duration</th></tr></thead>';
+          const body = document.createElement('tbody');
+          rows.forEach((entry) => {
+            const started = new Date(entry.started_at); const finished = new Date(entry.ended_at || entry.last_seen_at);
+            const row = document.createElement('tr');
+            [entry.user_display_name || entry.user_email || 'Unknown', Number.isNaN(started) ? '—' : started.toLocaleString(), Number.isNaN(started) || Number.isNaN(finished) ? '—' : formatDuration((finished - started) / 1000)].forEach((value) => { const cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell); });
+            body.appendChild(row);
+          });
+          table.appendChild(body); historyContent.replaceChildren(table);
+        } catch (error) { historyContent.textContent = error.message || 'Unable to load clock history.'; }
+      });
+      closeButton.addEventListener('click', () => dialog.close());
+    }
+  }
+
 
   function initTicketRelated() {
     const panel = document.querySelector('[data-ticket-related]');
@@ -3070,8 +3159,9 @@
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', ready);
+    document.addEventListener('DOMContentLoaded', () => { ready(); initialiseTicketPageClock(); });
   } else {
     ready();
+    initialiseTicketPageClock();
   }
 })();

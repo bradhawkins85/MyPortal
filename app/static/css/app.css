@@ -10669,6 +10669,23 @@ a.stat-strip__stat:focus-visible {
   align-items: stretch;
 }
 
+.ticket-reply-actions {
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.ticket-page-clock { display: flex; align-items: center; gap: .45rem; font-variant-numeric: tabular-nums; }
+.ticket-page-clock__label { color: var(--text-muted, #64748b); font-size: .9rem; }
+.ticket-page-clock__menu { position: relative; }
+.ticket-page-clock__menu summary { list-style: none; }
+.ticket-page-clock__menu summary::-webkit-details-marker { display: none; }
+.ticket-page-clock__menu-content { position: absolute; bottom: calc(100% + .4rem); left: 0; z-index: 20; white-space: nowrap; padding: .35rem; border: 1px solid rgba(148,163,184,.3); border-radius: .7rem; background: var(--surface, #fff); box-shadow: 0 12px 30px -16px rgba(15,23,42,.6); }
+.ticket-page-clock-dialog { width: min(38rem, calc(100vw - 2rem)); border: 0; border-radius: .9rem; padding: 1.25rem; color: var(--text-color, #0f172a); box-shadow: 0 25px 60px rgba(15,23,42,.45); }
+.ticket-page-clock-dialog::backdrop { background: rgba(15,23,42,.45); }
+.ticket-page-clock-dialog__header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+.ticket-page-clock-history { width: 100%; border-collapse: collapse; }
+.ticket-page-clock-history th, .ticket-page-clock-history td { padding: .55rem; border-bottom: 1px solid rgba(148,163,184,.25); text-align: left; }
+
 .ticket-reply-submit__primary {
   display: inline-flex;
   align-items: center;
