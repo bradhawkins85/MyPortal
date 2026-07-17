@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any, List, Optional
 
@@ -36,6 +37,26 @@ def _build_safe_update_clause(updates: dict[str, Any]) -> tuple[str, list[Any]]:
 async def get_user_by_email(email: str) -> Optional[dict[str, Any]]:
     row = await db.fetch_one("SELECT * FROM users WHERE email = %s", (email,))
     return row
+
+
+async def get_user_by_phone(phone: str) -> Optional[dict[str, Any]]:
+    """Return the first user whose mobile number matches ``phone``.
+
+    Phone numbers are compared after removing common formatting characters so
+    tray submissions can match stored numbers despite formatting differences.
+    """
+    normalised_phone = re.sub(r"[\s\-\(\)\+]", "", phone.strip())
+    if not normalised_phone:
+        return None
+    return await db.fetch_one(
+        """
+        SELECT * FROM users
+        WHERE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(mobile_phone, ''), ' ', ''), '-', ''), '(', ''), ')', ''), '+', '') = %s
+        ORDER BY id ASC
+        LIMIT 1
+        """,
+        (normalised_phone,),
+    )
 
 
 async def get_user_by_id(user_id: int) -> Optional[dict[str, Any]]:
