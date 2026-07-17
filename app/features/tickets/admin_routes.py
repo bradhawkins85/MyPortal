@@ -45,6 +45,7 @@ from app.repositories import ticket_statuses as ticket_status_repo
 from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import ticket_canned_responses as canned_responses_repo
 from app.repositories import ticket_expenses as expenses_repo
+from app.repositories import ticket_clocks as ticket_clocks_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import email_blocklist as email_blocklist_repo
 from app.repositories import users as user_repo
@@ -430,6 +431,54 @@ async def admin_ticket_detail(
         current_user,
         ticket_id=ticket_id,
     )
+
+
+async def _ticket_clock_user(request: Request, ticket_id: int) -> tuple[dict[str, Any], int]:
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    user_id = int(current_user.get("id") or 0)
+    if user_id <= 0:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    return current_user, user_id
+
+
+@router.post("/admin/tickets/{ticket_id:int}/page-clocks", response_class=JSONResponse)
+async def admin_start_ticket_page_clock(ticket_id: int, request: Request):
+    _, user_id = await _ticket_clock_user(request, ticket_id)
+    clock_id = await ticket_clocks_repo.start_clock(ticket_id, user_id)
+    return JSONResponse({"clockId": clock_id})
+
+
+@router.post("/admin/tickets/{ticket_id:int}/page-clocks/{clock_id:int}/heartbeat", response_class=JSONResponse)
+async def admin_heartbeat_ticket_page_clock(ticket_id: int, clock_id: int, request: Request):
+    _, user_id = await _ticket_clock_user(request, ticket_id)
+    if not await ticket_clocks_repo.touch_clock(clock_id, ticket_id, user_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clock not found")
+    return JSONResponse({"ok": True})
+
+
+@router.post("/admin/tickets/{ticket_id:int}/page-clocks/{clock_id:int}/stop", response_class=JSONResponse)
+async def admin_stop_ticket_page_clock(ticket_id: int, clock_id: int, request: Request):
+    _, user_id = await _ticket_clock_user(request, ticket_id)
+    await ticket_clocks_repo.stop_clock(clock_id, ticket_id, user_id)
+    return JSONResponse({"ok": True})
+
+
+@router.get("/admin/tickets/{ticket_id:int}/page-clocks", response_class=JSONResponse)
+async def admin_list_ticket_page_clocks(ticket_id: int, request: Request):
+    await _ticket_clock_user(request, ticket_id)
+    clocks = await ticket_clocks_repo.list_clocks(ticket_id)
+    for clock in clocks:
+        for field in ("started_at", "last_seen_at", "ended_at"):
+            value = clock.get(field)
+            if isinstance(value, datetime):
+                clock[field] = value.astimezone(timezone.utc).isoformat()
+    return JSONResponse({"clocks": clocks})
 
 
 @router.post("/admin/tickets/{ticket_id:int}/expenses", response_class=HTMLResponse)

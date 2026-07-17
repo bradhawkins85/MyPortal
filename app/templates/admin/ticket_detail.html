@@ -1306,7 +1306,17 @@
                   </label>
                 </div>
               </div>
-              <div class="form-actions">
+              <div class="form-actions ticket-reply-actions">
+                <div class="ticket-page-clock" data-ticket-page-clock data-ticket-id="{{ ticket.id }}" aria-live="polite">
+                  <span class="ticket-page-clock__label">Time open</span>
+                  <strong data-ticket-page-clock-display>0:00:00</strong>
+                  <details class="ticket-page-clock__menu">
+                    <summary class="button button--secondary button--small">Actions</summary>
+                    <div class="ticket-page-clock__menu-content">
+                      <button type="button" class="button button--ghost button--small" data-ticket-page-clock-history>View clock history</button>
+                    </div>
+                  </details>
+                </div>
                 <div class="ticket-reply-submit" data-ticket-reply-submit>
                   <input type="hidden" name="replyStatus" value="" data-ticket-reply-status-input />
                   <button type="submit" class="button button--primary ticket-reply-submit__primary">Post reply</button>
@@ -1325,6 +1335,13 @@
                 </div>
               </div>
             </form>
+            <dialog class="ticket-page-clock-dialog" data-ticket-page-clock-dialog aria-labelledby="ticket-page-clock-history-title">
+              <div class="ticket-page-clock-dialog__header">
+                <h3 id="ticket-page-clock-history-title">Ticket clock history</h3>
+                <button type="button" class="button button--ghost button--small" data-ticket-page-clock-close>Close</button>
+              </div>
+              <div data-ticket-page-clock-history-content>Loading clock history…</div>
+            </dialog>
             </div>
           </details>
 
