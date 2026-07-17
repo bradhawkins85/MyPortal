@@ -18,7 +18,7 @@ def test_build_safe_update_clause_allows_known_columns():
     assert params == ["Alice", 1]
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_update_user_rejects_unknown_columns_before_query(monkeypatch):
     executed = False
 
@@ -31,3 +31,35 @@ async def test_update_user_rejects_unknown_columns_before_query(monkeypatch):
     with pytest.raises(ValueError, match="Unsupported update fields"):
         await users.update_user(1, **{"email = 'x' --": "bad"})
     assert not executed
+
+
+@pytest.mark.anyio
+async def test_get_user_by_phone_normalises_common_phone_formatting(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_fetch_one(query, params):
+        captured["query"] = query
+        captured["params"] = params
+        return {"id": 42}
+
+    monkeypatch.setattr(users.db, "fetch_one", fake_fetch_one)
+
+    result = await users.get_user_by_phone(" +1 (555) 010-1234 ")
+
+    assert result == {"id": 42}
+    assert captured["params"] == ("15550101234",)
+    assert "COALESCE(mobile_phone, '')" in captured["query"]
+
+
+@pytest.mark.anyio
+async def test_get_user_by_phone_ignores_empty_normalised_values(monkeypatch):
+    queried = False
+
+    async def fake_fetch_one(*args, **kwargs):
+        nonlocal queried
+        queried = True
+
+    monkeypatch.setattr(users.db, "fetch_one", fake_fetch_one)
+
+    assert await users.get_user_by_phone("+ - ()") is None
+    assert not queried

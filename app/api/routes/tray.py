@@ -436,9 +436,9 @@ async def tray_submit_ticket(
     The bearer auth token is the preferred device identity and is used to link
     the ticket to the corresponding asset and company.  ``device_uid`` remains
     accepted as a backwards-compatible fallback for older tray clients that do
-    not send bearer auth.  Name, email, and phone are provided by the user in
-    the tray dialog; email is used to match an existing portal user account
-    when one exists.
+    not send bearer auth. Name, email, and phone are provided by the user in
+    the tray dialog. The requester is matched by email first, then by phone
+    number when no email match exists.
 
     Dynamic question answers are validated server-side against the current
     question definitions.  Required visible questions must have a non-empty
@@ -474,10 +474,13 @@ async def tray_submit_ticket(
     # Normalise email once; reused for both lookup and ticket creation.
     normalised_email = payload.email.strip().lower()
 
-    # Attempt to resolve an existing portal user by email so the ticket
-    # appears under their account and they receive notifications normally.
+    # Resolve an existing portal user so the ticket appears under their account
+    # and they receive notifications normally. Email takes precedence over a
+    # phone match, including when the phone belongs to another user.
     requester_id: int | None = None
     existing_user = await users_repo.get_user_by_email(normalised_email)
+    if existing_user is None and payload.phone:
+        existing_user = await users_repo.get_user_by_phone(payload.phone)
     if existing_user:
         requester_id = int(existing_user["id"])
 
