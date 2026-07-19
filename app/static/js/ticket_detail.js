@@ -285,7 +285,7 @@
 
     const ticketId = clock.dataset.ticketId;
     const display = clock.querySelector('[data-ticket-page-clock-display]');
-    const historyButton = clock.querySelector('[data-ticket-page-clock-history]');
+    const historyButton = document.querySelector('[data-ticket-page-clock-history]');
     const dialog = document.querySelector('[data-ticket-page-clock-dialog]');
     const historyContent = dialog && dialog.querySelector('[data-ticket-page-clock-history-content]');
     const closeButton = dialog && dialog.querySelector('[data-ticket-page-clock-close]');

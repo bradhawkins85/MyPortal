@@ -6,6 +6,7 @@
 
 {% block header_actions %}
   {{ page_header_actions([
+    {"label": "Clock history", "type": "button", "attrs": {"data-ticket-page-clock-history": true}},
     {"label": "Audit Trail", "type": "button", "attrs": {"data-ticket-automation-history-open": true, "data-ticket-id": ticket.id}},
     {"label": "All tickets", "type": "link", "href": "/admin/tickets"}
   ]) }}
@@ -1310,12 +1311,6 @@
                 <div class="ticket-page-clock" data-ticket-page-clock data-ticket-id="{{ ticket.id }}" aria-live="polite">
                   <span class="ticket-page-clock__label">Time open</span>
                   <strong data-ticket-page-clock-display>0:00:00</strong>
-                  <details class="ticket-page-clock__menu">
-                    <summary class="button button--secondary button--small">Actions</summary>
-                    <div class="ticket-page-clock__menu-content">
-                      <button type="button" class="button button--ghost button--small" data-ticket-page-clock-history>View clock history</button>
-                    </div>
-                  </details>
                 </div>
                 <div class="ticket-reply-submit" data-ticket-reply-submit>
                   <input type="hidden" name="replyStatus" value="" data-ticket-reply-status-input />
