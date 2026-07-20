@@ -713,6 +713,24 @@ def _search_message_uids(
     return [], last_error
 
 
+def _select_staff_contact(
+    staff_records: list[Mapping[str, Any]],
+    *,
+    preferred_company_id: int | None = None,
+) -> tuple[int | None, int | None]:
+    if not staff_records:
+        return None, None
+    selected: Mapping[str, Any] | None = None
+    if preferred_company_id is not None:
+        for staff_record in staff_records:
+            if _int_or_none(staff_record.get("company_id")) == preferred_company_id:
+                selected = staff_record
+                break
+    if selected is None:
+        selected = staff_records[0]
+    return _int_or_none(selected.get("company_id")), _extract_record_id(selected)
+
+
 async def _resolve_ticket_entities(
     from_header: str | None,
     *,
@@ -766,7 +784,25 @@ async def _resolve_ticket_entities(
             return company_id, None, requester_staff_id
         return company_id, None, None
 
-    company_id = _int_or_none(default_company_id)
+    default_company_id_int = _int_or_none(default_company_id)
+
+    for email_address in email_addresses:
+        try:
+            staff_records = await staff_repo.list_staff_by_email(email_address)
+        except RuntimeError as exc:  # pragma: no cover - defensive fallback
+            log_error(
+                "Failed to resolve staff contact by email",
+                email=email_address,
+                error=str(exc),
+            )
+            staff_records = []
+        staff_company_id, staff_id = _select_staff_contact(
+            staff_records, preferred_company_id=default_company_id_int
+        )
+        if staff_id is not None:
+            return staff_company_id or default_company_id_int, None, staff_id
+
+    company_id = default_company_id_int
     requester_id: int | None = None
     requester_staff_id: int | None = None
 
@@ -1881,6 +1917,12 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         external_reference=_normalise_ticket_external_reference(message_id),
                         initial_reply_author_id=requester_id,
                         requester_email=from_email_addr if requester_id is None else None,
+                        initial_reply_author_email=(
+                            from_email_addr if requester_id is None else None
+                        ),
+                        initial_reply_author_display_name=(
+                            from_address if requester_id is None else None
+                        ),
                     )
                     is_new_ticket = True
                     ticket_id = ticket.get("id") if isinstance(ticket, Mapping) else None

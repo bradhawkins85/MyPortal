@@ -1195,6 +1195,8 @@ async def create_ticket(
     initial_reply_author_id: int | None = None,
     id: int | None = None,
     requester_email: str | None = None,
+    initial_reply_author_email: str | None = None,
+    initial_reply_author_display_name: str | None = None,
     send_creation_notification: bool = True,
     record_initial_reply: bool = True,
 ) -> TicketRecord:
@@ -1248,6 +1250,10 @@ async def create_ticket(
                 author_id=author_id,
                 body=original_description,
                 is_internal=False,
+                author_email=initial_reply_author_email if author_id is None else None,
+                author_display_name=(
+                    initial_reply_author_display_name if author_id is None else None
+                ),
             )
         except Exception as exc:  # pragma: no cover - defensive logging
             log_error(

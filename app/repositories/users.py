@@ -35,7 +35,18 @@ def _build_safe_update_clause(updates: dict[str, Any]) -> tuple[str, list[Any]]:
 
 
 async def get_user_by_email(email: str) -> Optional[dict[str, Any]]:
-    row = await db.fetch_one("SELECT * FROM users WHERE email = %s", (email,))
+    clean_email = str(email or "").strip()
+    if not clean_email:
+        return None
+    row = await db.fetch_one(
+        """
+        SELECT * FROM users
+        WHERE LOWER(email) = LOWER(%s)
+        ORDER BY id ASC
+        LIMIT 1
+        """,
+        (clean_email,),
+    )
     return row
 
 

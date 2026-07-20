@@ -212,6 +212,44 @@ async def test_resolve_ticket_entities_handles_staff_without_user(monkeypatch):
     assert requester_staff_id == 123
 
 
+async def test_resolve_ticket_entities_falls_back_to_existing_staff_contact_company(monkeypatch):
+    async def fake_get_company_by_email_domain(domain: str):
+        assert domain == "example.com"
+        return None
+
+    async def fake_get_user_by_email(email: str):
+        assert email == "sender@example.com"
+        return None
+
+    async def fake_list_staff_by_email(email: str):
+        assert email == "sender@example.com"
+        return [{"id": 321, "company_id": 654}]
+
+    async def fake_get_staff_by_company_and_email(company_id: int, email: str):
+        raise AssertionError("staff should be resolved from existing contacts globally")
+
+    monkeypatch.setattr(
+        imap.company_repo,
+        "get_company_by_email_domain",
+        fake_get_company_by_email_domain,
+    )
+    monkeypatch.setattr(imap.users_repo, "get_user_by_email", fake_get_user_by_email)
+    monkeypatch.setattr(imap.staff_repo, "list_staff_by_email", fake_list_staff_by_email)
+    monkeypatch.setattr(
+        imap.staff_repo,
+        "get_staff_by_company_and_email",
+        fake_get_staff_by_company_and_email,
+    )
+
+    company_id, requester_id, requester_staff_id = await imap._resolve_ticket_entities(
+        "Sender <sender@example.com>"
+    )
+
+    assert company_id == 654
+    assert requester_id is None
+    assert requester_staff_id == 321
+
+
 async def test_sync_account_does_not_mark_as_read_on_ticket_failure(monkeypatch):
     recorded_messages: list[dict[str, object]] = []
     account_updates: list[tuple[int, dict[str, object]]] = []

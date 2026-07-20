@@ -1448,6 +1448,12 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             requester_email=(
                                 from_email_addr if requester_id is None else None
                             ),
+                            initial_reply_author_email=(
+                                from_email_addr if requester_id is None else None
+                            ),
+                            initial_reply_author_display_name=(
+                                (from_header or from_address) if requester_id is None else None
+                            ),
                             record_initial_reply=not create_initial_reply_after_inline_persist,
                         )
                         is_new_ticket = True

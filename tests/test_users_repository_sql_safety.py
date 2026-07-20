@@ -63,3 +63,35 @@ async def test_get_user_by_phone_ignores_empty_normalised_values(monkeypatch):
 
     assert await users.get_user_by_phone("+ - ()") is None
     assert not queried
+
+
+@pytest.mark.anyio
+async def test_get_user_by_email_is_case_insensitive_and_trims(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_fetch_one(query, params):
+        captured["query"] = query
+        captured["params"] = params
+        return {"id": 7, "email": "Sender@Example.com"}
+
+    monkeypatch.setattr(users.db, "fetch_one", fake_fetch_one)
+
+    result = await users.get_user_by_email(" sender@example.COM ")
+
+    assert result == {"id": 7, "email": "Sender@Example.com"}
+    assert captured["params"] == ("sender@example.COM",)
+    assert "LOWER(email) = LOWER(%s)" in captured["query"]
+
+
+@pytest.mark.anyio
+async def test_get_user_by_email_ignores_empty_values(monkeypatch):
+    queried = False
+
+    async def fake_fetch_one(*args, **kwargs):
+        nonlocal queried
+        queried = True
+
+    monkeypatch.setattr(users.db, "fetch_one", fake_fetch_one)
+
+    assert await users.get_user_by_email("   ") is None
+    assert not queried
