@@ -42,7 +42,8 @@ async def list_clocks(ticket_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """
         SELECT c.id, c.started_at, c.last_seen_at, c.ended_at,
-               u.email AS user_email, u.display_name AS user_display_name
+               u.email AS user_email,
+               NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))), '') AS user_display_name
         FROM ticket_page_clocks c
         LEFT JOIN users u ON u.id = c.user_id
         WHERE c.ticket_id = %s
