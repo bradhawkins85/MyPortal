@@ -261,7 +261,7 @@ ExoRunner = Callable[[str, str], Awaitable[dict[str, Any]]]
 BestPracticeRunner = Union[GraphRunner, ExoRunner]
 
 # Keys that are implementation details and must not be exposed in the public catalog
-_INTERNAL_KEYS = frozenset({"source", "source_type", "remediation_cmdlet", "remediation_params", "remediation_url", "remediation_payload"})
+_INTERNAL_KEYS = frozenset({"source", "source_type", "remediation_cmdlet", "remediation_params", "remediation_url", "remediation_payload", "remediation_type", "remediation_mailbox_params"})
 
 
 # ---------------------------------------------------------------------------
@@ -4002,7 +4002,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_shared_mailbox_signin_blocked,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "foreach_user_graph",
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
@@ -4059,7 +4060,12 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_antiphish_quarantine_impersonated_domain,
         "source_type": "exo",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-AntiPhishPolicy",
+        "remediation_params": {
+            "Identity": "Office365 AntiPhish Default",
+            "TargetedDomainProtectionAction": "Quarantine",
+        },
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
@@ -4077,7 +4083,12 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_antiphish_quarantine_impersonated_user,
         "source_type": "exo",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-AntiPhishPolicy",
+        "remediation_params": {
+            "Identity": "Office365 AntiPhish Default",
+            "TargetedUserProtectionAction": "Quarantine",
+        },
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
@@ -4095,7 +4106,12 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_antiphish_domain_impersonation_safety_tip,
         "source_type": "exo",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-AntiPhishPolicy",
+        "remediation_params": {
+            "Identity": "Office365 AntiPhish Default",
+            "EnableSimilarDomainsSafetyTips": True,
+        },
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
@@ -4113,7 +4129,12 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_antiphish_user_impersonation_safety_tip,
         "source_type": "exo",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-AntiPhishPolicy",
+        "remediation_params": {
+            "Identity": "Office365 AntiPhish Default",
+            "EnableSimilarUsersSafetyTips": True,
+        },
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
@@ -4131,7 +4152,12 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_antiphish_unusual_characters_safety_tip,
         "source_type": "exo",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_cmdlet": "Set-AntiPhishPolicy",
+        "remediation_params": {
+            "Identity": "Office365 AntiPhish Default",
+            "EnableUnusualCharactersSafetyTips": True,
+        },
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
@@ -4196,7 +4222,9 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_sharepoint_external_sharing_restricted,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_url": _SPO_SETTINGS_URL,
+        "remediation_payload": {"sharingCapability": "existingExternalUserSharingOnly"},
         "requires_licenses": [CAP_SHAREPOINT_ONLINE],
     },
     {
@@ -4210,7 +4238,9 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_sp_guests_cannot_share_unowned,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_url": _SPO_SETTINGS_URL,
+        "remediation_payload": {"isResharingByExternalUsersEnabled": False},
         "requires_licenses": [CAP_SHAREPOINT_ONLINE],
     },
     {
@@ -4224,7 +4254,9 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_onedrive_content_sharing_restricted,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_url": _SPO_SETTINGS_URL,
+        "remediation_payload": {"oneDriveSharingCapability": "existingExternalUserSharingOnly"},
         "requires_licenses": [CAP_SHAREPOINT_ONLINE],
     },
     {
@@ -4252,7 +4284,9 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_modern_auth_sp_apps,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_url": _SPO_SETTINGS_URL,
+        "remediation_payload": {"isLegacyAuthProtocolsEnabled": False},
         "requires_licenses": [CAP_SHAREPOINT_ONLINE],
     },
     {
@@ -5684,6 +5718,53 @@ async def _remediate_foreach_mailbox(
     return all_ok
 
 
+async def _remediate_foreach_user_graph(
+    graph_token: str,
+    company_id: int,
+    check_id: str,
+) -> bool:
+    """Disable sign-in for all unlicensed member accounts (shared mailboxes).
+
+    Fetches all users via Microsoft Graph, then PATCHes each unlicensed member
+    account that currently has ``accountEnabled=True`` to ``{"accountEnabled": false}``.
+    Returns ``True`` if all required updates succeeded (or none were needed),
+    ``False`` if at least one update failed.
+    """
+    users = await _safe_graph_get_all(graph_token, _USERS_LIST_URL)
+    if users is None:
+        log_error(
+            "M365 foreach-user-graph remediation – unable to enumerate users",
+            company_id=company_id,
+            check_id=check_id,
+        )
+        return False
+
+    candidates = [
+        u for u in users
+        if (u.get("userType") or "").lower() == "member"
+        and not (u.get("assignedLicenses") or [])
+        and u.get("accountEnabled") is True
+    ]
+    all_ok = True
+    for user in candidates:
+        user_id = user.get("id")
+        if not user_id:
+            continue
+        user_url = f"https://graph.microsoft.com/v1.0/users/{user_id}"
+        try:
+            await _graph_patch(graph_token, user_url, {"accountEnabled": False})
+        except M365Error as exc:
+            log_error(
+                "M365 foreach-user-graph remediation – PATCH user failed",
+                company_id=company_id,
+                check_id=check_id,
+                user_id=user_id,
+                error=str(exc),
+            )
+            all_ok = False
+    return all_ok
+
+
 async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     """Attempt automated remediation for a single best-practice check.
 
@@ -5692,7 +5773,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     database, and returns a result dict with ``success`` (bool) and ``message``
     (str) keys.
 
-    Supports three remediation patterns:
+    Supports four remediation patterns:
 
     * ``source_type="exo"`` – executes a single cmdlet via the Exchange Online
       REST API using the ``remediation_cmdlet`` and ``remediation_params``
@@ -5703,6 +5784,9 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
       ``remediation_mailbox_params`` catalog field.
     * ``source_type="graph"`` – issues a ``PATCH`` request to Microsoft Graph
       using the ``remediation_url`` and ``remediation_payload`` catalog fields.
+    * ``source_type="graph"`` with ``remediation_type="foreach_user_graph"`` –
+      fetches all users and disables sign-in for each unlicensed member account
+      that currently has ``accountEnabled=True``.
     """
     bp = _catalog_map().get(check_id)
     if not bp or not bp.get("has_remediation"):
@@ -5756,8 +5840,6 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 )
                 success = False
     elif source_type == "graph":
-        remediation_url = bp.get("remediation_url", "")
-        remediation_payload = bp.get("remediation_payload") or {}
         try:
             graph_token = await acquire_access_token(company_id)
         except M365Error as exc:
@@ -5777,18 +5859,23 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 "success": False,
                 "message": "Unable to acquire Microsoft Graph token. Check that the app credentials are correct.",
             }
-        try:
-            await _graph_patch(graph_token, remediation_url, remediation_payload)
-            success = True
-        except M365Error as exc:
-            log_error(
-                "M365 best practice Graph remediation failed",
-                company_id=company_id,
-                check_id=check_id,
-                url=remediation_url,
-                error=str(exc),
-            )
-            success = False
+        if bp.get("remediation_type") == "foreach_user_graph":
+            success = await _remediate_foreach_user_graph(graph_token, company_id, check_id)
+        else:
+            remediation_url = bp.get("remediation_url", "")
+            remediation_payload = bp.get("remediation_payload") or {}
+            try:
+                await _graph_patch(graph_token, remediation_url, remediation_payload)
+                success = True
+            except M365Error as exc:
+                log_error(
+                    "M365 best practice Graph remediation failed",
+                    company_id=company_id,
+                    check_id=check_id,
+                    url=remediation_url,
+                    error=str(exc),
+                )
+                success = False
     else:
         success = False
 
