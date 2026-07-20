@@ -3842,13 +3842,14 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "transparency, allowing organisations to review, approve, or reject "
             "Microsoft engineer access requests to their data."
         ),
-        "remediation": "Set-OrganizationConfig -CustomerLockBoxEnabled $true",
+        "remediation": (
+            "Set-OrganizationConfig -CustomerLockBoxEnabled $true "
+            "(requires Compliance Administrator or Global Administrator role)"
+        ),
         "source": _check_customer_lockbox,
         "source_type": "exo",
         "default_enabled": True,
-        "has_remediation": True,
-        "remediation_cmdlet": "Set-OrganizationConfig",
-        "remediation_params": {"CustomerLockBoxEnabled": True},
+        "has_remediation": False,
         "is_cis_benchmark": True,
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
@@ -4024,7 +4025,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": False,
-        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+        "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
     {
         "id": "bp_antiphish_impersonated_user_protection",
@@ -4043,7 +4044,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": False,
-        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+        "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
     {
         "id": "bp_antiphish_quarantine_impersonated_domain",
@@ -4066,7 +4067,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "Identity": "Office365 AntiPhish Default",
             "TargetedDomainProtectionAction": "Quarantine",
         },
-        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+        "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
     {
         "id": "bp_antiphish_quarantine_impersonated_user",
@@ -4089,7 +4090,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "Identity": "Office365 AntiPhish Default",
             "TargetedUserProtectionAction": "Quarantine",
         },
-        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+        "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
     {
         "id": "bp_antiphish_domain_impersonation_safety_tip",
@@ -4112,7 +4113,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "Identity": "Office365 AntiPhish Default",
             "EnableSimilarDomainsSafetyTips": True,
         },
-        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+        "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
     {
         "id": "bp_antiphish_user_impersonation_safety_tip",
@@ -4135,7 +4136,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "Identity": "Office365 AntiPhish Default",
             "EnableSimilarUsersSafetyTips": True,
         },
-        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+        "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
     {
         "id": "bp_antiphish_unusual_characters_safety_tip",
@@ -4158,7 +4159,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "Identity": "Office365 AntiPhish Default",
             "EnableUnusualCharactersSafetyTips": True,
         },
-        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+        "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
     {
         "id": "bp_quarantine_notification_enabled",

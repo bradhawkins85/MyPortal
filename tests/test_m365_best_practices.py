@@ -3916,7 +3916,9 @@ def test_customer_lockbox_catalog_entry():
     """bp_customer_lockbox catalog entry must have the expected fields."""
     catalog = bp_service.list_best_practices()
     entry = next(bp for bp in catalog if bp["id"] == "bp_customer_lockbox")
-    assert entry.get("has_remediation") is True
+    # Automated remediation is not available: Set-OrganizationConfig -CustomerLockBoxEnabled
+    # requires Compliance Administrator or Global Administrator, not Exchange Administrator.
+    assert entry.get("has_remediation") is False
     assert entry.get("default_enabled") is True
     assert entry.get("is_cis_benchmark") is True
     assert "CustomerLockBoxEnabled" in entry["remediation"]
