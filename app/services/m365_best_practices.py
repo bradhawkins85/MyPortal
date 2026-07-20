@@ -5727,6 +5727,8 @@ async def _remediate_foreach_user_graph(
 
     Fetches all users via Microsoft Graph, then PATCHes each unlicensed member
     account that currently has ``accountEnabled=True`` to ``{"accountEnabled": false}``.
+    On-premises-synced accounts are skipped because Azure AD does not permit
+    modifying cloud-managed attributes on objects synced from on-prem AD.
     Returns ``True`` if all required updates succeeded (or none were needed),
     ``False`` if at least one update failed.
     """
@@ -5744,6 +5746,7 @@ async def _remediate_foreach_user_graph(
         if (u.get("userType") or "").lower() == "member"
         and not (u.get("assignedLicenses") or [])
         and u.get("accountEnabled") is True
+        and not u.get("onPremisesSyncEnabled")  # can't disable sign-in for on-prem-synced accounts via Graph
     ]
     all_ok = True
     for user in candidates:
@@ -5841,7 +5844,16 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 success = False
     elif source_type == "graph":
         try:
-            graph_token = await acquire_access_token(company_id)
+            # Use an app-only (client credentials) token so that application
+            # permissions such as SharePointTenantSettings.ReadWrite.All are
+            # present in the token.  A delegated token obtained from a stored
+            # refresh token only carries the scopes consented during the
+            # interactive connect flow (e.g. AppRoleAssignment.ReadWrite.All)
+            # and would be missing the application permissions required for
+            # write-based remediations, causing a 403 even after re-consent.
+            graph_token = await acquire_access_token(
+                company_id, force_client_credentials=True
+            )
         except M365Error as exc:
             log_error(
                 "M365 best practice remediation – Graph token acquisition failed",

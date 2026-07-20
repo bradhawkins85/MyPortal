@@ -5066,3 +5066,112 @@ async def test_remediate_shared_mailbox_signin_blocked_graph_list_failure():
 
     assert result["success"] is False
     assert upserts[0]["remediation_status"] == "failed"
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for fixes from post-PR-3292 investigation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_graph_check_uses_force_client_credentials():
+    """Graph-based remediations must acquire a client-credentials token.
+
+    Using a delegated (refresh_token-based) token causes 403 errors because
+    application permissions (e.g. SharePointTenantSettings.ReadWrite.All) are
+    only present in client-credentials tokens, not in delegated tokens that
+    only carry the scopes consented during the interactive connect flow.
+    """
+    acquired_kwargs: list[dict] = []
+
+    async def fake_acquire(company_id, **kwargs):
+        acquired_kwargs.append(kwargs)
+        return "graph-token"
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            side_effect=fake_acquire,
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ),
+    ):
+        await bp_service.remediate_check(
+            company_id=11, check_id="bp_sharepoint_external_sharing_restricted"
+        )
+
+    assert acquired_kwargs, "acquire_access_token was not called"
+    assert acquired_kwargs[0].get("force_client_credentials") is True, (
+        "remediate_check must call acquire_access_token with "
+        "force_client_credentials=True so application permissions are present "
+        "in the token (delegated tokens lack SharePointTenantSettings.ReadWrite.All)"
+    )
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_shared_mailbox_signin_blocked_skips_onprem_synced():
+    """foreach_user_graph must not attempt to PATCH on-prem-synced accounts.
+
+    Azure AD rejects PATCH /users/{id} for on-prem-synced accounts with a 400
+    error because cloud-managed attributes cannot be modified for objects that
+    are authoritative in on-premises Active Directory.  Skipping them prevents
+    a single hybrid-synced shared mailbox from failing the entire remediation.
+    """
+    patched_urls: list[str] = []
+    users = [
+        # cloud-only shared mailbox - should be patched
+        {
+            "id": "cloud-user",
+            "userType": "Member",
+            "assignedLicenses": [],
+            "accountEnabled": True,
+            "onPremisesSyncEnabled": False,
+        },
+        # on-prem synced shared mailbox - must be skipped
+        {
+            "id": "onprem-user",
+            "userType": "Member",
+            "assignedLicenses": [],
+            "accountEnabled": True,
+            "onPremisesSyncEnabled": True,
+        },
+    ]
+
+    async def fake_graph_patch(token, url, payload):
+        patched_urls.append(url)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._safe_graph_get_all",
+            new_callable=AsyncMock,
+            return_value=users,
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            side_effect=fake_graph_patch,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=20, check_id="bp_shared_mailbox_signin_blocked"
+        )
+
+    assert result["success"] is True
+    # Only the cloud-only account should have been patched
+    assert len(patched_urls) == 1
+    assert "cloud-user" in patched_urls[0]
+    assert all("onprem-user" not in url for url in patched_urls)
