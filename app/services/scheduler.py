@@ -1391,7 +1391,7 @@ class SchedulerService:
                             results = await m365_service.check_enterprise_app_permissions(
                                 company_id_int
                             )
-                            all_ok = all(
+                            all_ok = bool(results) and all(
                                 app.get("all_ok") for app in results
                             )
                             details = json.dumps(
@@ -1408,7 +1408,7 @@ class SchedulerService:
                                 {
                                     "company_id": company_id_int,
                                     "error": str(exc)
-                                    or f"{type(exc).__name__} (no details)",
+                                    or f"{exc.__class__.__name__} (no details)",
                                 },
                                 default=str,
                             )

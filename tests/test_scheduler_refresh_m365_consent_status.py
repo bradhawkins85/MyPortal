@@ -164,6 +164,38 @@ async def test_refresh_m365_consent_status_records_failure_on_exception():
 
 
 @pytest.mark.asyncio
+async def test_refresh_m365_consent_status_all_ok_false_when_no_results():
+    """all_ok is False when check returns an empty list (nothing verified)."""
+    from app.services.scheduler import SchedulerService
+
+    scheduler = SchedulerService()
+    recorded: list[dict] = []
+
+    async def fake_record(task_id, *, status, started_at, finished_at, duration_ms, details=None):
+        recorded.append({"status": status, "details": details})
+
+    with (
+        patch(
+            "app.services.scheduler.m365_service.check_enterprise_app_permissions",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "app.services.scheduler.scheduled_tasks_repo.record_task_run",
+            side_effect=fake_record,
+        ),
+        patch("app.services.scheduler.db.acquire_lock") as mock_lock,
+    ):
+        mock_lock.return_value.__aenter__.return_value = True
+        await scheduler._run_task(_make_task())
+
+    assert recorded[-1]["status"] == "succeeded"
+    data = json.loads(recorded[-1]["details"])
+    assert data["all_ok"] is False
+    assert data["apps_checked"] == 0
+
+
+@pytest.mark.asyncio
 async def test_refresh_m365_consent_status_skips_without_company_id():
     """Handler records skipped when no company_id is present."""
     from app.services.scheduler import SchedulerService
