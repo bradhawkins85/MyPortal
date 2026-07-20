@@ -19,6 +19,9 @@ from app.repositories import tickets as tickets_repo
 from app.services import modules as modules_service
 from app.services import value_templates
 
+SCHEDULED_TICKET_SCAN_BATCH_SIZE = 1000
+SCHEDULED_TICKET_SCAN_MAX_CANDIDATES = 50000
+
 TRIGGER_EVENTS: list[dict[str, str]] = [
     {"value": "tickets.created", "label": "Ticket created"},
     {"value": "tickets.updated", "label": "Ticket updated"},
@@ -899,6 +902,42 @@ async def _invoke_automation_actions_for_context(
     return {"status": "skipped", "reason": "No action module configured"}, None
 
 
+async def _list_ticket_automation_scan_candidates(
+    *,
+    limit: int,
+    exhaustive: bool = False,
+) -> list[dict[str, Any]]:
+    """Load ordered ticket candidates for scheduled automation evaluation.
+
+    Preview endpoints preserve their caller-provided scan cap so the UI remains
+    responsive. Real scheduled runs page through a much larger bounded window so
+    stale tickets are not skipped merely because they sit beyond the first
+    repository batch.
+    """
+
+    if not exhaustive:
+        scan_limit = max(1, min(int(limit or 1000), 5000))
+        return await tickets_repo.list_tickets_for_automation_scan(limit=scan_limit)
+
+    max_candidates = max(1, int(limit or SCHEDULED_TICKET_SCAN_MAX_CANDIDATES))
+    batch_size = max(1, min(SCHEDULED_TICKET_SCAN_BATCH_SIZE, 5000, max_candidates))
+    candidates: list[dict[str, Any]] = []
+    offset = 0
+    while len(candidates) < max_candidates:
+        remaining = max_candidates - len(candidates)
+        batch = await tickets_repo.list_tickets_for_automation_scan(
+            limit=min(batch_size, remaining),
+            offset=offset,
+        )
+        if not batch:
+            break
+        candidates.extend(batch)
+        if len(batch) < min(batch_size, remaining):
+            break
+        offset += len(batch)
+    return candidates
+
+
 async def _scan_tickets_for_automation(
     automation: Mapping[str, Any],
     *,
@@ -911,7 +950,7 @@ async def _scan_tickets_for_automation(
     raw_filters = automation.get("trigger_filters")
     filters = raw_filters if isinstance(raw_filters, Mapping) else None
     scan_limit = max(1, min(int(limit or 1000), 5000))
-    scanned = await tickets_repo.list_tickets_for_automation_scan(limit=scan_limit)
+    scanned = await _list_ticket_automation_scan_candidates(limit=scan_limit)
     matches: list[dict[str, Any]] = []
 
     from app.services import tickets as tickets_service
@@ -1177,7 +1216,10 @@ async def _execute_scheduled_ticket_automation(
     now = datetime.now(timezone.utc)
     raw_filters = automation.get("trigger_filters")
     filters = raw_filters if isinstance(raw_filters, Mapping) else None
-    scanned = await tickets_repo.list_tickets_for_automation_scan(limit=1000)
+    scanned = await _list_ticket_automation_scan_candidates(
+        limit=SCHEDULED_TICKET_SCAN_MAX_CANDIDATES,
+        exhaustive=True,
+    )
     matched = 0
     succeeded = 0
     failed = 0
