@@ -5,7 +5,7 @@ import html
 import socket
 from ipaddress import ip_address
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
@@ -89,6 +89,25 @@ def _to_decimal(value: Any, *, default: Decimal | None = None) -> Decimal | None
         return Decimal(str(value))
     except (TypeError, ValueError, ArithmeticError):
         return default
+
+
+def _to_stock_feed_decimal(
+    value: Any, *, default: Decimal | None = None
+) -> Decimal | None:
+    """Coerce feed numbers to the stock_feed DECIMAL(10,2) column shape."""
+
+    decimal_value = _to_decimal(value, default=default)
+    if decimal_value is None:
+        return default
+
+    try:
+        rounded = decimal_value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError, ArithmeticError):
+        return default
+
+    if abs(rounded) >= Decimal("100000000"):
+        return default
+    return rounded
 
 
 def _parse_stock_date(value: Any) -> date | None:
@@ -319,7 +338,7 @@ def _parse_feed_item(element: Element) -> dict[str, Any] | None:
         "sku": sku_cleaned,
         "product_name": product_name,
         "product_name2": product_name2,
-        "rrp": _to_decimal(_get_feed_value(element, "RRP", "rrp")),
+        "rrp": _to_stock_feed_decimal(_get_feed_value(element, "RRP", "rrp")),
         "category_name": category_name,
         "on_hand_nsw": _coerce_feed_int(
             _get_feed_value(element, "OnHandChanelNsw", "on_hand_nsw")
@@ -333,11 +352,11 @@ def _parse_feed_item(element: Element) -> dict[str, Any] | None:
         "on_hand_sa": _coerce_feed_int(
             _get_feed_value(element, "OnHandChanelSa", "on_hand_sa")
         ),
-        "dbp": _to_decimal(_get_feed_value(element, "DBP", "dbp")),
-        "weight": _to_decimal(_get_feed_value(element, "Weight", "weight")),
-        "length": _to_decimal(_get_feed_value(element, "Length", "length")),
-        "width": _to_decimal(_get_feed_value(element, "Width", "width")),
-        "height": _to_decimal(_get_feed_value(element, "Height", "height")),
+        "dbp": _to_stock_feed_decimal(_get_feed_value(element, "DBP", "dbp")),
+        "weight": _to_stock_feed_decimal(_get_feed_value(element, "Weight", "weight")),
+        "length": _to_stock_feed_decimal(_get_feed_value(element, "Length", "length")),
+        "width": _to_stock_feed_decimal(_get_feed_value(element, "Width", "width")),
+        "height": _to_stock_feed_decimal(_get_feed_value(element, "Height", "height")),
         "pub_date": pub_date,
         "warranty_length": warranty_length,
         "manufacturer": manufacturer,
