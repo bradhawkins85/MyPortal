@@ -85,6 +85,26 @@ def test_filters_match_ticket_boolean_and_time_automation_fields():
     )
 
 
+def test_filters_match_ticket_status_human_label_against_slug():
+    context = {"ticket": {"status": "waiting_on_client", "in_status_age_hours": 97}}
+    filters = {
+        "all": [
+            {"greater_than_or_equal": {"ticket.in_status_age_hours": "96"}},
+            {"match": {"ticket.status": "Waiting on client"}},
+        ]
+    }
+
+    assert automations_service._filters_match(filters, context)
+
+
+def test_filters_match_ticket_status_slug_against_human_label():
+    context = {"ticket": {"status": "Waiting on client"}}
+
+    assert automations_service._filters_match(
+        {"match": {"ticket.status": "waiting_on_client"}}, context
+    )
+
+
 def test_filters_match_string_operator_variants():
     context = {"ticket": {"subject": "Network outage for payroll"}}
 

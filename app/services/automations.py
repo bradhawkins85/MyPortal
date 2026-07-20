@@ -280,11 +280,36 @@ def _compile_like_pattern(pattern: str) -> re.Pattern[str]:
     return re.compile("".join(pieces))
 
 
+def _normalise_string_token(value: str) -> str:
+    """Return a stable token for comparing human labels with stored slugs."""
+
+    text = value.strip().casefold()
+    return re.sub(r"[^a-z0-9]+", "_", text).strip("_")
+
+
+def _has_unescaped_like_wildcard(value: str) -> bool:
+    escaped = False
+    for char in value:
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == "%":
+            return True
+    return False
+
+
 def _string_value_matches(actual: Any, expected: str) -> bool:
     if not isinstance(actual, str):
         return False
     pattern = _compile_like_pattern(expected)
-    return bool(pattern.fullmatch(actual))
+    if pattern.fullmatch(actual):
+        return True
+    if _has_unescaped_like_wildcard(expected):
+        return False
+    return _normalise_string_token(actual) == _normalise_string_token(expected)
 
 
 _REGEX_PATTERN_MAX_LENGTH = 256
