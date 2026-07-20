@@ -84,6 +84,7 @@ COMMANDS_BY_MODULE: dict[str, set[str]] = {
         "sync_m365_licenses",
         "sync_m365_contacts",
         "sync_m365_mailboxes",
+        "refresh_m365_consent_status",
     },
     "xero": {"sync_to_xero", "sync_to_xero_auto_send"},
     "call-recordings": {
@@ -1382,6 +1383,38 @@ class SchedulerService:
                         log_info(
                             "No upcoming BCP reviews to notify", days_ahead=days_ahead
                         )
+                elif command == "refresh_m365_consent_status":
+                    company_id = task.get("company_id")
+                    if company_id:
+                        company_id_int = int(company_id)
+                        try:
+                            results = await m365_service.check_enterprise_app_permissions(
+                                company_id_int
+                            )
+                            all_ok = bool(results) and all(
+                                app.get("all_ok") for app in results
+                            )
+                            details = json.dumps(
+                                {
+                                    "company_id": company_id_int,
+                                    "all_ok": all_ok,
+                                    "apps_checked": len(results),
+                                },
+                                default=str,
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            status = "failed"
+                            details = json.dumps(
+                                {
+                                    "company_id": company_id_int,
+                                    "error": str(exc)
+                                    or f"{exc.__class__.__name__} (no details)",
+                                },
+                                default=str,
+                            )
+                    else:
+                        status = "skipped"
+                        details = "Company context required"
                 else:
                     status = "skipped"
                     details = "No handler registered for command"
