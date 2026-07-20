@@ -582,9 +582,10 @@ async def bulk_get_consent_status(
                             check results have been recorded yet, or some
                             required roles are still ``unknown``.
 
-    Companies that are absent from *company_ids* are not included in the
-    result.  Companies with no rows at all in ``m365_permission_check_results``
-    for the supplied role IDs receive ``"not_checked"``.
+    Returns an empty dict when either *company_ids* or *required_role_ids* is
+    empty.  Companies that have no rows in ``m365_permission_check_results``
+    for the supplied role IDs are omitted from the result, which callers
+    should treat as ``"not_checked"``.
     """
     if not company_ids or not required_role_ids:
         return {}
@@ -610,8 +611,8 @@ async def bulk_get_consent_status(
     result: dict[int, str] = {}
     for row in rows:
         cid = int(row["company_id"])
-        fail_count = int(row["fail_count"] or 0)
-        unknown_count = int(row["unknown_count"] or 0)
+        fail_count = row["fail_count"] or 0
+        unknown_count = row["unknown_count"] or 0
         if fail_count > 0:
             result[cid] = "needs_reconsent"
         elif unknown_count > 0:
