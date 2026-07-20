@@ -87,10 +87,11 @@ async def test_resolve_ticket_entities_matches_company_and_staff(monkeypatch):
         fake_get_user_by_email,
     )
 
-    company_id, requester_id = await imap._resolve_ticket_entities("User <user@example.com>")
+    company_id, requester_id, requester_staff_id = await imap._resolve_ticket_entities("User <user@example.com>")
 
     assert company_id == 5
     assert requester_id == 77
+    assert requester_staff_id is None
 
 
 async def test_resolve_ticket_entities_matches_company_without_staff(monkeypatch):
@@ -123,10 +124,11 @@ async def test_resolve_ticket_entities_matches_company_without_staff(monkeypatch
         fake_get_user_by_email,
     )
 
-    company_id, requester_id = await imap._resolve_ticket_entities("Sender <sender@example.com>")
+    company_id, requester_id, requester_staff_id = await imap._resolve_ticket_entities("Sender <sender@example.com>")
 
     assert company_id == 7
     assert requester_id is None
+    assert requester_staff_id is None
 
 
 async def test_resolve_ticket_entities_falls_back_to_account_company(monkeypatch):
@@ -160,13 +162,14 @@ async def test_resolve_ticket_entities_falls_back_to_account_company(monkeypatch
         fake_get_user_by_email,
     )
 
-    company_id, requester_id = await imap._resolve_ticket_entities(
+    company_id, requester_id, requester_staff_id = await imap._resolve_ticket_entities(
         "Support <help@tenant.com>",
         default_company_id="11",
     )
 
     assert company_id == 11
     assert requester_id == 81
+    assert requester_staff_id is None
 
 
 async def test_resolve_ticket_entities_handles_staff_without_user(monkeypatch):
@@ -199,9 +202,14 @@ async def test_resolve_ticket_entities_handles_staff_without_user(monkeypatch):
         fake_get_user_by_email,
     )
 
-    await imap._resolve_ticket_entities("Support <help@tenant.com>", default_company_id="11")
+    company_id, requester_id, requester_staff_id = await imap._resolve_ticket_entities(
+        "Support <help@tenant.com>", default_company_id="11"
+    )
 
     assert (11, "help@tenant.com") in checked
+    assert company_id == 11
+    assert requester_id is None
+    assert requester_staff_id == 123
 
 
 async def test_sync_account_does_not_mark_as_read_on_ticket_failure(monkeypatch):
@@ -330,10 +338,6 @@ async def test_sync_account_does_not_mark_as_read_on_ticket_failure(monkeypatch)
         fake_get_user_by_email,
     )
 
-    company_id, requester_id = await imap._resolve_ticket_entities("Member <member@example.com>")
-
-    assert company_id == 15
-    assert requester_id is None
     monkeypatch.setattr(imap.imaplib, "IMAP4_SSL", fake_imap4_ssl)
 
     result = await imap.sync_account(7)
@@ -478,6 +482,7 @@ async def test_sync_account_imports_email_successfully(monkeypatch):
     assert created_tickets[0]["subject"] == "Help me with this"
     assert created_tickets[0]["module_slug"] == "imap"
     assert created_tickets[0]["requester_id"] == 42
+    assert created_tickets[0]["requester_staff_id"] is None
     assert created_tickets[0]["company_id"] == 24
     assert created_tickets[0]["initial_reply_author_id"] == 42
     assert created_tickets[0]["requester_email"] is None

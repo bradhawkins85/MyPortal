@@ -1392,9 +1392,13 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     description_lines.append("\n" + body)
                 description = "\n\n".join(description_lines).strip()
                 default_company_id = _int_or_none(account.get("company_id"))
-                ticket_company_id, requester_id = await _resolve_ticket_entities(
+                resolved_entities = await _resolve_ticket_entities(
                     from_header,
                     default_company_id=default_company_id,
+                )
+                ticket_company_id, requester_id = resolved_entities[:2]
+                requester_staff_id = (
+                    resolved_entities[2] if len(resolved_entities) > 2 else None
                 )
 
                 # Find existing ticket for reply. The shared matcher allows
@@ -1432,6 +1436,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             subject=subject,
                             description=description or "Email body unavailable.",
                             requester_id=requester_id,
+                            requester_staff_id=requester_staff_id,
                             company_id=ticket_company_id,
                             assigned_user_id=None,
                             priority="normal",

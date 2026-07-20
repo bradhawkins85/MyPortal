@@ -717,7 +717,7 @@ async def _resolve_ticket_entities(
     from_header: str | None,
     *,
     default_company_id: int | None = None,
-) -> tuple[int | None, int | None]:
+) -> tuple[int | None, int | None, int | None]:
     email_addresses = _extract_email_addresses(from_header)
 
     checked_users: set[str] = set()
@@ -737,7 +737,7 @@ async def _resolve_ticket_entities(
                 company = await company_repo.get_company_by_email_domain(domain)
                 if company:
                     resolved_company_id = _int_or_none(company.get("id"))
-            return resolved_company_id, requester_id
+            return resolved_company_id, requester_id, None
 
     seen_domains: set[str] = set()
 
@@ -759,14 +759,16 @@ async def _resolve_ticket_entities(
         user = await users_repo.get_user_by_email(email_address)
         requester_id = _extract_record_id(user)
         if requester_id is not None:
-            return company_id, requester_id
+            return company_id, requester_id, None
         staff_member = await staff_repo.get_staff_by_company_and_email(company_id, email_address)
-        if staff_member:
-            return company_id, None
-        return company_id, None
+        requester_staff_id = _extract_record_id(staff_member)
+        if requester_staff_id is not None:
+            return company_id, None, requester_staff_id
+        return company_id, None, None
 
     company_id = _int_or_none(default_company_id)
     requester_id: int | None = None
+    requester_staff_id: int | None = None
 
     if company_id is not None:
         checked: set[str] = set()
@@ -779,11 +781,12 @@ async def _resolve_ticket_entities(
             if requester_id is not None:
                 break
             staff_member = await staff_repo.get_staff_by_company_and_email(company_id, email_address)
-            if staff_member:
+            requester_staff_id = _extract_record_id(staff_member)
+            if requester_staff_id is not None:
                 requester_id = None
                 break
 
-    return company_id, requester_id
+    return company_id, requester_id, requester_staff_id
 
 
 async def _is_email_address_known(email_address: str) -> bool:
@@ -1831,7 +1834,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 description_lines.append("\n" + body)
             description = "\n\n".join(description_lines).strip()
             default_company_id = _int_or_none(account.get("company_id"))
-            company_id, requester_id = await _resolve_ticket_entities(
+            company_id, requester_id, requester_staff_id = await _resolve_ticket_entities(
                 from_address,
                 default_company_id=default_company_id,
             )
@@ -1868,6 +1871,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         subject=subject,
                         description=description or "Email body unavailable.",
                         requester_id=requester_id,
+                        requester_staff_id=requester_staff_id,
                         company_id=company_id,
                         assigned_user_id=None,
                         priority="normal",
