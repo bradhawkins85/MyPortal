@@ -142,6 +142,17 @@ _PROVISION_APP_ROLES: list[str] = [
     "434d7c66-07c6-4b1f-ab21-417cf2cdaaca",  # OrgSettings-Forms.Read.All
 ]
 
+def get_required_app_role_ids() -> list[str]:
+    """Return the list of Microsoft Graph application permission role IDs
+    required for the provisioned integration app.
+
+    Callers can compare these against stored
+    ``m365_permission_check_results`` rows to determine whether a tenant's
+    admin consent is current.
+    """
+    return list(_PROVISION_APP_ROLES)
+
+
 # OAuth scopes requested during the admin-consent provisioning flow
 PROVISION_SCOPE = (
     "https://graph.microsoft.com/Application.ReadWrite.All "

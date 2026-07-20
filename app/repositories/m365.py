@@ -565,3 +565,59 @@ async def delete_permission_check_results(company_id: int) -> None:
         "DELETE FROM m365_permission_check_results WHERE company_id = %s",
         (company_id,),
     )
+
+
+async def bulk_get_consent_status(
+    company_ids: list[int],
+    required_role_ids: list[str],
+) -> dict[int, str]:
+    """Return a per-company consent status string for a set of required role IDs.
+
+    Possible return values (keyed by company_id):
+
+    * ``"up_to_date"``    – all required roles have status ``pass`` or
+                            ``not_supported`` (no ``fail`` / ``unknown`` rows).
+    * ``"needs_reconsent"`` – at least one required role has status ``fail``.
+    * ``"not_checked"``   – the company has M365 credentials but no permission
+                            check results have been recorded yet, or some
+                            required roles are still ``unknown``.
+
+    Returns an empty dict when either *company_ids* or *required_role_ids* is
+    empty.  Companies that have no rows in ``m365_permission_check_results``
+    for the supplied role IDs are omitted from the result, which callers
+    should treat as ``"not_checked"``.
+    """
+    if not company_ids or not required_role_ids:
+        return {}
+
+    company_placeholders = ", ".join(["%s"] * len(company_ids))
+    role_placeholders = ", ".join(["%s"] * len(required_role_ids))
+
+    rows = await db.fetch_all(
+        f"""
+        SELECT
+            company_id,
+            SUM(CASE WHEN status = 'fail' THEN 1 ELSE 0 END)    AS fail_count,
+            SUM(CASE WHEN status = 'unknown' THEN 1 ELSE 0 END) AS unknown_count,
+            COUNT(*)                                              AS total
+        FROM m365_permission_check_results
+        WHERE company_id IN ({company_placeholders})
+          AND role_id     IN ({role_placeholders})
+        GROUP BY company_id
+        """,
+        tuple(company_ids) + tuple(required_role_ids),
+    )
+
+    result: dict[int, str] = {}
+    for row in rows:
+        cid = int(row["company_id"])
+        fail_count = row["fail_count"] or 0
+        unknown_count = row["unknown_count"] or 0
+        if fail_count > 0:
+            result[cid] = "needs_reconsent"
+        elif unknown_count > 0:
+            result[cid] = "not_checked"
+        else:
+            result[cid] = "up_to_date"
+
+    return result
