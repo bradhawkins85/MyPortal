@@ -1,3 +1,4 @@
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, call
 
@@ -250,6 +251,42 @@ def test_parse_stock_feed_xml_reports_parse_error_details():
     assert "mismatched tag" in message
     assert "line 1" in message
     assert "column" in message
+
+
+def test_parse_stock_feed_xml_rounds_weight_to_column_scale():
+    xml_payload = """
+        <rss>
+          <channel>
+            <item>
+              <StockCode>ROUND1</StockCode>
+              <ProductName>Rounded Weight</ProductName>
+              <Weight>0.125</Weight>
+            </item>
+          </channel>
+        </rss>
+    """
+
+    items = products_service._parse_stock_feed_xml(xml_payload)
+
+    assert items[0]["weight"] == Decimal("0.13")
+
+
+def test_parse_stock_feed_xml_ignores_weight_too_large_for_column():
+    xml_payload = """
+        <rss>
+          <channel>
+            <item>
+              <StockCode>HEAVY1</StockCode>
+              <ProductName>Too Heavy</ProductName>
+              <Weight>100000000</Weight>
+            </item>
+          </channel>
+        </rss>
+    """
+
+    items = products_service._parse_stock_feed_xml(xml_payload)
+
+    assert items[0]["weight"] is None
 
 
 @pytest.mark.anyio("asyncio")
