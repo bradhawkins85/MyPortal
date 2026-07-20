@@ -180,7 +180,7 @@ async def test_create_ticket_returns_inserted_record(monkeypatch):
         "ai_summary_model": None,
         "ai_resolution_state": None,
         "ai_summary_updated_at": None,
-        "ai_tags": "[\"printer\", \"hardware\"]",
+        "ai_tags": '["printer", "hardware"]',
         "ai_tags_status": "succeeded",
         "ai_tags_model": "llama3",
         "ai_tags_updated_at": None,
@@ -292,8 +292,16 @@ async def test_replace_ticket_assets_updates_links(monkeypatch):
 
     assets = await tickets.replace_ticket_assets(77, [2, 3])
 
-    delete_calls = [call for call in dummy_db.execute_calls if call[0].startswith("DELETE FROM ticket_assets")]
-    insert_calls = [call for call in dummy_db.execute_calls if call[0].startswith("INSERT INTO ticket_assets")]
+    delete_calls = [
+        call
+        for call in dummy_db.execute_calls
+        if call[0].startswith("DELETE FROM ticket_assets")
+    ]
+    insert_calls = [
+        call
+        for call in dummy_db.execute_calls
+        if call[0].startswith("INSERT INTO ticket_assets")
+    ]
 
     assert delete_calls
     assert insert_calls
@@ -329,7 +337,10 @@ async def test_create_reply_returns_inserted_record(monkeypatch):
     assert record["is_billable"] is True
     assert "SELECT tr.*, lt.name AS labour_type_name" in dummy_db.fetch_sql
     assert "FROM ticket_replies tr" in dummy_db.fetch_sql
-    assert "LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id" in dummy_db.fetch_sql
+    assert (
+        "LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id"
+        in dummy_db.fetch_sql
+    )
     assert dummy_db.fetch_params == (42,)
     assert record["kind"] == "message"
 
@@ -382,7 +393,10 @@ async def test_automation_filter_context_treats_shipment_reply_as_system(monkeyp
     await tickets.get_automation_filter_context_by_ticket_ids([5])
 
     latest_query = dummy_db.fetch_calls[-1][0]
-    assert "WHEN tr.external_reference LIKE 'shipment-watch:%%' THEN 'system'" in latest_query
+    assert (
+        "WHEN tr.external_reference LIKE 'shipment-watch:%%' THEN 'system'"
+        in latest_query
+    )
 
 
 @pytest.mark.anyio
@@ -404,7 +418,10 @@ async def test_get_reply_by_id_fetches_normalised_record(monkeypatch):
 
     assert "SELECT tr.*, lt.name AS labour_type_name" in dummy_db.fetch_sql
     assert "FROM ticket_replies tr" in dummy_db.fetch_sql
-    assert "LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id" in dummy_db.fetch_sql
+    assert (
+        "LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id"
+        in dummy_db.fetch_sql
+    )
     assert dummy_db.fetch_params == (15,)
     assert record["id"] == 15
     assert record["minutes_spent"] == 10
@@ -436,7 +453,10 @@ async def test_update_reply_updates_minutes_and_billable(monkeypatch):
         in dummy_db.fetch_sql
     )
     assert "FROM ticket_replies tr" in dummy_db.fetch_sql
-    assert "LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id" in dummy_db.fetch_sql
+    assert (
+        "LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id"
+        in dummy_db.fetch_sql
+    )
     assert "WHERE tr.id = %s" in dummy_db.fetch_sql
     assert record["minutes_spent"] == 15
     assert record["is_billable"] is True
@@ -483,7 +503,7 @@ async def test_get_ticket_by_external_reference(monkeypatch):
         "ai_summary_model": None,
         "ai_resolution_state": None,
         "ai_summary_updated_at": None,
-        "ai_tags": "[\"sample\"]",
+        "ai_tags": '["sample"]',
         "ai_tags_status": None,
         "ai_tags_model": None,
         "ai_tags_updated_at": None,
@@ -593,7 +613,9 @@ async def test_delete_tickets_returns_deleted_count(monkeypatch):
     deleted = await tickets.delete_tickets([1, "2", "ignored", 0, -5, 2])
 
     assert deleted == 2
-    assert dummy_db.fetch_sql.startswith("SELECT COUNT(*) AS total FROM tickets WHERE id IN")
+    assert dummy_db.fetch_sql.startswith(
+        "SELECT COUNT(*) AS total FROM tickets WHERE id IN"
+    )
     assert dummy_db.fetch_params == (1, 2)
     assert dummy_db.execute_sql.startswith("DELETE FROM tickets WHERE id IN")
     assert dummy_db.execute_params == (1, 2)
@@ -722,7 +744,7 @@ async def test_automation_scan_orders_by_status_age_candidates(monkeypatch):
     records = await tickets.list_tickets_for_automation_scan(limit=250)
 
     assert records == []
-    assert dummy_db.fetch_params == (250,)
+    assert dummy_db.fetch_params == (250, 0)
     assert (
         "ORDER BY COALESCE(t.status_changed_at, t.created_at, t.updated_at) ASC, "
         "t.updated_at ASC, t.id ASC"

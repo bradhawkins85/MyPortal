@@ -580,7 +580,9 @@ async def mark_replies_non_billable(reply_ids: Sequence[int]) -> int:
     )
 
 
-async def list_tickets_for_automation_scan(*, limit: int = 1000) -> list[TicketRecord]:
+async def list_tickets_for_automation_scan(
+    *, limit: int = 1000, offset: int = 0
+) -> list[TicketRecord]:
     """Return recent ticket records with reply timestamps for scheduled automations.
 
     Scheduled automations apply their filter JSON in Python so the same nested
@@ -590,6 +592,7 @@ async def list_tickets_for_automation_scan(*, limit: int = 1000) -> list[TicketR
     """
 
     safe_limit = max(1, min(int(limit or 1000), 5000))
+    safe_offset = max(0, int(offset or 0))
     rows = await db.fetch_all(
         """
         SELECT
@@ -602,9 +605,9 @@ async def list_tickets_for_automation_scan(*, limit: int = 1000) -> list[TicketR
         FROM tickets t
         WHERE t.merged_into_ticket_id IS NULL
         ORDER BY COALESCE(t.status_changed_at, t.created_at, t.updated_at) ASC, t.updated_at ASC, t.id ASC
-        LIMIT %s
+        LIMIT %s OFFSET %s
         """,
-        (safe_limit,),
+        (safe_limit, safe_offset),
     )
     records: list[TicketRecord] = []
     for row in rows:

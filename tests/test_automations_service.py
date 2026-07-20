@@ -235,6 +235,7 @@ def test_filters_match_accepts_human_readable_operator_keys():
         context,
     )
 
+
 @pytest.mark.anyio
 async def test_execute_automation_interpolates_context(monkeypatch):
     captured: list[tuple[str, dict[str, object]]] = []
@@ -891,9 +892,17 @@ async def test_execute_scheduled_ticket_automation_runs_actions_for_matching_tic
     ]
     captured: list[tuple[str, dict[str, object]]] = []
 
-    async def fake_list_tickets_for_automation_scan(*, limit: int = 1000):
-        assert limit == 1000
-        return scanned_tickets
+    monkeypatch.setattr(automations_service, "SCHEDULED_TICKET_SCAN_BATCH_SIZE", 1)
+
+    async def fake_list_tickets_for_automation_scan(
+        *, limit: int = 1000, offset: int = 0
+    ):
+        assert limit == 1
+        if offset == 0:
+            return scanned_tickets[:1]
+        if offset == 1:
+            return scanned_tickets[1:]
+        return []
 
     async def fake_enrich(ticket):
         return dict(ticket)
@@ -1018,7 +1027,9 @@ async def test_preview_scheduled_ticket_automation_returns_matches_without_actio
         },
     ]
 
-    async def fake_list_tickets_for_automation_scan(*, limit: int = 1000):
+    async def fake_list_tickets_for_automation_scan(
+        *, limit: int = 1000, offset: int = 0
+    ):
         assert limit == 25
         return scanned_tickets
 
@@ -1102,7 +1113,9 @@ async def test_simulate_event_ticket_automation_processes_selected_matches(monke
         assert automation_id == 13
         return automation
 
-    async def fake_list_tickets_for_automation_scan(*, limit: int = 1000):
+    async def fake_list_tickets_for_automation_scan(
+        *, limit: int = 1000, offset: int = 0
+    ):
         assert limit == 50
         return scanned_tickets
 
