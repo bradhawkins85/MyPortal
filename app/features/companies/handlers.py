@@ -122,6 +122,7 @@ async def _render_companies_dashboard(
     from app.repositories import m365 as m365_repo
     from app.repositories import roles as role_repo
     from app.repositories import user_companies as user_company_repo
+    from app.services import m365 as m365_service
 
     is_super_admin, managed_companies, membership_lookup = (
         await _get_company_management_scope(
@@ -149,6 +150,25 @@ async def _render_companies_dashboard(
         )
         for (_, company), credentials in zip(company_ids_with_rows, credentials_rows):
             company["m365_tenant_id"] = (credentials or {}).get("tenant_id", "").strip()
+
+    # Fetch M365 consent status for companies that have credentials configured.
+    m365_company_ids = [
+        company_id
+        for company_id, company in company_ids_with_rows
+        if company.get("m365_tenant_id")
+    ]
+    if m365_company_ids:
+        consent_status_map = await m365_repo.bulk_get_consent_status(
+            m365_company_ids,
+            m365_service.get_required_app_role_ids(),
+        )
+    else:
+        consent_status_map = {}
+    for company_id, company in company_ids_with_rows:
+        if company.get("m365_tenant_id"):
+            company["m365_consent_status"] = consent_status_map.get(company_id, "not_checked")
+        else:
+            company["m365_consent_status"] = None
 
     ordered_company_ids: list[int] = [
         int(company["id"])

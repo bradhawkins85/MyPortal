@@ -22,6 +22,7 @@
   {"key": "payment_method",            "label": "Payment Methods",              "default_visible": false},
   {"key": "require_po",                "label": "Require PO",                   "default_visible": false},
   {"key": "m365_tenant_id",            "label": "Microsoft 365 Tenant ID",      "default_visible": false},
+  {"key": "m365_consent",              "label": "M365 Consent",                 "default_visible": true},
   {"key": "vip",           "label": "VIP",           "default_visible": true},
   {"key": "status",        "label": "Status",        "default_visible": true},
   {"key": "actions",       "label": "Actions",       "default_visible": true}
@@ -71,6 +72,7 @@
                 <th scope="col" data-sort="string" data-column-key="payment_method">Payment Methods</th>
                 <th scope="col" data-sort="string" data-column-key="require_po">Require PO</th>
                 <th scope="col" data-sort="string" data-column-key="m365_tenant_id">Microsoft 365 Tenant ID</th>
+                <th scope="col" data-sort="string" data-column-key="m365_consent">M365 Consent</th>
                 <th scope="col" data-sort="number" data-column-key="vip">VIP</th>
                 <th scope="col" data-sort="string" data-column-key="status">Status</th>
                 <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
@@ -147,6 +149,18 @@
                     <td data-label="Microsoft 365 Tenant ID" data-value="{{ company.m365_tenant_id or '' }}" data-column-key="m365_tenant_id">
                       {% if company.m365_tenant_id %}
                         {{ company.m365_tenant_id }}
+                      {% else %}
+                        <span class="text-muted">—</span>
+                      {% endif %}
+                    </td>
+                    {% set consent_status = company.m365_consent_status %}
+                    <td data-label="M365 Consent" data-value="{{ consent_status or '' }}" data-column-key="m365_consent">
+                      {% if consent_status == "up_to_date" %}
+                        <span class="tag tag--success">Up to date</span>
+                      {% elif consent_status == "needs_reconsent" %}
+                        <span class="tag tag--danger">Re-consent needed</span>
+                      {% elif consent_status == "not_checked" %}
+                        <span class="tag tag--warning">Not checked</span>
                       {% else %}
                         <span class="text-muted">—</span>
                       {% endif %}
