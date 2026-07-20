@@ -38,9 +38,13 @@ async def test_create_ticket_triggers_automations(monkeypatch):
 
     monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
-    monkeypatch.setattr(tickets_service.company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(
+        tickets_service.company_repo, "get_company_by_id", fake_get_company
+    )
     monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
-    monkeypatch.setattr(tickets_service, "resolve_status_or_default", fake_resolve_status)
+    monkeypatch.setattr(
+        tickets_service, "resolve_status_or_default", fake_resolve_status
+    )
 
     ticket = await tickets_service.create_ticket(
         subject="Printer offline",
@@ -88,9 +92,13 @@ async def test_create_ticket_can_skip_automations(monkeypatch):
 
     monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
-    monkeypatch.setattr(tickets_service.company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(
+        tickets_service.company_repo, "get_company_by_id", fake_get_company
+    )
     monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
-    monkeypatch.setattr(tickets_service, "resolve_status_or_default", fake_resolve_status)
+    monkeypatch.setattr(
+        tickets_service, "resolve_status_or_default", fake_resolve_status
+    )
 
     ticket = await tickets_service.create_ticket(
         subject="Laptop setup",
@@ -193,9 +201,13 @@ async def test_create_ticket_truncates_long_description(monkeypatch):
 
     monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
-    monkeypatch.setattr(tickets_service.company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(
+        tickets_service.company_repo, "get_company_by_id", fake_get_company
+    )
     monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
-    monkeypatch.setattr(tickets_service, "resolve_status_or_default", fake_resolve_status)
+    monkeypatch.setattr(
+        tickets_service, "resolve_status_or_default", fake_resolve_status
+    )
 
     long_description = "A" * (tickets_service._MAX_TICKET_DESCRIPTION_BYTES + 512)
 
@@ -252,9 +264,13 @@ async def test_create_ticket_initial_reply_uses_full_description(monkeypatch):
     monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(tickets_repo, "create_reply", fake_create_reply)
     monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
-    monkeypatch.setattr(tickets_service.company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(
+        tickets_service.company_repo, "get_company_by_id", fake_get_company
+    )
     monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
-    monkeypatch.setattr(tickets_service, "resolve_status_or_default", fake_resolve_status)
+    monkeypatch.setattr(
+        tickets_service, "resolve_status_or_default", fake_resolve_status
+    )
 
     long_description = "B" * (tickets_service._MAX_TICKET_DESCRIPTION_BYTES + 128)
 
@@ -315,9 +331,13 @@ async def test_create_ticket_records_initial_reply(monkeypatch):
     monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(tickets_repo, "create_reply", fake_create_reply)
     monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
-    monkeypatch.setattr(tickets_service.company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(
+        tickets_service.company_repo, "get_company_by_id", fake_get_company
+    )
     monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
-    monkeypatch.setattr(tickets_service, "resolve_status_or_default", fake_resolve_status)
+    monkeypatch.setattr(
+        tickets_service, "resolve_status_or_default", fake_resolve_status
+    )
 
     ticket = await tickets_service.create_ticket(
         subject="VPN issue",
@@ -368,9 +388,13 @@ async def test_create_ticket_records_initial_reply_without_author(monkeypatch):
     monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(tickets_repo, "create_reply", fake_create_reply)
     monkeypatch.setattr(automations_service, "handle_event", fake_handle_event)
-    monkeypatch.setattr(tickets_service.company_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(
+        tickets_service.company_repo, "get_company_by_id", fake_get_company
+    )
     monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
-    monkeypatch.setattr(tickets_service, "resolve_status_or_default", fake_resolve_status)
+    monkeypatch.setattr(
+        tickets_service, "resolve_status_or_default", fake_resolve_status
+    )
 
     ticket = await tickets_service.create_ticket(
         subject="Automation created",
@@ -594,3 +618,62 @@ async def test_emit_ticket_updated_event_auto_detects_requester(monkeypatch):
     actor_meta = context["ticket_update"]
     assert actor_meta["actor_type"] == "requester"
     assert actor_meta["actor_label"] == "Requester"
+
+
+@pytest.mark.anyio
+async def test_create_ticket_records_initial_reply_external_author(monkeypatch):
+    async def fake_create_ticket(**kwargs):
+        return {**kwargs, "id": 88}
+
+    async def fake_create_reply(**kwargs):
+        created_replies.append(kwargs)
+        return {"id": 1, **kwargs}
+
+    async def fake_get_company(_company_id):
+        return None
+
+    async def fake_get_user(_user_id):
+        return None
+
+    async def fake_resolve_status(value):
+        return value or "open"
+
+    created_replies: list[dict[str, object]] = []
+    monkeypatch.setattr(tickets_repo, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(tickets_repo, "create_reply", fake_create_reply)
+    monkeypatch.setattr(
+        tickets_service.company_repo, "get_company_by_id", fake_get_company
+    )
+    monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user)
+    monkeypatch.setattr(
+        tickets_service, "resolve_status_or_default", fake_resolve_status
+    )
+
+    await tickets_service.create_ticket(
+        subject="Imported email",
+        description="From: Sender <sender@example.com>\n\nPlease help",
+        requester_id=None,
+        requester_staff_id=None,
+        company_id=12,
+        assigned_user_id=None,
+        priority="normal",
+        status="open",
+        category="email",
+        module_slug="imap",
+        external_reference="msg-1",
+        ticket_number=None,
+        trigger_automations=False,
+        initial_reply_author_email="sender@example.com",
+        initial_reply_author_display_name="Sender <sender@example.com>",
+    )
+
+    assert created_replies == [
+        {
+            "ticket_id": 88,
+            "author_id": None,
+            "body": "From: Sender <sender@example.com>\n\nPlease help",
+            "is_internal": False,
+            "author_email": "sender@example.com",
+            "author_display_name": "Sender <sender@example.com>",
+        }
+    ]
