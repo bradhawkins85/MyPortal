@@ -196,8 +196,95 @@ async def test_refresh_m365_consent_status_all_ok_false_when_no_results():
 
 
 @pytest.mark.asyncio
-async def test_refresh_m365_consent_status_skips_without_company_id():
-    """Handler records skipped when no company_id is present."""
+async def test_refresh_m365_consent_status_all_companies_success():
+    """Without a company_id the handler runs for every provisioned company."""
+    from app.services.scheduler import SchedulerService
+
+    scheduler = SchedulerService()
+    recorded: list[dict] = []
+
+    async def fake_record(task_id, *, status, started_at, finished_at, duration_ms, details=None):
+        recorded.append({"status": status, "details": details})
+
+    with (
+        patch(
+            "app.services.scheduler.m365_service.check_enterprise_app_permissions",
+            new_callable=AsyncMock,
+            return_value=[{"name": "Microsoft Graph", "all_ok": True}],
+        ),
+        patch(
+            "app.services.scheduler.scheduled_tasks_repo.record_task_run",
+            side_effect=fake_record,
+        ),
+        patch("app.services.scheduler.db.acquire_lock") as mock_lock,
+        patch(
+            "app.services.scheduler.m365_repo.list_provisioned_company_ids",
+            new_callable=AsyncMock,
+            return_value={1, 2, 3},
+        ),
+    ):
+        mock_lock.return_value.__aenter__.return_value = True
+        task = {"id": 20, "command": "refresh_m365_consent_status"}
+        await scheduler._run_task(task)
+
+    assert recorded[-1]["status"] == "succeeded"
+    data = json.loads(recorded[-1]["details"])
+    assert data["companies_checked"] == 3
+    assert len(data["results"]) == 3
+    assert all(r["all_ok"] is True for r in data["results"])
+
+
+@pytest.mark.asyncio
+async def test_refresh_m365_consent_status_all_companies_partial_failure():
+    """Status is 'failed' when at least one company raises an exception."""
+    from app.services.scheduler import SchedulerService
+
+    scheduler = SchedulerService()
+    recorded: list[dict] = []
+
+    async def fake_record(task_id, *, status, started_at, finished_at, duration_ms, details=None):
+        recorded.append({"status": status, "details": details})
+
+    call_count = 0
+
+    async def fake_check(cid: int):
+        nonlocal call_count
+        call_count += 1
+        if cid == 2:
+            raise Exception("Graph API unavailable")
+        return [{"name": "Microsoft Graph", "all_ok": True}]
+
+    with (
+        patch(
+            "app.services.scheduler.m365_service.check_enterprise_app_permissions",
+            side_effect=fake_check,
+        ),
+        patch(
+            "app.services.scheduler.scheduled_tasks_repo.record_task_run",
+            side_effect=fake_record,
+        ),
+        patch("app.services.scheduler.db.acquire_lock") as mock_lock,
+        patch(
+            "app.services.scheduler.m365_repo.list_provisioned_company_ids",
+            new_callable=AsyncMock,
+            return_value={1, 2},
+        ),
+    ):
+        mock_lock.return_value.__aenter__.return_value = True
+        task = {"id": 20, "command": "refresh_m365_consent_status"}
+        await scheduler._run_task(task)
+
+    assert recorded[-1]["status"] == "failed"
+    data = json.loads(recorded[-1]["details"])
+    assert data["companies_checked"] == 2
+    failed_entries = [r for r in data["results"] if "error" in r]
+    assert len(failed_entries) == 1
+    assert "Graph API unavailable" in failed_entries[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_m365_consent_status_skips_when_no_provisioned_companies():
+    """Status is 'skipped' when no M365 companies are provisioned."""
     from app.services.scheduler import SchedulerService
 
     scheduler = SchedulerService()
@@ -216,6 +303,11 @@ async def test_refresh_m365_consent_status_skips_without_company_id():
             side_effect=fake_record,
         ),
         patch("app.services.scheduler.db.acquire_lock") as mock_lock,
+        patch(
+            "app.services.scheduler.m365_repo.list_provisioned_company_ids",
+            new_callable=AsyncMock,
+            return_value=set(),
+        ),
     ):
         mock_lock.return_value.__aenter__.return_value = True
         task = {"id": 20, "command": "refresh_m365_consent_status"}

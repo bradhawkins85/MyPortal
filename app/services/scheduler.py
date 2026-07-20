@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.core.database import db
 from app.core.logging import log_error, log_info
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
+from app.repositories import m365 as m365_repo
 from app.services import asset_importer
 from app.services import automations as automations_service
 from app.services import company_id_lookup
@@ -1413,8 +1414,46 @@ class SchedulerService:
                                 default=str,
                             )
                     else:
-                        status = "skipped"
-                        details = "Company context required"
+                        provisioned_ids = await m365_repo.list_provisioned_company_ids()
+                        if not provisioned_ids:
+                            status = "skipped"
+                            details = "No provisioned M365 companies found"
+                        else:
+                            company_results: list[dict[str, Any]] = []
+                            any_failed = False
+                            for cid in provisioned_ids:
+                                try:
+                                    cid_results = await m365_service.check_enterprise_app_permissions(
+                                        cid
+                                    )
+                                    cid_all_ok = bool(cid_results) and all(
+                                        app.get("all_ok", False) for app in cid_results
+                                    )
+                                    company_results.append(
+                                        {
+                                            "company_id": cid,
+                                            "all_ok": cid_all_ok,
+                                            "apps_checked": len(cid_results),
+                                        }
+                                    )
+                                except Exception as exc:  # noqa: BLE001
+                                    any_failed = True
+                                    company_results.append(
+                                        {
+                                            "company_id": cid,
+                                            "error": str(exc)
+                                            or f"{exc.__class__.__name__} (no details)",
+                                        }
+                                    )
+                            if any_failed:
+                                status = "failed"
+                            details = json.dumps(
+                                {
+                                    "companies_checked": len(provisioned_ids),
+                                    "results": company_results,
+                                },
+                                default=str,
+                            )
                 else:
                     status = "skipped"
                     details = "No handler registered for command"
