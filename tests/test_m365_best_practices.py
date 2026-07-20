@@ -4544,3 +4544,525 @@ def test_onprem_password_protection_uses_graph_source():
     assert entry is not None
     assert entry.get("source_type") == "graph"
     assert entry.get("source") is bp_service._check_onprem_password_protection
+
+
+# ---------------------------------------------------------------------------
+# New remediations – catalog assertions
+# ---------------------------------------------------------------------------
+
+
+def test_new_remediable_checks_have_has_remediation_true():
+    """All 10 newly wired-up checks must expose has_remediation=True."""
+    catalog = {bp["id"]: bp for bp in bp_service._BEST_PRACTICES}
+    expected_ids = [
+        "bp_antiphish_quarantine_impersonated_domain",
+        "bp_antiphish_quarantine_impersonated_user",
+        "bp_antiphish_domain_impersonation_safety_tip",
+        "bp_antiphish_user_impersonation_safety_tip",
+        "bp_antiphish_unusual_characters_safety_tip",
+        "bp_sharepoint_external_sharing_restricted",
+        "bp_sp_guests_cannot_share_unowned",
+        "bp_onedrive_content_sharing_restricted",
+        "bp_modern_auth_sp_apps",
+        "bp_shared_mailbox_signin_blocked",
+    ]
+    for check_id in expected_ids:
+        entry = catalog.get(check_id)
+        assert entry is not None, f"catalog entry missing: {check_id}"
+        assert entry.get("has_remediation") is True, f"has_remediation not True for {check_id}"
+
+
+def test_antiphish_remediation_catalog_fields():
+    """Anti-phish EXO checks must have the correct cmdlet and params."""
+    catalog = {bp["id"]: bp for bp in bp_service._BEST_PRACTICES}
+    expected = {
+        "bp_antiphish_quarantine_impersonated_domain": "TargetedDomainProtectionAction",
+        "bp_antiphish_quarantine_impersonated_user": "TargetedUserProtectionAction",
+        "bp_antiphish_domain_impersonation_safety_tip": "EnableSimilarDomainsSafetyTips",
+        "bp_antiphish_user_impersonation_safety_tip": "EnableSimilarUsersSafetyTips",
+        "bp_antiphish_unusual_characters_safety_tip": "EnableUnusualCharactersSafetyTips",
+    }
+    for check_id, param_key in expected.items():
+        entry = catalog[check_id]
+        assert entry.get("source_type") == "exo", f"source_type wrong for {check_id}"
+        assert entry.get("remediation_cmdlet") == "Set-AntiPhishPolicy", f"wrong cmdlet for {check_id}"
+        params = entry.get("remediation_params") or {}
+        assert params.get("Identity") == "Office365 AntiPhish Default", f"Identity missing for {check_id}"
+        assert param_key in params, f"param {param_key} missing for {check_id}"
+
+
+def test_spo_remediation_catalog_fields():
+    """SharePoint Graph checks must point at the SPO settings URL."""
+    catalog = {bp["id"]: bp for bp in bp_service._BEST_PRACTICES}
+    spo_checks = [
+        "bp_sharepoint_external_sharing_restricted",
+        "bp_sp_guests_cannot_share_unowned",
+        "bp_onedrive_content_sharing_restricted",
+        "bp_modern_auth_sp_apps",
+    ]
+    for check_id in spo_checks:
+        entry = catalog[check_id]
+        assert entry.get("source_type") == "graph", f"source_type wrong for {check_id}"
+        assert entry.get("remediation_url") == bp_service._SPO_SETTINGS_URL, f"wrong URL for {check_id}"
+        assert entry.get("remediation_payload"), f"remediation_payload empty for {check_id}"
+
+
+def test_shared_mailbox_remediation_catalog_fields():
+    """bp_shared_mailbox_signin_blocked must use foreach_user_graph type."""
+    catalog = {bp["id"]: bp for bp in bp_service._BEST_PRACTICES}
+    entry = catalog["bp_shared_mailbox_signin_blocked"]
+    assert entry.get("source_type") == "graph"
+    assert entry.get("remediation_type") == "foreach_user_graph"
+    assert entry.get("has_remediation") is True
+
+
+def test_internal_keys_hide_remediation_type_and_mailbox_params():
+    """remediation_type and remediation_mailbox_params must be stripped from public catalog."""
+    public = bp_service.list_best_practices()
+    for entry in public:
+        assert "remediation_type" not in entry, f"remediation_type leaked in {entry['id']}"
+        assert "remediation_mailbox_params" not in entry, f"remediation_mailbox_params leaked in {entry['id']}"
+
+
+# ---------------------------------------------------------------------------
+# New remediations – EXO anti-phish
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_antiphish_quarantine_domain_success():
+    """Successful EXO remediation for bp_antiphish_quarantine_impersonated_domain."""
+    upserts: list[dict] = []
+    invocations: list[dict] = []
+
+    async def fake_exo_invoke(token, tenant_id, cmdlet, params):
+        invocations.append({"cmdlet": cmdlet, "params": params})
+        return {}
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-abc"),
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            side_effect=fake_exo_invoke,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=10, check_id="bp_antiphish_quarantine_impersonated_domain"
+        )
+
+    assert result["success"] is True
+    assert upserts[0]["remediation_status"] == "success"
+    assert len(invocations) == 1
+    assert invocations[0]["cmdlet"] == "Set-AntiPhishPolicy"
+    assert invocations[0]["params"]["Identity"] == "Office365 AntiPhish Default"
+    assert invocations[0]["params"]["TargetedDomainProtectionAction"] == "Quarantine"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_antiphish_domain_safety_tip_success():
+    """Successful EXO remediation for bp_antiphish_domain_impersonation_safety_tip."""
+    upserts: list[dict] = []
+    invocations: list[dict] = []
+
+    async def fake_exo_invoke(token, tenant_id, cmdlet, params):
+        invocations.append({"cmdlet": cmdlet, "params": params})
+        return {}
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-abc"),
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            side_effect=fake_exo_invoke,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=10, check_id="bp_antiphish_domain_impersonation_safety_tip"
+        )
+
+    assert result["success"] is True
+    assert invocations[0]["params"]["EnableSimilarDomainsSafetyTips"] is True
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_antiphish_exo_failure():
+    """EXO failure for an anti-phish check records remediation_status=failed."""
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-abc"),
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            new_callable=AsyncMock,
+            side_effect=M365Error("Set-AntiPhishPolicy failed"),
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=10, check_id="bp_antiphish_unusual_characters_safety_tip"
+        )
+
+    assert result["success"] is False
+    assert upserts[0]["remediation_status"] == "failed"
+
+
+# ---------------------------------------------------------------------------
+# New remediations – SharePoint Graph PATCH
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_spo_external_sharing_restricted_success():
+    """Successful Graph PATCH for bp_sharepoint_external_sharing_restricted."""
+    upserts: list[dict] = []
+    patched_urls: list[str] = []
+    patched_payloads: list[dict] = []
+
+    async def fake_graph_patch(token, url, payload):
+        patched_urls.append(url)
+        patched_payloads.append(payload)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            side_effect=fake_graph_patch,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=11, check_id="bp_sharepoint_external_sharing_restricted"
+        )
+
+    assert result["success"] is True
+    assert upserts[0]["remediation_status"] == "success"
+    assert patched_urls[0] == bp_service._SPO_SETTINGS_URL
+    assert patched_payloads[0] == {"sharingCapability": "existingExternalUserSharingOnly"}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_modern_auth_sp_apps_success():
+    """Successful Graph PATCH for bp_modern_auth_sp_apps disables legacy auth."""
+    patched_payloads: list[dict] = []
+
+    async def fake_graph_patch(token, url, payload):
+        patched_payloads.append(payload)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            side_effect=fake_graph_patch,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=11, check_id="bp_modern_auth_sp_apps"
+        )
+
+    assert result["success"] is True
+    assert patched_payloads[0] == {"isLegacyAuthProtocolsEnabled": False}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_sp_guests_cannot_share_unowned_success():
+    """Successful Graph PATCH for bp_sp_guests_cannot_share_unowned."""
+    patched_payloads: list[dict] = []
+
+    async def fake_graph_patch(token, url, payload):
+        patched_payloads.append(payload)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            side_effect=fake_graph_patch,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=11, check_id="bp_sp_guests_cannot_share_unowned"
+        )
+
+    assert result["success"] is True
+    assert patched_payloads[0] == {"isResharingByExternalUsersEnabled": False}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_onedrive_content_sharing_restricted_success():
+    """Successful Graph PATCH for bp_onedrive_content_sharing_restricted."""
+    patched_payloads: list[dict] = []
+
+    async def fake_graph_patch(token, url, payload):
+        patched_payloads.append(payload)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            side_effect=fake_graph_patch,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=11, check_id="bp_onedrive_content_sharing_restricted"
+        )
+
+    assert result["success"] is True
+    assert patched_payloads[0] == {"oneDriveSharingCapability": "existingExternalUserSharingOnly"}
+
+
+# ---------------------------------------------------------------------------
+# New remediations – shared mailbox foreach_user_graph
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_shared_mailbox_signin_blocked_success():
+    """foreach_user_graph remediation patches each unlicensed enabled member account."""
+    upserts: list[dict] = []
+    patched_urls: list[str] = []
+    patched_payloads: list[dict] = []
+
+    users = [
+        # should be patched – unlicensed member, enabled
+        {
+            "id": "user-1",
+            "userPrincipalName": "shared1@contoso.com",
+            "userType": "Member",
+            "assignedLicenses": [],
+            "accountEnabled": True,
+        },
+        # should be patched – unlicensed member, enabled
+        {
+            "id": "user-2",
+            "userPrincipalName": "shared2@contoso.com",
+            "userType": "Member",
+            "assignedLicenses": [],
+            "accountEnabled": True,
+        },
+        # already disabled – skip
+        {
+            "id": "user-3",
+            "userPrincipalName": "shared3@contoso.com",
+            "userType": "Member",
+            "assignedLicenses": [],
+            "accountEnabled": False,
+        },
+        # licensed – skip
+        {
+            "id": "user-4",
+            "userPrincipalName": "licensed@contoso.com",
+            "userType": "Member",
+            "assignedLicenses": [{"skuId": "abc"}],
+            "accountEnabled": True,
+        },
+        # guest – skip
+        {
+            "id": "user-5",
+            "userPrincipalName": "guest@contoso.com",
+            "userType": "Guest",
+            "assignedLicenses": [],
+            "accountEnabled": True,
+        },
+    ]
+
+    async def fake_graph_patch(token, url, payload):
+        patched_urls.append(url)
+        patched_payloads.append(payload)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._safe_graph_get_all",
+            new_callable=AsyncMock,
+            return_value=users,
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            side_effect=fake_graph_patch,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=20, check_id="bp_shared_mailbox_signin_blocked"
+        )
+
+    assert result["success"] is True
+    assert upserts[0]["remediation_status"] == "success"
+    # Only user-1 and user-2 should have been patched
+    assert len(patched_urls) == 2
+    assert "user-1" in patched_urls[0]
+    assert "user-2" in patched_urls[1]
+    assert all(p == {"accountEnabled": False} for p in patched_payloads)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_shared_mailbox_signin_blocked_no_candidates():
+    """foreach_user_graph succeeds immediately when there are no sign-in-enabled shared mailboxes."""
+    upserts: list[dict] = []
+    users = [
+        {
+            "id": "user-1",
+            "userType": "Member",
+            "assignedLicenses": [],
+            "accountEnabled": False,  # already disabled
+        },
+    ]
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._safe_graph_get_all",
+            new_callable=AsyncMock,
+            return_value=users,
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+        ) as mock_patch,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=20, check_id="bp_shared_mailbox_signin_blocked"
+        )
+
+    assert result["success"] is True
+    mock_patch.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_shared_mailbox_signin_blocked_partial_failure():
+    """foreach_user_graph records failure if any individual PATCH fails."""
+    upserts: list[dict] = []
+    users = [
+        {"id": "u1", "userType": "Member", "assignedLicenses": [], "accountEnabled": True},
+        {"id": "u2", "userType": "Member", "assignedLicenses": [], "accountEnabled": True},
+    ]
+    call_count = 0
+
+    async def failing_patch(token, url, payload):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise M365Error("PATCH failed")
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._safe_graph_get_all",
+            new_callable=AsyncMock,
+            return_value=users,
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            side_effect=failing_patch,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=20, check_id="bp_shared_mailbox_signin_blocked"
+        )
+
+    assert result["success"] is False
+    assert upserts[0]["remediation_status"] == "failed"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_shared_mailbox_signin_blocked_graph_list_failure():
+    """foreach_user_graph records failure when user enumeration fails."""
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._safe_graph_get_all",
+            new_callable=AsyncMock,
+            return_value=None,  # indicates Graph error
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=20, check_id="bp_shared_mailbox_signin_blocked"
+        )
+
+    assert result["success"] is False
+    assert upserts[0]["remediation_status"] == "failed"

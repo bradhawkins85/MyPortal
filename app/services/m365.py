@@ -67,8 +67,8 @@ _TEAMS_MANAGE_AS_APP_ROLE = "dc50a0fb-09a3-484d-be87-e023b12c6440"
 _TEAMS_ADMIN_ROLE_TEMPLATE_ID = "69091246-20e8-4a56-aa4d-066075b2a7a8"
 
 # Microsoft Graph application permission required for SharePoint Online best-practice checks.
-# Grants access to GET /admin/sharepoint/settings via the Graph API.
-_SHAREPOINT_TENANT_SETTINGS_ROLE = "83d4163d-a2d8-4d3b-9695-4ae3ca98f888"
+# Grants access to GET and PATCH /admin/sharepoint/settings via the Graph API.
+_SHAREPOINT_TENANT_SETTINGS_ROLE = "19b94e34-907c-4f43-bde9-38b1909ed408"
 # Microsoft Graph application permission required to enumerate SharePoint sites
 # and read their default document libraries for OneDrive export destinations.
 _SITES_READ_ALL_ROLE = "332a536c-c7ef-4017-ab91-336970924f0d"
@@ -127,7 +127,7 @@ _PROVISION_APP_ROLES: list[str] = [
     "bf394140-e372-4bf9-a898-299cfc7564e5",  # SecurityEvents.Read.All
     "e0b77adb-e790-44a3-b0a0-257d06303687",  # SecuritySecureScore.Read.All (required by /security/secureScores)
     # SharePoint Online tenant settings (required for SPO best-practice checks)
-    _SHAREPOINT_TENANT_SETTINGS_ROLE,  # SharePointTenantSettings.Read.All
+    _SHAREPOINT_TENANT_SETTINGS_ROLE,  # SharePointTenantSettings.ReadWrite.All
     # SharePoint sites and default document libraries (OneDrive export destination picker):
     _SITES_READ_ALL_ROLE,  # Sites.Read.All
     # SharePoint document library writes (OneDrive export folder creation/copy):
@@ -215,7 +215,7 @@ _GRAPH_ROLE_NAMES: dict[str, str] = {
     "9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30": "Application.Read.All",
     "bf394140-e372-4bf9-a898-299cfc7564e5": "SecurityEvents.Read.All",
     "e0b77adb-e790-44a3-b0a0-257d06303687": "SecuritySecureScore.Read.All",
-    "83d4163d-a2d8-4d3b-9695-4ae3ca98f888": "SharePointTenantSettings.Read.All",
+    "19b94e34-907c-4f43-bde9-38b1909ed408": "SharePointTenantSettings.ReadWrite.All",
     "332a536c-c7ef-4017-ab91-336970924f0d": "Sites.Read.All",
     "9492366f-7969-46a4-8d15-ed1a20078fff": "Sites.ReadWrite.All",
     "62a82d76-70ea-41e2-9197-370581804d09": "Group.ReadWrite.All",
@@ -226,7 +226,7 @@ _GRAPH_ROLE_NAMES: dict[str, str] = {
 
 # Microsoft Graph application permissions that must be requested/granted even
 # when a tenant's servicePrincipal appRoles projection does not include them.
-# SharePointTenantSettings.Read.All is assignable in tenants where the Entra
+# SharePointTenantSettings.ReadWrite.All is assignable in tenants where the Entra
 # portal can add it manually, but Graph service-principal lookups can omit it;
 # filtering it out here caused diagnostics repair/re-authorisation to leave the
 # permission missing while still reporting it as an actionable failure.
