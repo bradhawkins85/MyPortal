@@ -1134,8 +1134,6 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     external_reference = _clean_text(form.get("externalReference")) or None
     shipment_tracking_url = _clean_text(form.get("shipmentTrackingUrl")) or None
     shipment_poll_interval_raw = _clean_text(form.get("shipmentPollIntervalSeconds"))
-    shipment_monitoring_raw = (_clean_text(form.get("shipmentMonitoringEnabled")) or "").lower()
-    shipment_monitoring_enabled = shipment_monitoring_raw in {"1", "true", "on", "yes"}
     shipment_public_comments_raw = (_clean_text(form.get("shipmentPublicCommentsEnabled")) or "").lower()
     shipment_public_comments_enabled = shipment_public_comments_raw in {"1", "true", "on", "yes"}
     shipment_poll_interval_seconds = 900
@@ -1150,7 +1148,8 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
                 error_message="Shipment poll interval must be a whole number of seconds.",
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
-    shipment_poll_interval_seconds = max(60, min(86_400, shipment_poll_interval_seconds))
+    shipment_poll_interval_seconds = max(0, min(86_400, shipment_poll_interval_seconds))
+    shipment_monitoring_enabled = shipment_poll_interval_seconds > 0
     review_date_raw = _clean_text(form.get("reviewDate"))
     review_date_value: date | None = None
     if review_date_raw:

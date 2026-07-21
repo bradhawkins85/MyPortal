@@ -412,22 +412,12 @@
                       form="ticket-details-form"
                       class="form-input"
                       type="number"
-                      min="60"
+                      min="0"
                       max="86400"
                       value="{{ ticket_shipment_watch.poll_interval_seconds if ticket_shipment_watch else 900 }}"
                     />
-                    <div class="form-field form-field--checkbox">
-                      <label class="checkbox" for="ticket-shipment-monitoring-enabled">
-                        <input
-                          id="ticket-shipment-monitoring-enabled"
-                          type="checkbox"
-                          name="shipmentMonitoringEnabled"
-                          value="1"
-                          form="ticket-details-form"
-                          {% if not ticket_shipment_watch or ticket_shipment_watch.active %}checked{% endif %}
-                        />
-                        <span>Enable shipment monitoring for this ticket</span>
-                      </label>
+                    <div class="form-help" style="margin-top: 6px;">
+                      Set to 0 to disable shipment lookups for this ticket. Positive intervals poll at the configured rate.
                     </div>
                     <div class="form-field form-field--checkbox">
                       <label class="checkbox" for="ticket-shipment-public-comments-enabled">

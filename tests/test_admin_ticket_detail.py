@@ -314,7 +314,6 @@ async def test_admin_update_ticket_details_persists_shipment_public_comments_fla
             ("priority", "normal"),
             ("shipmentTrackingUrl", "https://www.startrack.com.au/track/ABC123"),
             ("shipmentPollIntervalSeconds", "900"),
-            ("shipmentMonitoringEnabled", "1"),
             ("shipmentPublicCommentsEnabled", "1"),
         ]
     )
@@ -357,6 +356,7 @@ async def test_admin_update_ticket_details_persists_shipment_public_comments_fla
 
     assert response.status_code == status.HTTP_303_SEE_OTHER
     upsert_watch_mock.assert_awaited_once()
+    assert upsert_watch_mock.await_args.kwargs["active"] is True
     assert upsert_watch_mock.await_args.kwargs["public_comments_enabled"] is True
 
 
