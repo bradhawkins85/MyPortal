@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urlsplit, urlunsplit, urljoin
 
 from app.core.config import get_settings
 
@@ -157,6 +157,72 @@ def _strip_html(value: str, *, image_base_url: str | None = None) -> str:
     parser.feed(value)
     parser.close()
     return parser.get_text()
+
+
+def _canonical_webhook_callback_url(callback_url: str) -> str:
+    """Return a normalized callback URL for webhook de-duplication."""
+    value = str(callback_url or "").strip()
+    if not value:
+        return ""
+    parsed = urlsplit(value)
+    scheme = parsed.scheme.lower() or "https"
+    hostname = (parsed.hostname or "").lower()
+    port = parsed.port
+    netloc = hostname
+    if port and not ((scheme == "https" and port == 443) or (scheme == "http" and port == 80)):
+        netloc = f"{netloc}:{port}"
+    path = parsed.path.rstrip("/") or "/"
+    return urlunsplit((scheme, netloc, path, "", ""))
+
+
+def _same_callback_except_scheme(left: str, right: str) -> bool:
+    """Return true when two callback URLs only differ by http/https scheme."""
+    left_canonical = _canonical_webhook_callback_url(left)
+    right_canonical = _canonical_webhook_callback_url(right)
+    if not left_canonical or not right_canonical:
+        return False
+    left_parts = urlsplit(left_canonical)
+    right_parts = urlsplit(right_canonical)
+    return (
+        left_parts.netloc == right_parts.netloc
+        and left_parts.path == right_parts.path
+        and left_parts.query == right_parts.query
+    )
+
+
+async def _reconcile_existing_webhooks(
+    board_id: str,
+    callback_url: str,
+    api_key: str,
+    token: str,
+) -> dict[str, Any] | None:
+    """Return the matching webhook and remove stale http:// duplicates."""
+    existing = await list_webhooks(api_key, token)
+    matching_hook: dict[str, Any] | None = None
+    stale_ids: list[str] = []
+    for hook in existing:
+        if str(hook.get("idModel") or "") != board_id:
+            continue
+        existing_callback = str(hook.get("callbackURL") or "")
+        if _canonical_webhook_callback_url(existing_callback) == _canonical_webhook_callback_url(
+            callback_url
+        ):
+            matching_hook = hook
+            continue
+        if _same_callback_except_scheme(existing_callback, callback_url):
+            hook_id = str(hook.get("id") or "").strip()
+            if hook_id:
+                stale_ids.append(hook_id)
+
+    for hook_id in stale_ids:
+        logger.info(
+            "Trello register_webhook: deleting stale duplicate webhook {} for board {}",
+            hook_id,
+            board_id,
+        )
+        await delete_webhook(hook_id, api_key, token)
+
+    return matching_hook
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +387,16 @@ async def register_webhook(
     except TrelloAuthError as exc:
         logger.debug("Trello register_webhook skipped: {}", exc)
         return None
+
+    existing_hook = await _reconcile_existing_webhooks(
+        board_id, callback_url, api_key, token
+    )
+    if existing_hook:
+        logger.info(
+            "Trello register_webhook: webhook {} already has correct callback URL",
+            existing_hook.get("id"),
+        )
+        return existing_hook
 
     url = f"{TRELLO_API_BASE}/webhooks"
     try:

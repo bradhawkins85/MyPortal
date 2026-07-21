@@ -182,3 +182,20 @@ def test_unexpected_forwarded_scheme_is_normalised_to_https():
     ):
         url = _build_public_callback_url(request)
     assert url == f"https://portal.example.com{_WEBHOOK_PATH}"
+
+
+def test_trello_callback_canonicalization_ignores_default_ports_and_trailing_slash():
+    from app.services import trello as trello_service
+
+    assert trello_service._canonical_webhook_callback_url(
+        "https://Portal.HawkinsIT.au:443/api/integration-modules/trello/webhook/"
+    ) == "https://portal.hawkinsit.au/api/integration-modules/trello/webhook"
+
+
+def test_trello_callback_duplicate_detection_matches_http_to_https_migration():
+    from app.services import trello as trello_service
+
+    assert trello_service._same_callback_except_scheme(
+        "http://portal.hawkinsit.au/api/integration-modules/trello/webhook",
+        "https://portal.hawkinsit.au/api/integration-modules/trello/webhook",
+    )
