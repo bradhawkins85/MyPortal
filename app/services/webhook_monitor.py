@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -51,6 +52,40 @@ def _prepare_request_body(payload: Any) -> Any:
     if isinstance(payload, str):
         return _truncate(payload)
     return payload
+
+
+def _normalize_source_url(url: str) -> str:
+    """Upgrade ``http://`` to ``https://`` for public (non-local) hosts.
+
+    Reverse proxies such as Traefik and Cloudflare terminate TLS and forward
+    requests to uvicorn over plain HTTP.  ``str(request.url)`` therefore
+    returns ``http://`` even when the original client connected over HTTPS.
+    Storing that ``http://`` URL as the ``target_url`` for an incoming webhook
+    means that any later retry will POST to ``http://``, hit the proxy's
+    HTTP→HTTPS redirect (301/308), and fail because httpx does not follow
+    redirects by default.
+
+    This helper normalises the scheme to ``https`` for any host that is not
+    ``localhost``, ``127.0.0.1``, ``::1``, or a ``.local`` name.
+    """
+    try:
+        parts = urlsplit(url)
+        if parts.scheme != "http":
+            return url
+        hostname = (parts.hostname or "").lower()
+        is_local = (
+            hostname in {"localhost", "127.0.0.1", "::1"}
+            or hostname.endswith(".local")
+        )
+        if is_local:
+            return url
+        # Reconstruct netloc explicitly: strip port 80 (the default HTTP port)
+        # since it should not be carried to the HTTPS URL; preserve other ports.
+        port = parts.port
+        netloc = f"{hostname}:{port}" if port and port != 80 else hostname
+        return urlunsplit(("https", netloc, parts.path, parts.query, parts.fragment))
+    except Exception:
+        return url
 
 
 async def enqueue_event(
@@ -214,19 +249,26 @@ async def log_incoming_webhook(
     # Create the event as 'succeeded' or 'failed' immediately since incoming webhooks
     # are already processed (not queued for delivery)
     status = "succeeded" if error_message is None else "failed"
-    
+
+    # Normalise the source URL: reverse proxies (Traefik, Cloudflare) forward
+    # requests to uvicorn over plain HTTP, so str(request.url) yields http://
+    # even for public HTTPS endpoints. Storing the normalised https:// URL
+    # ensures that any manual retry does not hit the proxy's HTTP→HTTPS redirect
+    # (301/308) and fail.
+    normalised_source_url = _normalize_source_url(source_url)
+
     # Redact sensitive headers before storing anywhere
     safe_headers = _redact_headers(headers, sensitive=_SENSITIVE_HEADERS)
 
     event = await webhook_repo.create_event(
         name=name,
-        target_url=source_url,  # For incoming, this is where we received it
+        target_url=normalised_source_url,  # For incoming, this is where we received it
         headers=safe_headers,
         payload=payload,
         max_attempts=1,
         backoff_seconds=0,
         direction="incoming",
-        source_url=source_url,
+        source_url=normalised_source_url,
     )
     
     if not event or event.get("id") is None:
@@ -371,7 +413,7 @@ async def _attempt_event(event: dict[str, Any]) -> None:
     response_headers: dict[str, Any] | None = None
     error_message: str | None = None
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
             response = await client.post(
                 str(event["target_url"]),
                 json=payload,
