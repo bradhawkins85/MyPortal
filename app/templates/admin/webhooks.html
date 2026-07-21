@@ -41,11 +41,32 @@
 <section class="card card--panel">
   <header class="card__header">
     <div class="card__controls">
+      <form class="card__controls" method="get" action="/admin/webhooks">
+        <input
+          type="search"
+          class="form-input"
+          name="q"
+          value="{{ webhook_search or '' }}"
+          placeholder="Search all loaded webhook events"
+          aria-label="Search webhook event history"
+        />
+        <select class="form-input" name="event_limit" aria-label="How many webhook events to load">
+          {% for option in webhook_event_limit_options %}
+            <option value="{{ option }}" {% if option == webhook_event_limit %}selected{% endif %}>
+              Latest {{ option }} events
+            </option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="button button--primary">Search history</button>
+        {% if webhook_search %}
+          <a class="button button--ghost" href="/admin/webhooks?event_limit={{ webhook_event_limit }}">Clear</a>
+        {% endif %}
+      </form>
       <input
         type="search"
         class="form-input"
-        placeholder="Filter webhook events"
-        aria-label="Filter webhook events"
+        placeholder="Filter loaded webhook events"
+        aria-label="Filter loaded webhook events"
         data-table-filter="webhooks-table"
       />
       <select
@@ -104,6 +125,7 @@
       />
     </div>
   </header>
+  <p class="card__subtitle">Showing {{ events|length }} loaded webhook events{% if webhook_search %} matching “{{ webhook_search }}”{% endif %}. Increase the history window to search farther back.</p>
   <div class="table-wrapper">
     <table class="table" id="webhooks-table" data-table data-table-id="webhooks">
       <thead>

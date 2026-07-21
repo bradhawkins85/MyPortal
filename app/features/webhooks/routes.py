@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 
 from app.repositories import webhook_events as webhook_events_repo
@@ -20,12 +20,16 @@ def _main():
 
 
 @router.get("/admin/webhooks", response_class=HTMLResponse)
-async def admin_webhooks(request: Request):
+async def admin_webhooks(
+    request: Request,
+    q: str = "",
+    event_limit: int = Query(default=1000, ge=1, le=5000),
+):
     main_module = _main()
     current_user, redirect = await main_module._require_super_admin_page(request)
     if redirect:
         return redirect
-    events = await webhook_events_repo.list_events(limit=100)
+    events = await webhook_events_repo.list_events(search=q, limit=event_limit)
     prepared_events: list[dict[str, Any]] = []
     for event in events:
         serialised_event = main_module._serialise_mapping(event)
@@ -36,6 +40,9 @@ async def admin_webhooks(request: Request):
     extra = {
         "title": "Webhook delivery queue",
         "events": prepared_events,
+        "webhook_search": q,
+        "webhook_event_limit": event_limit,
+        "webhook_event_limit_options": (200, 500, 1000, 2500, 5000),
     }
     return await main_module._render_template(
         "admin/webhooks.html",
