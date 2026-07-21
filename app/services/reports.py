@@ -196,9 +196,42 @@ async def _build_assets(company_id: int) -> dict[str, Any]:
     }
 
 
+def _staff_row_to_account(row: Mapping[str, Any]) -> dict[str, Any]:
+    first_name = row.get("first_name") or ""
+    last_name = row.get("last_name") or ""
+    name = row.get("name") or f"{first_name} {last_name}".strip()
+    return {
+        "first_name": first_name,
+        "last_name": last_name,
+        "name": name,
+        "email": row.get("email"),
+        "department": row.get("department"),
+        "job_title": row.get("position") or row.get("job_title"),
+        "mobile_phone": row.get("mobile_phone"),
+        "onboarding_status": row.get("onboarding_status"),
+        "m365_last_sign_in": _datetime_to_iso(row.get("m365_last_sign_in")),
+    }
+
+
+async def _list_active_staff_accounts(company_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT first_name, last_name, name, email, department, position, job_title,
+               mobile_phone, onboarding_status, m365_last_sign_in
+        FROM staff
+        WHERE company_id = %s
+          AND enabled = 1
+          AND NOT (LOWER(SUBSTR(email, 1, 8)) = 'package_')
+        ORDER BY LOWER(last_name), LOWER(first_name), LOWER(email)
+        """,
+        (company_id,),
+    )
+    return [_staff_row_to_account(row) for row in rows or []]
+
+
 async def _build_staff(company_id: int) -> dict[str, Any]:
-    total = await staff_repo.count_staff(company_id, enabled=True, exclude_package_staff=True)
-    return {"total_active": int(total)}
+    accounts = await _list_active_staff_accounts(company_id)
+    return {"total_active": len(accounts), "accounts": accounts}
 
 
 async def _build_m365_best_practices(company_id: int) -> dict[str, Any]:
@@ -640,23 +673,7 @@ async def _build_assets_detail(company_id: int) -> dict[str, Any]:
 
 async def _build_staff_detail(company_id: int) -> dict[str, Any]:
     """Full list of enabled staff for the detail page."""
-    rows = await staff_repo.list_staff(
-        company_id, enabled=True, exclude_package_staff=True, page_size=500
-    )
-    staff: list[dict[str, Any]] = []
-    for row in rows:
-        staff.append(
-            {
-                "name": row.get("name") or (
-                    f"{row.get('first_name', '')} {row.get('last_name', '')}".strip()
-                ),
-                "email": row.get("email"),
-                "mobile_phone": row.get("mobile_phone"),
-                "department": row.get("department"),
-                "position": row.get("position") or row.get("job_title"),
-                "onboarding_status": row.get("onboarding_status"),
-            }
-        )
+    staff = await _list_active_staff_accounts(company_id)
     return {"staff": staff, "total": len(staff)}
 
 
