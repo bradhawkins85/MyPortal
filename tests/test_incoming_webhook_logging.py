@@ -179,3 +179,171 @@ async def test_create_manual_event_sets_direction_outgoing():
         call_kwargs = mock_create.call_args.kwargs
         assert call_kwargs['direction'] == 'outgoing'
         assert result['direction'] == 'outgoing'
+
+
+# ---------------------------------------------------------------------------
+# _normalize_source_url
+# ---------------------------------------------------------------------------
+
+def test_normalize_source_url_upgrades_public_http_to_https():
+    from app.services.webhook_monitor import _normalize_source_url
+    assert _normalize_source_url(
+        "http://portal.hawkinsit.au/api/integration-modules/trello/webhook"
+    ) == "https://portal.hawkinsit.au/api/integration-modules/trello/webhook"
+
+
+def test_normalize_source_url_leaves_https_unchanged():
+    from app.services.webhook_monitor import _normalize_source_url
+    url = "https://portal.hawkinsit.au/api/integration-modules/trello/webhook"
+    assert _normalize_source_url(url) == url
+
+
+def test_normalize_source_url_preserves_localhost_http():
+    from app.services.webhook_monitor import _normalize_source_url
+    url = "http://localhost:8000/api/integration-modules/trello/webhook"
+    assert _normalize_source_url(url) == url
+
+
+def test_normalize_source_url_preserves_127_0_0_1():
+    from app.services.webhook_monitor import _normalize_source_url
+    url = "http://127.0.0.1:8000/webhook"
+    assert _normalize_source_url(url) == url
+
+
+def test_normalize_source_url_preserves_dot_local():
+    from app.services.webhook_monitor import _normalize_source_url
+    url = "http://myhost.local/webhook"
+    assert _normalize_source_url(url) == url
+
+
+def test_normalize_source_url_preserves_path_and_query():
+    from app.services.webhook_monitor import _normalize_source_url
+    assert _normalize_source_url(
+        "http://example.com/path?foo=bar"
+    ) == "https://example.com/path?foo=bar"
+
+
+def test_normalize_source_url_strips_default_http_port_80():
+    from app.services.webhook_monitor import _normalize_source_url
+    # Port 80 is the HTTP default and should be dropped in the HTTPS URL
+    assert _normalize_source_url(
+        "http://example.com:80/path"
+    ) == "https://example.com/path"
+
+
+def test_normalize_source_url_preserves_non_standard_port():
+    from app.services.webhook_monitor import _normalize_source_url
+    # Non-standard ports are preserved since we don't know the HTTPS equivalent
+    assert _normalize_source_url(
+        "http://example.com:8080/path"
+    ) == "https://example.com:8080/path"
+
+
+# ---------------------------------------------------------------------------
+# log_incoming_webhook stores normalised (https) source_url for public hosts
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_log_incoming_webhook_normalises_http_source_url_for_public_host():
+    """http:// source URLs for public hosts must be stored as https:// so that
+    manual retries don't hit the proxy's HTTP->HTTPS redirect (308/301)."""
+    with patch('app.repositories.webhook_events.create_event', new_callable=AsyncMock) as mock_create, \
+         patch('app.repositories.webhook_events.record_attempt', new_callable=AsyncMock), \
+         patch('app.repositories.webhook_events.mark_event_completed', new_callable=AsyncMock), \
+         patch('app.repositories.webhook_events.get_event', new_callable=AsyncMock) as mock_get:
+
+        mock_create.return_value = {'id': 1}
+        mock_get.return_value = {'id': 1, 'status': 'succeeded'}
+
+        await webhook_monitor.log_incoming_webhook(
+            name="Trello Webhook",
+            source_url="http://portal.hawkinsit.au/api/integration-modules/trello/webhook",
+            response_status=200,
+        )
+
+        call_kwargs = mock_create.call_args.kwargs
+        assert call_kwargs['target_url'] == "https://portal.hawkinsit.au/api/integration-modules/trello/webhook"
+        assert call_kwargs['source_url'] == "https://portal.hawkinsit.au/api/integration-modules/trello/webhook"
+
+
+@pytest.mark.asyncio
+async def test_log_incoming_webhook_preserves_http_for_localhost():
+    """http:// source URLs for localhost must not be upgraded -- local dev envs
+    may not have HTTPS configured."""
+    with patch('app.repositories.webhook_events.create_event', new_callable=AsyncMock) as mock_create, \
+         patch('app.repositories.webhook_events.record_attempt', new_callable=AsyncMock), \
+         patch('app.repositories.webhook_events.mark_event_completed', new_callable=AsyncMock), \
+         patch('app.repositories.webhook_events.get_event', new_callable=AsyncMock) as mock_get:
+
+        mock_create.return_value = {'id': 2}
+        mock_get.return_value = {'id': 2, 'status': 'succeeded'}
+
+        await webhook_monitor.log_incoming_webhook(
+            name="Local Webhook",
+            source_url="http://localhost:8000/api/integration-modules/trello/webhook",
+            response_status=200,
+        )
+
+        call_kwargs = mock_create.call_args.kwargs
+        assert call_kwargs['target_url'] == "http://localhost:8000/api/integration-modules/trello/webhook"
+        assert call_kwargs['source_url'] == "http://localhost:8000/api/integration-modules/trello/webhook"
+
+
+# ---------------------------------------------------------------------------
+# _attempt_event follows 3xx redirects
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_attempt_event_follows_308_redirect():
+    """Verify that `_attempt_event` constructs the httpx client with
+    ``follow_redirects=True`` so that proxy 308/301 redirects (e.g. Traefik's
+    HTTP→HTTPS redirect) are followed transparently.
+
+    We mock httpx at the constructor level to assert the configuration flag,
+    rather than simulating an actual HTTP redirect chain.  The actual redirect-
+    following behaviour is an httpx internal concern; what we own is the flag.
+    """
+    import httpx
+    from unittest.mock import MagicMock
+
+    event = {
+        "id": 99,
+        "target_url": "http://portal.hawkinsit.au/api/integration-modules/trello/webhook",
+        "attempt_count": 0,
+        "max_attempts": 3,
+        "backoff_seconds": 300,
+        "headers": {},
+        "payload": {"action": {"type": "createCard"}},
+    }
+
+    final_response = MagicMock(spec=httpx.Response)
+    final_response.status_code = 200
+    final_response.text = "ok"
+    final_response.headers = {}
+
+    async def fake_post(url, **kwargs):
+        return final_response
+
+    with patch('app.services.webhook_monitor.webhook_repo') as mock_repo, \
+         patch('app.services.webhook_monitor.httpx.AsyncClient') as mock_client_cls:
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = fake_post
+        mock_client_cls.return_value = mock_client
+
+        mock_repo.record_attempt = AsyncMock()
+        mock_repo.mark_event_completed = AsyncMock()
+        mock_repo.mark_event_failed = AsyncMock()
+        mock_repo.schedule_retry = AsyncMock()
+
+        await webhook_monitor._attempt_event(event)
+
+    # The client must be created with follow_redirects=True so that any
+    # 301/308 redirect from the proxy is followed without failing delivery.
+    _, client_kwargs = mock_client_cls.call_args
+    assert client_kwargs.get('follow_redirects') is True
+
+    # Delivery was recorded as succeeded
+    mock_repo.mark_event_completed.assert_awaited_once()
