@@ -61,7 +61,7 @@ class CanonicalShipmentSnapshot(BaseModel):
 
 class TicketShipmentWatchPayload(BaseModel):
     tracking_url: str = Field(min_length=1, max_length=500)
-    poll_interval_seconds: int = Field(default=900, ge=60, le=86_400)
+    poll_interval_seconds: int = Field(default=900, ge=0, le=86_400)
     active: bool = True
     public_comments_enabled: bool = True
 
@@ -517,12 +517,15 @@ async def _extract_snapshot_with_llm(
 def _is_watch_due(watch: Mapping[str, Any], *, now_utc: datetime | None = None) -> bool:
     now = now_utc or datetime.now(timezone.utc)
     last_checked = watch.get("last_checked_at")
-    interval_seconds = int(watch.get("poll_interval_seconds") or 900)
+    interval_raw = watch.get("poll_interval_seconds")
+    interval_seconds = 900 if interval_raw is None else int(interval_raw)
+    if interval_seconds <= 0:
+        return False
     if not isinstance(last_checked, datetime):
         return True
     if last_checked.tzinfo is None:
         last_checked = last_checked.replace(tzinfo=timezone.utc)
-    return (now - last_checked).total_seconds() >= max(60, interval_seconds)
+    return (now - last_checked).total_seconds() >= interval_seconds
 
 
 def _has_meaningful_change(
@@ -580,8 +583,8 @@ async def upsert_watch(
         tracking_url=clean_url,
         provider=provider.slug,
         consignment_id=consignment_id,
-        poll_interval_seconds=max(60, int(poll_interval_seconds)),
-        active=bool(active),
+        poll_interval_seconds=max(0, int(poll_interval_seconds)),
+        active=bool(active) and int(poll_interval_seconds) > 0,
         public_comments_enabled=bool(public_comments_enabled),
     )
     return watch

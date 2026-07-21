@@ -513,3 +513,23 @@ async def test_llm_extraction_handles_trigger_errors(monkeypatch):
         html_excerpt="<html></html>",
     )
     assert snapshot is None
+
+
+def test_zero_poll_interval_is_not_due():
+    now = datetime.now(timezone.utc)
+    watch = {
+        "poll_interval_seconds": 0,
+        "last_checked_at": None,
+    }
+
+    assert svc._is_watch_due(watch, now_utc=now) is False
+
+
+def test_positive_poll_interval_uses_defined_interval():
+    now = datetime.now(timezone.utc)
+    watch = {
+        "poll_interval_seconds": 30,
+        "last_checked_at": now - timedelta(seconds=31),
+    }
+
+    assert svc._is_watch_due(watch, now_utc=now) is True
