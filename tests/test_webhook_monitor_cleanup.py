@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 from app.services import webhook_monitor
@@ -45,3 +46,11 @@ def test_purge_completed_events_skips_logging_when_empty(monkeypatch):
 
     assert deleted == 0
     assert log_calls == []
+
+
+def test_webhook_retry_action_enabled_for_succeeded_events():
+    template = Path("app/templates/admin/webhooks.html").read_text()
+    retry_button = template.split("data-webhook-retry", 1)[1].split(">", 1)[0]
+
+    assert "event.status == 'succeeded'" not in retry_button
+    assert "disabled" not in retry_button
