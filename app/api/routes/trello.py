@@ -206,7 +206,10 @@ def _build_public_callback_url(request: Request) -> str:
        callback. Trello would then follow the proxy's HTTP→HTTPS ``301``
        redirect and downgrade its event ``POST`` to a ``GET``, so MyPortal
        would never receive real webhook events.
-    4. Fall back to ``request.base_url``.
+    4. For public-looking hosts, prefer ``https`` even when the ASGI request
+       scheme is ``http``. This protects deployments where the proxy does not
+       forward any ``X-Forwarded-*`` headers.
+    5. Fall back to ``request.base_url``.
     """
 
     settings = get_settings()
@@ -242,6 +245,17 @@ def _build_public_callback_url(request: Request) -> str:
     host = forwarded_host or request.headers.get("host") or request.url.netloc
     # Strip any path/query that a malformed header might contain.
     host = host.split("/")[0].strip()
+
+    hostname = host.rsplit("@", 1)[-1].split(":", 1)[0].strip().lower()
+    is_local_host = hostname in {"localhost", "127.0.0.1", "::1"} or hostname.endswith(
+        ".local"
+    )
+    if scheme == "http" and host and not is_local_host:
+        # A public host reached over the internal HTTP hop should still be
+        # registered with Trello as HTTPS. Trello does not preserve POST
+        # requests across Cloudflare/proxy 301 redirects, so an http://
+        # callback makes event delivery fail before the request reaches us.
+        scheme = "https"
     if not host:
         # Last-resort fallback to the ASGI base URL.
         return f"{str(request.base_url).rstrip('/')}{_WEBHOOK_PATH}"

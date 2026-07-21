@@ -123,8 +123,8 @@ def test_defaults_to_https_when_proxy_detected_without_forwarded_proto():
     assert url == f"https://portal.example.com{_WEBHOOK_PATH}"
 
 
-def test_explicit_forwarded_proto_http_is_respected_even_with_xff():
-    """If the proxy explicitly says http (rare but possible), respect it."""
+def test_explicit_forwarded_proto_http_for_public_host_is_upgraded_to_https():
+    """Public webhook callbacks must not be registered as http://."""
     request = _make_request(
         {
             "host": "portal.example.com",
@@ -137,14 +137,14 @@ def test_explicit_forwarded_proto_http_is_respected_even_with_xff():
         return_value=_settings_with(None),
     ):
         url = _build_public_callback_url(request)
-    assert url == f"http://portal.example.com{_WEBHOOK_PATH}"
+    assert url == f"https://portal.example.com{_WEBHOOK_PATH}"
 
 
 # ---------------------------------------------------------------------------
-# 4. No proxy at all – fall back to the request scheme
+# 4. No proxy at all – preserve local HTTP but upgrade public hosts to HTTPS
 # ---------------------------------------------------------------------------
 
-def test_no_proxy_uses_request_scheme():
+def test_no_proxy_uses_request_scheme_for_localhost():
     request = _make_request({"host": "localhost:8000"}, scheme="http")
     with patch(
         "app.api.routes.trello.get_settings",
@@ -152,6 +152,16 @@ def test_no_proxy_uses_request_scheme():
     ):
         url = _build_public_callback_url(request)
     assert url == f"http://localhost:8000{_WEBHOOK_PATH}"
+
+
+def test_no_proxy_upgrades_public_http_host_to_https():
+    request = _make_request({"host": "portal.hawkinsit.au"}, scheme="http")
+    with patch(
+        "app.api.routes.trello.get_settings",
+        return_value=_settings_with(None),
+    ):
+        url = _build_public_callback_url(request)
+    assert url == f"https://portal.hawkinsit.au{_WEBHOOK_PATH}"
 
 
 # ---------------------------------------------------------------------------
