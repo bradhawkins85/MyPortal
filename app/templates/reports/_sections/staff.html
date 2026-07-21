@@ -1,11 +1,43 @@
 {% from "macros/counters.html" import counter_strip %}
 <section class="card card--panel" data-report-section="staff">
   <header class="card__header report-section__header">
-    <h2>Active staff</h2>
+    <h2>Active user accounts</h2>
+    <span class="report-section__meta">{{ section.data.total_active or 0 }} active users</span>
   </header>
   <div class="card__body">
     {{ counter_strip(items=[
-      {'label': 'Active staff', 'value': section.data.total_active or 0, 'variant': 'info'}
+      {'label': 'Active users', 'value': section.data.total_active or 0, 'variant': 'info'}
     ]) }}
+    {% set accounts = section.data.accounts or [] %}
+    {% if accounts %}
+      <div class="table-wrapper">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>First Name</th>
+            <th>Last Name</th>
+            <th>Email Address</th>
+            <th>Department</th>
+            <th>Job Title</th>
+            <th>O365 Last Sign In</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for account in accounts %}
+            <tr>
+              <td>{{ account.first_name or '—' }}</td>
+              <td>{{ account.last_name or '—' }}</td>
+              <td>{{ account.email or '—' }}</td>
+              <td>{{ account.department or '—' }}</td>
+              <td>{{ account.job_title or '—' }}</td>
+              <td data-utc="{{ account.m365_last_sign_in or '' }}">{{ account.m365_last_sign_in or '—' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    {% else %}
+      <p class="report-empty">No active user accounts are recorded for this company.</p>
+    {% endif %}
   </div>
 </section>
