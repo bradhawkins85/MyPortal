@@ -80,3 +80,58 @@ def test_trello_external_reference_helpers():
     assert trello_service.card_id_from_external_reference("trello:card-1") == "card-1"
     assert trello_service.card_id_from_external_reference("card-1") == "card-1"
     assert trello_service.card_id_from_external_reference("") is None
+
+
+def test_trello_ticket_subject_is_truncated_for_database_limit():
+    long_name = "A" * 300
+
+    subject, original = trello_routes._normalise_trello_ticket_subject(long_name)
+
+    assert len(subject) == 255
+    assert subject.endswith("…")
+    assert original == long_name
+
+
+def test_build_trello_ticket_description_includes_original_title_when_truncated():
+    description = trello_routes._build_trello_ticket_description(
+        None,
+        None,
+        original_card_name="Long <title>",
+    )
+
+    assert description is not None
+    assert "Original Trello card title" in description
+    assert "Long &lt;title&gt;" in description
+
+
+def test_handle_create_card_truncates_long_webhook_title_without_full_card(monkeypatch):
+    async def run_test():
+        created_payload: dict = {}
+        long_name = "Webhook title " * 30
+
+        monkeypatch.setattr(trello_routes.trello_service, "find_ticket_for_card", AsyncMock(return_value=None))
+        monkeypatch.setattr(
+            trello_routes.trello_service,
+            "get_company_for_board",
+            AsyncMock(return_value=None),
+        )
+        monkeypatch.setattr(trello_routes.trello_service, "post_ticket_created_comment", AsyncMock())
+
+        async def fake_create_ticket(**kwargs):
+            created_payload.update(kwargs)
+            return {"id": 123, "ticket_number": "T-123"}
+
+        monkeypatch.setattr(trello_routes.tickets_service, "create_ticket", fake_create_ticket)
+
+        await trello_routes._handle_create_card(
+            "board-1",
+            "card-1",
+            {"name": long_name},
+            {},
+        )
+
+        assert len(created_payload["subject"]) == 255
+        assert created_payload["subject"].endswith("…")
+        assert long_name.strip() in created_payload["description"]
+
+    asyncio.run(run_test())
