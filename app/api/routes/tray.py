@@ -273,7 +273,9 @@ async def get_device_config(
     if device.get("company_id"):
         company = await companies_repo.get_company_by_id(int(device["company_id"]))
         chat_enabled = bool(
-            company and company.get("tray_chat_enabled", True) and _settings.matrix_enabled
+            company
+            and company.get("tray_chat_enabled", True)
+            and _settings.matrix_enabled
         )
     return TrayConfigResponse(
         version=int(config.get("version") or 1),
@@ -478,8 +480,15 @@ async def tray_submit_ticket(
     # and they receive notifications normally. Email takes precedence over a
     # phone match, including when the phone belongs to another user.
     requester_id: int | None = None
+    requester_staff_id: int | None = None
     existing_user = await users_repo.get_user_by_email(normalised_email)
-    if existing_user is None and payload.phone:
+    if existing_user is None and company_id is not None:
+        staff_member = await staff_repo.get_staff_by_company_and_email(
+            int(company_id), normalised_email
+        )
+        if staff_member and staff_member.get("enabled"):
+            requester_staff_id = int(staff_member["id"])
+    if existing_user is None and requester_staff_id is None and payload.phone:
         existing_user = await users_repo.get_user_by_phone(payload.phone)
     if existing_user:
         requester_id = int(existing_user["id"])
@@ -503,7 +512,7 @@ async def tray_submit_ticket(
     # Contact block: include when no portal account is matched.
     # Values are HTML-escaped before embedding to prevent markdown injection.
     description_parts: list[str] = []
-    if requester_id is None:
+    if requester_id is None and requester_staff_id is None:
         safe_name = _html.escape(payload.name)
         safe_email = _html.escape(normalised_email)
         contact_line = f"**Name:** {safe_name}"
@@ -535,6 +544,7 @@ async def tray_submit_ticket(
         subject=payload.subject.strip(),
         description=description_html,
         requester_id=requester_id,
+        requester_staff_id=requester_staff_id,
         company_id=company_id,
         assigned_user_id=None,
         priority="normal",
@@ -544,7 +554,11 @@ async def tray_submit_ticket(
         external_reference=external_reference,
         trigger_automations=True,
         initial_reply_author_id=requester_id,
-        requester_email=normalised_email if requester_id is None else None,
+        requester_email=(
+            normalised_email
+            if requester_id is None and requester_staff_id is None
+            else None
+        ),
     )
 
     # Link to the device's asset when one is known.
@@ -577,6 +591,7 @@ async def tray_submit_ticket(
         device_uid=device.get("uid") or payload.device_uid,
         ticket_id=ticket.get("id"),
         requester_id=requester_id,
+        requester_staff_id=requester_staff_id,
     )
 
     return TrayTicketSubmitResponse(
@@ -753,7 +768,9 @@ def _render_ticket_form(
 ) -> str:
     values = values or {}
     title = "Create Syncro Ticket" if mode == "syncro" else "Submit Ticket"
-    brand_name = (branding_display_name or "MyPortal Helpdesk").strip() or "MyPortal Helpdesk"
+    brand_name = (
+        branding_display_name or "MyPortal Helpdesk"
+    ).strip() or "MyPortal Helpdesk"
     intro = "Create a support ticket linked to this computer."
     fields = []
     for name, label, field_type, placeholder, required in [
@@ -2106,7 +2123,9 @@ async def issue_chat_token(
     if company_id:
         company = await companies_repo.get_company_by_id(int(company_id))
         if not (
-            company and company.get("tray_chat_enabled", True) and _settings.matrix_enabled
+            company
+            and company.get("tray_chat_enabled", True)
+            and _settings.matrix_enabled
         ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
