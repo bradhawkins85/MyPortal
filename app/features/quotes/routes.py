@@ -21,6 +21,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from app.core.config import get_settings
 from app.features.orders import routes as orders_routes
 from app.repositories import cart as cart_repo
+from app.repositories import companies as company_repo
 from app.repositories import shop as shop_repo
 from app.repositories import users as user_repo
 from app.security.session import session_manager
@@ -102,6 +103,19 @@ def _pdf_image_src(request: Request, url: str | None) -> str | None:
     return _absolute_asset_url(request, url)
 
 
+def _is_quote_expired(expires_at: datetime | str | None) -> bool:
+    if not expires_at:
+        return False
+    if isinstance(expires_at, str):
+        try:
+            expires_at = datetime.fromisoformat(expires_at)
+        except (ValueError, AttributeError):
+            return False
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at < datetime.now(timezone.utc)
+
+
 def _build_quote_pdf_html(
     *,
     request: Request,
@@ -109,6 +123,7 @@ def _build_quote_pdf_html(
     quote: dict[str, Any],
     items: list[dict[str, Any]],
     include_line_images: bool,
+    watermark_expired: bool = False,
 ) -> str:
     quote_number = escape(str(quote.get("quote_number") or ""))
     company_name = escape(str((company or {}).get("name") or ""))
@@ -148,7 +163,7 @@ def _build_quote_pdf_html(
             f'<div class="product-image-card">'
             f'<img class="detail-image" src="{escape(image_url, quote=True)}" '
             f'alt="{escape(str(item.get("product_name") or "Product"), quote=True)}">'
-            f'</div>'
+            f"</div>"
             if image_url
             else ""
         )
@@ -179,6 +194,12 @@ def _build_quote_pdf_html(
             f"{product_link_html}"
             "</section>"
         )
+
+    watermark_html = (
+        '<div class="expired-watermark" aria-hidden="true">Expired</div>'
+        if watermark_expired
+        else ""
+    )
 
     return f"""
 <!doctype html>
@@ -217,9 +238,11 @@ def _build_quote_pdf_html(
     .description iframe {{ border: 1px solid #e5e7eb; min-height: 260px; width: 100%; }}
     .product-link {{ border-top: 1px solid #e5e7eb; font-size: 12px; margin-top: 18px; padding-top: 10px; overflow-wrap: anywhere; }}
     .product-link a {{ color: #2563eb; }}
+    .expired-watermark {{ color: rgba(185, 28, 28, 0.18); font-size: 88px; font-weight: 800; left: 50%; letter-spacing: .08em; position: fixed; text-transform: uppercase; top: 50%; transform: translate(-50%, -50%) rotate(-32deg); z-index: 999; }}
   </style>
 </head>
 <body>
+  {watermark_html}
   <section>
     <div class="hero">
       <div><p class="eyebrow">Quote</p><h1>{quote_number}</h1><p>{quote_name}</p></div>
@@ -268,18 +291,6 @@ async def quotes_page(
         text = (value or "").strip()
         return text if text else "Active"
 
-    def _is_expired(expires_at: datetime | str | None) -> bool:
-        if not expires_at:
-            return False
-        if isinstance(expires_at, str):
-            try:
-                expires_at = datetime.fromisoformat(expires_at)
-            except (ValueError, AttributeError):
-                return False
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        return expires_at < datetime.now(timezone.utc)
-
     enriched_quotes: list[dict[str, Any]] = []
 
     user_ids_to_fetch = set()
@@ -296,7 +307,7 @@ async def quotes_page(
 
     for quote_record in quotes_raw:
         label = _label(quote_record.get("status"))
-        is_expired = _is_expired(quote_record.get("expires_at"))
+        is_expired = _is_quote_expired(quote_record.get("expires_at"))
         if is_expired and label.lower() == "active":
             label = "Expired"
         record = dict(quote_record)
@@ -395,6 +406,51 @@ async def export_quote_pdf(
         quote=quote_summary,
         items=quote_items,
         include_line_images=with_images,
+    )
+    pdf_bytes = HTML(string=html, base_url=str(request.base_url)).write_pdf()
+    filename = f"{quote_number}-{'with-images' if with_images else 'no-images'}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get(
+    "/quotes/magic/{token}",
+    response_class=Response,
+    name="download_quote_magic_pdf",
+    include_in_schema=False,
+)
+async def download_quote_magic_pdf(
+    request: Request,
+    token: str,
+    with_images: bool = Query(True, alias="withImages"),
+) -> Response:
+    quote_summary = await shop_repo.get_quote_summary_by_magic_link_token(token)
+    if not quote_summary:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Quote link not found"
+        )
+
+    company_id = int(quote_summary["company_id"])
+    company = await company_repo.get_company_by_id(company_id)
+    quote_items = await shop_repo.list_quote_items(
+        str(quote_summary["quote_number"]), company_id
+    )
+    if not quote_items:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found"
+        )
+
+    quote_number = str(quote_summary.get("quote_number") or "quote")
+    html = _build_quote_pdf_html(
+        request=request,
+        company=company,
+        quote=quote_summary,
+        items=quote_items,
+        include_line_images=with_images,
+        watermark_expired=_is_quote_expired(quote_summary.get("expires_at")),
     )
     pdf_bytes = HTML(string=html, base_url=str(request.base_url)).write_pdf()
     filename = f"{quote_number}-{'with-images' if with_images else 'no-images'}.pdf"

@@ -267,6 +267,36 @@
     }
   }
 
+
+  async function openQuoteLinkModal(quoteNumber, companyId) {
+    const modal = document.getElementById('quote-link-modal');
+    const modalTitle = document.getElementById('modal-link-title');
+    const linkInput = document.getElementById('quote-link-url');
+    const errorDiv = document.getElementById('modal-link-error');
+
+    if (!modal || !modalTitle || !linkInput || !errorDiv) {
+      return;
+    }
+
+    modalTitle.textContent = `Quote Link ${quoteNumber}`;
+    linkInput.value = '';
+    errorDiv.style.display = 'none';
+    openModal(modal);
+
+    try {
+      const data = await requestJson(`/api/quotes/${quoteNumber}/magic-link?companyId=${companyId}`, {
+        method: 'POST',
+      });
+      linkInput.value = data.url || '';
+      linkInput.focus();
+      linkInput.select();
+    } catch (error) {
+      console.error('Failed to create quote link:', error);
+      errorDiv.style.display = 'block';
+      errorDiv.textContent = error.message || 'Failed to create quote link. Please try again.';
+    }
+  }
+
   function bindQuoteViewButtons() {
     document.querySelectorAll('[data-quote-view]').forEach((button) => {
       button.addEventListener('click', async (event) => {
@@ -313,6 +343,19 @@
     });
   }
 
+  function bindQuoteLinkButtons() {
+    document.querySelectorAll('[data-quote-link]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const quoteNumber = button.dataset.quoteNumber;
+        const companyId = button.dataset.companyId;
+        if (!quoteNumber || !companyId) {
+          return;
+        }
+        await openQuoteLinkModal(quoteNumber, companyId);
+      });
+    });
+  }
+
   function bindQuoteSyncButtons() {
     document.querySelectorAll('[data-quote-sync]').forEach((button) => {
       button.addEventListener('click', async () => {
@@ -331,13 +374,31 @@
     const assignModal = document.getElementById('quote-assign-modal');
     const assignForm = document.getElementById('quote-assign-form');
     const unassignButton = document.getElementById('unassign-button');
+    const linkModal = document.getElementById('quote-link-modal');
+    const copyQuoteLinkButton = document.getElementById('copy-quote-link-button');
     
     bindModalDismissal(modal);
     bindModalDismissal(assignModal);
+    bindModalDismissal(linkModal);
     bindQuoteViewButtons();
     bindQuoteDeleteButtons();
     bindQuoteAssignButtons();
+    bindQuoteLinkButtons();
     bindQuoteSyncButtons();
+
+    if (copyQuoteLinkButton) {
+      copyQuoteLinkButton.addEventListener('click', async () => {
+        const linkInput = document.getElementById('quote-link-url');
+        if (!linkInput || !linkInput.value) {
+          return;
+        }
+        await navigator.clipboard.writeText(linkInput.value);
+        copyQuoteLinkButton.textContent = 'Copied';
+        window.setTimeout(() => {
+          copyQuoteLinkButton.textContent = 'Copy link';
+        }, 1600);
+      });
+    }
 
     // Handle assign form submission
     if (assignForm) {
