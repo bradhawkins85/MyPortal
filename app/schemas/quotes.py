@@ -69,3 +69,11 @@ class QuoteAssignRequest(BaseModel):
     assigned_user_id: int | None = Field(alias="assignedUserId")
 
     model_config = {"populate_by_name": True}
+
+
+class QuoteMagicLinkResponse(BaseModel):
+    quote_number: str = Field(alias="quoteNumber")
+    company_id: int = Field(alias="companyId")
+    url: str
+
+    model_config = {"populate_by_name": True}
