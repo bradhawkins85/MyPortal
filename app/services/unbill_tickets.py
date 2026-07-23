@@ -7,7 +7,7 @@ from app.repositories import ticket_billed_time_entries as billed_time_repo
 from app.repositories import tickets as tickets_repo
 
 _DATE_FORMAT = "%Y%m%d"
-_MAX_TICKETS_PER_RUN = 10000
+_DEFAULT_TICKETS_PAGE_SIZE = 1000
 
 
 def parse_unbill_cutoff_date(value: str) -> datetime:
@@ -34,12 +34,30 @@ def _ticket_label(ticket: Mapping[str, Any]) -> str:
     return f"Ticket #{ticket.get('id')}"
 
 
-async def preview_unbill_tickets(cutoff_date: datetime) -> dict[str, Any]:
-    """Preview billed tickets created before the UTC cutoff date."""
-    tickets = await tickets_repo.list_billed_tickets_older_than(
-        cutoff_date,
-        limit=_MAX_TICKETS_PER_RUN,
-    )
+async def preview_unbill_tickets(
+    cutoff_date: datetime, *, limit: int = _DEFAULT_TICKETS_PAGE_SIZE
+) -> dict[str, Any]:
+    """Preview billed tickets created before the UTC cutoff date.
+
+    Billed tickets are read in pages so old tickets are not skipped when the
+    matching set is larger than a single query limit.
+    """
+    page_size = max(1, int(limit or _DEFAULT_TICKETS_PAGE_SIZE))
+    offset = 0
+    tickets: list[Mapping[str, Any]] = []
+    while True:
+        page = await tickets_repo.list_billed_tickets_older_than(
+            cutoff_date,
+            limit=page_size,
+            offset=offset,
+        )
+        if not page:
+            break
+        tickets.extend(page)
+        if len(page) < page_size:
+            break
+        offset += page_size
+
     items = [
         {
             "type": "ticket",
