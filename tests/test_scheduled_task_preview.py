@@ -5,14 +5,20 @@ from app.services import scheduled_task_preview
 
 
 def test_preview_requires_company_for_generate_invoice():
-    preview = asyncio.run(scheduled_task_preview.preview_task({"command": "generate_invoice", "company_id": None}))
+    preview = asyncio.run(
+        scheduled_task_preview.preview_task(
+            {"command": "generate_invoice", "company_id": None}
+        )
+    )
 
     assert preview["status"] == "skipped"
     assert "Company context" in preview["summary"]
 
 
 def test_preview_unsupported_command():
-    preview = asyncio.run(scheduled_task_preview.preview_task({"command": "sync_staff"}))
+    preview = asyncio.run(
+        scheduled_task_preview.preview_task({"command": "sync_staff"})
+    )
 
     assert preview["status"] == "unsupported"
     assert preview["items"] == []
@@ -36,7 +42,11 @@ def test_preview_price_change_notifications(monkeypatch):
         fake_products,
     )
 
-    preview = asyncio.run(scheduled_task_preview.preview_task({"command": "send_price_change_notifications"}))
+    preview = asyncio.run(
+        scheduled_task_preview.preview_task(
+            {"command": "send_price_change_notifications"}
+        )
+    )
 
     assert preview["status"] == "ready"
     assert preview["totals"]["productCount"] == 1
@@ -44,6 +54,8 @@ def test_preview_price_change_notifications(monkeypatch):
 
 
 def test_generate_invoice_preview_uses_xero_line_item_template(monkeypatch):
+    monkeypatch.setenv("XERO_BILLABLE_STATUSES", "resolved")
+
     async def fake_company(company_id):
         return {"id": company_id, "name": "Acme"}
 
@@ -76,20 +88,43 @@ def test_generate_invoice_preview_uses_xero_line_item_template(monkeypatch):
             }
         ]
 
-    monkeypatch.setattr(scheduled_task_preview.company_repo, "get_company_by_id", fake_company)
-    monkeypatch.setattr(scheduled_task_preview.modules_service, "get_module_settings", fake_settings)
-    monkeypatch.setattr(scheduled_task_preview.xero_service, "build_invoice_context", fake_context)
-    monkeypatch.setattr(scheduled_task_preview.xero_service, "build_recurring_invoice_items", fake_recurring)
-    monkeypatch.setattr(scheduled_task_preview.tickets_repo, "list_tickets", fake_tickets)
-    monkeypatch.setattr(scheduled_task_preview.billed_time_repo, "get_unbilled_reply_ids", fake_unbilled)
-    monkeypatch.setattr(scheduled_task_preview.tickets_repo, "list_replies", fake_replies)
+    monkeypatch.setattr(
+        scheduled_task_preview.company_repo, "get_company_by_id", fake_company
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.modules_service, "get_module_settings", fake_settings
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.xero_service, "build_invoice_context", fake_context
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.xero_service,
+        "build_recurring_invoice_items",
+        fake_recurring,
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.tickets_repo, "list_tickets", fake_tickets
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.billed_time_repo, "get_unbilled_reply_ids", fake_unbilled
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.tickets_repo, "list_replies", fake_replies
+    )
 
-    preview = asyncio.run(scheduled_task_preview.preview_task({"command": "generate_invoice", "company_id": 1}))
+    preview = asyncio.run(
+        scheduled_task_preview.preview_task(
+            {"command": "generate_invoice", "company_id": 1}
+        )
+    )
 
     assert preview["status"] == "ready"
     assert preview["totals"]["ticketLineCount"] == 1
     item = preview["items"][0]
-    assert item["xeroDescription"] == "Ticket #42 - Broken printer - Remote Support - 1 Hour 30 Mins"
+    assert (
+        item["xeroDescription"]
+        == "Ticket #42 - Broken printer - Remote Support - 1 Hour 30 Mins"
+    )
     assert item["xeroQuantity"] == "1.50"
     assert item["xeroUnitAmount"] == "125.50"
     assert item["xeroItemCode"] == "LAB"
@@ -98,6 +133,8 @@ def test_generate_invoice_preview_uses_xero_line_item_template(monkeypatch):
 
 
 def test_generate_invoice_preview_prefers_env_xero_line_item_template(monkeypatch):
+    monkeypatch.setenv("XERO_BILLABLE_STATUSES", "resolved")
+
     async def fake_company(company_id):
         return {"id": company_id, "name": "Acme"}
 
@@ -113,7 +150,14 @@ def test_generate_invoice_preview_prefers_env_xero_line_item_template(monkeypatc
         return []
 
     async def fake_tickets(company_id, limit):
-        return [{"id": 42, "subject": "Broken printer", "status": "Resolved", "requester_name": "Jane Requester"}]
+        return [
+            {
+                "id": 42,
+                "subject": "Broken printer",
+                "status": "Resolved",
+                "requester_name": "Jane Requester",
+            }
+        ]
 
     async def fake_unbilled(ticket_id):
         return [100]
@@ -134,15 +178,35 @@ def test_generate_invoice_preview_prefers_env_xero_line_item_template(monkeypatc
         "XERO_LINE_ITEM_TEMPLATE",
         "Ticket {ticket_id}: {ticket_subject} {labour_suffix} {requester_name} ({labour_duration})",
     )
-    monkeypatch.setattr(scheduled_task_preview.company_repo, "get_company_by_id", fake_company)
-    monkeypatch.setattr(scheduled_task_preview.modules_service, "get_module_settings", fake_settings)
-    monkeypatch.setattr(scheduled_task_preview.xero_service, "build_invoice_context", fake_context)
-    monkeypatch.setattr(scheduled_task_preview.xero_service, "build_recurring_invoice_items", fake_recurring)
-    monkeypatch.setattr(scheduled_task_preview.tickets_repo, "list_tickets", fake_tickets)
-    monkeypatch.setattr(scheduled_task_preview.billed_time_repo, "get_unbilled_reply_ids", fake_unbilled)
-    monkeypatch.setattr(scheduled_task_preview.tickets_repo, "list_replies", fake_replies)
+    monkeypatch.setattr(
+        scheduled_task_preview.company_repo, "get_company_by_id", fake_company
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.modules_service, "get_module_settings", fake_settings
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.xero_service, "build_invoice_context", fake_context
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.xero_service,
+        "build_recurring_invoice_items",
+        fake_recurring,
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.tickets_repo, "list_tickets", fake_tickets
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.billed_time_repo, "get_unbilled_reply_ids", fake_unbilled
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.tickets_repo, "list_replies", fake_replies
+    )
 
-    preview = asyncio.run(scheduled_task_preview.preview_task({"command": "generate_invoice", "company_id": 1}))
+    preview = asyncio.run(
+        scheduled_task_preview.preview_task(
+            {"command": "generate_invoice", "company_id": 1}
+        )
+    )
 
     assert preview["status"] == "ready"
     assert preview["items"][0]["xeroDescription"] == (
@@ -151,6 +215,8 @@ def test_generate_invoice_preview_prefers_env_xero_line_item_template(monkeypatc
 
 
 def test_generate_invoice_preview_resolves_requester_name_for_template(monkeypatch):
+    monkeypatch.setenv("XERO_BILLABLE_STATUSES", "resolved")
+
     async def fake_company(company_id):
         return {"id": company_id, "name": "Acme"}
 
@@ -161,7 +227,14 @@ def test_generate_invoice_preview_resolves_requester_name_for_template(monkeypat
         return []
 
     async def fake_tickets(company_id, limit):
-        return [{"id": 42, "subject": "Broken printer", "status": "Resolved", "requester_id": 99}]
+        return [
+            {
+                "id": 42,
+                "subject": "Broken printer",
+                "status": "Resolved",
+                "requester_id": 99,
+            }
+        ]
 
     async def fake_unbilled(ticket_id):
         return [100]
@@ -178,35 +251,94 @@ def test_generate_invoice_preview_resolves_requester_name_for_template(monkeypat
             }
         ]
 
-    monkeypatch.setenv("XERO_LINE_ITEM_TEMPLATE", "Ticket {ticket_id}: {ticket_subject} - {requester_name}")
-    monkeypatch.setattr(scheduled_task_preview.company_repo, "get_company_by_id", fake_company)
-    monkeypatch.setattr(scheduled_task_preview.xero_service, "build_invoice_context", fake_context)
-    monkeypatch.setattr(scheduled_task_preview.xero_service, "build_recurring_invoice_items", fake_recurring)
-    monkeypatch.setattr(scheduled_task_preview.tickets_repo, "list_tickets", fake_tickets)
-    monkeypatch.setattr(scheduled_task_preview.billed_time_repo, "get_unbilled_reply_ids", fake_unbilled)
-    monkeypatch.setattr(scheduled_task_preview.tickets_repo, "list_replies", fake_replies)
+    monkeypatch.setenv(
+        "XERO_LINE_ITEM_TEMPLATE",
+        "Ticket {ticket_id}: {ticket_subject} - {requester_name}",
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.company_repo, "get_company_by_id", fake_company
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.xero_service, "build_invoice_context", fake_context
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.xero_service,
+        "build_recurring_invoice_items",
+        fake_recurring,
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.tickets_repo, "list_tickets", fake_tickets
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.billed_time_repo, "get_unbilled_reply_ids", fake_unbilled
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.tickets_repo, "list_replies", fake_replies
+    )
     monkeypatch.setattr(
         scheduled_task_preview.invoice_generator_service.xero_service.users_repo,
         "get_user_by_id",
-        AsyncMock(return_value={"id": 99, "first_name": "Jane", "last_name": "Requester", "email": "jane@example.com"}),
+        AsyncMock(
+            return_value={
+                "id": 99,
+                "first_name": "Jane",
+                "last_name": "Requester",
+                "email": "jane@example.com",
+            }
+        ),
     )
 
-    preview = asyncio.run(scheduled_task_preview.preview_task({"command": "generate_invoice", "company_id": 1}))
+    preview = asyncio.run(
+        scheduled_task_preview.preview_task(
+            {"command": "generate_invoice", "company_id": 1}
+        )
+    )
 
     assert preview["status"] == "ready"
-    assert preview["items"][0]["xeroDescription"] == "Ticket 42: Broken printer - Jane Requester"
+    assert (
+        preview["items"][0]["xeroDescription"]
+        == "Ticket 42: Broken printer - Jane Requester"
+    )
 
 
 def test_unbill_time_entries_preview_lists_billable_entries(monkeypatch):
     async def fake_entries(company_id, limit, offset=0):
-        return [
-            {"id": 100, "ticket_id": 42, "ticket_number": "T-42", "subject": "AYCE support", "is_billable": True, "minutes_spent": 45, "labour_type_name": "Remote Support"},
-            {"id": 101, "ticket_id": 42, "ticket_number": "T-42", "subject": "AYCE support", "is_billable": True, "minutes_spent": 30, "labour_type_name": "Remote Support"},
-        ] if offset == 0 else []
+        return (
+            [
+                {
+                    "id": 100,
+                    "ticket_id": 42,
+                    "ticket_number": "T-42",
+                    "subject": "AYCE support",
+                    "is_billable": True,
+                    "minutes_spent": 45,
+                    "labour_type_name": "Remote Support",
+                },
+                {
+                    "id": 101,
+                    "ticket_id": 42,
+                    "ticket_number": "T-42",
+                    "subject": "AYCE support",
+                    "is_billable": True,
+                    "minutes_spent": 30,
+                    "labour_type_name": "Remote Support",
+                },
+            ]
+            if offset == 0
+            else []
+        )
 
-    monkeypatch.setattr(scheduled_task_preview.unbill_time_entries_service.tickets_repo, "list_billable_time_entries", fake_entries)
+    monkeypatch.setattr(
+        scheduled_task_preview.unbill_time_entries_service.tickets_repo,
+        "list_billable_time_entries",
+        fake_entries,
+    )
 
-    preview = asyncio.run(scheduled_task_preview.preview_task({"command": "unbill_time_entries", "company_id": 1}))
+    preview = asyncio.run(
+        scheduled_task_preview.preview_task(
+            {"command": "unbill_time_entries", "company_id": 1}
+        )
+    )
 
     assert preview["status"] == "ready"
     assert preview["totals"] == {"timeEntryCount": 2, "minutes": 75}
@@ -217,15 +349,39 @@ def test_unbill_time_entries_preview_lists_billable_entries(monkeypatch):
 def test_unbill_time_entries_preview_scans_all_ticket_pages(monkeypatch):
     async def fake_entries(company_id, limit, offset=0):
         pages = {
-            0: [{"id": 420, "ticket_id": 42, "ticket_number": "T-42", "subject": "First page", "minutes_spent": 30, "labour_type_name": "Remote Support"}],
-            1: [{"id": 840, "ticket_id": 84, "ticket_number": "T-84", "subject": "Second page", "minutes_spent": 30, "labour_type_name": "Remote Support"}],
+            0: [
+                {
+                    "id": 420,
+                    "ticket_id": 42,
+                    "ticket_number": "T-42",
+                    "subject": "First page",
+                    "minutes_spent": 30,
+                    "labour_type_name": "Remote Support",
+                }
+            ],
+            1: [
+                {
+                    "id": 840,
+                    "ticket_id": 84,
+                    "ticket_number": "T-84",
+                    "subject": "Second page",
+                    "minutes_spent": 30,
+                    "labour_type_name": "Remote Support",
+                }
+            ],
         }
         return pages.get(offset, [])
 
-    monkeypatch.setattr(scheduled_task_preview.unbill_time_entries_service.tickets_repo, "list_billable_time_entries", fake_entries)
+    monkeypatch.setattr(
+        scheduled_task_preview.unbill_time_entries_service.tickets_repo,
+        "list_billable_time_entries",
+        fake_entries,
+    )
 
     preview = asyncio.run(
-        scheduled_task_preview.unbill_time_entries_service.preview_unbill_time_entries(1, limit=1)
+        scheduled_task_preview.unbill_time_entries_service.preview_unbill_time_entries(
+            1, limit=1
+        )
     )
 
     assert preview["status"] == "ready"
