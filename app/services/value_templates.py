@@ -3,12 +3,21 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
-from app.services import dynamic_variables, message_templates, system_variables, conditional_expressions
+from app.services import (
+    dynamic_variables,
+    message_templates,
+    system_variables,
+    conditional_expressions,
+)
 
 _TOKEN_PATTERN = re.compile(r"\{\{\s*([^\s{}]+)\s*\}\}")
+_VAR_TOKEN_PATTERN = re.compile(
+    r"\$\{\s*([^{}]+?)\s*\}(?:\.format\(\s*[\"\']([^\"\']*)[\"\']\s*\))?"
+)
+_VAR_METHOD_PATTERN = re.compile(r"\.([A-Za-z_][A-Za-z0-9_]*)\(([^()]*)\)")
 _UPPER_TOKEN_SANITISER = re.compile(r"[^A-Z0-9]+")
 
 
@@ -52,19 +61,36 @@ def _collect_tokens(value: Any) -> list[str]:
                         # These are identifiers that contain colons and don't start with quotes
                         trimmed = part.strip()
                         # Skip quoted strings
-                        if trimmed and not (trimmed.startswith('"') or trimmed.startswith("'")):
+                        if trimmed and not (
+                            trimmed.startswith('"') or trimmed.startswith("'")
+                        ):
                             # Split on comparison operators to get left and right sides
-                            comparison_parts = re.split(r'\s*(>=|<=|>|<|==|!=)\s*', trimmed)
+                            comparison_parts = re.split(
+                                r"\s*(>=|<=|>|<|==|!=)\s*", trimmed
+                            )
                             for token_candidate in comparison_parts:
                                 candidate = token_candidate.strip()
                                 # Add if it looks like a token (contains colon or is a known pattern)
-                                if ':' in candidate or candidate.replace('_', '').replace('-', '').replace('.', '').isalnum():
+                                if (
+                                    ":" in candidate
+                                    or candidate.replace("_", "")
+                                    .replace("-", "")
+                                    .replace(".", "")
+                                    .isalnum()
+                                ):
                                     # Exclude numeric literals
                                     try:
                                         float(candidate)
                                     except (ValueError, TypeError):
                                         # Not a number, might be a token
-                                        if candidate and candidate not in ['>', '<', '>=', '<=', '==', '!=']:
+                                        if candidate and candidate not in [
+                                            ">",
+                                            "<",
+                                            ">=",
+                                            "<=",
+                                            "==",
+                                            "!=",
+                                        ]:
                                             _add(candidate)
 
             # Collect regular tokens (wrapped in {{}})
@@ -75,7 +101,9 @@ def _collect_tokens(value: Any) -> list[str]:
             for item in current.values():
                 _walk(item)
             return
-        if isinstance(current, Sequence) and not isinstance(current, (str, bytes, bytearray)):
+        if isinstance(current, Sequence) and not isinstance(
+            current, (str, bytes, bytearray)
+        ):
             for item in current:
                 _walk(item)
             return
@@ -146,7 +174,9 @@ def _stringify_template_value(value: Any) -> str:
             return json.dumps(coerced)
         except TypeError:
             return str(coerced)
-    if isinstance(coerced, Sequence) and not isinstance(coerced, (str, bytes, bytearray)):
+    if isinstance(coerced, Sequence) and not isinstance(
+        coerced, (str, bytes, bytearray)
+    ):
         if all(isinstance(item, str) for item in coerced):
             return ", ".join(item for item in coerced if item)
         try:
@@ -186,13 +216,15 @@ def _resolve_context_value(context: Mapping[str, Any] | None, path: str) -> Any:
     if not context or not path:
         return None
     current: Any = context
-    for segment in path.split('.'):
+    for segment in path.split("."):
         if isinstance(current, Mapping):
             value = current.get(segment)
             if value is None and segment not in current and segment in _FIELD_ALIASES:
                 value = current.get(_FIELD_ALIASES[segment])
             current = value
-        elif isinstance(current, Sequence) and not isinstance(current, (str, bytes, bytearray)):
+        elif isinstance(current, Sequence) and not isinstance(
+            current, (str, bytes, bytearray)
+        ):
             try:
                 index = int(segment)
             except (TypeError, ValueError):
@@ -239,6 +271,125 @@ def build_template_token_map(
     return tokens
 
 
+def _add_months(value: date | datetime, months: int) -> date | datetime:
+    year = value.year + ((value.month - 1 + months) // 12)
+    month = ((value.month - 1 + months) % 12) + 1
+    if month == 12:
+        next_month = date(year + 1, 1, 1)
+    else:
+        next_month = date(year, month + 1, 1)
+    last_day = (next_month - timedelta(days=1)).day
+    return value.replace(year=year, month=month, day=min(value.day, last_day))
+
+
+def _parse_var_method_kwargs(raw: str) -> dict[str, int]:
+    kwargs: dict[str, int] = {}
+    for part in raw.split(","):
+        if not part.strip():
+            continue
+        if "=" not in part:
+            raise ValueError("variable date adjustment arguments must use name=value")
+        key, value = part.split("=", 1)
+        key = key.strip()
+        if key not in {"days", "weeks", "months", "years"}:
+            raise ValueError(f"unsupported variable date adjustment: {key}")
+        kwargs[key] = int(value.strip())
+    return kwargs
+
+
+def _apply_var_date_adjustment(value: Any, name: str, raw_args: str = "") -> Any:
+    if not isinstance(value, (date, datetime)):
+        return value
+    if name in {"previous", "last"}:
+        kwargs = _parse_var_method_kwargs(raw_args)
+        kwargs = {key: -amount for key, amount in kwargs.items()}
+    elif name in {"next", "add"}:
+        kwargs = _parse_var_method_kwargs(raw_args)
+    else:
+        return value
+    years = kwargs.pop("years", 0)
+    months = kwargs.pop("months", 0) + (years * 12)
+    adjusted = _add_months(value, months) if months else value
+    delta_kwargs = {key: amount for key, amount in kwargs.items() if amount}
+    if delta_kwargs:
+        adjusted = adjusted + timedelta(**delta_kwargs)
+    return adjusted
+
+
+def _resolve_vars_value(context: Mapping[str, Any] | None, expression: str) -> Any:
+    expr = expression.strip()
+    methods: list[tuple[str, str]] = []
+    while True:
+        match = _VAR_METHOD_PATTERN.search(expr)
+        if not match:
+            break
+        methods.append((match.group(1), match.group(2)))
+        expr = expr[: match.start()] + expr[match.end() :]
+    parts = [part for part in expr.split(".") if part]
+    value: Any = None
+    if parts[:3] == ["vars", "now", "utc"]:
+        value = datetime.now(timezone.utc)
+        parts = parts[3:]
+    elif parts[:3] == ["vars", "now", "local"]:
+        value = datetime.now().astimezone()
+        parts = parts[3:]
+    elif parts[:2] == ["vars", "now"]:
+        value = datetime.now().astimezone()
+        parts = parts[2:]
+    elif parts and parts[0] == "vars":
+        value = _resolve_context_value(context, ".".join(parts[1:]))
+        parts = []
+    for part in parts:
+        if part == "date" and isinstance(value, datetime):
+            value = value.date()
+        elif part == "time" and isinstance(value, datetime):
+            value = value.timetz()
+        elif part == "year" and isinstance(value, (date, datetime)):
+            value = value.year
+        elif part == "month" and isinstance(value, (date, datetime)):
+            value = value.month
+        elif part == "day" and isinstance(value, (date, datetime)):
+            value = value.day
+        elif part in {"last_month", "previous_month"}:
+            value = (
+                _add_months(value, -1) if isinstance(value, (date, datetime)) else value
+            )
+        elif part == "next_month":
+            value = (
+                _add_months(value, 1) if isinstance(value, (date, datetime)) else value
+            )
+        else:
+            value = _resolve_context_value({"value": value}, f"value.{part}")
+    for name, args in methods:
+        value = _apply_var_date_adjustment(value, name, args)
+    return value
+
+
+def _python_date_format(pattern: str) -> str:
+    replacements = (
+        ("yyyy", "%Y"),
+        ("MMMM", "%B"),
+        ("MMM", "%b"),
+        ("MM", "%m"),
+        ("dd", "%d"),
+        ("EEEE", "%A"),
+        ("EEE", "%a"),
+        ("HH", "%H"),
+        ("mm", "%M"),
+        ("ss", "%S"),
+    )
+    rendered = pattern
+    for source, target in replacements:
+        rendered = rendered.replace(source, target)
+    return rendered
+
+
+def _format_vars_value(value: Any, pattern: str | None) -> Any:
+    if pattern and isinstance(value, (date, datetime, time)):
+        return value.strftime(_python_date_format(pattern))
+    return _stringify_template_value(value)
+
+
 def render_string(
     value: str,
     context: Mapping[str, Any] | None,
@@ -251,10 +402,16 @@ def render_string(
     token_map = dict(base_tokens)
     if include_templates:
         token_map.update(build_template_token_map(context, base_tokens=base_tokens))
-    
+
     # First, process conditional expressions
     processed_value = conditional_expressions.process_conditionals(value, token_map)
-    
+
+    def _replace_var(match: re.Match[str]) -> str:
+        resolved = _resolve_vars_value(context, match.group(1))
+        return str(_format_vars_value(resolved, match.group(2)))
+
+    processed_value = _VAR_TOKEN_PATTERN.sub(_replace_var, processed_value)
+
     # Check if the entire processed result is a single token (for type coercion)
     # This must be done BEFORE token replacement to preserve types
     stripped = processed_value.strip()
@@ -265,7 +422,7 @@ def render_string(
         if resolved is None:
             resolved = token_map.get(token_name)
         return _coerce_template_value(resolved)
-    
+
     # Then process any token references that may have been returned by conditionals
     # This handles cases where conditionals return token names like "list:asset:bitdefender"
     def _replace(match: re.Match[str]) -> str:
@@ -274,10 +431,10 @@ def render_string(
         if resolved is None:
             resolved = token_map.get(token_name, "")
         return _stringify_template_value(resolved)
-    
+
     # Apply token replacement to the processed value
     final_value = _TOKEN_PATTERN.sub(_replace, processed_value)
-    
+
     return final_value
 
 
@@ -318,13 +475,23 @@ def render_value(
         )
     if isinstance(value, Mapping):
         return {
-            key: render_value(item, context, base_tokens=base_tokens, include_templates=include_templates)
+            key: render_value(
+                item,
+                context,
+                base_tokens=base_tokens,
+                include_templates=include_templates,
+            )
             for key, item in value.items()
         }
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         result: list[Any] = []
         for item in value:
-            rendered = render_value(item, context, base_tokens=base_tokens, include_templates=include_templates)
+            rendered = render_value(
+                item,
+                context,
+                base_tokens=base_tokens,
+                include_templates=include_templates,
+            )
             if isinstance(rendered, list):
                 result.extend(rendered)
             else:
