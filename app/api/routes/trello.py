@@ -19,6 +19,7 @@ router = APIRouter(prefix="/api/integration-modules/trello", tags=["Trello"])
 # Webhook endpoint (Trello verification + event ingestion)
 # ---------------------------------------------------------------------------
 
+
 @router.head("/webhook", status_code=status.HTTP_200_OK)
 @router.get("/webhook", status_code=status.HTTP_200_OK)
 async def trello_webhook_verify(request: Request) -> JSONResponse:
@@ -130,6 +131,7 @@ async def trello_webhook_receive(request: Request) -> JSONResponse:
 # Admin: register a Trello webhook for a board
 # ---------------------------------------------------------------------------
 
+
 @router.post(
     "/boards/{board_id}/register-webhook",
     status_code=status.HTTP_200_OK,
@@ -169,7 +171,9 @@ async def register_trello_webhook(
         board_id,
         callback_url,
     )
-    result = await trello_service.register_webhook(board_id, callback_url, company=company)
+    result = await trello_service.register_webhook(
+        board_id, callback_url, company=company
+    )
     if not result:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -263,7 +267,6 @@ def _build_public_callback_url(request: Request) -> str:
     return f"{scheme}://{host}{_WEBHOOK_PATH}"
 
 
-
 _MAX_TICKET_SUBJECT_LENGTH = 255
 
 
@@ -295,24 +298,25 @@ def _build_trello_ticket_description(
     if safe_url:
         escaped_url = html.escape(safe_url, quote=True)
         parts.append(
-            '<p><strong>Trello card:</strong> '
+            "<p><strong>Trello card:</strong> "
             f'<a href="{escaped_url}" target="_blank" rel="noopener noreferrer">'
-            f'{escaped_url}</a></p>'
+            f"{escaped_url}</a></p>"
         )
 
     safe_desc = str(card_desc or "").strip()
     if safe_desc:
         escaped_desc = html.escape(safe_desc).replace("\n", "<br>")
         parts.append(
-            "<p><strong>Trello card content:</strong></p>"
-            f"<p>{escaped_desc}</p>"
+            "<p><strong>Trello card content:</strong></p>" f"<p>{escaped_desc}</p>"
         )
 
     return "\n".join(parts) if parts else None
 
+
 # ---------------------------------------------------------------------------
 # Internal handlers
 # ---------------------------------------------------------------------------
+
 
 async def _handle_create_card(
     board_id: str,
@@ -325,24 +329,25 @@ async def _handle_create_card(
     # Check if a ticket already exists for this card (idempotency)
     existing = await trello_service.find_ticket_for_card(card_id)
     if existing:
-        logger.debug(
-            "Trello createCard: ticket already exists for card {}", card_id
-        )
+        logger.debug("Trello createCard: ticket already exists for card {}", card_id)
         return
 
     # Resolve the company linked to this board
     company = await trello_service.get_company_for_board(board_id)
     company_id: int | None = int(company["id"]) if company else None
 
-    full_card = await trello_service.get_card(card_id, company=company) if company else None
+    full_card = (
+        await trello_service.get_card(card_id, company=company) if company else None
+    )
     card_payload = full_card or card_data
 
     raw_card_name: str = str(card_payload.get("name") or "").strip()
     card_name, original_card_name = _normalise_trello_ticket_subject(raw_card_name)
     card_desc: str | None = str(card_payload.get("desc") or "").strip() or None
-    card_url: str | None = str(
-        card_payload.get("url") or card_payload.get("shortUrl") or ""
-    ).strip() or None
+    card_url: str | None = (
+        str(card_payload.get("url") or card_payload.get("shortUrl") or "").strip()
+        or None
+    )
     ticket_description = _build_trello_ticket_description(
         card_desc,
         card_url,
@@ -373,12 +378,12 @@ async def _handle_create_card(
 
     ticket_id = ticket.get("id")
     ticket_number = ticket.get("ticket_number") or ticket_id
-    logger.info(
-        "Trello createCard: created ticket {} for card {}", ticket_id, card_id
-    )
+    logger.info("Trello createCard: created ticket {} for card {}", ticket_id, card_id)
 
     # Post confirmation comment back on the Trello card (new requirement)
-    await trello_service.post_ticket_created_comment(card_id, ticket_number, company=company)
+    await trello_service.post_ticket_created_comment(
+        card_id, ticket_number, company=company
+    )
 
 
 async def _handle_comment_card(
@@ -410,21 +415,28 @@ async def _handle_comment_card(
     ticket_id: int = int(ticket["id"])
     member_creator: dict[str, Any] = action.get("memberCreator") or {}
     author_label = (
-        str(member_creator.get("fullName") or member_creator.get("username") or "")
-        .strip()
+        str(
+            member_creator.get("fullName") or member_creator.get("username") or ""
+        ).strip()
         or "Trello"
     )
     body = f"<p><strong>{author_label} (Trello):</strong> {comment_text}</p>"
 
     try:
         from app.repositories import tickets as tickets_repo
-        await tickets_repo.create_reply(
+
+        reply = await tickets_repo.create_reply(
             ticket_id=ticket_id,
             author_id=None,
             body=body,
             is_internal=False,
         )
-        await tickets_service.emit_ticket_updated_event(ticket_id, actor_type="system")
+        await tickets_service.emit_ticket_updated_event(
+            ticket_id, actor_type="system", reply=reply
+        )
+        await tickets_service.emit_ticket_replied_event(
+            ticket_id, actor_type="system", reply=reply
+        )
         logger.info(
             "Trello commentCard: added reply to ticket {} from card {}",
             ticket_id,
@@ -469,6 +481,7 @@ async def _handle_update_card(
 
     try:
         from app.repositories import tickets as tickets_repo
+
         await tickets_repo.create_reply(
             ticket_id=ticket_id,
             author_id=None,
