@@ -240,6 +240,7 @@ async def get_sat_stats(company_id: int) -> dict[str, Any] | None:
 async def upsert_sat_stats(
     company_id: int,
     *,
+    enrolled_learners: int = 0,
     avg_completion_rate: float,
     avg_score: float,
     phishing_clicks: int,
@@ -256,7 +257,8 @@ async def upsert_sat_stats(
         await db.execute(
             """
             UPDATE huntress_sat_stats
-               SET avg_completion_rate = %s,
+               SET enrolled_learners = %s,
+                   avg_completion_rate = %s,
                    avg_score = %s,
                    phishing_clicks = %s,
                    phishing_compromises = %s,
@@ -265,6 +267,7 @@ async def upsert_sat_stats(
              WHERE company_id = %s
             """,
             (
+                int(enrolled_learners),
                 float(avg_completion_rate),
                 float(avg_score),
                 int(phishing_clicks),
@@ -278,12 +281,13 @@ async def upsert_sat_stats(
         await db.execute(
             """
             INSERT INTO huntress_sat_stats
-                (company_id, avg_completion_rate, avg_score,
+                (company_id, enrolled_learners, avg_completion_rate, avg_score,
                  phishing_clicks, phishing_compromises, phishing_reports, snapshot_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 int(company_id),
+                int(enrolled_learners),
                 float(avg_completion_rate),
                 float(avg_score),
                 int(phishing_clicks),

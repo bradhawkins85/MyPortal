@@ -3,8 +3,10 @@
 This pack makes the Huntress integration a first-class hot-reloadable
 feature-pack unit.  Credentials are read from the environment
 (``HUNTRESS_API_KEY`` / ``HUNTRESS_API_SECRET`` / ``HUNTRESS_BASE_URL``)
-and the module is gated by the standard ``integration_modules``
-enable/disable toggle — so no standalone routes are needed here.
+plus Curricula Managed SAT credentials (``CURRICULA_API_KEY`` /
+``CURRICULA_API_SECRET`` / ``CURRICULA_BASE_URL``), and the module is gated
+by the standard ``integration_modules`` enable/disable toggle — so no standalone
+routes are needed here.
 
 The daily sync is triggered by the scheduler (``sync_huntress`` command).
 """

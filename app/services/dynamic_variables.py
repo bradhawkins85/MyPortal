@@ -7,6 +7,7 @@ from typing import Any
 from app.repositories import assets as assets_repo
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import issues as issues_repo
+from app.repositories import huntress as huntress_repo
 from app.repositories import reporting as reporting_repo
 from app.services import reporting as reporting_service
 
@@ -209,6 +210,14 @@ async def build_dynamic_token_map(
     issue_count_requests = _extract_issue_count_requests(tokens)
     issue_list_requests = _extract_issue_list_requests(tokens)
     report_requests = _extract_report_requests(tokens)
+    huntress_sat_variable_names = {
+        "huntress.sat.learners.enrolled",
+        "huntress_sat_enrolled_learners",
+        "huntress_sat_learner_count",
+    }
+    huntress_sat_count_requests = {
+        token for token in tokens if token.lower() in huntress_sat_variable_names
+    }
 
     all_requests = [
         active_asset_requests,
@@ -217,6 +226,7 @@ async def build_dynamic_token_map(
         issue_count_requests,
         issue_list_requests,
         report_requests,
+        huntress_sat_count_requests,
     ]
     if not any(all_requests):
         return {}
@@ -287,6 +297,17 @@ async def build_dynamic_token_map(
                 company_id=company_id,
             )
             result[token] = ", ".join(assets)
+
+    # Handle Huntress SAT active learner count variables
+    if huntress_sat_count_requests:
+        stats = (
+            await huntress_repo.get_sat_stats(company_id)
+            if company_id is not None
+            else None
+        )
+        enrolled = int((stats or {}).get("enrolled_learners") or 0)
+        for token in huntress_sat_count_requests:
+            result[token] = str(enrolled)
 
     # Handle saved reporting query variables
     if report_requests:

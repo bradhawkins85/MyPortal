@@ -17,6 +17,7 @@ from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.repositories import invoice_lines as invoice_lines_repo
+from app.repositories import huntress as huntress_repo
 from app.repositories import staff as staff_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import ticket_billed_time_entries as billed_time_repo
@@ -1567,6 +1568,13 @@ async def build_invoice_context(company_id: int) -> dict[str, Any]:
         "active_users": user_count,
         "total_assets": total_assets,
     }
+
+    huntress_sat_stats = await huntress_repo.get_sat_stats(company_id)
+    enrolled_learners = int((huntress_sat_stats or {}).get("enrolled_learners") or 0)
+    context.update({
+        "huntress_sat_enrolled_learners": enrolled_learners,
+        "huntress_sat_learner_count": enrolled_learners,
+    })
 
     # Add custom field checkbox counts for all defined checkbox fields.
     # Variables are exposed as {cf_total_FIELDNAME} and {cf_active_FIELDNAME}

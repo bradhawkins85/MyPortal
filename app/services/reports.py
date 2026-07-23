@@ -126,7 +126,7 @@ REPORT_SECTIONS: tuple[ReportSection, ...] = (
     ReportSection(
         key="huntress_sat",
         label="Huntress Security Awareness Training",
-        description="Average completion / score across SAT learners and phishing simulation outcomes.",
+        description="Enrolled learners, average progress, scores, and phishing simulation outcomes.",
     ),
     ReportSection(
         key="huntress_siem",
@@ -1039,6 +1039,7 @@ async def _build_huntress_sat(company_id: int) -> dict[str, Any]:
     if not stats:
         return {}
     return {
+        "enrolled_learners": int(stats.get("enrolled_learners") or 0),
         "avg_completion_rate": float(stats.get("avg_completion_rate") or 0),
         "avg_score": float(stats.get("avg_score") or 0),
         "phishing_clicks": int(stats.get("phishing_clicks") or 0),
@@ -1072,6 +1073,10 @@ async def _build_huntress_sat_detail(company_id: int) -> dict[str, Any]:
         )
     summary["learners"] = learners
     summary["total_assignments"] = len(learners)
+    if not summary.get("enrolled_learners"):
+        summary["enrolled_learners"] = len(
+            {row.get("learner_external_id") or row.get("learner_email") for row in learners}
+        )
     return summary
 
 
