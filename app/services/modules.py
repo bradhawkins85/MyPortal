@@ -1045,7 +1045,12 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
     {
         "slug": "huntress",
         "name": "Huntress",
-        "description": "Huntress EDR / ITDR / SAT / SIEM / SOC statistics for company reports. Credentials are read from environment variables (HUNTRESS_API_KEY, HUNTRESS_API_SECRET).",
+        "description": (
+            "Huntress EDR / ITDR / SAT / SIEM / SOC statistics for company reports. "
+            "Credentials are read from environment variables (HUNTRESS_API_KEY, "
+            "HUNTRESS_API_SECRET, and CURRICULA_API_KEY/CURRICULA_API_SECRET "
+            "for Managed SAT)."
+        ),
         "icon": "🛡️",
         "settings": {},
     },

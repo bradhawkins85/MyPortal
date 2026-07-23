@@ -330,3 +330,13 @@ Adjustment methods accept `days`, `weeks`, `months`, and `years` as integer argu
 - Use `${vars.now.local...}` when the ticket text should follow the portal/server local timezone.
 - Use `${vars.now.utc...}` when the ticket text must be timezone-neutral or match UTC audit/reporting periods.
 - `${vars.now...}` without `local` or `utc` resolves like local time for these payload expressions.
+
+### Huntress Managed SAT learner count variables
+
+When the Huntress integration is enabled and a company has a Huntress organisation/account ID, the daily Huntress sync stores Managed Security Awareness Training learner snapshots from the Curricula JSON:API. Use these variables in invoice quantities, invoice descriptions, scheduled tickets, automations, and message templates:
+
+- `{{ huntress.sat.learners.enrolled }}` – active/enrolled learner count for the current company.
+- `{{ huntress_sat_enrolled_learners }}` – invoice-friendly alias for the same learner count.
+- `{{ huntress_sat_learner_count }}` – legacy-style alias for the same learner count.
+
+The value is read from the last successful Huntress sync snapshot, so rendering templates never makes live Curricula API calls.

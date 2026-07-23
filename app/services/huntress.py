@@ -2,8 +2,10 @@
 
 The Huntress integration has no UI settings — credentials are read from the
 environment (``HUNTRESS_API_KEY`` / ``HUNTRESS_API_SECRET`` /
-``HUNTRESS_BASE_URL``) and the module is gated by the standard
-``integration_modules`` enable/disable toggle.
+``HUNTRESS_BASE_URL`` plus ``CURRICULA_API_KEY`` /
+``CURRICULA_API_SECRET`` / ``CURRICULA_BASE_URL`` for Managed SAT)
+and the module is gated by the standard ``integration_modules``
+enable/disable toggle.
 
 The service exposes thin wrappers per Huntress endpoint family and a
 ``refresh_company`` orchestrator that pulls every product (EDR, ITDR, SAT,
@@ -59,6 +61,17 @@ def _get_credentials() -> dict[str, str] | None:
     return {"api_key": api_key, "api_secret": api_secret, "base_url": base_url}
 
 
+
+def _get_curricula_credentials() -> dict[str, str] | None:
+    settings = get_settings()
+    api_key = (settings.curricula_api_key or "").strip()
+    api_secret = (settings.curricula_api_secret or "").strip()
+    base_url = (settings.curricula_base_url or "").strip().rstrip("/")
+    if not api_key or not api_secret or not base_url:
+        return None
+    return {"api_key": api_key, "api_secret": api_secret, "base_url": base_url}
+
+
 def credentials_status() -> dict[str, bool]:
     """Lightweight, non-secret status used by the modules admin page."""
     settings = get_settings()
@@ -66,6 +79,13 @@ def credentials_status() -> dict[str, bool]:
         "api_key_present": bool((settings.huntress_api_key or "").strip()),
         "api_secret_present": bool((settings.huntress_api_secret or "").strip()),
         "base_url_present": bool((settings.huntress_base_url or "").strip()),
+        "curricula_api_key_present": bool((settings.curricula_api_key or "").strip()),
+        "curricula_api_secret_present": bool(
+            (settings.curricula_api_secret or "").strip()
+        ),
+        "curricula_base_url_present": bool(
+            (settings.curricula_base_url or "").strip()
+        ),
     }
 
 
@@ -213,13 +233,73 @@ async def get_itdr_summary(org_id: str) -> dict[str, int]:
 
 
 async def get_sat_summary(org_id: str) -> dict[str, Any] | None:
-    """SAT endpoints are not currently exposed in Huntress public API docs."""
-    return None
+    """Return Huntress Managed SAT learner and progress rollups for an account.
+
+    Curricula/Huntress Managed SAT uses the JSON:API REST API at
+    ``https://mycurricula.com/api/v1`` with client-credentials API clients. The
+    useful billing/reporting metric exposed by third-party reconciliation docs
+    is the active learner count; where assignment progress is returned, we also
+    calculate average completion and score from the learner rows.
+    """
+    rows = await get_sat_learner_breakdown(org_id)
+    if rows is None:
+        return None
+
+    learner_ids = {
+        str(row.get("learner_external_id") or row.get("learner_email") or "").strip()
+        for row in rows
+        if row.get("learner_external_id") or row.get("learner_email")
+    }
+    completions = [float(row.get("completion_percent") or 0) for row in rows]
+    scores = [
+        float(row.get("score") or 0)
+        for row in rows
+        if row.get("score") is not None
+    ]
+    return {
+        "enrolled_learners": len(learner_ids) or len(rows),
+        "avg_completion_rate": (
+            (sum(completions) / len(completions)) if completions else 0
+        ),
+        "avg_score": (sum(scores) / len(scores)) if scores else 0,
+        "phishing_clicks": sum(
+            1 for row in rows if float(row.get("click_rate") or 0) > 0
+        ),
+        "phishing_compromises": sum(
+            1 for row in rows if float(row.get("compromise_rate") or 0) > 0
+        ),
+        "phishing_reports": sum(
+            1 for row in rows if float(row.get("report_rate") or 0) > 0
+        ),
+    }
 
 
 async def get_sat_learner_breakdown(org_id: str) -> list[dict[str, Any]] | None:
-    """SAT learner detail endpoints are not currently exposed in public API docs."""
-    return None
+    """Return per-learner SAT progress rows from the Curricula JSON:API.
+
+    The public Stoplight docs describe Curricula as a JSON:API REST API for
+    channel partners. Tenant responses can vary by API version, so this parser
+    accepts common JSON:API shapes and normalises learner/account assignment
+    fields into the snapshot table schema used by reports.
+    """
+    credentials = _get_curricula_credentials()
+    if not credentials:
+        raise HuntressConfigurationError(
+            "Curricula credentials are not configured (set CURRICULA_API_KEY and "
+            "CURRICULA_API_SECRET)."
+        )
+
+    async with _client(credentials) as client:
+        payload = await _get_json(
+            client,
+            f"/accounts/{org_id}/learners",
+            {"include": "assignments,progress", "page[size]": 100},
+            allow_not_found=True,
+        )
+    if payload is None:
+        return None
+    learners = _extract_list(payload, key="learners")
+    return [_normalise_sat_learner(row) for row in learners if isinstance(row, Mapping)]
 
 
 async def get_siem_data_volume(org_id: str, days: int = 30) -> dict[str, Any] | None:
@@ -318,6 +398,7 @@ async def refresh_company(company: Mapping[str, Any]) -> dict[str, Any]:
     if sat is not None:
         await huntress_repo.upsert_sat_stats(
             company_id,
+            enrolled_learners=sat.get("enrolled_learners", 0),
             avg_completion_rate=sat["avg_completion_rate"],
             avg_score=sat["avg_score"],
             phishing_clicks=sat["phishing_clicks"],
@@ -437,6 +518,60 @@ def _extract_list(payload: Any, *, key: str) -> list[Any]:
                 return [item for item in value if isinstance(item, (dict, list))]
     return []
 
+
+
+def _jsonapi_attrs(row: Mapping[str, Any]) -> dict[str, Any]:
+    attrs = row.get("attributes")
+    if isinstance(attrs, Mapping):
+        merged = dict(attrs)
+        if row.get("id") is not None:
+            merged.setdefault("id", row.get("id"))
+        return merged
+    return dict(row)
+
+
+def _first_value(payload: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in payload and payload.get(key) is not None:
+            return payload.get(key)
+    return None
+
+
+def _normalise_sat_learner(row: Mapping[str, Any]) -> dict[str, Any]:
+    data = _jsonapi_attrs(row)
+    learner_id = _first_value(
+        data, "learner_external_id", "learner_id", "user_id", "id", "uuid"
+    )
+    assignment_id = _first_value(
+        data, "assignment_id", "training_assignment_id", "campaign_id", "course_id"
+    )
+    if not assignment_id:
+        assignment_id = "learner-summary"
+    completion = _first_value(
+        data,
+        "completion_percent",
+        "progress",
+        "progress_percent",
+        "percent_complete",
+        "completion_rate",
+    )
+    return {
+        "learner_external_id": str(learner_id or data.get("email") or "").strip(),
+        "learner_email": _first_value(data, "learner_email", "email", "user_email"),
+        "learner_name": _first_value(
+            data, "learner_name", "name", "full_name", "display_name"
+        ),
+        "assignment_id": str(assignment_id),
+        "assignment_name": _first_value(
+            data, "assignment_name", "training_name", "course_name", "campaign_name"
+        ),
+        "status": _first_value(data, "status", "state", "enrollment_status"),
+        "completion_percent": _coerce_float(completion),
+        "score": _coerce_float(_first_value(data, "score", "average_score", "quiz_score")),
+        "click_rate": _coerce_float(_first_value(data, "click_rate", "phishing_click_rate")),
+        "compromise_rate": _coerce_float(_first_value(data, "compromise_rate", "phishing_compromise_rate")),
+        "report_rate": _coerce_float(_first_value(data, "report_rate", "phishing_report_rate")),
+    }
 
 def _extract_next_page_token(payload: Any) -> str | None:
     """Return the ``next_page_token`` from a Huntress paginated response, or ``None``."""

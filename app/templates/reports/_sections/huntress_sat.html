@@ -10,7 +10,8 @@
   </header>
   <div class="card__body">
     {{ counter_strip(items=[
-      {'label': 'Avg completion', 'value': '%.1f%%' | format(section.data.avg_completion_rate or 0), 'variant': 'info'},
+      {'label': 'Enrolled learners', 'value': section.data.enrolled_learners or 0, 'variant': 'info'},
+      {'label': 'Avg progress', 'value': '%.1f%%' | format(section.data.avg_completion_rate or 0), 'variant': 'info'},
       {'label': 'Avg score', 'value': '%.1f' | format(section.data.avg_score or 0), 'variant': 'info'},
       {'label': 'Phishing clicks', 'value': section.data.phishing_clicks or 0, 'variant': 'danger'},
       {'label': 'Phishing compromises', 'value': section.data.phishing_compromises or 0, 'variant': 'danger'},
