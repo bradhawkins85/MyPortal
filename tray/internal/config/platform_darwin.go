@@ -2,11 +2,7 @@
 
 package config
 
-import (
-	"bufio"
-	"os"
-	"strings"
-)
+import "os"
 
 const macOSEnvFile = "/Library/Preferences/io.myportal.tray.env"
 
@@ -17,28 +13,11 @@ func loadMacOS() (*Config, error) {
 	}
 	defer f.Close()
 
-	vals := make(map[string]string)
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) == 2 {
-			vals[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
-		}
+	cfg, err := parseEnvConfig(f)
+	if err != nil {
+		return nil, err
 	}
-
-	au := true
-	if strings.ToLower(vals["AUTO_UPDATE"]) == "false" {
-		au = false
-	}
-	return &Config{
-		PortalURL:  vals["MYPORTAL_URL"],
-		EnrolToken: vals["ENROL_TOKEN"],
-		AutoUpdate: au,
-	}, nil
+	return cfg, nil
 }
 
 func loadWindows() (*Config, error) {

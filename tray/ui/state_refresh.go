@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/bradhawkins85/myportal-tray/internal/config"
 	"github.com/bradhawkins85/myportal-tray/internal/logger"
 )
 
@@ -12,9 +13,10 @@ import (
 // source available, in this order:
 //  1. MYPORTAL_URL environment variable (always wins; never overwritten).
 //  2. tray-state.json (written by the service after a successful enrolment).
-//  3. HKLM\Software\MyPortal\Tray\PortalURL on Windows (written by the MSI
-//     at install time). This lets the tray contact the server on first launch,
-//     before the service has finished enrolling the device.
+//  3. Platform install configuration: /Library/Preferences/io.myportal.tray.env
+//     on macOS, or HKLM\Software\MyPortal\Tray\PortalURL on Windows. This
+//     lets the tray contact the server on first launch, before the service has
+//     finished enrolling the device.
 //
 // Called both at startup and whenever a config_changed IPC message arrives.
 func refreshPortalURL() {
@@ -38,6 +40,13 @@ func refreshPortalURL() {
 		}
 	} else {
 		logger.Debug("refreshPortalURL: %s not readable yet (%v)", p, err)
+	}
+	if installCfg, cfgErr := config.Load(); cfgErr != nil {
+		logger.Warn("refreshPortalURL: install config not readable (%v)", cfgErr)
+	} else if installCfg.PortalURL != "" {
+		gPortalURL = installCfg.PortalURL
+		logger.Debug("refreshPortalURL: using portal URL from install config (%s)", installCfg.PortalURL)
+		return
 	}
 	if regURL := portalURLFromRegistry(); regURL != "" {
 		gPortalURL = regURL
