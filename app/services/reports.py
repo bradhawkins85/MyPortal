@@ -235,8 +235,8 @@ async def _list_active_staff_accounts(company_id: int) -> list[dict[str, Any]]:
 
 
 async def _build_staff(company_id: int) -> dict[str, Any]:
-    total = await staff_repo.count_staff(company_id, enabled=True, exclude_package_staff=True)
-    return {"total_active": int(total)}
+    accounts = await _list_active_staff_accounts(company_id)
+    return {"total_active": len(accounts), "accounts": accounts}
 
 
 async def _build_active_user_accounts(company_id: int) -> dict[str, Any]:

@@ -91,3 +91,25 @@ def test_webhooks_pack_loads_and_reloads_cleanly():
         await registry.unload_all()
 
     asyncio.new_event_loop().run_until_complete(_run())
+
+
+def test_admin_webhooks_loads_larger_searchable_history_window():
+    import inspect
+
+    signature = inspect.signature(webhooks_routes.admin_webhooks)
+
+    assert signature.parameters["event_limit"].default.default == 1000
+    source = inspect.getsource(webhooks_routes.admin_webhooks)
+    assert "le=5000" in source
+    assert "search=q" in source
+
+
+def test_webhook_history_template_exposes_server_side_search_controls():
+    from pathlib import Path
+
+    template = Path("app/templates/admin/webhooks.html").read_text()
+
+    assert 'name="q"' in template
+    assert 'name="event_limit"' in template
+    assert "Search history" in template
+    assert "Increase the history window" in template

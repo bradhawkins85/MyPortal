@@ -2732,7 +2732,8 @@ async def list_quote_summaries(company_id: int) -> list[dict[str, Any]]:
             MAX(notes) AS notes,
             MAX(po_number) AS po_number,
             MAX(name) AS name,
-            MAX(assigned_user_id) AS assigned_user_id
+            MAX(assigned_user_id) AS assigned_user_id,
+            MAX(magic_link_token) AS magic_link_token
         FROM shop_quotes
         WHERE company_id = %s
         GROUP BY quote_number, company_id
@@ -2758,7 +2759,8 @@ async def get_quote_summary(
             MAX(notes) AS notes,
             MAX(po_number) AS po_number,
             MAX(name) AS name,
-            MAX(assigned_user_id) AS assigned_user_id
+            MAX(assigned_user_id) AS assigned_user_id,
+            MAX(magic_link_token) AS magic_link_token
         FROM shop_quotes
         WHERE quote_number = %s AND company_id = %s
         GROUP BY quote_number, company_id
@@ -2768,6 +2770,46 @@ async def get_quote_summary(
     if not row:
         return None
     return _normalise_quote_summary(row)
+
+
+async def get_quote_summary_by_magic_link_token(token: str) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        """
+        SELECT
+            quote_number,
+            company_id,
+            MAX(user_id) AS user_id,
+            MAX(created_at) AS created_at,
+            MAX(expires_at) AS expires_at,
+            MAX(status) AS status,
+            MAX(notes) AS notes,
+            MAX(po_number) AS po_number,
+            MAX(name) AS name,
+            MAX(assigned_user_id) AS assigned_user_id,
+            MAX(magic_link_token) AS magic_link_token
+        FROM shop_quotes
+        WHERE magic_link_token = %s
+        GROUP BY quote_number, company_id
+        """,
+        (token,),
+    )
+    if not row:
+        return None
+    return _normalise_quote_summary(row)
+
+
+async def set_quote_magic_link_token(
+    quote_number: str, company_id: int, token: str
+) -> dict[str, Any] | None:
+    existing = await get_quote_summary(quote_number, company_id)
+    if not existing:
+        return None
+
+    await db.execute(
+        "UPDATE shop_quotes SET magic_link_token = %s WHERE quote_number = %s AND company_id = %s",
+        (token, quote_number, company_id),
+    )
+    return await get_quote_summary(quote_number, company_id)
 
 
 async def update_quote(
@@ -2876,6 +2918,7 @@ def _normalise_quote_summary(row: dict[str, Any]) -> dict[str, Any]:
     summary["po_number"] = row.get("po_number")
     summary["name"] = row.get("name")
     summary["assigned_user_id"] = _coerce_optional_int(row.get("assigned_user_id"))
+    summary["magic_link_token"] = row.get("magic_link_token")
     summary["created_at"] = _normalise_datetime(row.get("created_at"))
     summary["expires_at"] = _normalise_datetime(row.get("expires_at"))
     return summary

@@ -166,8 +166,31 @@
 
     {% elif section.key == 'staff' %}
       <section class="report-section">
-        <h2>Active staff</h2>
-        {{ stats([{'label': 'Active staff', 'value': section.data.total_active or 0, 'variant': 'info'}]) }}
+        <h2>Active user accounts</h2>
+        {{ stats([{'label': 'Active users', 'value': section.data.total_active or 0, 'variant': 'info'}]) }}
+        {% set accounts = section.data.accounts or [] %}
+        {% if accounts %}
+          <table class="report-table">
+            <thead><tr>
+              <th>First Name</th><th>Last Name</th><th>Email Address</th>
+              <th>Department</th><th>Job Title</th><th>O365 Last Sign In</th>
+            </tr></thead>
+            <tbody>
+              {% for account in accounts %}
+                <tr>
+                  <td>{{ account.first_name or '—' }}</td>
+                  <td>{{ account.last_name or '—' }}</td>
+                  <td>{{ account.email or '—' }}</td>
+                  <td>{{ account.department or '—' }}</td>
+                  <td>{{ account.job_title or '—' }}</td>
+                  <td>{{ account.m365_last_sign_in or '—' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="empty">No active user accounts are recorded for this company.</p>
+        {% endif %}
       </section>
 
     {% elif section.key == 'active_user_accounts' %}

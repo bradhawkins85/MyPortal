@@ -132,12 +132,34 @@ async def get_event(event_id: int) -> dict[str, Any] | None:
     return _normalise_event(row) if row else None
 
 
-async def list_events(*, status: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+async def list_events(
+    *,
+    status: str | None = None,
+    search: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
     params: list[Any] = []
-    where = ""
+    clauses: list[str] = []
     if status:
-        where = "WHERE status = %s"
+        clauses.append("status = %s")
         params.append(status)
+    search_term = (search or "").strip()
+    if search_term:
+        like = f"%{search_term}%"
+        clauses.append(
+            "("
+            "name LIKE %s OR "
+            "target_url LIKE %s OR "
+            "source_url LIKE %s OR "
+            "status LIKE %s OR "
+            "direction LIKE %s OR "
+            "last_error LIKE %s OR "
+            "payload LIKE %s OR "
+            "metadata LIKE %s"
+            ")"
+        )
+        params.extend([like] * 8)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     params.append(limit)
     rows = await db.fetch_all(
         f"SELECT * FROM webhook_events {where} ORDER BY updated_at DESC LIMIT %s",

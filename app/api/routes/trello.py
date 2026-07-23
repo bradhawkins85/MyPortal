@@ -9,7 +9,6 @@ from loguru import logger
 
 from app.api.dependencies.auth import require_super_admin
 from app.core.config import get_settings
-from app.repositories import companies as company_repo
 from app.services import tickets as tickets_service
 from app.services import trello as trello_service
 from app.services import webhook_monitor
@@ -207,7 +206,10 @@ def _build_public_callback_url(request: Request) -> str:
        callback. Trello would then follow the proxy's HTTP→HTTPS ``301``
        redirect and downgrade its event ``POST`` to a ``GET``, so MyPortal
        would never receive real webhook events.
-    4. Fall back to ``request.base_url``.
+    4. For public-looking hosts, prefer ``https`` even when the ASGI request
+       scheme is ``http``. This protects deployments where the proxy does not
+       forward any ``X-Forwarded-*`` headers.
+    5. Fall back to ``request.base_url``.
     """
 
     settings = get_settings()
@@ -243,6 +245,17 @@ def _build_public_callback_url(request: Request) -> str:
     host = forwarded_host or request.headers.get("host") or request.url.netloc
     # Strip any path/query that a malformed header might contain.
     host = host.split("/")[0].strip()
+
+    hostname = host.rsplit("@", 1)[-1].split(":", 1)[0].strip().lower()
+    is_local_host = hostname in {"localhost", "127.0.0.1", "::1"} or hostname.endswith(
+        ".local"
+    )
+    if scheme == "http" and host and not is_local_host:
+        # A public host reached over the internal HTTP hop should still be
+        # registered with Trello as HTTPS. Trello does not preserve POST
+        # requests across Cloudflare/proxy 301 redirects, so an http://
+        # callback makes event delivery fail before the request reaches us.
+        scheme = "https"
     if not host:
         # Last-resort fallback to the ASGI base URL.
         return f"{str(request.base_url).rstrip('/')}{_WEBHOOK_PATH}"
@@ -251,12 +264,33 @@ def _build_public_callback_url(request: Request) -> str:
 
 
 
+_MAX_TICKET_SUBJECT_LENGTH = 255
+
+
+def _normalise_trello_ticket_subject(card_name: str | None) -> tuple[str, str | None]:
+    """Return a DB-safe ticket subject and the original when it was shortened."""
+    subject = str(card_name or "").strip() or "(no title)"
+    if len(subject) <= _MAX_TICKET_SUBJECT_LENGTH:
+        return subject, None
+    return f"{subject[: _MAX_TICKET_SUBJECT_LENGTH - 1]}…", subject
+
+
 def _build_trello_ticket_description(
     card_desc: str | None,
     card_url: str | None,
+    *,
+    original_card_name: str | None = None,
 ) -> str | None:
     """Return safe HTML containing the Trello card link and card content."""
     parts: list[str] = []
+
+    safe_original_name = str(original_card_name or "").strip()
+    if safe_original_name:
+        escaped_name = html.escape(safe_original_name).replace("\n", "<br>")
+        parts.append(
+            "<p><strong>Original Trello card title:</strong></p>"
+            f"<p>{escaped_name}</p>"
+        )
     safe_url = str(card_url or "").strip()
     if safe_url:
         escaped_url = html.escape(safe_url, quote=True)
@@ -303,12 +337,17 @@ async def _handle_create_card(
     full_card = await trello_service.get_card(card_id, company=company) if company else None
     card_payload = full_card or card_data
 
-    card_name: str = str(card_payload.get("name") or "").strip() or "(no title)"
+    raw_card_name: str = str(card_payload.get("name") or "").strip()
+    card_name, original_card_name = _normalise_trello_ticket_subject(raw_card_name)
     card_desc: str | None = str(card_payload.get("desc") or "").strip() or None
     card_url: str | None = str(
         card_payload.get("url") or card_payload.get("shortUrl") or ""
     ).strip() or None
-    ticket_description = _build_trello_ticket_description(card_desc, card_url)
+    ticket_description = _build_trello_ticket_description(
+        card_desc,
+        card_url,
+        original_card_name=original_card_name,
+    )
 
     try:
         ticket = await tickets_service.create_ticket(
@@ -330,7 +369,7 @@ async def _handle_create_card(
             card_id,
             exc,
         )
-        return
+        raise
 
     ticket_id = ticket.get("id")
     ticket_number = ticket.get("ticket_number") or ticket_id

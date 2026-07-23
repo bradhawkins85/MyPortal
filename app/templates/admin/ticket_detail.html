@@ -256,165 +256,6 @@
             <div class="card-collapsible__content">
             <div class="card__body card__body--meta">
               <dl class="definition-list">
-                {% if ticket.ai_tags_status or (ticket.ai_tags is not none and ticket.ai_tags|length > 0) %}
-                  <div class="definition-list__item">
-                    <dt>AI Tags</dt>
-                    <dd>
-                      {% if tag_status_lower == 'succeeded' and ticket.ai_tags %}
-                        <div class="tag-list" id="ai-tags-container">
-                          {% for tag in ticket.ai_tags %}
-                            <span class="tag" data-tag-slug="{{ tag }}">
-                              {{ tag.replace('-', ' ') }}
-                              {% if is_super_admin %}
-                                <button 
-                                  type="button" 
-                                  class="tag__remove" 
-                                  onclick="removeTag('{{ tag }}')"
-                                  aria-label="Remove tag {{ tag }}"
-                                  title="Remove this tag"
-                                >×</button>
-                                <button
-                                  type="button"
-                                  class="tag__exclude"
-                                  onclick="excludeAndRemoveTag('{{ tag }}')"
-                                  aria-label="Exclude tag {{ tag }} from future use"
-                                  title="Remove and exclude from future use"
-                                ><svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true"><path d="M8.27 3 3 8.27v7.46L8.27 21h7.46L21 15.73V8.27L15.73 3H8.27zm4.5 13h-1.5v-1.5h1.5V16zm0-3h-1.5V8h1.5v5z"/></svg></button>
-                              {% endif %}
-                            </span>
-                          {% endfor %}
-                        </div>
-                      {% elif tag_status_lower == 'succeeded' %}
-                        <span class="card__empty">Ollama did not return tags for this ticket.</span>
-                      {% elif tag_status_lower == 'skipped' %}
-                        <span class="card__empty">Enable the Ollama integration module to generate tags.</span>
-                      {% elif tag_status_lower == 'error' %}
-                        <span class="card__empty">AI tag generation failed. Check the Ollama module logs.</span>
-                      {% else %}
-                        <span class="card__empty">AI tags are not currently available.</span>
-                      {% endif %}
-                    </dd>
-                  </div>
-                {% endif %}
-                <div class="definition-list__item">
-                  <dt>Module</dt>
-                  <dd>{{ ticket_module.name if ticket_module else (ticket.module_slug or '—') }}</dd>
-                </div>
-                <div class="definition-list__item">
-                  <dt><label class="form-label" for="ticket-category-detail">Category</label></dt>
-                  <dd>
-                    <input
-                      id="ticket-category-detail"
-                      name="category"
-                      form="ticket-details-form"
-                      class="form-input"
-                      maxlength="64"
-                      value="{{ ticket.category or '' }}"
-                      placeholder="Networking, onboarding, escalation…"
-                    />
-                  </dd>
-                </div>
-                <div class="definition-list__item">
-                  <dt><label class="form-label" for="ticket-reference-detail">External reference</label></dt>
-                  <dd>
-                    <input
-                      id="ticket-reference-detail"
-                      name="externalReference"
-                      form="ticket-details-form"
-                      class="form-input"
-                      maxlength="128"
-                      value="{{ ticket.external_reference or '' }}"
-                      placeholder="Syncro ID or external case"
-                    />
-                  </dd>
-                </div>
-                <div class="definition-list__item">
-                  <dt><label class="form-label" for="ticket-shipment-tracking-url">Shipment tracking URL</label></dt>
-                  <dd>
-                    <input
-                      id="ticket-shipment-tracking-url"
-                      name="shipmentTrackingUrl"
-                      form="ticket-details-form"
-                      class="form-input"
-                      maxlength="500"
-                      value="{{ ticket_shipment_watch.tracking_url if ticket_shipment_watch else '' }}"
-                      placeholder="Paste the full carrier tracking URL"
-                      data-shipment-watch-url
-                    />
-                    <div class="form-help" style="margin-top: 6px;">
-                      Provider:
-                      <strong data-shipment-watch-provider>{{ ticket_shipment_watch.provider|title if ticket_shipment_watch and ticket_shipment_watch.provider else 'Not detected' }}</strong>
-                      {% if ticket_shipment_watch and ticket_shipment_watch.last_checked_at %}
-                        · Last checked {{ ticket_shipment_watch.last_checked_at.astimezone().strftime('%Y-%m-%d %H:%M') }}
-                      {% endif %}
-                      {% if ticket_shipment_watch and ticket_shipment_watch.last_posted_update_at %}
-                        · Last posted {{ ticket_shipment_watch.last_posted_update_at.astimezone().strftime('%Y-%m-%d %H:%M') }}
-                      {% endif %}
-                    </div>
-                  </dd>
-                </div>
-                <div class="definition-list__item">
-                  <dt><label class="form-label" for="ticket-shipment-poll-interval">Shipment poll interval (seconds)</label></dt>
-                  <dd>
-                    <input
-                      id="ticket-shipment-poll-interval"
-                      name="shipmentPollIntervalSeconds"
-                      form="ticket-details-form"
-                      class="form-input"
-                      type="number"
-                      min="60"
-                      max="86400"
-                      value="{{ ticket_shipment_watch.poll_interval_seconds if ticket_shipment_watch else 900 }}"
-                    />
-                    <div class="form-field form-field--checkbox">
-                      <label class="checkbox" for="ticket-shipment-monitoring-enabled">
-                        <input
-                          id="ticket-shipment-monitoring-enabled"
-                          type="checkbox"
-                          name="shipmentMonitoringEnabled"
-                          value="1"
-                          form="ticket-details-form"
-                          {% if not ticket_shipment_watch or ticket_shipment_watch.active %}checked{% endif %}
-                        />
-                        <span>Enable shipment monitoring for this ticket</span>
-                      </label>
-                    </div>
-                    <div class="form-field form-field--checkbox">
-                      <label class="checkbox" for="ticket-shipment-public-comments-enabled">
-                        <input
-                          id="ticket-shipment-public-comments-enabled"
-                          type="checkbox"
-                          name="shipmentPublicCommentsEnabled"
-                          value="1"
-                          form="ticket-details-form"
-                          {% if not ticket_shipment_watch or ticket_shipment_watch.public_comments_enabled %}checked{% endif %}
-                        />
-                        <span>Post shipping updates as public ticket comments</span>
-                      </label>
-                    </div>
-                  </dd>
-                </div>
-                {% if ticket_assets %}
-                  <div class="definition-list__item">
-                    <dt>Assets</dt>
-                    <dd>
-                      <div class="tag-list">
-                        {% for asset in ticket_assets %}
-                      {% set asset_label = asset.name %}
-                          <span class="tag">{{ asset_label }}</span>
-                        {% endfor %}
-                      </div>
-                    </dd>
-                  </div>
-                {% endif %}
-                <div class="definition-list__item">
-                  <dt>Created</dt>
-                  <dd>{{ ticket.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.created_at else '—' }}</dd>
-                </div>
-                <div class="definition-list__item">
-                  <dt>Updated</dt>
-                  <dd>{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</dd>
-                </div>
                 <div class="definition-list__item">
                   <dt>Watchers</dt>
                   <dd>
@@ -516,12 +357,161 @@
                   </dd>
                 </div>
                 <div class="definition-list__item">
+                  <dt><label class="form-label" for="ticket-reference-detail">External reference</label></dt>
+                  <dd>
+                    <input
+                      id="ticket-reference-detail"
+                      name="externalReference"
+                      form="ticket-details-form"
+                      class="form-input"
+                      maxlength="128"
+                      value="{{ ticket.external_reference or '' }}"
+                      placeholder="Syncro ID or external case"
+                    />
+                  </dd>
+                </div>
+                <div class="definition-list__item">
                   <dt>Billable minutes</dt>
                   <dd data-ticket-billable-total>{{ ticket_billable_minutes }}</dd>
                 </div>
                 <div class="definition-list__item">
                   <dt>Non-billable minutes</dt>
                   <dd data-ticket-non-billable-total>{{ ticket_non_billable_minutes }}</dd>
+                </div>
+                <div class="definition-list__item">
+                  <dt><label class="form-label" for="ticket-shipment-tracking-url">Shipment tracking URL</label></dt>
+                  <dd>
+                    <input
+                      id="ticket-shipment-tracking-url"
+                      name="shipmentTrackingUrl"
+                      form="ticket-details-form"
+                      class="form-input"
+                      maxlength="500"
+                      value="{{ ticket_shipment_watch.tracking_url if ticket_shipment_watch else '' }}"
+                      placeholder="Paste the full carrier tracking URL"
+                      data-shipment-watch-url
+                    />
+                    <div class="form-help" style="margin-top: 6px;">
+                      Provider:
+                      <strong data-shipment-watch-provider>{{ ticket_shipment_watch.provider|title if ticket_shipment_watch and ticket_shipment_watch.provider else 'Not detected' }}</strong>
+                      {% if ticket_shipment_watch and ticket_shipment_watch.last_checked_at %}
+                        · Last checked {{ ticket_shipment_watch.last_checked_at.astimezone().strftime('%Y-%m-%d %H:%M') }}
+                      {% endif %}
+                      {% if ticket_shipment_watch and ticket_shipment_watch.last_posted_update_at %}
+                        · Last posted {{ ticket_shipment_watch.last_posted_update_at.astimezone().strftime('%Y-%m-%d %H:%M') }}
+                      {% endif %}
+                    </div>
+                  </dd>
+                </div>
+                <div class="definition-list__item">
+                  <dt><label class="form-label" for="ticket-shipment-poll-interval">Shipment poll interval (seconds)</label></dt>
+                  <dd>
+                    <input
+                      id="ticket-shipment-poll-interval"
+                      name="shipmentPollIntervalSeconds"
+                      form="ticket-details-form"
+                      class="form-input"
+                      type="number"
+                      min="0"
+                      max="86400"
+                      value="{{ ticket_shipment_watch.poll_interval_seconds if ticket_shipment_watch else 900 }}"
+                    />
+                    <div class="form-help" style="margin-top: 6px;">
+                      Set to 0 to disable shipment lookups for this ticket. Positive intervals poll at the configured rate.
+                    </div>
+                    <div class="form-field form-field--checkbox">
+                      <label class="checkbox" for="ticket-shipment-public-comments-enabled">
+                        <input
+                          id="ticket-shipment-public-comments-enabled"
+                          type="checkbox"
+                          name="shipmentPublicCommentsEnabled"
+                          value="1"
+                          form="ticket-details-form"
+                          {% if not ticket_shipment_watch or ticket_shipment_watch.public_comments_enabled %}checked{% endif %}
+                        />
+                        <span>Post shipping updates as public ticket comments</span>
+                      </label>
+                    </div>
+                  </dd>
+                </div>
+                {% if ticket_assets %}
+                  <div class="definition-list__item">
+                    <dt>Assets</dt>
+                    <dd>
+                      <div class="tag-list">
+                        {% for asset in ticket_assets %}
+                      {% set asset_label = asset.name %}
+                          <span class="tag">{{ asset_label }}</span>
+                        {% endfor %}
+                      </div>
+                    </dd>
+                  </div>
+                {% endif %}
+                {% if ticket.ai_tags_status or (ticket.ai_tags is not none and ticket.ai_tags|length > 0) %}
+                  <div class="definition-list__item">
+                    <dt>AI Tags</dt>
+                    <dd>
+                      {% if tag_status_lower == 'succeeded' and ticket.ai_tags %}
+                        <div class="tag-list" id="ai-tags-container">
+                          {% for tag in ticket.ai_tags %}
+                            <span class="tag" data-tag-slug="{{ tag }}">
+                              {{ tag.replace('-', ' ') }}
+                              {% if is_super_admin %}
+                                <button 
+                                  type="button" 
+                                  class="tag__remove" 
+                                  onclick="removeTag('{{ tag }}')"
+                                  aria-label="Remove tag {{ tag }}"
+                                  title="Remove this tag"
+                                >×</button>
+                                <button
+                                  type="button"
+                                  class="tag__exclude"
+                                  onclick="excludeAndRemoveTag('{{ tag }}')"
+                                  aria-label="Exclude tag {{ tag }} from future use"
+                                  title="Remove and exclude from future use"
+                                ><svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true"><path d="M8.27 3 3 8.27v7.46L8.27 21h7.46L21 15.73V8.27L15.73 3H8.27zm4.5 13h-1.5v-1.5h1.5V16zm0-3h-1.5V8h1.5v5z"/></svg></button>
+                              {% endif %}
+                            </span>
+                          {% endfor %}
+                        </div>
+                      {% elif tag_status_lower == 'succeeded' %}
+                        <span class="card__empty">Ollama did not return tags for this ticket.</span>
+                      {% elif tag_status_lower == 'skipped' %}
+                        <span class="card__empty">Enable the Ollama integration module to generate tags.</span>
+                      {% elif tag_status_lower == 'error' %}
+                        <span class="card__empty">AI tag generation failed. Check the Ollama module logs.</span>
+                      {% else %}
+                        <span class="card__empty">AI tags are not currently available.</span>
+                      {% endif %}
+                    </dd>
+                  </div>
+                {% endif %}
+                <div class="definition-list__item">
+                  <dt>Module</dt>
+                  <dd>{{ ticket_module.name if ticket_module else (ticket.module_slug or '—') }}</dd>
+                </div>
+                <div class="definition-list__item">
+                  <dt><label class="form-label" for="ticket-category-detail">Category</label></dt>
+                  <dd>
+                    <input
+                      id="ticket-category-detail"
+                      name="category"
+                      form="ticket-details-form"
+                      class="form-input"
+                      maxlength="64"
+                      value="{{ ticket.category or '' }}"
+                      placeholder="Networking, onboarding, escalation…"
+                    />
+                  </dd>
+                </div>
+                <div class="definition-list__item">
+                  <dt>Created</dt>
+                  <dd>{{ ticket.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.created_at else '—' }}</dd>
+                </div>
+                <div class="definition-list__item">
+                  <dt>Updated</dt>
+                  <dd>{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</dd>
                 </div>
               </dl>
             </div>
