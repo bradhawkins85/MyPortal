@@ -181,18 +181,25 @@ def _extract_issue_list_requests(tokens: Iterable[str]) -> dict[str, str]:
 
 
 def _extract_report_requests(tokens: Iterable[str]) -> dict[str, tuple[str, str]]:
-    """Extract report.slug.count and report.slug.list tokens."""
+    """Extract saved-report count/list tokens.
+
+    Supports both the explicit ``report.slug.count`` form and the legacy
+    ``slug.count`` shorthand used by recurring invoice item quantities.
+    """
     requests: dict[str, tuple[str, str]] = {}
     for token in tokens:
         if not token:
             continue
         parts = token.split(".")
-        if len(parts) < 3 or parts[0].lower() != "report":
+        if len(parts) < 2:
             continue
         action = parts[-1].lower()
         if action not in {"count", "list"}:
             continue
-        slug = ".".join(parts[1:-1]).strip()
+        if len(parts) >= 3 and parts[0].lower() == "report":
+            slug = ".".join(parts[1:-1]).strip()
+        else:
+            slug = ".".join(parts[:-1]).strip()
         if slug:
             requests[token] = (slug, action)
     return requests
