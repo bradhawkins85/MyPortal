@@ -170,6 +170,34 @@
         {{ stats([{'label': 'Active staff', 'value': section.data.total_active or 0, 'variant': 'info'}]) }}
       </section>
 
+    {% elif section.key == 'active_user_accounts' %}
+      <section class="report-section">
+        <h2>Active user accounts</h2>
+        {% set accounts = section.data.accounts or [] %}
+        {% if accounts %}
+          <table class="report-table">
+            <thead><tr>
+              <th>First Name</th><th>Last Name</th><th>Email Address</th>
+              <th>Department</th><th>Job Title</th><th>O365 Last Sign In</th>
+            </tr></thead>
+            <tbody>
+              {% for account in accounts %}
+                <tr>
+                  <td>{{ account.first_name or '—' }}</td>
+                  <td>{{ account.last_name or '—' }}</td>
+                  <td>{{ account.email or '—' }}</td>
+                  <td>{{ account.department or '—' }}</td>
+                  <td>{{ account.job_title or '—' }}</td>
+                  <td>{{ account.m365_last_sign_in or '—' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="empty">No active user accounts are recorded for this company.</p>
+        {% endif %}
+      </section>
+
     {% elif section.key == 'm365_best_practices' %}
       <section class="report-section">
         <h2>M365 best practice summary</h2>
@@ -513,27 +541,57 @@
 
       {% elif section.key == 'staff' %}
         <section class="report-section" style="{{ pb }}">
-          <h2>Staff — Full list</h2>
+          <h2>Active user accounts — Full list</h2>
           {% set staff = dd.staff or [] %}
           {% if staff %}
             <table class="report-table">
               <thead><tr>
-                <th>Name</th><th>Email</th><th>Mobile</th><th>Department</th><th>Position</th>
+                <th>First Name</th><th>Last Name</th><th>Email Address</th>
+                <th>Department</th><th>Job Title</th><th>O365 Last Sign In</th>
               </tr></thead>
               <tbody>
                 {% for member in staff %}
                   <tr>
-                    <td>{{ member.name or '—' }}</td>
+                    <td>{{ member.first_name or '—' }}</td>
+                    <td>{{ member.last_name or '—' }}</td>
                     <td>{{ member.email or '—' }}</td>
-                    <td>{{ member.mobile_phone or '—' }}</td>
                     <td>{{ member.department or '—' }}</td>
-                    <td>{{ member.position or '—' }}</td>
+                    <td>{{ member.job_title or '—' }}</td>
+                    <td>{{ member.m365_last_sign_in or '—' }}</td>
                   </tr>
                 {% endfor %}
               </tbody>
             </table>
           {% else %}
-            <p class="empty">No active staff recorded.</p>
+            <p class="empty">No active user accounts recorded.</p>
+          {% endif %}
+        </section>
+
+      {% elif section.key == 'active_user_accounts' %}
+        <section class="report-section" style="{{ pb }}">
+          <h2>Active user accounts — Full list</h2>
+          {% set accounts = dd.accounts or [] %}
+          {% if accounts %}
+            <table class="report-table">
+              <thead><tr>
+                <th>First Name</th><th>Last Name</th><th>Email Address</th>
+                <th>Department</th><th>Job Title</th><th>O365 Last Sign In</th>
+              </tr></thead>
+              <tbody>
+                {% for account in accounts %}
+                  <tr>
+                    <td>{{ account.first_name or '—' }}</td>
+                    <td>{{ account.last_name or '—' }}</td>
+                    <td>{{ account.email or '—' }}</td>
+                    <td>{{ account.department or '—' }}</td>
+                    <td>{{ account.job_title or '—' }}</td>
+                    <td>{{ account.m365_last_sign_in or '—' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="empty">No active user accounts recorded.</p>
           {% endif %}
         </section>
 

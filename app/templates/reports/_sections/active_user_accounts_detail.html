@@ -1,11 +1,11 @@
-<section class="card card--panel" data-report-section="staff_detail">
+<section class="card card--panel" data-report-section="active_user_accounts_detail">
   <header class="card__header report-section__header">
     <h2>Active user accounts — Full list</h2>
     <span class="report-section__meta">{{ section.detail_data.total or 0 }} active users</span>
   </header>
   <div class="card__body">
-    {% set staff = section.detail_data.staff or [] %}
-    {% if staff %}
+    {% set accounts = section.detail_data.accounts or [] %}
+    {% if accounts %}
       <div class="table-wrapper">
       <table class="table">
         <thead>
@@ -16,19 +16,17 @@
             <th>Department</th>
             <th>Job Title</th>
             <th>O365 Last Sign In</th>
-            <th>Onboarding status</th>
           </tr>
         </thead>
         <tbody>
-          {% for member in staff %}
+          {% for account in accounts %}
             <tr>
-              <td>{{ member.first_name or '—' }}</td>
-              <td>{{ member.last_name or '—' }}</td>
-              <td>{{ member.email or '—' }}</td>
-              <td>{{ member.department or '—' }}</td>
-              <td>{{ member.job_title or '—' }}</td>
-              <td data-utc="{{ member.m365_last_sign_in or '' }}">{{ member.m365_last_sign_in or '—' }}</td>
-              <td>{{ member.onboarding_status or '—' }}</td>
+              <td>{{ account.first_name or '—' }}</td>
+              <td>{{ account.last_name or '—' }}</td>
+              <td>{{ account.email or '—' }}</td>
+              <td>{{ account.department or '—' }}</td>
+              <td>{{ account.job_title or '—' }}</td>
+              <td data-utc="{{ account.m365_last_sign_in or '' }}">{{ account.m365_last_sign_in or '—' }}</td>
             </tr>
           {% endfor %}
         </tbody>
