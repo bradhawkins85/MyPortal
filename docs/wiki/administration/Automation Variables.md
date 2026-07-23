@@ -265,3 +265,68 @@ When a valid company or requester timezone is available, local tokens are also p
 | `${vars.now.local.display}` | Local display date (`Mon DD, YYYY`) | `Mar 30, 2026` |
 | `${vars.now.local.datetime}` | Local display datetime | `2026-03-30 10:22:01 EDT` |
 | `${vars.now.local.timezone}` | Resolved IANA timezone | `America/New_York` |
+
+#### Scheduled ticket and automation payload date expressions
+
+Scheduled ticket JSON payloads and other automation payload fields that use the shared template renderer can use `${vars.now...}` expressions anywhere a string value is accepted. These expressions are evaluated before the ticket is created, so they are safe to use in JSON fields such as `subject`, `description`, `category`, or webhook payload values.
+
+**Common scheduled ticket examples**
+
+```json
+{
+  "subject": "GMP Backup Restore Testing - ${vars.now.local.date}",
+  "description": "Monthly restore test for ${vars.now.local.date}.format(\"MMMM yyyy\")",
+  "priority": "normal",
+  "status": "new"
+}
+```
+
+If this automation runs on March 30, 2026, the subject becomes `GMP Backup Restore Testing - 2026-03-30` and the description includes `March 2026`.
+
+**Formatting**
+
+Append `.format("...")` after a date/time expression to control the output. The formatter supports these common Java-style tokens:
+
+| Token | Meaning | Example output |
+| --- | --- | --- |
+| `yyyy` | Four-digit year | `2026` |
+| `MMMM` | Full month name | `March` |
+| `MMM` | Abbreviated month name | `Mar` |
+| `MM` | Two-digit month | `03` |
+| `dd` | Two-digit day of month | `30` |
+| `EEEE` | Full weekday name | `Monday` |
+| `EEE` | Abbreviated weekday name | `Mon` |
+| `HH` | 24-hour hour | `14` |
+| `mm` | Minutes | `22` |
+| `ss` | Seconds | `01` |
+
+Examples:
+
+| Expression | Example output |
+| --- | --- |
+| `${vars.now.local.date}.format("MMMM")` | `March` |
+| `${vars.now.local.date}.format("MMMM yyyy")` | `March 2026` |
+| `${vars.now.local}.format("EEEE, dd MMMM yyyy")` | `Monday, 30 March 2026` |
+| `${vars.now.utc}.format("yyyy-MM-dd HH:mm:ss")` | `2026-03-30 14:22:01` |
+
+**Offsets for last month, next month, and other relative dates**
+
+Use the built-in month shortcuts or adjustment methods when scheduled tickets need to refer to a different period than the run date:
+
+| Expression | Description | Example output when run on March 30, 2026 |
+| --- | --- | --- |
+| `${vars.now.local.date.last_month}.format("MMMM yyyy")` | Previous calendar month | `February 2026` |
+| `${vars.now.local.date.previous_month}.format("MMMM yyyy")` | Alias for previous calendar month | `February 2026` |
+| `${vars.now.local.date.next_month}.format("MMMM yyyy")` | Next calendar month | `April 2026` |
+| `${vars.now.local.date.last(months=1)}.format("MMMM yyyy")` | Subtract one month | `February 2026` |
+| `${vars.now.local.date.next(months=1)}.format("MMMM yyyy")` | Add one month | `April 2026` |
+| `${vars.now.local.date.add(days=7)}.format("yyyy-MM-dd")` | Add seven days | `2026-04-06` |
+| `${vars.now.local.date.previous(weeks=2)}.format("yyyy-MM-dd")` | Subtract two weeks | `2026-03-16` |
+
+Adjustment methods accept `days`, `weeks`, `months`, and `years` as integer arguments. Multiple arguments can be combined, for example `${vars.now.local.date.next(months=1, days=7)}.format("yyyy-MM-dd")`.
+
+**Local vs UTC**
+
+- Use `${vars.now.local...}` when the ticket text should follow the portal/server local timezone.
+- Use `${vars.now.utc...}` when the ticket text must be timezone-neutral or match UTC audit/reporting periods.
+- `${vars.now...}` without `local` or `utc` resolves like local time for these payload expressions.
