@@ -1,3 +1,4 @@
+import asyncio
 from datetime import timezone
 import importlib.util
 from pathlib import Path
@@ -46,3 +47,52 @@ def test_parse_unbill_cutoff_date_accepts_yyyymmdd_as_utc_start():
 def test_parse_unbill_cutoff_date_rejects_invalid_values(value):
     with pytest.raises(ValueError):
         unbill_tickets.parse_unbill_cutoff_date(value)
+
+
+def test_preview_unbill_tickets_scans_all_ticket_pages(monkeypatch):
+    calls = []
+
+    async def fake_tickets(cutoff_date, limit, offset=0):
+        calls.append((limit, offset))
+        pages = {
+            0: [
+                {
+                    "id": 1,
+                    "ticket_number": "T-1",
+                    "subject": "Old billed ticket",
+                    "created_at": cutoff_date,
+                    "billed_at": cutoff_date,
+                    "xero_invoice_number": "INV-1",
+                },
+            ],
+            1: [
+                {
+                    "id": 2,
+                    "ticket_number": "T-2",
+                    "subject": "Older billed ticket",
+                    "created_at": cutoff_date,
+                    "billed_at": cutoff_date,
+                    "xero_invoice_number": "INV-2",
+                },
+            ],
+        }
+        return pages.get(offset, [])
+
+    monkeypatch.setattr(
+        unbill_tickets.tickets_repo,
+        "list_billed_tickets_older_than",
+        fake_tickets,
+        raising=False,
+    )
+
+    preview = asyncio.run(
+        unbill_tickets.preview_unbill_tickets(
+            unbill_tickets.parse_unbill_cutoff_date("20260530"),
+            limit=1,
+        )
+    )
+
+    assert preview["status"] == "ready"
+    assert preview["totals"] == {"ticketCount": 2}
+    assert [item["id"] for item in preview["items"]] == [1, 2]
+    assert calls == [(1, 0), (1, 1), (1, 2)]

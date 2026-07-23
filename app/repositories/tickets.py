@@ -1161,7 +1161,7 @@ async def replace_ticket_assets(
 
 
 async def list_billed_tickets_older_than(
-    cutoff: datetime, *, limit: int = 10000
+    cutoff: datetime, *, limit: int = 1000, offset: int = 0
 ) -> list[TicketRecord]:
     """Return billed, unmerged tickets created before the supplied UTC cutoff."""
     rows = await db.fetch_all(
@@ -1172,9 +1172,9 @@ async def list_billed_tickets_older_than(
           AND created_at < %s
           AND (billed_at IS NOT NULL OR COALESCE(TRIM(xero_invoice_number), '') <> '')
         ORDER BY created_at ASC, id ASC
-        LIMIT %s
+        LIMIT %s OFFSET %s
         """,
-        (cutoff, int(max(1, limit))),
+        (cutoff, int(max(1, limit)), int(max(0, offset))),
     )
     return [_normalise_ticket(row) for row in rows]
 
