@@ -56,6 +56,11 @@ REPORT_SECTIONS: tuple[ReportSection, ...] = (
         description="Count of staff accounts currently enabled for the company.",
     ),
     ReportSection(
+        key="active_user_accounts",
+        label="Active user accounts",
+        description="Full list of active user accounts with O365 last sign-in details.",
+    ),
+    ReportSection(
         key="m365_best_practices",
         label="M365 best practice summary",
         description="Pass/fail summary from the latest M365 best practice scan.",
@@ -232,6 +237,11 @@ async def _list_active_staff_accounts(company_id: int) -> list[dict[str, Any]]:
 async def _build_staff(company_id: int) -> dict[str, Any]:
     accounts = await _list_active_staff_accounts(company_id)
     return {"total_active": len(accounts), "accounts": accounts}
+
+
+async def _build_active_user_accounts(company_id: int) -> dict[str, Any]:
+    accounts = await _list_active_staff_accounts(company_id)
+    return {"accounts": accounts, "total": len(accounts)}
 
 
 async def _build_m365_best_practices(company_id: int) -> dict[str, Any]:
@@ -624,6 +634,7 @@ async def _build_backup_jobs(company_id: int) -> dict[str, Any]:
 _SECTION_BUILDERS = {
     "assets": _build_assets,
     "staff": _build_staff,
+    "active_user_accounts": _build_active_user_accounts,
     "m365_best_practices": _build_m365_best_practices,
     "top_mailboxes": _build_top_mailboxes,
     "orders_current_month": _build_orders_current_month,
@@ -675,6 +686,11 @@ async def _build_staff_detail(company_id: int) -> dict[str, Any]:
     """Full list of enabled staff for the detail page."""
     staff = await _list_active_staff_accounts(company_id)
     return {"staff": staff, "total": len(staff)}
+
+
+async def _build_active_user_accounts_detail(company_id: int) -> dict[str, Any]:
+    """Full list of active user accounts for the detail page."""
+    return await _build_active_user_accounts(company_id)
 
 
 async def _build_m365_best_practices_detail(company_id: int) -> dict[str, Any]:
@@ -1114,6 +1130,7 @@ async def _build_huntress_soc_detail(company_id: int) -> dict[str, Any]:
 _DETAIL_BUILDERS: dict[str, Any] = {
     "assets": _build_assets_detail,
     "staff": _build_staff_detail,
+    "active_user_accounts": _build_active_user_accounts_detail,
     "m365_best_practices": _build_m365_best_practices_detail,
     "top_mailboxes": _build_top_mailboxes_detail,
     "orders_current_month": _build_orders_detail,
@@ -1236,6 +1253,8 @@ async def build_company_report(company_id: int) -> ReportData:
     if section_order:
         key_to_def = {s.key: s for s in REPORT_SECTIONS}
         ordered_defs = [key_to_def[k] for k in section_order if k in key_to_def]
+        ordered_keys = {section.key for section in ordered_defs}
+        ordered_defs.extend(section for section in REPORT_SECTIONS if section.key not in ordered_keys)
     else:
         ordered_defs = list(REPORT_SECTIONS)
 
@@ -1296,6 +1315,8 @@ def _section_is_empty(key: str, data: dict[str, Any]) -> bool:
         return int(data.get("total_synced") or 0) == 0
     if key == "staff":
         return int(data.get("total_active") or 0) == 0
+    if key == "active_user_accounts":
+        return int(data.get("total") or 0) == 0
     if key == "m365_best_practices":
         return int(data.get("total") or 0) == 0
     if key == "top_mailboxes":
