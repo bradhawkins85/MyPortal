@@ -255,6 +255,61 @@ def test_build_recurring_invoice_items_with_custom_field_variable(monkeypatch):
     assert tl_item["Quantity"] == 25.0
 
 
+
+def test_build_recurring_invoice_items_with_shorthand_report_count(monkeypatch):
+    """Recurring quantities support legacy saved-report shorthand tokens."""
+
+    async def fake_list_items(company_id):
+        return [
+            {
+                "id": 1,
+                "company_id": company_id,
+                "product_code": "ONLINE-WORKSTATIONS",
+                "description_template": "Online workstations",
+                "qty_expression": "{{ online-workstations-last-30-days.count }}",
+                "price_override": 2.50,
+                "active": True,
+            }
+        ]
+
+    async def fake_get_query_by_slug(slug):
+        assert slug == "online-workstations-last-30-days"
+        return {
+            "slug": slug,
+            "sql_query": "SELECT name FROM assets WHERE company_id = {{current.company}}",
+        }
+
+    async def fake_count_query_rows(sql_query, *, company_id=None):
+        assert company_id == 77
+        return 80
+
+    monkeypatch.setattr(
+        xero.recurring_items_repo,
+        "list_company_recurring_invoice_items",
+        fake_list_items,
+    )
+    monkeypatch.setattr(
+        xero.value_templates.dynamic_variables.reporting_repo,
+        "get_query_by_slug",
+        fake_get_query_by_slug,
+    )
+    monkeypatch.setattr(
+        xero.value_templates.dynamic_variables.reporting_service,
+        "count_query_rows",
+        fake_count_query_rows,
+    )
+
+    result = asyncio.run(
+        xero.build_recurring_invoice_items(
+            company_id=77,
+            tax_type="OUTPUT2",
+            context={"company_name": "Acme"},
+        )
+    )
+
+    assert len(result) == 1
+    assert result[0]["Quantity"] == 80.0
+
 def test_build_recurring_invoice_items_fetches_xero_rates(monkeypatch):
     async def run_test():
         """Test that build_recurring_invoice_items fetches item rates from Xero."""
