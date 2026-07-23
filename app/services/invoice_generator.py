@@ -3,6 +3,7 @@
 Generates invoices from company recurring invoice items and billable tickets,
 storing them locally in MyPortal (no external accounting system required).
 """
+
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
@@ -24,16 +25,33 @@ from app.repositories import users as users_repo
 from app.services import modules as modules_service
 from app.services import xero as xero_service
 
-
-DEFAULT_XERO_LINE_ITEM_TEMPLATE = "Ticket {ticket_id}: {ticket_subject} {labour_suffix} ({labour_duration})"
+DEFAULT_XERO_LINE_ITEM_TEMPLATE = (
+    "Ticket {ticket_id}: {ticket_subject} {labour_suffix} ({labour_duration})"
+)
 
 
 def _env_xero_line_item_template() -> str:
     return str(os.getenv("XERO_LINE_ITEM_TEMPLATE", "")).strip()
 
 
+def _get_env_xero_billable_statuses() -> set[str]:
+    """Return ticket statuses that may be billed by local invoice generation.
+
+    The Generate Invoice scheduled task must follow the XERO_BILLABLE_STATUSES
+    environment setting so tickets in other workflow states are not pulled into
+    local invoices just because they have unbilled time or expenses.
+    """
+
+    return (
+        xero_service._normalise_status_filter(os.getenv("XERO_BILLABLE_STATUSES", ""))
+        or set()
+    )
+
+
 def _minutes_to_hours(minutes: int) -> Decimal:
-    return (Decimal(minutes) / Decimal(60)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return (Decimal(minutes) / Decimal(60)).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
 
 
 def _coerce_minutes(value: Any) -> int:
@@ -61,7 +79,10 @@ async def _get_xero_line_item_template() -> str:
         settings = await modules_service.get_module_settings("xero") or {}
     except RuntimeError:
         settings = {}
-    return str(settings.get("line_item_description_template") or "").strip() or DEFAULT_XERO_LINE_ITEM_TEMPLATE
+    return (
+        str(settings.get("line_item_description_template") or "").strip()
+        or DEFAULT_XERO_LINE_ITEM_TEMPLATE
+    )
 
 
 def _strip_empty_description_segments(description: str) -> str:
@@ -112,7 +133,11 @@ def _build_expense_line_description(
     if not expense_descriptions:
         return base_description
     if len(expense_descriptions) == 1:
-        return f"{base_description} - {expense_descriptions[0]}" if base_description else expense_descriptions[0]
+        return (
+            f"{base_description} - {expense_descriptions[0]}"
+            if base_description
+            else expense_descriptions[0]
+        )
     expenses_text = "\n".join(expense_descriptions)
     return f"{base_description}\n{expenses_text}" if base_description else expenses_text
 
@@ -167,7 +192,9 @@ async def _get_xero_rate_lookup_credentials() -> tuple[str | None, str | None]:
     try:
         module = await modules_service.get_module("xero", redact=False)
     except Exception as exc:
-        logger.warning("Failed to load Xero module for recurring item price lookup", error=str(exc))
+        logger.warning(
+            "Failed to load Xero module for recurring item price lookup", error=str(exc)
+        )
         return None, None
 
     if not module or not module.get("enabled"):
@@ -177,17 +204,25 @@ async def _get_xero_rate_lookup_credentials() -> tuple[str | None, str | None]:
     try:
         credentials = await modules_service.get_xero_credentials() or {}
     except Exception as exc:
-        logger.warning("Failed to load Xero credentials for recurring item price lookup", error=str(exc))
+        logger.warning(
+            "Failed to load Xero credentials for recurring item price lookup",
+            error=str(exc),
+        )
         credentials = {}
 
-    tenant_id = str(credentials.get("tenant_id") or settings.get("tenant_id") or "").strip()
+    tenant_id = str(
+        credentials.get("tenant_id") or settings.get("tenant_id") or ""
+    ).strip()
     if not tenant_id:
         return None, None
 
     try:
         access_token = await modules_service.acquire_xero_access_token()
     except Exception as exc:
-        logger.warning("Failed to acquire Xero access token for recurring item price lookup", error=str(exc))
+        logger.warning(
+            "Failed to acquire Xero access token for recurring item price lookup",
+            error=str(exc),
+        )
         return None, None
 
     return tenant_id, access_token
@@ -241,6 +276,8 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
     ticket_numbers: list[str] = []
     billable_tickets_found = 0
 
+    billable_statuses = _get_env_xero_billable_statuses()
+
     # Fetch all tickets for the company and find unbilled ones
     try:
         all_tickets = await tickets_repo.list_tickets(company_id=company_id, limit=1000)
@@ -253,13 +290,22 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
         all_tickets = []
 
     for ticket in all_tickets:
+        ticket_status = str(ticket.get("status") or "").strip().lower()
+        if ticket_status not in billable_statuses:
+            continue
+
         ticket_id = ticket.get("id")
         if not ticket_id:
             continue
 
         unbilled_reply_ids = await billed_time_repo.get_unbilled_reply_ids(ticket_id)
-        unbilled_expenses = await expenses_repo.list_expenses(ticket_id, unbilled_only=True)
-        expense_total = sum((_to_decimal(expense.get("amount")) or Decimal("0")) for expense in unbilled_expenses)
+        unbilled_expenses = await expenses_repo.list_expenses(
+            ticket_id, unbilled_only=True
+        )
+        expense_total = sum(
+            (_to_decimal(expense.get("amount")) or Decimal("0"))
+            for expense in unbilled_expenses
+        )
         if not unbilled_reply_ids and expense_total <= 0:
             continue
 
@@ -336,7 +382,11 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
                 "labour_groups": labour_groups,
                 "requester_name": requester_name,
                 "requester_email": requester_email,
-                "expense_ids": [int(expense["id"]) for expense in unbilled_expenses if expense.get("id")],
+                "expense_ids": [
+                    int(expense["id"])
+                    for expense in unbilled_expenses
+                    if expense.get("id")
+                ],
             }
         )
 
@@ -348,13 +398,21 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
                 requester_name=requester_name,
                 requester_email=requester_email,
             )
-            ticket_line_items.append({
-                "Description": description,
-                "Quantity": 1.0,
-                "UnitAmount": float(expense_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
-                "ItemCode": "",
-                "MyPortalTicketExpenseIds": [int(expense["id"]) for expense in unbilled_expenses if expense.get("id")],
-            })
+            ticket_line_items.append(
+                {
+                    "Description": description,
+                    "Quantity": 1.0,
+                    "UnitAmount": float(
+                        expense_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    ),
+                    "ItemCode": "",
+                    "MyPortalTicketExpenseIds": [
+                        int(expense["id"])
+                        for expense in unbilled_expenses
+                        if expense.get("id")
+                    ],
+                }
+            )
 
         ticket_num = str(ticket_id)
         if ticket_num not in ticket_numbers:
@@ -443,7 +501,9 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
     ]
     now = datetime.now(timezone.utc)
     try:
-        await recurring_items_repo.mark_recurring_invoice_items_billed(recurring_item_ids, billed_at=now)
+        await recurring_items_repo.mark_recurring_invoice_items_billed(
+            recurring_item_ids, billed_at=now
+        )
     except Exception as exc:
         logger.error(
             "Failed to update recurring invoice item billing timestamps",
@@ -491,9 +551,17 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
                 )
 
         try:
-            await expenses_repo.mark_expenses_billed(list(ticket_ctx.get("expense_ids") or []), invoice_number=invoice_number, billed_at=now)
+            await expenses_repo.mark_expenses_billed(
+                list(ticket_ctx.get("expense_ids") or []),
+                invoice_number=invoice_number,
+                billed_at=now,
+            )
         except Exception as exc:
-            logger.error("Failed to mark ticket expenses billed", ticket_id=ticket_id, error=str(exc))
+            logger.error(
+                "Failed to mark ticket expenses billed",
+                ticket_id=ticket_id,
+                error=str(exc),
+            )
 
         # Update ticket: mark as billed and move to the configured invoiced status.
         invoiced_status = xero_service.resolve_invoiced_ticket_status()
