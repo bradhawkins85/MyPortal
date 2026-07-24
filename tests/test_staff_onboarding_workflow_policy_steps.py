@@ -514,6 +514,43 @@ async def test_execute_policy_step_adds_user_to_teams_groups(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_execute_policy_step_removes_user_from_all_teams_groups_when_ids_blank(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        workflows, "_resolve_staff_m365_user", AsyncMock(return_value={"id": "user-1"})
+    )
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
+    monkeypatch.setattr(
+        workflows.m365_service,
+        "_graph_get_all",
+        AsyncMock(
+            return_value=[
+                {"id": "group-a", "groupTypes": []},
+                {"id": "group-dynamic", "groupTypes": ["DynamicMembership"]},
+                {"id": "group-b", "groupTypes": ["Unified"]},
+            ]
+        ),
+    )
+    graph_delete = AsyncMock(return_value={})
+    monkeypatch.setattr(workflows.m365_service, "_graph_delete", graph_delete)
+
+    result = await workflows._execute_policy_step(
+        step={"type": "m365_remove_teams_group_member", "group_ids_csv": ""},
+        company_id=9,
+        staff={"id": 703, "email": "old.user@example.com"},
+        policy_config={},
+        vars_map={},
+    )
+
+    assert result["operation"] == "remove"
+    assert result["group_ids"] == ["group-a", "group-b"]
+    assert graph_delete.await_count == 2
+
+
+@pytest.mark.anyio
 async def test_execute_policy_step_removes_user_from_sharepoint_sites(monkeypatch):
     monkeypatch.setattr(
         workflows, "_resolve_staff_m365_user", AsyncMock(return_value={"id": "user-2"})
@@ -548,6 +585,51 @@ async def test_execute_policy_step_removes_user_from_sharepoint_sites(monkeypatc
 
     assert result["operation"] == "remove"
     assert result["site_ids"] == ["site-a"]
+    graph_delete.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_execute_policy_step_removes_user_from_all_sharepoint_sites_when_ids_blank(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        workflows, "_resolve_staff_m365_user", AsyncMock(return_value={"id": "user-2"})
+    )
+    monkeypatch.setattr(
+        workflows.m365_service, "acquire_access_token", AsyncMock(return_value="token")
+    )
+
+    graph_get_all = AsyncMock(return_value=[{"id": "site-a"}, {"id": "site-b"}])
+    monkeypatch.setattr(workflows.m365_service, "_graph_get_all", graph_get_all)
+
+    async def fake_graph_get(_token: str, url: str):
+        if "/sites/site-a/permissions" in url:
+            return {
+                "value": [
+                    {
+                        "id": "perm-1",
+                        "grantedToIdentitiesV2": [{"user": {"id": "user-2"}}],
+                    }
+                ]
+            }
+        return {"value": [{"id": "perm-2", "grantedToIdentitiesV2": []}]}
+
+    monkeypatch.setattr(
+        workflows.m365_service, "_graph_get", AsyncMock(side_effect=fake_graph_get)
+    )
+    graph_delete = AsyncMock(return_value={})
+    monkeypatch.setattr(workflows.m365_service, "_graph_delete", graph_delete)
+
+    result = await workflows._execute_policy_step(
+        step={"type": "m365_remove_sharepoint_site_member", "site_ids_csv": ""},
+        company_id=9,
+        staff={"id": 704, "email": "offboard.user@example.com"},
+        policy_config={},
+        vars_map={},
+    )
+
+    assert result["operation"] == "remove"
+    assert result["site_ids"] == ["site-a", "site-b"]
     graph_delete.assert_awaited_once()
 
 
