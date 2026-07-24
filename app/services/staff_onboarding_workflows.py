@@ -1425,13 +1425,24 @@ async def _execute_policy_step(
             or _resolve_template_value(step.get("group_ids_csv"), vars_map=vars_map)
             or _resolve_template_value(step.get("group_id"), vars_map=vars_map)
         )
-        if not group_ids:
+        if not group_ids and step_type == "m365_add_teams_group_member":
             raise WorkflowStepError(f"{step_type} requires one or more group IDs")
         m365_user_id = await _resolve_step_user_id()
         encoded_user_id = quote(m365_user_id, safe="")
         access_token = await m365_service.acquire_access_token(
             company_id, force_client_credentials=True
         )
+        if not group_ids:
+            memberships = await m365_service._graph_get_all(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/memberOf/microsoft.graph.group?$select=id,groupTypes",
+            )
+            group_ids = [
+                str(item.get("id")).strip()
+                for item in memberships
+                if item.get("id")
+                and "DynamicMembership" not in (item.get("groupTypes") or [])
+            ]
         changed_group_ids: list[str] = []
         for group_id in group_ids:
             if step_type == "m365_add_teams_group_member":
@@ -1465,7 +1476,7 @@ async def _execute_policy_step(
             or _resolve_template_value(step.get("site_ids_csv"), vars_map=vars_map)
             or _resolve_template_value(step.get("site_id"), vars_map=vars_map)
         )
-        if not site_ids:
+        if not site_ids and step_type == "m365_add_sharepoint_site_member":
             raise WorkflowStepError(f"{step_type} requires one or more site IDs")
         m365_user_id = await _resolve_step_user_id()
         encoded_user_id = quote(m365_user_id, safe="")
@@ -1482,12 +1493,19 @@ async def _execute_policy_step(
         )
         if site_role not in {"read", "write"}:
             raise WorkflowStepError("site_role must be either 'read' or 'write'")
+        if not site_ids:
+            sites = await m365_service._graph_get_all(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                "https://graph.microsoft.com/v1.0/sites?search=*&$select=id&$top=200",
+            )
+            site_ids = [str(site.get("id")).strip() for site in sites if site.get("id")]
         changed_site_ids: list[str] = []
         for site_id in site_ids:
+            encoded_site_id = quote(site_id, safe="")
             if step_type == "m365_add_sharepoint_site_member":
                 await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
                     access_token,
-                    f"https://graph.microsoft.com/v1.0/sites/{site_id}/permissions",
+                    f"https://graph.microsoft.com/v1.0/sites/{encoded_site_id}/permissions",
                     {
                         "roles": [site_role],
                         "grantedToIdentitiesV2": [
@@ -1498,7 +1516,7 @@ async def _execute_policy_step(
             else:
                 permissions = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
                     access_token,
-                    f"https://graph.microsoft.com/v1.0/sites/{site_id}/permissions",
+                    f"https://graph.microsoft.com/v1.0/sites/{encoded_site_id}/permissions",
                 )
                 for permission in permissions.get("value") or []:
                     permission_id = str(permission.get("id") or "").strip()
