@@ -1030,3 +1030,107 @@ async def test_confirm_webhook_checkpoint_marks_wait_step_success_before_resume(
     assert append_log.await_args.kwargs["step_name"] == "Pause for webhook"
     assert append_log.await_args.kwargs["status"] == "success"
     resume.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_create_ticket_step_uses_requester_and_returns_ticket_number(monkeypatch):
+    monkeypatch.setattr(
+        workflows.tickets_service,
+        "resolve_status_or_default",
+        AsyncMock(return_value="open"),
+    )
+    create_ticket = AsyncMock(return_value={"id": 123, "ticket_number": "HD-123"})
+    monkeypatch.setattr(workflows.tickets_service, "create_ticket", create_ticket)
+
+    result = await workflows._execute_policy_step(
+        step={
+            "type": "create_ticket",
+            "subject": "Onboard ${vars.staff.full_name}",
+            "description": "Started",
+            "priority": "high",
+            "assigned_user_id": "44",
+        },
+        company_id=9,
+        staff={"id": 5, "requested_by_user_id": 17},
+        policy_config={},
+        vars_map={"staff.full_name": "Jane Starter"},
+        step_name="Create Ticket",
+    )
+
+    assert result == {"ticket_id": 123, "ticket_number": "HD-123"}
+    create_ticket.assert_awaited_once()
+    assert create_ticket.await_args.kwargs["requester_id"] == 17
+    assert create_ticket.await_args.kwargs["initial_reply_author_id"] == 17
+    assert create_ticket.await_args.kwargs["assigned_user_id"] == 44
+
+
+@pytest.mark.anyio
+async def test_update_and_reply_ticket_steps_use_created_ticket_variable(monkeypatch):
+    ticket = {
+        "id": 123,
+        "ticket_number": "HD-123",
+        "assigned_user_id": 44,
+    }
+    monkeypatch.setattr(
+        workflows.tickets_repo,
+        "get_ticket_by_number_or_id",
+        AsyncMock(return_value=ticket),
+    )
+    monkeypatch.setattr(
+        workflows.tickets_service,
+        "resolve_status_or_default",
+        AsyncMock(return_value="in_progress"),
+    )
+    update_ticket = AsyncMock(return_value={**ticket, "status": "in_progress"})
+    monkeypatch.setattr(workflows.tickets_repo, "update_ticket", update_ticket)
+    emit_updated = AsyncMock()
+    monkeypatch.setattr(
+        workflows.tickets_service, "emit_ticket_updated_event", emit_updated
+    )
+    create_reply = AsyncMock(return_value={"id": 77, "is_internal": True})
+    monkeypatch.setattr(workflows.tickets_repo, "create_reply", create_reply)
+    emit_replied = AsyncMock()
+    monkeypatch.setattr(
+        workflows.tickets_service, "emit_ticket_replied_event", emit_replied
+    )
+
+    update_result = await workflows._execute_policy_step(
+        step={
+            "type": "update_ticket",
+            "ticket_number": "${vars.ticket_number}",
+            "status": "In Progress",
+            "priority": "high",
+        },
+        company_id=9,
+        staff={"id": 5},
+        policy_config={},
+        vars_map={"ticket_number": "HD-123"},
+    )
+    reply_result = await workflows._execute_policy_step(
+        step={
+            "type": "reply_ticket",
+            "ticket_number": "${vars.ticket_number}",
+            "body": "Done",
+            "is_internal": True,
+        },
+        company_id=9,
+        staff={"id": 5},
+        policy_config={},
+        vars_map={"ticket_number": "HD-123"},
+    )
+
+    assert update_result["updated"] == {"status": "in_progress", "priority": "high"}
+    update_ticket.assert_awaited_once_with(123, status="in_progress", priority="high")
+    assert reply_result == {
+        "ticket_id": 123,
+        "ticket_number": "HD-123",
+        "reply_id": 77,
+        "is_internal": True,
+    }
+    create_reply.assert_awaited_once_with(
+        ticket_id=123,
+        author_id=44,
+        body="Done",
+        is_internal=True,
+        author_display_name=None,
+    )

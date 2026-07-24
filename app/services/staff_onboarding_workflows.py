@@ -22,6 +22,7 @@ from app.repositories import licenses as license_repo
 from app.repositories import staff as staff_repo
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.repositories import staff_onboarding_workflows as workflow_repo
+from app.repositories import tickets as tickets_repo
 from app.repositories import users as user_repo
 from app.services import audit as audit_service
 from app.services import email as email_service
@@ -502,6 +503,31 @@ async def notify_staff_approval_requested(
                 error=str(exc),
             )
     return approver_ids
+
+
+def _coerce_positive_int(value: Any) -> int | None:
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+async def _resolve_workflow_ticket(
+    step: dict[str, Any], vars_map: dict[str, Any]
+) -> dict[str, Any]:
+    ticket_ref = (
+        _resolve_template_value(step.get("ticket_id"), vars_map=vars_map)
+        or _resolve_template_value(step.get("ticket_number"), vars_map=vars_map)
+        or vars_map.get("ticket_id")
+        or vars_map.get("ticket_number")
+    )
+    ticket = await tickets_repo.get_ticket_by_number_or_id(str(ticket_ref or ""))
+    if not ticket:
+        raise WorkflowStepError(
+            "Ticket step requires an existing ticket_id or ticket_number"
+        )
+    return dict(ticket)
 
 
 async def _create_failure_ticket(
@@ -1654,20 +1680,82 @@ async def _execute_policy_step(
         description = str(
             _resolve_template_value(step.get("description"), vars_map=vars_map) or ""
         ).strip()
-        status_value = await tickets_service.resolve_status_or_default(None)
+        requester_id = _coerce_positive_int(staff.get("requested_by_user_id"))
+        assigned_user_id = _coerce_positive_int(
+            _resolve_template_value(step.get("assigned_user_id"), vars_map=vars_map)
+        )
+        status_value = await tickets_service.resolve_status_or_default(
+            _resolve_template_value(step.get("status"), vars_map=vars_map)
+        )
         ticket = await tickets_service.create_ticket(
             subject=subject,
             description=description or subject,
-            requester_id=None,
+            requester_id=requester_id,
             company_id=company_id,
-            assigned_user_id=None,
-            priority=str(step.get("priority") or "normal"),
+            assigned_user_id=assigned_user_id,
+            priority=str(
+                _resolve_template_value(step.get("priority"), vars_map=vars_map)
+                or "normal"
+            ),
             status=status_value,
             category=str(step.get("category") or "staff-onboarding"),
             module_slug=str(step.get("module_slug") or "m365"),
-            external_reference=f"staff-workflow:{staff.get('id')}:{step.get('name')}",
+            external_reference=f"staff-workflow:{staff.get('id')}:{step_name or step.get('name')}",
+            initial_reply_author_id=requester_id,
         )
-        return {"ticket_id": ticket.get("id")}
+        ticket_number = ticket.get("ticket_number") or ticket.get("id")
+        return {"ticket_id": ticket.get("id"), "ticket_number": ticket_number}
+
+    if step_type == "update_ticket":
+        ticket = await _resolve_workflow_ticket(step, vars_map)
+        update_fields: dict[str, Any] = {}
+        if step.get("status") not in (None, ""):
+            update_fields["status"] = await tickets_service.resolve_status_or_default(
+                _resolve_template_value(step.get("status"), vars_map=vars_map)
+            )
+        if step.get("priority") not in (None, ""):
+            update_fields["priority"] = str(
+                _resolve_template_value(step.get("priority"), vars_map=vars_map) or ""
+            ).strip()
+        if not update_fields:
+            raise WorkflowStepError("update_ticket requires status or priority")
+        updated = await tickets_repo.update_ticket(int(ticket["id"]), **update_fields)
+        await tickets_service.emit_ticket_updated_event(
+            updated or int(ticket["id"]), actor_type="system"
+        )
+        return {
+            "ticket_id": int(ticket["id"]),
+            "ticket_number": ticket.get("ticket_number") or ticket.get("id"),
+            "updated": update_fields,
+        }
+
+    if step_type == "reply_ticket":
+        ticket = await _resolve_workflow_ticket(step, vars_map)
+        body = str(
+            _resolve_template_value(step.get("body"), vars_map=vars_map) or ""
+        ).strip()
+        if not body:
+            raise WorkflowStepError("reply_ticket requires body")
+        author_id = _coerce_positive_int(ticket.get("assigned_user_id"))
+        reply = await tickets_repo.create_reply(
+            ticket_id=int(ticket["id"]),
+            author_id=author_id,
+            body=body,
+            is_internal=bool(step.get("is_internal") or step.get("internal_note")),
+            author_display_name="System" if author_id is None else None,
+        )
+        await tickets_service.emit_ticket_replied_event(
+            ticket, actor_type="technician" if author_id else "system", reply=reply
+        )
+        await tickets_service.emit_ticket_updated_event(
+            ticket, actor_type="technician" if author_id else "system", reply=reply
+        )
+        return {
+            "ticket_id": int(ticket["id"]),
+            "ticket_number": ticket.get("ticket_number") or ticket.get("id"),
+            "reply_id": reply.get("id"),
+            "is_internal": bool(reply.get("is_internal")),
+        }
 
     if step_type == "conditional_pause":
         left = _resolve_template_value(step.get("if"), vars_map=vars_map)

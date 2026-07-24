@@ -846,6 +846,21 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "description": "Sends workflow details to the requesting user using workflow/system variables.",
     },
     {
+        "type": "create_ticket",
+        "name": "Create Ticket",
+        "description": "Creates a helpdesk ticket for this workflow on behalf of the onboarding/offboarding requester and stores ticket_id/ticket_number variables for later steps.",
+    },
+    {
+        "type": "update_ticket",
+        "name": "Update Ticket",
+        "description": "Updates the workflow ticket status and/or priority using a ticket number or ID from earlier steps.",
+    },
+    {
+        "type": "reply_ticket",
+        "name": "Reply Ticket",
+        "description": "Adds a public reply or internal note to the workflow ticket as the assigned technician, or System if unassigned.",
+    },
+    {
         "type": "wait_for_webhook",
         "name": "Pause For Webhook",
         "description": (
@@ -959,6 +974,21 @@ _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "description": "Sends onboarding details (for example login/password) to the requesting user using workflow/system variables.",
     },
     {
+        "type": "create_ticket",
+        "name": "Create Ticket",
+        "description": "Creates a helpdesk ticket for this workflow on behalf of the onboarding/offboarding requester and stores ticket_id/ticket_number variables for later steps.",
+    },
+    {
+        "type": "update_ticket",
+        "name": "Update Ticket",
+        "description": "Updates the workflow ticket status and/or priority using a ticket number or ID from earlier steps.",
+    },
+    {
+        "type": "reply_ticket",
+        "name": "Reply Ticket",
+        "description": "Adds a public reply or internal note to the workflow ticket as the assigned technician, or System if unassigned.",
+    },
+    {
         "type": "wait_for_webhook",
         "name": "Pause For Webhook",
         "description": (
@@ -1039,6 +1069,87 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
         ],
         "retry_policy": {"max_retries": 0},
         "failure_policy": {"mode": "fail_fast", "create_ticket_on_failure": True},
+    },
+    "create_ticket": {
+        "fields": [
+            {
+                "name": "subject",
+                "label": "Subject",
+                "type": "text",
+                "default": "${vars.staff.full_name} onboarding",
+                "required": True,
+            },
+            {
+                "name": "description",
+                "label": "Description",
+                "type": "textarea",
+                "default": "Workflow started for ${vars.staff.full_name}.",
+                "required": True,
+            },
+            {
+                "name": "priority",
+                "label": "Priority",
+                "type": "select",
+                "default": "normal",
+                "options": ["low", "normal", "high", "urgent"],
+            },
+            {"name": "status", "label": "Status", "type": "text", "default": ""},
+            {
+                "name": "assigned_user_id",
+                "label": "Assigned technician user ID",
+                "type": "number",
+                "required": False,
+            },
+            {
+                "name": "store.ticket_number",
+                "label": "Store ticket number variable",
+                "type": "text",
+                "default": "ticket_number",
+            },
+        ],
+    },
+    "update_ticket": {
+        "fields": [
+            {
+                "name": "ticket_number",
+                "label": "Ticket number",
+                "type": "text",
+                "default": "${vars.ticket_number}",
+                "required": True,
+            },
+            {"name": "status", "label": "New status", "type": "text", "default": ""},
+            {
+                "name": "priority",
+                "label": "New priority",
+                "type": "select",
+                "default": "",
+                "options": ["", "low", "normal", "high", "urgent"],
+            },
+        ],
+    },
+    "reply_ticket": {
+        "fields": [
+            {
+                "name": "ticket_number",
+                "label": "Ticket number",
+                "type": "text",
+                "default": "${vars.ticket_number}",
+                "required": True,
+            },
+            {
+                "name": "body",
+                "label": "Reply body",
+                "type": "textarea",
+                "default": "Workflow update for ${vars.staff.full_name}.",
+                "required": True,
+            },
+            {
+                "name": "is_internal",
+                "label": "Internal note",
+                "type": "checkbox",
+                "default": False,
+            },
+        ],
     },
     "create_user": {
         "fields": [
