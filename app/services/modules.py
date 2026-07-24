@@ -539,14 +539,13 @@ async def _load_ticket_email_attachments(
     """Load ticket attachments for automation email modules when possible.
 
     Explicit payload attachments are respected by callers; this helper only supplies
-    attachments automatically when the automation context identifies a ticket. Reply
-    events can provide the attachments uploaded with that reply so the outgoing
-    email does not have to fall back to every attachment on the ticket.
+    attachments automatically for ticket reply events that include the files uploaded
+    with that reply. Other ticket automations, such as reminders, must not attach
+    every file already stored on the ticket.
     """
     ticket_id = _extract_ticket_id_from_email_payload(payload)
     context = payload.get("context")
 
-    from app.repositories import ticket_attachments as attachments_repo
     from app.services import ticket_attachments as attachments_service
 
     attachments: list[Mapping[str, Any]] = []
@@ -558,19 +557,7 @@ async def _load_ticket_email_attachments(
             ]
 
     if not attachments:
-        if ticket_id is None:
-            return []
-        try:
-            attachments = await attachments_repo.list_attachments(
-                ticket_id, access_levels=("open", "closed")
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.warning(
-                "Unable to load ticket attachments for automation email",
-                ticket_id=ticket_id,
-                error=str(exc),
-            )
-            return []
+        return []
 
     email_attachments: list[dict[str, Any]] = []
     for attachment in attachments:
