@@ -511,7 +511,7 @@ async def get_contacts(customer_id: str | int) -> list[dict[str, Any]]:
 async def get_customer(customer_id: str | int) -> dict[str, Any] | None:
     customer_id_value = _coerce_int_id(customer_id)
     if customer_id_value is None:
-        raise SyncroAPIError("Syncro customer ID must be a positive integer")
+        raise SyncroAPIError(f"Invalid Syncro customer ID: {customer_id!r}. Must be a positive integer.")
     payload = await _request("GET", f"/customers/{customer_id_value}")
     if not payload:
         return None
