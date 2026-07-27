@@ -54,9 +54,9 @@ _LLM_PROMPT_CHAR_LIMIT = 64000
 _LLM_SNIPPET_LENGTH = 500
 _DEFAULT_CONTEXT_TOKEN_BUDGET = 12000
 _MAX_TICKET_ID_QUERY_LENGTH = 1000
-_EXPLICIT_TICKET_ID_RE = re.compile(
-    r"(?:ticket\s*#?|#)\s*(\d{3,})|\b(\d{4,})\b", re.IGNORECASE
-)
+_TICKET_MARKER_KEYWORD = "ticket"
+_MIN_MARKED_TICKET_ID_DIGITS = 3
+_MIN_STANDALONE_TICKET_ID_DIGITS = 4
 
 
 class AgentContextMode(str, Enum):
@@ -253,8 +253,48 @@ def _extract_explicit_ticket_ids(query: str) -> list[int]:
     query_text = query or ""
     if len(query_text) > _MAX_TICKET_ID_QUERY_LENGTH:
         return ids
-    for match in _EXPLICIT_TICKET_ID_RE.findall(query_text):
-        value = next((part for part in match if part), "")
+
+    def _is_word_char(char: str) -> bool:
+        return char.isalnum() or char == "_"
+
+    def _has_word_boundaries(start: int, end: int) -> bool:
+        no_word_before = start <= 0 or not _is_word_char(query_text[start - 1])
+        no_word_after = end == len(query_text) or not _is_word_char(query_text[end])
+        return no_word_before and no_word_after
+
+    def _has_explicit_ticket_marker(start: int) -> bool:
+        marker_index = start
+        while marker_index > 0 and query_text[marker_index - 1].isspace():
+            marker_index -= 1
+        if marker_index > 0 and query_text[marker_index - 1] == "#":
+            return True
+
+        word_end = marker_index
+        word_start = word_end
+        while word_start > 0 and query_text[word_start - 1].isalpha():
+            word_start -= 1
+        return query_text[word_start:word_end].casefold() == _TICKET_MARKER_KEYWORD
+
+    index = 0
+    while index < len(query_text):
+        if not query_text[index].isdigit():
+            index += 1
+            continue
+        start = index
+        while index < len(query_text) and query_text[index].isdigit():
+            index += 1
+        end = index
+        value = query_text[start:end]
+        if len(value) < _MIN_MARKED_TICKET_ID_DIGITS:
+            continue
+        if not (
+            _has_explicit_ticket_marker(start)
+            or (
+                len(value) >= _MIN_STANDALONE_TICKET_ID_DIGITS
+                and _has_word_boundaries(start, end)
+            )
+        ):
+            continue
         try:
             ticket_id = int(value)
         except (TypeError, ValueError):

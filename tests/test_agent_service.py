@@ -151,6 +151,31 @@ async def test_execute_agent_query_rejects_blank(monkeypatch):
     assert result["answer"] is None
 
 
+def test_extract_explicit_ticket_ids_supported_formats():
+    query = "Check ticket #123, #456, ticket789, 9876, and repeat #123."
+
+    result = agent_service._extract_explicit_ticket_ids(query)
+
+    assert result == [123, 456, 789, 9876]
+
+
+def test_extract_explicit_ticket_ids_requires_markers():
+    query = (
+        "Reference abc1234def, #      nope, ticketabc123, "
+        "and ticket      nope."
+    )
+
+    result = agent_service._extract_explicit_ticket_ids(query)
+
+    assert result == []
+
+
+def test_extract_explicit_ticket_ids_rejects_three_digit_standalone_values():
+    result = agent_service._extract_explicit_ticket_ids("Check 321 before anything else.")
+
+    assert result == []
+
+
 @pytest.mark.anyio
 async def test_execute_agent_query_has_relevant_sources_flag(monkeypatch):
     """Test that has_relevant_sources flag is set correctly when sources are found."""
