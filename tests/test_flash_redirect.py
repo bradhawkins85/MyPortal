@@ -19,6 +19,8 @@ def test_flash_redirect_allows_local_path() -> None:
         "https://evil.example/phish",
         "//evil.example/phish",
         "admin/foo",
+        "/%2F/evil.example/phish",
+        "/%5C%5Cevil.example/phish",
         "",
         "   ",
         None,
