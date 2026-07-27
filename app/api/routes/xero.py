@@ -148,6 +148,7 @@ async def _apply_xero_invoice_event(event: dict[str, Any], request: Request) -> 
         return {"status": "ignored", "reason": "unsupported category"}
     invoice_id = _extract_xero_invoice_id(event)
     if not invoice_id:
+        logger.warning("Ignoring Xero invoice webhook event with invalid or missing invoice ID")
         return {"status": "ignored", "reason": "missing invoice id"}
 
     local_invoice = await invoice_repo.get_invoice_by_xero_invoice_id(invoice_id)

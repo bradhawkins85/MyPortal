@@ -39,6 +39,14 @@ def test_extract_xero_invoice_id_rejects_invalid_value():
     assert xero._extract_xero_invoice_id(event) is None
 
 
+def test_extract_xero_invoice_id_rejects_invalid_value_from_resource_url():
+    event = {
+        "resourceUrl": "https://api.xero.com/api.xro/2.0/Invoices/../transfer-funds-to/123?amount=456"
+    }
+
+    assert xero._extract_xero_invoice_id(event) is None
+
+
 def test_summarise_xero_webhook_results_deduplicates_failures():
     results = [
         {"status": "failed", "error": "Internal processing error"},
