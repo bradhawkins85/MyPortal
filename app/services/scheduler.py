@@ -1559,7 +1559,7 @@ class SchedulerService:
                 f"remote_head={remote_head}\n"
             )
             _SYSTEM_UPDATE_FLAG_PATH.write_text(flag_payload, encoding="utf-8")
-            os.chmod(_SYSTEM_UPDATE_FLAG_PATH, 0o640)
+            os.chmod(_SYSTEM_UPDATE_FLAG_PATH, 0o600)
 
             log_info(
                 "System update scheduled",
