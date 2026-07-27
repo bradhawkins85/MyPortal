@@ -747,7 +747,10 @@ async def test_sync_account_processes_messages(monkeypatch):
                 "id": "msg-001",
                 "internetMessageId": "<msg001@example.com>",
                 "subject": "Test ticket",
-                "body": {"contentType": "html", "content": "<p>Please help</p>"},
+                "body": {
+                    "contentType": "html",
+                    "content": '<p>Please help</p><img src="cid:screenshot@outlook">',
+                },
                 "from": {
                     "emailAddress": {"name": "User", "address": "requester@example.com"}
                 },
@@ -799,6 +802,12 @@ async def test_sync_account_processes_messages(monkeypatch):
         created_tickets.append(kwargs)
         return {"id": 100, "ticket_number": "T-100"}
 
+    embedded_bodies: list[str] = []
+
+    async def fake_embed_graph_inline_images(**kwargs):
+        embedded_bodies.append(kwargs["html_body"])
+        return '<p>Please help</p><img src="/api/tickets/100/attachments/1/download">'
+
     async def fake_refresh_ai_summary(ticket_id):
         pass
 
@@ -815,6 +824,7 @@ async def test_sync_account_processes_messages(monkeypatch):
     monkeypatch.setattr(m365_mail.mail_repo, "update_account", fake_update_account)
     monkeypatch.setattr(m365_mail, "_resolve_ticket_entities", fake_resolve_ticket_entities)
     monkeypatch.setattr(m365_mail, "_find_existing_ticket_for_reply", fake_find_existing_ticket)
+    monkeypatch.setattr(m365_mail, "_embed_graph_inline_images", fake_embed_graph_inline_images)
     monkeypatch.setattr(m365_mail.tickets_service, "create_ticket", fake_create_ticket)
     monkeypatch.setattr(m365_mail.tickets_service, "refresh_ticket_ai_summary", fake_refresh_ai_summary)
     monkeypatch.setattr(m365_mail.tickets_service, "refresh_ticket_ai_tags", fake_refresh_ai_tags)
@@ -826,6 +836,9 @@ async def test_sync_account_processes_messages(monkeypatch):
     assert len(created_tickets) == 1
     assert created_tickets[0]["subject"] == "Test ticket"
     assert created_tickets[0]["module_slug"] == "m365-mail"
+    assert embedded_bodies == [
+        '<p>Please help</p><img src="cid:screenshot@outlook">'
+    ]
     assert len(recorded_messages) == 1
     assert recorded_messages[0]["status"] == "imported"
 
