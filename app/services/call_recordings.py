@@ -574,6 +574,39 @@ async def _sync_grandstream_ucm(
     }
 
 
+def _validate_recordings_path(
+    recordings_path: str,
+    trusted_base: str | None = None,
+) -> Path:
+    """Resolve *recordings_path* and guard against path-traversal attacks.
+
+    The resolved path must reside within the trusted recordings root, which is
+    taken from *trusted_base* (caller-supplied) or the ``CALL_RECORDINGS_PATH``
+    environment variable.  When neither is configured the traversal check is
+    skipped and only absolute-path resolution applies — production deployments
+    MUST configure one of these to enforce the restriction.
+
+    Returns the resolved :class:`~pathlib.Path` on success.
+    Raises :class:`ValueError` if the path is invalid or outside the safe root.
+    """
+    try:
+        base_path = Path(recordings_path).expanduser().resolve()
+    except (ValueError, OSError):
+        raise ValueError(f"Invalid recordings path: {recordings_path}")
+
+    _safe_root_str = (trusted_base or os.environ.get("CALL_RECORDINGS_PATH", "")).strip()
+    if _safe_root_str:
+        try:
+            _safe_root = Path(_safe_root_str).expanduser().resolve()
+            base_path.relative_to(_safe_root)
+        except ValueError:
+            raise ValueError(
+                f"Recordings path {base_path} must be within the configured recordings root {_safe_root}"
+            )
+
+    return base_path
+
+
 async def sync_recordings_from_filesystem(
     recordings_path: str,
     *,
@@ -581,30 +614,7 @@ async def sync_recordings_from_filesystem(
     trusted_base: str | None = None,
 ) -> dict[str, Any]:
     """Discover recordings on disk and persist them to the database."""
-    # Validate and resolve the path
-    try:
-        base_path = Path(recordings_path).expanduser().resolve()
-    except (ValueError, OSError) as e:
-        raise ValueError(f"Invalid recordings path: {recordings_path}")
-
-    # Guard against path traversal: the resolved path must be within the trusted
-    # recordings root.  Prefer the explicitly-supplied trusted_base, then fall
-    # back to the CALL_RECORDINGS_PATH environment variable.
-    # When neither is configured (e.g. initial setup), the check is skipped and
-    # only absolute-path resolution (provided by Path.resolve() above) applies.
-    # Administrators MUST set CALL_RECORDINGS_PATH or configure recordings_path
-    # in module settings to enforce this restriction in production.
-    _safe_root_str = (trusted_base or "").strip() or os.environ.get(
-        "CALL_RECORDINGS_PATH", ""
-    ).strip()
-    if _safe_root_str:
-        try:
-            _safe_root = Path(_safe_root_str).expanduser().resolve()
-            base_path.relative_to(_safe_root)
-        except ValueError:
-            raise ValueError(
-                "Recordings path must be within the configured recordings root"
-            )
+    base_path = _validate_recordings_path(recordings_path, trusted_base)
 
     if not base_path.exists() or not base_path.is_dir():
         raise FileNotFoundError(f"Recordings path does not exist: {recordings_path}")
@@ -740,30 +750,7 @@ async def force_sync_recordings_from_filesystem(
     - transcription (only updated if found in filesystem)
     - labour-related fields (preserved)
     """
-    # Validate and resolve the path
-    try:
-        base_path = Path(recordings_path).expanduser().resolve()
-    except (ValueError, OSError) as e:
-        raise ValueError(f"Invalid recordings path: {recordings_path}")
-
-    # Guard against path traversal: the resolved path must be within the trusted
-    # recordings root.  Prefer the explicitly-supplied trusted_base, then fall
-    # back to the CALL_RECORDINGS_PATH environment variable.
-    # When neither is configured (e.g. initial setup), the check is skipped and
-    # only absolute-path resolution (provided by Path.resolve() above) applies.
-    # Administrators MUST set CALL_RECORDINGS_PATH or configure recordings_path
-    # in module settings to enforce this restriction in production.
-    _safe_root_str = (trusted_base or "").strip() or os.environ.get(
-        "CALL_RECORDINGS_PATH", ""
-    ).strip()
-    if _safe_root_str:
-        try:
-            _safe_root = Path(_safe_root_str).expanduser().resolve()
-            base_path.relative_to(_safe_root)
-        except ValueError:
-            raise ValueError(
-                "Recordings path must be within the configured recordings root"
-            )
+    base_path = _validate_recordings_path(recordings_path, trusted_base)
 
     if not base_path.exists() or not base_path.is_dir():
         raise FileNotFoundError(f"Recordings path does not exist: {recordings_path}")
