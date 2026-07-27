@@ -54,6 +54,7 @@ _LLM_PROMPT_CHAR_LIMIT = 64000
 _LLM_SNIPPET_LENGTH = 500
 _DEFAULT_CONTEXT_TOKEN_BUDGET = 12000
 _MAX_TICKET_ID_QUERY_LENGTH = 1000
+_TICKET_MARKER_KEYWORD = "ticket"
 
 
 class AgentContextMode(str, Enum):
@@ -255,7 +256,7 @@ def _extract_explicit_ticket_ids(query: str) -> list[int]:
         return char.isalnum() or char == "_"
 
     def _has_word_boundaries(start: int, end: int) -> bool:
-        no_word_before = start == 0 or not _is_word_char(query_text[start - 1])
+        no_word_before = start <= 0 or not _is_word_char(query_text[start - 1])
         no_word_after = end == len(query_text) or not _is_word_char(query_text[end])
         return no_word_before and no_word_after
 
@@ -270,7 +271,7 @@ def _extract_explicit_ticket_ids(query: str) -> list[int]:
         word_start = word_end
         while word_start > 0 and query_text[word_start - 1].isalpha():
             word_start -= 1
-        return query_text[word_start:word_end].casefold() == "ticket"
+        return query_text[word_start:word_end].casefold() == _TICKET_MARKER_KEYWORD
 
     for match in re.finditer(r"\d+", query_text):
         value = match.group(0)
