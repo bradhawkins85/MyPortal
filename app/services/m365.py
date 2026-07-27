@@ -1286,13 +1286,14 @@ def _validate_graph_url(url: str) -> None:
         log_error("Rejected non-Graph URL in Microsoft Graph helper", url=url)
         raise M365Error("Invalid Microsoft Graph URL", http_status=400)
 
-    if not path.startswith(("/v1.0/", "/beta/")):
+    segments = path.split("/")
+    if len(segments) < 3 or segments[0] != "" or segments[1] not in {"v1.0", "beta"}:
         log_error("Rejected non-Graph URL in Microsoft Graph helper", url=url)
         raise M365Error("Invalid Microsoft Graph URL", http_status=400)
 
-    segments = path.lstrip("/").split("/")
-    if any(segment == "" for segment in segments) or any(
-        unquote(segment) in {".", ".."} for segment in segments
+    resource_segments = segments[2:]
+    if not resource_segments or any(segment == "" for segment in resource_segments) or any(
+        unquote(segment) in {".", ".."} for segment in resource_segments
     ):
         log_error("Rejected unsafe Graph path in Microsoft Graph helper", url=url)
         raise M365Error("Invalid Microsoft Graph URL", http_status=400)

@@ -101,6 +101,9 @@ def test_graph_validate_url_rejects_unsafe_components():
         _validate_graph_url("https://graph.microsoft.com/v1.0")
 
     with pytest.raises(M365Error):
+        _validate_graph_url("https://graph.microsoft.com/v1.0/")
+
+    with pytest.raises(M365Error):
         _validate_graph_url("https://graph.microsoft.com/v1.0//users")
 
     with pytest.raises(M365Error):
