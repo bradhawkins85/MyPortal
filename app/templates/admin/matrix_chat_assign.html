@@ -181,6 +181,7 @@
   aria-modal="true"
   aria-labelledby="rule-modal-title"
   aria-hidden="true"
+  data-is-editing="{{ 'true' if is_editing else 'false' }}"
   hidden
 >
   <div class="modal__content" role="document">
@@ -577,11 +578,11 @@
     });
   });
 
-  {% if is_editing %}
+  if (modal.dataset.isEditing === 'true') {
     title.textContent = 'Edit rule';
     submitButton.textContent = 'Update rule';
     openModal();
-  {% endif %}
+  }
 })();
 </script>
 {% endblock %}
