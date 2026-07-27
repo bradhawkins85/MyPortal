@@ -15,7 +15,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services import m365 as m365_service
-from app.services.m365 import M365Error, _graph_get, _graph_path_segment, _validate_graph_url
+from app.services.m365 import (
+    M365Error,
+    _graph_get,
+    _graph_object_id,
+    _graph_path_segment,
+    _validate_graph_url,
+)
 
 
 @pytest.fixture
@@ -95,6 +101,9 @@ def test_graph_validate_url_rejects_unsafe_components():
         _validate_graph_url("https://graph.microsoft.com/v1.0")
 
     with pytest.raises(M365Error):
+        _validate_graph_url("https://graph.microsoft.com/v1.0//users")
+
+    with pytest.raises(M365Error):
         _validate_graph_url("https://graph.microsoft.com/v1.0/users#fragment")
 
     with pytest.raises(M365Error):
@@ -104,6 +113,12 @@ def test_graph_validate_url_rejects_unsafe_components():
 def test_graph_path_segment_quotes_path_separators():
     """_graph_path_segment neutralizes path separators in dynamic IDs."""
     assert _graph_path_segment("user/../../mailFolders") == "user%2F..%2F..%2FmailFolders"
+
+
+def test_graph_object_id_rejects_non_guid_values():
+    """_graph_object_id only accepts directory object GUIDs."""
+    with pytest.raises(M365Error):
+        _graph_object_id("user/../../owners")
 
 
 

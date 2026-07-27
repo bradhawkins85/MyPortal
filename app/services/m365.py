@@ -1257,6 +1257,17 @@ def _graph_path_segment(value: Any) -> str:
     return quote(str(value).strip(), safe="")
 
 
+def _graph_object_id(value: Any) -> str:
+    """Return a validated Microsoft Graph object ID for path construction."""
+    candidate = str(value).strip()
+    if not re.fullmatch(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        candidate,
+    ):
+        raise M365Error("Invalid Microsoft Graph object ID", http_status=400)
+    return candidate
+
+
 def _validate_graph_url(url: str) -> None:
     """Reject non-Microsoft Graph targets to prevent SSRF via forwarded URLs."""
     parsed = urlsplit(url)
@@ -1279,7 +1290,10 @@ def _validate_graph_url(url: str) -> None:
         log_error("Rejected non-Graph URL in Microsoft Graph helper", url=url)
         raise M365Error("Invalid Microsoft Graph URL", http_status=400)
 
-    if any(unquote(segment) in {".", ".."} for segment in path.split("/")):
+    segments = path.lstrip("/").split("/")
+    if any(segment == "" for segment in segments) or any(
+        unquote(segment) in {".", ".."} for segment in segments
+    ):
         log_error("Rejected unsafe Graph path in Microsoft Graph helper", url=url)
         raise M365Error("Invalid Microsoft Graph URL", http_status=400)
 
@@ -1517,7 +1531,7 @@ async def _delete_existing_apps_by_display_name(
         try:
             await _graph_delete(
                 access_token,
-                f"https://graph.microsoft.com/v1.0/applications/{_graph_path_segment(obj_id)}",
+                f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(obj_id)}",
             )
             log_info(
                 "Deleted existing app registration before re-provisioning",
@@ -1665,7 +1679,7 @@ async def provision_app_registration(
     secret_expiry_str = secret_expiry_date.isoformat() + "T00:00:00Z"
     secret_data = await _graph_post(
         access_token,
-        f"https://graph.microsoft.com/v1.0/applications/{_graph_path_segment(app_object_id)}/addPassword",
+        f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/addPassword",
         {
             "passwordCredential": {
                 "displayName": "MyPortal",
@@ -1747,7 +1761,7 @@ async def _grant_provisioned_roles(
             try:
                 await _post_app_role_assignment_with_retry(
                     access_token,
-                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
+                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
                     {
                         "principalId": sp_object_id,
                         "resourceId": graph_sp_id,
@@ -1786,7 +1800,7 @@ async def _grant_provisioned_roles(
                 try:
                     await _post_app_role_assignment_with_retry(
                         access_token,
-                        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
+                        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
                         {
                             "principalId": sp_object_id,
                             "resourceId": exo_sp_id,
@@ -1847,7 +1861,7 @@ async def _grant_provisioned_roles(
                     try:
                         await _post_app_role_assignment_with_retry(
                             access_token,
-                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
+                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
                             {
                                 "principalId": sp_object_id,
                                 "resourceId": teams_sp_id,
@@ -1895,10 +1909,10 @@ async def _grant_provisioned_roles(
         try:
             await _graph_post(
                 access_token,
-                f"https://graph.microsoft.com/v1.0/applications/{_graph_path_segment(app_object_id)}/owners/$ref",
+                f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/owners/$ref",
                 {
                     "@odata.id": (
-                        f"https://graph.microsoft.com/v1.0/directoryObjects/{_graph_path_segment(sp_object_id)}"
+                        f"https://graph.microsoft.com/v1.0/directoryObjects/{_graph_object_id(sp_object_id)}"
                     )
                 },
             )
@@ -1971,7 +1985,7 @@ async def renew_client_secret(company_id: int) -> None:
     # Create new client secret via Graph API
     secret_data = await _graph_post(
         access_token,
-        f"https://graph.microsoft.com/v1.0/applications/{_graph_path_segment(app_object_id)}/addPassword",
+        f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/addPassword",
         {
             "passwordCredential": {
                 "displayName": "MyPortal",
@@ -2007,7 +2021,7 @@ async def renew_client_secret(company_id: int) -> None:
         try:
             await _graph_post(
                 access_token,
-                f"https://graph.microsoft.com/v1.0/applications/{_graph_path_segment(app_object_id)}/removePassword",
+                f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/removePassword",
                 {"keyId": old_key_id},
             )
             log_info(
@@ -3114,7 +3128,7 @@ async def verify_tenant_permissions(
     # Retrieve current app role assignments for the service principal
     assignments_response = await _graph_get(
         access_token,
-        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
+        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
     )
     assigned_roles: set[str] = {
         str(a.get("appRoleId") or "") for a in assignments_response.get("value", [])
@@ -3196,7 +3210,7 @@ async def check_enterprise_app_permissions(
     # Each assignment has appRoleId and resourceId (the resource SP object ID).
     assignments_response = await _graph_get(
         access_token,
-        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
+        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
     )
     assignment_list = assignments_response.get("value", [])
 
@@ -3221,7 +3235,7 @@ async def check_enterprise_app_permissions(
             sp_info = await _graph_get(
                 access_token,
                 (
-                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(resource_id)}"
+                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(resource_id)}"
                     "?$select=appId"
                 ),
             )
@@ -3547,7 +3561,7 @@ async def try_grant_missing_permissions(
         # share the same appRoleId GUID so we must check by resourceId as well.
         assignments_response = await _graph_get(
             access_token,
-            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
+            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
         )
         assignment_list = assignments_response.get("value", [])
         assigned_roles: set[str] = {
@@ -3642,7 +3656,7 @@ async def try_grant_missing_permissions(
                     try:
                         await _graph_post(
                             access_token,
-                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
+                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
                             {
                                 "principalId": sp_object_id,
                                 "resourceId": graph_sp_id,
@@ -3672,7 +3686,7 @@ async def try_grant_missing_permissions(
                     try:
                         await _graph_post(
                             access_token,
-                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
+                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
                             {
                                 "principalId": sp_object_id,
                                 "resourceId": exo_sp_id,
@@ -3704,7 +3718,7 @@ async def try_grant_missing_permissions(
                     try:
                         await _graph_post(
                             access_token,
-                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
+                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
                             {
                                 "principalId": sp_object_id,
                                 "resourceId": teams_sp_id,
