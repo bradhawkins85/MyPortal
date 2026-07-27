@@ -18,6 +18,7 @@ _settings = get_settings()
 _M_LIMIT_EXCEEDED = "M_LIMIT_EXCEEDED"
 _DEFAULT_TIMEOUT = 30.0
 _SYNC_TIMEOUT_MS = 30_000
+_SAFE_MATRIX_PATH_RE = re.compile(r"^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]+$")
 
 # Module-level shared client for connection pooling across Matrix API calls.
 # Limits are intentionally conservative; the sync loop uses a longer timeout.
@@ -77,6 +78,13 @@ async def _request(
     timeout: float = _DEFAULT_TIMEOUT,
     max_retries: int = 3,
 ) -> dict[str, Any]:
+    if not _SAFE_MATRIX_PATH_RE.fullmatch(path):
+        raise MatrixError("M_INVALID_PARAM", "Invalid Matrix API path")
+    if not path.startswith("/_matrix/"):
+        raise MatrixError("M_INVALID_PARAM", "Invalid Matrix API path")
+    if any(segment in {".", ".."} for segment in path.split("/")):
+        raise MatrixError("M_INVALID_PARAM", "Invalid Matrix API path")
+
     url = f"{_base_url()}{path}"
     for attempt in range(max_retries):
         try:
