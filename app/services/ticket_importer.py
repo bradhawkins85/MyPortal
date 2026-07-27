@@ -136,8 +136,7 @@ def _clean_text(value: Any) -> str | None:
     normalised = unescape(text.replace("\r\n", "\n")).replace("\xa0", " ")
     normalised = _HTML_NEWLINE_TAGS.sub("\n", normalised)
     normalised = _HTML_TAGS.sub("", normalised)
-    normalised = re.sub(r"[\t ]+(?=\n)", "", normalised)
-    normalised = re.sub(r"(?<=\n)[\t ]+", "", normalised)
+    normalised = "\n".join(line.strip(" \t") for line in normalised.split("\n"))
     normalised = re.sub(r"\n{2,}", "\n", normalised)
     normalised = normalised.strip()
     return normalised or None
