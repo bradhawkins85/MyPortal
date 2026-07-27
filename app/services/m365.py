@@ -1275,7 +1275,7 @@ def _validate_graph_url(url: str) -> None:
         log_error("Rejected non-Graph URL in Microsoft Graph helper", url=url)
         raise M365Error("Invalid Microsoft Graph URL", http_status=400)
 
-    if path not in ("/v1.0", "/beta") and not path.startswith(("/v1.0/", "/beta/")):
+    if not path.startswith(("/v1.0/", "/beta/")):
         log_error("Rejected non-Graph URL in Microsoft Graph helper", url=url)
         raise M365Error("Invalid Microsoft Graph URL", http_status=400)
 
@@ -3220,8 +3220,10 @@ async def check_enterprise_app_permissions(
         try:
             sp_info = await _graph_get(
                 access_token,
-                f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(resource_id)}"
-                "?$select=appId",
+                (
+                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(resource_id)}"
+                    "?$select=appId"
+                ),
             )
             resource_id_to_app_id[resource_id] = str(sp_info.get("appId") or "")
         except M365Error:
