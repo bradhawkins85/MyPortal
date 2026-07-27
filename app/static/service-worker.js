@@ -118,6 +118,10 @@ self.addEventListener('fetch', (event) => {
   );
 });
 self.addEventListener('message', (event) => {
+  // Reject messages from untrusted origins (CWE-940)
+  if (!event.origin || event.origin !== self.location.origin) {
+    return;
+  }
   const data = event.data;
   if (!data || typeof data !== 'object') {
     return;
