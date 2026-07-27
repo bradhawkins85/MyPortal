@@ -54,9 +54,6 @@ _LLM_PROMPT_CHAR_LIMIT = 64000
 _LLM_SNIPPET_LENGTH = 500
 _DEFAULT_CONTEXT_TOKEN_BUDGET = 12000
 _MAX_TICKET_ID_QUERY_LENGTH = 1000
-_EXPLICIT_TICKET_ID_RE = re.compile(
-    r"(?:ticket\s*#?|#)\s*(\d{3,})|\b(\d{4,})\b", re.IGNORECASE
-)
 
 
 class AgentContextMode(str, Enum):
@@ -253,8 +250,39 @@ def _extract_explicit_ticket_ids(query: str) -> list[int]:
     query_text = query or ""
     if len(query_text) > _MAX_TICKET_ID_QUERY_LENGTH:
         return ids
-    for match in _EXPLICIT_TICKET_ID_RE.findall(query_text):
-        value = next((part for part in match if part), "")
+
+    def _is_word_char(char: str) -> bool:
+        return char.isalnum() or char == "_"
+
+    def _has_word_boundaries(start: int, end: int) -> bool:
+        before_is_word = start > 0 and _is_word_char(query_text[start - 1])
+        after_is_word = end < len(query_text) and _is_word_char(query_text[end])
+        return not before_is_word and not after_is_word
+
+    def _has_explicit_ticket_marker(start: int) -> bool:
+        marker_index = start
+        while marker_index > 0 and query_text[marker_index - 1].isspace():
+            marker_index -= 1
+        if marker_index > 0 and query_text[marker_index - 1] == "#":
+            return True
+
+        word_end = marker_index
+        word_start = word_end
+        while word_start > 0 and query_text[word_start - 1].isalpha():
+            word_start -= 1
+        if query_text[word_start:word_end].casefold() != "ticket":
+            return False
+        return True
+
+    for match in re.finditer(r"\d+", query_text):
+        value = match.group(0)
+        if len(value) < 3:
+            continue
+        if not (
+            _has_explicit_ticket_marker(match.start())
+            or (len(value) >= 4 and _has_word_boundaries(match.start(), match.end()))
+        ):
+            continue
         try:
             ticket_id = int(value)
         except (TypeError, ValueError):
