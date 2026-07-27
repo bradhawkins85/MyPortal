@@ -122,13 +122,18 @@
       }
 
       async function deleteExclusion(tagSlug) {
-        const escapedSlugForDisplay = tagSlug;
-        if (!confirm(`Are you sure you want to remove "${escapedSlugForDisplay}" from the exclusion list?`)) {
+        const slug = tagSlug
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#039;/g, "'")
+          .replace(/&amp;/g, '&');
+        if (!confirm(`Are you sure you want to remove "${slug}" from the exclusion list?`)) {
           return;
         }
 
         try {
-          const response = await fetch(`/api/tag-exclusions/${encodeURIComponent(tagSlug)}`, {
+          const response = await fetch(`/api/tag-exclusions/${encodeURIComponent(slug)}`, {
             method: 'DELETE',
             headers: {
               'X-CSRF-Token': csrfToken || '',
