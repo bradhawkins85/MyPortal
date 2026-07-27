@@ -16,6 +16,7 @@ handlers unless the feature pack renders its own response).
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -78,9 +79,13 @@ def set_flash(
     signed = _sign(payload)
     settings = get_settings()
     secure = settings.environment.lower() == "production"
+    # Base64-encode so the cookie value is restricted to [A-Za-z0-9+/=]:
+    # - prevents any header-injection via special / whitespace characters
+    # - keeps the value RFC 6265-compliant
+    cookie_value = base64.b64encode(signed.encode()).decode()
     response.set_cookie(
         _COOKIE_NAME,
-        signed,
+        cookie_value,
         httponly=True,
         secure=secure,
         max_age=_MAX_AGE,
@@ -97,6 +102,11 @@ def pop_flash(request: Request) -> dict[str, str] | None:
     """
     raw = request.cookies.get(_COOKIE_NAME)
     if not raw:
+        return None
+    # Decode the base64 wrapper applied in set_flash; reject malformed values.
+    try:
+        raw = base64.b64decode(raw.encode()).decode()
+    except Exception:
         return None
     payload = _verify(raw)
     if payload is None:
