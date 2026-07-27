@@ -94,10 +94,14 @@ def _strip_html_tags(value: str) -> str:
             cleaned_parts.append(value[cursor:])
             break
 
-        end = value.find(">", start + 2)
+        end = value.find(">", start + 1)
         if end == -1:
             cleaned_parts.append(value[cursor:])
             break
+        if end == start + 1:
+            cleaned_parts.append(value[cursor : end + 1])
+            cursor = end + 1
+            continue
 
         cleaned_parts.append(value[cursor:start])
         cursor = end + 1

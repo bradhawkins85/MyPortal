@@ -83,6 +83,10 @@ def test_strip_html_tags_handles_nested_left_angle_brackets():
     assert _strip_html_tags("<span<bad>From: Example</span>") == "From: Example"
 
 
+def test_strip_html_tags_removes_valid_html_tags():
+    assert _strip_html_tags("<span>From: Example</span>") == "From: Example"
+
+
 @pytest.mark.asyncio
 async def test_persist_inline_images_for_ticket_body_saves_data_uri(monkeypatch, tmp_path):
     png_bytes = base64.b64decode(
