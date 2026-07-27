@@ -8,6 +8,7 @@ import re
 import socket
 import time
 from abc import ABC, abstractmethod
+from html.parser import HTMLParser
 from datetime import datetime, timezone
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
@@ -178,11 +179,38 @@ def _extract_consignment_id(url: str, fallback_text: str = "") -> str | None:
     return None
 
 
+class _HTMLTextExtractor(HTMLParser):
+    """Extract visible text from HTML, skipping script and style blocks."""
+
+    _SKIP_TAGS = frozenset({"script", "style"})
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._parts: list[str] = []
+        self._skip_depth: int = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:  # type: ignore[override]  # mypy: parent uses untyped signature
+        if tag.lower() in self._SKIP_TAGS:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        # Guard against going negative on malformed HTML with unmatched
+        # closing tags (e.g. </script> with no preceding <script>).
+        if tag.lower() in self._SKIP_TAGS and self._skip_depth > 0:
+            self._skip_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth == 0:
+            self._parts.append(data)
+
+    def get_text(self) -> str:
+        return " ".join(self._parts)
+
+
 def _extract_visible_text(html_text: str, *, limit: int = 14_000) -> str:
-    text = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", html_text)
-    text = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", text)
-    text = re.sub(r"(?is)<[^>]+>", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
+    extractor = _HTMLTextExtractor()
+    extractor.feed(html_text)
+    text = re.sub(r"\s+", " ", extractor.get_text()).strip()
     return text[:limit]
 
 
