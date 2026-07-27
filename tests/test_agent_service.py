@@ -151,7 +151,7 @@ async def test_execute_agent_query_rejects_blank(monkeypatch):
     assert result["answer"] is None
 
 
-def test_extract_explicit_ticket_ids_handles_supported_ticket_formats():
+def test_extract_explicit_ticket_ids_supported_formats():
     query = "Check ticket #123, #456, ticket789, 9876, and repeat #123."
 
     result = agent_service._extract_explicit_ticket_ids(query)
@@ -159,7 +159,7 @@ def test_extract_explicit_ticket_ids_handles_supported_ticket_formats():
     assert result == [123, 456, 789, 9876]
 
 
-def test_extract_explicit_ticket_ids_requires_explicit_marker_or_standalone_id():
+def test_extract_explicit_ticket_ids_requires_markers():
     query = (
         "Reference abc1234def, #      nope, ticketabc123, "
         "and ticket      nope."

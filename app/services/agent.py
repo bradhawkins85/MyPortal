@@ -275,15 +275,23 @@ def _extract_explicit_ticket_ids(query: str) -> list[int]:
             word_start -= 1
         return query_text[word_start:word_end].casefold() == _TICKET_MARKER_KEYWORD
 
-    for match in re.finditer(r"\d+", query_text):
-        value = match.group(0)
+    index = 0
+    while index < len(query_text):
+        if not query_text[index].isdigit():
+            index += 1
+            continue
+        start = index
+        while index < len(query_text) and query_text[index].isdigit():
+            index += 1
+        end = index
+        value = query_text[start:end]
         if len(value) < _MIN_MARKED_TICKET_ID_DIGITS:
             continue
         if not (
-            _has_explicit_ticket_marker(match.start())
+            _has_explicit_ticket_marker(start)
             or (
                 len(value) >= _MIN_STANDALONE_TICKET_ID_DIGITS
-                and _has_word_boundaries(match.start(), match.end())
+                and _has_word_boundaries(start, end)
             )
         ):
             continue
