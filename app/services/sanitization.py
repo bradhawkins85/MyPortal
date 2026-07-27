@@ -83,6 +83,10 @@ class SanitizedRichText:
 
 
 def _strip_html_tags(value: str) -> str:
+    """Remove complete non-empty angle-bracket tags in linear time.
+
+    Empty tags (``<>``) and unclosed tags are preserved.
+    """
     if "<" not in value or ">" not in value:
         return value
 
