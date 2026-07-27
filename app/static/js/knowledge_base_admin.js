@@ -433,7 +433,13 @@
     ];
 
     commands.forEach((item) => {
-      const button = createToolbarButton(item.command, item.label.replace(/<[^>]*>/g, ''));
+      let plainLabel = item.label;
+      let prevLabel;
+      do {
+        prevLabel = plainLabel;
+        plainLabel = plainLabel.replace(/<[^>]*>/g, '');
+      } while (plainLabel !== prevLabel);
+      const button = createToolbarButton(item.command, plainLabel);
       button.innerHTML = item.label;
       if (item.value) {
         button.dataset.kbCommandValue = item.value;
