@@ -1809,9 +1809,7 @@ async def upload_diagnostics(
     diag_dir = os.path.join(str(media_root), "tray_diagnostics")
     os.makedirs(diag_dir, exist_ok=True)
     raw_device_uid = device.get("device_uid") or device_uid
-    safe_device_uid = tray_service.normalise_device_uid(
-        str(raw_device_uid) if raw_device_uid is not None else None
-    )
+    safe_device_uid = tray_service.normalise_device_uid(raw_device_uid)
     filename = f"{safe_device_uid}_{_uuid.uuid4().hex}.zip"
     stored_path = os.path.join(diag_dir, filename)
     with open(stored_path, "wb") as f:
