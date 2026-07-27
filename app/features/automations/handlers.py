@@ -889,13 +889,16 @@ async def admin_test_automation(automation_id: int, request: Request):
             apply=apply_action,
         )
     except ValueError as exc:
-        message = str(exc)
-        status_code = (
-            status.HTTP_404_NOT_FOUND
-            if "not found" in message.lower()
-            else status.HTTP_400_BAD_REQUEST
+        is_not_found = "not found" in str(exc).lower()
+        if is_not_found:
+            return JSONResponse(
+                {"detail": "The requested resource was not found."},
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+        return JSONResponse(
+            {"detail": "Invalid request parameters."},
+            status_code=status.HTTP_400_BAD_REQUEST,
         )
-        return JSONResponse({"detail": message}, status_code=status_code)
     return JSONResponse(_main()._serialise_for_json(result))
 
 
