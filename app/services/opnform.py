@@ -13,7 +13,7 @@ class OpnformValidationError(ValueError):
 
 
 IFRAME_TAG_REGEX = re.compile(r"<iframe\b[^>]*>", re.IGNORECASE)
-SCRIPT_TAG_REGEX = re.compile(r"<script\b[^>]*>[\s\S]*?</script>", re.IGNORECASE)
+SCRIPT_TAG_REGEX = re.compile(r"<script\b[^>]*>", re.IGNORECASE)
 
 
 class _AttributeExtractor(HTMLParser):
