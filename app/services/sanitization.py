@@ -82,6 +82,37 @@ class SanitizedRichText:
     has_rich_content: bool
 
 
+def _strip_html_tags(value: str) -> str:
+    """Remove complete non-empty angle-bracket tags in linear time.
+
+    Empty tags (``<>``) and unclosed tags are preserved.
+    """
+    if "<" not in value or ">" not in value:
+        return value
+
+    cleaned_parts: list[str] = []
+    cursor = 0
+    while True:
+        start = value.find("<", cursor)
+        if start == -1:
+            cleaned_parts.append(value[cursor:])
+            break
+
+        end = value.find(">", start + 1)
+        if end == -1:
+            cleaned_parts.append(value[cursor:])
+            break
+        if end == start + 1:
+            cleaned_parts.append(value[cursor : end + 1])
+            cursor = end + 1
+            continue
+
+        cleaned_parts.append(value[cursor:start])
+        cursor = end + 1
+
+    return "".join(cleaned_parts)
+
+
 def _strip_quoted_email_headers(value: str) -> str:
     """Remove common quoted email header blocks from replies.
 
@@ -93,14 +124,14 @@ def _strip_quoted_email_headers(value: str) -> str:
 
     lines = value.splitlines()
     for idx, line in enumerate(lines):
-        normalised = re.sub(r"<[^>]+>", "", line).strip()
+        normalised = _strip_html_tags(line).strip()
         if _EMAIL_THREAD_DIVIDER.match(normalised):
             return "\n".join(lines[:idx]).rstrip()
         if _EMAIL_HEADER_PATTERN.match(normalised):
             header_hits = 0
             header_prefixes: set[str] = set()
             for candidate in lines[idx : idx + 6]:
-                candidate_text = re.sub(r"<[^>]+>", "", candidate).strip()
+                candidate_text = _strip_html_tags(candidate).strip()
                 if _EMAIL_HEADER_PATTERN.match(candidate_text):
                     header_hits += 1
                     header_prefixes.add(candidate_text.split(":", 1)[0].strip().lower())

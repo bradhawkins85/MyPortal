@@ -3,7 +3,7 @@ import base64
 import pytest
 
 from app.services import ticket_attachments as ticket_attachments_service
-from app.services.sanitization import sanitize_rich_text
+from app.services.sanitization import _strip_html_tags, sanitize_rich_text
 
 
 def test_sanitize_rich_text_keeps_images_with_safe_attributes():
@@ -73,6 +73,26 @@ def test_sanitize_rich_text_keeps_non_quoted_header_like_content():
     assert "voice mail from" in result.html
     assert "Duration" in result.html
     assert "Received" in result.html
+
+
+def test_strip_html_tags_preserves_original_empty_tag_behavior():
+    assert _strip_html_tags("<>From: Example") == "<>From: Example"
+
+
+def test_strip_html_tags_handles_nested_left_angle_brackets():
+    assert _strip_html_tags("<span<bad>From: Example</span>") == "From: Example"
+
+
+def test_strip_html_tags_removes_valid_html_tags():
+    assert _strip_html_tags("<span>From: Example</span>") == "From: Example"
+
+
+def test_strip_html_tags_preserves_unclosed_tags():
+    assert _strip_html_tags("<span>From: Example") == "<span>From: Example"
+
+
+def test_strip_html_tags_removes_multiple_tags_with_attributes():
+    assert _strip_html_tags('<p class="x">From:</p><strong> Example</strong>') == "From: Example"
 
 
 @pytest.mark.asyncio
