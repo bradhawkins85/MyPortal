@@ -110,6 +110,7 @@ def _extract_xero_invoice_id(event: dict[str, Any]) -> str | None:
 
 
 def _normalize_xero_invoice_id(value: Any) -> str | None:
+    """Return a UUID-formatted Xero invoice ID, or ``None`` if validation fails."""
     candidate = str(value or "").strip()
     if not candidate:
         return None
@@ -124,7 +125,7 @@ async def _fetch_xero_invoice(invoice_id: str) -> dict[str, Any] | None:
     """Fetch a Xero invoice using a defensively validated invoice ID."""
     normalized_invoice_id = _normalize_xero_invoice_id(invoice_id)
     if not normalized_invoice_id:
-        raise ValueError("Invalid Xero invoice ID")
+        raise ValueError("Invalid Xero invoice ID format")
     credentials = await modules_service.get_xero_credentials()
     tenant_id = str((credentials or {}).get("tenant_id") or "").strip()
     if not tenant_id:
