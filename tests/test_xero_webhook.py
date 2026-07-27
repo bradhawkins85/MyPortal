@@ -33,7 +33,7 @@ def test_extract_xero_invoice_id_from_resource_url():
     assert xero._extract_xero_invoice_id(event) == "123e4567-e89b-12d3-a456-426614174000"
 
 
-def test_extract_xero_invoice_id_rejects_invalid_value():
+def test_extract_xero_invoice_id_rejects_invalid_resource_id():
     event = {"resourceId": "../transfer-funds-to/123?amount=456"}
 
     assert xero._extract_xero_invoice_id(event) is None
