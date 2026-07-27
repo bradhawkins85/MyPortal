@@ -255,9 +255,9 @@ def _extract_explicit_ticket_ids(query: str) -> list[int]:
         return char.isalnum() or char == "_"
 
     def _has_word_boundaries(start: int, end: int) -> bool:
-        before_is_word = start > 0 and _is_word_char(query_text[start - 1])
-        after_is_word = end < len(query_text) and _is_word_char(query_text[end])
-        return not before_is_word and not after_is_word
+        no_word_before = start == 0 or not _is_word_char(query_text[start - 1])
+        no_word_after = end == len(query_text) or not _is_word_char(query_text[end])
+        return no_word_before and no_word_after
 
     def _has_explicit_ticket_marker(start: int) -> bool:
         marker_index = start

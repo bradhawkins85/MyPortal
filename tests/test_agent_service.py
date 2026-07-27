@@ -162,10 +162,16 @@ def test_extract_explicit_ticket_ids_handles_supported_ticket_formats():
 def test_extract_explicit_ticket_ids_requires_explicit_marker_or_standalone_id():
     query = (
         "Reference abc1234def, #      nope, ticketabc123, "
-        "and ticket      nope before 321."
+        "and ticket      nope."
     )
 
     result = agent_service._extract_explicit_ticket_ids(query)
+
+    assert result == []
+
+
+def test_extract_explicit_ticket_ids_rejects_three_digit_standalone_values():
+    result = agent_service._extract_explicit_ticket_ids("Check 321 before anything else.")
 
     assert result == []
 
