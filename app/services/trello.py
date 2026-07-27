@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit, urljoin
+from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 from app.core.config import get_settings
 
@@ -275,7 +275,7 @@ async def add_comment_to_card(
         return None
 
     full_text = f"{MYPORTAL_COMMENT_PREFIX} {text}"
-    url = f"{TRELLO_API_BASE}/cards/{card_id}/actions/comments"
+    url = f"{TRELLO_API_BASE}/cards/{quote(card_id, safe='')}/actions/comments"
     try:
         async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
             response = await client.post(
