@@ -433,7 +433,13 @@
     ];
 
     commands.forEach((item) => {
-      const button = createToolbarButton(item.command, item.label.replace(/<[^>]*>/g, ''));
+      let plainLabel = item.label;
+      let prevLabel;
+      do {
+        prevLabel = plainLabel;
+        plainLabel = plainLabel.replace(/<[^>]*>/g, '');
+      } while (plainLabel !== prevLabel);
+      const button = createToolbarButton(item.command, plainLabel);
       button.innerHTML = item.label;
       if (item.value) {
         button.dataset.kbCommandValue = item.value;
@@ -1280,7 +1286,7 @@
               return;
             }
             document.execCommand('createLink', false, url);
-            const selectorUrl = url.replace(/"/g, '\\"');
+            const selectorUrl = url.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
             editor.querySelectorAll(`a[href="${selectorUrl}"]`).forEach((anchor) => {
               anchor.target = '_blank';
               anchor.rel = 'noopener';
