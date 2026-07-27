@@ -317,17 +317,19 @@ def test_generate_invoice_billable_ticket_uses_hours_and_minutes(monkeypatch):
         "build_recurring_invoice_items",
         AsyncMock(return_value=[]),
     )
+    list_tickets = AsyncMock(
+        return_value=[{"id": 55, "subject": "VPN help", "status": "resolved"}]
+    )
     monkeypatch.setattr(
         invoice_generator.tickets_repo,
         "list_tickets",
-        AsyncMock(
-            return_value=[{"id": 55, "subject": "VPN help", "status": "resolved"}]
-        ),
+        list_tickets,
     )
+    get_unbilled_reply_ids = AsyncMock(return_value=[1, 2])
     monkeypatch.setattr(
         invoice_generator.billed_time_repo,
         "get_unbilled_reply_ids",
-        AsyncMock(return_value=[1, 2]),
+        get_unbilled_reply_ids,
     )
     monkeypatch.setattr(
         invoice_generator.tickets_repo,
@@ -374,6 +376,59 @@ def test_generate_invoice_billable_ticket_uses_hours_and_minutes(monkeypatch):
         created_lines[0]["description"]
         == "Ticket 55: VPN help Remote (2 Hours 30 Mins)"
     )
+    list_tickets.assert_awaited_once_with(company_id=1, limit=None)
+    # Finalisation must use the reply snapshot which produced the line rather
+    # than discovering newly-added, uninvoiced work in a second query.
+    get_unbilled_reply_ids.assert_awaited_once_with(55)
+
+
+def test_generate_invoice_line_failure_does_not_consume_sources(monkeypatch):
+    monkeypatch.setattr(
+        invoice_generator.company_repo,
+        "get_company_by_id",
+        AsyncMock(return_value=_make_company()),
+    )
+    monkeypatch.setattr(
+        invoice_generator.xero_service,
+        "build_invoice_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        invoice_generator.xero_service,
+        "build_recurring_invoice_items",
+        AsyncMock(return_value=_make_recurring_items()),
+    )
+    monkeypatch.setattr(
+        invoice_generator.tickets_repo, "list_tickets", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        invoice_generator.invoice_repo,
+        "create_invoice",
+        AsyncMock(return_value={"id": 606}),
+    )
+    monkeypatch.setattr(
+        invoice_generator.invoice_repo, "get_max_invoice_seq", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr(
+        invoice_generator.invoice_lines_repo,
+        "create_invoice_line",
+        AsyncMock(side_effect=RuntimeError("database write failed")),
+    )
+    delete_invoice = AsyncMock()
+    monkeypatch.setattr(invoice_generator.invoice_repo, "delete_invoice", delete_invoice)
+    mark_recurring = AsyncMock()
+    monkeypatch.setattr(
+        invoice_generator.recurring_items_repo,
+        "mark_recurring_invoice_items_billed",
+        mark_recurring,
+    )
+
+    result = asyncio.run(invoice_generator.generate_invoice(1))
+
+    assert result["status"] == "error"
+    assert result["reason"] == "Failed to create invoice lines"
+    delete_invoice.assert_awaited_once_with(606)
+    mark_recurring.assert_not_awaited()
 
 
 def test_generate_invoice_resolves_requester_name_for_template(monkeypatch):
