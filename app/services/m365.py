@@ -1255,12 +1255,12 @@ async def _graph_get_all(access_token: str, url: str) -> list[dict[str, Any]]:
 
 
 def _graph_path_segment(value: Any) -> str:
-    """Return a single Microsoft Graph path segment encoded for safe URL use."""
+    """Encode a dynamic Microsoft Graph path value as one safe URL segment."""
     return quote(str(value).strip(), safe="")
 
 
 def _graph_object_id(value: Any) -> str:
-    """Return a validated Microsoft Graph object ID for path construction."""
+    """Validate a Microsoft Entra directory object ID GUID for Graph paths."""
     candidate = str(value).strip()
     if not re.fullmatch(
         r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
@@ -1299,11 +1299,15 @@ def _validate_graph_url(url: str) -> None:
         raise M365Error("Invalid Microsoft Graph URL", http_status=400)
 
     resource_segments = segments[2:]
-    has_empty_resource_segments = any(segment == "" for segment in resource_segments)
-    has_relative_resource_segments = any(
+    contains_empty_resource_segments = any(segment == "" for segment in resource_segments)
+    contains_relative_resource_segments = any(
         unquote(segment) in {".", ".."} for segment in resource_segments
     )
-    if not resource_segments or has_empty_resource_segments or has_relative_resource_segments:
+    if (
+        not resource_segments
+        or contains_empty_resource_segments
+        or contains_relative_resource_segments
+    ):
         log_error("Rejected unsafe Graph path in Microsoft Graph helper", url=url)
         raise M365Error("Invalid Microsoft Graph URL", http_status=400)
 
