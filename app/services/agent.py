@@ -53,6 +53,7 @@ _LLM_COMPANY_CONTEXT_LIMIT = 3
 _LLM_PROMPT_CHAR_LIMIT = 64000
 _LLM_SNIPPET_LENGTH = 500
 _DEFAULT_CONTEXT_TOKEN_BUDGET = 12000
+_MAX_TICKET_ID_QUERY_LENGTH = 1000
 _EXPLICIT_TICKET_ID_RE = re.compile(
     r"(?:ticket\s*#?|#)\s*(\d{3,})|\b(\d{4,})\b", re.IGNORECASE
 )
@@ -249,7 +250,10 @@ def _coerce_user_id(user: Mapping[str, Any]) -> int:
 
 def _extract_explicit_ticket_ids(query: str) -> list[int]:
     ids: list[int] = []
-    for match in _EXPLICIT_TICKET_ID_RE.findall(query or ""):
+    query_text = query or ""
+    if len(query_text) > _MAX_TICKET_ID_QUERY_LENGTH:
+        return ids
+    for match in _EXPLICIT_TICKET_ID_RE.findall(query_text):
         value = next((part for part in match if part), "")
         try:
             ticket_id = int(value)
