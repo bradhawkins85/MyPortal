@@ -273,14 +273,16 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
     # Build ticket line items for billable tickets
     ticket_line_items: list[dict[str, Any]] = []
     tickets_context: list[dict[str, Any]] = []
-    ticket_numbers: list[str] = []
     billable_tickets_found = 0
 
     billable_statuses = _get_env_xero_billable_statuses()
 
     # Fetch all tickets for the company and find unbilled ones
     try:
-        all_tickets = await tickets_repo.list_tickets(company_id=company_id, limit=1000)
+        # Do not silently omit older tickets for companies with more than 1,000
+        # records. Status filtering below still protects tickets which are not in
+        # a billable workflow state.
+        all_tickets = await tickets_repo.list_tickets(company_id=company_id, limit=None)
     except Exception as exc:
         logger.warning(
             "Failed to fetch tickets for invoice generation",
@@ -316,6 +318,7 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
         # Group by labour type
         labour_map: dict[tuple[str | None, str | None], dict[str, Any]] = {}
         billable_minutes = 0
+        billed_replies: list[dict[str, Any]] = []
 
         for reply in unbilled_replies:
             minutes = _coerce_minutes(reply.get("minutes_spent"))
@@ -324,6 +327,13 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
             if not reply.get("is_billable"):
                 continue
             billable_minutes += minutes
+            billed_replies.append(
+                {
+                    "id": int(reply["id"]),
+                    "minutes": minutes,
+                    "labour_type_id": reply.get("labour_type_id"),
+                }
+            )
             labour_code = str(reply.get("labour_type_code") or "").strip() or None
             labour_name = str(reply.get("labour_type_name") or "").strip() or None
             labour_rate = reply.get("labour_type_rate")
@@ -382,6 +392,10 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
                 "labour_groups": labour_groups,
                 "requester_name": requester_name,
                 "requester_email": requester_email,
+                # Preserve the exact entries used to construct the invoice. A
+                # reply added or edited while the invoice is being saved must
+                # not be marked as billed without appearing on an invoice line.
+                "billed_replies": billed_replies,
                 "expense_ids": [
                     int(expense["id"])
                     for expense in unbilled_expenses
@@ -413,10 +427,6 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
                     ],
                 }
             )
-
-        ticket_num = str(ticket_id)
-        if ticket_num not in ticket_numbers:
-            ticket_numbers.append(ticket_num)
 
     combined_line_items = recurring_line_items + ticket_line_items
 
@@ -472,8 +482,10 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
     invoice_id = invoice["id"]
 
     # Create invoice line records
+    line_creation_error: Exception | None = None
     for item in combined_line_items:
-        qty = Decimal(str(item.get("Quantity") or 1))
+        raw_quantity = item.get("Quantity")
+        qty = Decimal(str(1 if raw_quantity is None else raw_quantity))
         unit = Decimal(str(item.get("UnitAmount") or 0))
         line_amount = (qty * unit).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         description = str(item.get("Description") or "").strip() or None
@@ -493,6 +505,27 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
                 invoice_id=invoice_id,
                 error=str(exc),
             )
+            line_creation_error = exc
+            break
+
+    if line_creation_error is not None:
+        # An incomplete draft must never consume ticket time/expenses. Remove it
+        # (and its lines via the invoice_lines FK) before returning the failure.
+        try:
+            await invoice_repo.delete_invoice(invoice_id)
+        except Exception as cleanup_exc:
+            logger.error(
+                "Failed to remove incomplete local invoice",
+                invoice_id=invoice_id,
+                error=str(cleanup_exc),
+            )
+        return {
+            "status": "error",
+            "reason": "Failed to create invoice lines",
+            "error": str(line_creation_error),
+            "company_id": company_id,
+            "invoice_id": invoice_id,
+        }
 
     recurring_item_ids = [
         int(item["MyPortalRecurringItemId"])
@@ -520,18 +553,9 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
         if not ticket_id:
             continue
 
-        unbilled_ids = await billed_time_repo.get_unbilled_reply_ids(ticket_id)
-        replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
-
-        for reply in replies:
-            reply_id = reply.get("id")
-            if reply_id not in unbilled_ids:
-                continue
-            if not reply.get("is_billable"):
-                continue
-            minutes = reply.get("minutes_spent")
-            if not minutes or minutes <= 0:
-                continue
+        for reply in ticket_ctx.get("billed_replies") or []:
+            reply_id = reply["id"]
+            minutes = reply["minutes"]
             labour_type_id = reply.get("labour_type_id")
             try:
                 await billed_time_repo.create_billed_time_entry(
