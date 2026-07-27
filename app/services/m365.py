@@ -14,7 +14,7 @@ import string
 import tempfile
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 
@@ -1252,14 +1252,35 @@ async def _graph_get_all(access_token: str, url: str) -> list[dict[str, Any]]:
     return items
 
 
+def _graph_path_segment(value: Any) -> str:
+    """Return a single Microsoft Graph path segment encoded for safe URL use."""
+    return quote(str(value).strip(), safe="")
+
+
 def _validate_graph_url(url: str) -> None:
     """Reject non-Microsoft Graph targets to prevent SSRF via forwarded URLs."""
     parsed = urlsplit(url)
     scheme = (parsed.scheme or "").lower()
     host = (parsed.hostname or "").lower()
+    path = parsed.path or "/"
 
-    if scheme != "https" or host not in _GRAPH_ALLOWED_HOSTS:
+    if (
+        scheme != "https"
+        or host not in _GRAPH_ALLOWED_HOSTS
+        or parsed.username
+        or parsed.password
+        or parsed.port is not None
+        or parsed.fragment
+    ):
         log_error("Rejected non-Graph URL in Microsoft Graph helper", url=url)
+        raise M365Error("Invalid Microsoft Graph URL", http_status=400)
+
+    if path not in ("/v1.0", "/beta") and not path.startswith(("/v1.0/", "/beta/")):
+        log_error("Rejected non-Graph URL in Microsoft Graph helper", url=url)
+        raise M365Error("Invalid Microsoft Graph URL", http_status=400)
+
+    if any(unquote(segment) in {".", ".."} for segment in path.split("/")):
+        log_error("Rejected unsafe Graph path in Microsoft Graph helper", url=url)
         raise M365Error("Invalid Microsoft Graph URL", http_status=400)
 
 
@@ -1496,7 +1517,7 @@ async def _delete_existing_apps_by_display_name(
         try:
             await _graph_delete(
                 access_token,
-                f"https://graph.microsoft.com/v1.0/applications/{obj_id}",
+                f"https://graph.microsoft.com/v1.0/applications/{_graph_path_segment(obj_id)}",
             )
             log_info(
                 "Deleted existing app registration before re-provisioning",
@@ -1644,7 +1665,7 @@ async def provision_app_registration(
     secret_expiry_str = secret_expiry_date.isoformat() + "T00:00:00Z"
     secret_data = await _graph_post(
         access_token,
-        f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/addPassword",
+        f"https://graph.microsoft.com/v1.0/applications/{_graph_path_segment(app_object_id)}/addPassword",
         {
             "passwordCredential": {
                 "displayName": "MyPortal",
@@ -1726,7 +1747,7 @@ async def _grant_provisioned_roles(
             try:
                 await _post_app_role_assignment_with_retry(
                     access_token,
-                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
                     {
                         "principalId": sp_object_id,
                         "resourceId": graph_sp_id,
@@ -1765,7 +1786,7 @@ async def _grant_provisioned_roles(
                 try:
                     await _post_app_role_assignment_with_retry(
                         access_token,
-                        f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
                         {
                             "principalId": sp_object_id,
                             "resourceId": exo_sp_id,
@@ -1826,7 +1847,7 @@ async def _grant_provisioned_roles(
                     try:
                         await _post_app_role_assignment_with_retry(
                             access_token,
-                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
                             {
                                 "principalId": sp_object_id,
                                 "resourceId": teams_sp_id,
@@ -1874,10 +1895,10 @@ async def _grant_provisioned_roles(
         try:
             await _graph_post(
                 access_token,
-                f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/owners/$ref",
+                f"https://graph.microsoft.com/v1.0/applications/{_graph_path_segment(app_object_id)}/owners/$ref",
                 {
                     "@odata.id": (
-                        f"https://graph.microsoft.com/v1.0/directoryObjects/{sp_object_id}"
+                        f"https://graph.microsoft.com/v1.0/directoryObjects/{_graph_path_segment(sp_object_id)}"
                     )
                 },
             )
@@ -1950,7 +1971,7 @@ async def renew_client_secret(company_id: int) -> None:
     # Create new client secret via Graph API
     secret_data = await _graph_post(
         access_token,
-        f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/addPassword",
+        f"https://graph.microsoft.com/v1.0/applications/{_graph_path_segment(app_object_id)}/addPassword",
         {
             "passwordCredential": {
                 "displayName": "MyPortal",
@@ -1986,7 +2007,7 @@ async def renew_client_secret(company_id: int) -> None:
         try:
             await _graph_post(
                 access_token,
-                f"https://graph.microsoft.com/v1.0/applications/{app_object_id}/removePassword",
+                f"https://graph.microsoft.com/v1.0/applications/{_graph_path_segment(app_object_id)}/removePassword",
                 {"keyId": old_key_id},
             )
             log_info(
@@ -3093,7 +3114,7 @@ async def verify_tenant_permissions(
     # Retrieve current app role assignments for the service principal
     assignments_response = await _graph_get(
         access_token,
-        f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
     )
     assigned_roles: set[str] = {
         str(a.get("appRoleId") or "") for a in assignments_response.get("value", [])
@@ -3175,7 +3196,7 @@ async def check_enterprise_app_permissions(
     # Each assignment has appRoleId and resourceId (the resource SP object ID).
     assignments_response = await _graph_get(
         access_token,
-        f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
     )
     assignment_list = assignments_response.get("value", [])
 
@@ -3199,7 +3220,7 @@ async def check_enterprise_app_permissions(
         try:
             sp_info = await _graph_get(
                 access_token,
-                f"https://graph.microsoft.com/v1.0/servicePrincipals/{resource_id}"
+                f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(resource_id)}"
                 "?$select=appId",
             )
             resource_id_to_app_id[resource_id] = str(sp_info.get("appId") or "")
@@ -3524,7 +3545,7 @@ async def try_grant_missing_permissions(
         # share the same appRoleId GUID so we must check by resourceId as well.
         assignments_response = await _graph_get(
             access_token,
-            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
         )
         assignment_list = assignments_response.get("value", [])
         assigned_roles: set[str] = {
@@ -3619,7 +3640,7 @@ async def try_grant_missing_permissions(
                     try:
                         await _graph_post(
                             access_token,
-                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
                             {
                                 "principalId": sp_object_id,
                                 "resourceId": graph_sp_id,
@@ -3649,7 +3670,7 @@ async def try_grant_missing_permissions(
                     try:
                         await _graph_post(
                             access_token,
-                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
                             {
                                 "principalId": sp_object_id,
                                 "resourceId": exo_sp_id,
@@ -3681,7 +3702,7 @@ async def try_grant_missing_permissions(
                     try:
                         await _graph_post(
                             access_token,
-                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{sp_object_id}/appRoleAssignments",
+                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
                             {
                                 "principalId": sp_object_id,
                                 "resourceId": teams_sp_id,
@@ -3774,7 +3795,7 @@ async def _count_forwarding_rules(access_token: str, user_id: str) -> int:
     users instead of repeating failing requests for every mailbox.
     """
     url = (
-        f"https://graph.microsoft.com/v1.0/users/{user_id}"
+        f"https://graph.microsoft.com/v1.0/users/{_graph_path_segment(user_id)}"
         "/mailFolders/inbox/messageRules"
     )
     try:
@@ -3805,7 +3826,7 @@ async def _get_user_mail_enabled_groups(
     list if the request fails so callers can treat any failure as *no groups*.
     """
     url = (
-        f"https://graph.microsoft.com/v1.0/users/{user_id}/memberOf"
+        f"https://graph.microsoft.com/v1.0/users/{_graph_path_segment(user_id)}/memberOf"
         "?$select=id,displayName,mail,mailEnabled"
     )
     try:
@@ -3847,7 +3868,7 @@ async def _get_mailbox_group_members(
 
     # Fetch the direct members of the backing group.
     members_url = (
-        f"https://graph.microsoft.com/v1.0/groups/{group_id}/members"
+        f"https://graph.microsoft.com/v1.0/groups/{_graph_path_segment(group_id)}/members"
         "?$select=id,displayName,userPrincipalName,mail"
     )
     try:
