@@ -4561,6 +4561,7 @@ async def _validate_call_recordings(
         sync_result = await call_recordings_service.sync_recordings_from_filesystem(
             recordings_path,
             phone_system_type=phone_system_type,
+            trusted_base=configured_path or None,
         )
         return {
             **sync_result,
@@ -4654,7 +4655,8 @@ async def _invoke_unifi_talk(
                 local_path=local_path,
             )
             sync_result = await call_recordings_service.sync_recordings_from_filesystem(
-                local_path
+                local_path,
+                trusted_base=local_path,
             )
 
             return {

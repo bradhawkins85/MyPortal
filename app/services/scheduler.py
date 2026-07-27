@@ -1218,6 +1218,7 @@ class SchedulerService:
                             result = await call_recordings_service.sync_recordings_from_filesystem(
                                 recordings_path,
                                 phone_system_type=phone_system_type,
+                                trusted_base=recordings_path,
                             )
                             details = json.dumps(result, default=str)
                             log_info("Call recordings synced", **result)
