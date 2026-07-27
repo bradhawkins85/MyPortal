@@ -19,9 +19,12 @@ def test_flash_redirect_allows_local_path() -> None:
         "https://evil.example/phish",
         "//evil.example/phish",
         "admin/foo",
+        "",
+        "   ",
+        None,
     ],
 )
-def test_flash_redirect_rejects_non_local_targets(target: str) -> None:
+def test_flash_redirect_rejects_non_local_targets(target: str | None) -> None:
     response = flash_redirect(target, "Saved successfully.", "success")
 
     assert response.headers["location"] == "/"
