@@ -591,18 +591,23 @@ def _validate_recordings_path(
     """
     try:
         base_path = Path(recordings_path).expanduser().resolve()
-    except (ValueError, OSError):
-        raise ValueError(f"Invalid recordings path: {recordings_path}")
+    except (ValueError, OSError) as exc:
+        raise ValueError(f"Invalid recordings path: {recordings_path}") from exc
 
     _safe_root_str = (trusted_base or os.environ.get("CALL_RECORDINGS_PATH", "")).strip()
     if _safe_root_str:
         try:
             _safe_root = Path(_safe_root_str).expanduser().resolve()
             base_path.relative_to(_safe_root)
-        except ValueError:
+        except ValueError as exc:
             raise ValueError(
-                f"Recordings path {base_path} must be within the configured recordings root {_safe_root}"
-            )
+                "Access denied: path is outside the allowed recordings directory"
+            ) from exc
+    else:
+        logger.warning(
+            "No trusted recordings root configured (trusted_base or CALL_RECORDINGS_PATH). "
+            "Path traversal validation is disabled. Set CALL_RECORDINGS_PATH in production."
+        )
 
     return base_path
 
