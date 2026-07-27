@@ -4,7 +4,7 @@ import base64
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
-from urllib.parse import quote, unquote, urlencode
+from urllib.parse import quote, unquote, urlencode, urlsplit
 
 import httpx
 
@@ -546,6 +546,7 @@ async def _record_message(
 # ---------------------------------------------------------------------------
 
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+_GRAPH_BASE_PARTS = urlsplit(_GRAPH_BASE)
 _MIN_FOLDER_ID_LENGTH = 20
 _WELL_KNOWN_MAIL_FOLDERS = {
     "archive",
@@ -608,6 +609,17 @@ async def _graph_get_bytes(access_token: str, url: str) -> bytes:
 
 async def _graph_patch(access_token: str, url: str, payload: dict[str, Any]) -> None:
     """Perform a PATCH request to Microsoft Graph."""
+    graph_base_path = _GRAPH_BASE_PARTS.path.rstrip("/")
+    parsed_url = urlsplit(url)
+    if (
+        parsed_url.scheme != _GRAPH_BASE_PARTS.scheme
+        or parsed_url.netloc != _GRAPH_BASE_PARTS.netloc
+        or (
+            parsed_url.path != graph_base_path
+            and not parsed_url.path.startswith(f"{graph_base_path}/")
+        )
+    ):
+        raise ValueError("Unexpected Microsoft Graph URL.")
     headers = {"Authorization": f"Bearer {access_token}"}
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.patch(url, headers=headers, json=payload)
