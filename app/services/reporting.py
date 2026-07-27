@@ -314,8 +314,12 @@ async def count_query_rows(sql: str, *, company_id: int | None = None) -> int:
         substitute_query_context(sql, company_id=company_id)
     )
     # Fetch rows directly instead of wrapping in COUNT(*) to avoid composing
-    # user SQL into another SQL string.  Counting in Python is equivalent here
-    # because result sets are already bounded by MAX_RESULT_ROWS.
+    # user SQL into another SQL string.  Counting in Python is equivalent for
+    # this reporting use-case where result sets are already bounded by
+    # MAX_RESULT_ROWS.  Note: this does transfer the row data to the
+    # application layer; for very large result sets the COUNT(*) subquery
+    # would be more efficient, but the row-count cap (MAX_RESULT_ROWS) keeps
+    # memory usage bounded in practice.
     rows = await db.fetch_many(statement, MAX_RESULT_ROWS + 1)
     return len(rows) if rows else 0
 

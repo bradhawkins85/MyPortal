@@ -242,6 +242,8 @@ class Database:
         transferred from the database, avoiding the need to embed ``LIMIT``
         clauses (and thus user-controlled content) inside a wrapper SQL string.
         """
+        if size <= 0:
+            raise ValueError("size must be a positive integer")
         if self._use_sqlite:
             if not self._sqlite_conn:
                 raise RuntimeError("SQLite database not initialised")
