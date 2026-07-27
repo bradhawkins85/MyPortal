@@ -270,9 +270,7 @@ def _extract_explicit_ticket_ids(query: str) -> list[int]:
         word_start = word_end
         while word_start > 0 and query_text[word_start - 1].isalpha():
             word_start -= 1
-        if query_text[word_start:word_end].casefold() != "ticket":
-            return False
-        return True
+        return query_text[word_start:word_end].casefold() == "ticket"
 
     for match in re.finditer(r"\d+", query_text):
         value = match.group(0)
