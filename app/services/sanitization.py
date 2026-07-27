@@ -71,6 +71,8 @@ _STYLE_BLOCK_PATTERN = re.compile(r"(?is)<style.*?>.*?</style>")
 _INLINE_CSS_PATTERN = re.compile(r"(?is)^\s*(?:[a-z0-9._#-]+\s*\{[^}]*\}\s*)+")
 _EMAIL_HEADER_PATTERN = re.compile(r"^(from|sent|to|subject|cc):", re.IGNORECASE)
 _EMAIL_THREAD_DIVIDER = re.compile(r"^-{2,}\s*original message\s*-{2,}$", re.IGNORECASE)
+_STYLE_OPEN_TAG = "<style"
+_STYLE_CLOSE_TAG = "</style>"
 
 
 @dataclass(slots=True)
@@ -146,6 +148,36 @@ def _strip_quoted_email_headers(value: str) -> str:
     return value
 
 
+def _strip_style_blocks(value: str) -> str:
+    """Remove complete <style>...</style> blocks in linear time."""
+    lower_value = value.lower()
+    if _STYLE_OPEN_TAG not in lower_value:
+        return value
+
+    cleaned_parts: list[str] = []
+    cursor = 0
+    while True:
+        start = lower_value.find(_STYLE_OPEN_TAG, cursor)
+        if start == -1:
+            cleaned_parts.append(value[cursor:])
+            break
+
+        tag_end = lower_value.find(">", start + len(_STYLE_OPEN_TAG))
+        if tag_end == -1:
+            cleaned_parts.append(value[cursor:])
+            break
+
+        block_end = lower_value.find(_STYLE_CLOSE_TAG, tag_end + 1)
+        if block_end == -1:
+            cleaned_parts.append(value[cursor:])
+            break
+
+        cleaned_parts.append(value[cursor:start])
+        cursor = block_end + len(_STYLE_CLOSE_TAG)
+
+    return "".join(cleaned_parts)
+
+
 def sanitize_rich_text(value: str | None) -> SanitizedRichText:
     """Clean potentially unsafe HTML and normalise newlines.
 
@@ -157,7 +189,7 @@ def sanitize_rich_text(value: str | None) -> SanitizedRichText:
 
     raw_text = (value or "").strip()
     if raw_text:
-        raw_text = _STYLE_BLOCK_PATTERN.sub("", raw_text)
+        raw_text = _strip_style_blocks(raw_text)
         raw_text = _INLINE_CSS_PATTERN.sub("", raw_text)
         raw_text = _strip_quoted_email_headers(raw_text)
     cleaned = nh3.clean(
