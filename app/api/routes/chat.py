@@ -757,8 +757,9 @@ async def test_connection(
         results["bot_identity"] = whoami.get("user_id")
         results["bot_ok"] = True
     except Exception as exc:
+        log_error("Matrix bot connection test failed", error=str(exc))
         results["bot_ok"] = False
-        results["bot_error"] = str(exc)
+        results["bot_error"] = "Connection failed. See server logs for details."
 
     if _settings.matrix_is_self_hosted:
         try:
@@ -771,7 +772,8 @@ async def test_connection(
             results["admin_ok"] = True
             results["server_version"] = resp.get("server_version")
         except Exception as exc:
+            log_error("Matrix admin connection test failed", error=str(exc))
             results["admin_ok"] = False
-            results["admin_error"] = str(exc)
+            results["admin_error"] = "Connection failed. See server logs for details."
 
     return JSONResponse(results)
