@@ -3,7 +3,7 @@ import base64
 import pytest
 
 from app.services import ticket_attachments as ticket_attachments_service
-from app.services.sanitization import _strip_html_tags, sanitize_rich_text
+from app.services.sanitization import _strip_html_tags, _strip_style_blocks, sanitize_rich_text
 
 
 def test_sanitize_rich_text_keeps_images_with_safe_attributes():
@@ -89,6 +89,25 @@ def test_strip_html_tags_removes_valid_html_tags():
 
 def test_strip_html_tags_preserves_unclosed_tags():
     assert _strip_html_tags("<span>From: Example") == "<span>From: Example"
+
+
+def test_strip_style_blocks_removes_complete_style_blocks():
+    assert _strip_style_blocks("<p>x</p><style>p{color:red}</style><p>y</p>") == "<p>x</p><p>y</p>"
+
+
+def test_strip_style_blocks_preserves_incomplete_style_blocks():
+    value = "<p>x</p><style>p{color:red}"
+    assert _strip_style_blocks(value) == value
+
+
+def test_strip_style_blocks_preserves_incomplete_style_open_tag():
+    value = "<p>x</p><style type='text/css'"
+    assert _strip_style_blocks(value) == value
+
+
+def test_strip_style_blocks_preserves_incomplete_style_block_with_attributes():
+    value = "<p>x</p><style type='text/css'>p{color:red}"
+    assert _strip_style_blocks(value) == value
 
 
 def test_strip_html_tags_removes_multiple_tags_with_attributes():
