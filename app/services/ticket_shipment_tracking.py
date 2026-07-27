@@ -189,12 +189,12 @@ class _HTMLTextExtractor(HTMLParser):
         self._parts: list[str] = []
         self._skip_depth: int = 0
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:  # type: ignore[override]
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:  # type: ignore[override]  # mypy: parent uses untyped signature
         if tag.lower() in self._SKIP_TAGS:
             self._skip_depth += 1
 
     def handle_endtag(self, tag: str) -> None:
-        # Guard against going negative on malformed HTML that has unmatched
+        # Guard against going negative on malformed HTML with unmatched
         # closing tags (e.g. </script> with no preceding <script>).
         if tag.lower() in self._SKIP_TAGS and self._skip_depth > 0:
             self._skip_depth -= 1
