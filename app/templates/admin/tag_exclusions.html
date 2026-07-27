@@ -122,8 +122,8 @@
       }
 
       async function deleteExclusion(tagSlug) {
-        const escapedSlugForDisplay = tagSlug.replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>').replace(/"/g, '"').replace(/&#039;/g, "'");
-        if (!confirm(`Are you sure you want to remove "${escapedSlugForDisplay}" from the exclusion list?`)) {
+        const displaySlug = tagSlug;
+        if (!confirm(`Are you sure you want to remove "${displaySlug}" from the exclusion list?`)) {
           return;
         }
 
