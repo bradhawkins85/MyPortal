@@ -26,9 +26,17 @@ def test_empty_xero_webhook_response_omits_content_length():
 
 
 def test_extract_xero_invoice_id_from_resource_url():
-    event = {"resourceUrl": "https://api.xero.com/api.xro/2.0/Invoices/inv-123"}
+    event = {
+        "resourceUrl": "https://api.xero.com/api.xro/2.0/Invoices/123e4567-e89b-12d3-a456-426614174000"
+    }
 
-    assert xero._extract_xero_invoice_id(event) == "inv-123"
+    assert xero._extract_xero_invoice_id(event) == "123e4567-e89b-12d3-a456-426614174000"
+
+
+def test_extract_xero_invoice_id_rejects_invalid_value():
+    event = {"resourceId": "../transfer-funds-to/123?amount=456"}
+
+    assert xero._extract_xero_invoice_id(event) is None
 
 
 def test_summarise_xero_webhook_results_deduplicates_failures():
@@ -51,14 +59,20 @@ async def test_apply_xero_invoice_event_marks_local_invoice_paid(monkeypatch):
         "company_id": 7,
         "invoice_number": "INV-001",
         "status": "xero",
-        "xero_invoice_id": "xero-invoice-id",
+        "xero_invoice_id": "123e4567-e89b-12d3-a456-426614174000",
     }
     updated_invoice = local_invoice | {"status": "paid"}
 
     monkeypatch.setattr(
         xero,
         "_fetch_xero_invoice",
-        AsyncMock(return_value={"InvoiceID": "xero-invoice-id", "InvoiceNumber": "INV-001", "Status": "PAID"}),
+        AsyncMock(
+            return_value={
+                "InvoiceID": "123e4567-e89b-12d3-a456-426614174000",
+                "InvoiceNumber": "INV-001",
+                "Status": "PAID",
+            }
+        ),
     )
     monkeypatch.setattr(xero.invoice_repo, "get_invoice_by_xero_invoice_id", AsyncMock(return_value=local_invoice))
     monkeypatch.setattr(xero.invoice_repo, "get_invoice_by_number", AsyncMock(return_value=None))
@@ -68,7 +82,7 @@ async def test_apply_xero_invoice_event_marks_local_invoice_paid(monkeypatch):
     monkeypatch.setattr(xero.audit_service, "record", audit_mock)
 
     result = await xero._apply_xero_invoice_event(
-        {"eventCategory": "INVOICE", "resourceId": "xero-invoice-id"},
+        {"eventCategory": "INVOICE", "resourceId": "123e4567-e89b-12d3-a456-426614174000"},
         request=None,
     )
 
@@ -86,7 +100,7 @@ async def test_apply_xero_invoice_event_ignores_unknown_local_invoice_without_fe
     monkeypatch.setattr(xero.audit_service, "record", AsyncMock())
 
     result = await xero._apply_xero_invoice_event(
-        {"eventCategory": "INVOICE", "resourceId": "foreign-xero-invoice-id"},
+        {"eventCategory": "INVOICE", "resourceId": "123e4567-e89b-12d3-a456-426614174001"},
         request=None,
     )
 
@@ -97,11 +111,28 @@ async def test_apply_xero_invoice_event_ignores_unknown_local_invoice_without_fe
 
 
 @pytest.mark.anyio("asyncio")
+async def test_apply_xero_invoice_event_ignores_invalid_invoice_id_without_fetch(monkeypatch):
+    fetch_mock = AsyncMock()
+    lookup_mock = AsyncMock()
+    monkeypatch.setattr(xero, "_fetch_xero_invoice", fetch_mock)
+    monkeypatch.setattr(xero.invoice_repo, "get_invoice_by_xero_invoice_id", lookup_mock)
+
+    result = await xero._apply_xero_invoice_event(
+        {"eventCategory": "INVOICE", "resourceId": "../transfer-funds-to/123?amount=456"},
+        request=None,
+    )
+
+    assert result == {"status": "ignored", "reason": "missing invoice id"}
+    lookup_mock.assert_not_awaited()
+    fetch_mock.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
 async def test_receive_webhook_acknowledges_valid_delivery_when_event_processing_fails(monkeypatch):
     from starlette.requests import Request
     from app.services import webhook_monitor
 
-    body = b'{"events":[{"eventCategory":"INVOICE","resourceId":"xero-invoice-id"}]}'
+    body = b'{"events":[{"eventCategory":"INVOICE","resourceId":"123e4567-e89b-12d3-a456-426614174000"}]}'
     key = "xero-webhook-key"
     signature = base64.b64encode(hmac.new(key.encode(), body, hashlib.sha256).digest()).decode()
 
