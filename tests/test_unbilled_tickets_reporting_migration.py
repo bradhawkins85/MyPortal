@@ -16,6 +16,11 @@ RESTORE_MIGRATION = (
     / "migrations"
     / "303_restore_unbilled_tickets_report.sql"
 )
+REPORT_COLUMNS_MIGRATION = (
+    Path(__file__).parent.parent
+    / "migrations"
+    / "304_unbilled_tickets_by_company_columns.sql"
+)
 
 
 def test_unbilled_tickets_report_groups_unbilled_time_by_company_and_labour_type():
@@ -47,4 +52,15 @@ def test_original_report_is_restored_for_installations_with_old_migration():
 
     assert "name = 'Unbilled Tickets'" in sql
     assert "WHERE slug = 'unbilled-tickets'" in sql
+    assert "AND is_system = 1" in sql
+
+
+def test_company_summary_exposes_company_id_and_preserves_labour_grouping():
+    sql = REPORT_COLUMNS_MIGRATION.read_text(encoding="utf-8")
+
+    assert "name = 'Unbilled Tickets By Company'" in sql
+    assert "SELECT c.id AS company_id" in sql
+    assert "SUM(tr.minutes_spent) AS billable_minutes" in sql
+    assert "GROUP BY c.id, c.name, lt.id, lt.name" in sql
+    assert "WHERE slug = 'unbilled-tickets-by-company'" in sql
     assert "AND is_system = 1" in sql
