@@ -41,7 +41,6 @@
             method="post"
             class="header-title-menu__form"
             data-confirm="Refresh descriptions for all {{ 'visible active and archived' if show_archived else 'active' }} products? This may take several minutes."
-            onsubmit="return confirm('Refresh descriptions for all {{ 'visible active and archived' if show_archived else 'active' }} products? This may take several minutes.');"
           >
             {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
             {% if show_archived %}<input type="hidden" name="include_archived" value="1" />{% endif %}
