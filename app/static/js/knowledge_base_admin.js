@@ -1286,7 +1286,7 @@
               return;
             }
             document.execCommand('createLink', false, url);
-            const selectorUrl = url.replace(/"/g, '\\"');
+            const selectorUrl = url.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
             editor.querySelectorAll(`a[href="${selectorUrl}"]`).forEach((anchor) => {
               anchor.target = '_blank';
               anchor.rel = 'noopener';
