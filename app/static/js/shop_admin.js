@@ -658,34 +658,13 @@
 
     function sanitizeDescriptionHtml(value) {
       const html = String(value || '');
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, 'text/html');
-
-      doc.querySelectorAll('script, iframe, object, embed, link, meta, base, form').forEach((element) => {
-        element.remove();
-      });
-
-      doc.querySelectorAll('*').forEach((element) => {
-        Array.from(element.attributes).forEach((attribute) => {
-          const name = attribute.name.toLowerCase();
-          const rawValue = String(attribute.value || '');
-          const normalizedValue = rawValue.trim().toLowerCase();
-
-          if (name.startsWith('on')) {
-            element.removeAttribute(attribute.name);
-            return;
-          }
-
-          if (
-            (name === 'href' || name === 'src') &&
-            /^(javascript:|data:|vbscript:)/i.test(normalizedValue)
-          ) {
-            element.removeAttribute(attribute.name);
-          }
-        });
-      });
-
-      return doc.body.innerHTML;
+      if (typeof DOMPurify !== 'undefined') {
+        return DOMPurify.sanitize(html);
+      }
+      // DOMPurify must be loaded before this script; return empty string as a
+      // safe fallback rather than inserting unsanitized HTML.
+      console.error('DOMPurify is not loaded. HTML content will not be rendered.');
+      return '';
     }
 
     function getOrCreateDescriptionEditor() {
