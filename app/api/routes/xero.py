@@ -114,12 +114,14 @@ def _normalize_xero_invoice_id(value: Any) -> str | None:
     if not candidate:
         return None
     try:
-        return str(UUID(candidate))
+        UUID(candidate)
+        return candidate
     except (TypeError, ValueError, AttributeError):
         return None
 
 
 async def _fetch_xero_invoice(invoice_id: str) -> dict[str, Any] | None:
+    """Fetch a Xero invoice using a defensively validated invoice ID."""
     normalized_invoice_id = _normalize_xero_invoice_id(invoice_id)
     if not normalized_invoice_id:
         raise ValueError("Invalid Xero invoice ID")
