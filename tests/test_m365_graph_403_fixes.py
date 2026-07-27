@@ -92,25 +92,29 @@ async def test_graph_get_without_extra_headers_still_works():
     assert captured_headers.get("Authorization") == "Bearer fake-token"
 
 
-def test_graph_validate_url_rejects_unsafe_components():
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://user@graph.microsoft.com/v1.0/users",
+        "https://graph.microsoft.com/v1.0",
+        "https://graph.microsoft.com/v1.0/",
+        "https://graph.microsoft.com/v1.0//users",
+        "https://graph.microsoft.com/v1.0/users#fragment",
+        "https://graph.microsoft.com/v1.0/users/../groups",
+    ],
+    ids=[
+        "embedded credentials",
+        "missing resource path",
+        "empty resource path segment",
+        "double slash",
+        "fragment",
+        "relative path segment",
+    ],
+)
+def test_graph_validate_url_rejects_unsafe_components(url: str):
     """_validate_graph_url rejects Graph URLs with unsafe authority/path parts."""
     with pytest.raises(M365Error):
-        _validate_graph_url("https://user@graph.microsoft.com/v1.0/users")
-
-    with pytest.raises(M365Error):
-        _validate_graph_url("https://graph.microsoft.com/v1.0")
-
-    with pytest.raises(M365Error):
-        _validate_graph_url("https://graph.microsoft.com/v1.0/")
-
-    with pytest.raises(M365Error):
-        _validate_graph_url("https://graph.microsoft.com/v1.0//users")
-
-    with pytest.raises(M365Error):
-        _validate_graph_url("https://graph.microsoft.com/v1.0/users#fragment")
-
-    with pytest.raises(M365Error):
-        _validate_graph_url("https://graph.microsoft.com/v1.0/users/../groups")
+        _validate_graph_url(url)
 
 
 def test_graph_path_segment_quotes_path_separators():

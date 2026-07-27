@@ -34,6 +34,8 @@ from app.services import modules as modules_service
 
 _GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 _GRAPH_ALLOWED_HOSTS = frozenset({"graph.microsoft.com"})
+_GRAPH_API_VERSIONS = frozenset({"v1.0", "beta"})
+_GRAPH_MIN_PATH_SEGMENTS = 3
 
 # Exchange Online (Office 365 Exchange Online) service principal app ID and scope.
 # Used to acquire app-only tokens for Exchange Online PowerShell REST API calls
@@ -1287,14 +1289,21 @@ def _validate_graph_url(url: str) -> None:
         raise M365Error("Invalid Microsoft Graph URL", http_status=400)
 
     segments = path.split("/")
-    if len(segments) < 3 or segments[0] != "" or segments[1] not in {"v1.0", "beta"}:
+    has_versioned_resource_path = (
+        len(segments) >= _GRAPH_MIN_PATH_SEGMENTS
+        and segments[0] == ""
+        and segments[1] in _GRAPH_API_VERSIONS
+    )
+    if not has_versioned_resource_path:
         log_error("Rejected non-Graph URL in Microsoft Graph helper", url=url)
         raise M365Error("Invalid Microsoft Graph URL", http_status=400)
 
     resource_segments = segments[2:]
-    if not resource_segments or any(segment == "" for segment in resource_segments) or any(
+    has_empty_resource_segments = any(segment == "" for segment in resource_segments)
+    has_relative_resource_segments = any(
         unquote(segment) in {".", ".."} for segment in resource_segments
-    ):
+    )
+    if not resource_segments or has_empty_resource_segments or has_relative_resource_segments:
         log_error("Rejected unsafe Graph path in Microsoft Graph helper", url=url)
         raise M365Error("Invalid Microsoft Graph URL", http_status=400)
 
