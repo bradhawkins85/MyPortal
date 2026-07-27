@@ -571,17 +571,43 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
                 continue
             initial_body = str(reply_body)
             break
-        reply = dict(replies[-1])
-        author_value = reply.get("author") if isinstance(reply.get("author"), Mapping) else None
-        author_id = reply.get("author_id")
-        author_user = await _resolve_user_snapshot(author_value, author_id)
-        author_snapshot = _build_user_snapshot(author_user)
-        reply["author"] = author_snapshot
-        snapshot_email = author_snapshot.get("email") if author_snapshot else None
-        snapshot_display = author_snapshot.get("display_name") if author_snapshot else None
-        reply["author_email"] = snapshot_email or reply.get("author_email")
-        reply["author_display_name"] = snapshot_display or reply.get("author_display_name")
-        latest_reply = reply
+        requester_id = enriched.get("requester_id")
+        assigned_user_id = enriched.get("assigned_user_id")
+        technician_reply: Mapping[str, Any] | None = None
+        technician_author: Mapping[str, Any] | None = None
+        for reply_record in reversed(replies):
+            if bool(reply_record.get("is_internal")):
+                continue
+            author_id = reply_record.get("author_id")
+            if author_id is None or author_id == requester_id:
+                continue
+            author_value = (
+                reply_record.get("author")
+                if isinstance(reply_record.get("author"), Mapping)
+                else None
+            )
+            author_user = await _resolve_user_snapshot(author_value, author_id)
+            permissions = author_user.get("permissions") if author_user else []
+            if isinstance(permissions, str):
+                permissions = [permissions]
+            is_technician = (
+                author_id == assigned_user_id
+                or bool(author_user and author_user.get("is_super_admin"))
+                or HELPDESK_PERMISSION_KEY in set(permissions or [])
+            )
+            if is_technician:
+                technician_reply = reply_record
+                technician_author = author_user
+                break
+        if technician_reply is not None:
+            reply = dict(technician_reply)
+            author_snapshot = _build_user_snapshot(technician_author)
+            reply["author"] = author_snapshot
+            snapshot_email = author_snapshot.get("email") if author_snapshot else None
+            snapshot_display = author_snapshot.get("display_name") if author_snapshot else None
+            reply["author_email"] = snapshot_email or reply.get("author_email")
+            reply["author_display_name"] = snapshot_display or reply.get("author_display_name")
+            latest_reply = reply
     enriched["latest_reply"] = latest_reply
     if initial_body is None and enriched.get("description") is not None:
         initial_body = str(enriched.get("description"))

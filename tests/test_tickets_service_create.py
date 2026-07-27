@@ -533,6 +533,34 @@ async def test_enrich_ticket_context_includes_relationship_details(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_enrich_ticket_context_uses_latest_public_technician_reply(monkeypatch):
+    ticket = {"id": 99, "requester_id": 7, "assigned_user_id": 11}
+    replies = [
+        {"id": 1, "author_id": 11, "body": "First technician reply", "is_internal": False},
+        {"id": 2, "author_id": 11, "body": "Private note", "is_internal": True},
+        {"id": 3, "author_id": 7, "body": "Latest customer reply", "is_internal": False},
+    ]
+
+    async def fake_list_replies(ticket_id, include_internal=True):
+        return replies
+
+    async def fake_list_watchers(ticket_id):
+        return []
+
+    async def fake_get_user_by_id(user_id):
+        return {"id": user_id, "email": "tech@example.com"}
+
+    monkeypatch.setattr(tickets_repo, "list_replies", fake_list_replies)
+    monkeypatch.setattr(tickets_repo, "list_watchers", fake_list_watchers)
+    monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user_by_id)
+
+    enriched = await tickets_service._enrich_ticket_context(ticket)
+
+    assert enriched["latest_reply"]["body"] == "First technician reply"
+    assert enriched["latest_reply"]["id"] == 1
+
+
+@pytest.mark.anyio
 async def test_emit_ticket_updated_event_includes_actor_metadata(monkeypatch):
     ticket_record = {"id": 55, "status": "open"}
 
