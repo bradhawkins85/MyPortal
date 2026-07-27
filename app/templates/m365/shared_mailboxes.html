@@ -469,12 +469,13 @@
         requestStatus.textContent = 'Submitting request…';
         requestStatus.className = 'panel__subtitle';
         requestStatus.style.display = 'block';
+        var csrfToken = '{{ csrf_token or "" }}';
         var headers = {
           'Content-Type': 'application/json'
         };
-{% if csrf_token %}
-        headers['X-CSRF-Token'] = '{{ csrf_token }}';
-{% endif %}
+        if (csrfToken) {
+          headers['X-CSRF-Token'] = csrfToken;
+        }
         fetch('/m365/mailboxes/permissions/request', {
           method: 'POST',
           headers: headers,
