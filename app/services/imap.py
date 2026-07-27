@@ -66,6 +66,7 @@ def _content_reference_keys(part: email.message.Message) -> set[str]:
         except Exception:
             # Malformed/unknown encoded filenames are tolerated; fall back to
             # the raw filename value for reference key normalization.
+            pass
         key = _normalise_content_reference(filename)
         if key:
             keys.add(key)
