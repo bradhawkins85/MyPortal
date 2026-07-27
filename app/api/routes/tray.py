@@ -1808,7 +1808,10 @@ async def upload_diagnostics(
     media_root = _settings.media_root if hasattr(_settings, "media_root") else "media"
     diag_dir = os.path.join(str(media_root), "tray_diagnostics")
     os.makedirs(diag_dir, exist_ok=True)
-    filename = f"{device_uid}_{_uuid.uuid4().hex}.zip"
+    safe_device_uid = tray_service.normalise_device_uid(
+        str(device.get("device_uid") or device_uid)
+    )
+    filename = f"{safe_device_uid}_{_uuid.uuid4().hex}.zip"
     stored_path = os.path.join(diag_dir, filename)
     with open(stored_path, "wb") as f:
         f.write(body)
