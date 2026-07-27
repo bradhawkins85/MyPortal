@@ -99,6 +99,7 @@ async def sync_call_recordings(
         result = await call_recordings_service.sync_recordings_from_filesystem(
             recordings_path,
             phone_system_type=phone_system_type,
+            trusted_base=module_settings.get("recordings_path"),
         )
         return result
     except FileNotFoundError:
@@ -143,6 +144,7 @@ async def force_sync_call_recordings(
         result = await call_recordings_service.force_sync_recordings_from_filesystem(
             recordings_path,
             phone_system_type=phone_system_type,
+            trusted_base=module_settings.get("recordings_path"),
         )
         return result
     except FileNotFoundError:

@@ -23,6 +23,7 @@ import hmac
 import json
 import re
 from typing import Literal
+from urllib.parse import urlsplit
 
 from fastapi import Request, Response
 from fastapi.responses import RedirectResponse
@@ -130,6 +131,20 @@ def clear_flash(response: Response) -> None:
     response.delete_cookie(_COOKIE_NAME)
 
 
+def _safe_redirect_target(url: str, *, fallback: str = "/") -> str:
+    """Return a local redirect target, or *fallback* when *url* is unsafe."""
+    candidate = str(url or "").strip()
+    if not candidate:
+        return fallback
+    candidate = candidate.replace("\\", "/")
+    parsed = urlsplit(candidate)
+    if parsed.scheme or parsed.netloc:
+        return fallback
+    if not candidate.startswith("/") or candidate.startswith("//"):
+        return fallback
+    return candidate
+
+
 def flash_redirect(
     url: str,
     message: str,
@@ -143,6 +158,6 @@ def flash_redirect(
 
         return flash_redirect("/admin/foo", "Saved.", "success")
     """
-    response = RedirectResponse(url=url, status_code=status_code)
+    response = RedirectResponse(url=_safe_redirect_target(url), status_code=status_code)
     set_flash(response, message, variant)
     return response
