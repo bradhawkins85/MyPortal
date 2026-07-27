@@ -67,9 +67,6 @@ async def list_accessible_companies(user: Mapping[str, Any]) -> list[dict[str, A
 
 
 async def _list_all_companies_safely() -> list[dict[str, Any]]:
-    # Preserve the historical guarded second read used by existing tests while
-    # centralising all-company enumeration for privileged access paths.
-    companies = await company_repo.list_companies()
     try:
         companies = await company_repo.list_companies()
     except RuntimeError as exc:
