@@ -10,7 +10,10 @@ import bcrypt
 
 _BCRYPT_SHA256_PREFIX = "bcrypt_sha256$"
 _PBKDF2_SHA256_PREFIX = "pbkdf2_sha256$"
+# Current OWASP guidance for PBKDF2-HMAC-SHA256 favors a high iteration count;
+# revisit periodically as hardware and recommendations evolve.
 _PBKDF2_ITERATIONS = 600_000
+# 32 bytes matches SHA-256 output size and provides full hash strength.
 _PBKDF2_DKLEN = 32
 # Prefix indicating passwords hashed via SHA-256 pre-hashing and bcrypt.
 
