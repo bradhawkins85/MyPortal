@@ -54,6 +54,22 @@
     return html.length > 0 ? html : '';
   }
 
+  function sanitiseEditorHtml(value) {
+    const source = typeof value === 'string' ? value : '';
+    if (!source) {
+      return '';
+    }
+    if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+      return window.DOMPurify.sanitize(source, { USE_PROFILES: { html: true } });
+    }
+    return source
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function updateSurfaceState(surface, hidden) {
     const html = getEditorHtml(surface);
     hidden.value = html;
@@ -100,11 +116,7 @@
 
     editor.classList.add('rich-text-editor--enhanced');
 
-    if (hidden.value) {
-      surface.innerHTML = hidden.value;
-    } else {
-      surface.innerHTML = '';
-    }
+    surface.innerHTML = sanitiseEditorHtml(hidden.value);
 
     updateSurfaceState(surface, hidden);
 
