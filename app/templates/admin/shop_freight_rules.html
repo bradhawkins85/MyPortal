@@ -515,11 +515,11 @@
     });
   });
 
-  {% if is_editing %}
+  if ({{ is_editing | tojson }}) {
     title.textContent = 'Edit rule';
     submitButton.textContent = 'Update rule';
     openModal();
-  {% endif %}
+  }
 })();
 </script>
 {% endblock %}
