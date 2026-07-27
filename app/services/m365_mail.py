@@ -619,7 +619,9 @@ async def _graph_patch(access_token: str, url: str, payload: dict[str, Any]) -> 
             and not parsed_url.path.startswith(f"{graph_base_path}/")
         )
     ):
-        raise ValueError("Unexpected Microsoft Graph URL.")
+        raise ValueError(
+            "Rejected Microsoft Graph PATCH URL outside the allowed Graph base."
+        )
     headers = {"Authorization": f"Bearer {access_token}"}
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.patch(url, headers=headers, json=payload)
