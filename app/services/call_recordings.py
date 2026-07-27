@@ -582,9 +582,7 @@ def _validate_recordings_path(
 
     The resolved path must reside within the trusted recordings root, which is
     taken from *trusted_base* (caller-supplied) or the ``CALL_RECORDINGS_PATH``
-    environment variable.  When neither is configured the traversal check is
-    skipped and only absolute-path resolution applies — production deployments
-    MUST configure one of these to enforce the restriction.
+    environment variable.
 
     Returns the resolved :class:`~pathlib.Path` on success.
     Raises :class:`ValueError` if the path is invalid or outside the safe root.
@@ -595,19 +593,18 @@ def _validate_recordings_path(
         raise ValueError(f"Invalid recordings path: {recordings_path}") from exc
 
     _safe_root_str = (trusted_base or os.environ.get("CALL_RECORDINGS_PATH", "")).strip()
-    if _safe_root_str:
-        try:
-            _safe_root = Path(_safe_root_str).expanduser().resolve()
-            base_path.relative_to(_safe_root)
-        except ValueError as exc:
-            raise ValueError(
-                "Access denied: path is outside the allowed recordings directory"
-            ) from exc
-    else:
-        logger.warning(
-            "No trusted recordings root configured (trusted_base or CALL_RECORDINGS_PATH). "
-            "Path traversal validation is disabled. Set CALL_RECORDINGS_PATH in production."
+    if not _safe_root_str:
+        raise ValueError(
+            "No trusted recordings root configured (trusted_base or CALL_RECORDINGS_PATH)."
         )
+
+    try:
+        _safe_root = Path(_safe_root_str).expanduser().resolve()
+        base_path.relative_to(_safe_root)
+    except ValueError as exc:
+        raise ValueError(
+            "Access denied: path is outside the allowed recordings directory"
+        ) from exc
 
     return base_path
 

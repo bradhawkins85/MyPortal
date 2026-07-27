@@ -570,7 +570,10 @@ async def test_sync_recordings_from_filesystem_creates_records(tmp_path):
         mock_get.return_value = None
         mock_create.return_value = {"id": 1}
 
-        result = await service.sync_recordings_from_filesystem(str(tmp_path))
+        result = await service.sync_recordings_from_filesystem(
+            str(tmp_path),
+            trusted_base=str(tmp_path),
+        )
 
         assert result["created"] == 1
         assert result["updated"] == 0
@@ -604,7 +607,10 @@ async def test_sync_recordings_from_filesystem_updates_existing(tmp_path):
          patch.object(repo, "update_call_recording", new_callable=AsyncMock) as mock_update:
         mock_get.return_value = existing
 
-        result = await service.sync_recordings_from_filesystem(str(tmp_path))
+        result = await service.sync_recordings_from_filesystem(
+            str(tmp_path),
+            trusted_base=str(tmp_path),
+        )
 
         assert result["updated"] == 1
         mock_create.assert_not_called()
@@ -622,7 +628,10 @@ async def test_sync_recordings_from_filesystem_missing_path(tmp_path):
 
     missing = tmp_path / "does-not-exist"
     with pytest.raises(FileNotFoundError):
-        await service.sync_recordings_from_filesystem(str(missing))
+        await service.sync_recordings_from_filesystem(
+            str(missing),
+            trusted_base=str(tmp_path),
+        )
 
 
 @pytest.mark.asyncio
@@ -652,7 +661,10 @@ async def test_sync_recordings_preserves_processing_status(tmp_path):
          patch.object(repo, "update_call_recording", new_callable=AsyncMock) as mock_update:
         mock_get.return_value = existing
 
-        result = await service.sync_recordings_from_filesystem(str(tmp_path))
+        result = await service.sync_recordings_from_filesystem(
+            str(tmp_path),
+            trusted_base=str(tmp_path),
+        )
 
         # Should skip the update entirely - no new transcription data
         assert result["skipped"] == 1
@@ -688,7 +700,10 @@ async def test_sync_recordings_preserves_completed_status(tmp_path):
          patch.object(repo, "update_call_recording", new_callable=AsyncMock) as mock_update:
         mock_get.return_value = existing
 
-        result = await service.sync_recordings_from_filesystem(str(tmp_path))
+        result = await service.sync_recordings_from_filesystem(
+            str(tmp_path),
+            trusted_base=str(tmp_path),
+        )
 
         # Should skip the update - existing transcription matches, no status change
         assert result["skipped"] == 1
@@ -724,7 +739,10 @@ async def test_sync_recordings_preserves_failed_status(tmp_path):
          patch.object(repo, "update_call_recording", new_callable=AsyncMock) as mock_update:
         mock_get.return_value = existing
 
-        result = await service.sync_recordings_from_filesystem(str(tmp_path))
+        result = await service.sync_recordings_from_filesystem(
+            str(tmp_path),
+            trusted_base=str(tmp_path),
+        )
 
         # Should skip the update - no new transcription data
         assert result["skipped"] == 1
@@ -814,7 +832,10 @@ async def test_sync_recordings_uses_title_extraction(tmp_path):
         mock_get.return_value = None  # No existing recording
         mock_create.return_value = {"id": 1}
         
-        result = await service.sync_recordings_from_filesystem(str(tmp_path))
+        result = await service.sync_recordings_from_filesystem(
+            str(tmp_path),
+            trusted_base=str(tmp_path),
+        )
         
         assert result["created"] == 1
         assert mock_create.await_count == 1

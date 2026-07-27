@@ -180,7 +180,9 @@ async def test_grandstream_sync_creates_records_from_csv(tmp_path):
         mock_lookup.return_value = None
 
         result = await service.sync_recordings_from_filesystem(
-            str(tmp_path), phone_system_type="grandstream-ucm"
+            str(tmp_path),
+            phone_system_type="grandstream-ucm",
+            trusted_base=str(tmp_path),
         )
 
     assert result["status"] == "ok"
@@ -226,7 +228,9 @@ async def test_grandstream_sync_skips_when_audio_missing(tmp_path):
         mock_get.return_value = None
 
         result = await service.sync_recordings_from_filesystem(
-            str(tmp_path), phone_system_type="grandstream-ucm"
+            str(tmp_path),
+            phone_system_type="grandstream-ucm",
+            trusted_base=str(tmp_path),
         )
 
     assert result["status"] == "ok"
@@ -239,7 +243,9 @@ async def test_grandstream_sync_skips_when_audio_missing(tmp_path):
 async def test_grandstream_sync_no_csv_files_returns_warning(tmp_path):
     """If no Grandstream CSV files are found, sync should return a warning."""
     result = await service.sync_recordings_from_filesystem(
-        str(tmp_path), phone_system_type="grandstream-ucm"
+        str(tmp_path),
+        phone_system_type="grandstream-ucm",
+        trusted_base=str(tmp_path),
     )
 
     assert result["status"] == "ok"
@@ -281,7 +287,9 @@ async def test_grandstream_sync_skips_existing_when_not_forced(tmp_path):
         mock_get.return_value = existing
 
         result = await service.sync_recordings_from_filesystem(
-            str(tmp_path), phone_system_type="grandstream-ucm"
+            str(tmp_path),
+            phone_system_type="grandstream-ucm",
+            trusted_base=str(tmp_path),
         )
 
     assert result["created"] == 0
@@ -327,7 +335,9 @@ async def test_grandstream_force_sync_updates_existing(tmp_path):
         mock_lookup.return_value = None
 
         result = await service.force_sync_recordings_from_filesystem(
-            str(tmp_path), phone_system_type="grandstream-ucm"
+            str(tmp_path),
+            phone_system_type="grandstream-ucm",
+            trusted_base=str(tmp_path),
         )
 
     assert result["created"] == 0
@@ -353,7 +363,9 @@ async def test_3cx_phone_system_uses_generic_processing(tmp_path):
         mock_create.return_value = {"id": 1}
 
         result = await service.sync_recordings_from_filesystem(
-            str(tmp_path), phone_system_type="3cx"
+            str(tmp_path),
+            phone_system_type="3cx",
+            trusted_base=str(tmp_path),
         )
 
     assert result["status"] == "ok"
@@ -386,7 +398,9 @@ async def test_module_handler_passes_grandstream_phone_system_type():
         )
 
     mock_sync.assert_awaited_once_with(
-        "/data/recordings", phone_system_type="grandstream-ucm"
+        "/data/recordings",
+        phone_system_type="grandstream-ucm",
+        trusted_base="/data/recordings",
     )
     assert result["phone_system_type"] == "grandstream-ucm"
     assert result["recordings_path"] == "/data/recordings"
