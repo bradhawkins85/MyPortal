@@ -83,7 +83,7 @@ def set_flash(
     # Base64-encode so the cookie value is restricted to [A-Za-z0-9+/=]:
     # - prevents any header-injection via special / whitespace characters
     # - keeps the value RFC 6265-compliant
-    cookie_value = base64.b64encode(signed.encode()).decode()
+    cookie_value = base64.b64encode(signed.encode("utf-8")).decode("utf-8")
     response.set_cookie(
         _COOKIE_NAME,
         cookie_value,
@@ -106,7 +106,7 @@ def pop_flash(request: Request) -> dict[str, str] | None:
         return None
     # Decode the base64 wrapper applied in set_flash; reject malformed values.
     try:
-        raw = base64.b64decode(raw.encode()).decode()
+        raw = base64.b64decode(raw.encode("utf-8")).decode("utf-8")
     except (binascii.Error, UnicodeDecodeError):
         return None
     payload = _verify(raw)
