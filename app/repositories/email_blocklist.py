@@ -1,18 +1,21 @@
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 from typing import Any, Literal
 
 from app.core.database import db
 
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _ALLOWED_SORTS = {"email", "created_at", "updated_at", "source", "last_event_type"}
 
 
 def normalize_email(address: str) -> str:
     normalised = str(address or "").strip().lower()
-    if not normalised or len(normalised) > 320 or not _EMAIL_RE.match(normalised):
+    if not normalised or len(normalised) > 320 or any(ch.isspace() for ch in normalised):
+        raise ValueError("Enter a valid email address.")
+    if normalised.count("@") != 1:
+        raise ValueError("Enter a valid email address.")
+    local, domain = normalised.split("@", 1)
+    if not local or not domain or "." not in domain:
         raise ValueError("Enter a valid email address.")
     return normalised
 
