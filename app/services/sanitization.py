@@ -68,7 +68,7 @@ _ALLOWED_PROTOCOLS: frozenset[str] = frozenset(
 )
 
 _STYLE_BLOCK_PATTERN = re.compile(r"(?is)<style.*?>.*?</style>")
-_INLINE_CSS_PATTERN = re.compile(r"(?is)^(?:\s*[a-z0-9._#-]+\s*\{[^}]*\}\s*)+")
+_INLINE_CSS_PATTERN = re.compile(r"(?is)^\s*(?:[a-z0-9._#-]+\s*\{[^}]*\}\s*)+")
 _EMAIL_HEADER_PATTERN = re.compile(r"^(from|sent|to|subject|cc):", re.IGNORECASE)
 _EMAIL_THREAD_DIVIDER = re.compile(r"^-{2,}\s*original message\s*-{2,}$", re.IGNORECASE)
 
