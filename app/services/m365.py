@@ -36,6 +36,9 @@ _GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 _GRAPH_ALLOWED_HOSTS = frozenset({"graph.microsoft.com"})
 _GRAPH_API_VERSIONS = frozenset({"v1.0", "beta"})
 _GRAPH_MIN_PATH_SEGMENTS = 3
+_GRAPH_OBJECT_ID_PATTERN = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
 
 # Exchange Online (Office 365 Exchange Online) service principal app ID and scope.
 # Used to acquire app-only tokens for Exchange Online PowerShell REST API calls
@@ -1262,10 +1265,7 @@ def _graph_path_segment(value: Any) -> str:
 def _graph_object_id(value: Any) -> str:
     """Validate a Microsoft Entra directory object ID GUID for Graph paths."""
     candidate = str(value).strip()
-    if not re.fullmatch(
-        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
-        candidate,
-    ):
+    if not _GRAPH_OBJECT_ID_PATTERN.fullmatch(candidate):
         raise M365Error("Invalid Microsoft Graph object ID", http_status=400)
     return candidate
 
@@ -1299,15 +1299,12 @@ def _validate_graph_url(url: str) -> None:
         raise M365Error("Invalid Microsoft Graph URL", http_status=400)
 
     resource_segments = segments[2:]
-    contains_empty_resource_segments = any(segment == "" for segment in resource_segments)
-    contains_relative_resource_segments = any(
-        unquote(segment) in {".", ".."} for segment in resource_segments
-    )
-    if (
-        not resource_segments
-        or contains_empty_resource_segments
-        or contains_relative_resource_segments
-    ):
+    contains_unsafe_resource_segments = not resource_segments
+    for segment in resource_segments:
+        if segment == "" or unquote(segment) in {".", ".."}:
+            contains_unsafe_resource_segments = True
+            break
+    if contains_unsafe_resource_segments:
         log_error("Rejected unsafe Graph path in Microsoft Graph helper", url=url)
         raise M365Error("Invalid Microsoft Graph URL", http_status=400)
 
