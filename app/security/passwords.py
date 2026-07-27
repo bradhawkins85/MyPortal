@@ -8,6 +8,7 @@ from os import urandom
 import bcrypt
 
 
+# Legacy prefix for historical SHA-256 pre-hash + bcrypt password records.
 _BCRYPT_SHA256_PREFIX = "bcrypt_sha256$"
 _PBKDF2_SHA256_PREFIX = "pbkdf2_sha256$"
 # Current OWASP guidance for PBKDF2-HMAC-SHA256 favors a high iteration count;
@@ -15,7 +16,6 @@ _PBKDF2_SHA256_PREFIX = "pbkdf2_sha256$"
 _PBKDF2_ITERATIONS = 600_000
 # 32 bytes matches SHA-256 output size and provides full hash strength.
 _PBKDF2_DKLEN = 32
-# Prefix indicating passwords hashed via SHA-256 pre-hashing and bcrypt.
 
 
 def _b64encode(value: bytes) -> str:
@@ -27,6 +27,7 @@ def _b64decode(value: str) -> bytes:
 
 
 def hash_password(password: str) -> str:
+    # 16 bytes (128 bits) provides strong per-password uniqueness for PBKDF2 salts.
     salt = urandom(16)
     digest = pbkdf2_hmac(
         "sha256",
