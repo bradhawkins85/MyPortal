@@ -17,6 +17,7 @@ handlers unless the feature pack renders its own response).
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -106,7 +107,7 @@ def pop_flash(request: Request) -> dict[str, str] | None:
     # Decode the base64 wrapper applied in set_flash; reject malformed values.
     try:
         raw = base64.b64decode(raw.encode()).decode()
-    except Exception:
+    except (binascii.Error, UnicodeDecodeError):
         return None
     payload = _verify(raw)
     if payload is None:
