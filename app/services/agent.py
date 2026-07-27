@@ -55,6 +55,8 @@ _LLM_SNIPPET_LENGTH = 500
 _DEFAULT_CONTEXT_TOKEN_BUDGET = 12000
 _MAX_TICKET_ID_QUERY_LENGTH = 1000
 _TICKET_MARKER_KEYWORD = "ticket"
+_MIN_MARKED_TICKET_ID_DIGITS = 3
+_MIN_STANDALONE_TICKET_ID_DIGITS = 4
 
 
 class AgentContextMode(str, Enum):
@@ -275,11 +277,14 @@ def _extract_explicit_ticket_ids(query: str) -> list[int]:
 
     for match in re.finditer(r"\d+", query_text):
         value = match.group(0)
-        if len(value) < 3:
+        if len(value) < _MIN_MARKED_TICKET_ID_DIGITS:
             continue
         if not (
             _has_explicit_ticket_marker(match.start())
-            or (len(value) >= 4 and _has_word_boundaries(match.start(), match.end()))
+            or (
+                len(value) >= _MIN_STANDALONE_TICKET_ID_DIGITS
+                and _has_word_boundaries(match.start(), match.end())
+            )
         ):
             continue
         try:
