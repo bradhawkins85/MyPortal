@@ -4438,6 +4438,10 @@ dialog.modal:not([open]) {
   box-shadow: 0 30px 80px -24px rgba(2, 6, 23, 0.95), 0 0 0 1px rgba(15, 23, 42, 0.7);
 }
 
+.modal__dialog--wide {
+  width: min(96vw, 80rem);
+}
+
 .modal__dialog .modal__header {
   display: flex;
   align-items: flex-start;
