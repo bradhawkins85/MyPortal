@@ -160,7 +160,10 @@ def test_extract_explicit_ticket_ids_handles_supported_ticket_formats():
 
 
 def test_extract_explicit_ticket_ids_requires_explicit_marker_or_standalone_id():
-    query = "Reference abc1234def, #      nope, and ticket      nope before 321."
+    query = (
+        "Reference abc1234def, #      nope, ticketabc123, "
+        "and ticket      nope before 321."
+    )
 
     result = agent_service._extract_explicit_ticket_ids(query)
 
