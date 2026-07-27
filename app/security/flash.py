@@ -158,6 +158,10 @@ def flash_redirect(
 
         return flash_redirect("/admin/foo", "Saved.", "success")
     """
-    response = RedirectResponse(url=_safe_redirect_target(url), status_code=status_code)
+    candidate = str(url or "").strip().replace("\\", "/")
+    parsed = urlsplit(candidate)
+    if parsed.scheme or parsed.netloc or not candidate.startswith("/") or candidate.startswith("//"):
+        candidate = "/"
+    response = RedirectResponse(url=candidate, status_code=status_code)
     set_flash(response, message, variant)
     return response
