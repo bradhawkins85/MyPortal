@@ -69,6 +69,11 @@ def test_clean_text_preserves_angle_brackets_when_not_tags():
     )
 
 
+def test_clean_text_trims_tabs_and_spaces_per_line():
+    value = " \tFirst\t \n\t Second \t\nThird\t "
+    assert ticket_importer._clean_text(value) == "First\nSecond\nThird"
+
+
 @pytest.mark.anyio
 async def test_import_ticket_by_id_creates_new_ticket(monkeypatch):
     async def fake_get_ticket(ticket_id, rate_limiter=None):
