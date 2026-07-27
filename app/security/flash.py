@@ -23,7 +23,7 @@ import hmac
 import json
 import re
 from typing import Literal
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from fastapi import Request, Response
 from fastapi.responses import RedirectResponse
@@ -158,6 +158,13 @@ def flash_redirect(
 
         return flash_redirect("/admin/foo", "Saved.", "success")
     """
-    response = RedirectResponse(url=_safe_redirect_target(url), status_code=status_code)
+    candidate = unquote(str(url or "").strip()).replace("\\", "/")
+    if not candidate:
+        candidate = "/"
+    else:
+        parsed = urlsplit(candidate)
+        if parsed.scheme or parsed.netloc or not candidate.startswith("/") or candidate.startswith("//"):
+            candidate = "/"
+    response = RedirectResponse(url=candidate, status_code=status_code)
     set_flash(response, message, variant)
     return response
