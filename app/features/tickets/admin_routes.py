@@ -1780,7 +1780,8 @@ async def admin_list_ticket_canned_responses(ticket_id: int, request: Request):
     ticket = await tickets_repo.get_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    context = _ticket_template_context(ticket)
+    enriched_ticket = await tickets_service._enrich_ticket_context(ticket)
+    context = _ticket_template_context(enriched_ticket)
     responses = []
     for response in await canned_responses_repo.list_responses():
         responses.append({
