@@ -54,7 +54,7 @@
     return html.length > 0 ? html : '';
   }
 
-  function sanitiseEditorHtml(value) {
+  function sanitizeEditorHtml(value) {
     const source = typeof value === 'string' ? value : '';
     if (!source) {
       return '';
@@ -116,7 +116,7 @@
 
     editor.classList.add('rich-text-editor--enhanced');
 
-    surface.innerHTML = sanitiseEditorHtml(hidden.value);
+    surface.innerHTML = sanitizeEditorHtml(hidden.value);
 
     updateSurfaceState(surface, hidden);
 
