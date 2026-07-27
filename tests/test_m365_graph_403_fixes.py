@@ -117,7 +117,7 @@ def test_graph_validate_url_rejects_unsafe_components(url: str):
         _validate_graph_url(url)
 
 
-def test_graph_path_segment_quotes_path_separators():
+def test_graph_path_segment_encodes_path_separators():
     """_graph_path_segment neutralizes path separators in dynamic IDs."""
     assert _graph_path_segment("user/../../mailFolders") == "user%2F..%2F..%2FmailFolders"
 
