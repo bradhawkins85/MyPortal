@@ -235,6 +235,26 @@ class Database:
                     await cursor.execute(adapted_sql, adapted_params)
                     return await cursor.fetchone()
 
+    async def fetch_many(self, sql: str, size: int, params: tuple | dict | None = None):
+        """Execute ``sql`` and return at most ``size`` rows.
+
+        Uses cursor-level ``fetchmany`` so only the requested number of rows is
+        transferred from the database, avoiding the need to embed ``LIMIT``
+        clauses (and thus user-controlled content) inside a wrapper SQL string.
+        """
+        if self._use_sqlite:
+            if not self._sqlite_conn:
+                raise RuntimeError("SQLite database not initialised")
+            cursor = await self._sqlite_conn.execute(sql, params or ())
+            rows = await cursor.fetchmany(size)
+            return [dict(row) for row in rows]
+        else:
+            async with self.acquire() as conn:
+                async with conn.cursor(aiomysql.DictCursor) as cursor:
+                    adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
+                    await cursor.execute(adapted_sql, adapted_params)
+                    return list(await cursor.fetchmany(size))
+
     async def fetch_all(self, sql: str, params: tuple | dict | None = None):
         if self._use_sqlite:
             if not self._sqlite_conn:
