@@ -149,11 +149,11 @@ def _strip_quoted_email_headers(value: str) -> str:
 
 def _strip_style_blocks(value: str) -> str:
     """Remove complete <style>...</style> blocks in linear time."""
-    if _STYLE_OPEN_TAG not in value.lower():
+    lower_value = value.lower()
+    if _STYLE_OPEN_TAG not in lower_value:
         return value
 
     cleaned_parts: list[str] = []
-    lower_value = value.lower()
     cursor = 0
     while True:
         start = lower_value.find(_STYLE_OPEN_TAG, cursor)

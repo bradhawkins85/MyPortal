@@ -95,6 +95,11 @@ def test_strip_style_blocks_removes_complete_style_blocks():
     assert _strip_style_blocks("<p>x</p><style>p{color:red}</style><p>y</p>") == "<p>x</p><p>y</p>"
 
 
+def test_strip_style_blocks_removes_multiple_complete_style_blocks():
+    value = "<style>a{}</style><p>x</p><style>b{}</style><p>y</p>"
+    assert _strip_style_blocks(value) == "<p>x</p><p>y</p>"
+
+
 def test_strip_style_blocks_preserves_incomplete_style_blocks():
     value = "<p>x</p><style>p{color:red}"
     assert _strip_style_blocks(value) == value
