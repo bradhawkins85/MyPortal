@@ -1291,7 +1291,11 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 body = body_content.get("content") or ""
                 if not body:
                     body = msg.get("bodyPreview") or ""
-                if msg.get("hasAttachments") and body:
+                # Graph deliberately excludes inline-only attachments from
+                # ``hasAttachments``.  Key this off the body instead so a
+                # message whose only attachment is a pasted screenshot still
+                # has its CID URL resolved before sanitisation.
+                if body and "cid:" in body.lower():
                     body = await _embed_graph_inline_images(
                         access_token=access_token,
                         upn=upn,
