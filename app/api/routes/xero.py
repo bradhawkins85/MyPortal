@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlencode
+from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response, status
@@ -99,16 +100,32 @@ def _summarise_xero_webhook_results(results: list[dict[str, Any]]) -> str | None
 
 
 def _extract_xero_invoice_id(event: dict[str, Any]) -> str | None:
-    invoice_id = str(event.get("resourceId") or event.get("resourceID") or "").strip()
+    invoice_id = _normalize_xero_invoice_id(event.get("resourceId") or event.get("resourceID"))
     if invoice_id:
         return invoice_id
     resource_url = str(event.get("resourceUrl") or event.get("resourceURL") or "").strip().rstrip("/")
     if "/Invoices/" in resource_url:
-        return resource_url.rsplit("/", 1)[-1] or None
+        return _normalize_xero_invoice_id(resource_url.rsplit("/", 1)[-1])
     return None
 
 
+def _normalize_xero_invoice_id(value: Any) -> str | None:
+    """Return a UUID-formatted Xero invoice ID, or ``None`` if validation fails."""
+    candidate = str(value or "").strip()
+    if not candidate:
+        return None
+    try:
+        UUID(candidate)
+        return candidate
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
 async def _fetch_xero_invoice(invoice_id: str) -> dict[str, Any] | None:
+    """Fetch a Xero invoice using a defensively validated invoice ID."""
+    normalized_invoice_id = _normalize_xero_invoice_id(invoice_id)
+    if not normalized_invoice_id:
+        raise ValueError("Invalid Xero invoice ID format")
     credentials = await modules_service.get_xero_credentials()
     tenant_id = str((credentials or {}).get("tenant_id") or "").strip()
     if not tenant_id:
@@ -116,7 +133,7 @@ async def _fetch_xero_invoice(invoice_id: str) -> dict[str, Any] | None:
     access_token = await modules_service.acquire_xero_access_token()
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(
-            f"https://api.xero.com/api.xro/2.0/Invoices/{invoice_id}",
+            f"https://api.xero.com/api.xro/2.0/Invoices/{normalized_invoice_id}",
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "xero-tenant-id": tenant_id,
@@ -134,6 +151,7 @@ async def _apply_xero_invoice_event(event: dict[str, Any], request: Request) -> 
         return {"status": "ignored", "reason": "unsupported category"}
     invoice_id = _extract_xero_invoice_id(event)
     if not invoice_id:
+        logger.warning("Ignoring Xero invoice webhook event with invalid or missing invoice ID")
         return {"status": "ignored", "reason": "missing invoice id"}
 
     local_invoice = await invoice_repo.get_invoice_by_xero_invoice_id(invoice_id)
