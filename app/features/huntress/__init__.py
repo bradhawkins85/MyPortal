@@ -4,7 +4,8 @@ This pack makes the Huntress integration a first-class hot-reloadable
 feature-pack unit.  Credentials are read from the environment
 (``HUNTRESS_API_KEY`` / ``HUNTRESS_API_SECRET`` / ``HUNTRESS_BASE_URL``)
 plus Curricula Managed SAT credentials (``CURRICULA_API_KEY`` /
-``CURRICULA_API_SECRET`` / ``CURRICULA_BASE_URL``), and the module is gated
+``CURRICULA_API_SECRET`` / ``CURRICULA_BASE_URL`` /
+``CURRICULA_OAUTH_TOKEN_URL``), and the module is gated
 by the standard ``integration_modules`` enable/disable toggle — so no standalone
 routes are needed here.
 

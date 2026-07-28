@@ -3,7 +3,8 @@
 The Huntress integration has no UI settings — credentials are read from the
 environment (``HUNTRESS_API_KEY`` / ``HUNTRESS_API_SECRET`` /
 ``HUNTRESS_BASE_URL`` plus ``CURRICULA_API_KEY`` /
-``CURRICULA_API_SECRET`` / ``CURRICULA_BASE_URL`` for Managed SAT)
+``CURRICULA_API_SECRET`` / ``CURRICULA_BASE_URL`` /
+``CURRICULA_OAUTH_TOKEN_URL`` for Managed SAT)
 and the module is gated by the standard ``integration_modules``
 enable/disable toggle.
 
@@ -66,9 +67,15 @@ def _get_curricula_credentials() -> dict[str, str] | None:
     api_key = (settings.curricula_api_key or "").strip()
     api_secret = (settings.curricula_api_secret or "").strip()
     base_url = (settings.curricula_base_url or "").strip().rstrip("/")
-    if not api_key or not api_secret or not base_url:
+    token_url = (settings.curricula_oauth_token_url or "").strip()
+    if not api_key or not api_secret or not base_url or not token_url:
         return None
-    return {"api_key": api_key, "api_secret": api_secret, "base_url": base_url}
+    return {
+        "api_key": api_key,
+        "api_secret": api_secret,
+        "base_url": base_url,
+        "token_url": token_url,
+    }
 
 
 def credentials_status() -> dict[str, bool]:
@@ -83,6 +90,9 @@ def credentials_status() -> dict[str, bool]:
             (settings.curricula_api_secret or "").strip()
         ),
         "curricula_base_url_present": bool((settings.curricula_base_url or "").strip()),
+        "curricula_oauth_token_url_present": bool(
+            (settings.curricula_oauth_token_url or "").strip()
+        ),
     }
 
 
@@ -101,6 +111,55 @@ def _client(credentials: Mapping[str, str]) -> httpx.AsyncClient:
         timeout=REQUEST_TIMEOUT,
         headers={"Accept": "application/json"},
     )
+
+
+def _oauth_token_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=REQUEST_TIMEOUT)
+
+
+def _bearer_client(
+    credentials: Mapping[str, str], access_token: str
+) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        base_url=credentials["base_url"],
+        timeout=REQUEST_TIMEOUT,
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {access_token}",
+        },
+    )
+
+
+async def _curricula_oauth_client(
+    credentials: Mapping[str, str],
+) -> httpx.AsyncClient:
+    """Exchange the Managed SAT client credentials and return a bearer client."""
+    async with _oauth_token_client() as token_client:
+        response = await token_client.post(
+            credentials["token_url"],
+            data={"grant_type": "client_credentials"},
+            auth=(credentials["api_key"], credentials["api_secret"]),
+            headers={"Accept": "application/json"},
+        )
+    if response.status_code >= 400:
+        log_error(
+            "Huntress Managed SAT OAuth token request failed",
+            status_code=response.status_code,
+            url=_redact_url(str(response.request.url)),
+        )
+        response.raise_for_status()
+    try:
+        token_payload = response.json()
+    except ValueError as exc:
+        raise HuntressConfigurationError(
+            "Huntress Managed SAT OAuth token response was not valid JSON."
+        ) from exc
+    access_token = str(token_payload.get("access_token") or "").strip()
+    if not access_token:
+        raise HuntressConfigurationError(
+            "Huntress Managed SAT OAuth token response did not contain an access_token."
+        )
+    return _bearer_client(credentials, access_token)
 
 
 async def _get_json(
@@ -343,7 +402,7 @@ async def get_sat_learner_breakdown(org_id: str) -> list[dict[str, Any]] | None:
             "CURRICULA_API_SECRET)."
         )
 
-    async with _client(credentials) as client:
+    async with await _curricula_oauth_client(credentials) as client:
         payload = await _get_json(
             client,
             f"/accounts/{org_id}/learners",
