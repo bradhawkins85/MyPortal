@@ -18,6 +18,7 @@
   {"key": "tacticalrmm_client_id",     "label": "Tactical RMM client ID",      "default_visible": false},
   {"key": "hudu_id",                   "label": "Hudu ID",                      "default_visible": false},
   {"key": "huntress_organization_id",  "label": "Huntress organisation ID",     "default_visible": false},
+  {"key": "huntress_sat_account_id",  "label": "Huntress SAT account ID",     "default_visible": false},
   {"key": "trello_board_id",           "label": "Trello board ID",              "default_visible": false},
   {"key": "payment_method",            "label": "Payment Methods",              "default_visible": false},
   {"key": "require_po",                "label": "Require PO",                   "default_visible": false},
@@ -68,6 +69,7 @@
                 <th scope="col" data-sort="string" data-column-key="tacticalrmm_client_id">Tactical RMM client ID</th>
                 <th scope="col" data-sort="string" data-column-key="hudu_id">Hudu ID</th>
                 <th scope="col" data-sort="string" data-column-key="huntress_organization_id">Huntress organisation ID</th>
+                <th scope="col" data-sort="string" data-column-key="huntress_sat_account_id">Huntress SAT account ID</th>
                 <th scope="col" data-sort="string" data-column-key="trello_board_id">Trello board ID</th>
                 <th scope="col" data-sort="string" data-column-key="payment_method">Payment Methods</th>
                 <th scope="col" data-sort="string" data-column-key="require_po">Require PO</th>
@@ -125,6 +127,7 @@
                         <span class="text-muted">—</span>
                       {% endif %}
                     </td>
+                    <td data-label="Huntress SAT account ID" data-value="{{ company.huntress_sat_account_id or '' }}" data-column-key="huntress_sat_account_id">{{ company.huntress_sat_account_id or '—' }}</td>
                     <td data-label="Trello board ID" data-value="{{ company.trello_board_id or '' }}" data-column-key="trello_board_id">
                       {% if company.trello_board_id %}
                         {{ company.trello_board_id }}

@@ -535,6 +535,10 @@ async def _render_company_edit_page(
             "huntress_organization_id",
             (company_record.get("huntress_organization_id") or "").strip(),
         ),
+        "huntress_sat_account_id": _string_value(
+            "huntress_sat_account_id",
+            (company_record.get("huntress_sat_account_id") or "").strip(),
+        ),
         "email_domains": _string_value("email_domains", default_email_domains),
         "is_vip": _bool_value("is_vip", bool(company_record.get("is_vip"))),
         "default_ticket_replies_billable": _bool_value(
@@ -1391,6 +1395,7 @@ async def admin_update_company(company_id: int, request: Request):
     xero_id_raw = str(form.get("xeroId", "")).strip()
     hudu_id_raw = str(form.get("huduId", "")).strip()
     huntress_organization_id_raw = str(form.get("huntressOrganizationId", "")).strip()
+    huntress_sat_account_id_raw = str(form.get("huntressSatAccountId", "")).strip()
     trello_board_id_raw = str(form.get("trelloBoardId", "")).strip()
     trello_api_key_raw = str(form.get("trelloApiKey", "")).strip()
     trello_token_raw = str(form.get("trelloToken", "")).strip()
@@ -1458,6 +1463,7 @@ async def admin_update_company(company_id: int, request: Request):
         "xero_id": xero_id_raw,
         "hudu_id": hudu_id_raw,
         "huntress_organization_id": huntress_organization_id_raw,
+        "huntress_sat_account_id": huntress_sat_account_id_raw,
         "trello_board_id": trello_board_id_raw,
         "trello_api_key": trello_api_key_raw or existing.get("trello_api_key"),
         "trello_token": trello_token_raw or existing.get("trello_token"),
@@ -1507,6 +1513,7 @@ async def admin_update_company(company_id: int, request: Request):
     xero_id = xero_id_raw or None
     hudu_id = hudu_id_raw or None
     huntress_organization_id = huntress_organization_id_raw or None
+    huntress_sat_account_id = huntress_sat_account_id_raw or None
     trello_board_id = trello_board_id_raw or None
     trello_api_key: str | None = (
         trello_api_key_raw
@@ -1524,6 +1531,7 @@ async def admin_update_company(company_id: int, request: Request):
         "xero_id": xero_id,
         "hudu_id": hudu_id,
         "huntress_organization_id": huntress_organization_id,
+        "huntress_sat_account_id": huntress_sat_account_id,
         "trello_board_id": trello_board_id,
         "trello_api_key": trello_api_key,
         "trello_token": trello_token,

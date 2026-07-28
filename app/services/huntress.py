@@ -185,6 +185,34 @@ async def list_organizations() -> list[dict[str, Any]]:
     return organisations
 
 
+async def list_sat_accounts() -> list[dict[str, Any]]:
+    """Return Managed SAT accounts available to the Curricula API client."""
+    credentials = _get_curricula_credentials()
+    if not credentials:
+        raise HuntressConfigurationError(
+            "Curricula credentials are not configured (set CURRICULA_API_KEY and "
+            "CURRICULA_API_SECRET)."
+        )
+
+    accounts: list[dict[str, Any]] = []
+    async with _client(credentials) as client:
+        page = 1
+        for _ in range(50):
+            payload = await _get_json(
+                client, "/accounts", {"page[number]": page, "page[size]": 100}
+            )
+            chunk = _extract_list(payload, key="accounts")
+            if not chunk:
+                break
+            accounts.extend(
+                _jsonapi_attrs(row) for row in chunk if isinstance(row, Mapping)
+            )
+            if len(chunk) < 100:
+                break
+            page += 1
+    return accounts
+
+
 async def get_latest_summary_report(
     org_id: str, report_type: str = "monthly_summary"
 ) -> dict[str, Any] | None:
@@ -395,10 +423,15 @@ async def refresh_company(company: Mapping[str, Any]) -> dict[str, Any]:
         }
     company_id = int(company_id_raw)
     org_id = str(org_id)
+    sat_id_raw = company.get("huntress_sat_account_id")
+    sat_id = (
+        sat_id_raw.strip() if isinstance(sat_id_raw, str) else sat_id_raw
+    ) or None
     snapshot_at = datetime.utcnow()
     summary: dict[str, Any] = {
         "company_id": company_id,
         "huntress_organization_id": org_id,
+        "huntress_sat_account_id": str(sat_id) if sat_id else None,
         "errors": {},
     }
 
@@ -446,7 +479,7 @@ async def refresh_company(company: Mapping[str, Any]) -> dict[str, Any]:
         )
         summary["itdr"] = itdr
 
-    sat = await _safe("sat", get_sat_summary(org_id))
+    sat = await _safe("sat", get_sat_summary(str(sat_id))) if sat_id else None
     if sat is not None:
         await huntress_repo.upsert_sat_stats(
             company_id,
@@ -460,7 +493,11 @@ async def refresh_company(company: Mapping[str, Any]) -> dict[str, Any]:
         )
         summary["sat"] = sat
 
-    sat_rows = await _safe("sat_learners", get_sat_learner_breakdown(org_id))
+    sat_rows = (
+        await _safe("sat_learners", get_sat_learner_breakdown(str(sat_id)))
+        if sat_id
+        else None
+    )
     if sat_rows is not None:
         await huntress_repo.replace_sat_learner_progress(
             company_id, sat_rows, snapshot_at=snapshot_at
@@ -695,6 +732,7 @@ __all__ = [
     "get_soc_event_count",
     "is_module_enabled",
     "list_organizations",
+    "list_sat_accounts",
     "refresh_all_companies",
     "refresh_company",
 ]

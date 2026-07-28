@@ -3272,12 +3272,14 @@
     const onedriveSitesButton = document.querySelector('[data-lookup-onedrive-export-sites]');
     const createOffboardedStaffSiteButton = document.querySelector('[data-create-offboarded-staff-site]');
     const huntressButton = document.querySelector('[data-lookup-huntress-id]');
+    const huntressSatButton = document.querySelector('[data-lookup-huntress-sat-id]');
     const tacticalInput = document.getElementById('edit-company-tactical');
     const xeroInput = document.getElementById('edit-company-xero');
     const huduInput = document.getElementById('edit-company-hudu');
     const onedriveSitesSelect = document.querySelector('[data-onedrive-export-sites-select]');
     const onedriveSitesError = document.querySelector('[data-onedrive-export-sites-error]');
     const huntressInput = document.getElementById('edit-company-huntress');
+    const huntressSatInput = document.getElementById('edit-company-huntress-sat');
 
     const offboardedStaffSiteName = 'Offboarded Staff';
 
@@ -3527,6 +3529,30 @@
         } finally {
           huntressButton.disabled = false;
           huntressButton.innerHTML = originalText;
+        }
+      });
+    }
+
+    if (huntressSatButton && huntressSatInput) {
+      huntressSatButton.addEventListener('click', async () => {
+        const originalText = huntressSatButton.innerHTML;
+        huntressSatButton.disabled = true;
+        huntressSatButton.innerHTML = spinnerHtml;
+        try {
+          const result = await requestJson(`/api/companies/${companyId}/lookup-huntress-sat-id`, { method: 'POST' });
+          if (result.status === 'found' && result.id) {
+            huntressSatInput.value = result.id;
+            huntressSatInput.classList.add('form-input--success');
+            setTimeout(() => huntressSatInput.classList.remove('form-input--success'), 2000);
+          } else {
+            alert('Huntress SAT account ID not found. Please ensure the company name matches exactly in Managed SAT.');
+          }
+        } catch (error) {
+          console.error('Failed to lookup Huntress SAT account ID:', error);
+          alert(error instanceof Error ? error.message : 'Failed to lookup ID. Please try again.');
+        } finally {
+          huntressSatButton.disabled = false;
+          huntressSatButton.innerHTML = originalText;
         }
       });
     }

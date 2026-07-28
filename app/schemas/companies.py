@@ -15,6 +15,7 @@ class CompanyBase(BaseModel):
     tacticalrmm_client_id: Optional[str] = None
     xero_id: Optional[str] = None
     huntress_organization_id: Optional[str] = None
+    huntress_sat_account_id: Optional[str] = None
     archived: Optional[int] = None
     default_ticket_replies_billable: Optional[int] = 1
     email_domains: list[str] = Field(default_factory=list)
@@ -43,6 +44,7 @@ class CompanyUpdate(BaseModel):
     tacticalrmm_client_id: Optional[str] = None
     xero_id: Optional[str] = None
     huntress_organization_id: Optional[str] = None
+    huntress_sat_account_id: Optional[str] = None
     archived: Optional[int] = None
     default_ticket_replies_billable: Optional[int] = None
     email_domains: Optional[list[str]] = None

@@ -103,6 +103,7 @@ async def update_company(
         not updated.get("tacticalrmm_client_id") or
         not updated.get("xero_id") or
         not updated.get("huntress_organization_id")
+        or not updated.get("huntress_sat_account_id")
     )
     
     final_record: dict[str, Any] = updated
@@ -590,3 +591,23 @@ async def lookup_huntress_organization_id(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error looking up Huntress organisation ID: {str(exc)}"
         )
+
+
+@router.post("/{company_id}/lookup-huntress-sat-id")
+async def lookup_huntress_sat_account_id(
+    company_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Lookup a Managed SAT account ID by the company's name."""
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    company_name = company.get("name", "")
+    if not company_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Company name is required")
+    sat_id = await company_id_lookup._lookup_huntress_sat_account_id(company_name)
+    if sat_id:
+        await company_repo.update_company(company_id, huntress_sat_account_id=sat_id)
+        return {"status": "found", "id": sat_id}
+    return {"status": "not_found", "id": None}
