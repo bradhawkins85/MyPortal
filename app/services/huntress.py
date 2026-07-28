@@ -212,28 +212,25 @@ async def get_latest_summary_report(
 
 
 async def get_edr_summary(org_id: str) -> dict[str, int]:
-    """Return EDR counters from the incident-report and signal endpoints.
+    """Return EDR counters from the incident, signal, and summary endpoints.
 
     EDR data is not part of every monthly summary response.  Querying the
     product endpoints directly also means a company sync works before its
-    first monthly report has been generated.
+    first monthly report has been generated. Huntress's incident-report API
+    accepts ``sent`` for active reports, but does not accept ``resolved`` as a
+    status filter. Resolved incidents are therefore read from the supported
+    monthly-summary counter instead of sending an invalid filtered request.
     """
     credentials = _get_credentials()
     if not credentials:
         raise HuntressConfigurationError("Huntress credentials are not configured.")
 
     async with _client(credentials) as client:
-        active, resolved, signals = await asyncio.gather(
+        active, signals = await asyncio.gather(
             _get_json(
                 client,
                 "/incident_reports",
                 {"organization_id": org_id, "status": "sent", "limit": 1},
-                allow_not_found=True,
-            ),
-            _get_json(
-                client,
-                "/incident_reports",
-                {"organization_id": org_id, "status": "resolved", "limit": 1},
                 allow_not_found=True,
             ),
             _get_json(
@@ -243,9 +240,11 @@ async def get_edr_summary(org_id: str) -> dict[str, int]:
                 allow_not_found=True,
             ),
         )
+    report = await get_latest_summary_report(org_id)
+    report_payload = report if isinstance(report, Mapping) else {}
     return {
         "active_incidents": _extract_total(active, "incident_reports"),
-        "resolved_incidents": _extract_total(resolved, "incident_reports"),
+        "resolved_incidents": _coerce_int(report_payload.get("incidents_resolved")),
         "signals_investigated": _extract_total(signals, "signals"),
     }
 
