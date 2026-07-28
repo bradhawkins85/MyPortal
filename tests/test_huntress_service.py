@@ -126,7 +126,11 @@ async def test_missing_curricula_credentials_do_not_abort_edr_sync(monkeypatch):
     monkeypatch.setattr(repo, "upsert_itdr_stats", AsyncMock())
 
     result = await huntress_service.refresh_company(
-        {"id": 42, "huntress_organization_id": "org-1"}
+        {
+            "id": 42,
+            "huntress_organization_id": "org-1",
+            "huntress_sat_account_id": "sat-1",
+        }
     )
 
     assert result["status"] == "partial"
@@ -277,6 +281,37 @@ async def test_get_sat_learner_breakdown_returns_none_on_404(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_refresh_company_reports_inaccessible_sat_account(monkeypatch):
+    """A SAT 404 must be visible in task output rather than looking successful."""
+    from app.services import huntress as huntress_service
+
+    monkeypatch.setattr(huntress_service, "get_edr_summary", AsyncMock(return_value=None))
+    monkeypatch.setattr(huntress_service, "get_itdr_summary", AsyncMock(return_value=None))
+    monkeypatch.setattr(huntress_service, "get_sat_summary", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        huntress_service, "get_sat_learner_breakdown", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        huntress_service, "get_siem_data_volume", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        huntress_service, "get_soc_event_count", AsyncMock(return_value=None)
+    )
+
+    result = await huntress_service.refresh_company(
+        {
+            "id": 20,
+            "huntress_organization_id": "559776",
+            "huntress_sat_account_id": "57778",
+        }
+    )
+
+    assert result["status"] == "partial"
+    assert set(result["errors"]) == {"sat", "sat_learners"}
+    assert "parent Curricula API client" in result["errors"]["sat"]
+
+
+@pytest.mark.asyncio
 async def test_get_soc_event_count_returns_none_on_404(monkeypatch):
     """If the SOC product is not enabled, 404 should return None silently."""
     from app.services import huntress as huntress_service
@@ -360,7 +395,11 @@ async def test_refresh_company_tolerates_partial_failure(monkeypatch):
     monkeypatch.setattr(repo, "upsert_soc_stats", AsyncMock())
 
     result = await huntress_service.refresh_company(
-        {"id": 42, "huntress_organization_id": "org-1"}
+        {
+            "id": 42,
+            "huntress_organization_id": "org-1",
+            "huntress_sat_account_id": "sat-1",
+        }
     )
 
     assert result["status"] == "partial"
