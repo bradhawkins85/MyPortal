@@ -47,6 +47,15 @@ async def get_asset_by_id(asset_id: int) -> dict[str, Any] | None:
     )
 
 
+async def get_asset_by_tactical_id(
+    company_id: int, tactical_asset_id: str
+) -> dict[str, Any] | None:
+    return await db.fetch_one(
+        "SELECT * FROM assets WHERE company_id = %s AND tactical_asset_id = %s",
+        (company_id, tactical_asset_id),
+    )
+
+
 async def delete_asset(asset_id: int) -> None:
     await db.execute("DELETE FROM assets WHERE id = %s", (asset_id,))
 

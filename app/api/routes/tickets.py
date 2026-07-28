@@ -31,6 +31,8 @@ from app.core.errors import (
 from app.core.logging import log_error
 from loguru import logger
 from app.repositories import company_memberships as membership_repo
+from app.repositories import companies as companies_repo
+from app.repositories import assets as assets_repo
 from app.repositories import staff as staff_repo
 from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import ticket_tasks as ticket_tasks_repo
@@ -44,8 +46,8 @@ from app.schemas.tickets import (
     LabourTypeUpdateRequest,
     SyncroTicketImportRequest,
     SyncroTicketImportSummary,
+    TacticalRMMTicketCreate,
     TicketAttachment,
-    TicketAttachmentCreate,
     TicketAttachmentListResponse,
     TicketAttachmentUpdate,
     TicketCreate,
@@ -725,7 +727,9 @@ async def create_ticket(
             try:
                 status_value = await tickets_service.validate_status_choice(
                     payload.status,
-                    allow_hidden=bool(current_user.get("is_super_admin")),
+                    allow_hidden=bool(
+                        current_user and current_user.get("is_super_admin")
+                    ),
                 )
             except ValueError as exc:
                 error_id = new_error_id()
@@ -788,6 +792,99 @@ async def create_ticket(
             else None
         ),
     )
+    return await _build_ticket_detail(ticket["id"], detail_user)
+
+
+@router.post(
+    "/tacticalrmm", response_model=TicketDetail, status_code=status.HTTP_201_CREATED
+)
+async def create_tacticalrmm_ticket(
+    payload: TacticalRMMTicketCreate,
+    request: Request,
+    actor: dict = Depends(_resolve_ticket_actor),
+) -> TicketDetail:
+    """Create a ticket from TRMM identifiers rather than MyPortal IDs."""
+    tactical_client_id = str(payload.company_id).strip()
+    company = await companies_repo.get_company_by_tactical_id(tactical_client_id)
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                "No MyPortal company is mapped to Tactical RMM client ID "
+                f"'{tactical_client_id}'."
+            ),
+        )
+
+    asset: dict | None = None
+    tactical_agent_id: str | None = None
+    if payload.agent_id is not None:
+        tactical_agent_id = str(payload.agent_id).strip()
+        asset = await assets_repo.get_asset_by_tactical_id(
+            int(company["id"]), tactical_agent_id
+        )
+        if not asset:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    "No MyPortal asset is mapped to Tactical RMM agent ID "
+                    f"'{tactical_agent_id}' for this company."
+                ),
+            )
+
+    try:
+        status_value = await tickets_service.validate_status_choice(
+            payload.status, allow_hidden=False
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid ticket status.",
+        ) from exc
+
+    ticket = await tickets_service.create_ticket(
+        subject=payload.subject,
+        description=payload.description,
+        requester_id=None,
+        company_id=int(company["id"]),
+        assigned_user_id=None,
+        priority=payload.priority,
+        status=status_value,
+        category=payload.category,
+        module_slug="tacticalrmm",
+        external_reference=payload.external_reference,
+        trigger_automations=True,
+        initial_reply_author_id=None,
+    )
+
+    if asset:
+        await tickets_repo.replace_ticket_assets(ticket["id"], [int(asset["id"])])
+
+    try:
+        await tickets_service.refresh_ticket_ai_summary(ticket["id"])
+    except RuntimeError as exc:
+        log_error(
+            f"Failed to refresh AI summary for ticket {ticket['id']}: {exc}",
+            exc_info=True,
+        )
+    await tickets_service.refresh_ticket_ai_tags(ticket["id"])
+
+    current_user = actor.get("user")
+    api_key_record = actor.get("api_key")
+    await audit_service.record(
+        action="ticket.create",
+        request=request,
+        user_id=int(current_user["id"]) if current_user else None,
+        entity_type="ticket",
+        entity_id=int(ticket["id"]),
+        before=None,
+        after=_audit_ticket_view(ticket),
+        api_key=(
+            str(api_key_record.get("name") or api_key_record.get("id"))
+            if api_key_record
+            else None
+        ),
+    )
+    detail_user = current_user or {"id": None, "is_super_admin": False}
     return await _build_ticket_detail(ticket["id"], detail_user)
 
 
