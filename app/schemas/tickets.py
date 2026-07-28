@@ -24,6 +24,32 @@ class TicketCreate(TicketBase):
     requester_id: Optional[int] = None
 
 
+class TacticalRMMTicketCreate(BaseModel):
+    """Ticket payload accepted from a Tactical RMM alert webhook.
+
+    ``company_id`` is deliberately a string-compatible external identifier: it
+    refers to Tactical RMM's client ID, not the MyPortal company primary key.
+    The two user ID fields are accepted for compatibility with existing alert
+    templates, but are not used because Tactical RMM user IDs cannot safely be
+    mapped to MyPortal users.
+    """
+
+    subject: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    status: str = Field(default="open", max_length=32)
+    priority: str = Field(default="normal", max_length=32)
+    category: Optional[str] = Field(default=None, max_length=64)
+    company_id: str | int = Field(..., description="Tactical RMM client ID")
+    agent_id: str | int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("agent_id", "tactical_agent_id"),
+        description="Optional Tactical RMM agent ID to link to the ticket",
+    )
+    requester_id: str | int | None = None
+    assigned_user_id: str | int | None = None
+    external_reference: Optional[str] = Field(default=None, max_length=128)
+
+
 class TicketUpdate(BaseModel):
     subject: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = None
