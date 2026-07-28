@@ -3,8 +3,7 @@
 The Huntress integration has no UI settings — credentials are read from the
 environment (``HUNTRESS_API_KEY`` / ``HUNTRESS_API_SECRET`` /
 ``HUNTRESS_BASE_URL`` plus ``CURRICULA_API_KEY`` /
-``CURRICULA_API_SECRET`` / ``CURRICULA_BASE_URL`` /
-``CURRICULA_OAUTH_TOKEN_URL`` for Managed SAT)
+``CURRICULA_API_SECRET`` / ``CURRICULA_BASE_URL`` for Managed SAT)
 and the module is gated by the standard ``integration_modules``
 enable/disable toggle.
 
@@ -67,14 +66,14 @@ def _get_curricula_credentials() -> dict[str, str] | None:
     api_key = (settings.curricula_api_key or "").strip()
     api_secret = (settings.curricula_api_secret or "").strip()
     base_url = (settings.curricula_base_url or "").strip().rstrip("/")
-    token_url = (settings.curricula_oauth_token_url or "").strip()
-    if not api_key or not api_secret or not base_url or not token_url:
+    if not api_key or not api_secret or not base_url:
         return None
+    oauth_base_url = base_url.removesuffix("/api/v1")
     return {
         "api_key": api_key,
         "api_secret": api_secret,
         "base_url": base_url,
-        "token_url": token_url,
+        "token_url": f"{oauth_base_url}/oauth/token",
     }
 
 
@@ -90,9 +89,6 @@ def credentials_status() -> dict[str, bool]:
             (settings.curricula_api_secret or "").strip()
         ),
         "curricula_base_url_present": bool((settings.curricula_base_url or "").strip()),
-        "curricula_oauth_token_url_present": bool(
-            (settings.curricula_oauth_token_url or "").strip()
-        ),
     }
 
 

@@ -1036,7 +1036,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
             "Huntress EDR / ITDR / SAT / SIEM / SOC statistics for company reports. "
             "Credentials are read from environment variables (HUNTRESS_API_KEY, "
             "HUNTRESS_API_SECRET, and CURRICULA_API_KEY/CURRICULA_API_SECRET "
-            "plus CURRICULA_OAUTH_TOKEN_URL for Managed SAT OAuth2)."
+            "for Managed SAT OAuth2)."
         ),
         "icon": "🛡️",
         "settings": {},

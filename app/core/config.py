@@ -609,11 +609,6 @@ class Settings(BaseSettings):
         default="https://dev.curricula.com/api/v1",
         validation_alias="CURRICULA_BASE_URL",
     )
-    curricula_oauth_token_url: str = Field(
-        default="https://dev.curricula.com/oauth/token",
-        validation_alias="CURRICULA_OAUTH_TOKEN_URL",
-    )
-
     # GitHub integration (used for fetching the latest tray MSI on startup)
     github_token: str | None = Field(
         default=None,

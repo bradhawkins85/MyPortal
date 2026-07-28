@@ -30,7 +30,6 @@ def _set_credentials(monkeypatch):
             "api_key": "test-key",
             "api_secret": "test-secret",
             "base_url": "https://dev.curricula.com/api/v1",
-            "token_url": "https://dev.curricula.com/oauth/token",
         },
     )
     # Skip the per-call sleep so tests run instantly.
@@ -84,7 +83,6 @@ async def test_credentials_status_reflects_environment(monkeypatch):
                 "curricula_api_key": "curricula-key",
                 "curricula_api_secret": "",
                 "curricula_base_url": "https://dev.curricula.com/api/v1",
-                "curricula_oauth_token_url": "https://dev.curricula.com/oauth/token",
             },
         )(),
     )
@@ -98,7 +96,31 @@ async def test_credentials_status_reflects_environment(monkeypatch):
         "curricula_api_key_present": True,
         "curricula_api_secret_present": False,
         "curricula_base_url_present": True,
-        "curricula_oauth_token_url_present": True,
+    }
+
+
+def test_curricula_oauth_token_url_is_derived_from_base_url(monkeypatch):
+    from app.services import huntress as huntress_service
+
+    monkeypatch.setattr(
+        huntress_service,
+        "get_settings",
+        lambda: type(
+            "S",
+            (),
+            {
+                "curricula_api_key": "oauth-client-id",
+                "curricula_api_secret": "oauth-client-secret",
+                "curricula_base_url": "https://sat.example.com/partner/api/v1/",
+            },
+        )(),
+    )
+
+    assert huntress_service._get_curricula_credentials() == {
+        "api_key": "oauth-client-id",
+        "api_secret": "oauth-client-secret",
+        "base_url": "https://sat.example.com/partner/api/v1",
+        "token_url": "https://sat.example.com/partner/oauth/token",
     }
 
 

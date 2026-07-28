@@ -36,15 +36,15 @@ add its client ID and client secret to `.env`:
 CURRICULA_API_KEY=<OAuth2 client ID>
 CURRICULA_API_SECRET=<OAuth2 client secret>
 CURRICULA_BASE_URL=https://dev.curricula.com/api/v1
-CURRICULA_OAUTH_TOKEN_URL=https://dev.curricula.com/oauth/token
 ```
 
-If Huntress supplies a tenant-specific API or token URL, use those values
-instead. At sync time MyPortal posts `grant_type=client_credentials` to the
-token URL using the client ID and secret as HTTP Basic credentials. It then
-sends the returned access token as `Authorization: Bearer ...` when requesting
-the learner list. Tokens and secrets are never stored in the database or
-written to logs.
+If Huntress supplies a tenant-specific API URL, use that as
+`CURRICULA_BASE_URL`. MyPortal derives the OAuth endpoint by replacing the
+trailing `/api/v1` with `/oauth/token`. At sync time MyPortal posts
+`grant_type=client_credentials` to that token URL using the client ID and
+secret as HTTP Basic credentials. It then sends the returned access token as
+`Authorization: Bearer ...` when requesting the learner list. Tokens and
+secrets are never stored in the database or written to logs.
 
 In each company's edit page, set **Huntress SAT account ID** to the child
 account ID used in the learner URL. This is distinct from the Huntress
