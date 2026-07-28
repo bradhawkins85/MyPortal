@@ -61,7 +61,6 @@ def _get_credentials() -> dict[str, str] | None:
     return {"api_key": api_key, "api_secret": api_secret, "base_url": base_url}
 
 
-
 def _get_curricula_credentials() -> dict[str, str] | None:
     settings = get_settings()
     api_key = (settings.curricula_api_key or "").strip()
@@ -83,9 +82,7 @@ def credentials_status() -> dict[str, bool]:
         "curricula_api_secret_present": bool(
             (settings.curricula_api_secret or "").strip()
         ),
-        "curricula_base_url_present": bool(
-            (settings.curricula_base_url or "").strip()
-        ),
+        "curricula_base_url_present": bool((settings.curricula_base_url or "").strip()),
     }
 
 
@@ -188,9 +185,9 @@ async def list_organizations() -> list[dict[str, Any]]:
     return organisations
 
 
-
-
-async def get_latest_summary_report(org_id: str, report_type: str = "monthly_summary") -> dict[str, Any] | None:
+async def get_latest_summary_report(
+    org_id: str, report_type: str = "monthly_summary"
+) -> dict[str, Any] | None:
     """Return the most recent summary report for an organisation."""
     credentials = _get_credentials()
     if not credentials:
@@ -215,13 +212,41 @@ async def get_latest_summary_report(org_id: str, report_type: str = "monthly_sum
 
 
 async def get_edr_summary(org_id: str) -> dict[str, int]:
-    """Return EDR counters from the latest Huntress summary report."""
-    report = await get_latest_summary_report(org_id)
-    payload = report if isinstance(report, Mapping) else {}
+    """Return EDR counters from the incident-report and signal endpoints.
+
+    EDR data is not part of every monthly summary response.  Querying the
+    product endpoints directly also means a company sync works before its
+    first monthly report has been generated.
+    """
+    credentials = _get_credentials()
+    if not credentials:
+        raise HuntressConfigurationError("Huntress credentials are not configured.")
+
+    async with _client(credentials) as client:
+        active, resolved, signals = await asyncio.gather(
+            _get_json(
+                client,
+                "/incident_reports",
+                {"organization_id": org_id, "status": "sent", "limit": 1},
+                allow_not_found=True,
+            ),
+            _get_json(
+                client,
+                "/incident_reports",
+                {"organization_id": org_id, "status": "resolved", "limit": 1},
+                allow_not_found=True,
+            ),
+            _get_json(
+                client,
+                "/signals",
+                {"organization_id": org_id, "limit": 1},
+                allow_not_found=True,
+            ),
+        )
     return {
-        "active_incidents": _coerce_int(payload.get("incidents_reported")),
-        "resolved_incidents": _coerce_int(payload.get("incidents_resolved")),
-        "signals_investigated": _coerce_int(payload.get("signals_investigated")),
+        "active_incidents": _extract_total(active, "incident_reports"),
+        "resolved_incidents": _extract_total(resolved, "incident_reports"),
+        "signals_investigated": _extract_total(signals, "signals"),
     }
 
 
@@ -229,7 +254,11 @@ async def get_itdr_summary(org_id: str) -> dict[str, int]:
     """Return ITDR investigations completed from the latest summary report."""
     report = await get_latest_summary_report(org_id)
     payload = report if isinstance(report, Mapping) else {}
-    return {"signals_investigated": _coerce_int(payload.get("itdr_investigations_completed"))}
+    return {
+        "signals_investigated": _coerce_int(
+            payload.get("itdr_investigations_completed")
+        )
+    }
 
 
 async def get_sat_summary(org_id: str) -> dict[str, Any] | None:
@@ -252,9 +281,7 @@ async def get_sat_summary(org_id: str) -> dict[str, Any] | None:
     }
     completions = [float(row.get("completion_percent") or 0) for row in rows]
     scores = [
-        float(row.get("score") or 0)
-        for row in rows
-        if row.get("score") is not None
+        float(row.get("score") or 0) for row in rows if row.get("score") is not None
     ]
     return {
         "enrolled_learners": len(learner_ids) or len(rows),
@@ -303,16 +330,31 @@ async def get_sat_learner_breakdown(org_id: str) -> list[dict[str, Any]] | None:
 
 
 async def get_siem_data_volume(org_id: str, days: int = 30) -> dict[str, Any] | None:
-    """Return SIEM log-volume counters from the latest Huntress summary report."""
-    report = await get_latest_summary_report(org_id)
-    payload = report if isinstance(report, Mapping) else {}
-    total_logs = _coerce_int(payload.get("siem_total_logs") or payload.get("siem_ingested_logs"))
-    if total_logs <= 0:
+    """Return SIEM log-volume counters from the product usage endpoint."""
+    credentials = _get_credentials()
+    if not credentials:
+        raise HuntressConfigurationError("Huntress credentials are not configured.")
+    async with _client(credentials) as client:
+        payload = await _get_json(
+            client,
+            "/siem/usage",
+            {"organization_id": org_id, "days": days},
+            allow_not_found=True,
+        )
+    if payload is None:
+        return None
+    data = payload if isinstance(payload, Mapping) else {}
+    total_bytes = _coerce_int(
+        data.get("total_bytes")
+        or data.get("data_collected_bytes")
+        or data.get("bytes_ingested")
+    )
+    if total_bytes <= 0:
         return None
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=days)
     return {
-        "data_collected_bytes_30d": total_logs,
+        "data_collected_bytes_30d": total_bytes,
         "window_start": start.replace(tzinfo=None),
         "window_end": end.replace(tzinfo=None),
     }
@@ -341,9 +383,11 @@ async def refresh_company(company: Mapping[str, Any]) -> dict[str, Any]:
     """
 
     company_id_raw = company.get("id")
-    org_id = (company.get("huntress_organization_id") or "").strip() if isinstance(
-        company.get("huntress_organization_id"), str
-    ) else company.get("huntress_organization_id")
+    org_id = (
+        (company.get("huntress_organization_id") or "").strip()
+        if isinstance(company.get("huntress_organization_id"), str)
+        else company.get("huntress_organization_id")
+    )
     if company_id_raw is None or not org_id:
         return {
             "company_id": company_id_raw,
@@ -362,8 +406,17 @@ async def refresh_company(company: Mapping[str, Any]) -> dict[str, Any]:
     async def _safe(name: str, coro):
         try:
             return await coro
-        except HuntressConfigurationError:
-            raise
+        except HuntressConfigurationError as exc:
+            # Huntress and Managed SAT use separate credentials.  Missing SAT
+            # credentials must not abort an otherwise valid EDR sync (and vice
+            # versa); expose the product-level failure in the task details.
+            log_info(
+                "Huntress sync step skipped because it is not configured",
+                company_id=company_id,
+                step=name,
+            )
+            summary["errors"][name] = str(exc)
+            return None
         except Exception as exc:  # noqa: BLE001 - log and continue
             log_error(
                 "Huntress sync step failed",
@@ -471,7 +524,11 @@ async def refresh_all_companies() -> dict[str, Any]:
                 skipped += 1
         except HuntressConfigurationError as exc:
             log_error("Huntress credentials missing during refresh", error=str(exc))
-            return {"status": "skipped", "reason": "credentials_missing", "companies": results}
+            return {
+                "status": "skipped",
+                "reason": "credentials_missing",
+                "companies": results,
+            }
         except Exception as exc:  # noqa: BLE001
             log_error(
                 "Huntress refresh raised an unexpected error",
@@ -517,7 +574,6 @@ def _extract_list(payload: Any, *, key: str) -> list[Any]:
             if isinstance(value, list):
                 return [item for item in value if isinstance(item, (dict, list))]
     return []
-
 
 
 def _jsonapi_attrs(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -567,11 +623,20 @@ def _normalise_sat_learner(row: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "status": _first_value(data, "status", "state", "enrollment_status"),
         "completion_percent": _coerce_float(completion),
-        "score": _coerce_float(_first_value(data, "score", "average_score", "quiz_score")),
-        "click_rate": _coerce_float(_first_value(data, "click_rate", "phishing_click_rate")),
-        "compromise_rate": _coerce_float(_first_value(data, "compromise_rate", "phishing_compromise_rate")),
-        "report_rate": _coerce_float(_first_value(data, "report_rate", "phishing_report_rate")),
+        "score": _coerce_float(
+            _first_value(data, "score", "average_score", "quiz_score")
+        ),
+        "click_rate": _coerce_float(
+            _first_value(data, "click_rate", "phishing_click_rate")
+        ),
+        "compromise_rate": _coerce_float(
+            _first_value(data, "compromise_rate", "phishing_compromise_rate")
+        ),
+        "report_rate": _coerce_float(
+            _first_value(data, "report_rate", "phishing_report_rate")
+        ),
     }
+
 
 def _extract_next_page_token(payload: Any) -> str | None:
     """Return the ``next_page_token`` from a Huntress paginated response, or ``None``."""
