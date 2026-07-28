@@ -52,6 +52,19 @@ def _patch_client(transport):
     return patch.object(huntress_service, "_client", builder)
 
 
+def _patch_curricula_oauth_client(transport):
+    from app.services import huntress as huntress_service
+
+    async def builder(credentials):
+        return httpx.AsyncClient(
+            base_url=credentials["base_url"],
+            headers={"Authorization": "Bearer test-access-token"},
+            transport=transport,
+        )
+
+    return patch.object(huntress_service, "_curricula_oauth_client", builder)
+
+
 @pytest.mark.asyncio
 async def test_credentials_status_reflects_environment(monkeypatch):
     from app.core import config as config_module
@@ -83,6 +96,31 @@ async def test_credentials_status_reflects_environment(monkeypatch):
         "curricula_api_key_present": True,
         "curricula_api_secret_present": False,
         "curricula_base_url_present": True,
+    }
+
+
+def test_curricula_oauth_token_url_is_derived_from_base_url(monkeypatch):
+    from app.services import huntress as huntress_service
+
+    monkeypatch.setattr(
+        huntress_service,
+        "get_settings",
+        lambda: type(
+            "S",
+            (),
+            {
+                "curricula_api_key": "oauth-client-id",
+                "curricula_api_secret": "oauth-client-secret",
+                "curricula_base_url": "https://sat.example.com/partner/api/v1/",
+            },
+        )(),
+    )
+
+    assert huntress_service._get_curricula_credentials() == {
+        "api_key": "oauth-client-id",
+        "api_secret": "oauth-client-secret",
+        "base_url": "https://sat.example.com/partner/api/v1",
+        "token_url": "https://sat.example.com/partner/oauth/token",
     }
 
 
@@ -257,7 +295,7 @@ async def test_get_sat_summary_returns_none_on_404(monkeypatch):
         return httpx.Response(404)
 
     transport = httpx.MockTransport(handler)
-    with _patch_client(transport):
+    with _patch_curricula_oauth_client(transport):
         result = await huntress_service.get_sat_summary("org-1")
 
     assert result is None
@@ -274,7 +312,7 @@ async def test_get_sat_learner_breakdown_returns_none_on_404(monkeypatch):
         return httpx.Response(404)
 
     transport = httpx.MockTransport(handler)
-    with _patch_client(transport):
+    with _patch_curricula_oauth_client(transport):
         result = await huntress_service.get_sat_learner_breakdown("org-1")
 
     assert result is None
@@ -311,7 +349,7 @@ async def test_get_sat_learner_breakdown_uses_documented_account_endpoint(
             )
         return httpx.Response(500)
 
-    with _patch_client(httpx.MockTransport(handler)):
+    with _patch_curricula_oauth_client(httpx.MockTransport(handler)):
         result = await huntress_service.get_sat_learner_breakdown("57777")
 
     assert [request.url.path for request in requests] == [
@@ -332,6 +370,51 @@ async def test_get_sat_learner_breakdown_uses_documented_account_endpoint(
             "report_rate": 0.0,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_curricula_oauth_uses_client_credentials_and_returns_bearer_client(
+    monkeypatch,
+):
+    from app.services import huntress as huntress_service
+
+    token_requests: list[httpx.Request] = []
+
+    def token_handler(request: httpx.Request) -> httpx.Response:
+        token_requests.append(request)
+        return httpx.Response(200, json={"access_token": "oauth-access-token"})
+
+    monkeypatch.setattr(
+        huntress_service,
+        "_oauth_token_client",
+        lambda: httpx.AsyncClient(transport=httpx.MockTransport(token_handler)),
+    )
+    monkeypatch.setattr(
+        huntress_service,
+        "_bearer_client",
+        lambda credentials, access_token: httpx.AsyncClient(
+            base_url=credentials["base_url"],
+            headers={"Authorization": f"Bearer {access_token}"},
+        ),
+    )
+    credentials = {
+        "api_key": "oauth-client-id",
+        "api_secret": "oauth-client-secret",
+        "base_url": "https://dev.curricula.com/api/v1",
+        "token_url": "https://dev.curricula.com/oauth/token",
+    }
+
+    client = await huntress_service._curricula_oauth_client(credentials)
+    try:
+        assert client.headers["authorization"] == "Bearer oauth-access-token"
+    finally:
+        await client.aclose()
+
+    assert len(token_requests) == 1
+    request = token_requests[0]
+    assert str(request.url) == "https://dev.curricula.com/oauth/token"
+    assert request.headers["authorization"].startswith("Basic ")
+    assert request.content == b"grant_type=client_credentials"
 
 
 @pytest.mark.asyncio

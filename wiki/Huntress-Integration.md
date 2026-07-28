@@ -24,6 +24,32 @@ and surfaces them in the Company Overview report.
 The module has no other UI configuration — credentials never live in the
 database.
 
+### Managed SAT OAuth2 setup
+
+The Managed SAT learner endpoint, `GET /accounts/{account_id}/learners`, does
+not accept the HTTP Basic authentication used by the other Huntress endpoints.
+It uses the OAuth2 **client credentials** grant. Create a parent/channel-partner
+Managed SAT API application that can access the managed child accounts, then
+add its client ID and client secret to `.env`:
+
+```
+CURRICULA_API_KEY=<OAuth2 client ID>
+CURRICULA_API_SECRET=<OAuth2 client secret>
+CURRICULA_BASE_URL=https://dev.curricula.com/api/v1
+```
+
+If Huntress supplies a tenant-specific API URL, use that as
+`CURRICULA_BASE_URL`. MyPortal derives the OAuth endpoint by replacing the
+trailing `/api/v1` with `/oauth/token`. At sync time MyPortal posts
+`grant_type=client_credentials` to that token URL using the client ID and
+secret as HTTP Basic credentials. It then sends the returned access token as
+`Authorization: Bearer ...` when requesting the learner list. Tokens and
+secrets are never stored in the database or written to logs.
+
+In each company's edit page, set **Huntress SAT account ID** to the child
+account ID used in the learner URL. This is distinct from the Huntress
+organisation ID used by EDR and other product endpoints.
+
 ## Linking companies to Huntress organisations
 
 Huntress organises data by *organisation*. To link a MyPortal company to a
@@ -72,8 +98,9 @@ the company yet, matching the existing auto-hide-empty behaviour.
 
 ## Rate limiting and resilience
 
-* The HTTP client uses HTTP Basic auth (`api_key:api_secret`) and a 30 s
-  timeout per request.
+* Huntress product requests use HTTP Basic auth (`api_key:api_secret`), while
+  Managed SAT learner requests exchange their credentials for an OAuth2 bearer
+  token. All HTTP clients use a 30 s timeout per request.
 * A short sleep is enforced between calls to stay well under Huntress's
   documented 60 req/min limit.
 * If one product endpoint errors, the rest of the snapshot still updates —
