@@ -292,7 +292,7 @@ async def get_sat_summary(org_id: str) -> dict[str, Any] | None:
     """Return Huntress Managed SAT learner and progress rollups for an account.
 
     Curricula/Huntress Managed SAT uses the JSON:API REST API at
-    ``https://mycurricula.com/api/v1`` with client-credentials API clients. The
+    ``https://dev.curricula.com/api/v1`` with client-credentials API clients. The
     useful billing/reporting metric exposed by third-party reconciliation docs
     is the active learner count; where assignment progress is returned, we also
     calculate average completion and score from the learner rows.
@@ -350,23 +350,6 @@ async def get_sat_learner_breakdown(org_id: str) -> list[dict[str, Any]] | None:
             {"include": "assignments,progress", "page[size]": 100},
             allow_not_found=True,
         )
-        if payload is None:
-            # Curricula's partner API exposes learners as a top-level JSON:API
-            # collection.  Older tenants accepted the nested account URL, but
-            # current tenants return 404 for it even when the account is visible
-            # from /accounts.  Keep the nested request for backwards
-            # compatibility, then use the account filter supported by the
-            # collection endpoint.
-            payload = await _get_json(
-                client,
-                "/learners",
-                {
-                    "filter[account_id]": org_id,
-                    "include": "assignments,progress",
-                    "page[size]": 100,
-                },
-                allow_not_found=True,
-            )
     if payload is None:
         return None
     learners = _extract_list(payload, key="learners")
