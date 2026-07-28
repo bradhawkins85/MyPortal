@@ -340,6 +340,35 @@ class TestFindExistingTicket:
         assert "COALESCE(t.description" in str(captured["query"])
         assert "%support@ideagen.example%" in captured["params"]
 
+    async def test_subject_ticket_number_wins_over_reply_header(self, monkeypatch):
+        """A reused thread must not override the explicit ticket in the subject."""
+        from app.core import database
+        from app.services import imap
+
+        async def mock_get_ticket_by_external_reference(_external_reference):
+            return {"id": 222, "ticket_number": "222"}
+
+        async def mock_fetch_all(query, params):
+            if "ticket_number" in query and params == ("111",):
+                return [{"id": 111, "ticket_number": "111", "subject": "Actual ticket"}]
+            return []
+
+        monkeypatch.setattr(
+            imap.tickets_repo,
+            "get_ticket_by_external_reference",
+            mock_get_ticket_by_external_reference,
+        )
+        monkeypatch.setattr(database.db, "fetch_all", mock_fetch_all)
+
+        result = await imap._find_existing_ticket_for_reply(
+            subject="RE: Ticket #111 - Actual ticket",
+            from_email="user@example.com",
+            related_message_ids=["reply-from-ticket-222@example.com"],
+        )
+
+        assert result is not None
+        assert result["ticket_number"] == "111"
+
     async def test_find_ticket_by_in_reply_to_header(self, monkeypatch):
         """Test finding ticket by matching Message-ID references."""
 

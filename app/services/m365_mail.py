@@ -31,6 +31,7 @@ from app.services.imap import (
     _extract_domains,
     _extract_email_addresses,
     _extract_message_ids,
+    _extract_ticket_number_from_subject,
     _find_existing_ticket_for_reply,
     _resolve_existing_reply_author_id,
     _int_or_none,
@@ -1253,53 +1254,75 @@ async def sync_account(account_id: int) -> dict[str, Any]:
 
                 # Check if already processed
                 existing_message = await mail_repo.get_message(int(account_id), msg_id)
+                stale_import_ticket: Mapping[str, Any] | None = None
                 if existing_message and existing_message.get("status") == "imported":
-                    # A previous run may have successfully imported the message but
-                    # failed while marking it read.  Avoid duplicate ticket activity,
-                    # but still repair the mailbox read state on subsequent syncs.
-                    read_state_repaired = False
-                    if mark_as_read and not msg.get("isRead", False):
-                        try:
-                            patch_url = (
-                                f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/"
-                                f"{quote(msg_id, safe='')}"
-                            )
-                            await _graph_patch(
-                                access_token, patch_url, {"isRead": True}
-                            )
-                            read_state_repaired = True
-                        except Exception:  # pragma: no cover - Graph API errors
-                            log_error(
-                                "Unable to mark already-imported M365 message as read",
-                                account_id=account_id,
-                                message_id=msg_id,
-                            )
                     existing_ticket_id = existing_message.get("ticket_id")
                     existing_ticket = None
                     if isinstance(existing_ticket_id, int):
-                        existing_ticket = await tickets_repo.get_ticket(
-                            existing_ticket_id
-                        )
-                    _remember_message_action(
-                        {
-                            **message_log_base,
-                            "outcome": "ignored",
-                            "reason": "already_imported",
-                            "ticket_id": existing_ticket_id,
-                            "ticket_number": (
-                                existing_ticket.get("ticket_number")
-                                if isinstance(existing_ticket, Mapping)
-                                else None
-                            ),
-                            "ticket_subject": (
-                                existing_ticket.get("subject")
-                                if isinstance(existing_ticket, Mapping)
-                                else None
-                            ),
-                            "read_state_repaired": read_state_repaired,
-                        }
+                        existing_ticket = await tickets_repo.get_ticket(existing_ticket_id)
+
+                    subject_ticket_number = _extract_ticket_number_from_subject(
+                        message_log_base["subject"]
                     )
-                    continue
+                    recorded_ticket_number = (
+                        str(existing_ticket.get("ticket_number") or existing_ticket_id)
+                        if isinstance(existing_ticket, Mapping)
+                        else str(existing_ticket_id or "")
+                    )
+                    import_marker_conflicts = bool(
+                        subject_ticket_number
+                        and recorded_ticket_number
+                        and subject_ticket_number != recorded_ticket_number
+                    )
+                    if import_marker_conflicts:
+                        # Graph message IDs are used as the import idempotency key.
+                        # If that marker points at a different explicit ticket than
+                        # the current subject, it is unsafe to suppress the email.
+                        # Process it normally and replace the stale marker below.
+                        stale_import_ticket = existing_ticket
+                    else:
+                        # A previous run may have successfully imported the message
+                        # but failed while marking it read. Avoid duplicate ticket
+                        # activity, but still repair the read state on later syncs.
+                        read_state_repaired = False
+                        if mark_as_read and not msg.get("isRead", False):
+                            try:
+                                patch_url = (
+                                    f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/"
+                                    f"{quote(msg_id, safe='')}"
+                                )
+                                await _graph_patch(access_token, patch_url, {"isRead": True})
+                                read_state_repaired = True
+                            except Exception:  # pragma: no cover - Graph API errors
+                                log_error(
+                                    "Unable to mark already-imported M365 message as read",
+                                    account_id=account_id,
+                                    message_id=msg_id,
+                                )
+                        _remember_message_action(
+                            {
+                                **message_log_base,
+                                "outcome": "ignored",
+                                "reason": "already_imported",
+                                "ticket_id": existing_ticket_id,
+                                "ticket_number": (
+                                    existing_ticket.get("ticket_number")
+                                    if isinstance(existing_ticket, Mapping)
+                                    else None
+                                ),
+                                "ticket_subject": (
+                                    existing_ticket.get("subject")
+                                    if isinstance(existing_ticket, Mapping)
+                                    else None
+                                ),
+                                "reason_detail": (
+                                    "This exact Microsoft Graph message ID was already "
+                                    "recorded as imported, so no duplicate reply was added."
+                                ),
+                                "read_state_repaired": read_state_repaired,
+                            }
+                        )
+                        continue
 
                 # Extract message details
                 subject = msg.get("subject") or f"Email from {upn}"
@@ -1691,6 +1714,12 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         "matched_by_related_message_ids": bool(related_message_ids),
                         "related_message_ids": (
                             related_message_ids[:10] if related_message_ids else None
+                        ),
+                        "corrected_stale_import_marker": stale_import_ticket is not None,
+                        "previous_ticket_number": (
+                            stale_import_ticket.get("ticket_number")
+                            if isinstance(stale_import_ticket, Mapping)
+                            else None
                         ),
                     }
                 )
