@@ -492,6 +492,13 @@ async def refresh_company(company: Mapping[str, Any]) -> dict[str, Any]:
             snapshot_at=snapshot_at,
         )
         summary["sat"] = sat
+    elif sat_id and "sat" not in summary["errors"]:
+        summary["errors"]["sat"] = (
+            "Managed SAT account was not accessible with the configured Curricula "
+            "API credentials (the learners endpoint returned 404). Confirm that "
+            "huntress_sat_account_id identifies an account visible to the parent "
+            "Curricula API client."
+        )
 
     sat_rows = (
         await _safe("sat_learners", get_sat_learner_breakdown(str(sat_id)))
@@ -503,6 +510,11 @@ async def refresh_company(company: Mapping[str, Any]) -> dict[str, Any]:
             company_id, sat_rows, snapshot_at=snapshot_at
         )
         summary["sat_learner_rows"] = len(sat_rows)
+    elif sat_id and "sat_learners" not in summary["errors"]:
+        summary["errors"]["sat_learners"] = (
+            "Managed SAT learners were not accessible with the configured Curricula "
+            "API credentials (the learners endpoint returned 404)."
+        )
 
     siem = await _safe("siem", get_siem_data_volume(org_id, days=30))
     if siem is not None:
