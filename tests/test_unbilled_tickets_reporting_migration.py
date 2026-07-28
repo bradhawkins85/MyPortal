@@ -21,6 +21,11 @@ REPORT_COLUMNS_MIGRATION = (
     / "migrations"
     / "304_unbilled_tickets_by_company_columns.sql"
 )
+ENSURE_REPORT_MIGRATION = (
+    Path(__file__).parent.parent
+    / "migrations"
+    / "306_ensure_unbilled_tickets_by_company_report.sql"
+)
 
 
 def test_unbilled_tickets_report_groups_unbilled_time_by_company_and_labour_type():
@@ -64,3 +69,14 @@ def test_company_summary_exposes_company_id_and_preserves_labour_grouping():
     assert "GROUP BY c.id, c.name, lt.id, lt.name" in sql
     assert "WHERE slug = 'unbilled-tickets-by-company'" in sql
     assert "AND is_system = 1" in sql
+
+
+def test_company_summary_is_inserted_for_installations_that_ran_old_migration():
+    sql = ENSURE_REPORT_MIGRATION.read_text(encoding="utf-8")
+
+    assert "INSERT IGNORE INTO reporting_queries" in sql
+    assert "'unbilled-tickets-by-company'" in sql
+    assert "'Unbilled Tickets By Company'" in sql
+    assert "SELECT c.id AS company_id" in sql
+    assert "UPDATE reporting_queries" in sql
+    assert "WHERE slug = 'unbilled-tickets-by-company'" in sql
