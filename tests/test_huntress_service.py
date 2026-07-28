@@ -29,7 +29,7 @@ def _set_credentials(monkeypatch):
         lambda: {
             "api_key": "test-key",
             "api_secret": "test-secret",
-            "base_url": "https://mycurricula.com/api/v1",
+            "base_url": "https://dev.curricula.com/api/v1",
         },
     )
     # Skip the per-call sleep so tests run instantly.
@@ -69,7 +69,7 @@ async def test_credentials_status_reflects_environment(monkeypatch):
                 "huntress_base_url": "https://api.huntress.io/v1",
                 "curricula_api_key": "curricula-key",
                 "curricula_api_secret": "",
-                "curricula_base_url": "https://mycurricula.com/api/v1",
+                "curricula_base_url": "https://dev.curricula.com/api/v1",
             },
         )(),
     )
@@ -281,10 +281,10 @@ async def test_get_sat_learner_breakdown_returns_none_on_404(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_sat_learner_breakdown_falls_back_to_filtered_collection(
+async def test_get_sat_learner_breakdown_uses_documented_account_endpoint(
     monkeypatch,
 ):
-    """Current Curricula tenants expose learners through the collection URL."""
+    """Curricula exposes learners through the documented account URL."""
     from app.services import huntress as huntress_service
 
     _set_credentials(monkeypatch)
@@ -293,9 +293,6 @@ async def test_get_sat_learner_breakdown_falls_back_to_filtered_collection(
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         if request.url.path.endswith("/accounts/57777/learners"):
-            return httpx.Response(404)
-        if request.url.path.endswith("/learners"):
-            assert request.url.params["filter[account_id]"] == "57777"
             return httpx.Response(
                 200,
                 json={
@@ -319,7 +316,6 @@ async def test_get_sat_learner_breakdown_falls_back_to_filtered_collection(
 
     assert [request.url.path for request in requests] == [
         "/api/v1/accounts/57777/learners",
-        "/api/v1/learners",
     ]
     assert result == [
         {

@@ -596,7 +596,7 @@ class Settings(BaseSettings):
         validation_alias="HUNTRESS_BASE_URL",
     )
     # Curricula / Huntress Managed SAT API. Kept separate from the Huntress
-    # partner API because Managed SAT is served from mycurricula.com.
+    # partner API because Managed SAT is served from Curricula's API host.
     curricula_api_key: str | None = Field(
         default=None,
         validation_alias="CURRICULA_API_KEY",
@@ -606,7 +606,7 @@ class Settings(BaseSettings):
         validation_alias="CURRICULA_API_SECRET",
     )
     curricula_base_url: str = Field(
-        default="https://mycurricula.com/api/v1",
+        default="https://dev.curricula.com/api/v1",
         validation_alias="CURRICULA_BASE_URL",
     )
 
