@@ -107,9 +107,14 @@
                               role="menuitem"
                               data-webhook-url-open
                               data-webhook-url="{{ webhook_url | e }}"
-                              aria-label="View webhook URL for {{ module.name }}"
+                              {% if module.slug == "huntress" %}
+                                data-webhook-url-title="SAT Callback URL"
+                                data-webhook-url-description="Copy this URL and enter it as the Callback URL in your Huntress SAT configuration."
+                                data-webhook-url-label="SAT Callback URL"
+                              {% endif %}
+                              aria-label="View {% if module.slug == 'huntress' %}SAT callback{% else %}webhook{% endif %} URL for {{ module.name }}"
                             >
-                              {% if module.slug == "xero" %}Callback URL{% else %}Webhook URL{% endif %}
+                              {% if module.slug == "huntress" %}SAT Callback URL{% elif module.slug == "xero" %}Callback URL{% else %}Webhook URL{% endif %}
                             </button>
                           </li>
                         {% endif %}
@@ -157,8 +162,8 @@
     <div class="modal__content modal__content--compact" role="dialog" aria-modal="true" aria-labelledby="webhook-url-modal-title">
       <button type="button" class="modal__close" data-modal-close aria-label="Close webhook URL modal">&times;</button>
       <h2 class="modal__title" id="webhook-url-modal-title">Webhook URL</h2>
-      <p class="modal__text">Copy this URL and use it in your external app.</p>
-      <label for="webhook-url-value" class="form-label">Webhook URL</label>
+      <p class="modal__text" id="webhook-url-modal-description">Copy this URL and use it in your external app.</p>
+      <label for="webhook-url-value" class="form-label" id="webhook-url-modal-label">Webhook URL</label>
       <input id="webhook-url-value" type="text" class="input webhook-url-modal__input" readonly />
       <p id="webhook-url-copy-status" class="webhook-url-modal__status" aria-live="polite"></p>
       <div class="webhook-url-modal__actions">
@@ -204,6 +209,9 @@
       if (!modal) return;
 
       var urlInput = document.getElementById('webhook-url-value');
+      var modalTitle = document.getElementById('webhook-url-modal-title');
+      var modalDescription = document.getElementById('webhook-url-modal-description');
+      var modalLabel = document.getElementById('webhook-url-modal-label');
       var copyButton = document.getElementById('webhook-url-copy');
       var status = document.getElementById('webhook-url-copy-status');
       var previousActive = null;
@@ -225,6 +233,12 @@
       function openModal(trigger) {
         var webhookUrl = trigger.getAttribute('data-webhook-url');
         if (!webhookUrl || !urlInput) return;
+        var title = trigger.getAttribute('data-webhook-url-title') || 'Webhook URL';
+        var description = trigger.getAttribute('data-webhook-url-description') || 'Copy this URL and use it in your external app.';
+        var label = trigger.getAttribute('data-webhook-url-label') || title;
+        if (modalTitle) modalTitle.textContent = title;
+        if (modalDescription) modalDescription.textContent = description;
+        if (modalLabel) modalLabel.textContent = label;
         urlInput.value = webhookUrl;
         modal.hidden = false;
         modal.setAttribute('aria-hidden', 'false');

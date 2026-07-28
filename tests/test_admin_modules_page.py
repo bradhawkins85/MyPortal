@@ -123,6 +123,7 @@ def test_modules_page_renders_module_quick_actions_and_helpers(super_admin_conte
             {"slug": "smtp2go", "name": "SMTP2Go", "description": "", "enabled": True, "settings": {}},
             {"slug": "trello", "name": "Trello", "description": "", "enabled": True, "settings": {}},
             {"slug": "uptimekuma", "name": "Uptime Kuma", "description": "", "enabled": True, "settings": {}},
+            {"slug": "huntress", "name": "Huntress", "description": "", "enabled": True, "settings": {}},
             {"slug": "xero", "name": "Xero", "description": "", "enabled": True, "settings": {}},
         ]
 
@@ -138,6 +139,10 @@ def test_modules_page_renders_module_quick_actions_and_helpers(super_admin_conte
     assert "/api/webhooks/smtp2go/events" in response.text
     assert "/api/integration-modules/trello/webhook" in response.text
     assert "/api/integration-modules/uptimekuma/alerts" in response.text
+    assert "/api/integration-modules/huntress/callback" in response.text
+    assert "SAT Callback URL" in response.text
+    assert 'data-webhook-url-title="SAT Callback URL"' in response.text
+    assert "enter it as the Callback URL in your Huntress SAT configuration" in response.text
     assert "/api/integration-modules/xero/callback" in response.text
     assert "data-webhook-url-open" in response.text
     assert 'id="webhook-url-modal"' in response.text

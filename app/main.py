@@ -9466,6 +9466,7 @@ async def _render_modules_dashboard(
         "smtp2go": f"{public_base}/api/webhooks/smtp2go/events",
         "trello": f"{public_base}/api/integration-modules/trello/webhook",
         "uptimekuma": f"{public_base}/api/integration-modules/uptimekuma/alerts",
+        "huntress": f"{public_base}/api/integration-modules/huntress/callback",
         "xero": f"{public_base}/api/integration-modules/xero/callback",
         "xero_webhook": f"{public_base}/api/integration-modules/xero/webhook",
     }
