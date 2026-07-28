@@ -872,6 +872,20 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         },
     },
     {
+        "slug": "receive-sms",
+        "name": "Receive SMS",
+        "description": "Create and update tickets from inbound SMS webhooks.",
+        "icon": "📱",
+        "settings": {},
+    },
+    {
+        "slug": "calls",
+        "name": "Calls",
+        "description": "Receive and review phone call webhook events.",
+        "icon": "☎️",
+        "settings": {},
+    },
+    {
         "slug": "m365-mail",
         "name": "Office 365 Mailbox Import",
         "description": "Import support emails from Microsoft 365 mailboxes into the ticketing queue.",

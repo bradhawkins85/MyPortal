@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from app.api.dependencies.auth import require_super_admin
+from app.api.dependencies.modules import require_module_enabled
 from app.repositories import tickets as tickets_repo
 from app.schemas.solidtime import (
     SolidtimeOrganisation,
@@ -22,6 +23,7 @@ from app.services import webhook_monitor
 router = APIRouter(
     prefix="/api/v1/solidtime",
     tags=["Solidtime"],
+    dependencies=[Depends(require_module_enabled("solidtime"))],
 )
 
 

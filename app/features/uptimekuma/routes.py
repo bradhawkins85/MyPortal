@@ -4,6 +4,8 @@ import json
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+
+from app.api.dependencies.modules import require_module_enabled
 from loguru import logger
 from pydantic import ValidationError
 
@@ -16,7 +18,7 @@ from app.schemas.uptimekuma import (
 from app.services import uptimekuma as uptimekuma_service
 from app.services import webhook_monitor
 
-router = APIRouter(prefix="/api/integration-modules/uptimekuma", tags=["Uptime Kuma"])
+router = APIRouter(prefix="/api/integration-modules/uptimekuma", tags=["Uptime Kuma"], dependencies=[Depends(require_module_enabled("uptimekuma"))])
 
 
 @router.post(

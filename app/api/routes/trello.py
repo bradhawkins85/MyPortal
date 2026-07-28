@@ -8,12 +8,13 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from app.api.dependencies.auth import require_super_admin
+from app.api.dependencies.modules import require_module_enabled
 from app.core.config import get_settings
 from app.services import tickets as tickets_service
 from app.services import trello as trello_service
 from app.services import webhook_monitor
 
-router = APIRouter(prefix="/api/integration-modules/trello", tags=["Trello"])
+router = APIRouter(prefix="/api/integration-modules/trello", tags=["Trello"], dependencies=[Depends(require_module_enabled("trello"))])
 
 # ---------------------------------------------------------------------------
 # Webhook endpoint (Trello verification + event ingestion)

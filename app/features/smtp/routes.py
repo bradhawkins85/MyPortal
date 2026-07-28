@@ -8,12 +8,14 @@ import hmac
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+
+from app.api.dependencies.modules import require_module_enabled
 from loguru import logger
 
 from app.services import smtp2go
 
-router = APIRouter(prefix="/api/webhooks/smtp2go", tags=["SMTP2Go Webhooks"])
+router = APIRouter(prefix="/api/webhooks/smtp2go", tags=["SMTP2Go Webhooks"], dependencies=[Depends(require_module_enabled("smtp2go"))])
 
 
 def _parse_timestamp_signature(signature: str) -> tuple[str | None, str | None]:

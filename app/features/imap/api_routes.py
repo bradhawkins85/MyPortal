@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.dependencies.auth import require_super_admin
+from app.api.dependencies.modules import require_module_enabled
 from app.api.dependencies.database import require_database
 from app.core.errors import build_client_http_error, log_exception_with_error_id, new_error_id
 from app.schemas.imap import (
@@ -14,7 +15,7 @@ from app.schemas.imap import (
 from app.services import audit as audit_service
 from app.services import imap as imap_service
 
-router = APIRouter(prefix="/imap", tags=["IMAP"])
+router = APIRouter(prefix="/imap", tags=["IMAP"], dependencies=[Depends(require_module_enabled("imap"))])
 
 
 # Audit IMAP account snapshots intentionally exclude any field that could
