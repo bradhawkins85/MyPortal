@@ -1216,7 +1216,7 @@ async def test_sync_account_matches_existing_ticket(monkeypatch):
 
 
 async def test_sync_account_attaches_m365_reply_to_resolved_ticket_number(monkeypatch):
-    """Graph mail replies should use the shared ticket matcher for resolved tickets."""
+    """An explicit subject ticket overrides a stale import marker for another ticket."""
     monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
 
     async def fake_get_module(slug: str, *, redact: bool = True):
@@ -1261,7 +1261,15 @@ async def test_sync_account_attaches_m365_reply_to_resolved_ticket_number(monkey
         }
 
     async def fake_get_message(account_id: int, message_uid: str):
-        return None
+        return {"status": "imported", "ticket_id": 25224}
+
+    async def fake_get_ticket(ticket_id: int):
+        assert ticket_id == 25224
+        return {
+            "id": 25224,
+            "ticket_number": "25224",
+            "subject": "Julie's mailbox",
+        }
 
     async def fake_resolve_ticket_entities(from_header, *, default_company_id=None):
         return 5, 42
@@ -1309,6 +1317,7 @@ async def test_sync_account_attaches_m365_reply_to_resolved_ticket_number(monkey
     monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
     monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
     monkeypatch.setattr(m365_mail.mail_repo, "get_message", fake_get_message)
+    monkeypatch.setattr(m365_mail.tickets_repo, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(m365_mail.mail_repo, "upsert_message", fake_upsert_message)
     monkeypatch.setattr(m365_mail.mail_repo, "update_account", fake_update_account)
     monkeypatch.setattr(m365_mail, "_resolve_ticket_entities", fake_resolve_ticket_entities)
@@ -1326,6 +1335,8 @@ async def test_sync_account_attaches_m365_reply_to_resolved_ticket_number(monkey
     assert len(replies_added) == 1
     assert replies_added[0]["ticket_id"] == 24417
     assert recorded_messages[-1]["ticket_id"] == 24417
+    assert result["message_actions"][-1]["corrected_stale_import_marker"] is True
+    assert result["message_actions"][-1]["previous_ticket_number"] == "25224"
 
 
 async def test_persist_m365_inline_images_for_ticket_rewrites_data_uri(monkeypatch):

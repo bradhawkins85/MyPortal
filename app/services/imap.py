@@ -1365,8 +1365,8 @@ async def _find_existing_ticket_for_reply(
     Find an existing ticket that this email is likely a reply to.
 
     Priority order:
-    1. Match In-Reply-To/References message IDs against ticket and reply external references
-    2. Extract ticket number from subject, including resolved tickets
+    1. Extract ticket number from subject, including resolved tickets
+    2. Match In-Reply-To/References message IDs against ticket and reply external references
     3. Fuzzy subject match for non-closed tickets where sender is requester or watcher.
 
     Args:
@@ -1378,6 +1378,35 @@ async def _find_existing_ticket_for_reply(
     Returns:
         Ticket record if found, None otherwise
     """
+    # The visible, explicit ticket number is authoritative. Reply headers can
+    # legitimately point at a different ticket when a thread was forwarded or
+    # reused, so checking those first can silently append to the wrong ticket.
+    ticket_number = _extract_ticket_number_from_subject(subject)
+    if ticket_number:
+        try:
+            rows = await db.fetch_all(
+                "SELECT * FROM tickets WHERE ticket_number = %s LIMIT 1",
+                (ticket_number,),
+            )
+            if rows:
+                from app.repositories.tickets import _normalise_ticket
+
+                return _normalise_ticket(rows[0])
+        except Exception:  # pragma: no cover - defensive
+            pass
+
+        try:
+            rows = await db.fetch_all(
+                "SELECT * FROM tickets WHERE id = %s LIMIT 1",
+                (int(ticket_number),),
+            )
+            if rows:
+                from app.repositories.tickets import _normalise_ticket
+
+                return _normalise_ticket(rows[0])
+        except Exception:  # pragma: no cover - defensive
+            pass
+
     related_ids = _expand_ticket_external_references(related_message_ids)
 
     if related_ids:
@@ -1418,36 +1447,6 @@ async def _find_existing_ticket_for_reply(
         except Exception:  # pragma: no cover - defensive logging
             pass
 
-    # First, try to extract ticket number from subject
-    ticket_number = _extract_ticket_number_from_subject(subject)
-    if ticket_number:
-        # Try to find ticket by ticket_number field
-        try:
-            rows = await db.fetch_all(
-                "SELECT * FROM tickets WHERE ticket_number = %s LIMIT 1",
-                (ticket_number,)
-            )
-            if rows:
-                from app.repositories.tickets import _normalise_ticket
-                ticket = _normalise_ticket(rows[0])
-                return ticket
-        except Exception:  # pragma: no cover - defensive
-            pass
-
-        # Also try by ID if ticket_number is numeric
-        try:
-            ticket_id = int(ticket_number)
-            rows = await db.fetch_all(
-                "SELECT * FROM tickets WHERE id = %s LIMIT 1",
-                (ticket_id,)
-            )
-            if rows:
-                from app.repositories.tickets import _normalise_ticket
-                ticket = _normalise_ticket(rows[0])
-                return ticket
-        except (ValueError, Exception):  # pragma: no cover - defensive
-            pass
-    
     # If no ticket number found, try to match by normalized subject
     # Only match non-closed tickets where sender is requester or watcher
     normalized_subject = _normalize_subject_for_matching(subject)

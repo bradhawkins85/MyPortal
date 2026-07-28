@@ -518,8 +518,14 @@
                           <a href="/admin/tickets/{{ action.ticket_id }}">#{{ action.ticket_number or action.ticket_id }}</a>
                           {% if action.ticket_subject %}<div class="table__meta">{{ action.ticket_subject }}</div>{% endif %}
                           {% if action.reply_outcome %}<div class="table__meta">{{ action.reply_outcome|replace('_', ' ') }}</div>{% endif %}
+                          {% if action.reason_detail %}<div class="table__meta">{{ action.reason_detail }}</div>{% endif %}
+                          {% if action.read_state_repaired %}<div class="table__meta">Mailbox read state was repaired.</div>{% endif %}
+                          {% if action.corrected_stale_import_marker %}
+                            <div class="table__meta">Corrected a stale import record previously linked to ticket #{{ action.previous_ticket_number or 'unknown' }}.</div>
+                          {% endif %}
                         {% elif action.reason %}
                           {{ action.reason|replace('_', ' ') }}
+                          {% if action.reason_detail %}<div class="table__meta">{{ action.reason_detail }}</div>{% endif %}
                         {% elif action.error %}
                           <span class="text-danger">{{ action.error }}</span>
                         {% else %}
