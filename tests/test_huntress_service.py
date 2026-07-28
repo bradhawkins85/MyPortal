@@ -281,6 +281,64 @@ async def test_get_sat_learner_breakdown_returns_none_on_404(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_sat_learner_breakdown_falls_back_to_filtered_collection(
+    monkeypatch,
+):
+    """Current Curricula tenants expose learners through the collection URL."""
+    from app.services import huntress as huntress_service
+
+    _set_credentials(monkeypatch)
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/accounts/57777/learners"):
+            return httpx.Response(404)
+        if request.url.path.endswith("/learners"):
+            assert request.url.params["filter[account_id]"] == "57777"
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "id": "learner-1",
+                            "type": "learners",
+                            "attributes": {
+                                "email": "learner@example.com",
+                                "name": "Example Learner",
+                                "progress": 75,
+                            },
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(500)
+
+    with _patch_client(httpx.MockTransport(handler)):
+        result = await huntress_service.get_sat_learner_breakdown("57777")
+
+    assert [request.url.path for request in requests] == [
+        "/api/v1/accounts/57777/learners",
+        "/api/v1/learners",
+    ]
+    assert result == [
+        {
+            "learner_external_id": "learner-1",
+            "learner_email": "learner@example.com",
+            "learner_name": "Example Learner",
+            "assignment_id": "learner-summary",
+            "assignment_name": None,
+            "status": None,
+            "completion_percent": 75.0,
+            "score": 0.0,
+            "click_rate": 0.0,
+            "compromise_rate": 0.0,
+            "report_rate": 0.0,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_refresh_company_reports_inaccessible_sat_account(monkeypatch):
     """A SAT 404 must be visible in task output rather than looking successful."""
     from app.services import huntress as huntress_service
