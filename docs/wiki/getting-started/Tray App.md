@@ -261,6 +261,23 @@ If you need advanced nesting, you can still use the **Advanced JSON** toggle to 
 
 ## 6. RMM deployment
 
+### Tactical RMM ticket URL Action
+
+MyPortal can open its ticket form directly from a Tactical RMM agent and link
+the resulting ticket to that agent's synced asset. First import the Tactical
+RMM assets so that the `TrayAgentID` agent custom field contains the enrolled
+MyPortal tray device UID. Then add a URL Action under **Settings → Global
+Settings → URL Actions** with this pattern (replace the hostname):
+
+```text
+https://portal.example.com/api/tray/ticket-form/url-action?TrayAgentID={{agent.TrayAgentID}}
+```
+
+The variable name is case-sensitive. Tactical RMM URL-encodes the custom-field
+value. MyPortal accepts only an active tray device that is linked to an asset,
+then redirects the browser to a short-lived encrypted MyPortal ticket form.
+The URL Action never exposes the internal asset or device database ID.
+
 ### Windows (PowerShell)
 
 ```powershell
