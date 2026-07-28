@@ -25,8 +25,8 @@ from decimal import Decimal
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.api.dependencies.auth import (
     get_current_tray_device,
@@ -909,6 +909,44 @@ async def issue_ticket_token(
     ticket_url = _ticket_form_url(token, request)
     return TrayTicketTokenResponse(
         token=token, expires_in=_TICKET_TOKEN_TTL_SECONDS, ticket_url=ticket_url
+    )
+
+
+@router.get(
+    "/ticket-form/url-action",
+    response_class=RedirectResponse,
+    include_in_schema=False,
+)
+async def tacticalrmm_ticket_url_action(
+    request: Request,
+    tray_agent_id: str = Query(alias="TrayAgentID", min_length=1, max_length=255),
+) -> RedirectResponse:
+    """Launch an asset-linked ticket form from a Tactical RMM URL Action.
+
+    ``TrayAgentID`` is the agent custom field populated by MyPortal's Tactical
+    RMM asset sync.  Exchange it for the same short-lived encrypted form token
+    used by the tray application rather than exposing an internal device ID in
+    the form URL.
+    """
+
+    device_uid = tray_agent_id.strip()
+    device = await tray_repo.get_device_by_uid(device_uid)
+    if not device or device.get("status") == "revoked":
+        raise HTTPException(status_code=404, detail="Tray device not found")
+    if not device.get("asset_id"):
+        raise HTTPException(
+            status_code=409, detail="Tray device is not linked to an asset"
+        )
+
+    token, _csrf = _issue_ticket_form_token(device, "myportal")
+    log_info(
+        "Tactical RMM URL Action launched tray ticket form",
+        device_uid=device_uid,
+        asset_id=device.get("asset_id"),
+    )
+    return RedirectResponse(
+        url=_ticket_form_url(token, request),
+        status_code=status.HTTP_303_SEE_OTHER,
     )
 
 
