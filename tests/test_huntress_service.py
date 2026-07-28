@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -33,6 +34,9 @@ def _set_credentials(monkeypatch):
     )
     # Skip the per-call sleep so tests run instantly.
     monkeypatch.setattr(huntress_service, "_REQUEST_INTERVAL_SECONDS", 0)
+    # pytest runs async tests on separate loops; avoid retaining a lock bound
+    # by a concurrent request in an earlier test.
+    monkeypatch.setattr(huntress_service, "_request_lock", asyncio.Lock())
 
 
 def _patch_client(transport):
@@ -143,12 +147,16 @@ async def test_get_edr_summary_uses_basic_auth_and_parses_totals(monkeypatch):
         captured_auth.append(request.headers.get("authorization", ""))
         path = request.url.path
         if path.endswith("/incident_reports"):
-            status_value = request.url.params.get("status")
             # API uses "sent" for active/open incidents, not "open"
-            total = 4 if status_value == "sent" else 9
-            return httpx.Response(200, json={"total": total, "incident_reports": []})
+            assert request.url.params.get("status") == "sent"
+            return httpx.Response(200, json={"total": 4, "incident_reports": []})
         if path.endswith("/signals"):
             return httpx.Response(200, json={"total": 17, "signals": []})
+        if path.endswith("/reports"):
+            return httpx.Response(
+                200,
+                json={"reports": [{"incidents_resolved": 9}]},
+            )
         return httpx.Response(404)
 
     transport = httpx.MockTransport(handler)
@@ -160,8 +168,43 @@ async def test_get_edr_summary_uses_basic_auth_and_parses_totals(monkeypatch):
         "resolved_incidents": 9,
         "signals_investigated": 17,
     }
-    # All three calls should carry HTTP Basic auth derived from the configured key/secret.
+    # All calls should carry HTTP Basic auth derived from the configured key/secret.
     assert captured_auth and all(auth.startswith("Basic ") for auth in captured_auth)
+
+
+@pytest.mark.asyncio
+async def test_get_edr_summary_does_not_filter_incidents_by_resolved(monkeypatch):
+    """Resolved is a summary metric, not a valid incident-report status filter."""
+    from app.services import huntress as huntress_service
+
+    _set_credentials(monkeypatch)
+    incident_statuses: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/incident_reports"):
+            status = request.url.params.get("status")
+            incident_statuses.append(status)
+            if status == "resolved":
+                return httpx.Response(400, json={"error": "invalid status"})
+            return httpx.Response(200, json={"total": 2, "incident_reports": []})
+        if request.url.path.endswith("/signals"):
+            return httpx.Response(200, json={"total": 3, "signals": []})
+        if request.url.path.endswith("/reports"):
+            return httpx.Response(
+                200,
+                json={"reports": [{"incidents_resolved": 11}]},
+            )
+        return httpx.Response(404)
+
+    with _patch_client(httpx.MockTransport(handler)):
+        result = await huntress_service.get_edr_summary("559776")
+
+    assert incident_statuses == ["sent"]
+    assert result == {
+        "active_incidents": 2,
+        "resolved_incidents": 11,
+        "signals_investigated": 3,
+    }
 
 
 @pytest.mark.asyncio
