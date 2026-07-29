@@ -45,16 +45,30 @@ def test_dashboard_controls_precede_stats_and_full_width_table():
     assert "grid-column: 1 / -1;" in css
 
 
-def test_ticket_stats_render_visible_non_zero_statuses_with_counter_strip():
-    """Ticket KPIs use the service-status treatment without exposing hidden statuses."""
+def test_ticket_stats_render_every_status_with_customisation_controls():
+    """Every configured status is available for a technician to show or hide."""
     html = _template_html()
 
     assert 'from "macros/counters.html" import counter_strip' in html
     assert "{% for definition in ticket_status_definitions %}" in html
-    assert "{% if status_count > 0 %}" in html
-    assert "'attrs': {'data-ticket-stat': definition.tech_status}" in html
+    assert 'data-ticket-stat-controls' in html
+    assert 'data-ticket-stat-toggle="{{ definition.tech_status }}"' in html
+    assert "'data-ticket-stat-selected': 'true' if status_count > 0 else 'false'" in html
+    assert "'data-ticket-stat': definition.tech_status" in html
     assert "total_label='All tickets'" in html
-    assert "class='ticket-dashboard__stats'" in html
+    assert "class='ticket-dashboard__stats-strip'" in html
+
+
+def test_ticket_stat_preferences_are_persisted_and_allow_empty_selection():
+    """A technician's chosen status tiles persist locally, including hiding all."""
+    javascript = (
+        TEMPLATE_PATH.parent.parent.parent / "static" / "js" / "ticket_stats.js"
+    ).read_text(encoding="utf-8")
+
+    assert "portal.tickets.stats" in javascript
+    assert "storedValue === null" in javascript
+    assert "saveSelectedStatuses(selectedStatuses)" in javascript
+    assert "tile.hidden = !isSelected" in javascript
 
 
 def test_ticket_stats_refresh_preserves_counter_labels():
@@ -68,6 +82,7 @@ def test_ticket_stats_refresh_preserves_counter_labels():
     update_stats = javascript[update_stats_start:update_stats_end]
     assert "element.querySelector('.stat-strip__stat-value')" in update_stats
     assert "statElements.total.querySelector('.stat-strip__stat-value')" in update_stats
+    assert "statElements[key].dataset.ticketStatSelected === 'true'" in update_stats
     assert "element.textContent =" not in update_stats
     assert "statElements.total.textContent =" not in update_stats
 

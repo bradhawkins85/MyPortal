@@ -5757,6 +5757,26 @@ dialog.modal:not([open]) {
   }
 }
 
+.ticket-dashboard__stats {
+  min-width: 0;
+  position: relative;
+}
+
+.ticket-dashboard__stats-strip {
+  margin-bottom: 0;
+}
+
+.ticket-stat-controls {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.5rem;
+}
+
+.ticket-stat-controls__panel {
+  max-height: min(420px, 70vh);
+  overflow-y: auto;
+}
+
 @media (max-width: 640px) {
   .ticket-dashboard__filters {
     flex-direction: column;
