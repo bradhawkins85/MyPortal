@@ -524,21 +524,54 @@
               {% set status_count = ticket_status_counts.get(definition.tech_status, 0) %}
               {% if status_count > 0 %}
                 {% set visible_ticket_total.value = visible_ticket_total.value + status_count %}
-                {% set _ = ticket_stat_items.append({
+              {% endif %}
+              {% set _ = ticket_stat_items.append({
                   'label': definition.tech_label,
                   'value': status_count,
                   'variant': ticket_stat_variants.get(definition.tech_status, ['info', 'warning', 'success', 'neutral'][loop.index0 % 4]),
-                  'attrs': {'data-ticket-stat': definition.tech_status}
+                  'attrs': {
+                    'data-ticket-stat': definition.tech_status,
+                    'data-ticket-stat-selected': 'true' if status_count > 0 else 'false',
+                    'hidden': status_count <= 0,
+                  }
                 }) %}
-              {% endif %}
             {% endfor %}
-            <div data-ticket-stats>
+            <div class="ticket-dashboard__stats" data-ticket-stats>
+              <div class="ticket-stat-controls ticket-columns" data-ticket-stat-controls>
+                <button
+                  type="button"
+                  class="button button--ghost button--compact ticket-columns__toggle"
+                  data-ticket-stats-toggle
+                  aria-haspopup="true"
+                  aria-expanded="false"
+                >
+                  <span>Stats</span>
+                  <span class="ticket-columns__chevron" aria-hidden="true">▾</span>
+                </button>
+                <div class="ticket-columns__panel ticket-stat-controls__panel" data-ticket-stats-panel hidden>
+                  <p class="ticket-columns__title">Show ticket stats</p>
+                  <div class="ticket-columns__options">
+                    {% for definition in ticket_status_definitions %}
+                      {% set status_count = ticket_status_counts.get(definition.tech_status, 0) %}
+                      <label class="ticket-columns__option">
+                        <input
+                          type="checkbox"
+                          class="ticket-stat-toggle"
+                          data-ticket-stat-toggle="{{ definition.tech_status }}"
+                          {% if status_count > 0 %}checked{% endif %}
+                        />
+                        <span>{{ definition.tech_label }}</span>
+                      </label>
+                    {% endfor %}
+                  </div>
+                </div>
+              </div>
               {{ counter_strip(
                 ticket_stat_items,
                 total=visible_ticket_total.value,
                 total_label='All tickets',
                 total_attrs={'data-ticket-stat': 'total'},
-                class='ticket-dashboard__stats',
+                class='ticket-dashboard__stats-strip',
               ) }}
             </div>
 
@@ -1283,6 +1316,7 @@
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/ticket_views.js') }}" defer></script>
   <script src="{{ static_url('/static/js/ticket_columns.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/ticket_stats.js') }}" defer></script>
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
 
   <script>

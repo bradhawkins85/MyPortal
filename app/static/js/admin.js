@@ -1131,12 +1131,12 @@
         }
         const tile = element.closest('.stat-strip__stat');
         if (tile) {
-          tile.hidden = !Number.isFinite(value) || value <= 0;
+          tile.hidden = tile.dataset.ticketStatSelected !== 'true';
         }
       });
       if (statElements.total) {
         const visibleTotal = Object.keys(statElements)
-          .filter((key) => key !== 'total')
+          .filter((key) => key !== 'total' && statElements[key].dataset.ticketStatSelected === 'true')
           .reduce((sum, key) => sum + Number(normalised[key] ?? 0), 0);
         const totalValueElement = statElements.total.querySelector('.stat-strip__stat-value');
         if (totalValueElement) {
