@@ -1125,7 +1125,10 @@
           return;
         }
         const value = Number(normalised[key] ?? 0);
-        element.textContent = String(Number.isFinite(value) ? value : 0);
+        const valueElement = element.querySelector('.stat-strip__stat-value');
+        if (valueElement) {
+          valueElement.textContent = String(Number.isFinite(value) ? value : 0);
+        }
         const tile = element.closest('.stat-strip__stat');
         if (tile) {
           tile.hidden = !Number.isFinite(value) || value <= 0;
@@ -1135,7 +1138,10 @@
         const visibleTotal = Object.keys(statElements)
           .filter((key) => key !== 'total')
           .reduce((sum, key) => sum + Number(normalised[key] ?? 0), 0);
-        statElements.total.textContent = String(Number.isFinite(visibleTotal) ? visibleTotal : 0);
+        const totalValueElement = statElements.total.querySelector('.stat-strip__stat-value');
+        if (totalValueElement) {
+          totalValueElement.textContent = String(Number.isFinite(visibleTotal) ? visibleTotal : 0);
+        }
       }
     }
 

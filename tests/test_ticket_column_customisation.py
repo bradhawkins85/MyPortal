@@ -57,6 +57,21 @@ def test_ticket_stats_render_visible_non_zero_statuses_with_counter_strip():
     assert "class='ticket-dashboard__stats'" in html
 
 
+def test_ticket_stats_refresh_preserves_counter_labels():
+    """Refreshing counts updates values without replacing each complete stat tile."""
+    javascript = (
+        TEMPLATE_PATH.parent.parent.parent / "static" / "js" / "admin.js"
+    ).read_text(encoding="utf-8")
+
+    update_stats_start = javascript.index("function updateStats(counts, total)")
+    update_stats_end = javascript.index("function formatReviewDate", update_stats_start)
+    update_stats = javascript[update_stats_start:update_stats_end]
+    assert "element.querySelector('.stat-strip__stat-value')" in update_stats
+    assert "statElements.total.querySelector('.stat-strip__stat-value')" in update_stats
+    assert "element.textContent =" not in update_stats
+    assert "statElements.total.textContent =" not in update_stats
+
+
 def test_next_ticket_number_handler_is_always_rendered():
     """The menu item handler must not depend on header-block scoped Jinja variables."""
     html = _template_html()
