@@ -19,6 +19,7 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx
+from app.services.module_gate import require_module_enabled
 from loguru import logger
 
 from app.core.config import get_settings
@@ -518,6 +519,7 @@ async def send_email_via_api(
         # Send request to SMTP2Go API
         api_url = "https://api.smtp2go.com/v3/email/send"
         
+        await require_module_enabled("smtp2go")
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(api_url, json=payload)
             

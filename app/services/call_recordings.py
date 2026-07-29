@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 import httpx
+from app.services.module_gate import require_module_enabled
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -1231,6 +1232,7 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
                     recording_id,
                 )
 
+        await require_module_enabled("whisperx")
         async with httpx.AsyncClient(timeout=300.0) as client:
             try:
                 # WhisperX /asr uses FastAPI Query(...) parameters, so options

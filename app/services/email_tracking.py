@@ -16,11 +16,13 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode, urlparse
 
+import httpx
 from itsdangerous import BadSignature, URLSafeSerializer
 from loguru import logger
 
 from app.core.config import get_settings
 from app.core.database import db
+from app.services.module_gate import require_module_enabled
 
 
 def generate_tracking_id() -> str:
@@ -363,13 +365,6 @@ async def send_event_to_plausible(
     Returns:
         True if event was sent successfully, False otherwise
     """
-    # Import httpx here to avoid circular imports
-    try:
-        import httpx
-    except ImportError:
-        logger.warning("httpx not available, cannot send events to Plausible")
-        return False
-    
     # Get Plausible configuration from integration module
     from app.services import modules as modules_service
     
@@ -414,6 +409,7 @@ async def send_event_to_plausible(
         if ip_address:
             headers['X-Forwarded-For'] = ip_address
         
+        await require_module_enabled("plausible")
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(api_url, json=event_data, headers=headers)
             response.raise_for_status()

@@ -42,6 +42,8 @@ from app.services import ticket_shipment_tracking as shipment_watch_service
 from app.services import backup_jobs as backup_jobs_service
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import rag_relationships as rag_relationship_repo
+from app.core.module_capabilities import COMMANDS_BY_MODULE, modules_for_command
+from app.repositories import integration_modules as module_repo
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SYSTEM_UPDATE_LOCK = asyncio.Lock()
@@ -77,28 +79,6 @@ _PACK_VERSION_RE = re.compile(r"""version\s*=\s*['"]([^'"]+)['"]""")
 
 # Mapping of module slug -> set of scheduled task commands that require that module.
 # Used to filter available commands in the UI and to disable tasks when a module is disabled.
-COMMANDS_BY_MODULE: dict[str, set[str]] = {
-    "m365": {
-        "sync_m365_data",
-        "sync_o365",
-        "sync_m365_email_domains",
-        "sync_m365_licenses",
-        "sync_m365_contacts",
-        "sync_m365_mailboxes",
-        "refresh_m365_consent_status",
-    },
-    "xero": {"sync_to_xero", "sync_to_xero_auto_send"},
-    "call-recordings": {
-        "sync_recordings",
-        "queue_transcriptions",
-        "process_transcription",
-    },
-    "unifi-talk": {"sync_unifi_talk_recordings"},
-    "tacticalrmm": {"push_tactical_companies", "pull_tactical_companies"},
-    "huntress": {"sync_huntress"},
-}
-
-
 def _normalise_upgrade_mode(value: str | None) -> str:
     if not value:
         return _DEFAULT_UPGRADE_MODE
@@ -618,6 +598,21 @@ class SchedulerService:
             if not lock_acquired:
                 # Another worker is already executing this task, skip silently
                 return
+
+            # Admission is deliberately inside the execution lock.  A module
+            # can be toggled after scheduler refresh but must never race into
+            # dispatch.
+            for module_slug in modules_for_command(str(command or "")):
+                module = await module_repo.get_module(module_slug)
+                if not module or not module.get("enabled"):
+                    now = datetime.now(timezone.utc)
+                    await scheduled_tasks_repo.record_task_run(
+                        int(task_id), status="skipped", started_at=now,
+                        finished_at=now, duration_ms=0,
+                        details=f"Module '{module_slug}' is disabled",
+                    )
+                    log_info("Scheduled task skipped: module disabled", task_id=task_id, command=command, module=module_slug)
+                    return
 
             if not force_restart:
                 debounce_cutoff = datetime.now(timezone.utc) - timedelta(seconds=55)

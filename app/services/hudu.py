@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+from app.services.module_gate import require_module_enabled
 
 from app.core.logging import log_error, log_info
 from app.services import modules as modules_service
@@ -79,6 +80,7 @@ async def search_companies(name: str) -> list[dict[str, Any]]:
     url = f"{base_url}/api/v1/companies"
     params = {"name": name}
 
+    await require_module_enabled("hudu")
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(url, headers=_make_headers(api_key), params=params)
         _raise_for_status(response)

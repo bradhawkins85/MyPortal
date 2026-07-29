@@ -39,6 +39,7 @@ from app.services import email as email_service, webhook_monitor
 from app.services import unifi_talk as unifi_talk_service
 from app.services.realtime import RefreshNotifier, refresh_notifier
 from app.services import tickets as tickets_service
+from app.core.module_capabilities import COMMANDS_BY_MODULE, MODULE_CAPABILITIES
 
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
@@ -2591,6 +2592,10 @@ async def update_module(
     settings: Mapping[str, Any] | None = None,
     notifier: RefreshNotifier | None = None,
 ) -> dict[str, Any] | None:
+    capabilities = MODULE_CAPABILITIES.get(slug)
+    if capabilities and capabilities.always_on:
+        # Internal action modules are catalogue entries, not kill switches.
+        enabled = True
     existing = await module_repo.get_module(slug)
     coerced = (
         _coerce_settings(slug, settings, existing) if settings is not None else None
@@ -2599,13 +2604,11 @@ async def update_module(
     if updated:
         # When a module is disabled, deactivate any scheduled tasks that belong to it.
         if enabled is False:
-            from app.services.scheduler import (
-                COMMANDS_BY_MODULE,
-            )  # local import to avoid circular dependency
-
             module_commands = COMMANDS_BY_MODULE.get(slug, set())
             if module_commands:
-                await scheduled_tasks_repo.disable_tasks_for_commands(module_commands)
+                await scheduled_tasks_repo.disable_tasks_for_commands(module_commands, module_slug=slug)
+        elif enabled is True:
+            await scheduled_tasks_repo.restore_tasks_disabled_by_module(slug)
         resolved_notifier = notifier or refresh_notifier
         await resolved_notifier.broadcast_refresh(reason=f"modules:updated:{slug}")
     return _redact_module_settings(updated) if updated else None
