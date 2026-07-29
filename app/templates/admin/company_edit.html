@@ -19,7 +19,6 @@
           <p class="card__subtitle">Manage general settings and email domains for this company.</p>
         </div>
         <div class="card__controls">
-          <a class="button button--ghost" href="/admin/companies">Back to companies</a>
           <span class="card__toggle-icon" aria-hidden="true"></span>
         </div>
       </summary>
@@ -60,19 +59,6 @@
               value="{{ form_data.email_domains }}"
             />
             <p class="form-help">Use commas to list domains. Domains are matched case-insensitively.</p>
-          </div>
-          <div class="form-field form-field--checkbox">
-            <label class="checkbox" for="edit-company-offboarding-email-forwarding">
-              <input
-                id="edit-company-offboarding-email-forwarding"
-                type="checkbox"
-                name="offboardingEmailForwardingEnabled"
-                value="1"
-                {% if form_data.offboarding_email_forwarding_enabled %}checked{% endif %}
-              />
-              <span>Enable email forwarding on offboarding requests</span>
-            </label>
-            <p class="form-help">When enabled, admins can select a staff member to forward emails to when submitting an offboarding request. Disable if your company uses a fixed forwarding address configured in the workflow step.</p>
           </div>
           <div class="form-actions">
             <button type="submit" class="button">Save changes</button>
@@ -721,6 +707,20 @@
           </div>
         </summary>
         <div class="card-collapsible__content">
+          <div class="form-field form-field--checkbox">
+            <label class="checkbox" for="edit-company-offboarding-email-forwarding">
+              <input
+                id="edit-company-offboarding-email-forwarding"
+                type="checkbox"
+                name="offboardingEmailForwardingEnabled"
+                form="company-settings-form"
+                value="1"
+                {% if form_data.offboarding_email_forwarding_enabled %}checked{% endif %}
+              />
+              <span>Enable email forwarding on offboarding requests</span>
+            </label>
+            <p class="form-help">When enabled, admins can select a staff member to forward emails to when submitting an offboarding request. Disable if your company uses a fixed forwarding address configured in the workflow step.</p>
+          </div>
           {% if m365_credential %}
           <dl class="definition-list">
             <div class="definition-list__item">
