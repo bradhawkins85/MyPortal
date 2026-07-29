@@ -59,8 +59,8 @@ def test_ticket_stats_render_every_status_with_customisation_controls():
     assert "class='ticket-dashboard__stats-strip'" in html
 
 
-def test_ticket_stat_preferences_are_persisted_and_allow_empty_selection():
-    """A technician's chosen status tiles persist locally, including hiding all."""
+def test_ticket_stat_preferences_are_persisted_and_zero_counts_stay_hidden():
+    """Saved status choices persist, but a selected status with no tickets stays hidden."""
     javascript = (
         TEMPLATE_PATH.parent.parent.parent / "static" / "js" / "ticket_stats.js"
     ).read_text(encoding="utf-8")
@@ -68,7 +68,7 @@ def test_ticket_stat_preferences_are_persisted_and_allow_empty_selection():
     assert "portal.tickets.stats" in javascript
     assert "storedValue === null" in javascript
     assert "saveSelectedStatuses(selectedStatuses)" in javascript
-    assert "tile.hidden = !isSelected" in javascript
+    assert "tile.hidden = !isSelected || !Number.isFinite(value) || value === 0" in javascript
 
     css = (
         TEMPLATE_PATH.parent.parent.parent / "static" / "css" / "app.css"
@@ -90,6 +90,21 @@ def test_ticket_stats_refresh_preserves_counter_labels():
     assert "statElements[key].dataset.ticketStatSelected === 'true'" in update_stats
     assert "element.textContent =" not in update_stats
     assert "statElements.total.textContent =" not in update_stats
+
+
+def test_ticket_stats_refresh_hides_zero_count_statuses():
+    """A refresh automatically hides selected status tiles when their count reaches zero."""
+    javascript = (
+        TEMPLATE_PATH.parent.parent.parent / "static" / "js" / "admin.js"
+    ).read_text(encoding="utf-8")
+
+    update_stats_start = javascript.index("function updateStats(counts)")
+    update_stats_end = javascript.index("function formatReviewDate", update_stats_start)
+    update_stats = javascript[update_stats_start:update_stats_end]
+    assert (
+        "tile.dataset.ticketStatSelected !== 'true' || !Number.isFinite(value) || value === 0"
+        in update_stats
+    )
 
 
 def test_ticket_stats_refresh_uses_global_status_total():
