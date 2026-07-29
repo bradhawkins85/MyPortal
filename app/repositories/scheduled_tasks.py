@@ -251,7 +251,7 @@ async def update_task_cron(task_id: int, cron: str) -> None:
 
 async def set_task_active(task_id: int, active: bool) -> dict[str, Any] | None:
     await db.execute(
-        "UPDATE scheduled_tasks SET active = %s WHERE id = %s",
+        "UPDATE scheduled_tasks SET active = %s, disabled_by_module = NULL WHERE id = %s",
         (1 if active else 0, task_id),
     )
     return await get_task(task_id)
@@ -355,7 +355,7 @@ async def mark_task_run(task_id: int) -> None:
     )
 
 
-async def disable_tasks_for_commands(commands: Iterable[str]) -> int:
+async def disable_tasks_for_commands(commands: Iterable[str], *, module_slug: str | None = None) -> int:
     """Disable all active scheduled tasks whose command is in *commands*.
 
     Returns the number of tasks that were deactivated.
@@ -365,7 +365,16 @@ async def disable_tasks_for_commands(commands: Iterable[str]) -> int:
         return 0
     placeholders = ",".join(["%s"] * len(command_list))
     result = await db.execute(
-        f"UPDATE scheduled_tasks SET active = 0 WHERE active = 1 AND command IN ({placeholders})",
-        tuple(command_list),
+        f"UPDATE scheduled_tasks SET active = 0, disabled_by_module = %s WHERE active = 1 AND command IN ({placeholders})",
+        (module_slug, *command_list),
+    )
+    return int(result or 0)
+
+
+async def restore_tasks_disabled_by_module(module_slug: str) -> int:
+    """Restore only tasks this module toggle previously deactivated."""
+    result = await db.execute(
+        "UPDATE scheduled_tasks SET active = 1, disabled_by_module = NULL WHERE disabled_by_module = %s",
+        (module_slug,),
     )
     return int(result or 0)
