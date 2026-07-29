@@ -255,6 +255,15 @@ def test_every_ticket_data_column_gets_a_typed_filter():
     assert "data-column-filter-clear" in js
 
 
+def test_date_column_filters_can_use_dynamic_today_reference():
+    """Date rules can remain relative to today when they are saved and reused."""
+    js = (TEMPLATE_PATH.parent.parent.parent / "static" / "js" / "ticket_views.js").read_text(encoding="utf-8")
+
+    assert 'data-column-filter-date-reference' in js
+    assert '<option value="today">Today</option>' in js
+    assert "filter.value === 'today' ? new Date()" in js
+
+
 def test_column_filters_are_saved_and_active_headers_are_highlighted():
     """Saved views persist column rules and CSS identifies active headings."""
     root = TEMPLATE_PATH.parent.parent.parent
