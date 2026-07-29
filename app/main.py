@@ -8614,7 +8614,6 @@ async def _render_tickets_dashboard(
     *,
     success_message: str | None = None,
     error_message: str | None = None,
-    phone_number: str | None = None,
     status_filter: list[str] | None = None,
     company_id: int | None = None,
     assigned_user_id: int | None = None,
@@ -8637,56 +8636,6 @@ async def _render_tickets_dashboard(
     ticket_time_lookup: dict[int, dict[str, Any]] = {}
     ticket_automation_filter_lookup: dict[int, dict[str, Any]] = {}
     ticket_autoload = True
-
-    # If phone number is provided, search by phone and render results directly
-    if phone_number:
-        phone_number_stripped = phone_number.strip()
-        if phone_number_stripped:
-            try:
-                company_memberships = await company_access.list_accessible_companies(user)
-                available_company_ids: list[int] = []
-                for entry in company_memberships:
-                    member_company_id = entry.get("company_id")
-                    try:
-                        available_company_ids.append(int(member_company_id))
-                    except (TypeError, ValueError):
-                        continue
-
-                active_company_id = getattr(request.state, "active_company_id", None)
-                active_company_ids: list[int] = []
-                if active_company_id is not None:
-                    try:
-                        active_company_ids = [int(active_company_id)]
-                    except (TypeError, ValueError):
-                        active_company_ids = []
-                if not active_company_ids:
-                    active_company_ids = available_company_ids
-
-                phone_tickets = await tickets_repo.list_tickets_by_requester_phone(
-                    phone_number_stripped,
-                    limit=_PHONE_SEARCH_LIMIT,
-                    user_id=user.get("id"),
-                    company_ids=active_company_ids or None,
-                )
-                tickets = phone_tickets
-                ticket_total = len(phone_tickets)
-                ticket_autoload = False
-
-                if phone_tickets:
-                    success_message = f"Found {len(phone_tickets)} ticket(s) for phone number {phone_number_stripped}"
-                else:
-                    error_message = f"No tickets found for phone number {phone_number_stripped}"
-            except Exception as exc:
-                log_error(
-                    "Error searching tickets by phone number",
-                    exc=exc,
-                    event="tickets.phone_search_failed",
-                    request_id=_get_request_id(request),
-                    path=request.url.path,
-                    user_id=user.get("id"),
-                    phone_number_provided=True,
-                )
-                error_message = "Failed to search tickets by phone number. Please try again."
 
     if tickets:
         ticket_ids = [int(t.get("id")) for t in tickets if t.get("id") is not None]
