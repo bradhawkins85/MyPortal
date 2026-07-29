@@ -2,12 +2,8 @@
   const root = document.querySelector('[data-cron-calendar]');
   if (!root) return;
 
-  const DISPLAY_MINUTES = 1;
-  const MINUTE_SLOTS_PER_HOUR = 60;
-  const MINUTE_SLOT_HEIGHT = 6;
-  const DAY_START_HOUR = 0;
-  const DAY_END_HOUR = 24;
-  const HOUR_HEIGHT = MINUTE_SLOTS_PER_HOUR * MINUTE_SLOT_HEIGHT;
+  const RUN_DURATION_MINUTES = 1;
+  const MIN_AVAILABLE_MINUTES = 15;
   const state = { view: 'week', anchor: new Date(), events: [], search: '', includeInactive: false };
   const grid = root.querySelector('[data-calendar-grid]');
   const rangeLabel = root.querySelector('[data-calendar-range]');
@@ -16,34 +12,18 @@
   const searchInput = root.querySelector('[data-calendar-search]');
   const inactiveInput = root.querySelector('[data-calendar-inactive]');
 
-  function startOfDay(date) { const d = new Date(date); d.setHours(0, 0, 0, 0); return d; }
-  function addDays(date, days) { const d = new Date(date); d.setDate(d.getDate() + days); return d; }
-  function startOfWeek(date) { const d = startOfDay(date); d.setDate(d.getDate() - d.getDay()); return d; }
-  function escapeHtml(value) { return String(value || '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
-  function formatDate(date, opts) { return new Intl.DateTimeFormat(undefined, opts).format(date); }
-  function formatTime(date) { return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(date); }
-  function formatHour(hour) { const d = new Date(); d.setHours(hour, 0, 0, 0); return new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).format(d).replace(' ', ''); }
-  function minutesSinceStart(date) { return (date.getHours() - DAY_START_HOUR) * 60 + date.getMinutes(); }
+  function startOfDay(date) { const result = new Date(date); result.setHours(0, 0, 0, 0); return result; }
+  function addDays(date, days) { const result = new Date(date); result.setDate(result.getDate() + days); return result; }
+  function startOfWeek(date) { const result = startOfDay(date); result.setDate(result.getDate() - result.getDay()); return result; }
+  function escapeHtml(value) { return String(value || '').replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
+  function formatDate(date, options) { return new Intl.DateTimeFormat(undefined, options).format(date); }
+  function formatTime(date) { return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date); }
   function isSameDay(left, right) { return startOfDay(left).getTime() === startOfDay(right).getTime(); }
-
-  function layoutTimelineEvents(events) {
-    const sorted = [...events].sort((left, right) => new Date(left.start) - new Date(right.start));
-    const active = [];
-    return sorted.map(event => {
-      const startsAt = new Date(event.start);
-      const endsAt = new Date(startsAt.getTime() + DISPLAY_MINUTES * 60000);
-      for (let idx = active.length - 1; idx >= 0; idx -= 1) {
-        if (active[idx].end <= startsAt) active.splice(idx, 1);
-      }
-      const usedColumns = new Set(active.map(item => item.column));
-      let column = 0;
-      while (usedColumns.has(column)) column += 1;
-      const entry = { event, startsAt, endsAt, end: endsAt, column, clusterSize: column + 1 };
-      active.push(entry);
-      const clusterSize = Math.max(...active.map(item => item.column), column) + 1;
-      active.forEach(item => { item.clusterSize = Math.max(item.clusterSize, clusterSize); });
-      return entry;
-    });
+  function durationLabel(minutes) {
+    if (minutes < 60) return `${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    return remainder ? `${hours} hr ${remainder} min` : `${hours} hr`;
   }
 
   function rangeForView() {
@@ -60,8 +40,9 @@
 
   function updateRangeLabel() {
     const { start, end } = rangeForView();
-    if (state.view === 'day') rangeLabel.textContent = formatDate(start, { dateStyle: 'medium' });
-    else rangeLabel.textContent = `${formatDate(start, { month: 'short', day: 'numeric' })} - ${formatDate(addDays(end, -1), { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    rangeLabel.textContent = state.view === 'day'
+      ? formatDate(start, { dateStyle: 'full' })
+      : `${formatDate(start, { month: 'short', day: 'numeric' })} – ${formatDate(addDays(end, -1), { month: 'short', day: 'numeric', year: 'numeric' })}`;
   }
 
   async function loadEvents() {
@@ -90,64 +71,62 @@
 
   function eventHtml(event) {
     const startsAt = new Date(event.start);
-    const endsAt = new Date(startsAt.getTime() + DISPLAY_MINUTES * 60000);
     return `<a class="cron-calendar__event" href="${escapeHtml(event.url)}">
-      <strong>${escapeHtml(event.title)}</strong>
-      <span class="cron-calendar__event-meta"><span>${formatTime(startsAt)} - ${formatTime(endsAt)}</span><span>${escapeHtml(event.companyName)}</span><code>${escapeHtml(event.cron)}</code><span>${escapeHtml(event.command)}</span>${event.active ? '' : '<span>Inactive</span>'}</span>
+      <time datetime="${escapeHtml(startsAt.toISOString())}">${formatTime(startsAt)}</time>
+      <span class="cron-calendar__event-body"><strong>${escapeHtml(event.title)}</strong><span>${escapeHtml(event.companyName || 'All companies')} · <code>${escapeHtml(event.cron)}</code></span><small>${escapeHtml(event.command)}</small></span>
+      ${event.active ? '<span class="cron-calendar__badge">Scheduled</span>' : '<span class="cron-calendar__badge cron-calendar__badge--inactive">Inactive</span>'}
     </a>`;
   }
 
-  function renderPeriod(label, events) {
-    return `<section class="cron-calendar__period"><div class="cron-calendar__period-header">${escapeHtml(label)}</div><div class="cron-calendar__events">${events.length ? events.map(eventHtml).join('') : '<p class="cron-calendar__empty">No scheduled runs.</p>'}</div></section>`;
+  function availabilityHtml(start, end) {
+    const minutes = Math.floor((end - start) / 60000);
+    if (minutes < MIN_AVAILABLE_MINUTES) return '';
+    return `<div class="cron-calendar__availability"><span class="cron-calendar__availability-icon" aria-hidden="true">✓</span><span><strong>Available</strong><small>${formatTime(start)} – ${formatTime(end)} · ${durationLabel(minutes)}</small></span></div>`;
   }
 
-  function renderTimeline(days) {
-    const events = filteredEvents();
-    const totalHours = DAY_END_HOUR - DAY_START_HOUR;
-    const timelineHeight = totalHours * HOUR_HEIGHT;
-    const dayList = Array.from({ length: days }, (_, idx) => addDays(days === 7 ? startOfWeek(state.anchor) : startOfDay(state.anchor), idx));
-    const now = new Date();
-    countLabel.textContent = String(events.length);
-    grid.className = `cron-calendar__grid cron-calendar__grid--timeline cron-calendar__grid--${state.view}`;
-    grid.innerHTML = `<div class="cron-calendar__timeline" style="--calendar-hour-height:${HOUR_HEIGHT}px;--calendar-timeline-height:${timelineHeight}px">
-      <div class="cron-calendar__corner" aria-hidden="true"></div>
-      <div class="cron-calendar__day-headings">${dayList.map(day => `<div class="cron-calendar__day-heading${isSameDay(day, now) ? ' is-today' : ''}"><span>${formatDate(day, { weekday: 'short' })}</span><strong>${formatDate(day, { day: '2-digit' })}</strong></div>`).join('')}</div>
-      <div class="cron-calendar__time-axis">${Array.from({ length: totalHours }, (_, idx) => `<span>${formatHour(DAY_START_HOUR + idx)}</span>`).join('')}</div>
-      <div class="cron-calendar__day-columns">${dayList.map(day => {
-        const items = layoutTimelineEvents(events.filter(event => isSameDay(new Date(event.start), day)));
-        return `<div class="cron-calendar__day-column${isSameDay(day, now) ? ' is-today' : ''}">${items.map(item => {
-          const { event, startsAt, endsAt, column, clusterSize } = item;
-          const top = Math.max(0, Math.min(timelineHeight - MINUTE_SLOT_HEIGHT, (minutesSinceStart(startsAt) / 60) * HOUR_HEIGHT));
-          const height = (DISPLAY_MINUTES / 60) * HOUR_HEIGHT;
-          const width = `calc(${100 / clusterSize}% - .3rem)`;
-          const left = `calc(${(100 / clusterSize) * column}% + .15rem)`;
-          return `<a class="cron-calendar__timeline-event" href="${escapeHtml(event.url)}" style="top:${top}px;height:${height}px;left:${left};width:${width}" title="${escapeHtml(event.title)} ${formatTime(startsAt)} - ${formatTime(endsAt)}">
-            <strong>${escapeHtml(event.title)}</strong><span>${formatTime(startsAt)} - ${formatTime(endsAt)}</span>
-          </a>`;
-        }).join('')}</div>`;
-      }).join('')}</div>
-    </div>`;
+  function dayHtml(day, events, showAvailability) {
+    const sorted = [...events].sort((left, right) => new Date(left.start) - new Date(right.start));
+    let schedule = '';
+    let cursor = startOfDay(day);
+    const dayEnd = addDays(cursor, 1);
+    sorted.forEach(event => {
+      const startsAt = new Date(event.start);
+      if (showAvailability) schedule += availabilityHtml(cursor, startsAt);
+      schedule += eventHtml(event);
+      cursor = new Date(Math.max(cursor.getTime(), startsAt.getTime() + RUN_DURATION_MINUTES * 60000));
+    });
+    if (showAvailability) schedule += availabilityHtml(cursor, dayEnd);
+    if (!schedule) schedule = '<p class="cron-calendar__empty">No scheduled runs.</p>';
+    const today = isSameDay(day, new Date());
+    return `<section class="cron-calendar__day${today ? ' is-today' : ''}">
+      <header class="cron-calendar__day-header"><div><span>${formatDate(day, { weekday: 'long' })}</span><strong>${formatDate(day, { month: 'short', day: 'numeric' })}</strong></div><span class="cron-calendar__run-count">${sorted.length} ${sorted.length === 1 ? 'run' : 'runs'}</span></header>
+      <div class="cron-calendar__schedule">${schedule}</div>
+    </section>`;
   }
 
   function render() {
     const events = filteredEvents();
-    if (state.view === 'day' || state.view === 'week') { renderTimeline(state.view === 'week' ? 7 : 1); return; }
+    const { start, end } = rangeForView();
+    const numberOfDays = Math.round((end - start) / 86400000);
+    const days = Array.from({ length: numberOfDays }, (_, index) => addDays(start, index));
     countLabel.textContent = String(events.length);
     grid.className = `cron-calendar__grid cron-calendar__grid--${state.view}`;
-    const byDay = new Map();
-    events.forEach(event => {
-      const key = formatDate(new Date(event.start), { dateStyle: 'full' });
-      byDay.set(key, [...(byDay.get(key) || []), event]);
-    });
-    grid.innerHTML = byDay.size ? Array.from(byDay.entries()).map(([label, items]) => renderPeriod(label, items)).join('') : renderPeriod('Upcoming 30 days', []);
+    grid.innerHTML = days.map(day => dayHtml(day, events.filter(event => isSameDay(new Date(event.start), day)), state.view !== 'list')).join('');
   }
 
   document.querySelectorAll('[data-calendar-view]').forEach(button => {
     const active = button.dataset.calendarView === state.view;
-    button.classList.toggle('button--primary', active); button.classList.toggle('button--ghost', !active);
+    button.classList.toggle('button--primary', active);
+    button.classList.toggle('button--ghost', !active);
+    button.setAttribute('aria-pressed', String(active));
     button.addEventListener('click', () => {
       state.view = button.dataset.calendarView;
-      document.querySelectorAll('[data-calendar-view]').forEach(btn => { btn.classList.toggle('button--primary', btn === button); btn.classList.toggle('button--ghost', btn !== button); });
+      document.querySelectorAll('[data-calendar-view]').forEach(item => {
+        const selected = item === button;
+        item.classList.toggle('button--primary', selected);
+        item.classList.toggle('button--ghost', !selected);
+        item.setAttribute('aria-pressed', String(selected));
+      });
       loadEvents();
     });
   });
