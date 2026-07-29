@@ -30,7 +30,7 @@
   }
 
   document.addEventListener('DOMContentLoaded', function () {
-    const sections = document.querySelectorAll('.company-edit-page details.card-collapsible');
+    const sections = document.querySelectorAll('.company-edit-page > .admin-grid > details.card-collapsible');
     const state = loadState();
 
     sections.forEach(function (section) {
