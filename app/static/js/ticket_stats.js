@@ -70,7 +70,8 @@
         const tile = statsContainer.querySelector(`[data-ticket-stat="${CSS.escape(status || '')}"]`);
         if (tile) {
           tile.dataset.ticketStatSelected = isSelected ? 'true' : 'false';
-          tile.hidden = !isSelected;
+          const value = Number(tile.querySelector('.stat-strip__stat-value')?.textContent || 0);
+          tile.hidden = !isSelected || !Number.isFinite(value) || value === 0;
         }
       });
       updateTotal();

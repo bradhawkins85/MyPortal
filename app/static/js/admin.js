@@ -1131,7 +1131,7 @@
         }
         const tile = element.closest('.stat-strip__stat');
         if (tile) {
-          tile.hidden = tile.dataset.ticketStatSelected !== 'true';
+          tile.hidden = tile.dataset.ticketStatSelected !== 'true' || !Number.isFinite(value) || value === 0;
         }
       });
       if (statElements.total) {
