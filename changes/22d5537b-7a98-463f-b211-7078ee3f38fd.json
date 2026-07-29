@@ -1,0 +1,7 @@
+{
+  "guid": "22d5537b-7a98-463f-b211-7078ee3f38fd",
+  "occurred_at": "2026-07-29T00:00:00Z",
+  "change_type": "fix",
+  "summary": "Evaluate the Microsoft 365 DMARC best-practice check against company Email domains instead of every domain in the tenant.",
+  "content_hash": "dmarc-company-email-domains"
+}
