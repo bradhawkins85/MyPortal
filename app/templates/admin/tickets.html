@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/counters.html" import counter_strip %}
 
 {% block header_title %}
   {% set show_ticket_automations = is_super_admin %}
@@ -510,28 +511,36 @@
           </aside>
 
           <div class="ticket-dashboard__right-column">
-            <div class="ticket-dashboard__stats management__stats" data-ticket-stats>
-            <article class="stat-card">
-              <h3 class="stat-card__title">Open tickets</h3>
-              <p class="stat-card__value" data-ticket-stat="open">{{ ticket_status_counts.get('open', 0) }}</p>
-            </article>
-            <article class="stat-card">
-              <h3 class="stat-card__title">In progress</h3>
-              <p class="stat-card__value" data-ticket-stat="in_progress">
-                {{ ticket_status_counts.get('in_progress', 0) + ticket_status_counts.get('pending', 0) }}
-              </p>
-            </article>
-            <article class="stat-card">
-              <h3 class="stat-card__title">Resolved</h3>
-              <p class="stat-card__value" data-ticket-stat="resolved">
-                {{ ticket_status_counts.get('resolved', 0) + ticket_status_counts.get('closed', 0) }}
-              </p>
-            </article>
-            <article class="stat-card">
-              <h3 class="stat-card__title">Total</h3>
-              <p class="stat-card__value" data-ticket-stat="total">{{ ticket_total }}</p>
-            </article>
-          </div>
+            {% set ticket_stat_items = [] %}
+            {% set visible_ticket_total = namespace(value=0) %}
+            {% set ticket_stat_variants = {
+              'open': 'info',
+              'in_progress': 'warning',
+              'pending': 'maintenance',
+              'resolved': 'success',
+              'closed': 'neutral'
+            } %}
+            {% for definition in ticket_status_definitions %}
+              {% set status_count = ticket_status_counts.get(definition.tech_status, 0) %}
+              {% if status_count > 0 %}
+                {% set visible_ticket_total.value = visible_ticket_total.value + status_count %}
+                {% set _ = ticket_stat_items.append({
+                  'label': definition.tech_label,
+                  'value': status_count,
+                  'variant': ticket_stat_variants.get(definition.tech_status, ['info', 'warning', 'success', 'neutral'][loop.index0 % 4]),
+                  'attrs': {'data-ticket-stat': definition.tech_status}
+                }) %}
+              {% endif %}
+            {% endfor %}
+            <div data-ticket-stats>
+              {{ counter_strip(
+                ticket_stat_items,
+                total=visible_ticket_total.value,
+                total_label='Visible tickets',
+                total_attrs={'data-ticket-stat': 'total'},
+                class='ticket-dashboard__stats',
+              ) }}
+            </div>
 
 
 
