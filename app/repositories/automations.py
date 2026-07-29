@@ -12,6 +12,27 @@ AutomationRecord = dict[str, Any]
 AutomationRunRecord = dict[str, Any]
 AutomationHistoryRecord = dict[str, Any]
 
+# Columns that may be updated via update_automation(); used to prevent SQL injection.
+_UPDATABLE_COLUMNS: frozenset[str] = frozenset(
+    {
+        "name",
+        "description",
+        "kind",
+        "execution_order",
+        "cadence",
+        "cron_expression",
+        "trigger_event",
+        "trigger_filters",
+        "action_module",
+        "action_payload",
+        "status",
+        "next_run_at",
+        "scheduled_time",
+        "run_once",
+        "last_run_at",
+    }
+)
+
 
 async def _ensure_connection() -> None:
     """Ensure the automation repository has an active database connection."""
@@ -318,6 +339,8 @@ async def update_automation(automation_id: int, **fields: Any) -> AutomationReco
     assignments: list[str] = []
     params: list[Any] = []
     for key, value in fields.items():
+        if key not in _UPDATABLE_COLUMNS:
+            raise ValueError(f"Invalid field for automation update: {key!r}")
         if key in {"trigger_filters", "action_payload"}:
             assignments.append(f"{key} = %s")
             params.append(_serialise(value))
