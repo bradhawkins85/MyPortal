@@ -1467,6 +1467,14 @@ def schedule_ticket_sync(ticket_id: int) -> None:
         settings_snapshot: Mapping[str, Any] | None = None
         try:
             settings_snapshot = await _load_module_settings()
+            if settings_snapshot is not None and not bool(
+                settings_snapshot.get("enabled")
+            ):
+                log_info(
+                    "Solidtime ticket sync not scheduled because module is disabled",
+                    ticket_id=ticket_id,
+                )
+                return
             result = await sync_ticket_to_project(int(ticket_id))
             reason = _ticket_sync_outcome_reason(
                 settings=settings_snapshot, sync_result=result
