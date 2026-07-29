@@ -287,15 +287,14 @@ async def _fetch_usage_by_key(key_ids: Iterable[int]) -> dict[int, list[dict[str
     if not ids:
         return {}
     placeholders = ", ".join(["%s"] * len(ids))
-    rows = await db.fetch_all(
-        f"""
-        SELECT api_key_id, ip_address, usage_count, last_used_at
-        FROM api_key_usage
-        WHERE api_key_id IN ({placeholders})
-        ORDER BY usage_count DESC
-        """,
-        tuple(ids),
+    query = (
+        "SELECT api_key_id, ip_address, usage_count, last_used_at"
+        " FROM api_key_usage"
+        " WHERE api_key_id IN ("
+        + placeholders  # contains only %s parameter markers, not user data
+        + ") ORDER BY usage_count DESC"
     )
+    rows = await db.fetch_all(query, tuple(ids))
     usage: dict[int, list[dict[str, Any]]] = {}
     for row in rows:
         key_id = row["api_key_id"]
