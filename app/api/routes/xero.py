@@ -117,8 +117,8 @@ def _normalize_xero_invoice_id(value: Any) -> str | None:
     if not candidate:
         return None
     try:
-        UUID(candidate)
-        return candidate
+        parsed_uuid = UUID(candidate)
+        return str(parsed_uuid)
     except (TypeError, ValueError, AttributeError):
         return None
 
