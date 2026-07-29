@@ -373,6 +373,7 @@ async def get_ticket_dashboard(
         limit=None if all_tickets else limit,
         include_reference_data=False,
     )
+    global_status_counts = await tickets_repo.count_tickets_by_status()
     rows: list[TicketDashboardRow] = []
     ticket_ids: list[int] = []
     for ticket in state.tickets:
@@ -514,7 +515,7 @@ async def get_ticket_dashboard(
     return TicketDashboardResponse(
         items=rows,
         total=state.total,
-        status_counts=dict(state.status_counts),
+        status_counts=global_status_counts,
         filters=filters,
     )
 
