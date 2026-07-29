@@ -45,6 +45,18 @@ def test_dashboard_controls_precede_stats_and_full_width_table():
     assert "grid-column: 1 / -1;" in css
 
 
+def test_ticket_stats_render_visible_non_zero_statuses_with_counter_strip():
+    """Ticket KPIs use the service-status treatment without exposing hidden statuses."""
+    html = _template_html()
+
+    assert 'from "macros/counters.html" import counter_strip' in html
+    assert "{% for definition in ticket_status_definitions %}" in html
+    assert "{% if status_count > 0 %}" in html
+    assert "'attrs': {'data-ticket-stat': definition.tech_status}" in html
+    assert "total_label='Visible tickets'" in html
+    assert "class='ticket-dashboard__stats'" in html
+
+
 def test_next_ticket_number_handler_is_always_rendered():
     """The menu item handler must not depend on header-block scoped Jinja variables."""
     html = _template_html()

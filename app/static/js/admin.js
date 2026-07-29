@@ -1120,21 +1120,22 @@
 
     function updateStats(counts, total) {
       const normalised = normaliseCounts(counts);
-      if (statElements.open) {
-        const value = Number(normalised.open ?? 0);
-        statElements.open.textContent = String(Number.isFinite(value) ? value : 0);
-      }
-      if (statElements.in_progress) {
-        const value = Number(normalised.in_progress ?? 0) + Number(normalised.pending ?? 0);
-        statElements.in_progress.textContent = String(Number.isFinite(value) ? value : 0);
-      }
-      if (statElements.resolved) {
-        const value = Number(normalised.resolved ?? 0) + Number(normalised.closed ?? 0);
-        statElements.resolved.textContent = String(Number.isFinite(value) ? value : 0);
-      }
+      Object.entries(statElements).forEach(([key, element]) => {
+        if (key === 'total') {
+          return;
+        }
+        const value = Number(normalised[key] ?? 0);
+        element.textContent = String(Number.isFinite(value) ? value : 0);
+        const tile = element.closest('.stat-strip__stat');
+        if (tile) {
+          tile.hidden = !Number.isFinite(value) || value <= 0;
+        }
+      });
       if (statElements.total) {
-        const safeTotal = Number(total);
-        statElements.total.textContent = String(Number.isFinite(safeTotal) ? safeTotal : 0);
+        const visibleTotal = Object.keys(statElements)
+          .filter((key) => key !== 'total')
+          .reduce((sum, key) => sum + Number(normalised[key] ?? 0), 0);
+        statElements.total.textContent = String(Number.isFinite(visibleTotal) ? visibleTotal : 0);
       }
     }
 
