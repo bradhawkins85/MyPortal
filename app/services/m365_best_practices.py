@@ -1311,26 +1311,25 @@ async def _check_spf_records_published(token: str) -> dict[str, Any]:
                    + ". Publish: v=spf1 include:spf.protection.outlook.com -all")
 
 
-async def _check_dmarc_records_published(token: str) -> dict[str, Any]:
+async def _check_dmarc_records_published(
+    _token: str, email_domains: list[str]
+) -> dict[str, Any]:
     check_id = "bp_dmarc_records_published"
-    check_name = "DMARC records for all Exchange Online domains are published"
-    domains_data = await _safe_graph_get_all(token, _DOMAINS_URL)
-    if domains_data is None:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
-                       "Unable to enumerate accepted domains from Microsoft Graph.")
-    exchange_domains = [
-        d.get("id") or d.get("name") or ""
-        for d in domains_data
-        if isinstance(d, dict)
-        and d.get("isVerified") is True
-        and not str(d.get("id") or "").endswith(".onmicrosoft.com")
-    ]
-    if not exchange_domains:
+    check_name = "DMARC records for all MyPortal Email domains are published"
+    configured_domains = sorted(
+        {
+            str(domain).strip().lower()
+            for domain in email_domains
+            if str(domain).strip()
+        }
+    )
+    if not configured_domains:
         return _result(check_id, check_name, STATUS_PASS,
-                       "No custom verified domains found; DMARC records are not required.")
+                       "No Email domains are configured for this company in MyPortal; "
+                       "DMARC records are not required.")
     missing: list[str] = []
     errored: list[str] = []
-    for domain in exchange_domains:
+    for domain in configured_domains:
         records = await _dns_txt_records(f"_dmarc.{domain}")
         if records is None:
             errored.append(domain)
@@ -1343,8 +1342,12 @@ async def _check_dmarc_records_published(token: str) -> dict[str, Any]:
                        f"DNS lookup failed for {len(errored)} domain(s); "
                        "verify DMARC records manually: " + ", ".join(errored[:5]))
     if not missing:
-        return _result(check_id, check_name, STATUS_PASS,
-                       f"DMARC records found for all {len(exchange_domains)} verified domain(s).")
+        return _result(
+            check_id,
+            check_name,
+            STATUS_PASS,
+            f"DMARC records found for all {len(configured_domains)} MyPortal Email domain(s).",
+        )
     suffix = f" (DNS errors for {len(errored)} domain(s))" if errored else ""
     return _result(check_id, check_name, STATUS_FAIL,
                    f"DMARC TXT record missing for {len(missing)} domain(s): "
@@ -4629,7 +4632,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
     },
     {
         "id": "bp_dmarc_records_published",
-        "name": "DMARC records for all Exchange Online domains are published",
+        "name": "DMARC records for all MyPortal Email domains are published",
         "description": (
             "DMARC policies tell receivers what to do with mail that fails "
             "SPF/DKIM and provides aggregate reporting on spoof attempts."
@@ -4640,6 +4643,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_dmarc_records_published,
         "source_type": "graph",
+        "uses_company_email_domains": True,
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
@@ -5434,7 +5438,9 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
                     if exo_token is None:
                         exo_token, exo_tenant_id = await _acquire_exo_access_token(company_id)
                     if bp.get("uses_company_email_domains"):
-                        email_domains = await companies_repo.get_email_domains_for_company(company_id)
+                        email_domains = (
+                            await companies_repo.get_email_domains_for_company(company_id)
+                        )
                         raw = await _call_check_with_retry(
                             lambda r=runner: r(  # type: ignore[call-arg,misc]
                                 exo_token, exo_tenant_id, email_domains
@@ -5449,11 +5455,19 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
                             check_id=check_id,
                         )
                 else:
-                    raw = await _call_check_with_retry(
-                        lambda r=runner: r(graph_token),  # type: ignore[call-arg,misc]
-                        company_id=company_id,
-                        check_id=check_id,
-                    )
+                    if bp.get("uses_company_email_domains"):
+                        email_domains = await companies_repo.get_email_domains_for_company(company_id)
+                        raw = await _call_check_with_retry(
+                            lambda r=runner: r(graph_token, email_domains),  # type: ignore[call-arg,misc]
+                            company_id=company_id,
+                            check_id=check_id,
+                        )
+                    else:
+                        raw = await _call_check_with_retry(
+                            lambda r=runner: r(graph_token),  # type: ignore[call-arg,misc]
+                            company_id=company_id,
+                            check_id=check_id,
+                        )
                 status = raw.get("status", STATUS_UNKNOWN)
                 details = raw.get("details") or ""
             except M365Error as exc:
@@ -5598,7 +5612,9 @@ async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
             if source_type == "exo":
                 exo_token, exo_tenant_id = await _acquire_exo_access_token(company_id)
                 if bp.get("uses_company_email_domains"):
-                    email_domains = await companies_repo.get_email_domains_for_company(company_id)
+                    email_domains = (
+                        await companies_repo.get_email_domains_for_company(company_id)
+                    )
                     raw = await _call_check_with_retry(
                         lambda r=runner: r(  # type: ignore[call-arg,misc]
                             exo_token, exo_tenant_id, email_domains
@@ -5613,11 +5629,19 @@ async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
                         check_id=check_id,
                     )
             else:
-                raw = await _call_check_with_retry(
-                    lambda r=runner: r(graph_token),  # type: ignore[call-arg,misc]
-                    company_id=company_id,
-                    check_id=check_id,
-                )
+                if bp.get("uses_company_email_domains"):
+                    email_domains = await companies_repo.get_email_domains_for_company(company_id)
+                    raw = await _call_check_with_retry(
+                        lambda r=runner: r(graph_token, email_domains),  # type: ignore[call-arg,misc]
+                        company_id=company_id,
+                        check_id=check_id,
+                    )
+                else:
+                    raw = await _call_check_with_retry(
+                        lambda r=runner: r(graph_token),  # type: ignore[call-arg,misc]
+                        company_id=company_id,
+                        check_id=check_id,
+                    )
             status = raw.get("status", STATUS_UNKNOWN)
             details = raw.get("details") or ""
         except M365Error as exc:
