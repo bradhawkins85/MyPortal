@@ -94,6 +94,23 @@ def test_status_filter_is_in_status_column_header_with_funnel_icon():
     assert '<h3 class="ticket-filters__section-title">Filter by Status</h3>' not in html
 
 
+def test_obsolete_filter_controls_are_not_rendered():
+    """The ticket sidebar stays visible and no longer offers phone search."""
+    html = _template_html()
+    assert 'data-ticket-filters-toggle' not in html
+    assert 'Hide filters' not in html
+    assert 'Search by Phone Number' not in html
+    assert 'name="phoneNumber"' not in html
+
+
+def test_status_filter_panel_has_an_opaque_background():
+    """The floating status menu must remain readable over ticket rows."""
+    css = (TEMPLATE_PATH.parent.parent.parent / "static" / "css" / "app.css").read_text(encoding="utf-8")
+    panel_rule = css[css.index(".ticket-status-filter__panel {"):]
+    panel_rule = panel_rule[:panel_rule.index("}")]
+    assert "background: var(--color-surface-2, #0f172a);" in panel_rule
+
+
 def test_table_cell_data_column_attributes():
     """Table <td> elements for customisable columns should carry data-column."""
     html = _template_html()

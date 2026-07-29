@@ -6782,34 +6782,6 @@ dialog.modal:not([open]) {
   min-width: 0;
 }
 
-.ticket-filters-panel__toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  margin-bottom: 0.75rem;
-}
-
-.ticket-filters-panel__toggle-icon {
-  width: 0.75rem;
-  height: 0.75rem;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  transform: rotate(135deg);
-  transition: transform 0.2s ease;
-}
-
-.ticket-filters-panel--collapsed .ticket-filters-panel__toggle-icon {
-  transform: rotate(-45deg);
-}
-
-.ticket-filters-panel--collapsed .ticket-filters {
-  display: none;
-}
-
-.ticket-filters-panel--collapsed .ticket-filters-panel__toggle {
-  margin-bottom: 0;
-}
-
 .ticket-filters {
   display: flex;
   flex-direction: column;
@@ -6946,7 +6918,7 @@ dialog.modal:not([open]) {
   overflow-y: auto;
   color: var(--color-text);
   text-align: left;
-  background: var(--color-surface-2);
+  background: var(--color-surface-2, #0f172a);
   border: 1px solid var(--color-border);
   border-radius: 0.6rem;
   box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.35);
@@ -7004,19 +6976,6 @@ dialog.modal:not([open]) {
   margin-bottom: 0;
 }
 
-/* Phone Number Search */
-.ticket-filters__phone-search {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.ticket-filters__phone-search-actions {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
 /* Right Column Layout */
 .ticket-dashboard__right-column {
   display: flex;
@@ -7035,23 +6994,6 @@ dialog.modal:not([open]) {
 
 .ticket-dashboard__right-column .table-wrapper {
   margin-top: 0;
-}
-
-@media (min-width: 960px) {
-  .ticket-dashboard__overview--filters-collapsed {
-    grid-template-columns: minmax(0, 3rem) minmax(0, 1fr);
-  }
-
-  .ticket-dashboard__overview--filters-collapsed .ticket-filters-panel__toggle {
-    width: 100%;
-    justify-content: center;
-    padding-inline: 0.35rem;
-    min-height: 2.5rem;
-  }
-
-  .ticket-dashboard__overview--filters-collapsed [data-ticket-filters-toggle-text] {
-    display: none;
-  }
 }
 
 .help {

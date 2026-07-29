@@ -394,7 +394,6 @@ async def admin_delete_email_blocklist_entry(entry_id: int, request: Request):
 @router.get("/admin/tickets", response_class=HTMLResponse)
 async def admin_tickets_page(
     request: Request,
-    phoneNumber: str | None = Query(default=None),
     status: list[str] = Query(default=[]),
     company_id: int | None = Query(default=None, alias="companyId"),
     assigned_user_id: int | None = Query(default=None, alias="assignedUserId"),
@@ -408,7 +407,6 @@ async def admin_tickets_page(
     return await main_module._render_tickets_dashboard(
         request,
         current_user,
-        phone_number=phoneNumber,
         status_filter=status if status else None,
         company_id=company_id,
         assigned_user_id=assigned_user_id,
