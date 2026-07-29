@@ -170,6 +170,17 @@ def test_table_header_data_column_attributes():
         )
 
 
+def test_ticket_table_does_not_render_actions_column():
+    """Ticket subjects link to details, so the table needs no actions column."""
+    html = _template_html()
+    table = html[html.index('id="tickets-table"'):]
+    table = table[:table.index("</table>")]
+
+    assert 'tickets-table__column--actions' not in table
+    assert 'tickets-table__cell--actions' not in table
+    assert '>Actions</th>' not in table
+
+
 def test_status_filter_is_in_status_column_header_with_funnel_icon():
     """Status choices should open from an accessible funnel in the Status heading."""
     html = _template_html()

@@ -2561,9 +2561,7 @@ button.header-title-menu__link,
   .tickets-table__column--assigned,
   .tickets-table__cell--assigned,
   .tickets-table__column--updated,
-  .tickets-table__cell--updated,
-  .tickets-table__column--actions,
-  .tickets-table__cell--actions {
+  .tickets-table__cell--updated {
     display: none;
   }
 
