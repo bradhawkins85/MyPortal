@@ -124,7 +124,7 @@ _HTML_NEWLINE_TAGS = re.compile(
     r"<\s*(?:br\s*/?|/(?:p|div|li|tr|table|thead|tbody|tfoot|section|article|header|footer|h[1-6]))\b[^>]*>",
     flags=re.IGNORECASE,
 )
-_HTML_TAGS = re.compile(r"<\s*/?\s*[a-zA-Z][^><]*>")
+_HTML_TAGS = re.compile(r"<\s*/?[a-zA-Z][^><]*>")
 
 
 def _clean_text(value: Any) -> str | None:
