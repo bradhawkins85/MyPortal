@@ -318,7 +318,7 @@ async def count_active_assets(*, company_id: Any = None, since: Any = None) -> i
         filters.append("last_sync >= %s")
         params.append(since_dt.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"))
 
-    sql = f"SELECT COUNT(*) AS total FROM assets WHERE {' AND '.join(filters)}"
+    sql = "SELECT COUNT(*) AS total FROM assets WHERE " + " AND ".join(filters)
     row = await db.fetch_one(sql, tuple(params) if params else None)
     if not row:
         return 0
@@ -371,7 +371,7 @@ async def count_active_assets_by_type(
         filters.append("LOWER(type) = LOWER(%s)")
         params.append(device_type)
 
-    sql = f"SELECT COUNT(*) AS total FROM assets WHERE {' AND '.join(filters)}"
+    sql = "SELECT COUNT(*) AS total FROM assets WHERE " + " AND ".join(filters)
     row = await db.fetch_one(sql, tuple(params) if params else None)
     if not row:
         return 0
