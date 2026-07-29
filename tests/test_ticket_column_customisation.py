@@ -27,6 +27,24 @@ def test_columns_toggle_button_present():
     assert '>Columns<' in html
 
 
+def test_dashboard_controls_precede_stats_and_full_width_table():
+    """The dashboard uses one control row followed by the full-width ticket list."""
+    html = _template_html()
+    quick_search_index = html.index('id="ticket-quick-filter"')
+    group_by_index = html.index('data-ticket-group-by')
+    columns_index = html.index('data-ticket-columns')
+    stats_index = html.index('data-ticket-stats')
+    table_index = html.index('id="tickets-table"')
+
+    assert quick_search_index < group_by_index < stats_index < table_index
+    assert quick_search_index < columns_index < stats_index
+
+    css = (TEMPLATE_PATH.parent.parent.parent / "static" / "css" / "app.css").read_text(encoding="utf-8")
+    assert "grid-template-columns: minmax(260px, 320px) minmax(260px, 340px) minmax(0, 1fr);" in css
+    assert ".ticket-dashboard__overview .table-wrapper" in css
+    assert "grid-column: 1 / -1;" in css
+
+
 def test_next_ticket_number_handler_is_always_rendered():
     """The menu item handler must not depend on header-block scoped Jinja variables."""
     html = _template_html()

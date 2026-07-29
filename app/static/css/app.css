@@ -5673,8 +5673,36 @@ dialog.modal:not([open]) {
 
 @media (min-width: 960px) {
   .ticket-dashboard__overview {
-    grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+    grid-template-columns: minmax(260px, 320px) minmax(260px, 340px) minmax(0, 1fr);
     align-items: start;
+  }
+
+  .ticket-dashboard__overview > .ticket-filters-panel,
+  .ticket-dashboard__overview > .ticket-filters-panel > .ticket-filters,
+  .ticket-dashboard__overview > .ticket-dashboard__right-column {
+    display: contents;
+  }
+
+  .ticket-dashboard__overview .ticket-filters__section:first-child {
+    grid-column: 1;
+    grid-row: 1;
+    height: 100%;
+  }
+
+  .ticket-dashboard__overview .ticket-filters__section--horizontal {
+    grid-column: 2;
+    grid-row: 1;
+    height: 100%;
+  }
+
+  .ticket-dashboard__stats {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .ticket-dashboard__overview .management__toolbar-info,
+  .ticket-dashboard__overview .table-wrapper {
+    grid-column: 1 / -1;
   }
 }
 
@@ -6957,10 +6985,14 @@ dialog.modal:not([open]) {
 
 /* Horizontal Section for Grouping and Search */
 .ticket-filters__section--horizontal {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 1rem;
   padding: 1rem 1.25rem;
+}
+
+.ticket-dashboard__dropdowns {
+  justify-content: flex-start;
 }
 
 .ticket-filters__group-control,
@@ -6982,10 +7014,6 @@ dialog.modal:not([open]) {
   flex-direction: column;
   gap: 1.5rem;
   min-width: 0;
-}
-
-.ticket-dashboard__right-column .management__toolbar {
-  margin-top: -0.5rem;
 }
 
 .ticket-dashboard__right-column .management__toolbar-info {
