@@ -70,6 +70,11 @@ def test_ticket_stat_preferences_are_persisted_and_allow_empty_selection():
     assert "saveSelectedStatuses(selectedStatuses)" in javascript
     assert "tile.hidden = !isSelected" in javascript
 
+    css = (
+        TEMPLATE_PATH.parent.parent.parent / "static" / "css" / "app.css"
+    ).read_text(encoding="utf-8")
+    assert ".stat-strip__stat[hidden] {\n  display: none;\n}" in css
+
 
 def test_ticket_stats_refresh_preserves_counter_labels():
     """Refreshing counts updates values without replacing each complete stat tile."""

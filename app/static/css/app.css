@@ -10165,6 +10165,10 @@ textarea:focus-visible,
   color: inherit;
 }
 
+.stat-strip__stat[hidden] {
+  display: none;
+}
+
 a.stat-strip__stat:focus-visible {
   outline: 2px solid var(--color-accent, #38bdf8);
   outline-offset: 2px;
