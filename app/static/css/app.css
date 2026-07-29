@@ -2365,7 +2365,7 @@ button.header-title-menu__link,
 }
 
 .ticket-column-filter__panel {
-  background: var(--color-surface, #fff);
+  background: var(--color-surface-2, #0f172a);
   border: 1px solid var(--color-border);
   border-radius: 0.5rem;
   box-shadow: 0 0.75rem 1.75rem rgb(15 23 42 / 18%);

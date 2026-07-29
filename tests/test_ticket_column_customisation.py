@@ -201,6 +201,14 @@ def test_status_filter_panel_has_an_opaque_background():
     assert "background: var(--color-surface-2, #0f172a);" in panel_rule
 
 
+def test_column_filter_panels_match_the_status_filter_background():
+    """Every floating column filter should use the status menu surface colour."""
+    css = (TEMPLATE_PATH.parent.parent.parent / "static" / "css" / "app.css").read_text(encoding="utf-8")
+    panel_rule = css[css.index(".ticket-column-filter__panel {"):]
+    panel_rule = panel_rule[:panel_rule.index("}")]
+    assert "background: var(--color-surface-2, #0f172a);" in panel_rule
+
+
 def test_table_cell_data_column_attributes():
     """Table <td> elements for customisable columns should carry data-column."""
     html = _template_html()
