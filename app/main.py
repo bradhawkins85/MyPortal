@@ -2810,8 +2810,6 @@ async def on_startup() -> None:
         elif name == "bootstrap_default_bcp_template":
             log_info("BCP default template bootstrapped")
 
-    await scheduler_service.start()
-    modules_service.start_xero_token_keepalive()
     global _rag_relationship_stop, _rag_relationship_tasks
     _rag_relationship_stop = asyncio.Event()
     _rag_relationship_tasks = []
@@ -2831,6 +2829,19 @@ async def on_startup() -> None:
         for slug in (getattr(settings, "feature_packs", "") or "").split(",")
         if slug.strip()
     ]
+    from app.core.module_capabilities import validate_capability_registry
+
+    capability_errors = validate_capability_registry(
+        modules_service.DEFAULT_MODULES, configured_feature_packs=pack_slugs
+    )
+    if capability_errors:
+        for error in capability_errors:
+            log_error("Module capability validation failed", error=error)
+        raise RuntimeError("Invalid module capability registry: " + "; ".join(capability_errors))
+
+    await scheduler_service.start()
+    modules_service.start_xero_token_keepalive()
+
     if pack_slugs:
         await feature_registry.load_many(pack_slugs)
 
