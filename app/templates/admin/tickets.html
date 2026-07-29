@@ -685,7 +685,6 @@
                 <th scope="col" data-sort="string" data-column="latest-reply-internal" class="tickets-table__column tickets-table__column--latest-reply-internal">reply.is_internal</th>
                 <th scope="col" data-sort="string" data-column="latest-reply-kind" class="tickets-table__column tickets-table__column--latest-reply-kind">reply.kind</th>
                 <th scope="col" data-sort="string" data-column="ticket-update-actor-type" class="tickets-table__column tickets-table__column--ticket-update-actor-type">ticket_update.actor_type</th>
-                <th scope="col" class="table__actions tickets-table__column tickets-table__column--actions">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -783,14 +782,11 @@
                     <td data-label="reply.is_internal" data-column="latest-reply-internal" class="tickets-table__cell tickets-table__cell--latest-reply-internal">{{ 'true' if automation_data.get('latest_reply_is_internal') else ('false' if automation_data.get('latest_reply_id') else '—') }}</td>
                     <td data-label="reply.kind" data-column="latest-reply-kind" class="tickets-table__cell tickets-table__cell--latest-reply-kind">{{ automation_data.get('latest_reply_kind') or '—' }}</td>
                     <td data-label="ticket_update.actor_type" data-column="ticket-update-actor-type" class="tickets-table__cell tickets-table__cell--ticket-update-actor-type">{{ automation_data.get('ticket_update_actor_type') or '—' }}</td>
-                    <td class="table__actions tickets-table__cell tickets-table__cell--actions">
-                      <a href="/admin/tickets/{{ ticket.id }}" class="button button--ghost">Open</a>
-                    </td>
                   </tr>
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="{{ 39 + (1 if can_bulk_delete_tickets or can_merge_tickets or can_bulk_edit_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
+                  <td colspan="{{ 38 + (1 if can_bulk_delete_tickets or can_merge_tickets or can_bulk_edit_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
                 </tr>
               {% endif %}
             </tbody>
