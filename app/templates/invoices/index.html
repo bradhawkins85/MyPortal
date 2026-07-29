@@ -64,7 +64,7 @@
             <th scope="col" data-sort="date" data-mobile-priority="essential">Created</th>
             <th scope="col" data-sort="date" data-mobile-priority="essential">Due date</th>
             <th scope="col" data-sort="string" data-mobile-priority="essential">Status</th>
-            {% if can_delete_invoices or can_sync_invoices_to_xero %}<th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>{% endif %}
+            {% if can_delete_invoices or (can_sync_invoices_to_xero and module_enabled.get('xero', false)) %}<th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>{% endif %}
           </tr>
         </thead>
         <tbody>
@@ -98,9 +98,9 @@
                 <span class="text-muted">No status</span>
               {% endif %}
             </td>
-            {% if can_delete_invoices or can_sync_invoices_to_xero %}
+            {% if can_delete_invoices or (can_sync_invoices_to_xero and module_enabled.get('xero', false)) %}
             <td class="table__actions">
-              {% if can_sync_invoices_to_xero %}
+              {% if can_sync_invoices_to_xero and module_enabled.get('xero', false) %}
                 <button
                   type="button"
                   class="button button--secondary button--small"

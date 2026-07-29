@@ -188,6 +188,9 @@ async def sync_quote_to_xero(
     _: None = Depends(require_database),
     current_user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
+    from app.services.module_gate import require_enabled
+
+    await require_enabled("xero")
     resolved_company_id = await _resolve_company_id(company_id, company_id_alt)
     await _ensure_company(resolved_company_id)
     summary = await shop_repo.get_quote_summary(quote_number, resolved_company_id)
