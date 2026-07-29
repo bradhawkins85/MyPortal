@@ -7,6 +7,7 @@ from app.repositories import companies as company_repo
 from app.repositories import invoice_lines as invoice_lines_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import ticket_billed_time_entries as billed_time_repo
+from app.repositories import ticket_expenses as expenses_repo
 from app.repositories import tickets as tickets_repo
 from app.services import invoice_generator as invoice_generator_service
 from app.services import modules as modules_service
@@ -130,10 +131,12 @@ async def _preview_generate_invoice(
     recurring_items = await xero_service.build_recurring_invoice_items(
         company_id, tax_type=None, context=context
     )
-    tickets = await tickets_repo.list_tickets(company_id=company_id, limit=1000)
+    tickets = await tickets_repo.list_tickets(company_id=company_id, limit=None)
     billable_statuses = invoice_generator_service._get_env_xero_billable_statuses()
     ticket_items: list[dict[str, Any]] = []
     billable_reply_count = 0
+    expense_count = 0
+    expense_total = Decimal("0.00")
     for ticket in tickets:
         ticket_status = str(ticket.get("status") or "").strip().lower()
         if ticket_status not in billable_statuses:
@@ -143,16 +146,24 @@ async def _preview_generate_invoice(
         if not ticket_id:
             continue
         unbilled_ids = await billed_time_repo.get_unbilled_reply_ids(ticket_id)
-        if not unbilled_ids:
-            continue
-        replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
+        expenses = await expenses_repo.list_expenses(ticket_id, unbilled_only=True)
+        ticket_expense_total = sum(
+            (
+                invoice_generator_service._to_decimal(expense.get("amount"))
+                or Decimal("0")
+            )
+            for expense in expenses
+        )
+        replies = (
+            await tickets_repo.list_replies(ticket_id, include_internal=True)
+            if unbilled_ids
+            else []
+        )
         minutes = sum(
             invoice_generator_service._coerce_minutes(r.get("minutes_spent"))
             for r in replies
             if r.get("id") in unbilled_ids and r.get("is_billable")
         )
-        if minutes <= 0:
-            continue
         billable_reply_count += len(
             [r for r in replies if r.get("id") in unbilled_ids and r.get("is_billable")]
         )
@@ -179,9 +190,10 @@ async def _preview_generate_invoice(
                 }
                 labour_map[key] = bucket
             bucket["minutes"] += reply_minutes
-        requester_name, requester_email = (
-            await invoice_generator_service.resolve_ticket_requester(dict(ticket))
-        )
+        (
+            requester_name,
+            requester_email,
+        ) = await invoice_generator_service.resolve_ticket_requester(dict(ticket))
         for group in labour_map.values():
             group_minutes = int(group.get("minutes") or 0)
             if group_minutes <= 0:
@@ -214,6 +226,28 @@ async def _preview_generate_invoice(
             if labour_code:
                 ticket_item["xeroItemCode"] = labour_code
             ticket_items.append(ticket_item)
+        if ticket_expense_total > 0:
+            description = invoice_generator_service._build_expense_line_description(
+                line_item_template,
+                dict(ticket),
+                expenses,
+                requester_name=requester_name,
+                requester_email=requester_email,
+            )
+            expense_count += len(expenses)
+            expense_total += ticket_expense_total
+            ticket_items.append(
+                {
+                    "type": "ticket_expense",
+                    "id": int(ticket_id),
+                    "label": description,
+                    "amount": _money(ticket_expense_total),
+                    "xeroDescription": description,
+                    "xeroQuantity": "1.00",
+                    "xeroUnitAmount": _money(ticket_expense_total),
+                    "action": "Add unbilled ticket expenses to the generated invoice",
+                }
+            )
     recurring_total = sum(
         Decimal(str(i.get("Quantity") or 0)) * Decimal(str(i.get("UnitAmount") or 0))
         for i in recurring_items
@@ -232,6 +266,8 @@ async def _preview_generate_invoice(
             "recurringLineCount": len(recurring_items),
             "ticketLineCount": len(ticket_items),
             "billableReplyCount": billable_reply_count,
+            "expenseCount": expense_count,
+            "expenseAmount": _money(expense_total),
             "recurringAmount": _money(recurring_total),
         },
         "items": [

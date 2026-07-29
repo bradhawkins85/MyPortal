@@ -109,6 +109,11 @@ def test_generate_invoice_preview_uses_xero_line_item_template(monkeypatch):
         scheduled_task_preview.billed_time_repo, "get_unbilled_reply_ids", fake_unbilled
     )
     monkeypatch.setattr(
+        scheduled_task_preview.expenses_repo,
+        "list_expenses",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
         scheduled_task_preview.tickets_repo, "list_replies", fake_replies
     )
 
@@ -199,6 +204,11 @@ def test_generate_invoice_preview_prefers_env_xero_line_item_template(monkeypatc
         scheduled_task_preview.billed_time_repo, "get_unbilled_reply_ids", fake_unbilled
     )
     monkeypatch.setattr(
+        scheduled_task_preview.expenses_repo,
+        "list_expenses",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
         scheduled_task_preview.tickets_repo, "list_replies", fake_replies
     )
 
@@ -273,6 +283,11 @@ def test_generate_invoice_preview_resolves_requester_name_for_template(monkeypat
         scheduled_task_preview.billed_time_repo, "get_unbilled_reply_ids", fake_unbilled
     )
     monkeypatch.setattr(
+        scheduled_task_preview.expenses_repo,
+        "list_expenses",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
         scheduled_task_preview.tickets_repo, "list_replies", fake_replies
     )
     monkeypatch.setattr(
@@ -299,6 +314,67 @@ def test_generate_invoice_preview_resolves_requester_name_for_template(monkeypat
         preview["items"][0]["xeroDescription"]
         == "Ticket 42: Broken printer - Jane Requester"
     )
+
+
+def test_generate_invoice_preview_includes_expense_only_ticket(monkeypatch):
+    monkeypatch.setenv("XERO_BILLABLE_STATUSES", "resolved")
+    monkeypatch.setattr(
+        scheduled_task_preview.company_repo,
+        "get_company_by_id",
+        AsyncMock(return_value={"id": 1, "name": "Acme"}),
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.xero_service,
+        "build_invoice_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.xero_service,
+        "build_recurring_invoice_items",
+        AsyncMock(return_value=[]),
+    )
+    list_tickets = AsyncMock(
+        return_value=[{"id": 42, "subject": "Return laptop", "status": "Resolved"}]
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.tickets_repo, "list_tickets", list_tickets
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.billed_time_repo,
+        "get_unbilled_reply_ids",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        scheduled_task_preview.expenses_repo,
+        "list_expenses",
+        AsyncMock(
+            return_value=[{"id": 7, "description": "Return freight", "amount": "43.75"}]
+        ),
+    )
+
+    preview = asyncio.run(
+        scheduled_task_preview.preview_task(
+            {"command": "generate_invoice", "company_id": 1}
+        )
+    )
+
+    assert preview["status"] == "ready"
+    assert preview["totals"]["ticketLineCount"] == 1
+    assert preview["totals"]["expenseCount"] == 1
+    assert preview["totals"]["expenseAmount"] == "43.75"
+    assert preview["items"] == [
+        {
+            "type": "ticket_expense",
+            "id": 42,
+            "label": "Ticket 42: Return laptop Expenses - Return freight",
+            "amount": "43.75",
+            "xeroDescription": "Ticket 42: Return laptop Expenses - Return freight",
+            "xeroQuantity": "1.00",
+            "xeroUnitAmount": "43.75",
+            "action": "Add unbilled ticket expenses to the generated invoice",
+        }
+    ]
+    list_tickets.assert_awaited_once_with(company_id=1, limit=None)
 
 
 def test_unbill_time_entries_preview_lists_billable_entries(monkeypatch):
