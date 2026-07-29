@@ -2384,6 +2384,54 @@ async def test_check_smtp_auth_disabled_fail():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_check_dkim_only_evaluates_myportal_email_domains():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [
+            {"Domain": "contoso.com", "Enabled": True},
+            {"Domain": "unused.example", "Enabled": False},
+        ]},
+    ):
+        result = await bp_service._check_dkim_enabled_all_domains(
+            "exo-token", "tenant-id", ["CONTOSO.COM"]
+        )
+
+    assert result["status"] == "pass"
+    assert "1 MyPortal Email domains" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_dkim_fails_for_disabled_myportal_email_domain():
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [
+            {"Domain": "contoso.com", "Enabled": True},
+            {"Domain": "example.com", "Enabled": False},
+        ]},
+    ):
+        result = await bp_service._check_dkim_enabled_all_domains(
+            "exo-token", "tenant-id", ["contoso.com", "example.com"]
+        )
+
+    assert result["status"] == "fail"
+    assert "example.com" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_dkim_is_not_applicable_without_myportal_email_domains():
+    exo = AsyncMock()
+    with patch("app.services.m365_best_practices._exo_invoke_command", exo):
+        result = await bp_service._check_dkim_enabled_all_domains(
+            "exo-token", "tenant-id", []
+        )
+
+    assert result["status"] == "not_applicable"
+    exo.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
 async def test_check_audit_bypass_disabled_pass_when_no_bypass():
     with patch(
         "app.services.m365_best_practices._exo_invoke_command",
