@@ -275,31 +275,6 @@
             <p class="form-help">Use commas to list domains. Domains are matched case-insensitively.</p>
           </div>
           <div class="form-field form-field--checkbox">
-            <label class="checkbox" for="edit-company-vip">
-              <input
-                id="edit-company-vip"
-                type="checkbox"
-                name="isVip"
-                value="1"
-                {% if form_data.is_vip %}checked{% endif %}
-              />
-              <span>VIP pricing</span>
-            </label>
-          </div>
-          <div class="form-field form-field--checkbox">
-            <label class="checkbox" for="edit-company-default-ticket-replies-billable">
-              <input
-                id="edit-company-default-ticket-replies-billable"
-                type="checkbox"
-                name="defaultTicketRepliesBillable"
-                value="1"
-                {% if form_data.default_ticket_replies_billable %}checked{% endif %}
-              />
-              <span>Default ticket replies to Billable</span>
-            </label>
-            <p class="form-help">When enabled, the Billable checkbox is ticked automatically for new technician ticket replies. Technicians can untick it on individual replies when needed.</p>
-          </div>
-          <div class="form-field form-field--checkbox">
             <label class="checkbox" for="edit-company-offboarding-email-forwarding">
               <input
                 id="edit-company-offboarding-email-forwarding"
@@ -311,39 +286,6 @@
               <span>Enable email forwarding on offboarding requests</span>
             </label>
             <p class="form-help">When enabled, admins can select a staff member to forward emails to when submitting an offboarding request. Disable if your company uses a fixed forwarding address configured in the workflow step.</p>
-          </div>
-          <div class="form-field">
-            <label class="form-label">Payment method</label>
-            <div class="form-checkbox-group">
-              <label class="form-checkbox__label">
-                <input
-                  type="checkbox"
-                  name="invoicePrepay"
-                  value="1"
-                  {% if 'invoice_prepay' in form_data.payment_method %}checked{% endif %}
-                />
-                <span>Invoice Prepay</span>
-              </label>
-              <label class="form-checkbox__label">
-                <input
-                  type="checkbox"
-                  name="invoicePostpay"
-                  value="1"
-                  {% if 'invoice_postpay' in form_data.payment_method %}checked{% endif %}
-                />
-                <span>Invoice Postpay</span>
-              </label>
-              <label class="form-checkbox__label">
-                <input
-                  type="checkbox"
-                  name="stripeEnabled"
-                  value="1"
-                  {% if 'stripe' in form_data.payment_method %}checked{% endif %}
-                />
-                <span>Stripe (coming soon)</span>
-              </label>
-            </div>
-            <p class="form-help">Select at least one payment method. Invoice Prepay sends an invoice before service is rendered. Invoice Postpay sends an invoice after the billing period. Stripe will take payment immediately (coming soon).</p>
           </div>
           <div class="form-field">
             <label class="form-label">Purchase order options</label>
@@ -366,6 +308,85 @@
         </form>
       </div>
     </section>
+    <details class="card card--panel card-collapsible admin-grid__full" data-company-edit-section="payments">
+      <summary class="card__header card__header--collapsible card__header--stacked">
+        <div>
+          <h2 class="card__title">Payments</h2>
+          <p class="card__subtitle">Configure payment methods, VIP pricing, and billable ticket reply defaults.</p>
+        </div>
+        <div class="card__collapsible-meta" aria-hidden="true">
+          <span class="card__toggle-icon"></span>
+        </div>
+      </summary>
+      <div class="card-collapsible__content">
+      <div class="form-field form-field--checkbox">
+        <label class="checkbox" for="edit-company-vip">
+          <input
+            id="edit-company-vip"
+            type="checkbox"
+            name="isVip"
+            form="company-settings-form"
+            value="1"
+            {% if form_data.is_vip %}checked{% endif %}
+          />
+          <span>VIP pricing</span>
+        </label>
+      </div>
+      <div class="form-field form-field--checkbox">
+        <label class="checkbox" for="edit-company-default-ticket-replies-billable">
+          <input
+            id="edit-company-default-ticket-replies-billable"
+            type="checkbox"
+            name="defaultTicketRepliesBillable"
+            form="company-settings-form"
+            value="1"
+            {% if form_data.default_ticket_replies_billable %}checked{% endif %}
+          />
+          <span>Default ticket replies to Billable</span>
+        </label>
+        <p class="form-help">When enabled, the Billable checkbox is ticked automatically for new technician ticket replies. Technicians can untick it on individual replies when needed.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Payment method</label>
+        <div class="form-checkbox-group">
+          <label class="form-checkbox__label">
+            <input
+              type="checkbox"
+              name="invoicePrepay"
+              form="company-settings-form"
+              value="1"
+              {% if 'invoice_prepay' in form_data.payment_method %}checked{% endif %}
+            />
+            <span>Invoice Prepay</span>
+          </label>
+          <label class="form-checkbox__label">
+            <input
+              type="checkbox"
+              name="invoicePostpay"
+              form="company-settings-form"
+              value="1"
+              {% if 'invoice_postpay' in form_data.payment_method %}checked{% endif %}
+            />
+            <span>Invoice Postpay</span>
+          </label>
+          <label class="form-checkbox__label">
+            <input
+              type="checkbox"
+              name="stripeEnabled"
+              form="company-settings-form"
+              value="1"
+              {% if 'stripe' in form_data.payment_method %}checked{% endif %}
+            />
+            <span>Stripe (coming soon)</span>
+          </label>
+        </div>
+        <p class="form-help">Select at least one payment method. Invoice Prepay sends an invoice before service is rendered. Invoice Postpay sends an invoice after the billing period. Stripe will take payment immediately (coming soon).</p>
+      </div>
+        <div class="form-actions">
+          <button type="submit" class="button" form="company-settings-form">Save company settings</button>
+        </div>
+      </div>
+    </details>
     {% if is_super_admin %}
       <details class="card card--panel card-collapsible admin-grid__full" data-staff-field-config-panel>
         <summary class="card__header card__header--collapsible card__header--stacked">
@@ -1852,6 +1873,7 @@
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/company_edit_sections.js') }}" defer></script>
   {% if is_super_admin %}
     <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
     <script src="{{ static_url('/static/js/automation.js') }}" defer></script>
