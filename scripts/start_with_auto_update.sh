@@ -60,6 +60,16 @@ has_uvicorn_log_level_arg() {
   return 1
 }
 
+has_uvicorn_forwarded_ips_arg() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --forwarded-allow-ips|--forwarded-allow-ips=*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
 build_uvicorn_command() {
   UVICORN_COMMAND=("$@")
   local resolved_log_level=""
@@ -71,6 +81,14 @@ build_uvicorn_command() {
 
   if [[ -n "$resolved_log_level" ]] && ! has_uvicorn_log_level_arg "$@"; then
     UVICORN_COMMAND+=(--log-level "$resolved_log_level")
+  fi
+
+  # Keep Uvicorn's access log and request.client in sync with MyPortal's
+  # TRUSTED_PROXIES security boundary. Uvicorn otherwise trusts only localhost,
+  # so a Traefik container/network peer appears as the client on every line.
+  # An explicit CLI option remains authoritative.
+  if [[ -n "${TRUSTED_PROXIES:-}" ]] && ! has_uvicorn_forwarded_ips_arg "$@"; then
+    UVICORN_COMMAND+=(--proxy-headers --forwarded-allow-ips "$TRUSTED_PROXIES")
   fi
 }
 

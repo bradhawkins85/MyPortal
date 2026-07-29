@@ -61,3 +61,31 @@ def test_wrapper_preserves_explicit_uvicorn_log_level(tmp_path: Path) -> None:
 
     assert argv.count("--log-level") == 1
     assert argv[-2:] == ["--log-level", "info"]
+
+
+def test_wrapper_configures_uvicorn_trusted_proxies(tmp_path: Path) -> None:
+    """Trusted proxy CIDRs also apply to Uvicorn access-log client addresses."""
+
+    argv = _run_wrapper(
+        tmp_path,
+        {"TRUSTED_PROXIES": "172.18.0.0/16,10.0.0.8"},
+    )
+
+    assert argv[-3:] == [
+        "--proxy-headers",
+        "--forwarded-allow-ips",
+        "172.18.0.0/16,10.0.0.8",
+    ]
+
+
+def test_wrapper_preserves_explicit_forwarded_allow_ips(tmp_path: Path) -> None:
+    """An explicit Uvicorn trust boundary takes precedence over the environment."""
+
+    argv = _run_wrapper(
+        tmp_path,
+        {"TRUSTED_PROXIES": "172.18.0.0/16"},
+        "--forwarded-allow-ips=10.0.0.8",
+    )
+
+    assert argv.count("--proxy-headers") == 0
+    assert argv.count("--forwarded-allow-ips=10.0.0.8") == 1
