@@ -1913,6 +1913,12 @@ async def execute_agent_query(
             job_id=rag_index_job_id,
             cleanup_missing=cleanup_rag_index,
         )
+        # A maintenance indexing run only needs to collect and persist sources.
+        # Continuing through retrieval and final-answer generation makes the job
+        # wait on an unrelated LLM request (with an empty query), which can leave
+        # an otherwise completed index marked as running indefinitely.
+        if rag_index_job_id is not None and allow_empty_query:
+            return {"sources": assembled_sources}
         raw_rag_candidates = await rag_retrieval.retrieve_candidates(
             query_text,
             user,
@@ -1920,6 +1926,11 @@ async def execute_agent_query(
             memberships=resolved_memberships,
             source_filters=sorted(allowed_rag_sources),
         )
+    except rag_index_service.RagIndexCancelled:
+        # Cancellation is job control, not a retrieval failure.  Let the job
+        # runner record the terminal cancelled state instead of continuing into
+        # answer generation.
+        raise
     except Exception as exc:  # pragma: no cover - defensive guard
         log_error("Agent RAG retrieval failed", error=str(exc))
         raw_rag_candidates = []

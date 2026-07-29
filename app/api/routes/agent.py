@@ -136,6 +136,14 @@ async def _run_rag_index_job(
             message="Indexing stopped by an administrator.",
             finished=True,
         )
+    except asyncio.CancelledError:
+        await rag_index_repo.update_job(
+            job_id,
+            status="cancelled",
+            message="Indexing task was cancelled.",
+            finished=True,
+        )
+        raise
     except Exception as exc:  # pragma: no cover - defensive background job guard
         if await rag_index_repo.job_stop_requested(job_id):
             await rag_index_repo.update_job(
@@ -221,15 +229,24 @@ async def stop_rag_index(
     await rag_index_repo.request_job_stop(job_id)
     task = _RAG_INDEX_TASKS.get(job_id)
     if task and not task.done():
-        task.cancel()
         await rag_index_repo.update_job(
             job_id,
             status="cancelled",
             message="Indexing force-stopped by an administrator.",
             finished=True,
         )
+        task.cancel()
         return {"job_id": job_id, "status": "cancelled"}
-    return {"job_id": job_id, "status": "cancelling"}
+    # Background tasks are process-local, so an API request handled by another
+    # worker cannot access the Task object.  Mark the persisted job terminal;
+    # the indexing loop observes cancelled as a stop request on its next check.
+    await rag_index_repo.update_job(
+        job_id,
+        status="cancelled",
+        message="Indexing stopped by an administrator.",
+        finished=True,
+    )
+    return {"job_id": job_id, "status": "cancelled"}
 
 
 @router.post("/rag/matching/pause")
