@@ -133,7 +133,7 @@ def configure_logging() -> None:
     log_level = settings.log_level or ("DEBUG" if settings.verbose_logging else "INFO")
 
     logger.add(sink=lambda msg: print(msg, end=""), format=_format_console_record, level=log_level)
-    _configure_uvicorn_access_logging(verbose=settings.verbose_logging)
+    _configure_uvicorn_logging(log_level=log_level, verbose=settings.verbose_logging)
 
     app_log_path = getattr(settings, "app_log_path", None)
     if app_log_path:
@@ -226,6 +226,14 @@ def _configure_uvicorn_access_logging(*, verbose: bool) -> None:
     ]
     if not verbose:
         access_logger.addFilter(_UvicornHeartbeatAccessFilter())
+
+
+def _configure_uvicorn_logging(*, log_level: str, verbose: bool) -> None:
+    """Keep Uvicorn and its WebSocket implementation at the configured level."""
+
+    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access", "websockets.server"):
+        logging.getLogger(logger_name).setLevel(log_level)
+    _configure_uvicorn_access_logging(verbose=verbose)
 
 
 def _coerce_optional(value: Any) -> Any:

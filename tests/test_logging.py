@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 from loguru import logger
 from app.core.logging import configure_logging, log_debug, log_error, log_info, log_warning
 
@@ -222,4 +221,27 @@ def test_uvicorn_access_filter_allows_heartbeat_when_verbose():
 
         assert access_logger.filter(heartbeat_record)
     finally:
+        access_logger.filters = original_filters
+
+
+def test_uvicorn_logging_uses_configured_warning_level():
+    """Warning logging suppresses Uvicorn's WebSocket lifecycle INFO messages."""
+    import logging
+
+    from app.core.logging import _configure_uvicorn_logging
+
+    logger_names = ("uvicorn", "uvicorn.error", "uvicorn.access", "websockets.server")
+    original_levels = {name: logging.getLogger(name).level for name in logger_names}
+    access_logger = logging.getLogger("uvicorn.access")
+    original_filters = list(access_logger.filters)
+    try:
+        _configure_uvicorn_logging(log_level="WARNING", verbose=False)
+
+        for name in logger_names:
+            target = logging.getLogger(name)
+            assert not target.isEnabledFor(logging.INFO)
+            assert target.isEnabledFor(logging.WARNING)
+    finally:
+        for name, level in original_levels.items():
+            logging.getLogger(name).setLevel(level)
         access_logger.filters = original_filters

@@ -1,0 +1,7 @@
+{
+  "guid": "9bb4459e-a815-4749-a21a-42ff9786a61c",
+  "occurred_at": "2026-07-29T00:00Z",
+  "change_type": "Fix",
+  "summary": "Apply LOG_LEVEL to Uvicorn and WebSocket lifecycle loggers so INFO messages such as accepted connections and connection open are suppressed at WARNING.",
+  "content_hash": "40fbab956d01e9665e86cc67fa30505f2add5fe96b56d604882e6e7471afdd22"
+}
