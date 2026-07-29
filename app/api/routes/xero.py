@@ -6,7 +6,7 @@ import hmac
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from uuid import UUID
 
 import httpx
@@ -117,8 +117,7 @@ def _normalize_xero_invoice_id(value: Any) -> str | None:
     if not candidate:
         return None
     try:
-        UUID(candidate)
-        return candidate
+        return str(UUID(candidate))
     except (TypeError, ValueError, AttributeError):
         return None
 
@@ -133,9 +132,10 @@ async def _fetch_xero_invoice(invoice_id: str) -> dict[str, Any] | None:
     if not tenant_id:
         raise RuntimeError("Xero tenant ID is not configured")
     access_token = await modules_service.acquire_xero_access_token()
+    encoded_invoice_id = quote(normalized_invoice_id, safe="")
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(
-            f"https://api.xero.com/api.xro/2.0/Invoices/{normalized_invoice_id}",
+            f"https://api.xero.com/api.xro/2.0/Invoices/{encoded_invoice_id}",
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "xero-tenant-id": tenant_id,
