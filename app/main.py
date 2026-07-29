@@ -2214,6 +2214,17 @@ async def _build_base_context(
         "has_admin_technician_access": has_admin_technician_access,
         "is_company_admin": is_super_admin or _menu_can(menu_access, "menu.admin.company"),
         "integration_modules": module_lookup,
+        # Normalised, read-only-by-convention feature map for templates.  Keep
+        # integration_modules above for callers which need module metadata.
+        "module_enabled": {
+            slug: bool(module.get("enabled"))
+            for slug, module in (module_lookup or {}).items()
+        },
+        "enabled_module_slugs": frozenset(
+            slug
+            for slug, module in (module_lookup or {}).items()
+            if bool(module.get("enabled"))
+        ),
         "syncro_module_enabled": bool((module_lookup or {}).get("syncro", {}).get("enabled")),
         "enable_auto_refresh": bool(settings.enable_auto_refresh),
         "matrix_chat_enabled": settings.matrix_enabled,
@@ -2293,6 +2304,9 @@ async def _build_public_context(
         "notification_unread_count": 0,
         "enable_auto_refresh": bool(settings.enable_auto_refresh),
         "matrix_chat_enabled": settings.matrix_enabled,
+        "integration_modules": {},
+        "module_enabled": {},
+        "enabled_module_slugs": frozenset(),
     }
     if extra:
         context.update(extra)

@@ -149,6 +149,9 @@ async def register_trello_webhook(
     linked to a company (via the company's Trello board ID field) so that the
     per-company API credentials can be used.
     """
+    from app.services.module_gate import require_enabled
+
+    await require_enabled("trello")
     board_id = board_id.strip()
     if not board_id:
         raise HTTPException(

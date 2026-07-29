@@ -12,6 +12,7 @@ from app.repositories import user_companies as user_company_repo
 from app.schemas.invoices import InvoiceCreate, InvoiceResponse, InvoiceUpdate
 from app.services import audit as audit_service
 from app.services import xero as xero_service
+from app.services.module_gate import require_enabled
 
 router = APIRouter(prefix="/api/invoices", tags=["Invoices"])
 
@@ -173,6 +174,7 @@ async def sync_invoice_to_xero(
     _: None = Depends(require_database),
     current_user: dict = Depends(require_super_admin),
 ):
+    await require_enabled("xero")
     existing = await invoice_repo.get_invoice_by_id(invoice_id)
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")

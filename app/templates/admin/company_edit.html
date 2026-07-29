@@ -36,6 +36,7 @@
               required
             />
           </div>
+          {% if module_enabled.get('syncro', false) %}
           <div class="form-field">
             <label class="form-label" for="edit-company-syncro">Syncro company ID</label>
             <input
@@ -46,6 +47,8 @@
               maxlength="255"
             />
           </div>
+          {% endif %}
+          {% if module_enabled.get('tacticalrmm', false) %}
           <div class="form-field">
             <label class="form-label" for="edit-company-tactical">Tactical RMM client ID</label>
             <div class="form-field__group">
@@ -74,6 +77,8 @@
               </button>
             </div>
           </div>
+          {% endif %}
+          {% if module_enabled.get('xero', false) %}
           <div class="form-field">
             <label class="form-label" for="edit-company-xero">Xero ID</label>
             <div class="form-field__group">
@@ -102,6 +107,8 @@
               </button>
             </div>
           </div>
+          {% endif %}
+          {% if module_enabled.get('hudu', false) %}
           <div class="form-field">
             <label class="form-label" for="edit-company-hudu">Hudu ID</label>
             <div class="form-field__group">
@@ -130,6 +137,8 @@
               </button>
             </div>
           </div>
+          {% endif %}
+          {% if module_enabled.get('huntress', false) %}
           <div class="form-field">
             <label class="form-label" for="edit-company-huntress">Huntress organisation ID</label>
             <div class="form-field__group">
@@ -160,6 +169,8 @@
             </div>
             <p class="form-help">Optional. Links this company to a Huntress organisation for EDR / ITDR / SIEM / SOC data. The nightly company-ID lookup task can populate it when the name matches.</p>
           </div>
+          {% endif %}
+          {% if module_enabled.get('huntress', false) %}
           <div class="form-field">
             <label class="form-label" for="edit-company-huntress-sat">Huntress SAT account ID</label>
             <div class="form-field__group">
@@ -172,6 +183,8 @@
             </div>
             <p class="form-help">Optional. Links this company to its separate Huntress Managed SAT account. SAT API calls use this ID rather than the EDR organisation ID.</p>
           </div>
+          {% endif %}
+          {% if module_enabled.get('trello', false) %}
           <div class="form-field">
             <label class="form-label" for="edit-company-trello-board">Trello board ID</label>
             <input
@@ -184,6 +197,8 @@
             />
             <p class="form-help">Link this company to a Trello board. Cards created on the board will become tickets. Find the board ID in the board URL or via the Trello API.</p>
           </div>
+          {% endif %}
+          {% if module_enabled.get('trello', false) %}
           <div class="form-field">
             <label class="form-label" for="edit-company-trello-api-key">Trello API key</label>
             <input
@@ -197,6 +212,8 @@
             />
             <p class="form-help">Stored securely. Leave blank to keep the existing value. Copy the <strong>Key</strong> (not the Secret) from <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">trello.com/app-key</a>.</p>
           </div>
+          {% endif %}
+          {% if module_enabled.get('trello', false) %}
           <div class="form-field">
             <label class="form-label" for="edit-company-trello-token">Trello OAuth token</label>
             <input
@@ -211,6 +228,7 @@
             <p class="form-help">Stored securely. Leave blank to keep the existing value. This is the <strong>OAuth Token</strong> — <em>not</em> the Secret shown on the app-key page. Go to <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">trello.com/app-key</a>, then click <strong>Token</strong> and authorise the app to generate it.</p>
           </div>
           {% if form_data.trello_board_id %}
+          {% endif %}
           <div class="form-field">
             <label class="form-label">Register Trello webhook</label>
             <div class="form-field__group">

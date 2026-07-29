@@ -141,7 +141,7 @@
                             <button type="submit" class="header-title-menu__link" role="menuitem">Load to Cart</button>
                           </form>
                         </li>
-                        {% if is_admin %}
+                        {% if is_admin and module_enabled.get('xero', false) %}
                           <li class="header-title-menu__item" role="none">
                             <button
                               type="button"

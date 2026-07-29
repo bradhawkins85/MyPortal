@@ -70,7 +70,7 @@
                             <a href="{{ manage_url }}" class="header-title-menu__link" role="menuitem">Manage</a>
                           </li>
                         {% endif %}
-                        {% if module.slug == "syncro" %}
+                        {% if module.slug == "syncro" and module.enabled %}
                           <li class="header-title-menu__item" role="none">
                             <form action="/admin/syncro/import-companies" method="post" class="inline-form">
                               {% if csrf_token %}
@@ -80,7 +80,7 @@
                             </form>
                           </li>
                         {% endif %}
-                        {% if module.slug == "tacticalrmm" %}
+                        {% if module.slug == "tacticalrmm" and module.enabled %}
                           <li class="header-title-menu__item" role="none">
                             <form action="/admin/modules/tacticalrmm/push-companies" method="post" class="inline-form">
                               {% if csrf_token %}
@@ -118,7 +118,7 @@
                             </button>
                           </li>
                         {% endif %}
-                        {% if module.slug == "xero" %}
+                        {% if module.slug == "xero" and module.enabled %}
                           {% set xero_webhook_url = (module_webhook_urls or {}).get("xero_webhook") %}
                           {% if xero_webhook_url %}
                             <li class="header-title-menu__item" role="none">
