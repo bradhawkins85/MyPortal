@@ -885,6 +885,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "description": "Receive and review phone call webhook events.",
         "icon": "☎️",
         "settings": {},
+        "enabled": True,
     },
     {
         "slug": "m365-mail",
@@ -989,6 +990,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
             "recordings_path": "/var/lib/myportal/call_recordings",
             "phone_system_type": "generic",
         },
+        "enabled": True,
     },
     {
         "slug": "whisperx",
@@ -2258,10 +2260,8 @@ async def ensure_default_modules() -> None:
             updates["description"] = default["description"]
         if current.get("icon") != default["icon"]:
             updates["icon"] = default["icon"]
-        # If the default specifies enabled=True and the module is currently disabled,
-        # enable it (for internal action modules that should always be available)
-        if default_enabled and not current.get("enabled", False):
-            updates["enabled"] = True
+        # Never overwrite an existing enabled flag.  Migration-created rows and
+        # operator toggles are authoritative; defaults apply only to new rows.
         if updates:
             await module_repo.update_module(default["slug"], **updates)
 
