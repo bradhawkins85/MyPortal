@@ -1118,11 +1118,11 @@ async def update_vendor(
         return await get_vendor_by_id(vendor_id)
     
     params.append(vendor_id)
-    query = f"""
-        UPDATE bc_vendor
-        SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
-        WHERE id = %s
-    """
+    query = (
+        "UPDATE bc_vendor SET "
+        + ", ".join(updates)
+        + ", updated_at = CURRENT_TIMESTAMP WHERE id = %s"
+    )
     await db.execute(query, tuple(params))
     return await get_vendor_by_id(vendor_id)
 
