@@ -23,7 +23,7 @@
         </div>
       </header>
       <div class="card__body card__body--stacked">
-        <form action="/admin/companies/{{ company.id }}" method="post" class="form" autocomplete="off">
+        <form id="company-settings-form" action="/admin/companies/{{ company.id }}" method="post" class="form" autocomplete="off">
           {% include "partials/csrf.html" %}
           <div class="form-field">
             <label class="form-label" for="edit-company-name">Company name</label>
@@ -275,31 +275,6 @@
             <p class="form-help">Use commas to list domains. Domains are matched case-insensitively.</p>
           </div>
           <div class="form-field form-field--checkbox">
-            <label class="checkbox" for="edit-company-vip">
-              <input
-                id="edit-company-vip"
-                type="checkbox"
-                name="isVip"
-                value="1"
-                {% if form_data.is_vip %}checked{% endif %}
-              />
-              <span>VIP pricing</span>
-            </label>
-          </div>
-          <div class="form-field form-field--checkbox">
-            <label class="checkbox" for="edit-company-default-ticket-replies-billable">
-              <input
-                id="edit-company-default-ticket-replies-billable"
-                type="checkbox"
-                name="defaultTicketRepliesBillable"
-                value="1"
-                {% if form_data.default_ticket_replies_billable %}checked{% endif %}
-              />
-              <span>Default ticket replies to Billable</span>
-            </label>
-            <p class="form-help">When enabled, the Billable checkbox is ticked automatically for new technician ticket replies. Technicians can untick it on individual replies when needed.</p>
-          </div>
-          <div class="form-field form-field--checkbox">
             <label class="checkbox" for="edit-company-offboarding-email-forwarding">
               <input
                 id="edit-company-offboarding-email-forwarding"
@@ -311,98 +286,6 @@
               <span>Enable email forwarding on offboarding requests</span>
             </label>
             <p class="form-help">When enabled, admins can select a staff member to forward emails to when submitting an offboarding request. Disable if your company uses a fixed forwarding address configured in the workflow step.</p>
-          </div>
-          <div class="form-field">
-            <label class="form-label" for="edit-company-onedrive-export-site">OneDrive export SharePoint site</label>
-            {% if m365_has_credentials %}
-              <div class="form-field__group">
-                <select
-                  id="edit-company-onedrive-export-site"
-                  name="onedriveExportSite"
-                  class="form-input"
-                  data-onedrive-export-sites-select
-                >
-                  <option value="">Do not enable manual OneDrive exports</option>
-                  {% if form_data.onedrive_export_drive_id %}
-                    {% set saved_site_payload = {
-                      'site_id': form_data.onedrive_export_site_id,
-                      'site_name': form_data.onedrive_export_site_name,
-                      'drive_id': form_data.onedrive_export_drive_id
-                    } %}
-                    <option value="{{ saved_site_payload | tojson | forceescape }}" selected>
-                      Current: {{ form_data.onedrive_export_site_name or form_data.onedrive_export_drive_id }}
-                    </option>
-                  {% endif %}
-                </select>
-                <button
-                  type="button"
-                  class="button button--ghost"
-                  data-lookup-onedrive-export-sites
-                  title="Lookup SharePoint sites for OneDrive exports"
-                  aria-label="Lookup SharePoint sites for OneDrive exports from Microsoft Graph"
-                >
-                  <span class="button__icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" focusable="false">
-                      <path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/>
-                      <path d="M20 12h2a10 10 0 0 0-10-10v2a8 8 0 0 1 8 8z"/>
-                      <path d="M12 20v2a10 10 0 0 0 10-10h-2a8 8 0 0 1-8 8z"/>
-                      <path d="M4 12H2a10 10 0 0 0 10 10v-2a8 8 0 0 1-8-8z"/>
-                    </svg>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  class="button button--ghost"
-                  data-create-offboarded-staff-site
-                  title="Create the Offboarded Staff SharePoint site for OneDrive exports"
-                  aria-label="Create Offboarded Staff SharePoint site"
-                  hidden
-                >
-                  Create Offboarded Staff
-                </button>
-              </div>
-              <p class="form-help">Click the lookup button to load SharePoint sites/default document libraries, then select the destination that will receive OneDrive export folders. If Offboarded Staff is missing after lookup, use the create button to add it.</p>
-              {% if form_data.onedrive_export_drive_id %}
-                <p class="form-help">Current saved export site: {{ form_data.onedrive_export_site_name or form_data.onedrive_export_drive_id }}</p>
-              {% endif %}
-              <p class="form-help form-help--error" data-onedrive-export-sites-error hidden></p>
-            {% else %}
-              <input class="form-input" id="edit-company-onedrive-export-site" value="Configure Microsoft 365 credentials first" readonly />
-              <p class="form-help">Complete this company's Office 365 configuration before selecting a OneDrive export destination.</p>
-            {% endif %}
-          </div>
-          <div class="form-field">
-            <label class="form-label">Payment method</label>
-            <div class="form-checkbox-group">
-              <label class="form-checkbox__label">
-                <input
-                  type="checkbox"
-                  name="invoicePrepay"
-                  value="1"
-                  {% if 'invoice_prepay' in form_data.payment_method %}checked{% endif %}
-                />
-                <span>Invoice Prepay</span>
-              </label>
-              <label class="form-checkbox__label">
-                <input
-                  type="checkbox"
-                  name="invoicePostpay"
-                  value="1"
-                  {% if 'invoice_postpay' in form_data.payment_method %}checked{% endif %}
-                />
-                <span>Invoice Postpay</span>
-              </label>
-              <label class="form-checkbox__label">
-                <input
-                  type="checkbox"
-                  name="stripeEnabled"
-                  value="1"
-                  {% if 'stripe' in form_data.payment_method %}checked{% endif %}
-                />
-                <span>Stripe (coming soon)</span>
-              </label>
-            </div>
-            <p class="form-help">Select at least one payment method. Invoice Prepay sends an invoice before service is rendered. Invoice Postpay sends an invoice after the billing period. Stripe will take payment immediately (coming soon).</p>
           </div>
           <div class="form-field">
             <label class="form-label">Purchase order options</label>
@@ -425,6 +308,85 @@
         </form>
       </div>
     </section>
+    <details class="card card--panel card-collapsible admin-grid__full" data-company-edit-section="payments">
+      <summary class="card__header card__header--collapsible card__header--stacked">
+        <div>
+          <h2 class="card__title">Payments</h2>
+          <p class="card__subtitle">Configure payment methods, VIP pricing, and billable ticket reply defaults.</p>
+        </div>
+        <div class="card__collapsible-meta" aria-hidden="true">
+          <span class="card__toggle-icon"></span>
+        </div>
+      </summary>
+      <div class="card-collapsible__content">
+      <div class="form-field form-field--checkbox">
+        <label class="checkbox" for="edit-company-vip">
+          <input
+            id="edit-company-vip"
+            type="checkbox"
+            name="isVip"
+            form="company-settings-form"
+            value="1"
+            {% if form_data.is_vip %}checked{% endif %}
+          />
+          <span>VIP pricing</span>
+        </label>
+      </div>
+      <div class="form-field form-field--checkbox">
+        <label class="checkbox" for="edit-company-default-ticket-replies-billable">
+          <input
+            id="edit-company-default-ticket-replies-billable"
+            type="checkbox"
+            name="defaultTicketRepliesBillable"
+            form="company-settings-form"
+            value="1"
+            {% if form_data.default_ticket_replies_billable %}checked{% endif %}
+          />
+          <span>Default ticket replies to Billable</span>
+        </label>
+        <p class="form-help">When enabled, the Billable checkbox is ticked automatically for new technician ticket replies. Technicians can untick it on individual replies when needed.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Payment method</label>
+        <div class="form-checkbox-group">
+          <label class="form-checkbox__label">
+            <input
+              type="checkbox"
+              name="invoicePrepay"
+              form="company-settings-form"
+              value="1"
+              {% if 'invoice_prepay' in form_data.payment_method %}checked{% endif %}
+            />
+            <span>Invoice Prepay</span>
+          </label>
+          <label class="form-checkbox__label">
+            <input
+              type="checkbox"
+              name="invoicePostpay"
+              form="company-settings-form"
+              value="1"
+              {% if 'invoice_postpay' in form_data.payment_method %}checked{% endif %}
+            />
+            <span>Invoice Postpay</span>
+          </label>
+          <label class="form-checkbox__label">
+            <input
+              type="checkbox"
+              name="stripeEnabled"
+              form="company-settings-form"
+              value="1"
+              {% if 'stripe' in form_data.payment_method %}checked{% endif %}
+            />
+            <span>Stripe (coming soon)</span>
+          </label>
+        </div>
+        <p class="form-help">Select at least one payment method. Invoice Prepay sends an invoice before service is rendered. Invoice Postpay sends an invoice after the billing period. Stripe will take payment immediately (coming soon).</p>
+      </div>
+        <div class="form-actions">
+          <button type="submit" class="button" form="company-settings-form">Save company settings</button>
+        </div>
+      </div>
+    </details>
     {% if is_super_admin %}
       <details class="card card--panel card-collapsible admin-grid__full" data-staff-field-config-panel>
         <summary class="card__header card__header--collapsible card__header--stacked">
@@ -827,6 +789,70 @@
             >Remove credentials</button>
           </form>
           {% endif %}
+          <hr class="divider" style="margin: 1.5rem 0;" />
+          <div class="form-field">
+            <label class="form-label" for="edit-company-onedrive-export-site">OneDrive export SharePoint site</label>
+            {% if m365_has_credentials %}
+              <div class="form-field__group">
+                <select
+                  id="edit-company-onedrive-export-site"
+                  name="onedriveExportSite"
+                  class="form-input"
+                  data-onedrive-export-sites-select
+                  form="company-settings-form"
+                >
+                  <option value="">Do not enable manual OneDrive exports</option>
+                  {% if form_data.onedrive_export_drive_id %}
+                    {% set saved_site_payload = {
+                      'site_id': form_data.onedrive_export_site_id,
+                      'site_name': form_data.onedrive_export_site_name,
+                      'drive_id': form_data.onedrive_export_drive_id
+                    } %}
+                    <option value="{{ saved_site_payload | tojson | forceescape }}" selected>
+                      Current: {{ form_data.onedrive_export_site_name or form_data.onedrive_export_drive_id }}
+                    </option>
+                  {% endif %}
+                </select>
+                <button
+                  type="button"
+                  class="button button--ghost"
+                  data-lookup-onedrive-export-sites
+                  title="Lookup SharePoint sites for OneDrive exports"
+                  aria-label="Lookup SharePoint sites for OneDrive exports from Microsoft Graph"
+                >
+                  <span class="button__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/>
+                      <path d="M20 12h2a10 10 0 0 0-10-10v2a8 8 0 0 1 8 8z"/>
+                      <path d="M12 20v2a10 10 0 0 0 10-10h-2a8 8 0 0 1-8 8z"/>
+                      <path d="M4 12H2a10 10 0 0 0 10 10v-2a8 8 0 0 1-8-8z"/>
+                    </svg>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  class="button button--ghost"
+                  data-create-offboarded-staff-site
+                  title="Create the Offboarded Staff SharePoint site for OneDrive exports"
+                  aria-label="Create Offboarded Staff SharePoint site"
+                  hidden
+                >
+                  Create Offboarded Staff
+                </button>
+              </div>
+              <p class="form-help">Click the lookup button to load SharePoint sites/default document libraries, then select the destination that will receive OneDrive export folders. If Offboarded Staff is missing after lookup, use the create button to add it.</p>
+              {% if form_data.onedrive_export_drive_id %}
+                <p class="form-help">Current saved export site: {{ form_data.onedrive_export_site_name or form_data.onedrive_export_drive_id }}</p>
+              {% endif %}
+              <p class="form-help form-help--error" data-onedrive-export-sites-error hidden></p>
+            {% else %}
+              <input class="form-input" id="edit-company-onedrive-export-site" value="Configure Microsoft 365 credentials first" readonly />
+              <p class="form-help">Complete this company's Microsoft 365 configuration before selecting a OneDrive export destination.</p>
+            {% endif %}
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="button" form="company-settings-form">Save company settings</button>
+          </div>
           {% if true %}
           <hr class="divider" style="margin: 1.5rem 0;" />
           <div>
@@ -1847,6 +1873,7 @@
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
   <script src="{{ static_url('/static/js/admin.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/company_edit_sections.js') }}" defer></script>
   {% if is_super_admin %}
     <script src="{{ static_url('/static/js/action-payload-editor.js') }}" defer></script>
     <script src="{{ static_url('/static/js/automation.js') }}" defer></script>
