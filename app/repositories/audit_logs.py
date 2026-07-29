@@ -91,11 +91,13 @@ async def list_audit_logs(
     params.append(int(limit))
     params.append(int(offset))
     rows = await db.fetch_all(
-        f"""
+        """
         SELECT al.*, u.email AS user_email
         FROM audit_logs AS al
         LEFT JOIN users AS u ON u.id = al.user_id
-        {where}
+        """
+        + where
+        + """
         ORDER BY al.created_at DESC
         LIMIT %s OFFSET %s
         """,
@@ -150,12 +152,12 @@ async def count_audit_logs(
         params.extend([like_value, like_value, like_value])
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     row = await db.fetch_one(
-        f"""
+        """
         SELECT COUNT(*) AS total
         FROM audit_logs AS al
         LEFT JOIN users AS u ON u.id = al.user_id
-        {where}
-        """,
+        """
+        + where,
         tuple(params),
     )
     if not row:
