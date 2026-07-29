@@ -343,36 +343,7 @@
                     data-table-filter="tickets-table" data-ticket-dashboard-search
                   />
                 </div>
-              </div>
-
-            </div>
-          </aside>
-
-          <div class="ticket-dashboard__right-column">
-            <div class="ticket-dashboard__stats management__stats" data-ticket-stats>
-            <article class="stat-card">
-              <h3 class="stat-card__title">Open tickets</h3>
-              <p class="stat-card__value" data-ticket-stat="open">{{ ticket_status_counts.get('open', 0) }}</p>
-            </article>
-            <article class="stat-card">
-              <h3 class="stat-card__title">In progress</h3>
-              <p class="stat-card__value" data-ticket-stat="in_progress">
-                {{ ticket_status_counts.get('in_progress', 0) + ticket_status_counts.get('pending', 0) }}
-              </p>
-            </article>
-            <article class="stat-card">
-              <h3 class="stat-card__title">Resolved</h3>
-              <p class="stat-card__value" data-ticket-stat="resolved">
-                {{ ticket_status_counts.get('resolved', 0) + ticket_status_counts.get('closed', 0) }}
-              </p>
-            </article>
-            <article class="stat-card">
-              <h3 class="stat-card__title">Total</h3>
-              <p class="stat-card__value" data-ticket-stat="total">{{ ticket_total }}</p>
-            </article>
-          </div>
-
-          <div class="management__toolbar">
+                <div class="management__toolbar ticket-dashboard__dropdowns">
             {% if can_bulk_delete_tickets %}
               {% set current_query = request.url.query %}
               <form
@@ -533,6 +504,36 @@
               </div>
             </div>
           </div>
+              </div>
+
+            </div>
+          </aside>
+
+          <div class="ticket-dashboard__right-column">
+            <div class="ticket-dashboard__stats management__stats" data-ticket-stats>
+            <article class="stat-card">
+              <h3 class="stat-card__title">Open tickets</h3>
+              <p class="stat-card__value" data-ticket-stat="open">{{ ticket_status_counts.get('open', 0) }}</p>
+            </article>
+            <article class="stat-card">
+              <h3 class="stat-card__title">In progress</h3>
+              <p class="stat-card__value" data-ticket-stat="in_progress">
+                {{ ticket_status_counts.get('in_progress', 0) + ticket_status_counts.get('pending', 0) }}
+              </p>
+            </article>
+            <article class="stat-card">
+              <h3 class="stat-card__title">Resolved</h3>
+              <p class="stat-card__value" data-ticket-stat="resolved">
+                {{ ticket_status_counts.get('resolved', 0) + ticket_status_counts.get('closed', 0) }}
+              </p>
+            </article>
+            <article class="stat-card">
+              <h3 class="stat-card__title">Total</h3>
+              <p class="stat-card__value" data-ticket-stat="total">{{ ticket_total }}</p>
+            </article>
+          </div>
+
+
 
           <div class="management__toolbar-info">
             <span data-table-info>Showing {{ tickets|length }} tickets</span>
