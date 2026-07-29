@@ -173,6 +173,32 @@ def test_ticket_columns_js_exists():
     assert js_path.exists(), "ticket_columns.js should exist in app/static/js/"
 
 
+def test_every_ticket_data_column_gets_a_typed_filter():
+    """The view manager builds filters from every table data-column header."""
+    js = (TEMPLATE_PATH.parent.parent.parent / "static" / "js" / "ticket_views.js").read_text(encoding="utf-8")
+
+    assert "thead th[data-column]" in js
+    assert "setupColumnFilters()" in js
+    assert "dateColumns" in js
+    assert "numberColumns" in js
+    assert "booleanColumns" in js
+    assert "Does not contain" in js
+    assert "In the last 30 days" in js
+    assert "data-column-filter-clear" in js
+
+
+def test_column_filters_are_saved_and_active_headers_are_highlighted():
+    """Saved views persist column rules and CSS identifies active headings."""
+    root = TEMPLATE_PATH.parent.parent.parent
+    js = (root / "static" / "js" / "ticket_views.js").read_text(encoding="utf-8")
+    css = (root / "static" / "css" / "app.css").read_text(encoding="utf-8")
+
+    assert "column_filters: this.filterState.columnFilters" in js
+    assert "view.filters.column_filters || {}" in js
+    assert "ticket-column-filter--active" in css
+    assert "ticket-status-filter--active" in css
+
+
 def test_localStorage_storage_key_in_js():
     """The JS file should use a distinct localStorage key for ticket columns."""
     js_path = (
