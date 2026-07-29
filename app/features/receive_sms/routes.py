@@ -9,13 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from app.api.dependencies.api_keys import require_api_key
+from app.api.dependencies.modules import require_module_enabled
 from app.core.database import db
 from app.core.logging import log_error
 from app.repositories import tickets as tickets_repo
 from app.services import tickets as tickets_service
 from app.services.sanitization import sanitize_rich_text
 
-router = APIRouter(prefix="/api/integration-modules/receive-sms", tags=["Receive SMS"])
+router = APIRouter(prefix="/api/integration-modules/receive-sms", tags=["Receive SMS"], dependencies=[Depends(require_module_enabled("receive-sms"))])
 
 
 class ReceiveSMSPayload(BaseModel):

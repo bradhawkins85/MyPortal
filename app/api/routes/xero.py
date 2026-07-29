@@ -10,12 +10,13 @@ from urllib.parse import urlencode
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from itsdangerous import URLSafeSerializer
 from itsdangerous import BadSignature
 from loguru import logger
 
+from app.api.dependencies.modules import require_module_enabled
 from app.core.config import Settings, get_settings
 from app.security.flash import flash_redirect
 from app.core.logging import log_error, log_info
@@ -25,8 +26,9 @@ from app.security.session import session_manager
 from app.services import modules as modules_service
 from app.services import audit as audit_service
 
-router = APIRouter(prefix="/api/integration-modules/xero", tags=["Xero"])
-oauth_router = APIRouter(prefix="/xero", tags=["Xero OAuth"])
+_require_xero_enabled = require_module_enabled("xero")
+router = APIRouter(prefix="/api/integration-modules/xero", tags=["Xero"], dependencies=[Depends(_require_xero_enabled)])
+oauth_router = APIRouter(prefix="/xero", tags=["Xero OAuth"], dependencies=[Depends(_require_xero_enabled)])
 
 _settings: Settings | None = None
 
@@ -186,13 +188,8 @@ async def _apply_xero_invoice_event(event: dict[str, Any], request: Request) -> 
 
 
 async def _ensure_module_enabled() -> dict[str, Any]:
-    module = await modules_service.get_module("xero", redact=False)
-    if not module or not module.get("enabled"):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Xero module is disabled",
-        )
-    return module
+    """Backward-compatible alias for callers of the former local guard."""
+    return await _require_xero_enabled()
 
 
 @router.post(
