@@ -34,7 +34,8 @@
         priorities: [],
         companies: [],
         assignedUsers: [],
-        search: ''
+        search: '',
+        columnFilters: {}
       };
       this.groupingFields = [];
       this.groupingField = null;
@@ -50,6 +51,7 @@
       this.setupEventListeners();
       this.setupStatusFilters();
       this.setupStatusFilterMenu();
+      this.setupColumnFilters();
       this.setupGroupingControls();
       await this.loadViews();
       this.updateViewActions();
@@ -181,8 +183,132 @@
             this.filterState.statuses = this.filterState.statuses.filter(s => s !== status);
           }
           this.applyFilters();
+          this.updateActiveFilterHeaders();
         });
       });
+    }
+
+    /** Add a type-appropriate filter popover to every data column header. */
+    setupColumnFilters() {
+      const table = this.container.querySelector('[data-table]');
+      if (!table) return;
+      const dateColumns = new Set(['updated', 'review-date', 'created', 'closed']);
+      const numberColumns = new Set([
+        'id', 'billable-minutes', 'non-billable-minutes', 'company-id',
+        'attachment-count', 'task-count', 'open-task-count', 'age-days',
+        'updated-age-hours', 'in-status-hours', 'last-reply-age-hours'
+      ]);
+      const booleanColumns = new Set(['has-attachments', 'has-tasks', 'has-open-tasks', 'latest-reply-internal']);
+
+      table.querySelectorAll('thead th[data-column]').forEach((header) => {
+        const column = header.dataset.column;
+        // Status already has its purpose-built multi-select filter.
+        if (!column || column === 'status') return;
+        const type = dateColumns.has(column) ? 'date' : numberColumns.has(column) ? 'number' : booleanColumns.has(column) ? 'boolean' : 'text';
+        const label = header.textContent.trim();
+        header.textContent = '';
+        const wrapper = document.createElement('span');
+        wrapper.className = 'ticket-column-filter';
+        wrapper.dataset.columnFilterMenu = column;
+        wrapper.innerHTML = `<span class="ticket-column-filter__label">${this.escapeHtml(label)}</span>`;
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'ticket-column-filter__toggle';
+        toggle.setAttribute('aria-label', `Filter ${label}`);
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 5.25A1.25 1.25 0 0 1 4.75 4h14.5a1.25 1.25 0 0 1 .96 2.05L14.5 12.9v5.35a1.25 1.25 0 0 1-.69 1.12l-2.5 1.25a1.25 1.25 0 0 1-1.81-1.12v-6.6L3.79 6.05a1.25 1.25 0 0 1-.29-.8Z"/></svg>';
+        const panel = document.createElement('span');
+        panel.className = 'ticket-column-filter__panel';
+        panel.hidden = true;
+        panel.innerHTML = this.columnFilterControls(column, type, label);
+        wrapper.append(toggle, panel);
+        header.appendChild(wrapper);
+
+        const stop = (event) => event.stopPropagation();
+        panel.addEventListener('click', stop);
+        toggle.addEventListener('click', (event) => {
+          stop(event);
+          this.container.querySelectorAll('[data-column-filter-menu]').forEach((menu) => {
+            if (menu !== wrapper) {
+              menu.querySelector('.ticket-column-filter__panel').hidden = true;
+              menu.querySelector('.ticket-column-filter__toggle').setAttribute('aria-expanded', 'false');
+            }
+          });
+          panel.hidden = !panel.hidden;
+          toggle.setAttribute('aria-expanded', String(!panel.hidden));
+        });
+        panel.querySelector('[data-column-filter-apply]').addEventListener('click', () => {
+          const operator = panel.querySelector('[data-column-filter-operator]').value;
+          const input = panel.querySelector('[data-column-filter-value]');
+          const value = input ? input.value.trim() : '';
+          if (operator === 'relative' || value !== '') this.filterState.columnFilters[column] = { type, operator, value };
+          else delete this.filterState.columnFilters[column];
+          panel.hidden = true;
+          toggle.setAttribute('aria-expanded', 'false');
+          this.updateActiveFilterHeaders();
+          this.applyFilters();
+        });
+        panel.querySelector('[data-column-filter-clear]').addEventListener('click', () => {
+          delete this.filterState.columnFilters[column];
+          this.populateColumnFilterPanel(column);
+          panel.hidden = true;
+          this.updateActiveFilterHeaders();
+          this.applyFilters();
+        });
+      });
+      document.addEventListener('click', () => this.closeColumnFilterMenus());
+      this.updateActiveFilterHeaders();
+    }
+
+    escapeHtml(value) {
+      const node = document.createElement('span');
+      node.textContent = value;
+      return node.innerHTML;
+    }
+
+    columnFilterControls(column, type, label) {
+      const operators = type === 'text'
+        ? [['contains', 'Contains'], ['not_contains', 'Does not contain'], ['equals', 'Equals'], ['not_equals', 'Does not equal'], ['starts_with', 'Starts with'], ['ends_with', 'Ends with']]
+        : type === 'number'
+          ? [['equals', 'Equals'], ['not_equals', 'Does not equal'], ['greater', 'Greater than'], ['greater_equal', 'At least'], ['less', 'Less than'], ['less_equal', 'At most']]
+          : type === 'date'
+            ? [['on', 'On'], ['before', 'Before'], ['after', 'After'], ['on_or_before', 'On or before'], ['on_or_after', 'On or after'], ['relative', 'In the last 30 days']]
+            : [['equals', 'Is']];
+      const options = operators.map(([value, text]) => `<option value="${value}">${text}</option>`).join('');
+      const inputType = type === 'number' ? 'number' : type === 'date' ? 'date' : 'text';
+      const valueControl = type === 'boolean'
+        ? '<select class="form-input" data-column-filter-value><option value="true">True</option><option value="false">False</option></select>'
+        : `<input class="form-input" data-column-filter-value type="${inputType}" aria-label="Filter value for ${this.escapeHtml(label)}">`;
+      return `<span class="ticket-column-filter__title">Filter ${this.escapeHtml(label)}</span><select class="form-input" data-column-filter-operator>${options}</select>${valueControl}<span class="ticket-column-filter__actions"><button type="button" class="button button--primary button--compact" data-column-filter-apply>Apply</button><button type="button" class="button button--ghost button--compact" data-column-filter-clear>Clear</button></span>`;
+    }
+
+    closeColumnFilterMenus() {
+      this.container.querySelectorAll('[data-column-filter-menu]').forEach((menu) => {
+        menu.querySelector('.ticket-column-filter__panel').hidden = true;
+        menu.querySelector('.ticket-column-filter__toggle').setAttribute('aria-expanded', 'false');
+      });
+    }
+
+    populateColumnFilterPanel(column) {
+      const menu = this.container.querySelector(`[data-column-filter-menu="${column}"]`);
+      if (!menu) return;
+      const filter = this.filterState.columnFilters[column];
+      const operator = menu.querySelector('[data-column-filter-operator]');
+      const value = menu.querySelector('[data-column-filter-value]');
+      if (operator) operator.value = filter ? filter.operator : operator.options[0].value;
+      if (value) value.value = filter ? filter.value : (filter && filter.type === 'boolean' ? 'true' : '');
+    }
+
+    updateActiveFilterHeaders() {
+      this.container.querySelectorAll('[data-column-filter-menu]').forEach((menu) => {
+        const active = Boolean(this.filterState.columnFilters[menu.dataset.columnFilterMenu]);
+        menu.classList.toggle('ticket-column-filter--active', active);
+      });
+      const statusMenu = this.container.querySelector('[data-ticket-status-filter-menu]');
+      if (statusMenu) {
+        const total = this.container.querySelectorAll('[data-status-filter]').length;
+        statusMenu.classList.toggle('ticket-status-filter--active', this.filterState.statuses.length > 0 && this.filterState.statuses.length < total);
+      }
     }
 
     /**
@@ -319,6 +445,8 @@
       rows.forEach(row => {
         let shouldShow = true;
 
+        shouldShow = shouldShow && this.rowMatchesColumnFilters(row);
+
         // Status filter
         if (this.filterState.statuses.length > 0) {
           const statusCell = row.querySelector('[data-label="Status"]');
@@ -364,6 +492,8 @@
       rows.forEach(row => {
         let shouldShow = true;
 
+        shouldShow = shouldShow && this.rowMatchesColumnFilters(row);
+
         // Priority filter is client-side only (API does not support priority filtering)
         if (this.filterState.priorities.length > 0) {
           const priorityCell = row.querySelector('[data-label="Priority"]');
@@ -384,6 +514,37 @@
       if (this.groupingField || this.groupingFields.length) {
         this.applyGrouping();
       }
+    }
+
+    rowMatchesColumnFilters(row) {
+      return Object.entries(this.filterState.columnFilters).every(([column, filter]) => {
+        const cell = row.querySelector(`[data-column="${column}"]`);
+        if (!cell) return false;
+        const raw = (cell.getAttribute('data-value') || cell.textContent || '').trim();
+        if (filter.type === 'number') {
+          const actual = Number(raw);
+          const expected = Number(filter.value);
+          if (!Number.isFinite(actual) || !Number.isFinite(expected)) return false;
+          return { equals: actual === expected, not_equals: actual !== expected, greater: actual > expected,
+            greater_equal: actual >= expected, less: actual < expected, less_equal: actual <= expected }[filter.operator] ?? true;
+        }
+        if (filter.type === 'date') {
+          const actual = new Date(raw.replace(' ', 'T'));
+          if (Number.isNaN(actual.getTime())) return false;
+          if (filter.operator === 'relative') return actual >= new Date(Date.now() - (30 * 86400000)) && actual <= new Date();
+          const expected = new Date(`${filter.value}T00:00:00`);
+          if (Number.isNaN(expected.getTime())) return false;
+          const actualDay = new Date(actual.getFullYear(), actual.getMonth(), actual.getDate()).getTime();
+          const expectedDay = new Date(expected.getFullYear(), expected.getMonth(), expected.getDate()).getTime();
+          return { on: actualDay === expectedDay, before: actualDay < expectedDay, after: actualDay > expectedDay,
+            on_or_before: actualDay <= expectedDay, on_or_after: actualDay >= expectedDay }[filter.operator] ?? true;
+        }
+        const actual = raw.toLocaleLowerCase();
+        const expected = String(filter.value).toLocaleLowerCase();
+        if (filter.type === 'boolean') return actual === expected;
+        return { contains: actual.includes(expected), not_contains: !actual.includes(expected), equals: actual === expected,
+          not_equals: actual !== expected, starts_with: actual.startsWith(expected), ends_with: actual.endsWith(expected) }[filter.operator] ?? true;
+      });
     }
 
     /**
@@ -582,6 +743,7 @@
           if (view.filters) {
             this.filterState.statuses = view.filters.status || [];
             this.filterState.priorities = view.filters.priority || [];
+            this.filterState.columnFilters = view.filters.column_filters || {};
             // Update UI checkboxes
             this.updateFilterUI();
           }
@@ -618,12 +780,14 @@
         priorities: [],
         companies: [],
         assignedUsers: [],
-        search: ''
+        search: '',
+        columnFilters: {}
       };
       this.groupingFields = [];
       this.groupingField = null;
       this.updateGroupingUI();
       this.updateFilterUI();
+      this.updateActiveFilterHeaders();
       this.removeGrouping();
       this.applyFilters();
     }
@@ -636,6 +800,8 @@
       this.container.querySelectorAll('[data-status-filter]').forEach(checkbox => {
         checkbox.checked = this.filterState.statuses.includes(checkbox.value);
       });
+      Object.keys(this.filterState.columnFilters).forEach((column) => this.populateColumnFilterPanel(column));
+      this.updateActiveFilterHeaders();
     }
 
     /**
@@ -657,6 +823,7 @@
         filters: {
           status: this.filterState.statuses,
           priority: this.filterState.priorities,
+          column_filters: this.filterState.columnFilters,
         },
         grouping_field: this.groupingField,
         grouping_fields: this.groupingFields,
