@@ -1218,35 +1218,40 @@ async def create_or_update_impact(
                 # Update existing record using COALESCE to preserve existing
                 # values for fields not explicitly provided
                 impact_id = existing[0]
-                update_query = """
-                    UPDATE bcp_impact
-                    SET losses_financial = COALESCE(%s, losses_financial),
-                        losses_increased_costs = COALESCE(%s, losses_increased_costs),
-                        losses_staffing = COALESCE(%s, losses_staffing),
-                        losses_product_service = COALESCE(%s, losses_product_service),
-                        losses_reputation = COALESCE(%s, losses_reputation),
-                        fines = COALESCE(%s, fines),
-                        legal_liability = COALESCE(%s, legal_liability),
-                        rto_hours = COALESCE(%s, rto_hours),
-                        losses_comments = COALESCE(%s, losses_comments)
-                    WHERE id = %s
-                """
-                await cursor.execute(
-                    update_query,
-                    (
-                        losses_financial,
-                        losses_increased_costs,
-                        losses_staffing,
-                        losses_product_service,
-                        losses_reputation,
-                        fines,
-                        legal_liability,
-                        rto_hours,
-                        losses_comments,
-                        impact_id,
-                    ),
-                )
-                await conn.commit()
+                if any(v is not None for v in (
+                    losses_financial, losses_increased_costs, losses_staffing,
+                    losses_product_service, losses_reputation, fines,
+                    legal_liability, rto_hours, losses_comments,
+                )):
+                    update_query = """
+                        UPDATE bcp_impact
+                        SET losses_financial = COALESCE(%s, losses_financial),
+                            losses_increased_costs = COALESCE(%s, losses_increased_costs),
+                            losses_staffing = COALESCE(%s, losses_staffing),
+                            losses_product_service = COALESCE(%s, losses_product_service),
+                            losses_reputation = COALESCE(%s, losses_reputation),
+                            fines = COALESCE(%s, fines),
+                            legal_liability = COALESCE(%s, legal_liability),
+                            rto_hours = COALESCE(%s, rto_hours),
+                            losses_comments = COALESCE(%s, losses_comments)
+                        WHERE id = %s
+                    """
+                    await cursor.execute(
+                        update_query,
+                        (
+                            losses_financial,
+                            losses_increased_costs,
+                            losses_staffing,
+                            losses_product_service,
+                            losses_reputation,
+                            fines,
+                            legal_liability,
+                            rto_hours,
+                            losses_comments,
+                            impact_id,
+                        ),
+                    )
+                    await conn.commit()
             else:
                 # Create new record
                 insert_query = """
