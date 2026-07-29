@@ -53,7 +53,7 @@ def test_ticket_stats_render_visible_non_zero_statuses_with_counter_strip():
     assert "{% for definition in ticket_status_definitions %}" in html
     assert "{% if status_count > 0 %}" in html
     assert "'attrs': {'data-ticket-stat': definition.tech_status}" in html
-    assert "total_label='Visible tickets'" in html
+    assert "total_label='All tickets'" in html
     assert "class='ticket-dashboard__stats'" in html
 
 
@@ -63,13 +63,23 @@ def test_ticket_stats_refresh_preserves_counter_labels():
         TEMPLATE_PATH.parent.parent.parent / "static" / "js" / "admin.js"
     ).read_text(encoding="utf-8")
 
-    update_stats_start = javascript.index("function updateStats(counts, total)")
+    update_stats_start = javascript.index("function updateStats(counts)")
     update_stats_end = javascript.index("function formatReviewDate", update_stats_start)
     update_stats = javascript[update_stats_start:update_stats_end]
     assert "element.querySelector('.stat-strip__stat-value')" in update_stats
     assert "statElements.total.querySelector('.stat-strip__stat-value')" in update_stats
     assert "element.textContent =" not in update_stats
     assert "statElements.total.textContent =" not in update_stats
+
+
+def test_ticket_stats_refresh_uses_global_status_total():
+    """The KPI total is derived from global counts, not the filtered row total."""
+    javascript = (
+        TEMPLATE_PATH.parent.parent.parent / "static" / "js" / "admin.js"
+    ).read_text(encoding="utf-8")
+
+    assert "state.updateStats(response?.status_counts);" in javascript
+    assert "state.updateStats(response?.status_counts, response?.total);" not in javascript
 
 
 def test_next_ticket_number_handler_is_always_rendered():

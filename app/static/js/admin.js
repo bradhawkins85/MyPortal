@@ -1118,7 +1118,7 @@
       return output;
     }
 
-    function updateStats(counts, total) {
+    function updateStats(counts) {
       const normalised = normaliseCounts(counts);
       Object.entries(statElements).forEach(([key, element]) => {
         if (key === 'total') {
@@ -1377,7 +1377,7 @@
       const state = getTicketTableState(table);
       const items = Array.isArray(response?.items) ? response.items : [];
       state.renderTable(items);
-      state.updateStats(response?.status_counts, response?.total);
+      state.updateStats(response?.status_counts);
       table.dispatchEvent(new CustomEvent('table:rows-updated'));
       bindTicketStatusAutoSubmit();
       bindTicketBulkDelete();

@@ -1,0 +1,7 @@
+{
+  "guid": "4ad63509-5c9f-4cf2-9418-3994151381bc",
+  "occurred_at": "2026-07-29T00:00Z",
+  "change_type": "Fix",
+  "summary": "Keep admin ticket status statistics based on all tickets when the ticket table is filtered.",
+  "content_hash": "40a66348ae101b152c96630ba75640a4b8499834c60bbdd9a4cd1ffd900164b8"
+}

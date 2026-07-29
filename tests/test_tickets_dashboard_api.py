@@ -108,8 +108,12 @@ def test_ticket_dashboard_endpoint(monkeypatch):
             }
         }
     )
+    global_status_counts_mock = AsyncMock(
+        return_value={"open": 7, "waiting_on_client_no_reminder": 4}
+    )
     monkeypatch.setattr(tickets_service, "load_dashboard_state", load_state_mock)
     monkeypatch.setattr(tickets_repo, "get_automation_filter_context_by_ticket_ids", automation_context_mock)
+    monkeypatch.setattr(tickets_repo, "count_tickets_by_status", global_status_counts_mock)
 
     app.dependency_overrides[require_helpdesk_technician] = lambda: {"id": 1, "is_super_admin": True}
     try:
@@ -120,7 +124,10 @@ def test_ticket_dashboard_endpoint(monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["total"] == 1
-    assert payload["status_counts"] == {"open": 1}
+    assert payload["status_counts"] == {
+        "open": 7,
+        "waiting_on_client_no_reminder": 4,
+    }
     assert payload["filters"]["status"] == ["open"]
     assert payload["filters"]["module_slug"] == "ops"
     assert payload["items"][0]["company_name"] == "Acme Corp"
@@ -145,6 +152,7 @@ def test_ticket_dashboard_endpoint(monkeypatch):
     assert kwargs["status_filter"] == ["open"]
     assert kwargs["module_filter"] == "ops"
     automation_context_mock.assert_awaited_once_with([41])
+    global_status_counts_mock.assert_awaited_once_with()
 
 
 def test_list_ticket_statuses_endpoint(monkeypatch):
