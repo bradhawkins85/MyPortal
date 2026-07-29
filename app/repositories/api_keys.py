@@ -220,20 +220,16 @@ async def update_api_key(
     permissions: PermissionMapping | None = None,
     is_enabled: bool | None = None,
 ) -> dict[str, Any]:
-    fields = ["description = %s", "expiry_date = %s"]
-    params: list[Any] = [description, expiry_date]
     if is_enabled is not None:
-        fields.append("is_enabled = %s")
-        params.append(1 if is_enabled else 0)
-    params.append(api_key_id)
-    await db.execute(
-        f"""
-        UPDATE api_keys
-        SET {', '.join(fields)}
-        WHERE id = %s
-        """,
-        tuple(params),
-    )
+        await db.execute(
+            "UPDATE api_keys SET description = %s, expiry_date = %s, is_enabled = %s WHERE id = %s",
+            (description, expiry_date, 1 if is_enabled else 0, api_key_id),
+        )
+    else:
+        await db.execute(
+            "UPDATE api_keys SET description = %s, expiry_date = %s WHERE id = %s",
+            (description, expiry_date, api_key_id),
+        )
     if permissions is not None:
         await _replace_api_key_permissions(api_key_id, permissions)
     updated = await get_api_key_with_usage(api_key_id)
