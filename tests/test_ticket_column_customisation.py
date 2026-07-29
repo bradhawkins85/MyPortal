@@ -80,6 +80,20 @@ def test_table_header_data_column_attributes():
         )
 
 
+def test_status_filter_is_in_status_column_header_with_funnel_icon():
+    """Status choices should open from an accessible funnel in the Status heading."""
+    html = _template_html()
+    status_header = html[html.index('data-column="status"', html.index('<thead>')):]
+    status_header = status_header[:status_header.index('</th>')]
+
+    assert 'data-ticket-status-filter-toggle' in status_header
+    assert 'aria-label="Filter tickets by status"' in status_header
+    assert '<svg viewBox="0 0 24 24"' in status_header
+    assert 'data-ticket-status-filter-panel' in status_header
+    assert 'data-status-filter' in status_header
+    assert '<h3 class="ticket-filters__section-title">Filter by Status</h3>' not in html
+
+
 def test_table_cell_data_column_attributes():
     """Table <td> elements for customisable columns should carry data-column."""
     html = _template_html()
@@ -130,4 +144,3 @@ def test_subject_column_always_visible_in_js():
     )
     js_content = js_path.read_text(encoding="utf-8")
     assert "'subject'" in js_content
-
