@@ -2385,9 +2385,8 @@ async def sync_company(
             "Date": date.today().isoformat(),
             "Status": "AUTHORISED" if auto_send else "DRAFT",
         }
-        due_date_value = invoice.get("due_date")
-        if isinstance(due_date_value, date):
-            invoice_payload["DueDate"] = due_date_value.isoformat()
+        # Do not send MyPortal's due date. When DueDate is omitted, Xero applies
+        # the payment terms configured for the contact to the new invoice.
         if auto_send:
             invoice_payload["SentToContact"] = True
 
