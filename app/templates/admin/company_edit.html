@@ -16,7 +16,7 @@
       <summary class="card__header card__header--collapsible card__header--actions">
         <div class="stacked">
           <h2 class="card__title">{{ form_data.name or company.name }}</h2>
-          <p class="card__subtitle">Manage identifiers, email domains, and VIP status for this company.</p>
+          <p class="card__subtitle">Manage general settings and email domains for this company.</p>
         </div>
         <div class="card__controls">
           <a class="button button--ghost" href="/admin/companies">Back to companies</a>
@@ -49,13 +49,53 @@
             />
           </div>
           {% endif %}
+          <div class="form-field">
+            <label class="form-label" for="edit-company-email-domains">Email domains</label>
+            <input
+              id="edit-company-email-domains"
+              name="emailDomains"
+              class="form-input"
+              type="text"
+              placeholder="example.com, example.org"
+              value="{{ form_data.email_domains }}"
+            />
+            <p class="form-help">Use commas to list domains. Domains are matched case-insensitively.</p>
+          </div>
+          <div class="form-field form-field--checkbox">
+            <label class="checkbox" for="edit-company-offboarding-email-forwarding">
+              <input
+                id="edit-company-offboarding-email-forwarding"
+                type="checkbox"
+                name="offboardingEmailForwardingEnabled"
+                value="1"
+                {% if form_data.offboarding_email_forwarding_enabled %}checked{% endif %}
+              />
+              <span>Enable email forwarding on offboarding requests</span>
+            </label>
+            <p class="form-help">When enabled, admins can select a staff member to forward emails to when submitting an offboarding request. Disable if your company uses a fixed forwarding address configured in the workflow step.</p>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="button">Save changes</button>
+          </div>
+        </form>
+      </div>
+    </details>
+    <details class="card card--panel card-collapsible admin-grid__full" data-company-edit-section="external-ids">
+      <summary class="card__header card__header--collapsible card__header--stacked">
+        <div>
+          <h2 class="card__title">External IDs</h2>
+          <p class="card__subtitle">Link this company to records in connected external services.</p>
+        </div>
+        <div class="card__collapsible-meta" aria-hidden="true"><span class="card__toggle-icon"></span></div>
+      </summary>
+      <div class="card-collapsible__content card__body card__body--stacked">
           {% if module_enabled.get('tacticalrmm', false) %}
           <div class="form-field">
             <label class="form-label" for="edit-company-tactical">Tactical RMM client ID</label>
             <div class="form-field__group">
               <input
                 id="edit-company-tactical"
-                name="tacticalClientId"
+                name="tacticalClientId" form="company-settings-form"
                 class="form-input"
                 value="{{ form_data.tacticalrmm_client_id }}"
                 maxlength="255"
@@ -85,7 +125,7 @@
             <div class="form-field__group">
               <input
                 id="edit-company-xero"
-                name="xeroId"
+                name="xeroId" form="company-settings-form"
                 class="form-input"
                 value="{{ form_data.xero_id }}"
                 maxlength="255"
@@ -115,7 +155,7 @@
             <div class="form-field__group">
               <input
                 id="edit-company-hudu"
-                name="huduId"
+                name="huduId" form="company-settings-form"
                 class="form-input"
                 value="{{ form_data.hudu_id }}"
                 maxlength="255"
@@ -145,7 +185,7 @@
             <div class="form-field__group">
               <input
                 id="edit-company-huntress"
-                name="huntressOrganizationId"
+                name="huntressOrganizationId" form="company-settings-form"
                 class="form-input"
                 value="{{ form_data.huntress_organization_id }}"
                 maxlength="64"
@@ -175,7 +215,7 @@
           <div class="form-field">
             <label class="form-label" for="edit-company-huntress-sat">Huntress SAT account ID</label>
             <div class="form-field__group">
-              <input id="edit-company-huntress-sat" name="huntressSatAccountId" class="form-input"
+              <input id="edit-company-huntress-sat" name="huntressSatAccountId" form="company-settings-form" class="form-input"
                 value="{{ form_data.huntress_sat_account_id }}" maxlength="64" placeholder="e.g. 67890" />
               <button type="button" class="button button--ghost" data-lookup-huntress-sat-id
                 title="Lookup Huntress SAT account ID" aria-label="Lookup Huntress SAT account ID from API">
@@ -185,50 +225,9 @@
             <p class="form-help">Optional. Links this company to its separate Huntress Managed SAT account. SAT API calls use this ID rather than the EDR organisation ID.</p>
           </div>
           {% endif %}
-          <div class="form-field">
-            <label class="form-label" for="edit-company-email-domains">Email domains</label>
-            <input
-              id="edit-company-email-domains"
-              name="emailDomains"
-              class="form-input"
-              type="text"
-              placeholder="example.com, example.org"
-              value="{{ form_data.email_domains }}"
-            />
-            <p class="form-help">Use commas to list domains. Domains are matched case-insensitively.</p>
-          </div>
-          <div class="form-field form-field--checkbox">
-            <label class="checkbox" for="edit-company-offboarding-email-forwarding">
-              <input
-                id="edit-company-offboarding-email-forwarding"
-                type="checkbox"
-                name="offboardingEmailForwardingEnabled"
-                value="1"
-                {% if form_data.offboarding_email_forwarding_enabled %}checked{% endif %}
-              />
-              <span>Enable email forwarding on offboarding requests</span>
-            </label>
-            <p class="form-help">When enabled, admins can select a staff member to forward emails to when submitting an offboarding request. Disable if your company uses a fixed forwarding address configured in the workflow step.</p>
-          </div>
-          <div class="form-field">
-            <label class="form-label">Purchase order options</label>
-            <div class="form-checkbox-group">
-              <label class="form-checkbox__label">
-                <input
-                  type="checkbox"
-                  name="requirePo"
-                  value="1"
-                  {% if form_data.require_po %}checked{% endif %}
-                />
-                <span>Require PO</span>
-              </label>
-            </div>
-            <p class="form-help">When enabled, customers must provide a purchase order number before placing an order.</p>
-          </div>
-          <div class="form-actions">
-            <button type="submit" class="button">Save changes</button>
-          </div>
-        </form>
+        <div class="form-actions">
+          <button type="submit" class="button" form="company-settings-form">Save company settings</button>
+        </div>
       </div>
     </details>
     {% if module_enabled.get('trello', false) %}
@@ -297,7 +296,7 @@
       <summary class="card__header card__header--collapsible card__header--stacked">
         <div>
           <h2 class="card__title">Payments</h2>
-          <p class="card__subtitle">Configure payment methods, VIP pricing, and billable ticket reply defaults.</p>
+          <p class="card__subtitle">Configure payment methods, purchase orders, VIP pricing, and billable ticket reply defaults.</p>
         </div>
         <div class="card__collapsible-meta" aria-hidden="true">
           <span class="card__toggle-icon"></span>
@@ -366,6 +365,22 @@
           </label>
         </div>
         <p class="form-help">Select at least one payment method. Invoice Prepay sends an invoice before service is rendered. Invoice Postpay sends an invoice after the billing period. Stripe will take payment immediately (coming soon).</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label">Purchase order options</label>
+        <div class="form-checkbox-group">
+          <label class="form-checkbox__label">
+            <input
+              type="checkbox"
+              name="requirePo"
+              form="company-settings-form"
+              value="1"
+              {% if form_data.require_po %}checked{% endif %}
+            />
+            <span>Require PO</span>
+          </label>
+        </div>
+        <p class="form-help">When enabled, customers must provide a purchase order number before placing an order.</p>
       </div>
         <div class="form-actions">
           <button type="submit" class="button" form="company-settings-form">Save company settings</button>
