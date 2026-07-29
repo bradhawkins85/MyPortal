@@ -221,6 +221,11 @@
         panel.className = 'ticket-column-filter__panel';
         panel.hidden = true;
         panel.innerHTML = this.columnFilterControls(column, type, label);
+        const dateReference = panel.querySelector('[data-column-filter-date-reference]');
+        if (dateReference) {
+          dateReference.addEventListener('change', () => this.updateDateFilterValueControl(panel));
+          this.updateDateFilterValueControl(panel);
+        }
         wrapper.append(toggle, panel);
         header.appendChild(wrapper);
 
@@ -240,7 +245,9 @@
         panel.querySelector('[data-column-filter-apply]').addEventListener('click', () => {
           const operator = panel.querySelector('[data-column-filter-operator]').value;
           const input = panel.querySelector('[data-column-filter-value]');
-          const value = input ? input.value.trim() : '';
+          const value = dateReference && dateReference.value === 'today'
+            ? 'today'
+            : (input ? input.value.trim() : '');
           if (operator === 'relative' || value !== '') this.filterState.columnFilters[column] = { type, operator, value };
           else delete this.filterState.columnFilters[column];
           panel.hidden = true;
@@ -278,6 +285,8 @@
       const inputType = type === 'number' ? 'number' : type === 'date' ? 'date' : 'text';
       const valueControl = type === 'boolean'
         ? '<select class="form-input" data-column-filter-value><option value="true">True</option><option value="false">False</option></select>'
+        : type === 'date'
+          ? '<select class="form-input" data-column-filter-date-reference aria-label="Date reference"><option value="date">Specific date</option><option value="today">Today</option></select><input class="form-input" data-column-filter-value type="date" aria-label="Filter value for ' + this.escapeHtml(label) + '">'
         : `<input class="form-input" data-column-filter-value type="${inputType}" aria-label="Filter value for ${this.escapeHtml(label)}">`;
       return `<span class="ticket-column-filter__title">Filter ${this.escapeHtml(label)}</span><select class="form-input" data-column-filter-operator>${options}</select>${valueControl}<span class="ticket-column-filter__actions"><button type="button" class="button button--primary button--compact" data-column-filter-apply>Apply</button><button type="button" class="button button--ghost button--compact" data-column-filter-clear>Clear</button></span>`;
     }
@@ -295,8 +304,20 @@
       const filter = this.filterState.columnFilters[column];
       const operator = menu.querySelector('[data-column-filter-operator]');
       const value = menu.querySelector('[data-column-filter-value]');
+      const dateReference = menu.querySelector('[data-column-filter-date-reference]');
       if (operator) operator.value = filter ? filter.operator : operator.options[0].value;
-      if (value) value.value = filter ? filter.value : (filter && filter.type === 'boolean' ? 'true' : '');
+      if (dateReference) dateReference.value = filter && filter.value === 'today' ? 'today' : 'date';
+      if (value) value.value = filter && filter.value !== 'today' ? filter.value : (filter && filter.type === 'boolean' ? 'true' : '');
+      this.updateDateFilterValueControl(menu);
+    }
+
+    updateDateFilterValueControl(container) {
+      const dateReference = container.querySelector('[data-column-filter-date-reference]');
+      const value = container.querySelector('[data-column-filter-value]');
+      if (!dateReference || !value) return;
+      const usesToday = dateReference.value === 'today';
+      value.hidden = usesToday;
+      value.disabled = usesToday;
     }
 
     updateActiveFilterHeaders() {
@@ -532,7 +553,7 @@
           const actual = new Date(raw.replace(' ', 'T'));
           if (Number.isNaN(actual.getTime())) return false;
           if (filter.operator === 'relative') return actual >= new Date(Date.now() - (30 * 86400000)) && actual <= new Date();
-          const expected = new Date(`${filter.value}T00:00:00`);
+          const expected = filter.value === 'today' ? new Date() : new Date(`${filter.value}T00:00:00`);
           if (Number.isNaN(expected.getTime())) return false;
           const actualDay = new Date(actual.getFullYear(), actual.getMonth(), actual.getDate()).getTime();
           const expectedDay = new Date(expected.getFullYear(), expected.getMonth(), expected.getDate()).getTime();
