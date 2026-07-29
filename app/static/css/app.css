@@ -6896,6 +6896,93 @@ dialog.modal:not([open]) {
   user-select: none;
 }
 
+/* Status filtering lives beside the Status table heading. */
+.ticket-status-filter {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ticket-status-filter__toggle {
+  display: inline-grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0.35rem;
+  place-items: center;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.ticket-status-filter__toggle svg {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
+}
+
+.ticket-status-filter__toggle:hover,
+.ticket-status-filter__toggle:focus-visible,
+.ticket-status-filter--open .ticket-status-filter__toggle {
+  color: var(--color-text);
+  background: var(--color-surface-3);
+  border-color: var(--color-border);
+  outline: none;
+}
+
+.ticket-status-filter__panel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  display: grid;
+  width: max-content;
+  min-width: 13rem;
+  max-height: 20rem;
+  padding: 0.65rem;
+  gap: 0.25rem;
+  overflow-y: auto;
+  color: var(--color-text);
+  text-align: left;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: 0.6rem;
+  box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.35);
+}
+
+.ticket-status-filter__panel[hidden] {
+  display: none;
+}
+
+.ticket-status-filter__title {
+  padding: 0.25rem 0.4rem 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ticket-status-filter__option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem;
+  border-radius: 0.4rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ticket-status-filter__option:hover {
+  background: var(--color-surface-3);
+}
+
+.ticket-status-filter__option input {
+  margin: 0;
+}
+
 /* Horizontal Section for Grouping and Search */
 .ticket-filters__section--horizontal {
   display: grid;

@@ -49,6 +49,7 @@
       // that fire while async initialization (loadViews) is in progress.
       this.setupEventListeners();
       this.setupStatusFilters();
+      this.setupStatusFilterMenu();
       this.setupGroupingControls();
       await this.loadViews();
       this.updateViewActions();
@@ -181,6 +182,41 @@
           }
           this.applyFilters();
         });
+      });
+    }
+
+    /**
+     * Setup the status column's filter menu without triggering table sorting.
+     */
+    setupStatusFilterMenu() {
+      const menu = this.container.querySelector('[data-ticket-status-filter-menu]');
+      if (!menu) return;
+      const toggle = menu.querySelector('[data-ticket-status-filter-toggle]');
+      const panel = menu.querySelector('[data-ticket-status-filter-panel]');
+      if (!toggle || !panel) return;
+
+      const closeMenu = () => {
+        panel.hidden = true;
+        menu.classList.remove('ticket-status-filter--open');
+        toggle.setAttribute('aria-expanded', 'false');
+      };
+
+      toggle.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const willOpen = panel.hidden;
+        panel.hidden = !willOpen;
+        menu.classList.toggle('ticket-status-filter--open', willOpen);
+        toggle.setAttribute('aria-expanded', String(willOpen));
+      });
+      panel.addEventListener('click', (event) => event.stopPropagation());
+      document.addEventListener('click', (event) => {
+        if (!menu.contains(event.target)) closeMenu();
+      });
+      menu.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          closeMenu();
+          toggle.focus();
+        }
       });
     }
 
