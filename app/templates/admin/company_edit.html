@@ -12,17 +12,18 @@
 {% block content %}
   <div class="company-edit-page" data-company-id="{{ company.id }}">
   <div class="admin-grid admin-grid--columns">
-    <section class="card card--panel admin-grid__full">
-      <header class="card__header card__header--actions">
+    <details class="card card--panel card-collapsible admin-grid__full" data-company-edit-section="general" open>
+      <summary class="card__header card__header--collapsible card__header--actions">
         <div class="stacked">
           <h2 class="card__title">{{ form_data.name or company.name }}</h2>
           <p class="card__subtitle">Manage identifiers, email domains, and VIP status for this company.</p>
         </div>
         <div class="card__controls">
           <a class="button button--ghost" href="/admin/companies">Back to companies</a>
+          <span class="card__toggle-icon" aria-hidden="true"></span>
         </div>
-      </header>
-      <div class="card__body card__body--stacked">
+      </summary>
+      <div class="card-collapsible__content card__body card__body--stacked">
         <form id="company-settings-form" action="/admin/companies/{{ company.id }}" method="post" class="form" autocomplete="off">
           {% include "partials/csrf.html" %}
           <div class="form-field">
@@ -184,84 +185,6 @@
             <p class="form-help">Optional. Links this company to its separate Huntress Managed SAT account. SAT API calls use this ID rather than the EDR organisation ID.</p>
           </div>
           {% endif %}
-          {% if module_enabled.get('trello', false) %}
-          <div class="form-field">
-            <label class="form-label" for="edit-company-trello-board">Trello board ID</label>
-            <input
-              id="edit-company-trello-board"
-              name="trelloBoardId"
-              class="form-input"
-              value="{{ form_data.trello_board_id or '' }}"
-              maxlength="255"
-              placeholder="e.g. 5abbe4b7ddc1b351ef961414"
-            />
-            <p class="form-help">Link this company to a Trello board. Cards created on the board will become tickets. Find the board ID in the board URL or via the Trello API.</p>
-          </div>
-          {% endif %}
-          {% if module_enabled.get('trello', false) %}
-          <div class="form-field">
-            <label class="form-label" for="edit-company-trello-api-key">Trello API key</label>
-            <input
-              id="edit-company-trello-api-key"
-              name="trelloApiKey"
-              class="form-input"
-              type="password"
-              autocomplete="off"
-              placeholder="{% if form_data.trello_api_key %}Key saved — enter to replace{% else %}Enter API key{% endif %}"
-              maxlength="255"
-            />
-            <p class="form-help">Stored securely. Leave blank to keep the existing value. Copy the <strong>Key</strong> (not the Secret) from <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">trello.com/app-key</a>.</p>
-          </div>
-          {% endif %}
-          {% if module_enabled.get('trello', false) %}
-          <div class="form-field">
-            <label class="form-label" for="edit-company-trello-token">Trello OAuth token</label>
-            <input
-              id="edit-company-trello-token"
-              name="trelloToken"
-              class="form-input"
-              type="password"
-              autocomplete="off"
-              placeholder="{% if form_data.trello_token %}Token saved — enter to replace{% else %}Enter OAuth token{% endif %}"
-              maxlength="255"
-            />
-            <p class="form-help">Stored securely. Leave blank to keep the existing value. This is the <strong>OAuth Token</strong> — <em>not</em> the Secret shown on the app-key page. Go to <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">trello.com/app-key</a>, then click <strong>Token</strong> and authorise the app to generate it.</p>
-          </div>
-          {% if form_data.trello_board_id %}
-          {% endif %}
-          <div class="form-field">
-            <label class="form-label">Register Trello webhook</label>
-            <div class="form-field__group">
-              <button
-                type="button"
-                class="button button--ghost"
-                id="trello-register-webhook-btn"
-                data-board-id="{{ form_data.trello_board_id or '' }}"
-              >Register webhook</button>
-            </div>
-            <p class="form-help" id="trello-register-status">Register this company's board with Trello so incoming card events create tickets.</p>
-          </div>
-          <script>
-            (function () {
-              var btn = document.getElementById('trello-register-webhook-btn');
-              if (!btn) return;
-              btn.addEventListener('click', async function () {
-                var boardId = btn.dataset.boardId;
-                var statusEl = document.getElementById('trello-register-status');
-                if (!boardId) { statusEl.textContent = 'Save the board ID first, then register the webhook.'; return; }
-                btn.disabled = true;
-                statusEl.textContent = 'Registering…';
-                try {
-                  var resp = await fetch('/api/integration-modules/trello/boards/' + encodeURIComponent(boardId) + '/register-webhook', {method: 'POST', headers: {'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content || ''}});
-                  var data = await resp.json();
-                  if (resp.ok) { statusEl.textContent = 'Webhook registered successfully.'; }
-                  else { statusEl.textContent = 'Error: ' + (data.detail || 'Unknown error'); }
-                } catch (e) { statusEl.textContent = 'Request failed: ' + e.message; }
-                btn.disabled = false;
-              });
-            })();
-          </script>
-          {% endif %}
           <div class="form-field">
             <label class="form-label" for="edit-company-email-domains">Email domains</label>
             <input
@@ -307,7 +230,69 @@
           </div>
         </form>
       </div>
-    </section>
+    </details>
+    {% if module_enabled.get('trello', false) %}
+    <details class="card card--panel card-collapsible admin-grid__full" data-company-edit-section="trello">
+      <summary class="card__header card__header--collapsible card__header--stacked">
+        <div>
+          <h2 class="card__title">Trello</h2>
+          <p class="card__subtitle">Configure this company's Trello board, credentials, and webhook.</p>
+        </div>
+        <div class="card__collapsible-meta" aria-hidden="true"><span class="card__toggle-icon"></span></div>
+      </summary>
+      <div class="card-collapsible__content">
+        <div class="form-field">
+          <label class="form-label" for="edit-company-trello-board">Trello board ID</label>
+          <input id="edit-company-trello-board" name="trelloBoardId" form="company-settings-form" class="form-input"
+            value="{{ form_data.trello_board_id or '' }}" maxlength="255" placeholder="e.g. 5abbe4b7ddc1b351ef961414" />
+          <p class="form-help">Link this company to a Trello board. Cards created on the board will become tickets. Find the board ID in the board URL or via the Trello API.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="edit-company-trello-api-key">Trello API key</label>
+          <input id="edit-company-trello-api-key" name="trelloApiKey" form="company-settings-form" class="form-input" type="password"
+            autocomplete="off" placeholder="{% if form_data.trello_api_key %}Key saved — enter to replace{% else %}Enter API key{% endif %}" maxlength="255" />
+          <p class="form-help">Stored securely. Leave blank to keep the existing value. Copy the <strong>Key</strong> (not the Secret) from <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">trello.com/app-key</a>.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="edit-company-trello-token">Trello OAuth token</label>
+          <input id="edit-company-trello-token" name="trelloToken" form="company-settings-form" class="form-input" type="password"
+            autocomplete="off" placeholder="{% if form_data.trello_token %}Token saved — enter to replace{% else %}Enter OAuth token{% endif %}" maxlength="255" />
+          <p class="form-help">Stored securely. Leave blank to keep the existing value. This is the <strong>OAuth Token</strong> — <em>not</em> the Secret shown on the app-key page. Go to <a href="https://trello.com/app-key" target="_blank" rel="noopener noreferrer">trello.com/app-key</a>, then click <strong>Token</strong> and authorise the app to generate it.</p>
+        </div>
+        <div class="form-field">
+          <label class="form-label">Register Trello webhook</label>
+          <div class="form-field__group">
+            <button type="button" class="button button--ghost" id="trello-register-webhook-btn"
+              data-board-id="{{ form_data.trello_board_id or '' }}">Register webhook</button>
+          </div>
+          <p class="form-help" id="trello-register-status">Register this company's board with Trello so incoming card events create tickets.</p>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button" form="company-settings-form">Save company settings</button>
+        </div>
+      </div>
+    </details>
+    <script>
+      (function () {
+        var btn = document.getElementById('trello-register-webhook-btn');
+        if (!btn) return;
+        btn.addEventListener('click', async function () {
+          var boardId = btn.dataset.boardId;
+          var statusEl = document.getElementById('trello-register-status');
+          if (!boardId) { statusEl.textContent = 'Save the board ID first, then register the webhook.'; return; }
+          btn.disabled = true;
+          statusEl.textContent = 'Registering…';
+          try {
+            var resp = await fetch('/api/integration-modules/trello/boards/' + encodeURIComponent(boardId) + '/register-webhook', {method: 'POST', headers: {'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content || ''}});
+            var data = await resp.json();
+            if (resp.ok) { statusEl.textContent = 'Webhook registered successfully.'; }
+            else { statusEl.textContent = 'Error: ' + (data.detail || 'Unknown error'); }
+          } catch (e) { statusEl.textContent = 'Request failed: ' + e.message; }
+          btn.disabled = false;
+        });
+      })();
+    </script>
+    {% endif %}
     <details class="card card--panel card-collapsible admin-grid__full" data-company-edit-section="payments">
       <summary class="card__header card__header--collapsible card__header--stacked">
         <div>
