@@ -37,6 +37,7 @@ from typing import Any, Awaitable, Callable, Union
 import httpx
 
 from app.core.logging import log_error, log_info
+from app.repositories import companies as companies_repo
 from app.repositories import m365_best_practices as bp_repo
 from app.services.cis_benchmark import (
     STATUS_FAIL,
@@ -2312,26 +2313,42 @@ async def _check_automatic_email_forwarding(
 
 
 async def _check_dkim_enabled_all_domains(
-    exo_token: str, tenant_id: str
+    exo_token: str, tenant_id: str, email_domains: list[str]
 ) -> dict[str, Any]:
     check_id = "bp_dkim_enabled_all_domains"
-    check_name = "DKIM is enabled for all Exchange Online domains"
+    check_name = "DKIM is enabled for all MyPortal Email domains"
+    configured_domains = {
+        str(domain).strip().lower() for domain in email_domains if str(domain).strip()
+    }
+    if not configured_domains:
+        return _result(
+            check_id,
+            check_name,
+            STATUS_NOT_APPLICABLE,
+            "No Email domains are configured for this company in MyPortal.",
+        )
     try:
         data = await _exo_invoke_command(exo_token, tenant_id, "Get-DkimSigningConfig")
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
                        f"Unable to query Get-DkimSigningConfig: {exc}")
     rows = data.get("value") or []
-    disabled = [
-        r.get("Domain") or r.get("Identity") or "?"
+    configs = {
+        str(r.get("Domain") or r.get("Identity") or "").strip().lower(): r
         for r in rows
-        if isinstance(r, dict) and r.get("Enabled") is not True
-    ]
+        if isinstance(r, dict) and (r.get("Domain") or r.get("Identity"))
+    }
+    disabled = sorted(
+        domain
+        for domain in configured_domains
+        if domain not in configs or configs[domain].get("Enabled") is not True
+    )
     if not disabled:
         return _result(check_id, check_name, STATUS_PASS,
-                       f"DKIM is enabled for all {len(rows)} configured domains.")
+                       f"DKIM is enabled for all {len(configured_domains)} MyPortal Email domains.")
     return _result(check_id, check_name, STATUS_FAIL,
-                   f"DKIM is disabled on {len(disabled)} domain(s): " + ", ".join(disabled[:5]))
+                   f"DKIM is disabled or unavailable on {len(disabled)} MyPortal Email domain(s): "
+                   + ", ".join(disabled[:5]))
 
 
 async def _check_third_party_storage_owa(
@@ -3896,7 +3913,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
     },
     {
         "id": "bp_dkim_enabled_all_domains",
-        "name": "DKIM is enabled for all Exchange Online domains",
+        "name": "DKIM is enabled for all MyPortal Email domains",
         "description": (
             "DKIM signs outbound mail with a tenant-controlled key, allowing "
             "recipients to verify authenticity and reject spoofed messages."
@@ -3908,6 +3925,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_dkim_enabled_all_domains,
         "source_type": "exo",
+        "uses_company_email_domains": True,
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
@@ -5415,11 +5433,21 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
                 if source_type == "exo":
                     if exo_token is None:
                         exo_token, exo_tenant_id = await _acquire_exo_access_token(company_id)
-                    raw = await _call_check_with_retry(
-                        lambda r=runner: r(exo_token, exo_tenant_id),  # type: ignore[call-arg,misc]
-                        company_id=company_id,
-                        check_id=check_id,
-                    )
+                    if bp.get("uses_company_email_domains"):
+                        email_domains = await companies_repo.get_email_domains_for_company(company_id)
+                        raw = await _call_check_with_retry(
+                            lambda r=runner: r(  # type: ignore[call-arg,misc]
+                                exo_token, exo_tenant_id, email_domains
+                            ),
+                            company_id=company_id,
+                            check_id=check_id,
+                        )
+                    else:
+                        raw = await _call_check_with_retry(
+                            lambda r=runner: r(exo_token, exo_tenant_id),  # type: ignore[call-arg,misc]
+                            company_id=company_id,
+                            check_id=check_id,
+                        )
                 else:
                     raw = await _call_check_with_retry(
                         lambda r=runner: r(graph_token),  # type: ignore[call-arg,misc]
@@ -5569,11 +5597,21 @@ async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
         try:
             if source_type == "exo":
                 exo_token, exo_tenant_id = await _acquire_exo_access_token(company_id)
-                raw = await _call_check_with_retry(
-                    lambda r=runner: r(exo_token, exo_tenant_id),  # type: ignore[call-arg,misc]
-                    company_id=company_id,
-                    check_id=check_id,
-                )
+                if bp.get("uses_company_email_domains"):
+                    email_domains = await companies_repo.get_email_domains_for_company(company_id)
+                    raw = await _call_check_with_retry(
+                        lambda r=runner: r(  # type: ignore[call-arg,misc]
+                            exo_token, exo_tenant_id, email_domains
+                        ),
+                        company_id=company_id,
+                        check_id=check_id,
+                    )
+                else:
+                    raw = await _call_check_with_retry(
+                        lambda r=runner: r(exo_token, exo_tenant_id),  # type: ignore[call-arg,misc]
+                        company_id=company_id,
+                        check_id=check_id,
+                    )
             else:
                 raw = await _call_check_with_retry(
                     lambda r=runner: r(graph_token),  # type: ignore[call-arg,misc]
