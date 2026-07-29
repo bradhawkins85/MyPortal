@@ -233,7 +233,7 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
 
     Builds invoice line items from:
     - Company recurring invoice items
-    - Billable tickets with unbilled time entries
+    - Billable tickets with unbilled time entries or expenses
 
     The generated invoice is stored locally in MyPortal and accessible
     via the /invoices page.
