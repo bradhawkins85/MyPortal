@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from app.api.routes import click_to_call
 from app.api.routes.click_to_call import ClickToCallSettingsUpdate, _public_settings
 
 
@@ -37,7 +38,12 @@ def test_click_to_call_settings_reject_unsafe_phone_ip(phone_ip):
         ClickToCallSettingsUpdate(phone_ip=phone_ip)
 
 
-def test_public_settings_never_exposes_encrypted_password():
+def test_public_settings_never_exposes_encrypted_password(monkeypatch):
+    monkeypatch.setattr(
+        click_to_call,
+        "get_app_settings",
+        lambda: type("Settings", (), {"click_to_call_phone_prefixes": "+61, 04"})(),
+    )
     result = _public_settings(
         {
             "enabled": 1,
@@ -52,5 +58,18 @@ def test_public_settings_never_exposes_encrypted_password():
         "phone_ip": "10.0.0.20",
         "login_username": "phone-user",
         "password_configured": True,
+        "phone_prefixes": ["+61", "04"],
     }
     assert "password_encrypted" not in result
+
+
+def test_public_settings_ignores_empty_phone_prefixes(monkeypatch):
+    monkeypatch.setattr(
+        click_to_call,
+        "get_app_settings",
+        lambda: type(
+            "Settings", (), {"click_to_call_phone_prefixes": " +61, , 617, "}
+        )(),
+    )
+
+    assert _public_settings(None)["phone_prefixes"] == ["+61", "617"]
