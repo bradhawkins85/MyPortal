@@ -191,6 +191,13 @@
                 {% if not ticket_requester_phone_display and not ticket_company_phone_display %}
                   <p class="form-help">—</p>
                 {% endif %}
+                {% if ticket_requester_lookup_name %}
+                  <div data-outlook-contact-phones data-requester-name="{{ ticket_requester_lookup_name }}">
+                    <button type="button" class="button button--ghost button--small" data-outlook-contact-load>Check Outlook contacts</button>
+                    <p class="form-help" data-outlook-contact-status hidden></p>
+                    <div data-outlook-contact-results></div>
+                  </div>
+                {% endif %}
               </div>
               <div class="form-field">
                 <label class="form-label" for="ticket-review-date-detail">Review Date</label>
