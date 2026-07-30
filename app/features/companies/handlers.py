@@ -540,6 +540,7 @@ async def _render_company_edit_page(
             (company_record.get("huntress_sat_account_id") or "").strip(),
         ),
         "email_domains": _string_value("email_domains", default_email_domains),
+        "phone": _string_value("phone", (company_record.get("phone") or "").strip()),
         "is_vip": _bool_value("is_vip", bool(company_record.get("is_vip"))),
         "default_ticket_replies_billable": _bool_value(
             "default_ticket_replies_billable",
@@ -1441,6 +1442,7 @@ async def admin_update_company(company_id: int, request: Request):
     )
     raw_email_domains = form.get("emailDomains")
     email_domains_text = str(raw_email_domains) if raw_email_domains is not None else ""
+    phone_raw = str(form.get("phone", "")).strip()
     existing = await company_repo.get_company_by_id(company_id)
     if not existing:
         raise HTTPException(
@@ -1468,6 +1470,7 @@ async def admin_update_company(company_id: int, request: Request):
         "trello_api_key": trello_api_key_raw or existing.get("trello_api_key"),
         "trello_token": trello_token_raw or existing.get("trello_token"),
         "email_domains": email_domains_text,
+        "phone": phone_raw,
         "is_vip": is_vip,
         "payment_method": payment_method,
         "require_po": require_po,
@@ -1536,6 +1539,7 @@ async def admin_update_company(company_id: int, request: Request):
         "trello_api_key": trello_api_key,
         "trello_token": trello_token,
         "email_domains": email_domains,
+        "phone": phone_raw or None,
         "payment_method": payment_method,
         "require_po": 1 if require_po else 0,
         "offboarding_email_forwarding_enabled": (
