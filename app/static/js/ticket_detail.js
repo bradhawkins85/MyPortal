@@ -1,5 +1,43 @@
 (function () {
 
+  function initialiseOutlookContactLookup() {
+    const root = document.querySelector('[data-outlook-contact-phones]');
+    if (!root) return;
+    const button = root.querySelector('[data-outlook-contact-load]');
+    const status = root.querySelector('[data-outlook-contact-status]');
+    const results = root.querySelector('[data-outlook-contact-results]');
+    if (!button || !status || !results) return;
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      status.hidden = false;
+      status.textContent = 'Checking your Outlook contacts…';
+      results.replaceChildren();
+      try {
+        const name = root.dataset.requesterName || '';
+        const response = await fetch(`/api/profile/m365-contacts/phones?name=${encodeURIComponent(name)}`);
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.detail || 'Unable to check Outlook contacts');
+        const phones = Array.isArray(payload.phones) ? payload.phones : [];
+        status.textContent = phones.length ? 'Outlook contact options:' : 'No matching Outlook contact phone numbers found.';
+        phones.forEach((item) => {
+          const line = document.createElement('p');
+          line.className = 'form-help';
+          const link = document.createElement('a');
+          link.href = `tel:${item.phone}`;
+          link.textContent = item.phone;
+          line.append(`${item.name}: `, link);
+          results.appendChild(line);
+        });
+      } catch (error) {
+        status.textContent = error.message || 'Unable to check Outlook contacts.';
+      } finally {
+        button.disabled = false;
+      }
+    });
+  }
+
+  initialiseOutlookContactLookup();
+
   const TICKET_SECTION_STATE_STORAGE_KEY = 'myportal.admin.ticketDetail.sectionState.v1';
 
   function formatApiErrorDetail(detail) {

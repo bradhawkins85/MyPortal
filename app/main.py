@@ -183,6 +183,7 @@ from app.services import company_access
 from app.services import dashboard as dashboard_service
 from app.services import email as email_service
 from app.services import m365_mail as m365_mail_service
+from app.services import user_m365_contacts as user_m365_contacts_service
 from app.services import rag_relationships as rag_relationship_service
 from app.services import m365 as m365_service
 from app.services import cis_benchmark as cis_benchmark_service
@@ -4576,6 +4577,8 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 state_data = oauth_state_serializer.loads(state)
                 if state_data.get("flow") == "m365_mail_auth":
                     error_redirect = "/admin/modules/m365-mail"
+                elif state_data.get("flow") == "user_m365_contacts":
+                    error_redirect = "/admin/profile"
             except Exception:
                 pass
         # AADSTS700016 means the PKCE app registration no longer exists in the
@@ -4625,6 +4628,37 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     except (TypeError, ValueError):
         company_id = 0
     flow = state_data.get("flow", "connect")
+
+    if flow == "user_m365_contacts":
+        current_user, auth_redirect = await _require_authenticated_user(request)
+        if auth_redirect or not current_user or int(current_user["id"]) != int(state_data.get("user_id") or 0):
+            return flash_redirect("/admin/profile", "The Microsoft sign-in session is not valid.", "error")
+        verifier = await _pop_m365_provision_code_verifier(state_data.get("pkce_handle"))
+        if not verifier:
+            return flash_redirect("/admin/profile", "The Microsoft sign-in verifier is missing.", "error")
+        redirect_uri = _build_m365_redirect_uri(request)
+        token_data = {
+            "client_id": await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri),
+            "grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri,
+            "code_verifier": verifier, "scope": user_m365_contacts_service.CONTACTS_SCOPE,
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            token_response = await client.post(
+                "https://login.microsoftonline.com/organizations/oauth2/v2.0/token", data=token_data
+            )
+        if token_response.status_code != 200:
+            return flash_redirect("/admin/profile", "Microsoft 365 contact sign-in failed.", "error")
+        payload = token_response.json()
+        access_token, refresh_token = payload.get("access_token"), payload.get("refresh_token")
+        if not access_token or not refresh_token:
+            return flash_redirect("/admin/profile", "Microsoft did not grant offline contact access.", "error")
+        tenant_id = m365_service.extract_tenant_id_from_token(str(access_token))
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(payload.get("expires_in") or 3600))
+        await user_m365_contacts_service.store_tokens(
+            int(current_user["id"]), tenant_id=tenant_id, account_email=str(current_user.get("email") or "") or None,
+            refresh_token=str(refresh_token), access_token=str(access_token), expires_at=expires_at,
+        )
+        return flash_redirect("/admin/profile", "Outlook contacts connected.", "success")
 
     if flow == "m365_mail_auth":
         from app.features.m365_mail.oauth import handle_m365_mail_auth_callback as _pack_handler
@@ -5531,6 +5565,7 @@ async def admin_profile_page(request: Request):
         totp_devices.append({"id": identifier, "name": name})
 
     totp_devices.sort(key=lambda entry: entry["name"].lower())
+    m365_contacts_status = await user_m365_contacts_service.status_for_user(int(user["id"]))
 
     context = await _build_base_context(
         request,
@@ -5540,9 +5575,56 @@ async def admin_profile_page(request: Request):
             "profile_membership": membership,
             "profile_show_technician_tools": _can_edit_profile_technician_tools(user, membership),
             "profile_totp_devices": totp_devices,
+            "profile_m365_contacts": m365_contacts_status,
         },
     )
     return templates.TemplateResponse(context["request"], "admin/profile.html", context)
+
+
+@app.get("/admin/profile/m365-contacts/connect")
+async def profile_m365_contacts_connect(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    redirect_uri = _build_m365_redirect_uri(request)
+    verifier, challenge = m365_service.generate_pkce_pair()
+    verifier_id = await _store_m365_provision_code_verifier(verifier)
+    state = oauth_state_serializer.dumps({
+        "flow": "user_m365_contacts", "user_id": int(user["id"]), "pkce_handle": verifier_id,
+    })
+    client_id = await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri)
+    params = {
+        "client_id": client_id, "response_type": "code", "redirect_uri": redirect_uri,
+        "response_mode": "query", "scope": user_m365_contacts_service.CONTACTS_SCOPE,
+        "state": state, "prompt": "select_account", "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    }
+    return RedirectResponse(
+        "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?" + urlencode(params),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/admin/profile/m365-contacts/disconnect")
+async def profile_m365_contacts_disconnect(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    from app.repositories import user_m365_contacts as user_contacts_repo
+    await user_contacts_repo.delete_integration(int(user["id"]))
+    return flash_redirect("/admin/profile", "Outlook contacts disconnected.", "success")
+
+
+@app.get("/api/profile/m365-contacts/phones", response_class=JSONResponse)
+async def profile_m365_contact_phones(request: Request, name: str = Query(..., min_length=1, max_length=200)):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    try:
+        phones = await user_m365_contacts_service.lookup_phones(int(user["id"]), name.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return JSONResponse({"phones": phones})
 
 
 @app.get("/api/rag/relationships/metrics", response_class=JSONResponse)
@@ -9224,6 +9306,16 @@ async def _render_ticket_detail(
     ticket_company_phone_display = _format_ticket_requester_phone(
         company.get("phone") if company else None
     )
+    ticket_requester_lookup_name = ""
+    for requester_option in requester_options:
+        if (_same_identifier(requester_option.get("staff_id"), requester_staff_id)
+                or _same_identifier(requester_option.get("user_id"), requester_user_id)
+                or _same_identifier(requester_option.get("id"), requester_user_id)):
+            ticket_requester_lookup_name = " ".join(filter(None, (
+                str(requester_option.get("first_name") or "").strip(),
+                str(requester_option.get("last_name") or "").strip(),
+            )))
+            break
 
     default_priorities = ["urgent", "high", "normal", "low"]
     current_priority = str(ticket.get("priority") or "normal")
@@ -9396,6 +9488,7 @@ async def _render_ticket_detail(
         "ticket_requester_options": requester_options,
         "ticket_requester_phone_display": ticket_requester_phone_display,
         "ticket_company_phone_display": ticket_company_phone_display,
+        "ticket_requester_lookup_name": ticket_requester_lookup_name,
         "ticket_watcher_staff_options": watcher_staff_options,
         "ticket_mention_staff_options": ticket_mention_staff_options,
         "ticket_priority_options": priority_options,

@@ -25,6 +25,27 @@
         <section class="card card--panel">
           <header class="card__header card__header--stacked">
             <div>
+              <h2 class="card__title">Outlook contacts</h2>
+              <p class="card__subtitle">Connect your own Microsoft 365 account to show phone numbers from your Outlook contacts when viewing a requester.</p>
+            </div>
+          </header>
+          <div class="card__body">
+            {% if profile_m365_contacts.connected %}
+              <p class="form-help">Connected{% if profile_m365_contacts.account_email %} as {{ profile_m365_contacts.account_email }}{% endif %}. MyPortal only requests read access to your contacts.</p>
+              <form method="post" action="/admin/profile/m365-contacts/disconnect" class="form-actions">
+                <button type="submit" class="button button--ghost">Disconnect Outlook contacts</button>
+              </form>
+            {% else %}
+              <p class="form-help">Not connected. Contact lookups are private to your technician account.</p>
+              <div class="form-actions">
+                <a class="button" href="/admin/profile/m365-contacts/connect">Connect Microsoft 365</a>
+              </div>
+            {% endif %}
+          </div>
+        </section>
+        <section class="card card--panel">
+          <header class="card__header card__header--stacked">
+            <div>
               <h2 class="card__title">Click to call</h2>
               <p class="card__subtitle">Use your Grandstream phone to call phone numbers shown throughout the portal.</p>
             </div>
