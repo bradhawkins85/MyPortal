@@ -5615,7 +5615,11 @@ async def profile_m365_contacts_disconnect(request: Request):
     return flash_redirect("/admin/profile", "Outlook contacts disconnected.", "success")
 
 
-@app.get("/api/profile/m365-contacts/phones", response_class=JSONResponse)
+@app.api_route(
+    "/api/profile/m365-contacts/phones",
+    methods=["GET", "POST"],
+    response_class=JSONResponse,
+)
 async def profile_m365_contact_phones(request: Request, name: str = Query(..., min_length=1, max_length=200)):
     user, redirect = await _require_authenticated_user(request)
     if redirect:

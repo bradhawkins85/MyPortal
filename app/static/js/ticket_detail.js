@@ -14,7 +14,10 @@
       results.replaceChildren();
       try {
         const name = root.dataset.requesterName || '';
-        const response = await fetch(`/api/profile/m365-contacts/phones?name=${encodeURIComponent(name)}`);
+        const response = await fetch(
+          `/api/profile/m365-contacts/phones?name=${encodeURIComponent(name)}`,
+          { method: 'POST' },
+        );
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.detail || 'Unable to check Outlook contacts');
         const phones = Array.isArray(payload.phones) ? payload.phones : [];

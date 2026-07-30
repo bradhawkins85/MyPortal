@@ -175,6 +175,7 @@
   "POST /api/notifications",
   "POST /api/notifications/acknowledge",
   "POST /api/notifications/{notification_id}/read",
+  "POST /api/profile/m365-contacts/phones",
   "POST /api/quotes/{quote_number}/assign",
   "POST /api/service-status/services",
   "POST /api/service-status/services/{service_id}/check-now",
