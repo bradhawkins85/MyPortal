@@ -32,7 +32,12 @@ def anyio_backend():
 @pytest.mark.anyio
 async def test_list_enabled_staff_users_returns_rows(monkeypatch):
     dummy_rows = [
-        {"staff_id": 11, "user_id": 101, "email": "bravo@example.com"},
+        {
+            "staff_id": 11,
+            "user_id": 101,
+            "email": "bravo@example.com",
+            "mobile_phone": "0412 345 678",
+        },
         {"staff_id": 5, "user_id": None, "email": "alpha@example.com"},
     ]
     dummy_db = _DummyStaffDB(dummy_rows)
@@ -44,11 +49,13 @@ async def test_list_enabled_staff_users_returns_rows(monkeypatch):
     assert "FROM staff AS s" in (dummy_db.last_sql or "")
     assert "s.created_at AS created_at" in (dummy_db.last_sql or "")
     assert "s.updated_at AS updated_at" in (dummy_db.last_sql or "")
+    assert "s.mobile_phone AS mobile_phone" in (dummy_db.last_sql or "")
     assert "u.created_at" not in (dummy_db.last_sql or "")
     assert "u.updated_at" not in (dummy_db.last_sql or "")
     assert result[0]["id"] == 101
     assert result[0]["requester_value"] == "user:101"
     assert result[0]["is_registered_user"] is True
+    assert result[0]["mobile_phone"] == "0412 345 678"
     assert result[1]["id"] == 5
     assert result[1]["requester_value"] == "staff:5"
     assert result[1]["is_registered_user"] is False
