@@ -283,6 +283,7 @@ async def list_enabled_staff_users(company_id: int) -> List[dict[str, Any]]:
             COALESCE(NULLIF(u.email, ''), s.email) AS email,
             COALESCE(NULLIF(u.first_name, ''), s.first_name) AS first_name,
             COALESCE(NULLIF(u.last_name, ''), s.last_name) AS last_name,
+            s.mobile_phone AS mobile_phone,
             s.company_id AS company_id,
             s.created_at AS created_at,
             s.updated_at AS updated_at,
