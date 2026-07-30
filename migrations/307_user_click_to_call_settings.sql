@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS user_click_to_call_settings (
-    user_id BIGINT NOT NULL PRIMARY KEY,
+    -- Keep this type identical to users.id so MySQL can create the foreign key.
+    user_id INT NOT NULL PRIMARY KEY,
     enabled TINYINT(1) NOT NULL DEFAULT 0,
     phone_ip VARCHAR(255) NULL,
     login_username VARCHAR(255) NULL,

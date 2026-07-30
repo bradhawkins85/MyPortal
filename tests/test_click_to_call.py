@@ -1,9 +1,22 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
 from app.api.routes.click_to_call import ClickToCallSettingsUpdate, _public_settings
+
+
+def test_click_to_call_migration_matches_user_id_type():
+    migration = (
+        Path(__file__).resolve().parents[1]
+        / "migrations"
+        / "307_user_click_to_call_settings.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "user_id INT NOT NULL PRIMARY KEY" in migration
+    assert "user_id BIGINT" not in migration
 
 
 def test_click_to_call_settings_accept_private_phone_ip():
