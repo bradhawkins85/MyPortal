@@ -182,7 +182,15 @@
               </div>
               <div class="form-field">
                 <span class="form-label">Requester phone</span>
-                <p class="form-help">{{ ticket_requester_phone_display or '—' }}</p>
+                {% if ticket_requester_phone_display %}
+                  <p class="form-help">Mobile: {{ ticket_requester_phone_display }}</p>
+                {% endif %}
+                {% if ticket_company_phone_display %}
+                  <p class="form-help">Company: {{ ticket_company_phone_display }}</p>
+                {% endif %}
+                {% if not ticket_requester_phone_display and not ticket_company_phone_display %}
+                  <p class="form-help">—</p>
+                {% endif %}
               </div>
               <div class="form-field">
                 <label class="form-label" for="ticket-review-date-detail">Review Date</label>

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, patch
 import io
+from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 import pytest
@@ -25,6 +26,16 @@ def _make_request(path: str = "/admin/tickets/1") -> Request:
     scope = {"type": "http", "method": "GET", "path": path, "headers": []}
     request = Request(scope, _dummy_receive)
     return request
+
+
+def test_requester_phone_field_renders_mobile_and_company_on_separate_lines() -> None:
+    template = Path("app/templates/admin/ticket_detail.html").read_text(encoding="utf-8")
+
+    assert "Mobile: {{ ticket_requester_phone_display }}" in template
+    assert "Company: {{ ticket_company_phone_display }}" in template
+    assert template.index("Mobile: {{ ticket_requester_phone_display }}") < template.index(
+        "Company: {{ ticket_company_phone_display }}"
+    )
 
 
 @pytest.fixture
@@ -84,11 +95,36 @@ async def test_render_ticket_detail_with_tactical_module_and_ai_tags(monkeypatch
     monkeypatch.setattr(main, "sanitize_rich_text", fake_sanitize)
     monkeypatch.setattr(main.tickets_repo, "get_ticket", AsyncMock(return_value=ticket))
     monkeypatch.setattr(main.tickets_repo, "list_replies", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        main.tickets_repo,
+        "list_split_replies_for_original",
+        AsyncMock(return_value=[]),
+    )
     monkeypatch.setattr(main.tickets_repo, "list_watchers", AsyncMock(return_value=[]))
     monkeypatch.setattr(main.attachments_repo, "list_attachments", AsyncMock(return_value=[]))
     monkeypatch.setattr(main.tickets_repo, "list_ticket_assets", AsyncMock(return_value=[]))
-    monkeypatch.setattr(main.user_repo, "get_user_by_id", AsyncMock(return_value={"id": 1, "email": "test@example.com"}))
-    monkeypatch.setattr(main.company_repo, "get_company_by_id", AsyncMock(return_value={"id": 1, "name": "Test Company"}))
+    monkeypatch.setattr(
+        main.user_repo,
+        "get_user_by_id",
+        AsyncMock(
+            return_value={
+                "id": 1,
+                "email": "test@example.com",
+                "mobile_phone": "0412 345 678",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        main.company_repo,
+        "get_company_by_id",
+        AsyncMock(
+            return_value={
+                "id": 1,
+                "name": "Test Company",
+                "phone": "+61 2 9876 5432",
+            }
+        ),
+    )
     monkeypatch.setattr(main.modules_service, "list_modules", AsyncMock(return_value=modules))
     monkeypatch.setattr(main.labour_types_service, "list_labour_types", AsyncMock(return_value=[]))
     monkeypatch.setattr(main.tickets_service, "list_status_definitions", AsyncMock(return_value=statuses))
@@ -105,6 +141,7 @@ async def test_render_ticket_detail_with_tactical_module_and_ai_tags(monkeypatch
             "first_name": "Requester",
             "last_name": "Example",
             "email": "requester@example.com",
+            "mobile_phone": "0412 345 678",
         }
     ]
     monkeypatch.setattr(
@@ -159,6 +196,8 @@ async def test_render_ticket_detail_with_tactical_module_and_ai_tags(monkeypatch
     assert captured["extra"]["ticket_mention_staff_options"] == [
         {"id": 2, "label": "Requester Example", "email": "requester@example.com"}
     ]
+    assert captured["extra"]["ticket_requester_phone_display"] == "0412 345 678"
+    assert captured["extra"]["ticket_company_phone_display"] == "02 9876 5432"
 
 
 @pytest.mark.anyio("asyncio")

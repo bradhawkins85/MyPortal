@@ -9221,6 +9221,9 @@ async def _render_ticket_detail(
             ticket_requester_phone_display = _format_ticket_requester_phone(
                 requester_record.get("mobile_phone")
             )
+    ticket_company_phone_display = _format_ticket_requester_phone(
+        company.get("phone") if company else None
+    )
 
     default_priorities = ["urgent", "high", "normal", "low"]
     current_priority = str(ticket.get("priority") or "normal")
@@ -9392,6 +9395,7 @@ async def _render_ticket_detail(
         "ticket_user_options": technician_users,
         "ticket_requester_options": requester_options,
         "ticket_requester_phone_display": ticket_requester_phone_display,
+        "ticket_company_phone_display": ticket_company_phone_display,
         "ticket_watcher_staff_options": watcher_staff_options,
         "ticket_mention_staff_options": ticket_mention_staff_options,
         "ticket_priority_options": priority_options,
