@@ -2,6 +2,7 @@
   const PHONE_PATTERN = /(?:\+?\d[\d\s().-]{5,}\d)/g;
   const SKIPPED_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'OPTION', 'SCRIPT', 'STYLE', 'TEXTAREA']);
   let enabled = false;
+  let phonePrefixes = [];
 
   function toast(message, variant) {
     if (window.__portalToast && typeof window.__portalToast.show === 'function') {
@@ -14,7 +15,16 @@
   function validNumber(text) {
     const normalized = text.replace(/[^0-9+]/g, '');
     const digits = normalized.replace(/\D/g, '');
-    return digits.length >= 7 && digits.length <= 15 ? normalized : null;
+    if (digits.length < 7 || digits.length > 15) return null;
+
+    // Only link values beginning with an operator-approved prefix. This avoids
+    // interpreting dates, timestamps, invoice numbers, and other digit strings
+    // as telephone numbers merely because they have a plausible length.
+    const hasAllowedPrefix = phonePrefixes.some((prefix) => {
+      const normalizedPrefix = prefix.replace(/[^0-9+]/g, '');
+      return normalizedPrefix && normalized.startsWith(normalizedPrefix);
+    });
+    return hasAllowedPrefix ? normalized : null;
   }
 
   async function call(number) {
@@ -77,7 +87,9 @@
     try {
       const response = await fetch('/api/click-to-call/settings', { credentials: 'same-origin' });
       if (!response.ok) return;
-      enabled = Boolean((await response.json()).enabled);
+      const settings = await response.json();
+      enabled = Boolean(settings.enabled);
+      phonePrefixes = Array.isArray(settings.phone_prefixes) ? settings.phone_prefixes : [];
       if (!enabled) return;
       linkify(document.body);
       new MutationObserver((mutations) => mutations.forEach((mutation) => {

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.api.dependencies.auth import get_current_user
 from app.api.dependencies.database import require_database
+from app.core.config import get_settings as get_app_settings
 from app.repositories import click_to_call as click_to_call_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 
@@ -52,6 +53,11 @@ def _public_settings(record: dict | None) -> dict[str, object]:
         "phone_ip": record.get("phone_ip") or "",
         "login_username": record.get("login_username") or "",
         "password_configured": bool(record.get("password_encrypted")),
+        "phone_prefixes": [
+            prefix.strip()
+            for prefix in get_app_settings().click_to_call_phone_prefixes.split(",")
+            if prefix.strip()
+        ],
     }
 
 

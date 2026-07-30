@@ -87,6 +87,14 @@ class Settings(BaseSettings):
         default="",
         validation_alias="ALLOWED_ORIGINS",
     )
+    click_to_call_phone_prefixes: str = Field(
+        default="+61,617,614,04",
+        validation_alias="CLICK_TO_CALL_PHONE_PREFIXES",
+        description=(
+            "Comma-separated phone prefixes eligible for automatic click-to-call "
+            "detection. Prefixes are compared after removing display formatting."
+        ),
+    )
     smtp_host: str | None = Field(default=None, validation_alias="SMTP_HOST")
     smtp_port: int = Field(default=587, validation_alias="SMTP_PORT")
     smtp_user: str | None = Field(default=None, validation_alias="SMTP_USER")
