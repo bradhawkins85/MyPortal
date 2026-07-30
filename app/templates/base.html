@@ -798,6 +798,9 @@
     <script src="{{ static_url('/static/js/header_menu.js') }}" defer></script>
     <script src="{{ static_url('/static/js/table_columns.js') }}" defer></script>
     <script src="{{ static_url('/static/js/main.js') }}" defer></script>
+    {% if has_authenticated_user %}
+    <script src="{{ static_url('/static/js/click_to_call.js') }}" defer></script>
+    {% endif %}
     <script>
       (function () {
         const tokenMeta = document.querySelector('meta[name="csrf-token"]');

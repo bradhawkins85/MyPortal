@@ -67,6 +67,7 @@ from app.api.routes import (
     bcp,
     business_continuity_plans as bc_plans_api,
     call_recordings as call_recordings_api,
+    click_to_call as click_to_call_api,
     companies,
     essential8 as essential8_api,
     compliance_checks as compliance_checks_api,
@@ -1096,6 +1097,7 @@ async def authenticated_swagger_ui(request: Request) -> Response:
 app.include_router(auth.router)
 app.include_router(agent.router)
 app.include_router(users.router)
+app.include_router(click_to_call_api.router)
 app.include_router(call_recordings_api.router)
 app.include_router(companies.router)
 app.include_router(essential8_api.router)

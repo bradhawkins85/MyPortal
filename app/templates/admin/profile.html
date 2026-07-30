@@ -25,6 +25,32 @@
         <section class="card card--panel">
           <header class="card__header card__header--stacked">
             <div>
+              <h2 class="card__title">Click to call</h2>
+              <p class="card__subtitle">Use your Grandstream phone to call phone numbers shown throughout the portal.</p>
+            </div>
+          </header>
+          <div class="card__body">
+            <form class="form" id="click-to-call-form">
+              <label class="form-checkbox"><input type="checkbox" id="click-to-call-enabled" /> Enable click to call</label>
+              <div class="form-field">
+                <label class="form-label" for="click-to-call-phone-ip">Phone IP</label>
+                <input class="form-input" id="click-to-call-phone-ip" inputmode="decimal" placeholder="192.168.1.50" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="click-to-call-username">Login username</label>
+                <input class="form-input" id="click-to-call-username" autocomplete="username" />
+              </div>
+              <div class="form-field">
+                <label class="form-label" for="click-to-call-password">Password</label>
+                <input class="form-input" type="password" id="click-to-call-password" autocomplete="new-password" placeholder="Leave blank to keep current password" />
+              </div>
+              <div class="form-actions"><button type="submit" class="button">Save click-to-call settings</button></div>
+            </form>
+          </div>
+        </section>
+        <section class="card card--panel">
+          <header class="card__header card__header--stacked">
+            <div>
               <h2 class="card__title">Notification Contact</h2>
               <p class="card__subtitle">Provide a mobile number for SMS alerts. Numbers are stored in E.164 format for secure delivery.</p>
             </div>

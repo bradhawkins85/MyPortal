@@ -5538,6 +5538,23 @@ dialog.modal:not([open]) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.click-to-call {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-primary, #60a5fa);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  cursor: pointer;
+}
+
+.click-to-call:hover,
+.click-to-call:focus-visible {
+  text-decoration-style: solid;
+}
+
 .profile-columns--standard {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
