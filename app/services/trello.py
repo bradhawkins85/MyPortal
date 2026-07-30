@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from html import unescape
 from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
@@ -166,6 +167,14 @@ def _strip_html(value: str, *, image_base_url: str | None = None) -> str:
     """Convert HTML to plain text/Markdown suitable for a Trello comment."""
     if not value:
         return ""
+
+    # Rich-text replies can reach this integration with their markup entity-
+    # encoded (for example ``&lt;/span&gt;&lt;/div&gt;``).  HTMLParser decodes
+    # character references only while emitting text, so feeding that value
+    # directly would expose the decoded tags in the Trello comment instead of
+    # treating them as markup.  Decode once before parsing so block elements
+    # and ``br`` tags are handled by the parser and rendered as line breaks.
+    value = unescape(value)
     parser = _TrelloCommentHTMLParser(image_base_url=image_base_url)
     parser.feed(value)
     parser.close()
