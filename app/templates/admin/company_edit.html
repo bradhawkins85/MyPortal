@@ -60,6 +60,20 @@
             />
             <p class="form-help">Use commas to list domains. Domains are matched case-insensitively.</p>
           </div>
+          <div class="form-field">
+            <label class="form-label" for="edit-company-phone">Company phone</label>
+            <input
+              id="edit-company-phone"
+              name="phone"
+              class="form-input"
+              type="tel"
+              autocomplete="tel"
+              placeholder="e.g. +44 20 7946 0958"
+              value="{{ form_data.phone }}"
+              maxlength="50"
+            />
+            <p class="form-help">The company's primary business phone number.</p>
+          </div>
           <div class="form-actions">
             <button type="submit" class="button">Save changes</button>
           </div>

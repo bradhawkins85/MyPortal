@@ -10,6 +10,7 @@ from app.services.company_domains import EmailDomainError, normalise_email_domai
 class CompanyBase(BaseModel):
     name: str
     address: Optional[str] = None
+    phone: Optional[str] = Field(default=None, max_length=50)
     is_vip: Optional[int] = None
     syncro_company_id: Optional[str] = None
     tacticalrmm_client_id: Optional[str] = None
@@ -39,6 +40,7 @@ class CompanyCreate(CompanyBase):
 class CompanyUpdate(BaseModel):
     name: Optional[str] = None
     address: Optional[str] = None
+    phone: Optional[str] = Field(default=None, max_length=50)
     is_vip: Optional[int] = None
     syncro_company_id: Optional[str] = None
     tacticalrmm_client_id: Optional[str] = None
