@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS user_m365_contact_integrations (
-    user_id BIGINT NOT NULL PRIMARY KEY,
+    -- Keep this type identical to users.id so MySQL can create the foreign key.
+    user_id INT NOT NULL PRIMARY KEY,
     tenant_id VARCHAR(64) NOT NULL,
     account_email VARCHAR(320) NULL,
     refresh_token TEXT NOT NULL,
