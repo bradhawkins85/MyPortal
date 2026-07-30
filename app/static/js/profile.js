@@ -70,6 +70,37 @@
   }
 
   const userId = root.dataset.userId;
+  const clickToCallForm = document.getElementById('click-to-call-form');
+  if (clickToCallForm) {
+    const enabledInput = clickToCallForm.querySelector('#click-to-call-enabled');
+    const phoneIpInput = clickToCallForm.querySelector('#click-to-call-phone-ip');
+    const usernameInput = clickToCallForm.querySelector('#click-to-call-username');
+    const passwordInput = clickToCallForm.querySelector('#click-to-call-password');
+    requestJson('/api/click-to-call/settings').then((settings) => {
+      enabledInput.checked = Boolean(settings.enabled);
+      phoneIpInput.value = settings.phone_ip || '';
+      usernameInput.value = settings.login_username || '';
+    }).catch(() => showMessage({ variant: 'error' }, 'Unable to load click-to-call settings.'));
+
+    clickToCallForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try {
+        await requestJson('/api/click-to-call/settings', {
+          method: 'PUT',
+          body: JSON.stringify({
+            enabled: enabledInput.checked,
+            phone_ip: phoneIpInput.value.trim() || null,
+            login_username: usernameInput.value.trim() || null,
+            password: passwordInput.value || null,
+          }),
+        });
+        passwordInput.value = '';
+        showMessage({ variant: 'success' }, 'Click-to-call settings saved.');
+      } catch (error) {
+        showMessage({ variant: 'error' }, error.message || 'Unable to save click-to-call settings.');
+      }
+    });
+  }
   let totpDevices = [];
   try {
     const parsed = JSON.parse(root.dataset.totpDevices || '[]');
