@@ -118,8 +118,10 @@ if detect_bool "${UVICORN_AUTO_UPDATE_ENABLED:-1}"; then
 fi
 
 uvicorn_pid=0
+shutdown_signal=""
 forward_signal() {
   local signal="$1"
+  shutdown_signal="$signal"
   if [[ "$uvicorn_pid" -gt 0 ]]; then
     kill -s "$signal" "$uvicorn_pid" 2>/dev/null || true
   fi
@@ -133,8 +135,21 @@ run_uvicorn() {
   build_uvicorn_command "$@"
   "${UVICORN_COMMAND[@]}" &
   uvicorn_pid=$!
-  wait "$uvicorn_pid"
-  local status=$?
+  local status
+  while true; do
+    wait "$uvicorn_pid"
+    status=$?
+
+    # A trapped signal interrupts bash's wait before Uvicorn has finished
+    # draining its workers.  Keep the wrapper (and therefore the systemd
+    # cgroup) alive until the child has completed its own cleanup.  Otherwise
+    # systemd can tear down multiprocessing's resource tracker while worker
+    # semaphores are still registered, producing leaked-semaphore warnings.
+    if [[ -n "$shutdown_signal" ]] && kill -0 "$uvicorn_pid" 2>/dev/null; then
+      continue
+    fi
+    break
+  done
   uvicorn_pid=0
   return "$status"
 }
