@@ -199,7 +199,12 @@ func addTraySeparator(parent *systray.MenuItem) {
 }
 
 func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuItem) {
-	switch node.Type {
+	// The server historically emitted TRMM_Script with mixed casing while most
+	// node types are lower-case. Treat the discriminator as case-insensitive so
+	// a harmless casing/whitespace difference cannot leave a visible menu item
+	// without a click handler.
+	nodeType := normalizedMenuNodeType(node.Type)
+	switch nodeType {
 	case "separator":
 		addTraySeparator(parent)
 
@@ -286,7 +291,7 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 			}
 		}()
 
-	case "TRMM_Script", "trmm_script":
+	case "trmm_script":
 		label := node.Label
 		if label == "" {
 			label = node.ScriptName
@@ -324,6 +329,9 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 				systray.Quit()
 			}
 		}()
+
+	default:
+		logger.Warn("Ignoring unsupported tray menu node type %q (label=%q)", node.Type, node.Label)
 	}
 }
 
