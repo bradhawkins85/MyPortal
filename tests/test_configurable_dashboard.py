@@ -1,5 +1,10 @@
+import asyncio
 from pathlib import Path
+from unittest.mock import AsyncMock
+
 import pytest
+
+from app.services import dashboard_layouts
 from app.services.dashboard_layouts import InvalidDashboardLayout, validate_layout
 
 
@@ -83,3 +88,60 @@ def test_dashboard_builder_uses_form_elements_collection():
     assert "const builderForm = dialog?.querySelector('form')" in script
     assert "builderForm?.elements.type.addEventListener" in script
     assert "dialog?.elements.type" not in script
+
+
+def test_stat_colours_and_custom_panel_size_are_validated():
+    panel = validate_layout(
+        {
+            "panels": [
+                {
+                    "id": "count",
+                    "type": "stat",
+                    "report": "example",
+                    "function": "count",
+                    "compare_value": "12.5",
+                    "less_colour": "#112233",
+                    "equal_colour": "not-a-colour",
+                    "greater_colour": "#AABBCC",
+                    "w": 1,
+                    "h": 12,
+                }
+            ]
+        }
+    )["panels"][0]
+
+    assert panel["compare_value"] == 12.5
+    assert panel["less_colour"] == "#112233"
+    assert panel["equal_colour"] == "#1e3a8a"
+    assert panel["greater_colour"] == "#AABBCC"
+    assert (panel["w"], panel["h"]) == (1, 12)
+
+
+def test_resolve_layout_omits_report_panels_without_permission(monkeypatch):
+    layout = validate_layout(
+        {
+            "panels": [
+                {"id": "help", "type": "link", "title": "Help", "url": "/tickets"},
+                {"id": "private", "type": "stat", "title": "Invoices", "report": "invoices"},
+            ]
+        }
+    )
+    monkeypatch.setattr(
+        dashboard_layouts.reporting_repo,
+        "get_query_by_slug",
+        AsyncMock(return_value={"id": 7, "sql_query": "SELECT secret FROM invoices"}),
+    )
+    monkeypatch.setattr(
+        dashboard_layouts.reporting_repo, "user_has_permission", AsyncMock(return_value=False)
+    )
+    run_query = AsyncMock()
+    monkeypatch.setattr(dashboard_layouts.reporting_service, "run_query_with_context", run_query)
+
+    result = asyncio.run(
+        dashboard_layouts.resolve_layout(
+            layout, company_id=4, can_run_all=False, user_id=9
+        )
+    )
+
+    assert [panel["id"] for panel in result["panels"]] == ["help"]
+    run_query.assert_not_awaited()

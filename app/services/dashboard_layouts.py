@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from numbers import Number
+import re
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
@@ -10,9 +11,10 @@ from app.repositories import reporting as reporting_repo
 from app.services import reporting as reporting_service
 from app.services.system_variables import get_system_variables
 
-MAX_PANELS = 40
+MAX_PANELS = 80
 PANEL_TYPES = {"link", "stat", "variable", "graph"}
 GRAPH_TYPES = {"bar", "line", "area", "doughnut"}
+COLOUR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 DEFAULT_LAYOUT = {
     "version": 2,
@@ -91,9 +93,9 @@ def validate_layout(value: Any) -> dict[str, Any]:
         }
         for key, default, low, high in (
             ("x", 0, 0, 11),
-            ("y", index, 0, 200),
-            ("w", 4, 2, 12),
-            ("h", 2, 1, 8),
+            ("y", index, 0, 500),
+            ("w", 4, 1, 12),
+            ("h", 2, 1, 12),
         ):
             try:
                 panel[key] = max(low, min(high, int(raw.get(key, default))))
@@ -115,6 +117,18 @@ def validate_layout(value: Any) -> dict[str, Any]:
             panel["report"] = str(raw.get("report") or "")[:120]
             if panel_type == "stat":
                 panel["function"] = "list" if raw.get("function") == "list" else "count"
+                if panel["function"] == "count":
+                    try:
+                        panel["compare_value"] = float(raw.get("compare_value", 0))
+                    except (TypeError, ValueError):
+                        panel["compare_value"] = 0
+                    for key, fallback in (
+                        ("less_colour", "#7c2d12"),
+                        ("equal_colour", "#1e3a8a"),
+                        ("greater_colour", "#14532d"),
+                    ):
+                        colour = str(raw.get(key) or fallback)
+                        panel[key] = colour if COLOUR_RE.fullmatch(colour) else fallback
             else:
                 panel["chart"] = (
                     raw.get("chart") if raw.get("chart") in GRAPH_TYPES else "bar"
@@ -141,8 +155,11 @@ async def resolve_layout(
                     can_run_all
                     or await reporting_repo.user_has_permission(report["id"], user_id)
                 )
+                # An inherited layout may contain panels its viewer cannot run.
+                # Omit those panels completely rather than leaking their title,
+                # report slug, or the fact that data exists.
                 if not permitted:
-                    raise ValueError("Report is unavailable")
+                    continue
                 result = await reporting_service.run_query_with_context(
                     report["sql_query"], company_id=company_id
                 )

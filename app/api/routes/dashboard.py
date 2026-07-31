@@ -48,8 +48,7 @@ async def get_dashboard(request: Request, user: dict = Depends(get_current_user)
     resolved = await layouts_service.resolve_layout(
         layout,
         company_id=company_id,
-        can_run_all=bool(user.get("is_super_admin"))
-        or source in {"company", "default"},
+        can_run_all=bool(user.get("is_super_admin")),
         user_id=user_id,
     )
     return {
