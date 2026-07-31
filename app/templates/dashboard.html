@@ -1,159 +1,36 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
-{% from 'macros/mobile.html' import mobile_collapsible %}
-
 {% block title %}Dashboard{% endblock %}
-
-{% block header_title %}
-  <span class="header__title-text">Dashboard</span>
-{% endblock %}
-
-{% block header_actions %}
-  {{ page_header_actions([]) }}
-{% endblock %}
-
+{% block header_title %}<span class="header__title-text">Dashboard</span>{% endblock %}
+{% block header_actions %}{{ page_header_actions([]) }}{% endblock %}
 {% block content %}
-{% set dashboard = dashboard or {} %}
-{% set greeting = dashboard.get('greeting') or {} %}
-{% set attention = dashboard.get('attention') or {'items': [], 'all_clear': True} %}
-{% set quick_actions = dashboard.get('quick_actions') or {'actions': []} %}
-{% set recent_activity = dashboard.get('recent_activity') or {'notifications': [], 'changes': []} %}
-{% set system_health = dashboard.get('system_health') %}
-
-<section class="dashboard-summary" aria-label="Dashboard summary">
-  <article class="card card--panel dashboard-summary__greeting">
-    <div class="dashboard-summary__greeting-text">
-      <h2 class="dashboard-summary__title">
-        {{ greeting.get('greeting') or 'Hello' }}, {{ greeting.get('name') or 'there' }}.
-      </h2>
-      {% if greeting.get('company_name') %}
-        <p class="dashboard-summary__meta">{{ greeting.company_name }}</p>
-      {% endif %}
+<section class="dashboard-workspace" data-dashboard-app>
+  <header class="dashboard-hero">
+    <div><p class="dashboard-hero__eyebrow">Workspace overview</p><h1>Your dashboard</h1><p>Live company insights, shortcuts and automation data in one flexible view.</p></div>
+    <div class="dashboard-toolbar" data-dashboard-toolbar hidden>
+      <button class="button button--secondary" type="button" data-dashboard-add>Add panel</button>
+      <button class="button button--secondary" type="button" data-dashboard-import>Import</button>
+      <button class="button button--secondary" type="button" data-dashboard-export>Export</button>
+      <button class="button" type="button" data-dashboard-save>Save layout</button>
     </div>
-  </article>
-
-  <article class="card card--panel dashboard-summary__attention" aria-labelledby="dashboard-attention-heading">
-    <header class="dashboard-summary__section-header">
-      <h2 id="dashboard-attention-heading" class="dashboard-summary__section-title">Needs your attention</h2>
-    </header>
-    {% if attention.all_clear %}
-      <p class="dashboard-summary__empty">
-        Nothing needs your attention right now. <span aria-hidden="true">🎉</span>
-      </p>
-    {% else %}
-      <ul class="dashboard-summary__attention-list" role="list">
-        {% for item in attention.get('items') or [] %}
-          <li class="dashboard-summary__attention-item dashboard-summary__attention-item--{{ item.severity or 'info' }}">
-            <a class="dashboard-summary__attention-link" href="{{ item.href }}">
-              <span class="dashboard-summary__attention-count">{{ item.count }}</span>
-              <span class="dashboard-summary__attention-label">{{ item.label }}</span>
-              {% if item.detail %}
-                <span class="dashboard-summary__attention-detail">{{ item.detail }}</span>
-              {% endif %}
-            </a>
-          </li>
-        {% endfor %}
-      </ul>
-    {% endif %}
-  </article>
-
-  {% if quick_actions.get('actions') %}
-    <article class="card card--panel dashboard-summary__actions" aria-labelledby="dashboard-actions-heading">
-      <header class="dashboard-summary__section-header">
-        <h2 id="dashboard-actions-heading" class="dashboard-summary__section-title">Quick actions</h2>
-      </header>
-      <ul class="dashboard-actions" role="list">
-        {% for action in quick_actions.actions %}
-          <li class="dashboard-actions__item">
-            <a class="button {% if action.variant == 'primary' %}button--primary{% else %}button--ghost{% endif %} button--small"
-               href="{{ action.href }}">
-              {{ action.label }}
-            </a>
-          </li>
-        {% endfor %}
-      </ul>
-    </article>
-  {% endif %}
-
-  <article class="card card--panel dashboard-summary__activity" aria-labelledby="dashboard-activity-heading">
-    <header class="dashboard-summary__section-header">
-      <h2 id="dashboard-activity-heading" class="dashboard-summary__section-title">Recent activity</h2>
-    </header>
-    {% call mobile_collapsible('Notifications', open=True, id='dashboard-activity-notifications') %}
-      {% set notifications = recent_activity.get('notifications') or [] %}
-      {% if notifications %}
-        <ul class="dashboard-activity-list" role="list">
-          {% for entry in notifications %}
-            <li class="dashboard-activity-list__item{% if not entry.read %} dashboard-activity-list__item--unread{% endif %}">
-              <div class="dashboard-activity-list__title">{{ entry.title }}</div>
-              {% if entry.subtitle %}
-                <div class="dashboard-activity-list__subtitle">{{ entry.subtitle }}</div>
-              {% endif %}
-              {% if entry.occurred_at %}
-                <div class="dashboard-activity-list__meta">
-                  <span data-utc="{{ entry.occurred_at.isoformat() }}">{{ entry.occurred_at.isoformat() }}</span>
-                </div>
-              {% endif %}
-            </li>
-          {% endfor %}
-        </ul>
-        {% if recent_activity.get('notifications_link') %}
-          <a class="dashboard-summary__more-link" href="{{ recent_activity.notifications_link }}">View all notifications</a>
-        {% endif %}
-      {% else %}
-        <p class="dashboard-summary__empty">No recent notifications.</p>
-      {% endif %}
-    {% endcall %}
-
-    {% set changes = recent_activity.get('changes') or [] %}
-    {% if changes %}
-      {% call mobile_collapsible('Recent changes', open=False, id='dashboard-activity-changes') %}
-        <ul class="dashboard-activity-list" role="list">
-          {% for entry in changes %}
-            <li class="dashboard-activity-list__item">
-              <div class="dashboard-activity-list__title">{{ entry.title }}</div>
-              {% if entry.subtitle %}
-                <div class="dashboard-activity-list__subtitle">{{ entry.subtitle }}</div>
-              {% endif %}
-              {% if entry.occurred_at %}
-                <div class="dashboard-activity-list__meta">
-                  <span data-utc="{{ entry.occurred_at.isoformat() }}">{{ entry.occurred_at.isoformat() }}</span>
-                </div>
-              {% endif %}
-            </li>
-          {% endfor %}
-        </ul>
-        {% if recent_activity.get('changes_link') %}
-          <a class="dashboard-summary__more-link" href="{{ recent_activity.changes_link }}">View change log</a>
-        {% endif %}
-      {% endcall %}
-    {% endif %}
-  </article>
-
-  {% if system_health %}
-    <article class="card card--panel dashboard-summary__health" aria-labelledby="dashboard-health-heading">
-      <header class="dashboard-summary__section-header">
-        <h2 id="dashboard-health-heading" class="dashboard-summary__section-title">System health</h2>
-      </header>
-      <ul class="dashboard-health" role="list">
-        <li class="dashboard-health__item">
-          <span class="dashboard-health__value">{{ system_health.webhook_pending }}</span>
-          <span class="dashboard-health__label">Webhooks pending</span>
-        </li>
-        <li class="dashboard-health__item">
-          <span class="dashboard-health__value">{{ system_health.webhook_in_progress }}</span>
-          <span class="dashboard-health__label">In progress</span>
-        </li>
-        <li class="dashboard-health__item dashboard-health__item--{% if system_health.webhook_failed %}danger{% else %}neutral{% endif %}">
-          <span class="dashboard-health__value">{{ system_health.webhook_failed }}</span>
-          <span class="dashboard-health__label">Failed</span>
-        </li>
-      </ul>
-      <div class="dashboard-summary__more-links">
-        <a class="dashboard-summary__more-link" href="{{ system_health.webhooks_url }}">Webhook activity</a>
-        <a class="dashboard-summary__more-link" href="{{ system_health.service_status_url }}">Service status</a>
-      </div>
-    </article>
-  {% endif %}
+  </header>
+  <div class="dashboard-context"><span class="dashboard-context__dot"></span><span data-dashboard-source>Loading dashboard…</span></div>
+  <div class="dashboard-grid" data-dashboard-grid aria-live="polite"><div class="dashboard-loading">Loading your panels…</div></div>
 </section>
+
+<dialog class="dashboard-builder" data-dashboard-builder>
+ <form method="dialog" class="dashboard-builder__surface">
+  <header><div><p class="dashboard-hero__eyebrow">Dashboard builder</p><h2>Add a panel</h2></div><button class="dashboard-builder__close" value="cancel" aria-label="Close">×</button></header>
+  <label>Panel type<select name="type"><option value="stat">Reporting statistic</option><option value="graph">Reporting graph</option><option value="variable">Automation variable</option><option value="link">Button / link</option></select></label>
+  <label>Title<input name="title" maxlength="120" required value="New panel"></label>
+  <div data-panel-report><label>Reporting query<select name="report"></select></label></div>
+  <div data-panel-function><label>Function<select name="function"><option value="count">.count — number of rows</option><option value="list">.list — first-column values</option></select></label></div>
+  <div data-panel-chart hidden><label>Graph style<select name="chart"><option value="bar">Bar</option><option value="line">Line</option><option value="area">Area</option><option value="doughnut">Doughnut</option></select></label></div>
+  <div data-panel-variable hidden><label>Automation variable<select name="variable"></select></label></div>
+  <div data-panel-link hidden><label>Button label<input name="label" value="Open"></label><label>URL<input name="url" placeholder="/tickets/new"></label></div>
+  <footer><button class="button button--secondary" value="cancel">Cancel</button><button class="button" value="default" data-panel-confirm>Add panel</button></footer>
+ </form>
+</dialog>
+<input type="file" accept="application/json" data-dashboard-file hidden>
+<script src="/static/js/dashboard.js" defer></script>
 {% endblock %}
