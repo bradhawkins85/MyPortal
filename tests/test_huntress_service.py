@@ -99,7 +99,7 @@ async def test_credentials_status_reflects_environment(monkeypatch):
     }
 
 
-def test_curricula_oauth_token_url_is_derived_from_base_url(monkeypatch):
+def test_curricula_oauth_endpoints_are_derived_from_base_url(monkeypatch):
     from app.services import huntress as huntress_service
 
     monkeypatch.setattr(
@@ -120,6 +120,7 @@ def test_curricula_oauth_token_url_is_derived_from_base_url(monkeypatch):
         "api_key": "oauth-client-id",
         "api_secret": "oauth-client-secret",
         "base_url": "https://sat.example.com/partner/api/v1",
+        "auth_url": "https://sat.example.com/partner/oauth/authorize",
         "token_url": "https://sat.example.com/partner/oauth/token",
     }
 
@@ -401,6 +402,7 @@ async def test_curricula_oauth_uses_client_credentials_and_returns_bearer_client
         "api_key": "oauth-client-id",
         "api_secret": "oauth-client-secret",
         "base_url": "https://dev.curricula.com/api/v1",
+        "auth_url": "https://dev.curricula.com/oauth/authorize",
         "token_url": "https://dev.curricula.com/oauth/token",
     }
 
@@ -413,10 +415,10 @@ async def test_curricula_oauth_uses_client_credentials_and_returns_bearer_client
     assert len(token_requests) == 1
     request = token_requests[0]
     assert str(request.url) == "https://dev.curricula.com/oauth/token"
-    assert "authorization" not in request.headers
+    assert request.headers["authorization"].startswith("Basic ")
     assert request.content == (
-        b"grant_type=client_credentials&client_id=oauth-client-id&"
-        b"client_secret=oauth-client-secret"
+        b"grant_type=client_credentials&scope=account%3Aread+assignments%3Aread+"
+        b"assignments%3Alearner-activity+learners%3Aread"
     )
 
 

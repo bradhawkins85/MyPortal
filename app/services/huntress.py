@@ -38,6 +38,13 @@ REQUEST_TIMEOUT = 30.0
 _REQUEST_INTERVAL_SECONDS = 1.1
 _request_lock = asyncio.Lock()
 
+CURRICULA_READ_SCOPES = (
+    "account:read",
+    "assignments:read",
+    "assignments:learner-activity",
+    "learners:read",
+)
+
 
 # ---------------------------------------------------------------------------
 # Configuration / client helpers
@@ -73,6 +80,7 @@ def _get_curricula_credentials() -> dict[str, str] | None:
         "api_key": api_key,
         "api_secret": api_secret,
         "base_url": base_url,
+        "auth_url": f"{oauth_base_url}/oauth/authorize",
         "token_url": f"{oauth_base_url}/oauth/token",
     }
 
@@ -135,9 +143,9 @@ async def _curricula_oauth_client(
             credentials["token_url"],
             data={
                 "grant_type": "client_credentials",
-                "client_id": credentials["api_key"],
-                "client_secret": credentials["api_secret"],
+                "scope": " ".join(CURRICULA_READ_SCOPES),
             },
+            auth=(credentials["api_key"], credentials["api_secret"]),
             headers={"Accept": "application/json"},
         )
     if response.status_code >= 400:

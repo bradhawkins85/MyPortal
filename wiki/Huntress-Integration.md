@@ -39,12 +39,18 @@ CURRICULA_BASE_URL=https://dev.curricula.com/api/v1
 ```
 
 If Huntress supplies a tenant-specific API URL, use that as
-`CURRICULA_BASE_URL`. MyPortal derives the OAuth endpoint by replacing the
-trailing `/api/v1` with `/oauth/token`. At sync time MyPortal posts
-`grant_type=client_credentials` to that token URL using the client ID and
+`CURRICULA_BASE_URL`. MyPortal derives both OAuth2 endpoints from that URL by
+removing the trailing `/api/v1`: `CURRICULA_AUTH_URL` is
+`<base>/oauth/authorize`, and `CURRICULA_TOKEN_URL` is `<base>/oauth/token`.
+The authorization endpoint is available for applications using the
+Authorization Code flow; MyPortal's unattended SAT synchronisation uses the
+token endpoint directly with the Client Credentials flow. At sync time
+MyPortal posts `grant_type=client_credentials` and the required read scopes
+(`account:read`, `assignments:read`,
+`assignments:learner-activity`, and `learners:read`) using the client ID and
 secret as HTTP Basic credentials. It then sends the returned access token as
-`Authorization: Bearer ...` when requesting the learner list. Tokens and
-secrets are never stored in the database or written to logs.
+`Authorization: Bearer ...` on every Curricula API request. Tokens and secrets
+are never stored in the database or written to logs.
 
 In each company's edit page, set **Huntress SAT account ID** to the child
 account ID used in the learner URL. This is distinct from the Huntress
