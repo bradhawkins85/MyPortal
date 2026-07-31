@@ -81,6 +81,7 @@ def _normalise_policy(row: dict[str, Any] | None, *, default_workflow_key: str =
         "is_enabled": bool(int(row.get("is_enabled") or 0)),
         "max_retries": max(0, int(row.get("max_retries") or 0)),
         "config": _deserialise_json(row.get("config_json")),
+        "is_configured": True,
     }
 
 
@@ -161,7 +162,7 @@ async def get_company_workflow_policy(
 ) -> dict[str, Any]:
     """Return the first (primary) workflow policy for a company and direction.
 
-    Falls back to a synthetic default policy when none is configured.
+    Falls back to a disabled synthetic policy when none is configured.
     This function is retained for backward compatibility with callers that
     expect a single policy dict.
     """
@@ -191,7 +192,8 @@ async def get_company_workflow_policy(
             "workflow_name": None,
             "delay_type": "scheduled",
             "sort_order": 0,
-            "is_enabled": True,
+            "is_enabled": False,
+            "is_configured": False,
             "max_retries": 2,
             "config": {},
         }
@@ -204,7 +206,8 @@ async def get_company_workflow_policy(
         "workflow_name": None,
         "delay_type": "scheduled",
         "sort_order": 0,
-        "is_enabled": True,
+        "is_enabled": False,
+        "is_configured": False,
         "max_retries": 2,
         "config": {},
     }

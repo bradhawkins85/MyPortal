@@ -112,6 +112,46 @@ def test_coerce_step_json_fields_parses_store_and_http_payload_fields():
 
 
 @pytest.mark.anyio
+async def test_run_workflow_skips_unconfigured_policy(monkeypatch):
+    monkeypatch.setattr(
+        workflows.staff_repo,
+        "get_staff_by_id",
+        AsyncMock(
+            return_value={
+                "id": 98,
+                "company_id": 7,
+                "onboarding_status": workflows.STATE_APPROVED,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        workflows.workflow_repo,
+        "get_company_workflow_policy",
+        AsyncMock(
+            return_value={
+                "is_configured": False,
+                "is_enabled": False,
+                "workflow_key": workflows.workflow_repo.DEFAULT_WORKFLOW_KEY,
+                "config": {},
+            }
+        ),
+    )
+    create_execution = AsyncMock()
+    monkeypatch.setattr(
+        workflows.workflow_repo, "create_or_reset_execution", create_execution
+    )
+
+    result = await workflows.run_staff_onboarding_workflow(
+        company_id=7,
+        staff_id=98,
+        initiated_by_user_id=None,
+    )
+
+    assert result == {"state": "skipped", "reason": "workflow_not_configured"}
+    create_execution.assert_not_awaited()
+
+
+@pytest.mark.anyio
 async def test_run_workflow_ignores_waiting_external_within_timeout(monkeypatch):
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     monkeypatch.setattr(
@@ -513,14 +553,9 @@ async def test_resume_uses_direction_from_execution_id_not_latest_staff_executio
 
 
 @pytest.mark.anyio
-async def test_enqueue_offboarding_uses_offboarding_workflow_key(monkeypatch):
-    """Regression: enqueue_staff_onboarding_workflow must use the direction-specific
-    workflow key when creating the queued execution for offboarding requests."""
+async def test_enqueue_offboarding_without_configured_policy_does_not_create_execution(monkeypatch):
     staff_record = {"id": 700, "date_offboarded": None}
     monkeypatch.setattr(workflows.staff_repo, "get_staff_by_id", AsyncMock(return_value=staff_record))
-    get_policy_mock = AsyncMock(return_value={"workflow_key": None})
-    monkeypatch.setattr(workflows.workflow_repo, "get_company_workflow_policy", get_policy_mock)
-    # Return empty list so the code falls back to get_company_workflow_policy
     monkeypatch.setattr(workflows.workflow_repo, "list_company_workflow_policies", AsyncMock(return_value=[]))
     create_mock = AsyncMock(return_value={"id": 88})
     monkeypatch.setattr(workflows.workflow_repo, "create_or_reset_execution", create_mock)
@@ -533,12 +568,8 @@ async def test_enqueue_offboarding_uses_offboarding_workflow_key(monkeypatch):
         direction=workflows.DIRECTION_OFFBOARDING,
     )
 
-    # Policy must be fetched with the offboarding default key.
-    assert get_policy_mock.await_args.kwargs.get("default_workflow_key") == workflows.workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY
-    # Execution must be created with the offboarding default workflow key as fallback.
-    assert create_mock.await_args.kwargs["workflow_key"] == workflows.workflow_repo.DEFAULT_OFFBOARDING_WORKFLOW_KEY
-    # Execution state must be set to offboarding_approved.
-    assert workflows.workflow_repo.update_execution_state.await_args.kwargs["state"] == workflows.STATE_OFFBOARDING_APPROVED
+    create_mock.assert_not_awaited()
+    workflows.workflow_repo.update_execution_state.assert_not_awaited()
 
 
 
@@ -566,15 +597,9 @@ def test_compute_scheduled_execution_offboarding_preserves_requested_datetime():
 
 
 @pytest.mark.anyio
-async def test_enqueue_workflow_creates_approved_execution(monkeypatch):
+async def test_enqueue_workflow_without_configured_policy_does_not_create_execution(monkeypatch):
     staff_record = {"id": 333, "date_onboarded": None}
     monkeypatch.setattr(workflows.staff_repo, "get_staff_by_id", AsyncMock(return_value=staff_record))
-    monkeypatch.setattr(
-        workflows.workflow_repo,
-        "get_company_workflow_policy",
-        AsyncMock(return_value={"workflow_key": workflows.workflow_repo.DEFAULT_WORKFLOW_KEY}),
-    )
-    # Return empty list so the code falls back to get_company_workflow_policy
     monkeypatch.setattr(workflows.workflow_repo, "list_company_workflow_policies", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         workflows.workflow_repo,
@@ -590,9 +615,8 @@ async def test_enqueue_workflow_creates_approved_execution(monkeypatch):
         direction=workflows.DIRECTION_ONBOARDING,
     )
 
-    workflows.workflow_repo.create_or_reset_execution.assert_awaited_once()
-    workflows.workflow_repo.update_execution_state.assert_awaited_once()
-    assert workflows.workflow_repo.update_execution_state.await_args.kwargs["state"] == workflows.STATE_APPROVED
+    workflows.workflow_repo.create_or_reset_execution.assert_not_awaited()
+    workflows.workflow_repo.update_execution_state.assert_not_awaited()
 
 
 @pytest.mark.anyio
