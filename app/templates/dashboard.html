@@ -20,14 +20,16 @@
 
 <dialog class="dashboard-builder" data-dashboard-builder>
  <form method="dialog" class="dashboard-builder__surface">
-  <header><div><p class="dashboard-hero__eyebrow">Dashboard builder</p><h2>Add a panel</h2></div><button class="dashboard-builder__close" value="cancel" aria-label="Close">×</button></header>
+  <header><div><p class="dashboard-hero__eyebrow">Dashboard builder</p><h2 data-panel-dialog-title>Add a panel</h2></div><button class="dashboard-builder__close" value="cancel" aria-label="Close">×</button></header>
   <label>Panel type<select name="type"><option value="stat">Reporting statistic</option><option value="graph">Reporting graph</option><option value="variable">Automation variable</option><option value="link">Button / link</option></select></label>
   <label>Title<input name="title" maxlength="120" required value="New panel"></label>
   <div data-panel-report><label>Reporting query<select name="report"></select></label></div>
   <div data-panel-function><label>Function<select name="function"><option value="count">.count — number of rows</option><option value="list">.list — first-column values</option></select></label></div>
+  <fieldset data-panel-count-colours><legend>Count background colours</legend><label>Compare count with<input name="compare_value" type="number" step="any" value="0"></label><div class="dashboard-builder__colour-grid"><label>Less than<input name="less_colour" type="color" value="#7c2d12"></label><label>Equal to<input name="equal_colour" type="color" value="#1e3a8a"></label><label>Greater than<input name="greater_colour" type="color" value="#14532d"></label></div></fieldset>
   <div data-panel-chart hidden><label>Graph style<select name="chart"><option value="bar">Bar</option><option value="line">Line</option><option value="area">Area</option><option value="doughnut">Doughnut</option></select></label></div>
   <div data-panel-variable hidden><label>Automation variable<select name="variable"></select></label></div>
   <div data-panel-link hidden><label>Button label<input name="label" value="Open"></label><label>URL<input name="url" placeholder="/tickets/new"></label></div>
+  <fieldset><legend>Panel size</legend><div class="dashboard-builder__size-grid"><label>Width (1–12 columns)<input name="w" type="number" min="1" max="12" value="4" required></label><label>Height (1–12 rows)<input name="h" type="number" min="1" max="12" value="2" required></label></div></fieldset>
   <footer><button class="button button--secondary" value="cancel">Cancel</button><button class="button" value="default" data-panel-confirm>Add panel</button></footer>
  </form>
 </dialog>
