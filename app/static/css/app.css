@@ -2384,6 +2384,57 @@ button.header-title-menu__link,
 .ticket-column-filter__title { color: var(--color-text); font-weight: 600; }
 .ticket-column-filter__actions { display: flex; gap: 0.4rem; }
 
+/* Shared table filters mirror the ticket workspace's compact header menus. */
+.table-column-filter {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.3rem;
+  position: relative;
+}
+
+.table-column-filter__toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  padding: 0.15rem;
+}
+
+.table-column-filter__toggle svg {
+  fill: currentColor;
+  height: 0.9rem;
+  width: 0.9rem;
+}
+
+.table-column-filter__toggle:hover,
+.table-column-filter__toggle:focus-visible,
+.table-column-filter--active .table-column-filter__label,
+.table-column-filter--active .table-column-filter__toggle {
+  color: var(--color-primary, #2563eb);
+}
+
+.table-column-filter__panel {
+  background: var(--color-surface-2, #0f172a);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  box-shadow: 0 0.75rem 1.75rem rgb(15 23 42 / 18%);
+  display: grid;
+  gap: 0.6rem;
+  left: 0;
+  min-width: 15rem;
+  padding: 0.75rem;
+  position: absolute;
+  text-align: left;
+  top: calc(100% + 0.4rem);
+  z-index: 30;
+}
+
+.table-column-filter__panel[hidden] { display: none; }
+.table-column-filter__title { color: var(--color-text); font-weight: 600; }
+.table-column-filter__actions { display: flex; gap: 0.4rem; }
+
 .ticket-group-by__hint {
   margin: -0.25rem 0 0.75rem;
   color: var(--muted-text, #64748b);

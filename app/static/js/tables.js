@@ -144,6 +144,7 @@
       }
 
       this.restorePersistedFilters();
+      this.setupColumnFilters();
       this.updateFilterState();
       if (this.paginationElement) {
         this.paginationElement.classList.add('table-pagination--active');
@@ -307,10 +308,129 @@
         this.columnFilters = Object.entries(state.columns).reduce((filters, [key, value]) => {
           if (typeof value === 'string' && value) {
             filters[key] = value.trim().toLowerCase();
+          } else if (value && typeof value === 'object' && value.value !== '') {
+            filters[key] = value;
           }
           return filters;
         }, {});
       }
+    }
+
+    /** Add the ticket-list filter popover to each usable column. */
+    setupColumnFilters() {
+      if (!this.table || !this.table.tHead || this.table.hasAttribute('data-table-column-filters-disabled')) {
+        return;
+      }
+      // The ticket workspace owns richer saved-view filters and builds these menus itself.
+      if (this.table.hasAttribute('data-ticket-status-options')) {
+        return;
+      }
+      const headerRow = this.table.tHead.rows[0];
+      if (!headerRow) {
+        return;
+      }
+      Array.from(headerRow.cells).forEach((header, index) => {
+        if (header.matches('.table__actions, .table__select, [data-column-filter-disabled]') || header.querySelector('input, button')) {
+          return;
+        }
+        const label = (header.textContent || '').trim();
+        if (!label) {
+          return;
+        }
+        const key = header.getAttribute('data-column-key') || `column-${index}`;
+        const sortType = (header.getAttribute('data-filter-type') || header.getAttribute('data-sort') || 'text').toLowerCase();
+        const type = sortType === 'number' || sortType === 'int' ? 'number' : sortType === 'date' ? 'date' : 'text';
+        header.setAttribute('data-column-key', key);
+        Array.from(this.table.tBodies).forEach((tbody) => {
+          Array.from(tbody.rows).forEach((row) => {
+            if (row.cells[index]) row.cells[index].setAttribute('data-column-key', key);
+          });
+        });
+
+        const wrapper = document.createElement('span');
+        wrapper.className = 'table-column-filter';
+        wrapper.dataset.tableColumnFilterMenu = key;
+        const labelNode = document.createElement('span');
+        labelNode.className = 'table-column-filter__label';
+        labelNode.textContent = label;
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'table-column-filter__toggle';
+        toggle.setAttribute('aria-label', `Filter ${label}`);
+        toggle.setAttribute('aria-haspopup', 'true');
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 5.25A1.25 1.25 0 0 1 4.75 4h14.5a1.25 1.25 0 0 1 .96 2.05L14.5 12.9v5.35a1.25 1.25 0 0 1-.69 1.12l-2.5 1.25a1.25 1.25 0 0 1-1.81-1.12v-6.6L3.79 6.05a1.25 1.25 0 0 1-.29-.8Z"/></svg>';
+        const panel = document.createElement('span');
+        panel.className = 'table-column-filter__panel';
+        panel.hidden = true;
+        const operators = type === 'text'
+          ? [['contains', 'Contains'], ['not_contains', 'Does not contain'], ['equals', 'Equals'], ['not_equals', 'Does not equal'], ['starts_with', 'Starts with'], ['ends_with', 'Ends with']]
+          : type === 'number'
+            ? [['equals', 'Equals'], ['not_equals', 'Does not equal'], ['greater', 'Greater than'], ['greater_equal', 'At least'], ['less', 'Less than'], ['less_equal', 'At most']]
+            : [['on', 'On'], ['before', 'Before'], ['after', 'After'], ['on_or_before', 'On or before'], ['on_or_after', 'On or after']];
+        const title = document.createElement('span');
+        title.className = 'table-column-filter__title';
+        title.textContent = `Filter ${label}`;
+        const operator = document.createElement('select');
+        operator.className = 'form-input';
+        operator.setAttribute('aria-label', `Filter operation for ${label}`);
+        operators.forEach(([value, text]) => operator.add(new Option(text, value)));
+        const valueInput = document.createElement('input');
+        valueInput.className = 'form-input';
+        valueInput.type = type === 'number' ? 'number' : type === 'date' ? 'date' : 'text';
+        valueInput.setAttribute('aria-label', `Filter value for ${label}`);
+        const actions = document.createElement('span');
+        actions.className = 'table-column-filter__actions';
+        actions.innerHTML = '<button type="button" class="button button--primary button--compact" data-table-column-filter-apply>Apply</button><button type="button" class="button button--ghost button--compact" data-table-column-filter-clear>Clear</button>';
+        panel.append(title, operator, valueInput, actions);
+        wrapper.append(labelNode, toggle, panel);
+        header.textContent = '';
+        header.appendChild(wrapper);
+
+        const current = this.columnFilters[key];
+        if (current && typeof current === 'object') {
+          operator.value = current.operator;
+          valueInput.value = current.value;
+          wrapper.classList.add('table-column-filter--active');
+        }
+        const close = () => { panel.hidden = true; toggle.setAttribute('aria-expanded', 'false'); };
+        toggle.addEventListener('click', (event) => {
+          event.stopPropagation();
+          document.querySelectorAll('[data-table-column-filter-menu]').forEach((menu) => {
+            if (menu !== wrapper) menu.querySelector('.table-column-filter__panel')?.setAttribute('hidden', '');
+          });
+          panel.hidden = !panel.hidden;
+          toggle.setAttribute('aria-expanded', String(!panel.hidden));
+        });
+        panel.addEventListener('click', (event) => event.stopPropagation());
+        actions.querySelector('[data-table-column-filter-apply]').addEventListener('click', () => {
+          const value = valueInput.value.trim();
+          if (value) this.columnFilters[key] = { type, operator: operator.value, value };
+          else delete this.columnFilters[key];
+          wrapper.classList.toggle('table-column-filter--active', Boolean(value));
+          this.page = 0;
+          this.updateFilterState();
+          this.persistFilterState();
+          this.render();
+          close();
+        });
+        actions.querySelector('[data-table-column-filter-clear]').addEventListener('click', () => {
+          valueInput.value = '';
+          delete this.columnFilters[key];
+          wrapper.classList.remove('table-column-filter--active');
+          this.page = 0;
+          this.updateFilterState();
+          this.persistFilterState();
+          this.render();
+          close();
+        });
+      });
+      document.addEventListener('click', () => {
+        this.table.querySelectorAll('[data-table-column-filter-menu]').forEach((menu) => {
+          menu.querySelector('.table-column-filter__panel').hidden = true;
+          menu.querySelector('.table-column-filter__toggle').setAttribute('aria-expanded', 'false');
+        });
+      });
     }
 
     getColumnCellValue(row, columnKey) {
@@ -320,16 +440,50 @@
       const escapedKey = window.CSS && typeof window.CSS.escape === 'function'
         ? window.CSS.escape(columnKey)
         : columnKey.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      const cell = row.querySelector(`[data-column-key="${escapedKey}"]`);
+      let cell = row.querySelector(`[data-column-key="${escapedKey}"]`);
+      if (!cell && this.table?.tHead?.rows?.[0]) {
+        const headers = Array.from(this.table.tHead.rows[0].cells);
+        const index = headers.findIndex((header) => header.getAttribute('data-column-key') === columnKey);
+        cell = index >= 0 ? row.cells[index] : null;
+      }
       return cell ? (cell.getAttribute('data-value') || cell.textContent || '').trim().toLowerCase() : '';
     }
 
     rowMatchesColumnFilters(row) {
-      return Object.entries(this.columnFilters).every(([columnKey, term]) => {
-        if (!term) {
+      return Object.entries(this.columnFilters).every(([columnKey, filter]) => {
+        if (!filter) {
           return true;
         }
-        return this.getColumnCellValue(row, columnKey).includes(term);
+        const cellValue = this.getColumnCellValue(row, columnKey);
+        if (typeof filter === 'string') return cellValue.includes(filter);
+        const expected = String(filter.value || '').toLowerCase();
+        if (filter.type === 'number') {
+          const actualNumber = Number.parseFloat(cellValue);
+          const expectedNumber = Number.parseFloat(expected);
+          if (Number.isNaN(actualNumber) || Number.isNaN(expectedNumber)) return false;
+          return filter.operator === 'greater' ? actualNumber > expectedNumber
+            : filter.operator === 'greater_equal' ? actualNumber >= expectedNumber
+              : filter.operator === 'less' ? actualNumber < expectedNumber
+                : filter.operator === 'less_equal' ? actualNumber <= expectedNumber
+                  : filter.operator === 'not_equals' ? actualNumber !== expectedNumber
+                    : actualNumber === expectedNumber;
+        }
+        if (filter.type === 'date') {
+          const actualDate = Date.parse(cellValue);
+          const expectedDate = Date.parse(expected);
+          if (Number.isNaN(actualDate) || Number.isNaN(expectedDate)) return false;
+          return filter.operator === 'before' ? actualDate < expectedDate
+            : filter.operator === 'after' ? actualDate > expectedDate
+              : filter.operator === 'on_or_before' ? actualDate <= expectedDate
+                : filter.operator === 'on_or_after' ? actualDate >= expectedDate
+                  : new Date(actualDate).toISOString().slice(0, 10) === expected;
+        }
+        return filter.operator === 'not_contains' ? !cellValue.includes(expected)
+          : filter.operator === 'equals' ? cellValue === expected
+            : filter.operator === 'not_equals' ? cellValue !== expected
+              : filter.operator === 'starts_with' ? cellValue.startsWith(expected)
+                : filter.operator === 'ends_with' ? cellValue.endsWith(expected)
+                  : cellValue.includes(expected);
       });
     }
 
