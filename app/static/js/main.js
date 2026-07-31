@@ -195,7 +195,26 @@
       }
     }
 
+    function shouldIgnoreRefresh(payload) {
+      const ticketDetail = document.querySelector('[data-admin-ticket-detail]');
+      if (!ticketDetail || !payload || typeof payload !== 'object') {
+        return false;
+      }
+
+      const topics = Array.isArray(payload.topics) ? payload.topics : [];
+      const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
+      const action = typeof data.action === 'string' ? data.action.trim().toLowerCase() : '';
+
+      return topics.includes('tickets') && (action === 'create' || action === 'created');
+    }
+
     function handleRefreshMessage(payload) {
+      // A newly created ticket changes ticket lists, but not an already-open ticket.
+      // Reloading this page would discard an in-progress reply and selected attachments.
+      if (shouldIgnoreRefresh(payload)) {
+        return;
+      }
+
       const detail = {
         ...(payload && typeof payload === 'object' ? payload : {}),
         showToast(message, options) {
