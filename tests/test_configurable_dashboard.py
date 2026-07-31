@@ -75,3 +75,11 @@ def test_client_dashboard_example_is_valid():
 
     layout = json.loads(Path("docs/examples/client-dashboard.json").read_text())
     assert validate_layout(layout)["title"] == "Client service overview"
+
+
+def test_dashboard_builder_uses_form_elements_collection():
+    script = Path("app/static/js/dashboard.js").read_text()
+
+    assert "const builderForm = dialog?.querySelector('form')" in script
+    assert "builderForm?.elements.type.addEventListener" in script
+    assert "dialog?.elements.type" not in script
