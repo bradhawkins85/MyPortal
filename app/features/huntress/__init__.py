@@ -18,7 +18,7 @@ from app.core.features import FeaturePack
 
 PACK = FeaturePack(
     slug="huntress",
-    version="1.0.0",
+    version="1.0.2",
 )
 
 
