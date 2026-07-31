@@ -17,7 +17,12 @@
 {% endblock %}
 
 {% block content %}
-  <div class="management management--single" data-layout>
+  <div
+    class="management management--single"
+    data-layout
+    data-admin-ticket-detail
+    data-ticket-id="{{ ticket.id }}"
+  >
     <section class="management__content">
       <header class="management__header">
         <div>
