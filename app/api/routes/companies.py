@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import EmailStr, TypeAdapter, ValidationError
 
 from app.api.dependencies.auth import get_current_user, require_helpdesk_technician, require_super_admin
 from app.api.dependencies.database import require_database
@@ -25,6 +26,7 @@ from app.services import company_id_lookup
 from app.services import m365 as m365_service
 
 router = APIRouter(prefix="/api/companies", tags=["Companies"])
+EMAIL_ADAPTER = TypeAdapter(EmailStr)
 
 
 @router.get("", response_model=list[CompanyResponse])
@@ -216,7 +218,14 @@ async def list_company_staff_users(
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     users = await staff_repo.list_enabled_staff_users(company_id)
-    return [StaffRequesterOption.model_validate(user) for user in users]
+    requester_options: list[StaffRequesterOption] = []
+    for user in users:
+        try:
+            EMAIL_ADAPTER.validate_python(user.get("email"))
+        except ValidationError:
+            continue
+        requester_options.append(StaffRequesterOption.model_validate(user))
+    return requester_options
 
 
 
