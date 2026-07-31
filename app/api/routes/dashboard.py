@@ -23,16 +23,9 @@ def _company_id(request: Request) -> int | None:
 
 
 async def _editable(user: dict, request: Request) -> bool:
-    if user.get("is_super_admin"):
-        return True
-    from app.api.dependencies.auth import membership_repo
-
-    try:
-        return await membership_repo.user_has_permission(
-            int(user["id"]), "helpdesk.technician"
-        )
-    except (KeyError, TypeError, ValueError):
-        return False
+    # Every authenticated user owns a personal dashboard layout. Report
+    # visibility is enforced separately by the catalog and resolver.
+    return bool(user.get("id"))
 
 
 @router.get("")

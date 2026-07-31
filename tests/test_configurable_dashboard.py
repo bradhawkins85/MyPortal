@@ -122,7 +122,12 @@ def test_resolve_layout_omits_report_panels_without_permission(monkeypatch):
         {
             "panels": [
                 {"id": "help", "type": "link", "title": "Help", "url": "/tickets"},
-                {"id": "private", "type": "stat", "title": "Invoices", "report": "invoices"},
+                {
+                    "id": "private",
+                    "type": "stat",
+                    "title": "Invoices",
+                    "report": "invoices",
+                },
             ]
         }
     )
@@ -132,10 +137,14 @@ def test_resolve_layout_omits_report_panels_without_permission(monkeypatch):
         AsyncMock(return_value={"id": 7, "sql_query": "SELECT secret FROM invoices"}),
     )
     monkeypatch.setattr(
-        dashboard_layouts.reporting_repo, "user_has_permission", AsyncMock(return_value=False)
+        dashboard_layouts.reporting_repo,
+        "user_has_permission",
+        AsyncMock(return_value=False),
     )
     run_query = AsyncMock()
-    monkeypatch.setattr(dashboard_layouts.reporting_service, "run_query_with_context", run_query)
+    monkeypatch.setattr(
+        dashboard_layouts.reporting_service, "run_query_with_context", run_query
+    )
 
     result = asyncio.run(
         dashboard_layouts.resolve_layout(
@@ -145,3 +154,67 @@ def test_resolve_layout_omits_report_panels_without_permission(monkeypatch):
 
     assert [panel["id"] for panel in result["panels"]] == ["help"]
     run_query.assert_not_awaited()
+
+
+def test_graph_uses_only_explicit_x_and_y_columns(monkeypatch):
+    layout = validate_layout(
+        {"panels": [{"id": "trend", "type": "graph", "report": "trend"}]}
+    )
+    monkeypatch.setattr(
+        dashboard_layouts.reporting_repo,
+        "get_query_by_slug",
+        AsyncMock(return_value={"id": 1, "sql_query": "SELECT ..."}),
+    )
+    monkeypatch.setattr(
+        dashboard_layouts.reporting_service,
+        "run_query_with_context",
+        AsyncMock(
+            return_value={
+                "columns": ["id", "X", "ignored", "Y", "Y1", "Y2"],
+                "rows": [
+                    {"id": 99, "X": "Jan", "ignored": 500, "Y": 2, "Y1": 3, "Y2": 4},
+                    {"id": 98, "X": "Feb", "ignored": 600, "Y": 5, "Y1": 6, "Y2": 7},
+                ],
+            }
+        ),
+    )
+
+    result = asyncio.run(
+        dashboard_layouts.resolve_layout(
+            layout, company_id=4, can_run_all=True, user_id=9
+        )
+    )
+
+    graph = result["panels"][0]["chart_data"]
+    assert graph["labels"] == ["Jan", "Feb"]
+    assert [series["name"] for series in graph["series"]] == ["Y", "Y1", "Y2"]
+    assert graph["series"][1]["values"] == [3, 6]
+
+
+def test_graph_requires_explicit_x_and_y_columns(monkeypatch):
+    layout = validate_layout(
+        {"panels": [{"id": "trend", "type": "graph", "report": "trend"}]}
+    )
+    monkeypatch.setattr(
+        dashboard_layouts.reporting_repo,
+        "get_query_by_slug",
+        AsyncMock(return_value={"id": 1, "sql_query": "SELECT ..."}),
+    )
+    monkeypatch.setattr(
+        dashboard_layouts.reporting_service,
+        "run_query_with_context",
+        AsyncMock(
+            return_value={
+                "columns": ["month", "total"],
+                "rows": [{"month": "Jan", "total": 2}],
+            }
+        ),
+    )
+
+    result = asyncio.run(
+        dashboard_layouts.resolve_layout(
+            layout, company_id=None, can_run_all=True, user_id=9
+        )
+    )
+
+    assert "columns named X and Y" in result["panels"][0]["error"]
