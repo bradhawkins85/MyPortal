@@ -3479,21 +3479,22 @@ async def run_staff_onboarding_workflow(
         raise ValueError("Staff not found")
     onboarding_status = str(staff.get("onboarding_status") or "").strip().lower()
 
-    # Look up the specific policy for this workflow key, or fall back to the default.
+    # An execution naming a workflow must match that specifically configured policy;
+    # silently substituting another policy could run steps the company did not choose.
     if workflow_key:
         policy = await workflow_repo.get_company_workflow_policy_by_key(
             company_id, workflow_key, direction
-        ) or await workflow_repo.get_company_workflow_policy(
-            company_id,
-            default_workflow_key=_default_workflow_key(direction),
-            direction=direction,
         )
+        if not policy:
+            return {"state": "skipped", "reason": "workflow_not_configured"}
     else:
         policy = await workflow_repo.get_company_workflow_policy(
             company_id,
             default_workflow_key=_default_workflow_key(direction),
             direction=direction,
         )
+    if not policy.get("is_configured", True):
+        return {"state": "skipped", "reason": "workflow_not_configured"}
     if not policy.get("is_enabled", True):
         return {"state": "skipped", "reason": "workflow_disabled"}
 
@@ -3545,7 +3546,6 @@ async def run_staff_onboarding_workflow(
     resolved_workflow_key = str(
         policy.get("workflow_key") or _default_workflow_key(direction)
     )
-    max_retries = max(0, int(policy.get("max_retries") or 0))
     policy_config = (
         policy.get("config") if isinstance(policy.get("config"), dict) else {}
     )
@@ -3602,17 +3602,19 @@ async def resume_staff_onboarding_workflow_after_external_confirmation(
     if exec_workflow_key:
         policy = await workflow_repo.get_company_workflow_policy_by_key(
             company_id, exec_workflow_key, direction
-        ) or await workflow_repo.get_company_workflow_policy(
-            company_id,
-            default_workflow_key=_default_workflow_key(direction),
-            direction=direction,
         )
+        if not policy:
+            return {"state": "skipped", "reason": "workflow_not_configured"}
     else:
         policy = await workflow_repo.get_company_workflow_policy(
             company_id,
             default_workflow_key=_default_workflow_key(direction),
             direction=direction,
         )
+    if not policy.get("is_configured", True):
+        return {"state": "skipped", "reason": "workflow_not_configured"}
+    if not policy.get("is_enabled", True):
+        return {"state": "skipped", "reason": "workflow_disabled"}
     workflow_key = str(policy.get("workflow_key") or _default_workflow_key(direction))
     max_retries = max(0, int(policy.get("max_retries") or 0))
     policy_config = (
@@ -4039,15 +4041,18 @@ async def enqueue_staff_onboarding_workflow(
     policies = await workflow_repo.list_company_workflow_policies(
         company_id, direction=direction, enabled_only=True
     )
-    # If no policies configured, fall back to a single default policy
+    # A workflow must be explicitly configured for this company and direction.
+    # Do not manufacture an execution from the repository's compatibility
+    # fallback when a company has never set up a workflow.
     if not policies:
-        policies = [
-            await workflow_repo.get_company_workflow_policy(
-                company_id,
-                default_workflow_key=_default_workflow_key(direction),
-                direction=direction,
-            )
-        ]
+        log_info(
+            "Skipped queuing unconfigured staff workflow",
+            company_id=company_id,
+            staff_id=staff_id,
+            initiated_by_user_id=initiated_by_user_id,
+            direction=direction,
+        )
+        return
 
     queued_state = (
         STATE_OFFBOARDING_APPROVED
