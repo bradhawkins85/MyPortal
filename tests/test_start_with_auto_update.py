@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -89,3 +91,57 @@ def test_wrapper_preserves_explicit_forwarded_allow_ips(tmp_path: Path) -> None:
 
     assert argv.count("--proxy-headers") == 0
     assert argv.count("--forwarded-allow-ips=10.0.0.8") == 1
+
+
+def test_wrapper_waits_for_child_cleanup_after_sigterm(tmp_path: Path) -> None:
+    """A service stop lets Uvicorn finish worker and semaphore cleanup."""
+
+    ready_path = tmp_path / "ready"
+    cleanup_path = tmp_path / "cleanup-complete"
+    fake_uvicorn = tmp_path / "fake_uvicorn.py"
+    fake_uvicorn.write_text(
+        "import pathlib, signal, time\n"
+        f"ready = pathlib.Path({str(ready_path)!r})\n"
+        f"cleanup = pathlib.Path({str(cleanup_path)!r})\n"
+        "def shutdown(signum, frame):\n"
+        "    time.sleep(0.25)\n"
+        "    cleanup.write_text('done', encoding='utf-8')\n"
+        "    raise SystemExit(0)\n"
+        "signal.signal(signal.SIGTERM, shutdown)\n"
+        "ready.write_text('ready', encoding='utf-8')\n"
+        "while True:\n"
+        "    time.sleep(1)\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "UVICORN_AUTO_UPDATE_ENABLED": "false",
+            "UVICORN_AUTO_UPDATE_ATTEMPTS": "1",
+        }
+    )
+    wrapper = subprocess.Popen(
+        [str(WRAPPER), sys.executable, str(fake_uvicorn)],
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not ready_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready_path.exists(), "fake Uvicorn process did not start"
+
+        wrapper.send_signal(signal.SIGTERM)
+        assert wrapper.poll() is None
+        assert not cleanup_path.exists()
+
+        wrapper.wait(timeout=5)
+        assert wrapper.returncode == 0
+        assert cleanup_path.read_text(encoding="utf-8") == "done"
+    finally:
+        if wrapper.poll() is None:
+            wrapper.kill()
+            wrapper.wait()
