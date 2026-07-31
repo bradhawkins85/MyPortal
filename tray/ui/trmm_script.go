@@ -12,6 +12,7 @@ import (
 )
 
 func runTRMMScriptFromMenu(node api.MenuNode) {
+	logger.Info("TRMM script menu item selected: label=%q script_id=%d", node.Label, node.ScriptID)
 	if node.ScriptID <= 0 {
 		logger.Warn("TRMM script menu item %q has no script_id", node.Label)
 		showTextWindow("Tactical RMM", "This menu item is missing a Tactical RMM script selection.")
@@ -30,13 +31,14 @@ func runTRMMScriptFromMenu(node api.MenuNode) {
 		showTextWindow("Tactical RMM", "Could not build the Tactical RMM script request.")
 		return
 	}
-	resp, err := httpClient.Do(req)
+	resp, err := trmmHTTPClient.Do(req)
 	if err != nil {
 		logger.Warn("TRMM script request failed: %v", err)
 		showTextWindow("Tactical RMM", "Could not contact MyPortal to start the script.")
 		return
 	}
 	defer resp.Body.Close()
+	logger.Info("TRMM script request received HTTP %d for script_id=%d", resp.StatusCode, node.ScriptID)
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		logger.Warn("TRMM script request HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))

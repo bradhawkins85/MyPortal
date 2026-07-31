@@ -326,6 +326,13 @@ async def run_trmm_script(
     that an administrator did not expose in the menu designer.
     """
 
+    log_info(
+        "Tray Tactical RMM script request received",
+        device_id=device.get("id"),
+        asset_id=device.get("asset_id"),
+        script_id=payload.script_id,
+    )
+
     config = await tray_service.resolve_config_for_device(device)
     script_node = _find_trmm_script_node(
         config.get("menu") or [], int(payload.script_id)
@@ -354,8 +361,24 @@ async def run_trmm_script(
             trmm_agent_id, int(payload.script_id)
         )
     except tacticalrmm_service.TacticalRMMConfigurationError as exc:
+        log_error(
+            "Tray Tactical RMM script request rejected by integration configuration",
+            device_id=device.get("id"),
+            asset_id=asset_id,
+            trmm_agent_id=trmm_agent_id,
+            script_id=payload.script_id,
+            error=str(exc),
+        )
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except tacticalrmm_service.TacticalRMMAPIError as exc:
+        log_error(
+            "Tray Tactical RMM script request failed",
+            device_id=device.get("id"),
+            asset_id=asset_id,
+            trmm_agent_id=trmm_agent_id,
+            script_id=payload.script_id,
+            error=str(exc),
+        )
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     response = result.get("response") if isinstance(result, dict) else None
