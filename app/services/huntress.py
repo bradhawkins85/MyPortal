@@ -133,8 +133,11 @@ async def _curricula_oauth_client(
     async with _oauth_token_client() as token_client:
         response = await token_client.post(
             credentials["token_url"],
-            data={"grant_type": "client_credentials"},
-            auth=(credentials["api_key"], credentials["api_secret"]),
+            data={
+                "grant_type": "client_credentials",
+                "client_id": credentials["api_key"],
+                "client_secret": credentials["api_secret"],
+            },
             headers={"Accept": "application/json"},
         )
     if response.status_code >= 400:
@@ -250,7 +253,7 @@ async def list_sat_accounts() -> list[dict[str, Any]]:
         )
 
     accounts: list[dict[str, Any]] = []
-    async with _client(credentials) as client:
+    async with await _curricula_oauth_client(credentials) as client:
         page = 1
         for _ in range(50):
             payload = await _get_json(

@@ -413,8 +413,29 @@ async def test_curricula_oauth_uses_client_credentials_and_returns_bearer_client
     assert len(token_requests) == 1
     request = token_requests[0]
     assert str(request.url) == "https://dev.curricula.com/oauth/token"
-    assert request.headers["authorization"].startswith("Basic ")
-    assert request.content == b"grant_type=client_credentials"
+    assert "authorization" not in request.headers
+    assert request.content == (
+        b"grant_type=client_credentials&client_id=oauth-client-id&"
+        b"client_secret=oauth-client-secret"
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_sat_accounts_uses_oauth_bearer_client(monkeypatch):
+    from app.services import huntress as huntress_service
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"data": []})
+
+    _set_credentials(monkeypatch)
+    with _patch_curricula_oauth_client(httpx.MockTransport(handler)):
+        assert await huntress_service.list_sat_accounts() == []
+
+    assert len(requests) == 1
+    assert requests[0].headers["authorization"] == "Bearer test-access-token"
 
 
 @pytest.mark.asyncio
