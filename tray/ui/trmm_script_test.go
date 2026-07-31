@@ -1,6 +1,18 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+func TestTRMMScriptHTTPTimeoutAllowsPortalUpstreamRequests(t *testing.T) {
+	if trmmHTTPClient.Timeout < 30*time.Second {
+		t.Fatalf("TRMM HTTP timeout is too short: %s", trmmHTTPClient.Timeout)
+	}
+	if httpClient.Timeout >= trmmHTTPClient.Timeout {
+		t.Fatalf("general HTTP client should retain a shorter timeout: %s", httpClient.Timeout)
+	}
+}
 
 func TestTRMMScriptSuccessMessageUsesAutomationScheduledNotice(t *testing.T) {
 	msg := trmmScriptSuccessMessage("Nightly Maintenance", "")

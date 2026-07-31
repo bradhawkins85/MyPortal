@@ -10,10 +10,14 @@ import (
 )
 
 // httpClient is a shared HTTP client used for API calls from within the UI
-// process.  The timeout is kept short (5 s) so that user-facing actions such
-// as opening the chat window do not stall for a long time when the portal is
-// temporarily unreachable.
+// process. The timeout is kept short so most user-facing actions do not stall
+// for a long time when the portal is temporarily unreachable.
 var httpClient = &http.Client{Timeout: 5 * time.Second}
+
+// trmmHTTPClient allows enough time for MyPortal to validate a script and
+// submit it to Tactical RMM before replying. The portal can make two upstream
+// requests, each with a 15-second timeout, while processing this action.
+var trmmHTTPClient = &http.Client{Timeout: 35 * time.Second}
 
 // newHTTPRequest creates a POST request with the device auth token in the
 // Authorization header and a JSON body.
