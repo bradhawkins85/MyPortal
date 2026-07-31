@@ -14,6 +14,14 @@ func TestTRMMScriptHTTPTimeoutAllowsPortalUpstreamRequests(t *testing.T) {
 	}
 }
 
+func TestNormalizedMenuNodeTypeRecognizesTRMMScriptVariants(t *testing.T) {
+	for _, nodeType := range []string{"TRMM_Script", "trmm_script", " TRMM_SCRIPT\t"} {
+		if got := normalizedMenuNodeType(nodeType); got != "trmm_script" {
+			t.Errorf("normalizedMenuNodeType(%q) = %q, want %q", nodeType, got, "trmm_script")
+		}
+	}
+}
+
 func TestTRMMScriptSuccessMessageUsesAutomationScheduledNotice(t *testing.T) {
 	msg := trmmScriptSuccessMessage("Nightly Maintenance", "")
 	want := "The requested automation has been scheduled and will run in the background shortly."

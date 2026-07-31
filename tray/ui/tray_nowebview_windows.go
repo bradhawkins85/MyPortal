@@ -195,7 +195,11 @@ func addTraySeparator(parent *systray.MenuItem) {
 }
 
 func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuItem) {
-	switch node.Type {
+	// Menu type discriminators come from administrator-authored JSON. Normalise
+	// them before dispatch so mixed-case values such as TRMM_Script always get
+	// their click handler attached.
+	nodeType := normalizedMenuNodeType(node.Type)
+	switch nodeType {
 	case "separator":
 		addTraySeparator(parent)
 
@@ -294,7 +298,7 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 			}
 		}()
 
-	case "TRMM_Script", "trmm_script":
+	case "trmm_script":
 		label := node.Label
 		if label == "" {
 			label = node.ScriptName
@@ -332,6 +336,9 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 				systray.Quit()
 			}
 		}()
+
+	default:
+		logger.Warn("Ignoring unsupported tray menu node type %q (label=%q)", node.Type, node.Label)
 	}
 }
 

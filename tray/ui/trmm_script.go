@@ -65,6 +65,10 @@ func runTRMMScriptFromMenu(node api.MenuNode) {
 	showOSNotification("Script scheduled", trmmScriptSuccessMessage(label, result.Message))
 }
 
+func normalizedMenuNodeType(nodeType string) string {
+	return strings.ToLower(strings.TrimSpace(nodeType))
+}
+
 func trmmScriptSuccessMessage(label string, serverMessage string) string {
 	serverMessage = strings.TrimSpace(serverMessage)
 	if serverMessage != "" {
