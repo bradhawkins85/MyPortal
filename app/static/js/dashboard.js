@@ -68,7 +68,7 @@
       else if (Array.isArray(panel.value)) body = `<ul class="dashboard-panel__list">${panel.value.map(value => `<li>${esc(value)}</li>`).join('')}</ul>`;
       else body = `<div class="dashboard-panel__value">${esc(panel.value)}</div>`;
 
-      const controls = editable ? '<div class="dashboard-panel__controls"><button class="dashboard-panel__edit" type="button" aria-label="Edit panel">Edit</button><button class="dashboard-panel__remove" type="button" aria-label="Remove panel">×</button></div>' : '';
+      const controls = editable ? '<div class="dashboard-panel__controls"><button class="button button--secondary dashboard-panel__edit" type="button" aria-label="Edit panel">Edit</button><button class="dashboard-panel__remove" type="button" aria-label="Remove panel">×</button></div>' : '';
       element.innerHTML = `<div class="dashboard-panel__top"><h2>${esc(panel.title)}</h2>${controls}</div>${body}`;
       element.querySelector('.dashboard-panel__edit')?.addEventListener('click', () => openBuilder(panel));
       element.querySelector('.dashboard-panel__remove')?.addEventListener('click', () => {
@@ -142,8 +142,9 @@
         toolbar.prepend(button);
       }
       source.textContent = `${state.title} · ${data.source} layout`;
-      render();
+      // Populate the builder before exposing edit controls for existing panels.
       if (editable) catalog = await api('/api/dashboard/catalog');
+      render();
     } catch (error) {
       grid.innerHTML = `<div class="dashboard-loading">${esc(error.message)}</div>`;
     }

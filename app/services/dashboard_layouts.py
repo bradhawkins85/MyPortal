@@ -15,6 +15,7 @@ MAX_PANELS = 80
 PANEL_TYPES = {"link", "stat", "variable", "graph"}
 GRAPH_TYPES = {"bar", "line", "area", "doughnut"}
 COLOUR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+GRAPH_Y_RE = re.compile(r"^Y(?:[1-9][0-9]*)?$")
 
 DEFAULT_LAYOUT = {
     "version": 2,
@@ -173,19 +174,14 @@ async def resolve_layout(
                         )
                     )
                 else:
-                    numeric = [
-                        c
-                        for c in columns[1:]
-                        if any(
-                            isinstance(r.get(c), Number)
-                            and not isinstance(r.get(c), bool)
-                            for r in rows
-                        )
-                    ]
+                    # X supplies labels and Y/Y1/Y2/... supply series. Other
+                    # query columns are deliberately ignored.
+                    x_column = next((c for c in columns if c == "X"), None)
+                    y_columns = [c for c in columns if GRAPH_Y_RE.fullmatch(c)]
                     item["chart_data"] = {
                         "labels": (
-                            [str(r.get(columns[0], "")) for r in rows[:50]]
-                            if columns
+                            [str(r.get(x_column, "")) for r in rows[:50]]
+                            if x_column
                             else []
                         ),
                         "series": [
@@ -196,9 +192,14 @@ async def resolve_layout(
                                     for r in rows[:50]
                                 ],
                             }
-                            for c in numeric
+                            for c in y_columns
                         ],
                     }
+                    if not x_column or not y_columns:
+                        item["error"] = (
+                            "Graph queries must return columns named X and Y "
+                            "(additional series may be named Y1, Y2, ...)."
+                        )
         except Exception as exc:
             item["error"] = str(exc)
         output["panels"].append(item)
