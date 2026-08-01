@@ -40,6 +40,30 @@ _XERO_ERROR_DETAIL_MAX_LENGTH = 500
 _XERO_INVOICE_NUMBER_SUFFIX_RE = re.compile(r"^(.*)(\d+)$")
 _INVOICED_TICKET_STATUS_ENV = "TICKET_INVOICED_STATUS"
 _DEFAULT_INVOICED_TICKET_STATUS = "closed"
+_DEFAULT_INVOICE_DUE_DAYS = 14
+_MAX_INVOICE_DUE_DAYS = 3650
+
+
+def resolve_invoice_due_days(company: Mapping[str, Any] | None = None) -> int:
+    """Resolve invoice terms, preferring a company's explicit override."""
+
+    company_value = company.get("invoice_due_days") if company else None
+    if company_value is not None and str(company_value).strip() != "":
+        try:
+            due_days = int(company_value)
+        except (TypeError, ValueError):
+            due_days = -1
+        if 0 <= due_days <= _MAX_INVOICE_DUE_DAYS:
+            return due_days
+
+    env_value = str(os.getenv("XERO_INVOICE_DUE_DAYS", _DEFAULT_INVOICE_DUE_DAYS)).strip()
+    try:
+        due_days = int(env_value)
+    except (TypeError, ValueError):
+        due_days = _DEFAULT_INVOICE_DUE_DAYS
+    if not 0 <= due_days <= _MAX_INVOICE_DUE_DAYS:
+        due_days = _DEFAULT_INVOICE_DUE_DAYS
+    return due_days
 
 
 def resolve_invoiced_ticket_status() -> str:
@@ -2383,10 +2407,11 @@ async def sync_company(
             "LineItems": xero_line_items,
             "LineAmountTypes": line_amount_type,
             "Date": date.today().isoformat(),
+            "DueDate": (
+                date.today() + timedelta(days=resolve_invoice_due_days(company))
+            ).isoformat(),
             "Status": "AUTHORISED" if auto_send else "DRAFT",
         }
-        # Do not send MyPortal's due date. When DueDate is omitted, Xero applies
-        # the payment terms configured for the contact to the new invoice.
         if auto_send:
             invoice_payload["SentToContact"] = True
 

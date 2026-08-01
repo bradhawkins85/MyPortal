@@ -453,8 +453,10 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
     # Generate invoice number
     invoice_number = await _generate_invoice_number()
 
-    # Determine due date (30 days from today)
-    due_date = date.today() + timedelta(days=30)
+    # Keep the local invoice aligned with the terms sent to Xero.
+    due_date = date.today() + timedelta(
+        days=xero_service.resolve_invoice_due_days(company)
+    )
 
     # Create the invoice record
     try:

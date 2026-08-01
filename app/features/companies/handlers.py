@@ -528,6 +528,12 @@ async def _render_company_edit_page(
         "xero_id": _string_value(
             "xero_id", (company_record.get("xero_id") or "").strip()
         ),
+        "invoice_due_days": _string_value(
+            "invoice_due_days",
+            str(company_record.get("invoice_due_days"))
+            if company_record.get("invoice_due_days") is not None
+            else "",
+        ),
         "hudu_id": _string_value(
             "hudu_id", (company_record.get("hudu_id") or "").strip()
         ),
@@ -1394,6 +1400,7 @@ async def admin_update_company(company_id: int, request: Request):
     syncro_company_raw = str(form.get("syncroCompanyId", "")).strip()
     tactical_client_raw = str(form.get("tacticalClientId", "")).strip()
     xero_id_raw = str(form.get("xeroId", "")).strip()
+    invoice_due_days_raw = str(form.get("invoiceDueDays", "")).strip()
     hudu_id_raw = str(form.get("huduId", "")).strip()
     huntress_organization_id_raw = str(form.get("huntressOrganizationId", "")).strip()
     huntress_sat_account_id_raw = str(form.get("huntressSatAccountId", "")).strip()
@@ -1463,6 +1470,7 @@ async def admin_update_company(company_id: int, request: Request):
         "syncro_company_id": syncro_company_raw,
         "tacticalrmm_client_id": tactical_client_raw,
         "xero_id": xero_id_raw,
+        "invoice_due_days": invoice_due_days_raw,
         "hudu_id": hudu_id_raw,
         "huntress_organization_id": huntress_organization_id_raw,
         "huntress_sat_account_id": huntress_sat_account_id_raw,
@@ -1500,6 +1508,21 @@ async def admin_update_company(company_id: int, request: Request):
             error_message="Enter a company name.",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
+    invoice_due_days: int | None = None
+    if invoice_due_days_raw:
+        try:
+            invoice_due_days = int(invoice_due_days_raw)
+        except ValueError:
+            invoice_due_days = -1
+        if not 0 <= invoice_due_days <= 3650:
+            return await _render_company_edit_page(
+                request,
+                current_user,
+                company_id=company_id,
+                form_values=form_values,
+                error_message="Invoice due days must be between 0 and 3650.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
     if onedrive_export_selection_raw and (
         not onedrive_export_site_id_raw or not onedrive_export_drive_id_raw
     ):
@@ -1532,6 +1555,7 @@ async def admin_update_company(company_id: int, request: Request):
         "syncro_company_id": syncro_company_id,
         "tacticalrmm_client_id": tactical_client_id,
         "xero_id": xero_id,
+        "invoice_due_days": invoice_due_days,
         "hudu_id": hudu_id,
         "huntress_organization_id": huntress_organization_id,
         "huntress_sat_account_id": huntress_sat_account_id,

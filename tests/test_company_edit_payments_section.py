@@ -24,6 +24,7 @@ def test_payment_settings_are_grouped_in_payments_section():
         "isVip",
         "defaultTicketRepliesBillable",
         "requirePo",
+        "invoiceDueDays",
     ):
         assert template.count(f'name="{field_name}"') == 1
         assert f'name="{field_name}"' in section
@@ -32,7 +33,7 @@ def test_payment_settings_are_grouped_in_payments_section():
 def test_moved_payment_settings_submit_with_company_settings_form():
     section = _payments_section(TEMPLATE.read_text())
 
-    assert section.count('form="company-settings-form"') == 7
+    assert section.count('form="company-settings-form"') == 8
     assert 'form="company-settings-form">Save company settings</button>' in section
 
 
