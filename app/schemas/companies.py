@@ -15,6 +15,7 @@ class CompanyBase(BaseModel):
     syncro_company_id: Optional[str] = None
     tacticalrmm_client_id: Optional[str] = None
     xero_id: Optional[str] = None
+    invoice_due_days: Optional[int] = Field(default=None, ge=0, le=3650)
     huntress_organization_id: Optional[str] = None
     huntress_sat_account_id: Optional[str] = None
     archived: Optional[int] = None
@@ -45,6 +46,7 @@ class CompanyUpdate(BaseModel):
     syncro_company_id: Optional[str] = None
     tacticalrmm_client_id: Optional[str] = None
     xero_id: Optional[str] = None
+    invoice_due_days: Optional[int] = Field(default=None, ge=0, le=3650)
     huntress_organization_id: Optional[str] = None
     huntress_sat_account_id: Optional[str] = None
     archived: Optional[int] = None

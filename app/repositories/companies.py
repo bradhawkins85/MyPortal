@@ -16,6 +16,8 @@ def _normalise_company(row: dict[str, Any]) -> dict[str, Any]:
         normalised["id"] = int(normalised["id"])
     if "archived" in normalised and normalised["archived"] is not None:
         normalised["archived"] = int(normalised["archived"])
+    if "invoice_due_days" in normalised and normalised["invoice_due_days"] is not None:
+        normalised["invoice_due_days"] = int(normalised["invoice_due_days"])
     if (
         "default_ticket_replies_billable" in normalised
         and normalised["default_ticket_replies_billable"] is not None

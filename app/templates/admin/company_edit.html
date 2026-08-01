@@ -367,6 +367,22 @@
         <p class="form-help">Select at least one payment method. Invoice Prepay sends an invoice before service is rendered. Invoice Postpay sends an invoice after the billing period. Stripe will take payment immediately (coming soon).</p>
       </div>
       <div class="form-field">
+        <label class="form-label" for="edit-company-invoice-due-days">Invoice due days</label>
+        <input
+          id="edit-company-invoice-due-days"
+          name="invoiceDueDays"
+          form="company-settings-form"
+          class="form-input"
+          type="number"
+          min="0"
+          max="3650"
+          step="1"
+          value="{{ form_data.invoice_due_days }}"
+          placeholder="Use environment default"
+        />
+        <p class="form-help">Number of calendar days after issue that Xero invoices are due. Leave blank to use <code>XERO_INVOICE_DUE_DAYS</code> (14 days by default).</p>
+      </div>
+      <div class="form-field">
         <label class="form-label">Purchase order options</label>
         <div class="form-checkbox-group">
           <label class="form-checkbox__label">
