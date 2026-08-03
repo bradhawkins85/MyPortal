@@ -166,7 +166,7 @@ async def test_xero_uses_local_rate_first():
     
     # Rate should be 95.00 (local rate)
     assert line_item["UnitAmount"] == 95.00
-    assert line_item["Quantity"] == 1.0  # 60 minutes = 1 hour
+    assert line_item["Quantity"] == 60
 
 
 @pytest.mark.asyncio
@@ -236,8 +236,9 @@ async def test_xero_falls_back_to_default_when_no_local_rate():
     invoice = invoices[0]
     line_item = invoice["line_items"][0]
     
-    # Rate should be 80.00 (default rate, Xero rate is no longer fetched)
-    assert line_item["UnitAmount"] == 80.00
+    # The legacy default is hourly and is converted to a per-minute fallback.
+    assert line_item["UnitAmount"] == 1.3333
+    assert line_item["Quantity"] == 60
 
 
 @pytest.mark.asyncio
@@ -301,5 +302,5 @@ async def test_xero_falls_back_to_default_rate():
     invoice = invoices[0]
     line_item = invoice["line_items"][0]
     
-    # Rate should be 80.00 (default rate)
-    assert line_item["UnitAmount"] == 80.00
+    assert line_item["UnitAmount"] == 1.3333
+    assert line_item["Quantity"] == 60

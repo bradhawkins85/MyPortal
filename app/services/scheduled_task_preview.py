@@ -198,7 +198,6 @@ async def _preview_generate_invoice(
             group_minutes = int(group.get("minutes") or 0)
             if group_minutes <= 0:
                 continue
-            hours = invoice_generator_service._minutes_to_hours(group_minutes)
             description = invoice_generator_service._build_ticket_line_description(
                 line_item_template,
                 ticket,
@@ -217,9 +216,9 @@ async def _preview_generate_invoice(
                 "id": int(ticket_id),
                 "label": description,
                 "minutes": group_minutes,
-                "hours": str(hours),
+                "hours": str(invoice_generator_service._minutes_to_hours(group_minutes)),
                 "xeroDescription": description,
-                "xeroQuantity": str(hours),
+                "xeroQuantity": str(group_minutes),
                 "xeroUnitAmount": _money(unit_amount),
                 "action": "Add billable ticket time using this Xero line item format",
             }

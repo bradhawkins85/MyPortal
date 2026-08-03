@@ -1150,7 +1150,6 @@ async def build_ticket_invoices(
                     group_minutes = int(group.get("minutes") or 0)
                     if group_minutes <= 0:
                         continue
-                    hours_decimal = _minutes_to_hours(group_minutes)
                     description = _format_line_description(
                         line_item_template,
                         ticket,
@@ -1165,23 +1164,25 @@ async def build_ticket_invoices(
                         duration_days=duration_days,
                     )
 
-                    # Determine rate to use: Local labour type rate, otherwise default hourly rate
+                    # Labour type rates are configured per minute. The legacy
+                    # module-wide fallback remains hourly, so convert it before
+                    # pairing it with a minute quantity.
                     labour_code = str(group.get("code") or "").strip()
                     local_rate = group.get("rate")
                     
                     # Use local rate if set, otherwise use default
                     if local_rate is not None:
                         try:
-                            rate_to_use = _to_decimal(local_rate) or rate_decimal
+                            rate_to_use = _to_decimal(local_rate) or (rate_decimal / Decimal("60"))
                         except (ValueError, TypeError, InvalidOperation):
-                            rate_to_use = rate_decimal
+                            rate_to_use = rate_decimal / Decimal("60")
                     else:
-                        rate_to_use = rate_decimal
+                        rate_to_use = rate_decimal / Decimal("60")
                     
                     line_item: dict[str, Any] = {
                         "Description": description,
-                        "Quantity": float(hours_decimal),
-                        "UnitAmount": float(_quantize(rate_to_use)),
+                        "Quantity": group_minutes,
+                        "UnitAmount": float(_quantize(rate_to_use, "0.0001")),
                         "AccountCode": str(account_code or "").strip(),
                     }
                     if labour_code:
@@ -1190,7 +1191,6 @@ async def build_ticket_invoices(
                         line_item["TaxType"] = str(tax_type).strip()
                     line_items.append(line_item)
             else:
-                hours_decimal = _minutes_to_hours(ticket_minutes)
                 description = _format_line_description(
                     line_item_template,
                     ticket,
@@ -1206,8 +1206,8 @@ async def build_ticket_invoices(
                 )
                 line_item = {
                     "Description": description,
-                    "Quantity": float(hours_decimal),
-                    "UnitAmount": float(_quantize(rate_decimal)),
+                    "Quantity": ticket_minutes,
+                    "UnitAmount": float(_quantize(rate_decimal / Decimal("60"), "0.0001")),
                     "AccountCode": str(account_code or "").strip(),
                 }
                 if tax_type:

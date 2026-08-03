@@ -376,6 +376,7 @@ def test_generate_invoice_billable_ticket_uses_hours_and_minutes(monkeypatch):
         created_lines[0]["description"]
         == "Ticket 55: VPN help Remote (2 Hours 30 Mins)"
     )
+    assert created_lines[0]["quantity"] == Decimal("150")
     list_tickets.assert_awaited_once_with(company_id=1, limit=None)
     # Finalisation must use the reply snapshot which produced the line rather
     # than discovering newly-added, uninvoiced work in a second query.

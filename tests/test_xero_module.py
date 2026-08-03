@@ -77,7 +77,7 @@ async def test_build_ticket_invoices_groups_billable_minutes():
     async def fake_fetch_replies(ticket_id: int):
         if ticket_id == 1:
             return [
-                {"minutes_spent": 30, "is_billable": True},
+                {"minutes_spent": 15, "is_billable": True},
                 {"minutes_spent": 15, "is_billable": False},
             ]
         return [
@@ -102,9 +102,9 @@ async def test_build_ticket_invoices_groups_billable_minutes():
 
     assert len(invoices) == 1
     invoice = invoices[0]
-    assert invoice["context"]["total_billable_minutes"] == 30
-    assert invoice["line_items"][0]["UnitAmount"] == 150.0
-    assert invoice["line_items"][0]["Quantity"] == 0.5
+    assert invoice["context"]["total_billable_minutes"] == 15
+    assert invoice["line_items"][0]["UnitAmount"] == 2.5
+    assert invoice["line_items"][0]["Quantity"] == 15
 
 
 @pytest.mark.anyio("asyncio")

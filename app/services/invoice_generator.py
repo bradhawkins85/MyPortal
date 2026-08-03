@@ -355,7 +355,6 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
             group_minutes = int(group.get("minutes") or 0)
             if group_minutes <= 0:
                 continue
-            hours_decimal = _minutes_to_hours(group_minutes)
             labour_name = str(group.get("name") or "").strip()
             labour_code = str(group.get("code") or "").strip()
             description = _build_ticket_line_description(
@@ -377,7 +376,7 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
 
             line_item: dict[str, Any] = {
                 "Description": description,
-                "Quantity": float(hours_decimal),
+                "Quantity": group_minutes,
                 "UnitAmount": float(rate),
                 "ItemCode": labour_code,
             }

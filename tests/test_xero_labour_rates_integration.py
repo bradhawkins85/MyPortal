@@ -284,10 +284,9 @@ async def test_sync_company_uses_xero_item_rates(monkeypatch):
     assert remote_item is not None, "REMOTE line item should exist"
     assert onsite_item is not None, "ONSITE line item should exist"
     
-    # Verify REMOTE uses Xero item rate: 60 minutes = 1 hour @ $95
-    assert remote_item["Quantity"] == 1.0
+    # Labour type rates are per minute and quantities preserve exact minutes.
+    assert remote_item["Quantity"] == 60
     assert remote_item["UnitAmount"] == 95.00, f"Expected 95.00 but got {remote_item['UnitAmount']}"
     
-    # Verify ONSITE uses Xero item rate: 120 minutes = 2 hours @ $150
-    assert onsite_item["Quantity"] == 2.0
+    assert onsite_item["Quantity"] == 120
     assert onsite_item["UnitAmount"] == 150.00, f"Expected 150.00 but got {onsite_item['UnitAmount']}"
