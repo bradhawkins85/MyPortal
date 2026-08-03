@@ -957,6 +957,14 @@ def _build_ticket_status_payloads(
     return statuses
 
 
+def _is_default_labour_type(identifier: Any, default_value: Any, index: int) -> bool:
+    """Match the selected radio value to an existing or unsaved labour type."""
+    return bool(
+        (identifier and str(identifier) == str(default_value))
+        or str(default_value) == f"new-{index}"
+    )
+
+
 @router.post("/admin/tickets/statuses", response_class=HTMLResponse)
 async def admin_replace_ticket_statuses(request: Request):
     main_module = _main()
@@ -1023,7 +1031,7 @@ async def admin_replace_labour_types(request: Request):
                 rate_value = float(rate_str.strip())
             except (ValueError, TypeError):
                 rate_value = None
-        is_default = identifier and str(identifier) == str(default_id)
+        is_default = _is_default_labour_type(identifier, default_id, index)
         definitions.append(
             {
                 "id": identifier,
