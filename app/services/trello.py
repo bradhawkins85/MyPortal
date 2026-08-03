@@ -169,12 +169,16 @@ def _strip_html(value: str, *, image_base_url: str | None = None) -> str:
         return ""
 
     # Rich-text replies can reach this integration with their markup entity-
-    # encoded (for example ``&lt;/span&gt;&lt;/div&gt;``).  HTMLParser decodes
-    # character references only while emitting text, so feeding that value
-    # directly would expose the decoded tags in the Trello comment instead of
-    # treating them as markup.  Decode once before parsing so block elements
-    # and ``br`` tags are handled by the parser and rendered as line breaks.
-    value = unescape(value)
+    # encoded, sometimes more than once after passing through the editor and
+    # sanitiser (for example ``&amp;lt;div&amp;gt;``). HTMLParser decodes
+    # character references while emitting text but does not parse the decoded
+    # text as markup, which would leak ``<div><br></div>`` into Trello. Decode
+    # boundedly before parsing so those tags are handled as HTML instead.
+    for _ in range(3):
+        decoded = unescape(value)
+        if decoded == value:
+            break
+        value = decoded
     parser = _TrelloCommentHTMLParser(image_base_url=image_base_url)
     parser.feed(value)
     parser.close()
