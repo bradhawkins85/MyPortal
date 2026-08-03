@@ -75,6 +75,17 @@ def test_dashboard_seed_catalog_has_at_least_30_prefixed_queries():
     assert sql.count("'Dashboard -") >= 30
 
 
+def test_license_product_dashboard_query_uses_license_name_column():
+    sql = Path("migrations/314_fix_dashboard_license_product_query.sql").read_text()
+    query_update = next(
+        line for line in sql.splitlines() if line.startswith("SET sql_query")
+    )
+
+    assert "COALESCE(name, ''Other'') AS X" in query_update
+    assert "GROUP BY name ORDER BY Y DESC" in query_update
+    assert "product_name" not in query_update
+
+
 def test_client_dashboard_example_is_valid():
     import json
 
