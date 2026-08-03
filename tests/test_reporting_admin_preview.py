@@ -82,6 +82,7 @@ def test_admin_reporting_test_renders_unsaved_query_without_updating(monkeypatch
     assert captured["template"] == "admin/reporting_form.html"
     extra = captured["extra"]
     assert extra["report"]["sql_query"] == "SELECT 2 AS changed"
+    assert extra["report"]["slug"] == "saved-slug"
     assert extra["granted_user_ids"] == {7}
     assert extra["test_result"]["rows"] == [{"changed": 2}]
     assert extra["test_error"] is None
