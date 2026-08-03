@@ -1,0 +1,7 @@
+{
+  "guid": "5be21137-5350-4f4a-83c2-9b8def9669ce",
+  "occurred_at": "2026-08-03T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fix automatic dashboard panel heights so lists and tables expand to fit their content instead of remaining two rows tall.",
+  "content_hash": "d587471a9f2b8c96bbbf8c68057deaf2619aa8d47bcb8323af8e258990395fa9"
+}

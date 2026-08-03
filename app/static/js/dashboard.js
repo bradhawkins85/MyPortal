@@ -170,7 +170,29 @@
     state.panels.filter(panel => panel.h === 0).forEach(panel => {
       const element = grid.querySelector(`[data-id="${CSS.escape(panel.id)}"]`);
       if (!element) return;
-      const height = Math.max(1, Math.min(6, Math.ceil((element.scrollHeight + gap) / (row + gap))));
+      // The visible panel is already constrained to its current grid span and
+      // its list/table children are scroll containers. Measuring that element
+      // therefore reports the assigned height rather than the content height.
+      const measurement = element.cloneNode(true);
+      Object.assign(measurement.style, {
+        position: 'absolute',
+        visibility: 'hidden',
+        pointerEvents: 'none',
+        width: `${element.getBoundingClientRect().width}px`,
+        height: 'auto',
+        maxHeight: 'none',
+        overflow: 'visible',
+        gridColumn: 'auto',
+        gridRow: 'auto'
+      });
+      measurement.querySelectorAll('.dashboard-panel__list, .dashboard-panel__table-wrap').forEach(child => {
+        child.style.overflow = 'visible';
+        child.style.maxHeight = 'none';
+      });
+      grid.append(measurement);
+      const contentHeight = measurement.scrollHeight;
+      measurement.remove();
+      const height = Math.max(1, Math.min(6, Math.ceil((contentHeight + gap) / (row + gap))));
       if (automaticHeights.get(panel.id) !== height) { automaticHeights.set(panel.id, height); changed = true; }
     });
     if (!changed) return;
