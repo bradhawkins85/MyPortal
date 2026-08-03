@@ -4,6 +4,8 @@ import hashlib
 import asyncio
 
 import pytest
+from PIL import Image
+from io import BytesIO
 
 from app.services import ticket_attachments
 
@@ -30,3 +32,21 @@ def test_ensure_not_blocked_allows_new_content(monkeypatch) -> None:
 
     monkeypatch.setattr(ticket_attachments.blocklist_repo, "is_blocked", not_blocked)
     assert asyncio.run(ticket_attachments.ensure_not_blocked(b"new")) == hashlib.sha256(b"new").hexdigest()
+
+
+def test_create_blocklist_thumbnail_resizes_image() -> None:
+    source = BytesIO()
+    Image.new("RGB", (800, 400), "red").save(source, format="PNG")
+
+    thumbnail, mime_type = ticket_attachments.create_blocklist_thumbnail(
+        source.getvalue(), "image/png"
+    )
+
+    assert thumbnail is not None
+    assert mime_type == "image/jpeg"
+    with Image.open(BytesIO(thumbnail)) as image:
+        assert image.size == (256, 128)
+
+
+def test_create_blocklist_thumbnail_ignores_non_images() -> None:
+    assert ticket_attachments.create_blocklist_thumbnail(b"document", "application/pdf") == (None, None)

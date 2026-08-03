@@ -29,6 +29,7 @@ dependencies = [
     "python-multipart",
     "nh3",
     "python-magic",
+    "Pillow>=10.0.0",
     "markdown-it-py",
     "mutagen",
     "phonenumbers",
