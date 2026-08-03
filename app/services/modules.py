@@ -10,6 +10,8 @@ import string
 import wave
 from defusedxml import ElementTree as DefusedET
 from defusedxml.common import DefusedXmlException
+from html import unescape
+from html.parser import HTMLParser
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import asyncio
@@ -3838,6 +3840,61 @@ async def _invoke_ntfy(
     )
 
 
+class _SMSHTMLTextParser(HTMLParser):
+    """Convert rich-text editor HTML into SMS-friendly plain text."""
+
+    _BLOCK_TAGS = frozenset({
+        "address", "article", "aside", "blockquote", "div", "footer", "h1",
+        "h2", "h3", "h4", "h5", "h6", "header", "li", "p", "section", "tr",
+    })
+    _SKIP_TAGS = frozenset({"script", "style"})
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag_name = tag.lower()
+        if tag_name in self._SKIP_TAGS:
+            self._skip_depth += 1
+        elif self._skip_depth == 0 and tag_name == "br":
+            self._append_newline()
+
+    def handle_endtag(self, tag: str) -> None:
+        tag_name = tag.lower()
+        if tag_name in self._SKIP_TAGS:
+            if self._skip_depth > 0:
+                self._skip_depth -= 1
+        elif self._skip_depth == 0 and tag_name in self._BLOCK_TAGS:
+            self._append_newline()
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth == 0:
+            self._parts.append(data)
+
+    def _append_newline(self) -> None:
+        if self._parts and not self._parts[-1].endswith("\n"):
+            self._parts.append("\n")
+
+    def get_text(self) -> str:
+        text = "".join(self._parts).replace("\xa0", " ")
+        lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.splitlines()]
+        result: list[str] = []
+        for line in lines:
+            if line or (result and result[-1]):
+                result.append(line)
+        return "\n".join(result).strip()
+
+
+def _sms_plain_text(value: Any) -> str:
+    """Return plain text while preserving rich-text paragraph line breaks."""
+    parser = _SMSHTMLTextParser()
+    parser.feed(unescape(str(value or "")))
+    parser.close()
+    return parser.get_text()
+
+
 async def _invoke_sms_gateway(
     settings: Mapping[str, Any],
     payload: Mapping[str, Any],
@@ -3855,7 +3912,7 @@ async def _invoke_sms_gateway(
     # Extract message and phone numbers from payload
     # Accepts both "phoneNumbers" (camelCase) and "phone_numbers" (snake_case)
     # for flexibility, but always outputs "phoneNumbers" in the request body
-    message = str(payload.get("message") or "")
+    message = _sms_plain_text(payload.get("message"))
     phone_numbers = payload.get("phoneNumbers") or payload.get("phone_numbers") or []
 
     if not isinstance(phone_numbers, list):

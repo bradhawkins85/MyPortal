@@ -117,6 +117,51 @@ def test_invoke_sms_gateway_success(monkeypatch):
     assert client_factory.captured_kwargs["headers"]["authorization"] == "Bearer test-token"
 
 
+def test_invoke_sms_gateway_converts_rich_text_message_to_plain_text(monkeypatch):
+    captured_event: dict[str, object] = {}
+
+    async def fake_create_manual_event(**kwargs):
+        captured_event.update(kwargs)
+        return {"id": 1, "status": "pending", "attempt_count": 0}
+
+    client_factory = _AsyncClientFactory(FakeResponse())
+    monkeypatch.setattr(modules.webhook_monitor, "create_manual_event", fake_create_manual_event)
+    monkeypatch.setattr(modules.webhook_repo, "record_attempt", _noop)
+    monkeypatch.setattr(modules.webhook_repo, "mark_event_completed", _noop)
+    monkeypatch.setattr(
+        modules.webhook_repo,
+        "get_event",
+        lambda event_id: asyncio.sleep(0, result={"id": event_id, "status": "succeeded"}),
+    )
+    monkeypatch.setattr(modules.httpx, "AsyncClient", lambda *a, **kw: client_factory)
+
+    rich_message = (
+        "<div>Download and run the DisplayLink cleaner,</div>"
+        "<div>https://www.synaptics.com/products/displaylink-installation-cleaner-macos</div>"
+        "<div>You will probably need to restart the Mac after running it.</div>"
+    )
+    asyncio.run(
+        modules._invoke_sms_gateway(
+            {"gateway_url": "https://sms.example.com/api/send", "authorization": "Bearer token"},
+            {"message": rich_message, "phoneNumbers": ["+1234567890"]},
+        )
+    )
+
+    expected = (
+        "Download and run the DisplayLink cleaner,\n"
+        "https://www.synaptics.com/products/displaylink-installation-cleaner-macos\n"
+        "You will probably need to restart the Mac after running it."
+    )
+    assert captured_event["payload"]["message"] == expected
+    assert client_factory.captured_kwargs["json"]["message"] == expected
+
+
+def test_sms_plain_text_handles_encoded_markup_and_breaks():
+    assert modules._sms_plain_text("First&lt;br&gt;Second&lt;/div&gt;&lt;div&gt;Third &amp;amp; final") == (
+        "First\nSecond\nThird & final"
+    )
+
+
 def test_invoke_sms_gateway_missing_url(monkeypatch):
     async def fake_create_manual_event(**kwargs):
         return {"id": 1, "status": "pending"}
