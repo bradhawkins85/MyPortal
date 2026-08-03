@@ -21,18 +21,31 @@ async def add(
     file_size: int,
     mime_type: str | None,
     created_by_user_id: int | None,
+    thumbnail_data: bytes | None = None,
+    thumbnail_mime_type: str | None = None,
 ) -> dict[str, Any]:
     await db.execute(
         """
         INSERT INTO ticket_attachment_blocklist
-          (sha256_hash, original_filename, file_size, mime_type, created_by_user_id)
-        VALUES (?, ?, ?, ?, ?)
+          (sha256_hash, original_filename, file_size, mime_type, created_by_user_id,
+           thumbnail_data, thumbnail_mime_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
           original_filename = COALESCE(original_filename, VALUES(original_filename)),
           file_size = COALESCE(file_size, VALUES(file_size)),
-          mime_type = COALESCE(mime_type, VALUES(mime_type))
+          mime_type = COALESCE(mime_type, VALUES(mime_type)),
+          thumbnail_data = COALESCE(thumbnail_data, VALUES(thumbnail_data)),
+          thumbnail_mime_type = COALESCE(thumbnail_mime_type, VALUES(thumbnail_mime_type))
         """,
-        (sha256_hash, original_filename, file_size, mime_type, created_by_user_id),
+        (
+            sha256_hash,
+            original_filename,
+            file_size,
+            mime_type,
+            created_by_user_id,
+            thumbnail_data,
+            thumbnail_mime_type,
+        ),
     )
     row = await db.fetch_one(
         "SELECT * FROM ticket_attachment_blocklist WHERE sha256_hash = ?",

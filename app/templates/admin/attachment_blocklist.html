@@ -19,10 +19,17 @@
           </header>
           <div class="table-wrapper">
             <table class="table table--stack-mobile" data-table data-table-id="attachment-blocklist-table">
-              <thead><tr><th>File</th><th>Size / type</th><th>Content hash</th><th>Blocked</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Preview</th><th>File</th><th>Size / type</th><th>Content hash</th><th>Blocked</th><th>Actions</th></tr></thead>
               <tbody>
                 {% for entry in entries %}
                   <tr>
+                    <td data-label="Preview">
+                      {% if entry.thumbnail_data_uri %}
+                        <img class="attachment-blocklist__thumbnail" src="{{ entry.thumbnail_data_uri }}" alt="Thumbnail of {{ entry.original_filename or 'blocked attachment' }}" />
+                      {% else %}
+                        <span class="attachment-blocklist__no-preview" aria-label="No image preview available">—</span>
+                      {% endif %}
+                    </td>
                     <td data-label="File">{{ entry.original_filename or 'Unknown file' }}</td>
                     <td data-label="Size / type">{{ entry.file_size | filesizeformat if entry.file_size is not none else '—' }} · {{ entry.mime_type or 'unknown' }}</td>
                     <td data-label="Content hash"><code title="{{ entry.sha256_hash }}">{{ entry.sha256_hash[:12] }}…</code></td>
@@ -35,7 +42,7 @@
                     </td>
                   </tr>
                 {% else %}
-                  <tr><td colspan="5" class="table__empty">No attachment content has been blocked.</td></tr>
+                  <tr><td colspan="6" class="table__empty">No attachment content has been blocked.</td></tr>
                 {% endfor %}
               </tbody>
             </table>

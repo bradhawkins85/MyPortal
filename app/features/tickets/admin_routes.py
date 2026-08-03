@@ -22,6 +22,7 @@ Mirrors the routes that used to live in ``app/main.py``:
 from __future__ import annotations
 
 import asyncio
+import base64
 import re
 from collections.abc import Sequence
 from datetime import date, datetime, timezone
@@ -403,6 +404,13 @@ async def admin_attachment_blocklist_page(request: Request):
     entries = await attachment_blocklist_repo.list_entries()
     for entry in entries:
         entry["created_iso"] = _iso_utc(entry.get("created_at"))
+        thumbnail_data = entry.pop("thumbnail_data", None)
+        thumbnail_mime_type = entry.pop("thumbnail_mime_type", None)
+        entry["thumbnail_data_uri"] = (
+            f"data:{thumbnail_mime_type};base64,{base64.b64encode(thumbnail_data).decode('ascii')}"
+            if thumbnail_data and thumbnail_mime_type == "image/jpeg"
+            else None
+        )
     return await main_module._render_template(
         "admin/attachment_blocklist.html",
         request,

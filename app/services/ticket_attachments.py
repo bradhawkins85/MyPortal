@@ -7,12 +7,14 @@ import hashlib
 import os
 import re
 import secrets
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 import importlib
 from fastapi import UploadFile
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from PIL import Image, UnidentifiedImageError
 
 from app.core.config import get_settings
 from app.core.logging import log_debug, log_error, log_info
@@ -82,6 +84,27 @@ _INLINE_IMAGE_EXTENSIONS = {
     "image/gif": "gif",
     "image/webp": "webp",
 }
+
+_BLOCKLIST_THUMBNAIL_SIZE = (256, 256)
+
+
+def create_blocklist_thumbnail(contents: bytes, mime_type: str | None) -> tuple[bytes | None, str | None]:
+    """Create a small, inert JPEG preview for blocklisted raster images."""
+    if not mime_type or not mime_type.lower().startswith("image/"):
+        return None, None
+    try:
+        with Image.open(BytesIO(contents)) as image:
+            image.thumbnail(_BLOCKLIST_THUMBNAIL_SIZE)
+            # Flatten transparency onto white so every Pillow-supported raster
+            # mode can be represented consistently as a compact RGB JPEG.
+            rgba = image.convert("RGBA")
+            flattened = Image.new("RGB", rgba.size, "white")
+            flattened.paste(rgba, mask=rgba.getchannel("A"))
+            output = BytesIO()
+            flattened.save(output, format="JPEG", quality=80, optimize=True)
+            return output.getvalue(), "image/jpeg"
+    except (UnidentifiedImageError, OSError, ValueError):
+        return None, None
 
 
 def content_hash(contents: bytes) -> str:
@@ -417,13 +440,19 @@ async def block_attachment(
     path = attachment_path(attachment)
     if not path.exists():
         raise FileNotFoundError("Attachment file not found")
-    digest = content_hash(path.read_bytes())
+    contents = path.read_bytes()
+    digest = content_hash(contents)
+    thumbnail_data, thumbnail_mime_type = create_blocklist_thumbnail(
+        contents, attachment.get("mime_type")
+    )
     entry = await blocklist_repo.add(
         digest,
         original_filename=attachment.get("original_filename"),
         file_size=int(attachment.get("file_size") or path.stat().st_size),
         mime_type=attachment.get("mime_type"),
         created_by_user_id=created_by_user_id,
+        thumbnail_data=thumbnail_data,
+        thumbnail_mime_type=thumbnail_mime_type,
     )
     removed = 0
     targets = await attachments_repo.list_all_attachments() if remove_existing else [attachment]
