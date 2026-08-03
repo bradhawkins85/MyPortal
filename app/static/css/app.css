@@ -8490,6 +8490,12 @@ a.service-card__ai-icon:hover {
   flex-shrink: 0;
 }
 
+.attachment-card__block-icon {
+  width: 1.15rem;
+  height: 1.15rem;
+  fill: currentColor;
+}
+
 .dropdown {
   position: relative;
 }

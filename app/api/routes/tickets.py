@@ -2109,6 +2109,42 @@ async def delete_ticket_attachment(
         )
 
 
+@router.post("/{ticket_id}/attachments/{attachment_id}/blocklist")
+async def blocklist_ticket_attachment(
+    ticket_id: int,
+    attachment_id: int,
+    request: Request,
+    remove_existing: bool = Query(default=False),
+    current_user: dict = Depends(require_helpdesk_technician),
+) -> dict[str, Any]:
+    """Block matching attachment bytes and discard this attachment."""
+    attachment = await attachments_repo.get_attachment(attachment_id)
+    if not attachment or attachment.get("ticket_id") != ticket_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    if remove_existing and not current_user.get("is_super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only super admins can remove matching historical attachments",
+        )
+    try:
+        entry, removed = await attachments_service.block_attachment(
+            attachment,
+            created_by_user_id=current_user.get("id"),
+            remove_existing=remove_existing,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    await audit_service.record(
+        action="ticket.attachment_blocked",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="ticket_attachment_blocklist",
+        entity_id=int(entry["id"]),
+        after={"sha256_hash": entry["sha256_hash"]},
+        metadata={"ticket_id": ticket_id, "attachment_id": attachment_id, "removed": removed},
+    )
+    return {"blocklist_id": entry["id"], "removed": removed}
+
 @router.get("/{ticket_id}/attachments/{attachment_id}/token")
 async def get_open_access_token(
     ticket_id: int,
