@@ -14,6 +14,8 @@
   let canAssign = false;
   let dragged;
   let editingId = null;
+  let dirty = false;
+  const saveButton = app.querySelector('[data-dashboard-save]');
 
   const esc = value => String(value ?? '').replace(/[&<>"']/g, character => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -29,17 +31,74 @@
     const labels = data.labels || [];
     const series = data.series || [];
     if (!labels.length || !series.length) return '<p>No numeric graph data.</p>';
-    const max = Math.max(1, ...series.flatMap(item => item.values.filter(Number.isFinite)));
-    const group = 90 / labels.length;
+    const values = series.flatMap(item => item.values.map(Number).filter(Number.isFinite));
+    const max = Math.max(1, ...values);
+    const colours = series.map((_, index) => `hsl(${215 + index * 55} 75% 55%)`);
+    const plot = {left: 12, right: 96, top: 8, bottom: 72};
+    const xAt = index => plot.left + (labels.length === 1 ? (plot.right - plot.left) / 2 : index * (plot.right - plot.left) / (labels.length - 1));
+    const yAt = value => plot.bottom - Number(value || 0) / max * (plot.bottom - plot.top);
     let marks = '';
-    labels.forEach((label, index) => series.forEach((item, seriesIndex) => {
-      const value = Number(item.values[index]) || 0;
-      const x = 6 + index * group + seriesIndex * (group / series.length);
-      const width = Math.max(2, group / series.length - 2);
-      const height = value / max * 65;
-      marks += `<rect x="${x}" y="${78 - height}" width="${width}" height="${height}" rx="1" fill="hsl(${215 + seriesIndex * 55} 75% 55%)"><title>${esc(label)} · ${esc(item.name)}: ${value}</title></rect>`;
-    }));
-    return `<svg class="dashboard-chart" viewBox="0 0 100 85" preserveAspectRatio="none" role="img" aria-label="${esc(panel.title)} graph">${marks}</svg>`;
+    for (let tick = 0; tick <= 4; tick += 1) {
+      const y = plot.bottom - tick * (plot.bottom - plot.top) / 4;
+      marks += `<line class="dashboard-chart__grid" x1="${plot.left}" x2="${plot.right}" y1="${y}" y2="${y}"/><text x="10" y="${y + 2}" text-anchor="end">${esc((max * tick / 4).toLocaleString(undefined, {maximumFractionDigits: 1}))}</text>`;
+    }
+    labels.forEach((label, index) => { marks += `<text x="${xAt(index)}" y="80" text-anchor="middle">${esc(label)}</text>`; });
+    if (panel.chart === 'bar') {
+      const group = (plot.right - plot.left) / labels.length;
+      labels.forEach((label, index) => series.forEach((item, seriesIndex) => {
+        const value = Number(item.values[index]) || 0;
+        const width = Math.max(1.5, group / series.length - 1.5);
+        const x = plot.left + index * group + seriesIndex * group / series.length + .75;
+        marks += `<rect x="${x}" y="${yAt(value)}" width="${width}" height="${plot.bottom - yAt(value)}" rx="1" fill="${colours[seriesIndex]}"><title>${esc(label)} · ${esc(item.name)}: ${value}</title></rect>`;
+      }));
+    } else if (panel.chart === 'doughnut') {
+      const totals = series.map(item => item.values.reduce((sum, value) => sum + (Number(value) || 0), 0));
+      const total = totals.reduce((sum, value) => sum + value, 0) || 1;
+      let offset = 0;
+      totals.forEach((value, index) => {
+        const length = value / total * 100;
+        marks += `<circle class="dashboard-chart__doughnut" cx="54" cy="40" r="24" pathLength="100" stroke="${colours[index]}" stroke-dasharray="${length} ${100 - length}" stroke-dashoffset="${-offset}"><title>${esc(series[index].name)}: ${value}</title></circle>`;
+        offset += length;
+      });
+    } else {
+      series.forEach((item, seriesIndex) => {
+        const points = item.values.map((value, index) => `${xAt(index)},${yAt(value)}`).join(' ');
+        if (panel.chart === 'area') marks += `<polygon points="${xAt(0)},${plot.bottom} ${points} ${xAt(labels.length - 1)},${plot.bottom}" fill="${colours[seriesIndex]}" opacity=".22"/>`;
+        marks += `<polyline points="${points}" fill="none" stroke="${colours[seriesIndex]}" stroke-width="1.8" vector-effect="non-scaling-stroke"/>`;
+        item.values.forEach((value, index) => { marks += `<circle cx="${xAt(index)}" cy="${yAt(value)}" r="1.5" fill="${colours[seriesIndex]}"><title>${esc(labels[index])} · ${esc(item.name)}: ${Number(value) || 0}</title></circle>`; });
+      });
+    }
+    const legend = series.map((item, index) => `<span><i style="--legend-colour:${colours[index]}"></i>${esc(item.name)}</span>`).join('');
+    return `<div class="dashboard-chart-wrap"><svg class="dashboard-chart" viewBox="0 0 100 85" role="img" aria-label="${esc(panel.title)} ${esc(panel.chart)} graph">${marks}</svg><div class="dashboard-chart__legend" aria-label="Graph legend">${legend}</div></div>`;
+  }
+
+  function setDirty(value = true) {
+    dirty = value;
+    if (saveButton) saveButton.disabled = !editable || !dirty;
+  }
+
+  const overlaps = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  function makeRoom(moved) {
+    const queue = [moved];
+    while (queue.length) {
+      const active = queue.shift();
+      state.panels.filter(panel => panel !== active && overlaps(active, panel)).forEach(panel => {
+        panel.y = Math.min(500, active.y + active.h);
+        queue.push(panel);
+      });
+    }
+  }
+
+  function gridPosition(event, panel) {
+    const bounds = grid.getBoundingClientRect();
+    const style = getComputedStyle(grid);
+    const gap = parseFloat(style.columnGap) || 0;
+    const column = (bounds.width - gap * 11) / 12;
+    const row = parseFloat(style.gridAutoRows) || 72;
+    return {
+      x: Math.max(0, Math.min(12 - panel.w, Math.floor((event.clientX - bounds.left) / (column + gap)))),
+      y: Math.max(0, Math.min(500, Math.floor((event.clientY - bounds.top) / (row + gap))))
+    };
   }
 
   function countColour(panel) {
@@ -68,6 +127,8 @@
       element.draggable = editable;
       element.style.setProperty('--panel-w', panel.w);
       element.style.setProperty('--panel-h', panel.h);
+      element.style.gridColumn = `${panel.x + 1} / span ${panel.w}`;
+      element.style.gridRow = `${panel.y + 1} / span ${panel.h}`;
       const background = countColour(panel);
       if (background) element.style.setProperty('--panel-background', background);
 
@@ -84,6 +145,7 @@
       element.querySelector('.dashboard-panel__edit')?.addEventListener('click', () => openBuilder(panel));
       element.querySelector('.dashboard-panel__remove')?.addEventListener('click', () => {
         state.panels = state.panels.filter(item => item.id !== panel.id);
+        setDirty();
         render();
       });
       element.addEventListener('dragstart', event => {
@@ -91,16 +153,29 @@
         dragged = panel;
         element.classList.add('is-dragging');
       });
-      element.addEventListener('dragend', () => element.classList.remove('is-dragging'));
-      element.addEventListener('dragover', event => event.preventDefault());
-      element.addEventListener('drop', event => {
-        event.preventDefault();
-        if (!dragged || dragged === panel) return;
-        const from = state.panels.indexOf(dragged);
-        const to = state.panels.indexOf(panel);
-        state.panels.splice(to, 0, state.panels.splice(from, 1)[0]);
-        render();
-      });
+      element.addEventListener('dragend', () => { element.classList.remove('is-dragging'); dragged = null; });
+      if (editable) {
+        const handle = document.createElement('button');
+        handle.type = 'button';
+        handle.className = 'dashboard-panel__resize';
+        handle.setAttribute('aria-label', 'Resize panel');
+        handle.addEventListener('pointerdown', event => {
+          event.preventDefault(); event.stopPropagation();
+          const start = {x: event.clientX, y: event.clientY, w: panel.w, h: panel.h};
+          const bounds = grid.getBoundingClientRect();
+          const column = bounds.width / 12;
+          const row = parseFloat(getComputedStyle(grid).gridAutoRows) || 72;
+          const move = moveEvent => {
+            panel.w = Math.max(1, Math.min(12 - panel.x, start.w + Math.round((moveEvent.clientX - start.x) / column)));
+            panel.h = Math.max(1, Math.min(12, start.h + Math.round((moveEvent.clientY - start.y) / row)));
+            makeRoom(panel); setDirty(); render();
+          };
+          handle.setPointerCapture(event.pointerId);
+          handle.addEventListener('pointermove', move);
+          handle.addEventListener('pointerup', () => handle.removeEventListener('pointermove', move), {once: true});
+        });
+        element.append(handle);
+      }
       grid.append(element);
     });
   }
@@ -156,6 +231,7 @@
       // Populate the builder before exposing edit controls for existing panels.
       if (editable) catalog = await api('/api/dashboard/catalog');
       render();
+      setDirty(false);
     } catch (error) {
       grid.innerHTML = `<div class="dashboard-loading">${esc(error.message)}</div>`;
     }
@@ -169,6 +245,7 @@
   app.querySelector('[data-dashboard-save]')?.addEventListener('click', async () => {
     await api('/api/dashboard', {method: 'PUT', body: JSON.stringify(state)});
     source.textContent = `${state.title} · personal layout saved`;
+    setDirty(false);
   });
   app.querySelector('[data-dashboard-export]')?.addEventListener('click', () => {
     const anchor = document.createElement('a');
@@ -182,6 +259,7 @@
     try {
       state = JSON.parse(await file.files[0].text());
       await resolveState();
+      setDirty();
       render();
     } catch (error) {
       alert(`Invalid dashboard JSON: ${error.message}`);
@@ -215,14 +293,26 @@
     if (type === 'graph') Object.assign(panel, {report: form.get('report'), chart: form.get('chart')});
     if (previous) state.panels[state.panels.indexOf(previous)] = panel;
     else state.panels.push(panel);
+    makeRoom(panel);
     try {
       await resolveState();
       editingId = null;
       dialog.close();
+      setDirty();
       render();
     } catch (error) {
       alert(`Unable to load panel data: ${error.message}`);
     }
+  });
+  grid.addEventListener('dragover', event => { if (editable && dragged) event.preventDefault(); });
+  grid.addEventListener('drop', event => {
+    if (!editable || !dragged) return;
+    event.preventDefault();
+    Object.assign(dragged, gridPosition(event, dragged));
+    makeRoom(dragged);
+    dragged = null;
+    setDirty();
+    render();
   });
   load();
 })();
