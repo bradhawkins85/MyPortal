@@ -151,6 +151,7 @@ async def test_list_attachments():
     assert result[0]["filename"] == "file1.pdf"
     assert result[1]["filename"] == "file2.png"
     assert mock_db.fetch_all_params[0] == 5  # ticket_id
+    assert "ORDER BY uploaded_at DESC, id DESC" in mock_db.fetch_all_sql
 
 
 @pytest.mark.asyncio

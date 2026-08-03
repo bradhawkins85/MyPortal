@@ -1940,6 +1940,7 @@ async def download_ticket_attachment(
     ticket_id: int,
     attachment_id: int,
     current_user: dict = Depends(get_current_user),
+    preview: bool = Query(default=False),
 ):
     """Download a ticket attachment (requires authentication)"""
     attachment = await attachments_repo.get_attachment(attachment_id)
@@ -1997,13 +1998,13 @@ async def download_ticket_attachment(
                 status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
             )
 
+    original_filename = attachment.get("original_filename") or "download"
+    disposition = "inline" if preview else "attachment"
     return FileResponse(
         path=file_path,
-        filename=attachment.get("original_filename"),
+        filename=original_filename,
         media_type=attachment.get("mime_type") or "application/octet-stream",
-        headers={
-            "Content-Disposition": f'attachment; filename="{attachment.get("original_filename", "download")}"'
-        },
+        content_disposition_type=disposition,
     )
 
 

@@ -117,7 +117,29 @@
               >
                 {% for attachment in ticket_attachments %}
                   <article class="attachment-card" data-attachment-id="{{ attachment.id }}">
-                    <div class="attachment-card__icon" aria-hidden="true">📎</div>
+                    <a
+                      class="attachment-card__preview"
+                      href="/api/tickets/{{ ticket.id }}/attachments/{{ attachment.id }}/download"
+                      title="Open {{ attachment.original_filename or attachment.filename }}"
+                    >
+                      {% if attachment.mime_type and attachment.mime_type.startswith('image/') %}
+                        <img
+                          src="/api/tickets/{{ ticket.id }}/attachments/{{ attachment.id }}/download?preview=true"
+                          alt="Preview of {{ attachment.original_filename or attachment.filename }}"
+                          loading="lazy"
+                        />
+                      {% elif attachment.mime_type == 'application/pdf' %}
+                        <iframe
+                          src="/api/tickets/{{ ticket.id }}/attachments/{{ attachment.id }}/download?preview=true#toolbar=0&navpanes=0"
+                          title="Preview of {{ attachment.original_filename or attachment.filename }}"
+                          loading="lazy"
+                          tabindex="-1"
+                        ></iframe>
+                        <span class="attachment-card__preview-shield" aria-hidden="true"></span>
+                      {% else %}
+                        <span class="attachment-card__file-type" aria-hidden="true">{{ (attachment.original_filename or attachment.filename).rsplit('.', 1)[-1][:5] | upper if '.' in (attachment.original_filename or attachment.filename) else 'FILE' }}</span>
+                      {% endif %}
+                    </a>
                     <div class="attachment-card__content">
                       <div class="attachment-card__header">
                         <p class="attachment-card__name">
