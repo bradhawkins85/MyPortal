@@ -117,6 +117,58 @@ def test_stat_colours_and_custom_panel_size_are_validated():
     assert (panel["w"], panel["h"]) == (1, 12)
 
 
+def test_listall_stat_preserves_and_returns_every_column(monkeypatch):
+    layout = validate_layout(
+        {
+            "panels": [
+                {
+                    "id": "details",
+                    "type": "stat",
+                    "report": "ticket-details",
+                    "function": "listall",
+                }
+            ]
+        }
+    )
+    assert layout["panels"][0]["function"] == "listall"
+    monkeypatch.setattr(
+        dashboard_layouts.reporting_repo,
+        "get_query_by_slug",
+        AsyncMock(return_value={"id": 1, "sql_query": "SELECT ..."}),
+    )
+    monkeypatch.setattr(
+        dashboard_layouts.reporting_service,
+        "run_query_with_context",
+        AsyncMock(
+            return_value={
+                "columns": ["Ticket", "Status"],
+                "rows": [
+                    {"Ticket": "T-1", "Status": "Open"},
+                    {"Ticket": "T-2", "Status": "Closed"},
+                ],
+            }
+        ),
+    )
+
+    result = asyncio.run(
+        dashboard_layouts.resolve_layout(
+            layout, company_id=None, can_run_all=True, user_id=9
+        )
+    )
+
+    assert result["panels"][0]["table_data"] == {
+        "columns": ["Ticket", "Status"],
+        "rows": [["T-1", "Open"], ["T-2", "Closed"]],
+    }
+
+
+def test_dashboard_editor_resolves_unsaved_panel_data():
+    script = Path("app/static/js/dashboard.js").read_text()
+
+    assert "await resolveState();" in script
+    assert "api('/api/dashboard/resolve'" in script
+
+
 def test_resolve_layout_omits_report_panels_without_permission(monkeypatch):
     layout = validate_layout(
         {

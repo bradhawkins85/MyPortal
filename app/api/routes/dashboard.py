@@ -68,6 +68,24 @@ async def save_dashboard(
     return {"layout": layout, "source": "personal"}
 
 
+@router.post("/resolve")
+async def resolve_dashboard(
+    payload: dict[str, Any], request: Request, user: dict = Depends(get_current_user)
+):
+    """Resolve an edited, unsaved layout so its panels can preview live data."""
+    try:
+        layout = layouts_service.validate_layout(payload)
+    except layouts_service.InvalidDashboardLayout as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    resolved = await layouts_service.resolve_layout(
+        layout,
+        company_id=_company_id(request),
+        can_run_all=bool(user.get("is_super_admin")),
+        user_id=int(user["id"]),
+    )
+    return {"layout": resolved}
+
+
 @router.delete("")
 async def reset_dashboard(user: dict = Depends(get_current_user)):
     await layouts_repo.delete_personal(int(user["id"]))

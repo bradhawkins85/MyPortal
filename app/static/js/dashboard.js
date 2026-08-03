@@ -49,6 +49,16 @@
     return value < target ? panel.less_colour : value > target ? panel.greater_colour : panel.equal_colour;
   }
 
+  function table(panel) {
+    const data = panel.table_data || {};
+    const columns = data.columns || [];
+    const rows = data.rows || [];
+    if (!columns.length) return '<p>No tabular data.</p>';
+    const head = columns.map(column => `<th scope="col">${esc(column)}</th>`).join('');
+    const body = rows.map(row => `<tr>${columns.map((_, index) => `<td>${esc(row[index])}</td>`).join('')}</tr>`).join('');
+    return `<div class="dashboard-panel__table-wrap"><table class="dashboard-panel__table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  }
+
   function render() {
     grid.innerHTML = '';
     state.panels.forEach(panel => {
@@ -65,6 +75,7 @@
       if (panel.error) body = `<p class="error">${esc(panel.error)}</p>`;
       else if (panel.type === 'link') body = `<a class="dashboard-panel__link" href="${esc(panel.url)}"><span class="button">${esc(panel.label)}</span></a>`;
       else if (panel.type === 'graph') body = chart(panel);
+      else if (panel.table_data) body = table(panel);
       else if (Array.isArray(panel.value)) body = `<ul class="dashboard-panel__list">${panel.value.map(value => `<li>${esc(value)}</li>`).join('')}</ul>`;
       else body = `<div class="dashboard-panel__value">${esc(panel.value)}</div>`;
 
@@ -150,6 +161,11 @@
     }
   }
 
+  async function resolveState() {
+    const data = await api('/api/dashboard/resolve', {method: 'POST', body: JSON.stringify(state)});
+    state = data.layout;
+  }
+
   app.querySelector('[data-dashboard-save]')?.addEventListener('click', async () => {
     await api('/api/dashboard', {method: 'PUT', body: JSON.stringify(state)});
     source.textContent = `${state.title} · personal layout saved`;
@@ -165,6 +181,7 @@
   file?.addEventListener('change', async () => {
     try {
       state = JSON.parse(await file.files[0].text());
+      await resolveState();
       render();
     } catch (error) {
       alert(`Invalid dashboard JSON: ${error.message}`);
@@ -173,7 +190,7 @@
   app.querySelector('[data-dashboard-add]')?.addEventListener('click', () => openBuilder());
   builderForm?.elements.type.addEventListener('change', updateBuilderVisibility);
   builderForm?.elements.function.addEventListener('change', updateBuilderVisibility);
-  dialog?.querySelector('[data-panel-confirm]').addEventListener('click', event => {
+  dialog?.querySelector('[data-panel-confirm]').addEventListener('click', async event => {
     event.preventDefault();
     if (!builderForm.reportValidity()) return;
     const form = new FormData(builderForm);
@@ -198,9 +215,14 @@
     if (type === 'graph') Object.assign(panel, {report: form.get('report'), chart: form.get('chart')});
     if (previous) state.panels[state.panels.indexOf(previous)] = panel;
     else state.panels.push(panel);
-    editingId = null;
-    dialog.close();
-    render();
+    try {
+      await resolveState();
+      editingId = null;
+      dialog.close();
+      render();
+    } catch (error) {
+      alert(`Unable to load panel data: ${error.message}`);
+    }
   });
   load();
 })();

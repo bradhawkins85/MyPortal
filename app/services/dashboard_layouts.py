@@ -117,7 +117,11 @@ def validate_layout(value: Any) -> dict[str, Any]:
         else:
             panel["report"] = str(raw.get("report") or "")[:120]
             if panel_type == "stat":
-                panel["function"] = "list" if raw.get("function") == "list" else "count"
+                panel["function"] = (
+                    raw.get("function")
+                    if raw.get("function") in {"list", "listall"}
+                    else "count"
+                )
                 if panel["function"] == "count":
                     try:
                         panel["compare_value"] = float(raw.get("compare_value", 0))
@@ -166,13 +170,20 @@ async def resolve_layout(
                 )
                 rows, columns = result["rows"], result["columns"]
                 if panel["type"] == "stat":
-                    item["value"] = (
-                        len(rows)
-                        if panel.get("function") == "count"
-                        else (
+                    if panel.get("function") == "count":
+                        item["value"] = len(rows)
+                    elif panel.get("function") == "listall":
+                        item["table_data"] = {
+                            "columns": columns,
+                            "rows": [
+                                [row.get(column) for column in columns]
+                                for row in rows[:8]
+                            ],
+                        }
+                    else:
+                        item["value"] = (
                             [row.get(columns[0]) for row in rows[:8]] if columns else []
                         )
-                    )
                 else:
                     # X supplies labels and Y/Y1/Y2/... supply series. Other
                     # query columns are deliberately ignored.
