@@ -76,6 +76,7 @@ async def update_query(
     description: str | None,
     sql_query: str,
 ) -> None:
+    """Update editable fields while leaving the report's existing slug intact."""
     await db.execute(
         "UPDATE reporting_queries SET name = %s, description = %s, "
         "sql_query = %s WHERE id = %s",
