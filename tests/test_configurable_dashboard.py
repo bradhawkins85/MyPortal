@@ -202,6 +202,16 @@ def test_zero_panel_height_is_preserved_for_automatic_sizing():
     assert panel["h"] == 0
 
 
+def test_automatic_height_measures_unconstrained_panel_content():
+    script = Path("app/static/js/dashboard.js").read_text()
+
+    assert "const measurement = element.cloneNode(true)" in script
+    assert "gridRow: 'auto'" in script
+    assert "child.style.overflow = 'visible'" in script
+    assert "const contentHeight = measurement.scrollHeight" in script
+    assert "element.scrollHeight + gap" not in script
+
+
 def test_dashboard_renders_each_supported_graph_style_with_axes_and_legend():
     script = Path("app/static/js/dashboard.js").read_text()
 
