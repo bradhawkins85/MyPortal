@@ -2589,6 +2589,38 @@
     const ticketId = container.getAttribute('data-ticket-id');
     const emptyMessage = document.querySelector('[data-attachments-empty]');
 
+    const imageLinks = container.querySelectorAll('[data-attachment-image-preview]');
+    if (imageLinks.length) {
+      const modal = document.createElement('dialog');
+      modal.className = 'attachment-image-modal';
+      modal.setAttribute('aria-labelledby', 'attachment-image-modal-title');
+      modal.innerHTML = `
+        <header class="attachment-image-modal__header">
+          <h2 class="attachment-image-modal__title" id="attachment-image-modal-title"></h2>
+          <button class="attachment-image-modal__close" type="button" aria-label="Close image preview">&times;</button>
+        </header>
+        <img class="attachment-image-modal__image" alt="">
+      `;
+      document.body.appendChild(modal);
+      const modalImage = modal.querySelector('.attachment-image-modal__image');
+      const modalTitle = modal.querySelector('.attachment-image-modal__title');
+      modal.querySelector('.attachment-image-modal__close').addEventListener('click', () => modal.close());
+      modal.addEventListener('click', (event) => {
+        if (event.target === modal) modal.close();
+      });
+      imageLinks.forEach((link) => {
+        link.addEventListener('click', (event) => {
+          event.preventDefault();
+          const thumbnail = link.querySelector('img');
+          const name = thumbnail?.alt.replace(/^Preview of /, '') || 'Attachment preview';
+          modalImage.src = thumbnail?.src || link.href;
+          modalImage.alt = name;
+          modalTitle.textContent = name;
+          modal.showModal();
+        });
+      });
+    }
+
     function updateEmptyState() {
       const remaining = container.querySelector('[data-attachment-id]');
       if (emptyMessage) {
