@@ -1034,6 +1034,7 @@
                       class="attachment-card__preview"
                       href="/api/tickets/{{ ticket.id }}/attachments/{{ attachment.id }}/download"
                       title="Open {{ attachment.original_filename or attachment.filename }}"
+                      {% if attachment.mime_type and attachment.mime_type.startswith('image/') %}data-attachment-image-preview{% endif %}
                     >
                       {% if attachment.mime_type and attachment.mime_type.startswith('image/') %}
                         <img
@@ -1058,11 +1059,21 @@
                         <p class="attachment-card__name">
                           <a
                             href="/api/tickets/{{ ticket.id }}/attachments/{{ attachment.id }}/download"
+                            download
                             title="{{ attachment.original_filename or attachment.filename }}"
                           >
                             {{ attachment.original_filename or attachment.filename }}
                           </a>
                         </p>
+                      </div>
+                      <p class="attachment-card__date">
+                        {% if attachment.uploaded_iso %}
+                          <span data-utc="{{ attachment.uploaded_iso }}"></span>
+                        {% else %}
+                          <span class="visually-hidden">Upload date unavailable</span>
+                        {% endif %}
+                      </p>
+                      <div class="attachment-card__footer">
                         <div class="attachment-card__actions">
                           <button
                             type="button"
@@ -1083,16 +1094,12 @@
                             data-attachment-id="{{ attachment.id }}"
                             aria-label="Remove attachment"
                           >
-                            Remove
+                            <svg class="attachment-card__remove-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-1 12H8L7 9Zm3 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z"/></svg>
+                            <span class="visually-hidden">Remove</span>
                           </button>
                         </div>
+                        <p class="attachment-card__meta">{{ attachment.file_size | filesizeformat }}</p>
                       </div>
-                      <p class="attachment-card__meta">
-                        {{ attachment.file_size | filesizeformat }}
-                        {% if attachment.uploaded_iso %}
-                          · <span data-utc="{{ attachment.uploaded_iso }}"></span>
-                        {% endif %}
-                      </p>
                     </div>
                   </article>
                 {% endfor %}

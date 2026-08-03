@@ -8452,9 +8452,7 @@ a.service-card__ai-icon:hover {
 }
 
 .attachment-card__header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-gap-tight);
+  min-width: 0;
 }
 
 .attachment-card__name {
@@ -8480,6 +8478,21 @@ a.service-card__ai-icon:hover {
   color: rgba(148, 163, 184, 0.78);
 }
 
+.attachment-card__date {
+  min-height: 1.15rem;
+  margin: 0 0 0.55rem;
+  font-size: 0.75rem;
+  color: rgba(203, 213, 225, 0.82);
+}
+
+.attachment-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 2rem;
+  gap: var(--space-gap-tight);
+}
+
 .attachment-card__actions {
   display: flex;
   align-items: center;
@@ -8488,12 +8501,68 @@ a.service-card__ai-icon:hover {
 
 .attachment-card__action {
   flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  padding: 0.35rem;
 }
 
-.attachment-card__block-icon {
+.attachment-card__block-icon,
+.attachment-card__remove-icon {
   width: 1.15rem;
   height: 1.15rem;
   fill: currentColor;
+}
+
+.attachment-image-modal {
+  width: min(92vw, 75rem);
+  max-height: 92vh;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0.85rem;
+  background: #0f172a;
+  color: #f8fafc;
+  box-shadow: 0 2rem 5rem rgba(0, 0, 0, 0.65);
+}
+
+.attachment-image-modal::backdrop {
+  background: rgba(2, 6, 23, 0.82);
+}
+
+.attachment-image-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0.85rem;
+}
+
+.attachment-image-modal__title {
+  margin: 0;
+  overflow: hidden;
+  font-size: 0.95rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-image-modal__close {
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 1.75rem;
+  cursor: pointer;
+}
+
+.attachment-image-modal__image {
+  display: block;
+  width: 100%;
+  max-height: calc(92vh - 3.5rem);
+  object-fit: contain;
+  background: #020617;
 }
 
 .dropdown {
