@@ -35,6 +35,9 @@
       </div>
       <div class="form-actions">
         <button type="submit" class="button button--primary" {% if not available_reports %}disabled{% endif %}>Run report</button>
+        {% if can_admin_reporting and selected_report %}
+          <a class="button button--ghost" href="/admin/reporting/{{ selected_report.id }}/edit">Edit report</a>
+        {% endif %}
       </div>
     </form>
     {% if not available_reports %}

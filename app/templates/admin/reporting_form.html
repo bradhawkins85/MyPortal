@@ -59,8 +59,49 @@
 
       <div class="form-actions">
         <button type="submit" class="button button--primary">{{ submit_label }}</button>
+        {% if test_action %}
+          <button type="submit" class="button button--ghost" name="action" value="test">Test changes</button>
+        {% endif %}
         <a class="button button--ghost" href="/admin/reporting">Cancel</a>
       </div>
     </form>
   </section>
+
+  {% if test_error %}
+    <section class="card card--panel" aria-labelledby="test-results-heading">
+      <header class="card__header">
+        <h2 class="card__title" id="test-results-heading">Test results</h2>
+      </header>
+      <p class="form-error">{{ test_error }}</p>
+    </section>
+  {% elif test_result %}
+    <section class="card card--panel" aria-labelledby="test-results-heading">
+      <header class="card__header">
+        <h2 class="card__title" id="test-results-heading">Test results</h2>
+        <p class="card__description">{{ test_result.row_count }} row(s){% if test_result.truncated %} (capped at {{ max_rows }}){% endif %}. These unsaved changes have not been applied.</p>
+      </header>
+      <div class="table-container">
+        <table class="data-table" role="table" aria-label="Test report results">
+          <thead>
+            <tr>
+              {% for column in test_result.columns %}<th scope="col">{{ column }}</th>{% endfor %}
+              {% if not test_result.columns %}<th scope="col">No columns</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in test_result.rows %}
+              <tr>
+                {% for column in test_result.columns %}
+                  {% set value = row.get(column) %}
+                  <td>{% if value is none %}<span class="text-muted">—</span>{% else %}{{ value }}{% endif %}</td>
+                {% endfor %}
+              </tr>
+            {% else %}
+              <tr><td class="table__empty" colspan="{{ test_result.columns|length or 1 }}">No rows returned.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
 {% endblock %}

@@ -368,6 +368,7 @@ async def admin_reporting_edit(
         "eligible_users": eligible,
         "granted_user_ids": granted_ids,
         "max_rows": reporting_service.MAX_RESULT_ROWS,
+        "test_action": f"/admin/reporting/{int(report_id)}",
     }
     return await _main()._render_template("admin/reporting_form.html", request, user, extra=extra)
 
@@ -424,6 +425,43 @@ async def admin_reporting_update(request: Request, report_id: int):
     form = await request.form()
     payload = _parse_reporting_form(form)
     error = _validate_reporting_input(payload)
+    if form.get("action") == "test":
+        from app.services import reporting as reporting_service
+
+        test_result = None
+        test_error = error
+        if not test_error:
+            try:
+                test_result = await reporting_service.run_query_with_context(
+                    payload["sql_query"],
+                    company_id=getattr(request.state, "active_company_id", None),
+                )
+            except reporting_service.ReportingQueryError as exc:
+                test_error = f"Report query is invalid: {exc}"
+            except Exception as exc:  # pragma: no cover - defensive
+                from app.core.logging import log_error
+
+                log_error("Reporting test query execution failed", error=str(exc))
+                test_error = f"Report failed to execute: {exc}"
+
+        eligible = await _list_reporting_eligible_users()
+        preview_report = {**record, **payload}
+        extra = {
+            "title": f"Edit report · {record['name']}",
+            "form_heading": f"Edit report · {record['name']}",
+            "submit_label": "Save changes",
+            "form_action": f"/admin/reporting/{int(report_id)}",
+            "test_action": f"/admin/reporting/{int(report_id)}",
+            "report": preview_report,
+            "eligible_users": eligible,
+            "granted_user_ids": set(payload["user_ids"]),
+            "max_rows": reporting_service.MAX_RESULT_ROWS,
+            "test_result": test_result,
+            "test_error": test_error,
+        }
+        return await _main()._render_template(
+            "admin/reporting_form.html", request, user, extra=extra
+        )
     if error:
         return flash_redirect(f"/admin/reporting/{int(report_id)}/edit", error, "error")
     if payload["slug"] != record.get("slug"):
