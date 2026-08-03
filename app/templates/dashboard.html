@@ -29,7 +29,7 @@
   <div data-panel-chart hidden><label>Graph style<select name="chart"><option value="bar">Bar</option><option value="line">Line</option><option value="area">Area</option><option value="doughnut">Doughnut</option></select></label></div>
   <div data-panel-variable hidden><label>Automation variable<select name="variable"></select></label></div>
   <div data-panel-link hidden><label>Button label<input name="label" value="Open"></label><label>URL<input name="url" placeholder="/tickets/new"></label></div>
-  <fieldset><legend>Panel size</legend><div class="dashboard-builder__size-grid"><label>Width (1–12 columns)<input name="w" type="number" min="1" max="12" value="4" required></label><label>Height (1–12 rows)<input name="h" type="number" min="1" max="12" value="2" required></label></div></fieldset>
+  <fieldset><legend>Panel size</legend><div class="dashboard-builder__size-grid"><label>Width (1–12 columns)<input name="w" type="number" min="1" max="12" value="4" required></label><label>Height (0 for automatic, 1–12 rows)<input name="h" type="number" min="0" max="12" value="2" required></label></div></fieldset>
   <footer><button class="button button--secondary" value="cancel">Cancel</button><button class="button" value="default" data-panel-confirm>Add panel</button></footer>
  </form>
 </dialog>

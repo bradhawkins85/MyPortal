@@ -77,13 +77,15 @@
     if (saveButton) saveButton.disabled = !editable || !dirty;
   }
 
-  const overlaps = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  const automaticHeights = new Map();
+  const panelHeight = panel => panel.h === 0 ? (automaticHeights.get(panel.id) || 1) : panel.h;
+  const overlaps = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + panelHeight(b) && a.y + panelHeight(a) > b.y;
   function makeRoom(moved) {
     const queue = [moved];
     while (queue.length) {
       const active = queue.shift();
       state.panels.filter(panel => panel !== active && overlaps(active, panel)).forEach(panel => {
-        panel.y = Math.min(500, active.y + active.h);
+        panel.y = Math.min(500, active.y + panelHeight(active));
         queue.push(panel);
       });
     }
@@ -126,9 +128,10 @@
       element.dataset.id = panel.id;
       element.draggable = editable;
       element.style.setProperty('--panel-w', panel.w);
-      element.style.setProperty('--panel-h', panel.h);
+      element.classList.toggle('dashboard-panel--auto-height', panel.h === 0);
+      element.style.setProperty('--panel-h', panelHeight(panel));
       element.style.gridColumn = `${panel.x + 1} / span ${panel.w}`;
-      element.style.gridRow = `${panel.y + 1} / span ${panel.h}`;
+      element.style.gridRow = `${panel.y + 1} / span ${panelHeight(panel)}`;
       const background = countColour(panel);
       if (background) element.style.setProperty('--panel-background', background);
 
@@ -154,29 +157,27 @@
         element.classList.add('is-dragging');
       });
       element.addEventListener('dragend', () => { element.classList.remove('is-dragging'); dragged = null; });
-      if (editable) {
-        const handle = document.createElement('button');
-        handle.type = 'button';
-        handle.className = 'dashboard-panel__resize';
-        handle.setAttribute('aria-label', 'Resize panel');
-        handle.addEventListener('pointerdown', event => {
-          event.preventDefault(); event.stopPropagation();
-          const start = {x: event.clientX, y: event.clientY, w: panel.w, h: panel.h};
-          const bounds = grid.getBoundingClientRect();
-          const column = bounds.width / 12;
-          const row = parseFloat(getComputedStyle(grid).gridAutoRows) || 72;
-          const move = moveEvent => {
-            panel.w = Math.max(1, Math.min(12 - panel.x, start.w + Math.round((moveEvent.clientX - start.x) / column)));
-            panel.h = Math.max(1, Math.min(12, start.h + Math.round((moveEvent.clientY - start.y) / row)));
-            makeRoom(panel); setDirty(); render();
-          };
-          handle.setPointerCapture(event.pointerId);
-          handle.addEventListener('pointermove', move);
-          handle.addEventListener('pointerup', () => handle.removeEventListener('pointermove', move), {once: true});
-        });
-        element.append(handle);
-      }
       grid.append(element);
+    });
+    requestAnimationFrame(resizeAutomaticPanels);
+  }
+
+  function resizeAutomaticPanels() {
+    const style = getComputedStyle(grid);
+    const row = parseFloat(style.gridAutoRows) || 72;
+    const gap = parseFloat(style.rowGap) || 0;
+    let changed = false;
+    state.panels.filter(panel => panel.h === 0).forEach(panel => {
+      const element = grid.querySelector(`[data-id="${CSS.escape(panel.id)}"]`);
+      if (!element) return;
+      const height = Math.max(1, Math.min(6, Math.ceil((element.scrollHeight + gap) / (row + gap))));
+      if (automaticHeights.get(panel.id) !== height) { automaticHeights.set(panel.id, height); changed = true; }
+    });
+    if (!changed) return;
+    state.panels.filter(panel => panel.h === 0).forEach(makeRoom);
+    state.panels.forEach(panel => {
+      const element = grid.querySelector(`[data-id="${CSS.escape(panel.id)}"]`);
+      if (element) element.style.gridRow = `${panel.y + 1} / span ${panelHeight(panel)}`;
     });
   }
 
