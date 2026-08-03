@@ -1,0 +1,7 @@
+{
+  "guid": "15e437c3-66ec-4ceb-af76-e18528486d80",
+  "occurred_at": "2026-08-03T00:00Z",
+  "change_type": "Feature",
+  "summary": "Add an Available licenses dashboard report showing spare Microsoft 365 seats by company and product while excluding hidden products.",
+  "content_hash": "f1ccecf3a90f3eca60dffb8fd7341c801424aaba96feb60ec2fed41c41df0a6f"
+}
