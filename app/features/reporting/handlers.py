@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import datetime, timezone
 from typing import Any
 
@@ -107,6 +108,12 @@ def _parse_reporting_form(form: FormData) -> dict[str, Any]:
         "sql_query": sql_query,
         "user_ids": user_ids,
     }
+
+
+def _reporting_slug(name: str) -> str:
+    """Build the stable, URL-safe identifier used when a report is created."""
+    ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-")[:120]
 
 
 def _validate_reporting_input(payload: dict[str, Any]) -> str | None:
@@ -382,6 +389,7 @@ async def admin_reporting_create(request: Request):
         return redirect
     form = await request.form()
     payload = _parse_reporting_form(form)
+    payload["slug"] = _reporting_slug(payload["name"])
     error = _validate_reporting_input(payload)
     if error:
         return flash_redirect("/admin/reporting/new", error, "error")
@@ -424,6 +432,9 @@ async def admin_reporting_update(request: Request, report_id: int):
         return flash_redirect("/admin/reporting", "Report not found", "error")
     form = await request.form()
     payload = _parse_reporting_form(form)
+    # A report slug is a permanent identifier. Ignore any forged or stale form
+    # value so existing integrations cannot be broken by an edit.
+    payload["slug"] = record["slug"]
     error = _validate_reporting_input(payload)
     if form.get("action") == "test":
         from app.services import reporting as reporting_service
@@ -464,10 +475,6 @@ async def admin_reporting_update(request: Request, report_id: int):
         )
     if error:
         return flash_redirect(f"/admin/reporting/{int(report_id)}/edit", error, "error")
-    if payload["slug"] != record.get("slug"):
-        clash = await reporting_repo.get_query_by_slug(payload["slug"])
-        if clash and int(clash["id"]) != int(report_id):
-            return flash_redirect(f"/admin/reporting/{int(report_id)}/edit", "That slug is already in use.", "error")
     before_snapshot = {
         "slug": record.get("slug"),
         "name": record.get("name"),
@@ -476,7 +483,6 @@ async def admin_reporting_update(request: Request, report_id: int):
     }
     await reporting_repo.update_query(
         int(report_id),
-        slug=payload["slug"],
         name=payload["name"],
         description=payload["description"],
         sql_query=payload["sql_query"],

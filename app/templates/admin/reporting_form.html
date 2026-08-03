@@ -26,8 +26,9 @@
       <div class="form-field">
         <label class="form-label required" for="report-slug">Slug</label>
         <input class="form-input" id="report-slug" name="slug" required maxlength="120"
-               pattern="[A-Za-z0-9_-]+" value="{{ report.slug or '' }}" />
-        <p class="form-hint">Letters, digits, underscores, and hyphens only. Used in URLs and exports.</p>
+               pattern="[A-Za-z0-9_-]+" value="{{ report.slug or '' }}"
+               {% if report.id %}readonly aria-readonly="true"{% endif %} />
+        <p class="form-hint">{% if report.id %}The slug is permanent after the report is saved.{% else %}Generated automatically from the report name. Used in URLs and exports.{% endif %}</p>
       </div>
       <div class="form-field">
         <label class="form-label" for="report-description">Description</label>
@@ -103,5 +104,27 @@
         </table>
       </div>
     </section>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {% if not report.id %}
+    <script>
+      (() => {
+        const nameInput = document.getElementById('report-name');
+        const slugInput = document.getElementById('report-slug');
+        const slugify = (value) => value
+          .normalize('NFKD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '')
+          .slice(0, 120);
+
+        nameInput.addEventListener('input', () => {
+          slugInput.value = slugify(nameInput.value);
+        });
+      })();
+    </script>
   {% endif %}
 {% endblock %}

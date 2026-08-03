@@ -72,15 +72,14 @@ async def create_query(
 async def update_query(
     query_id: int,
     *,
-    slug: str,
     name: str,
     description: str | None,
     sql_query: str,
 ) -> None:
     await db.execute(
-        "UPDATE reporting_queries SET slug = %s, name = %s, description = %s, "
+        "UPDATE reporting_queries SET name = %s, description = %s, "
         "sql_query = %s WHERE id = %s",
-        (slug, name, description, sql_query, int(query_id)),
+        (name, description, sql_query, int(query_id)),
     )
 
 
