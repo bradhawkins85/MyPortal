@@ -238,9 +238,9 @@ async def test_build_ticket_invoices_with_labour_types():
     assert "REMOTE" in labour_codes
     assert "ONSITE" in labour_codes
     
-    # Verify quantities (60 min = 1.0 hr, 30 min = 0.5 hr)
+    # Xero receives the exact billable minute counts.
     quantities = sorted([item["Quantity"] for item in invoice["line_items"]])
-    assert quantities == [0.5, 1.0]
+    assert quantities == [30, 60]
 
 
 @pytest.mark.anyio("asyncio")
