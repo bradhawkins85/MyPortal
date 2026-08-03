@@ -180,16 +180,26 @@ def test_dashboard_editor_resolves_unsaved_panel_data():
     assert "api('/api/dashboard/resolve'" in script
 
 
-def test_dashboard_supports_free_placement_resize_and_dirty_save_state():
+def test_dashboard_supports_free_placement_auto_height_and_dirty_save_state():
     script = Path("app/static/js/dashboard.js").read_text()
     template = Path("app/templates/dashboard.html").read_text()
 
     assert "element.style.gridColumn" in script
     assert "element.style.gridRow" in script
-    assert "dashboard-panel__resize" in script
+    assert "function resizeAutomaticPanels()" in script
+    assert "Math.max(1, Math.min(6" in script
+    assert "dashboard-panel__resize" not in script
     assert "function makeRoom(moved)" in script
     assert "function setDirty(value = true)" in script
     assert "data-dashboard-save disabled" in template
+
+
+def test_zero_panel_height_is_preserved_for_automatic_sizing():
+    panel = validate_layout(
+        {"panels": [{"id": "dynamic", "type": "variable", "h": 0}]}
+    )["panels"][0]
+
+    assert panel["h"] == 0
 
 
 def test_dashboard_renders_each_supported_graph_style_with_axes_and_legend():

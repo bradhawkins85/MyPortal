@@ -96,7 +96,7 @@ def validate_layout(value: Any) -> dict[str, Any]:
             ("x", 0, 0, 11),
             ("y", index, 0, 500),
             ("w", 4, 1, 12),
-            ("h", 2, 1, 12),
+            ("h", 2, 0, 12),
         ):
             try:
                 panel[key] = max(low, min(high, int(raw.get(key, default))))
