@@ -180,6 +180,28 @@ def test_dashboard_editor_resolves_unsaved_panel_data():
     assert "api('/api/dashboard/resolve'" in script
 
 
+def test_dashboard_supports_free_placement_resize_and_dirty_save_state():
+    script = Path("app/static/js/dashboard.js").read_text()
+    template = Path("app/templates/dashboard.html").read_text()
+
+    assert "element.style.gridColumn" in script
+    assert "element.style.gridRow" in script
+    assert "dashboard-panel__resize" in script
+    assert "function makeRoom(moved)" in script
+    assert "function setDirty(value = true)" in script
+    assert "data-dashboard-save disabled" in template
+
+
+def test_dashboard_renders_each_supported_graph_style_with_axes_and_legend():
+    script = Path("app/static/js/dashboard.js").read_text()
+
+    assert "panel.chart === 'bar'" in script
+    assert "panel.chart === 'doughnut'" in script
+    assert "panel.chart === 'area'" in script
+    assert "dashboard-chart__grid" in script
+    assert "dashboard-chart__legend" in script
+
+
 def test_resolve_layout_omits_report_panels_without_permission(monkeypatch):
     layout = validate_layout(
         {
