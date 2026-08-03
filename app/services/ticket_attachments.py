@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import os
 import re
 import secrets
@@ -16,6 +17,7 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from app.core.config import get_settings
 from app.core.logging import log_debug, log_error, log_info
 from app.repositories import ticket_attachments as attachments_repo
+from app.repositories import attachment_blocklist as blocklist_repo
 
 
 # Maximum file size: 50 MB
@@ -80,6 +82,19 @@ _INLINE_IMAGE_EXTENSIONS = {
     "image/gif": "gif",
     "image/webp": "webp",
 }
+
+
+def content_hash(contents: bytes) -> str:
+    """Return the stable, non-reversible identifier used by the blocklist."""
+    return hashlib.sha256(contents).hexdigest()
+
+
+async def ensure_not_blocked(contents: bytes) -> str:
+    """Reject content already flagged by a technician, regardless of its name."""
+    digest = content_hash(contents)
+    if await blocklist_repo.is_blocked(digest):
+        raise ValueError("This attachment is on the attachment blocklist and was discarded")
+    return digest
 
 
 def _get_upload_directory() -> Path:
@@ -194,6 +209,8 @@ async def save_uploaded_file(
         if file_size > MAX_FILE_SIZE:
             raise ValueError(f"File size {file_size} exceeds maximum")
 
+        await ensure_not_blocked(contents)
+
         # Validate MIME type from actual file bytes (defeats spoofed Content-Type).
         actual_mime = _sniff_mime_type(contents[:_MAGIC_HEADER_BYTES])
         if actual_mime and actual_mime not in ALLOWED_MIME_TYPES:
@@ -257,6 +274,8 @@ async def save_file_bytes(
     file_size = len(contents)
     if file_size > MAX_FILE_SIZE:
         raise ValueError(f"File size {file_size} exceeds maximum")
+
+    await ensure_not_blocked(contents)
 
     # Validate MIME type from actual file bytes.
     actual_mime = _sniff_mime_type(contents[:_MAGIC_HEADER_BYTES])
@@ -379,6 +398,41 @@ async def delete_attachment_file(attachment: dict[str, Any]) -> None:
         except Exception as e:
             log_error(f"Failed to delete file {filename}: {e}")
             # Don't raise - file might already be gone, record is deleted
+
+
+def attachment_path(attachment: dict[str, Any]) -> Path:
+    """Locate an attachment in current or legacy private storage."""
+    path = get_attachment_file_path(str(attachment.get("filename") or ""))
+    if not path.exists():
+        legacy = get_legacy_attachment_file_path(str(attachment.get("filename") or ""))
+        if legacy.exists():
+            return legacy
+    return path
+
+
+async def block_attachment(
+    attachment: dict[str, Any], *, created_by_user_id: int | None, remove_existing: bool
+) -> tuple[dict[str, Any], int]:
+    """Block an attachment's bytes and optionally purge every historical match."""
+    path = attachment_path(attachment)
+    if not path.exists():
+        raise FileNotFoundError("Attachment file not found")
+    digest = content_hash(path.read_bytes())
+    entry = await blocklist_repo.add(
+        digest,
+        original_filename=attachment.get("original_filename"),
+        file_size=int(attachment.get("file_size") or path.stat().st_size),
+        mime_type=attachment.get("mime_type"),
+        created_by_user_id=created_by_user_id,
+    )
+    removed = 0
+    targets = await attachments_repo.list_all_attachments() if remove_existing else [attachment]
+    for candidate in targets:
+        candidate_path = attachment_path(candidate)
+        if candidate_path.exists() and content_hash(candidate_path.read_bytes()) == digest:
+            await delete_attachment_file(candidate)
+            removed += 1
+    return entry, removed
 
 
 def _safe_attachment_path(base_dir: Path, filename: str) -> Path:

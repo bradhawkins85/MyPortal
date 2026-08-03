@@ -48,6 +48,7 @@ from app.repositories import ticket_expenses as expenses_repo
 from app.repositories import ticket_clocks as ticket_clocks_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import email_blocklist as email_blocklist_repo
+from app.repositories import attachment_blocklist as attachment_blocklist_repo
 from app.repositories import users as user_repo
 from app.repositories import site_settings as site_settings_repo
 from app.services import agent as agent_service
@@ -58,6 +59,7 @@ from app.services import tickets as tickets_service
 from app.services import ticket_shipment_tracking as shipment_watch_service
 from app.services import message_templates as message_template_service
 from app.services import unbill_tickets as unbill_tickets_service
+from app.services import audit as audit_service
 from app.services import tray as tray_service
 from app.services.sanitization import sanitize_rich_text
 
@@ -390,6 +392,44 @@ async def admin_delete_email_blocklist_entry(entry_id: int, request: Request):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin access required")
     await email_blocklist_repo.delete_entry(entry_id)
     return flash_redirect("/admin/tickets/email-blocklist", "Email address removed from the blocklist.", "success")
+
+
+@router.get("/admin/tickets/attachment-blocklist", response_class=HTMLResponse)
+async def admin_attachment_blocklist_page(request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    entries = await attachment_blocklist_repo.list_entries()
+    for entry in entries:
+        entry["created_iso"] = _iso_utc(entry.get("created_at"))
+    return await main_module._render_template(
+        "admin/attachment_blocklist.html",
+        request,
+        current_user,
+        extra={"title": "Attachment blocklist", "entries": entries},
+    )
+
+
+@router.post("/admin/tickets/attachment-blocklist/{entry_id:int}/delete")
+async def admin_delete_attachment_blocklist_entry(entry_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    await attachment_blocklist_repo.delete(entry_id)
+    await audit_service.record(
+        action="ticket.attachment_blocklist_removed",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="ticket_attachment_blocklist",
+        entity_id=entry_id,
+    )
+    return flash_redirect(
+        "/admin/tickets/attachment-blocklist",
+        "Attachment removed from the blocklist.",
+        "success",
+    )
 
 @router.get("/admin/tickets", response_class=HTMLResponse)
 async def admin_tickets_page(

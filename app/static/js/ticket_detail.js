@@ -2650,6 +2650,32 @@
         handleRemove(button);
       });
     });
+
+    const blockButtons = container.querySelectorAll('[data-block-attachment]');
+    blockButtons.forEach((button) => {
+      button.addEventListener('click', async () => {
+        const attachmentId = button.getAttribute('data-attachment-id');
+        if (!attachmentId || !ticketId || !window.confirm('Block this file content and discard this attachment? Future identical files will not be saved.')) return;
+        const removeExisting = button.getAttribute('data-can-remove-existing') === 'true'
+          && window.confirm('Also permanently remove identical attachments from all past tickets to reclaim storage?');
+        button.disabled = true;
+        try {
+          const response = await fetch(`/api/tickets/${ticketId}/attachments/${attachmentId}/blocklist?remove_existing=${removeExisting}`, {
+            method: 'POST',
+            headers: {'X-CSRF-Token': getCsrfToken()},
+          });
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.detail || 'Failed to block attachment');
+          }
+          button.closest('[data-attachment-id]')?.remove();
+          updateEmptyState();
+        } catch (error) {
+          alert(error instanceof Error ? error.message : 'Failed to block attachment');
+          button.disabled = false;
+        }
+      });
+    });
   }
 
   function getTicketIdFromPath() {
