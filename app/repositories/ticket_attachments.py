@@ -75,7 +75,9 @@ async def list_attachments(
         query += f" AND access_level IN ({placeholders})"
         params.extend(allowed_access_levels)
 
-    query += " ORDER BY uploaded_at ASC"
+    # Keep the most recently added files first everywhere attachments are used.
+    # The id provides deterministic ordering when multiple rows share a timestamp.
+    query += " ORDER BY uploaded_at DESC, id DESC"
 
     rows = await db.fetch_all(query, tuple(params))
     return [dict(row) for row in rows]
