@@ -2851,21 +2851,34 @@
     function updateRowIdentifiers() {
       const rows = Array.from(list.querySelectorAll('[data-labour-row]'));
       rows.forEach((row, index) => {
+        const defaultInput = row.querySelector('input[name="defaultLabourType"]');
         const codeInput = row.querySelector('input[name="labourCode"]');
         const nameInput = row.querySelector('input[name="labourName"]');
+        const idInput = row.querySelector('input[name="labourId"]');
         const labels = Array.from(row.querySelectorAll('label'));
+        if (defaultInput) {
+          const defaultId = `labour-default-${index}`;
+          defaultInput.id = defaultId;
+          // New labour types do not have a database ID yet. Give their radio
+          // buttons a row-specific value so the server can identify which new
+          // record was selected as the default.
+          defaultInput.value = idInput && idInput.value ? idInput.value : `new-${index}`;
+          if (labels[0]) {
+            labels[0].setAttribute('for', defaultId);
+          }
+        }
         if (codeInput) {
           const codeId = `labour-code-${index}`;
           codeInput.id = codeId;
-          if (labels[0]) {
-            labels[0].setAttribute('for', codeId);
+          if (labels[1]) {
+            labels[1].setAttribute('for', codeId);
           }
         }
         if (nameInput) {
           const nameId = `labour-name-${index}`;
           nameInput.id = nameId;
-          if (labels[1]) {
-            labels[1].setAttribute('for', nameId);
+          if (labels[2]) {
+            labels[2].setAttribute('for', nameId);
           }
         }
       });
