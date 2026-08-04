@@ -63,6 +63,41 @@ async def test_lookup_phones_reads_the_authenticated_technicians_contacts(monkey
     assert phones == [{"name": "Ada Lovelace", "phone": "0400 111 222"}]
 
 
+@pytest.mark.anyio
+async def test_lookup_phones_follows_graph_contact_pages(monkeypatch):
+    monkeypatch.setattr(
+        user_m365_contacts,
+        "acquire_access_token",
+        AsyncMock(return_value="technician-access-token"),
+    )
+    async_client = httpx.AsyncClient
+    requested_urls: list[str] = []
+
+    async def graph_contacts(request: httpx.Request) -> httpx.Response:
+        requested_urls.append(str(request.url))
+        assert request.headers["Authorization"] == "Bearer technician-access-token"
+        if "$skiptoken" not in request.url.params:
+            return httpx.Response(200, json={
+                "value": [{"displayName": "Grace Hopper", "mobilePhone": "0400 999 999"}],
+                "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/contacts?$skiptoken=next-page",
+            })
+        return httpx.Response(200, json={"value": [{
+            "displayName": "Ada Lovelace",
+            "mobilePhone": "0400 111 222",
+        }]})
+
+    monkeypatch.setattr(
+        user_m365_contacts.httpx,
+        "AsyncClient",
+        lambda **kwargs: async_client(transport=httpx.MockTransport(graph_contacts), **kwargs),
+    )
+
+    phones = await user_m365_contacts.lookup_phones(42, "Ada Lovelace")
+
+    assert phones == [{"name": "Ada Lovelace", "phone": "0400 111 222"}]
+    assert len(requested_urls) == 2
+
+
 def test_tenant_id_uses_id_token_when_graph_access_token_is_opaque(monkeypatch):
     """The OAuth callback must not require Microsoft Graph access tokens to be JWTs."""
     seen: list[str] = []

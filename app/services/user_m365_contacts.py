@@ -108,8 +108,16 @@ def match_contact_phones(requester_name: str, contacts: list[Mapping[str, Any]])
 
 async def lookup_phones(user_id: int, requester_name: str) -> list[dict[str, str]]:
     token = await acquire_access_token(user_id)
+    contacts: list[Mapping[str, Any]] = []
+    next_url: str | None = GRAPH_CONTACTS_URL
+    visited_urls: set[str] = set()
     async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.get(GRAPH_CONTACTS_URL, headers={"Authorization": f"Bearer {token}"})
-    if response.status_code != 200:
-        raise ValueError("Unable to read Outlook contacts")
-    return match_contact_phones(requester_name, response.json().get("value") or [])
+        while next_url and next_url not in visited_urls:
+            visited_urls.add(next_url)
+            response = await client.get(next_url, headers={"Authorization": f"Bearer {token}"})
+            if response.status_code != 200:
+                raise ValueError("Unable to read Outlook contacts")
+            payload = response.json()
+            contacts.extend(payload.get("value") or [])
+            next_url = payload.get("@odata.nextLink")
+    return match_contact_phones(requester_name, contacts)
