@@ -18,6 +18,8 @@ EXPECTED = {
     ("GET", "/reports/company-overview.pdf"),
     ("GET", "/reports/company-overview/settings"),
     ("POST", "/reports/company-overview/settings"),
+    ("GET", "/reports/company-overview/settings/export"),
+    ("POST", "/reports/company-overview/settings/import"),
     ("GET", "/admin/reports/pdf-cover-image"),
     ("POST", "/admin/reports/pdf-cover-image"),
     ("POST", "/admin/reports/pdf-cover-image/delete"),
@@ -69,10 +71,12 @@ def test_reports_pack_owns_handlers():
     assert report_routes.router.routes[1].endpoint == report_handlers.company_overview_report_pdf
     assert report_routes.router.routes[2].endpoint == report_handlers.company_overview_report_settings_page
     assert report_routes.router.routes[3].endpoint == report_handlers.company_overview_report_settings_save
-    assert report_routes.router.routes[4].endpoint == report_handlers.admin_report_cover_image_page
-    assert report_routes.router.routes[5].endpoint == report_handlers.admin_report_cover_image_upload
-    assert report_routes.router.routes[6].endpoint == report_handlers.admin_report_cover_image_delete
-    assert report_routes.router.routes[7].endpoint == report_handlers.admin_report_cover_image_preview
+    assert report_routes.router.routes[4].endpoint == report_handlers.company_overview_report_settings_export
+    assert report_routes.router.routes[5].endpoint == report_handlers.company_overview_report_settings_import
+    assert report_routes.router.routes[6].endpoint == report_handlers.admin_report_cover_image_page
+    assert report_routes.router.routes[7].endpoint == report_handlers.admin_report_cover_image_upload
+    assert report_routes.router.routes[8].endpoint == report_handlers.admin_report_cover_image_delete
+    assert report_routes.router.routes[9].endpoint == report_handlers.admin_report_cover_image_preview
 
 
 def test_reports_pack_loads_and_reloads_cleanly():
@@ -120,6 +124,17 @@ def test_report_designer_rows_are_collapsible_and_draggable():
     assert "rows.addEventListener('dragstart'" in template
     assert "rows.addEventListener('dragover'" in template
     assert "rows.addEventListener('drop'" in template
+
+
+def test_report_designer_exposes_import_export_controls():
+    """Admins should be able to move a designed report between companies."""
+
+    template = Path("app/templates/reports/settings.html").read_text()
+
+    assert 'href="/reports/company-overview/settings/export"' in template
+    assert 'action="/reports/company-overview/settings/import"' in template
+    assert 'name="layout_import_file"' in template
+    assert 'name="layout_import_json"' in template
 
 
 def test_company_overview_spacing_has_fallback_values():

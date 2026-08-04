@@ -6,6 +6,8 @@ Owns the report view/admin routes:
 * ``GET /reports/company-overview.pdf``
 * ``GET /reports/company-overview/settings``
 * ``POST /reports/company-overview/settings``
+* ``GET /reports/company-overview/settings/export``
+* ``POST /reports/company-overview/settings/import``
 * ``GET /admin/reports/pdf-cover-image``
 * ``POST /admin/reports/pdf-cover-image``
 * ``POST /admin/reports/pdf-cover-image/delete``
