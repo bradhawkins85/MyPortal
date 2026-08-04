@@ -1,0 +1,7 @@
+{
+  "guid": "bbad02f9-6fd0-4945-bffa-6ddea3e74ee8",
+  "occurred_at": "2026-08-04T00:00:00Z",
+  "change_type": "Feature",
+  "summary": "Added a Clone action to saved reports so administrators can copy report settings and permissions into a new, editable report.",
+  "content_hash": "7ce18b38333ca1b07542631ba92f403d34ecafa21fdb28edb917a2943e914943"
+}

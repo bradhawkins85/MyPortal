@@ -24,6 +24,12 @@ _add(
     ["GET"],
     response_class=HTMLResponse,
 )
+_add(
+    "/admin/reporting/{report_id}/clone",
+    handlers.admin_reporting_clone,
+    ["GET"],
+    response_class=HTMLResponse,
+)
 _add("/admin/reporting", handlers.admin_reporting_create, ["POST"], response_class=HTMLResponse)
 _add(
     "/admin/reporting/{report_id}",
