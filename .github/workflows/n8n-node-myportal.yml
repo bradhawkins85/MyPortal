@@ -1,0 +1,49 @@
+name: Build n8n MyPortal Node
+
+on:
+  push:
+    paths:
+      - 'integrations/n8n-node-myportal/**'
+      - '.github/workflows/n8n-node-myportal.yml'
+  pull_request:
+    paths:
+      - 'integrations/n8n-node-myportal/**'
+      - '.github/workflows/n8n-node-myportal.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build and package n8n node
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: integrations/n8n-node-myportal
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: integrations/n8n-node-myportal/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Package node
+        run: npm pack
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: n8n-nodes-myportal
+          path: integrations/n8n-node-myportal/n8n-nodes-myportal-*.tgz
+          if-no-files-found: error
