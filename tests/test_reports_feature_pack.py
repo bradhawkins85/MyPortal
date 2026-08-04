@@ -120,3 +120,13 @@ def test_report_designer_rows_are_collapsible_and_draggable():
     assert "rows.addEventListener('dragstart'" in template
     assert "rows.addEventListener('dragover'" in template
     assert "rows.addEventListener('drop'" in template
+
+
+def test_company_overview_spacing_has_fallback_values():
+    """Report spacing must work even when the global theme omits space tokens."""
+
+    template = Path("app/templates/reports/index.html").read_text()
+
+    assert ".report-page{display:flex;flex-direction:column;gap:var(--space-4,1rem);padding:var(--space-3,.75rem)}" in template
+    assert "padding:var(--space-4,1rem)" in template
+    assert "gap:var(--space-3,.75rem)" in template
