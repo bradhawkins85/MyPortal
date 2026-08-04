@@ -12,6 +12,9 @@ from app.services import reporting as reporting_service
 
 MAX_COLUMNS = 12
 MAX_ROWS = 50
+DEFAULT_DIVIDER_HEIGHT = 50
+MIN_DIVIDER_HEIGHT = 1
+MAX_DIVIDER_HEIGHT = 500
 ALLOWED_AGGREGATES = {"value", "count", "sum", "average", "minimum", "maximum"}
 ALLOWED_OPERATORS = {"gte", "gt", "lte", "lt", "eq"}
 HEX_COLOUR = re.compile(r"^#[0-9a-f]{6}$", re.IGNORECASE)
@@ -49,6 +52,15 @@ def _text(value: Any, limit: int = 255) -> str:
     return str(value or "").strip()[:limit]
 
 
+def _divider_height(value: Any) -> int:
+    """Return a safe divider height in pixels, including for legacy layouts."""
+    try:
+        height = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_DIVIDER_HEIGHT
+    return min(MAX_DIVIDER_HEIGHT, max(MIN_DIVIDER_HEIGHT, height))
+
+
 def normalise_layout(value: Any, valid_slugs: set[str]) -> list[dict[str, Any]]:
     """Validate browser input and discard unknown reports/options."""
     if not isinstance(value, list):
@@ -58,7 +70,10 @@ def normalise_layout(value: Any, valid_slugs: set[str]) -> list[dict[str, Any]]:
         if not isinstance(raw_row, dict):
             continue
         if raw_row.get("type") == "divider":
-            rows.append({"type": "divider", "title": _text(raw_row.get("title"), 160)})
+            rows.append({
+                "type": "divider", "title": _text(raw_row.get("title"), 160),
+                "height": _divider_height(raw_row.get("height")),
+            })
             continue
         columns: list[dict[str, Any]] = []
         for raw in (raw_row.get("columns") or [])[:MAX_COLUMNS]:
@@ -163,7 +178,10 @@ async def build(company_id: int, company: dict[str, Any]) -> LayoutReport:
     rendered_rows = []
     for row in layout:
         if row.get("type") == "divider":
-            rendered_rows.append({"type": "divider", "title": row.get("title")})
+            rendered_rows.append({
+                "type": "divider", "title": row.get("title"),
+                "height": _divider_height(row.get("height")),
+            })
             continue
         rendered_columns = []
         for config in row.get("columns", []):

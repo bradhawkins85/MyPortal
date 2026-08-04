@@ -10,7 +10,7 @@
     <p class="report-cover__eyebrow">Company overview report</p><h1>{{ report.company.name }}</h1>
     <p>Generated <span data-utc="{{ report.generated_at.isoformat() }}">{{ report.generated_at.strftime('%Y-%m-%d %H:%M UTC') }}</span></p>
   </div></header>
-  {% for row in report.rows %}{% if row.type == 'divider' %}<div class="report-divider{% if row.title %} report-divider--labelled{% endif %}" role="separator">{% if row.title %}<span>{{ row.title }}</span>{% endif %}</div>{% else %}<section class="report-layout-row">
+  {% for row in report.rows %}{% if row.type == 'divider' %}<div class="report-divider{% if row.title %} report-divider--labelled{% endif %}" role="separator" style="--report-divider-height: {{ row.height }}px">{% if row.title %}<span>{{ row.title }}</span>{% endif %}</div>{% else %}<section class="report-layout-row">
     {% if row.title %}<h2 class="report-layout-row__title">{{ row.title }}</h2>{% endif %}
     <div class="report-layout-row__grid" style="--report-columns: {{ row.columns|length }}">
     {% for cell in row.columns %}<article class="report-cell report-cell--{{ cell.display }}"{% if cell.variant != 'neutral' %} style="--report-cell-colour:{{ cell.variant }}"{% endif %}>
@@ -27,6 +27,6 @@
 .report-page{display:flex;flex-direction:column;gap:var(--space-4)}.report-cover__body{padding:var(--space-5);text-align:center}.report-cover__eyebrow{text-transform:uppercase;letter-spacing:.12em;color:var(--color-text-muted)}
 .report-layout-row__title{font-size:1.25rem;margin:0 0 var(--space-2)}.report-layout-row__grid{display:grid;grid-template-columns:repeat(var(--report-columns),minmax(0,1fr));gap:var(--space-3)}
 .report-cell{background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px;padding:var(--space-3);min-width:0;overflow:hidden}.report-cell h3{font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin:0 0 var(--space-2)}.report-stat{font-size:1.8rem;font-weight:700}
-.report-cell[style]{background:var(--report-cell-colour);border-color:var(--report-cell-colour);color:#fff}.report-table{font-size:.8rem}.report-error{color:var(--color-danger)}.report-divider{display:flex;align-items:center;gap:var(--space-3);color:var(--color-text-muted);font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin:var(--space-2) 0}.report-divider::before,.report-divider--labelled::after{content:"";height:1px;background:var(--color-border);flex:1}
+.report-cell[style]{background:var(--report-cell-colour);border-color:var(--report-cell-colour);color:#fff}.report-table{font-size:.8rem}.report-error{color:var(--color-danger)}.report-divider{display:flex;align-items:center;gap:var(--space-3);color:var(--color-text-muted);font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;height:var(--report-divider-height,50px)}.report-divider::before,.report-divider--labelled::after{content:"";height:1px;background:var(--color-border);flex:1}
 @media(max-width:900px){.report-layout-row__grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:600px){.report-layout-row__grid{grid-template-columns:1fr}}
 </style>{% endblock %}
