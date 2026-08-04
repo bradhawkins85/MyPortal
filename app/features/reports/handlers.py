@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import File, HTTPException, Request, UploadFile, status
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from app.security.flash import flash_redirect
 
@@ -53,6 +53,34 @@ async def _load_report_context(request: Request):
     company = await company_repo.get_company_by_id(company_id)
     return user, membership, company, company_id, None
 
+
+def _safe_export_filename(name: str | None, company_id: int) -> str:
+    safe_name = "".join(
+        ch if ch.isalnum() or ch in (" ", "-", "_") else "_"
+        for ch in (name or f"company_{company_id}")
+    ).strip().replace(" ", "_") or f"company_{company_id}"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return f"company_overview_layout_{safe_name}_{timestamp}.json"
+
+
+def _layout_export_payload(
+    company: dict[str, Any], company_id: int, layout: list[dict[str, Any]]
+) -> dict[str, Any]:
+    return {
+        "type": "myportal.company_overview_layout",
+        "version": 1,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "source_company": {"id": company_id, "name": company.get("name")},
+        "layout": layout,
+    }
+
+
+def _layout_from_import_payload(payload: Any) -> Any:
+    if isinstance(payload, dict) and payload.get("type") == "myportal.company_overview_layout":
+        return payload.get("layout")
+    if isinstance(payload, list):
+        return payload
+    raise ValueError("Import file must be a company overview layout export.")
 
 def _delete_cover_image_file(relative_path: str) -> None:
     private_uploads_path = _main()._private_uploads_path
@@ -229,6 +257,92 @@ async def company_overview_report_settings_save(request: Request):
     return RedirectResponse(
         url="/reports/company-overview", status_code=status.HTTP_303_SEE_OTHER
     )
+
+
+async def company_overview_report_settings_export(request: Request):
+    from app.services import audit as audit_service
+    from app.services import company_report_layout
+
+    user, membership, company, company_id, redirect = await _load_report_context(request)
+    if redirect:
+        return redirect
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    if not _can_configure_report(user, membership):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to export report layouts.",
+        )
+    layout = await company_report_layout.get_layout(company_id)
+    await audit_service.log_action(
+        action="report.company_overview.export_layout",
+        user_id=user.get("id"),
+        entity_type="company",
+        entity_id=company_id,
+        metadata={"rows": len(layout)},
+        request=request,
+    )
+    return JSONResponse(
+        _layout_export_payload(company, company_id, layout),
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{_safe_export_filename(company.get("name"), company_id)}"'
+            )
+        },
+    )
+
+
+async def company_overview_report_settings_import(request: Request):
+    from starlette.datastructures import UploadFile as StarletteUploadFile
+
+    from app.services import audit as audit_service
+    from app.services import company_report_layout
+
+    user, membership, company, company_id, redirect = await _load_report_context(request)
+    if redirect:
+        return redirect
+    if company is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    if not _can_configure_report(user, membership):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to import report layouts.",
+        )
+    form = await request.form()
+    raw_payload = str(form.get("layout_import_json") or "").strip()
+    upload = form.get("layout_import_file")
+    if isinstance(upload, StarletteUploadFile) and upload.filename:
+        raw_bytes = await upload.read()
+        raw_payload = raw_bytes.decode("utf-8-sig")
+    if not raw_payload:
+        return flash_redirect(
+            "/reports/company-overview/settings",
+            "Choose a report layout JSON file or paste exported JSON.",
+            "error",
+        )
+    try:
+        imported = _layout_from_import_payload(json.loads(raw_payload))
+        saved_layout = await company_report_layout.save_layout(company_id, imported)
+    except UnicodeDecodeError:
+        return flash_redirect(
+            "/reports/company-overview/settings",
+            "Import file must be UTF-8 encoded JSON.",
+            "error",
+        )
+    except (json.JSONDecodeError, ValueError) as exc:
+        return flash_redirect("/reports/company-overview/settings", str(exc), "error")
+    await audit_service.log_action(
+        action="report.company_overview.import_layout",
+        user_id=user.get("id"),
+        entity_type="company",
+        entity_id=company_id,
+        metadata={
+            "rows": len(saved_layout),
+            "columns": sum(len(row.get("columns", [])) for row in saved_layout),
+        },
+        request=request,
+    )
+    return flash_redirect("/reports/company-overview/settings", "Report layout imported.", "success")
 
 
 async def admin_report_cover_image_page(request: Request):
