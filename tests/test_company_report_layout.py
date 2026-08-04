@@ -39,8 +39,18 @@ def test_normalise_layout_preserves_dividers_and_rejects_unsafe_colours():
             {"operator": "gte", "value": 1, "colour": "red; display:none"},
         ]}]},
     ], {"valid"})
-    assert rows[0] == {"type": "divider", "title": "Security"}
+    assert rows[0] == {"type": "divider", "title": "Security", "height": 50}
     assert rows[1]["columns"][0]["thresholds"] == []
+
+
+def test_normalise_layout_validates_divider_height():
+    rows = layout.normalise_layout([
+        {"type": "divider", "height": "72"},
+        {"type": "divider", "height": 9999},
+        {"columns": [{"slug": "valid"}]},
+    ], {"valid"})
+    assert rows[0]["height"] == 72
+    assert rows[1]["height"] == layout.MAX_DIVIDER_HEIGHT
 
 
 def test_normalise_layout_rejects_empty_or_unknown_slugs():
