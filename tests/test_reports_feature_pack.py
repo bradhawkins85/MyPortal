@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
 
 import app.main as main_module
@@ -105,3 +107,16 @@ def test_reports_pack_loads_and_reloads_cleanly():
         await registry.unload_all()
 
     asyncio.new_event_loop().run_until_complete(_run())
+
+
+def test_report_designer_rows_are_collapsible_and_draggable():
+    """The row boundary and reorder controls should remain part of the UI."""
+
+    template = Path("app/templates/reports/settings.html").read_text()
+
+    assert '<details class="designer-row">' in template
+    assert 'class="designer-row__summary"' in template
+    assert 'class="drag" draggable="true"' in template
+    assert "rows.addEventListener('dragstart'" in template
+    assert "rows.addEventListener('dragover'" in template
+    assert "rows.addEventListener('drop'" in template
