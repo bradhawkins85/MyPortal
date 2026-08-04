@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -65,14 +66,14 @@ def _delete_cover_image_file(relative_path: str) -> None:
 
 
 async def company_overview_report_page(request: Request):
-    from app.services import reports as reports_service
+    from app.services import company_report_layout
 
     user, membership, company, company_id, redirect = await _load_report_context(request)
     if redirect:
         return redirect
     if company is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
-    report = await reports_service.build_company_report(company_id)
+    report = await company_report_layout.build(company_id, company)
     extra = {
         "title": "Company overview report",
         "report": report,
@@ -86,7 +87,7 @@ async def company_overview_report_pdf(request: Request):
     from fastapi.responses import StreamingResponse
 
     from app.services import audit as audit_service
-    from app.services import reports as reports_service
+    from app.services import company_report_layout
 
     user, _membership, company, company_id, redirect = await _load_report_context(request)
     if redirect:
@@ -129,7 +130,7 @@ async def company_overview_report_pdf(request: Request):
         except (ValueError, OSError):
             pass
 
-    report = await reports_service.build_company_report(company_id)
+    report = await company_report_layout.build(company_id, company)
     base_context = await _main()._build_base_context(
         request,
         user,
@@ -172,7 +173,7 @@ async def company_overview_report_pdf(request: Request):
 
 
 async def company_overview_report_settings_page(request: Request):
-    from app.services import reports as reports_service
+    from app.services import company_report_layout
 
     user, membership, company, company_id, redirect = await _load_report_context(request)
     if redirect:
@@ -183,30 +184,20 @@ async def company_overview_report_settings_page(request: Request):
         return RedirectResponse(
             url="/reports/company-overview", status_code=status.HTTP_303_SEE_OTHER
         )
-    visibility = await reports_service.get_section_visibility(company_id)
-    detail_visibility = await reports_service.get_section_detail_visibility(company_id)
-    report_settings = await reports_service.get_company_report_settings(company_id)
-    section_order: list[str] | None = report_settings.get("section_order")
-    all_sections = list(reports_service.REPORT_SECTIONS)
-    if section_order:
-        key_to_section = {s.key: s for s in all_sections}
-        ordered = [key_to_section[k] for k in section_order if k in key_to_section]
-        remaining = [s for s in all_sections if s.key not in set(section_order)]
-        all_sections = ordered + remaining
+    layout = await company_report_layout.get_layout(company_id)
+    queries = await company_report_layout.available_queries()
     extra = {
-        "title": "Report sections",
+        "title": "Report designer",
         "company": company,
-        "sections": all_sections,
-        "visibility": visibility,
-        "detail_visibility": detail_visibility,
-        "auto_hide_empty": report_settings.get("auto_hide_empty", True),
+        "layout": layout,
+        "reporting_queries": queries,
     }
     return await _main()._render_template("reports/settings.html", request, user, extra=extra)
 
 
 async def company_overview_report_settings_save(request: Request):
     from app.services import audit as audit_service
-    from app.services import reports as reports_service
+    from app.services import company_report_layout
 
     user, membership, company, company_id, redirect = await _load_report_context(request)
     if redirect:
@@ -219,35 +210,19 @@ async def company_overview_report_settings_save(request: Request):
             detail="You do not have permission to configure reports.",
         )
     form = await request.form()
-    enabled_keys = set(form.getlist("sections"))
-    preferences = {
-        section.key: (section.key in enabled_keys)
-        for section in reports_service.REPORT_SECTIONS
-    }
-    await reports_service.save_section_visibility(company_id, preferences)
-    detailed_keys = set(form.getlist("detailed_sections"))
-    detail_preferences = {
-        section.key: (section.key in detailed_keys and section.key in enabled_keys)
-        for section in reports_service.REPORT_SECTIONS
-    }
-    await reports_service.save_section_detail_visibility(company_id, detail_preferences)
-    auto_hide_empty = form.get("auto_hide_empty") == "1"
-    raw_order = form.get("section_order", "")
-    section_order_list: list[str] | None = (
-        [k for k in raw_order.split(",") if k] if raw_order else None
-    )
-    await reports_service.save_company_report_settings(
-        company_id, auto_hide_empty, section_order_list
-    )
+    try:
+        raw_layout = json.loads(str(form.get("layout_json") or "[]"))
+        saved_layout = await company_report_layout.save_layout(company_id, raw_layout)
+    except (json.JSONDecodeError, ValueError) as exc:
+        return flash_redirect("/reports/company-overview/settings", str(exc), "error")
     await audit_service.log_action(
         action="report.company_overview.configure",
         user_id=user.get("id"),
         entity_type="company",
         entity_id=company_id,
         metadata={
-            "enabled_sections": sorted(enabled_keys),
-            "detailed_sections": sorted(detailed_keys & enabled_keys),
-            "auto_hide_empty": auto_hide_empty,
+            "rows": len(saved_layout),
+            "columns": sum(len(row["columns"]) for row in saved_layout),
         },
         request=request,
     )

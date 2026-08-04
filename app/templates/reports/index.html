@@ -1,115 +1,32 @@
 {% extends "base.html" %}
-{% from "macros/counters.html" import counter_strip %}
-
 {% block header_title %}Company overview report{% endblock %}
 {% block title %}Company overview report{% endblock %}
-
-{% block header_actions %}
-<div class="header-actions header-actions--right">
+{% block header_actions %}<div class="header-actions header-actions--right">
   <a class="button button--primary" href="/reports/company-overview.pdf">Download PDF</a>
-  {% if can_configure_report %}
-    <a class="button button--ghost" href="/reports/company-overview/settings">Configure sections</a>
-  {% endif %}
-</div>
-{% endblock %}
-
-{% block content %}
-<div class="report-page">
-
-  {# Cover block #}
-  <div class="card card--panel report-cover">
-    <div class="report-cover__body">
-      <p class="report-cover__eyebrow">Company overview report</p>
-      <h1 class="report-cover__title">{{ report.company.name }}</h1>
-      {% if report.company.address %}
-        <p class="report-cover__meta">{{ report.company.address }}</p>
-      {% endif %}
-      <p class="report-cover__meta">
-        Generated <span data-utc="{{ report.generated_at.isoformat() }}">{{ report.generated_at.strftime('%Y-%m-%d %H:%M UTC') }}</span>
-      </p>
-    </div>
-  </div>
-
-  {# ── Summary sections ── #}
-  {% set stat_row_rendered = namespace(value=false) %}
-  {% for section in report.sections %}
-    {% if section.enabled %}
-      {% if section.key in ['assets', 'staff', 'orders_current_month'] %}
-        {# Render all three stat sections together in one row on first encounter #}
-        {% if not stat_row_rendered.value %}
-          <div class="report-stat-row">
-            {% for inner in report.sections %}
-              {% if inner.key in ['assets', 'staff', 'orders_current_month'] and inner.enabled %}
-                {% include "reports/_sections/" + inner.key + ".html" ignore missing %}
-              {% endif %}
-            {% endfor %}
-          </div>
-          {% set stat_row_rendered.value = true %}
-        {% endif %}
-      {% else %}
-        {% include "reports/_sections/" + section.key + ".html" ignore missing %}
-      {% endif %}
-    {% endif %}
-  {% endfor %}
-
-  {% set any_enabled = namespace(value=false) %}
-  {% for section in report.sections %}
-    {% if section.enabled %}{% set any_enabled.value = true %}{% endif %}
-  {% endfor %}
-  {% if not any_enabled.value %}
-    <div class="card card--panel">
-      <div class="card__body">
-        <p>No report sections are currently enabled for this company.</p>
-        {% if can_configure_report %}
-          <p><a class="button button--primary" href="/reports/company-overview/settings">Configure sections</a></p>
-        {% endif %}
-      </div>
-    </div>
-  {% endif %}
-
-  {# ── Detailed section pages (only rendered when at least one section has detailed=True) ── #}
-  {% set any_detailed = namespace(value=false) %}
-  {% for section in report.sections %}
-    {% if section.enabled and section.detailed %}{% set any_detailed.value = true %}{% endif %}
-  {% endfor %}
-
-  {% if any_detailed.value %}
-    <div class="card card--panel report-detail-divider">
-      <div class="card__body">
-        <h2 style="margin: 0; font-size: 1.1rem; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.08em;">Detailed report</h2>
-        <p style="margin: var(--space-1) 0 0; color: var(--color-text-muted); font-size: 0.9rem;">The following pages contain expanded detail for each section marked as detailed.</p>
-      </div>
-    </div>
-
-    {% for section in report.sections %}
-      {% if section.enabled and section.detailed %}
-        {% include "reports/_sections/" + section.key + "_detail.html" ignore missing %}
-      {% endif %}
-    {% endfor %}
-  {% endif %}
-
-</div>
-{% endblock %}
-
-{% block styles %}
-<style>
-  .report-page { display: flex; flex-direction: column; gap: var(--space-4); }
-  .report-stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: var(--space-4); }
-  .report-stat-row > .card { margin: 0; }
-  .report-cover__body { padding: var(--space-5); text-align: center; }
-  .report-cover__eyebrow {
-    margin: 0 0 var(--space-2);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: 0.85rem;
-    color: var(--color-text-muted);
-  }
-  .report-cover__title { margin: 0 0 var(--space-2); font-size: 2.2rem; }
-  .report-cover__meta { margin: 0; color: var(--color-text-muted); }
-  .report-section__header { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
-  .report-section__header h2 { margin: 0; font-size: 1.25rem; }
-  .report-section__meta { color: var(--color-text-muted); font-size: 0.9rem; }
-  .report-empty { color: var(--color-text-muted); padding: var(--space-3); }
-  .report-detail-divider { border-top: 3px solid var(--color-primary, #0e4f8a); }
-</style>
-{% endblock %}
+  {% if can_configure_report %}<a class="button button--ghost" href="/reports/company-overview/settings">Design report</a>{% endif %}
+</div>{% endblock %}
+{% block content %}<div class="report-page">
+  <header class="card card--panel report-cover"><div class="report-cover__body">
+    <p class="report-cover__eyebrow">Company overview report</p><h1>{{ report.company.name }}</h1>
+    <p>Generated <span data-utc="{{ report.generated_at.isoformat() }}">{{ report.generated_at.strftime('%Y-%m-%d %H:%M UTC') }}</span></p>
+  </div></header>
+  {% for row in report.rows %}<section class="report-layout-row">
+    {% if row.title %}<h2 class="report-layout-row__title">{{ row.title }}</h2>{% endif %}
+    <div class="report-layout-row__grid" style="--report-columns: {{ row.columns|length }}">
+    {% for cell in row.columns %}<article class="report-cell report-cell--{{ cell.display }} report-cell--{{ cell.variant or 'neutral' }}">
+      <h3>{{ cell.title or cell.name }}</h3>
+      {% if cell.error %}<p class="report-error">{{ cell.error }}</p>
+      {% elif cell.display == 'stat' %}<div class="report-stat">{{ cell.value }}{{ cell.suffix }}</div>
+      {% elif cell.result.rows %}<div class="table-wrapper"><table class="table report-table"><thead><tr>{% for column in cell.result.columns %}<th>{{ column|replace('_', ' ')|title }}</th>{% endfor %}</tr></thead><tbody>
+        {% for item in cell.result.rows %}<tr>{% for column in cell.result.columns %}<td>{{ item.get(column) if item.get(column) is not none else '—' }}</td>{% endfor %}</tr>{% endfor %}
+      </tbody></table></div>{% else %}<p class="report-empty">No results.</p>{% endif %}
+    </article>{% endfor %}</div>
+  </section>{% else %}<div class="card card--panel"><div class="card__body">No report rows are configured.</div></div>{% endfor %}
+</div>{% endblock %}
+{% block styles %}<style>
+.report-page{display:flex;flex-direction:column;gap:var(--space-4)}.report-cover__body{padding:var(--space-5);text-align:center}.report-cover__eyebrow{text-transform:uppercase;letter-spacing:.12em;color:var(--color-text-muted)}
+.report-layout-row__title{font-size:1.25rem;margin:0 0 var(--space-2)}.report-layout-row__grid{display:grid;grid-template-columns:repeat(var(--report-columns),minmax(0,1fr));gap:var(--space-3)}
+.report-cell{background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px;padding:var(--space-3);min-width:0;overflow:hidden}.report-cell h3{font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin:0 0 var(--space-2)}.report-stat{font-size:1.8rem;font-weight:700}
+.report-cell--info{background:#e8f2ff;border-color:#3b82f6}.report-cell--success{background:#e8f7ef;border-color:#22a06b}.report-cell--warning{background:#fff5d6;border-color:#d99b16}.report-cell--danger{background:#fdebec;border-color:#d64545}.report-table{font-size:.8rem}.report-error{color:var(--color-danger)}
+@media(max-width:900px){.report-layout-row__grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:600px){.report-layout-row__grid{grid-template-columns:1fr}}
+</style>{% endblock %}
