@@ -17,6 +17,7 @@ EXPECTED = {
     ("GET", "/admin/reporting"),
     ("GET", "/admin/reporting/new"),
     ("GET", "/admin/reporting/{report_id}/edit"),
+    ("GET", "/admin/reporting/{report_id}/clone"),
     ("POST", "/admin/reporting"),
     ("POST", "/admin/reporting/{report_id}"),
     ("POST", "/admin/reporting/{report_id}/delete"),
@@ -62,9 +63,10 @@ def test_reporting_pack_owns_handlers():
     assert reporting_routes.router.routes[2].endpoint == reporting_handlers.admin_reporting
     assert reporting_routes.router.routes[3].endpoint == reporting_handlers.admin_reporting_new
     assert reporting_routes.router.routes[4].endpoint == reporting_handlers.admin_reporting_edit
-    assert reporting_routes.router.routes[5].endpoint == reporting_handlers.admin_reporting_create
-    assert reporting_routes.router.routes[6].endpoint == reporting_handlers.admin_reporting_update
-    assert reporting_routes.router.routes[7].endpoint == reporting_handlers.admin_reporting_delete
+    assert reporting_routes.router.routes[5].endpoint == reporting_handlers.admin_reporting_clone
+    assert reporting_routes.router.routes[6].endpoint == reporting_handlers.admin_reporting_create
+    assert reporting_routes.router.routes[7].endpoint == reporting_handlers.admin_reporting_update
+    assert reporting_routes.router.routes[8].endpoint == reporting_handlers.admin_reporting_delete
 
 
 def test_reporting_pack_loads_and_reloads_cleanly():

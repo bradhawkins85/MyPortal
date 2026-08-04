@@ -380,6 +380,39 @@ async def admin_reporting_edit(
     return await _main()._render_template("admin/reporting_form.html", request, user, extra=extra)
 
 
+async def admin_reporting_clone(request: Request, report_id: int):
+    from app.repositories import reporting as reporting_repo
+    from app.services import reporting as reporting_service
+
+    user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    record = await reporting_repo.get_query(int(report_id))
+    if not record:
+        return flash_redirect("/admin/reporting", "Report not found", "error")
+
+    eligible = await _list_reporting_eligible_users()
+    granted_ids = set(await reporting_repo.list_permission_user_ids(int(report_id)))
+    clone_name = f"{record['name']} (Copy)"
+    cloned_report = {
+        **record,
+        "id": None,
+        "name": clone_name,
+        "slug": _reporting_slug(clone_name),
+    }
+    extra = {
+        "title": f"Clone report · {record['name']}",
+        "form_heading": f"Clone report · {record['name']}",
+        "submit_label": "Create cloned report",
+        "form_action": "/admin/reporting",
+        "report": cloned_report,
+        "eligible_users": eligible,
+        "granted_user_ids": granted_ids,
+        "max_rows": reporting_service.MAX_RESULT_ROWS,
+    }
+    return await _main()._render_template("admin/reporting_form.html", request, user, extra=extra)
+
+
 async def admin_reporting_create(request: Request):
     from app.repositories import reporting as reporting_repo
     from app.services import audit as audit_service
@@ -542,6 +575,7 @@ __all__ = [
     "admin_reporting",
     "admin_reporting_new",
     "admin_reporting_edit",
+    "admin_reporting_clone",
     "admin_reporting_create",
     "admin_reporting_update",
     "admin_reporting_delete",

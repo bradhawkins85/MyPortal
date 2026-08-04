@@ -7,6 +7,7 @@ Owns reporting page/admin routes:
 * ``GET /admin/reporting``
 * ``GET /admin/reporting/new``
 * ``GET /admin/reporting/{report_id}/edit``
+* ``GET /admin/reporting/{report_id}/clone``
 * ``POST /admin/reporting``
 * ``POST /admin/reporting/{report_id}``
 * ``POST /admin/reporting/{report_id}/delete``
@@ -21,7 +22,7 @@ from .routes import router as reporting_router
 
 PACK = FeaturePack(
     slug="reporting",
-    version="1.0.0",
+    version="1.1.0",
     routers=(reporting_router,),
 )
 
