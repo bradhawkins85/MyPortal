@@ -2,15 +2,32 @@
   "name": "n8n-nodes-myportal",
   "version": "0.1.0",
   "description": "n8n community node for MyPortal staff and ticket actions.",
-  "keywords": ["n8n-community-node-package", "myportal"],
+  "keywords": [
+    "n8n-community-node-package",
+    "myportal"
+  ],
   "license": "MIT",
   "main": "dist/nodes/MyPortal/MyPortal.node.js",
-  "scripts": {"build": "tsc", "lint": "tsc --noEmit", "prepack": "npm run build"},
-  "files": ["dist"],
+  "scripts": {
+    "build": "tsc && mkdir -p dist/nodes/MyPortal && cp nodes/MyPortal/myportal.svg dist/nodes/MyPortal/myportal.svg",
+    "lint": "tsc --noEmit",
+    "prepack": "npm run build"
+  },
+  "files": [
+    "dist"
+  ],
   "n8n": {
     "n8nNodesApiVersion": 1,
-    "credentials": ["dist/credentials/MyPortalApi.credentials.js"],
-    "nodes": ["dist/nodes/MyPortal/MyPortal.node.js"]
+    "credentials": [
+      "dist/credentials/MyPortalApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/MyPortal/MyPortal.node.js"
+    ]
   },
-  "devDependencies": {"@types/node": "^20.14.9", "n8n-workflow": "^1.82.0", "typescript": "^5.5.3"}
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "n8n-workflow": "^1.82.0",
+    "typescript": "^5.5.3"
+  }
 }

@@ -34,7 +34,10 @@ The workflow:
 5. Runs `npm pack` and uploads the generated `n8n-nodes-myportal-*.tgz` as a workflow artifact.
 
 Download the `n8n-nodes-myportal` artifact from a successful workflow run when you want to install
-the built package without publishing it to npm.
+the built package without publishing it to npm. GitHub downloads workflow artifacts as `.zip` files;
+unzip the artifact first and install the `n8n-nodes-myportal-*.tgz` file inside it. Installing the
+artifact `.zip` directly with npm causes `TAR_BAD_ARCHIVE` / checksum errors because npm expects a
+gzip-compressed npm package tarball, not GitHub's artifact wrapper.
 
 ## Install in n8n
 
@@ -60,16 +63,17 @@ npm install n8n-nodes-myportal
 Use this when the package has not been published to npm yet.
 
 1. Run the **Build n8n MyPortal Node** GitHub Actions workflow.
-2. Download and unzip the `n8n-nodes-myportal` artifact.
-3. Copy or upload the generated `n8n-nodes-myportal-*.tgz` file to your n8n host.
-4. Install it from the n8n user directory:
+2. Download the `n8n-nodes-myportal` artifact `.zip`.
+3. Unzip it and verify that you have the generated `n8n-nodes-myportal-*.tgz` file.
+4. Copy or upload only the `.tgz` file to your n8n host.
+5. Install it from the n8n user directory:
 
 ```bash
 cd ~/.n8n
 npm install /path/to/n8n-nodes-myportal-0.1.0.tgz
 ```
 
-5. Restart n8n, then create a **MyPortal API** credential and add the **MyPortal** node to a workflow.
+6. Restart n8n, then create a **MyPortal API** credential and add the **MyPortal** node to a workflow.
 
 ### Option 3: Install in Docker
 
