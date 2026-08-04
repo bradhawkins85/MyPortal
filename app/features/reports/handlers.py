@@ -222,7 +222,7 @@ async def company_overview_report_settings_save(request: Request):
         entity_id=company_id,
         metadata={
             "rows": len(saved_layout),
-            "columns": sum(len(row["columns"]) for row in saved_layout),
+            "columns": sum(len(row.get("columns", [])) for row in saved_layout),
         },
         request=request,
     )
