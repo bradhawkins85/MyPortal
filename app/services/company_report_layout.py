@@ -1,6 +1,7 @@
 """Configurable HTML-style company report layout and query renderer."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -13,7 +14,9 @@ MAX_COLUMNS = 12
 MAX_ROWS = 50
 ALLOWED_AGGREGATES = {"value", "count", "sum", "average", "minimum", "maximum"}
 ALLOWED_OPERATORS = {"gte", "gt", "lte", "lt", "eq"}
-ALLOWED_COLOURS = {"neutral", "info", "success", "warning", "danger"}
+HEX_COLOUR = re.compile(r"^#[0-9a-f]{6}$", re.IGNORECASE)
+LEGACY_COLOURS = {"success": "#14532d", "warning": "#d99b16", "danger": "#d64545",
+                  "info": "#3b82f6", "neutral": "#6b7280"}
 
 
 def default_layout() -> list[dict[str, Any]]:
@@ -54,6 +57,9 @@ def normalise_layout(value: Any, valid_slugs: set[str]) -> list[dict[str, Any]]:
     for raw_row in value[:MAX_ROWS]:
         if not isinstance(raw_row, dict):
             continue
+        if raw_row.get("type") == "divider":
+            rows.append({"type": "divider", "title": _text(raw_row.get("title"), 160)})
+            continue
         columns: list[dict[str, Any]] = []
         for raw in (raw_row.get("columns") or [])[:MAX_COLUMNS]:
             if not isinstance(raw, dict):
@@ -70,12 +76,12 @@ def normalise_layout(value: Any, valid_slugs: set[str]) -> list[dict[str, Any]]:
                 if not isinstance(threshold, dict):
                     continue
                 operator = _text(threshold.get("operator"), 4).lower()
-                colour = _text(threshold.get("colour"), 12).lower()
+                colour = _text(threshold.get("colour"), 7).lower()
                 try:
                     number = float(threshold.get("value"))
                 except (TypeError, ValueError):
                     continue
-                if operator in ALLOWED_OPERATORS and colour in ALLOWED_COLOURS:
+                if operator in ALLOWED_OPERATORS and HEX_COLOUR.fullmatch(colour):
                     thresholds.append({"operator": operator, "value": number, "colour": colour})
             columns.append({
                 "slug": slug, "title": _text(raw.get("title"), 120), "display": display,
@@ -86,7 +92,7 @@ def normalise_layout(value: Any, valid_slugs: set[str]) -> list[dict[str, Any]]:
             })
         if columns:
             rows.append({"title": _text(raw_row.get("title"), 160), "columns": columns})
-    if not rows:
+    if not any(row.get("columns") for row in rows):
         raise ValueError("Add at least one row containing a reporting slug.")
     return rows
 
@@ -123,7 +129,8 @@ def _variant(value: Any, thresholds: list[dict[str, Any]]) -> str:
                    "lte": lambda a, b: a <= b, "lt": lambda a, b: a < b, "eq": lambda a, b: a == b}
     for threshold in thresholds:
         if comparisons[threshold["operator"]](number, threshold["value"]):
-            return threshold["colour"]
+            colour = str(threshold["colour"]).lower()
+            return colour if HEX_COLOUR.fullmatch(colour) else LEGACY_COLOURS.get(colour, "neutral")
     return "neutral"
 
 
@@ -155,6 +162,9 @@ async def build(company_id: int, company: dict[str, Any]) -> LayoutReport:
     cache: dict[str, dict[str, Any]] = {}
     rendered_rows = []
     for row in layout:
+        if row.get("type") == "divider":
+            rendered_rows.append({"type": "divider", "title": row.get("title")})
+            continue
         rendered_columns = []
         for config in row.get("columns", []):
             slug = config.get("slug")
