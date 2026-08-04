@@ -61,3 +61,35 @@ async def test_lookup_phones_reads_the_authenticated_technicians_contacts(monkey
 
     acquire_access_token.assert_awaited_once_with(42)
     assert phones == [{"name": "Ada Lovelace", "phone": "0400 111 222"}]
+
+
+def test_tenant_id_uses_id_token_when_graph_access_token_is_opaque(monkeypatch):
+    """The OAuth callback must not require Microsoft Graph access tokens to be JWTs."""
+    seen: list[str] = []
+
+    def extract(token: str) -> str:
+        seen.append(token)
+        if token == "signed-id-token":
+            return "tenant-123"
+        raise ValueError("opaque token")
+
+    monkeypatch.setattr(user_m365_contacts.m365_service, "extract_tenant_id_from_token", extract)
+
+    tenant_id = user_m365_contacts.tenant_id_from_token_response(
+        {"access_token": "opaque-graph-token", "id_token": "signed-id-token"}
+    )
+
+    assert tenant_id == "tenant-123"
+    assert seen == ["signed-id-token"]
+
+
+def test_tenant_id_falls_back_to_access_token_for_older_responses(monkeypatch):
+    monkeypatch.setattr(
+        user_m365_contacts.m365_service,
+        "extract_tenant_id_from_token",
+        lambda token: "tenant-legacy" if token == "jwt-access-token" else "unexpected",
+    )
+
+    assert user_m365_contacts.tenant_id_from_token_response(
+        {"access_token": "jwt-access-token"}
+    ) == "tenant-legacy"

@@ -4654,7 +4654,19 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         access_token, refresh_token = payload.get("access_token"), payload.get("refresh_token")
         if not access_token or not refresh_token:
             return flash_redirect("/admin/profile", "Microsoft did not grant offline contact access.", "error")
-        tenant_id = m365_service.extract_tenant_id_from_token(str(access_token))
+        # Graph access tokens are intended for Microsoft Graph and are not
+        # guaranteed to be JWTs that this application can decode.  The ID
+        # token, on the other hand, is issued to this client and is the stable
+        # source for the signed-in tenant.  Keep the access-token fallback for
+        # older responses which did not include an ID token.
+        try:
+            tenant_id = user_m365_contacts_service.tenant_id_from_token_response(payload)
+        except ValueError:
+            return flash_redirect(
+                "/admin/profile",
+                "Microsoft did not return a usable account identity.",
+                "error",
+            )
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(payload.get("expires_in") or 3600))
         await user_m365_contacts_service.store_tokens(
             int(current_user["id"]), tenant_id=tenant_id, account_email=str(current_user.get("email") or "") or None,

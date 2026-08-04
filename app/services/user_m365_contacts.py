@@ -19,6 +19,20 @@ GRAPH_CONTACTS_URL = (
 )
 
 
+def tenant_id_from_token_response(payload: Mapping[str, Any]) -> str:
+    """Return the tenant from an OAuth response without assuming Graph tokens are JWTs."""
+    id_token = str(payload.get("id_token") or "")
+    access_token = str(payload.get("access_token") or "")
+    for token in (id_token, access_token):
+        if not token:
+            continue
+        try:
+            return m365_service.extract_tenant_id_from_token(token)
+        except (TypeError, ValueError):
+            continue
+    raise ValueError("Microsoft did not return a usable account identity")
+
+
 async def status_for_user(user_id: int) -> dict[str, Any]:
     record = await contacts_repo.get_integration(user_id)
     return {"connected": bool(record), "account_email": record.get("account_email") if record else None}
