@@ -500,6 +500,9 @@ async def get_ticket_dashboard(
                     else None
                 ),
                 latest_reply_kind=automation_data.get("latest_reply_kind"),
+                latest_public_reply_email_status=automation_data.get(
+                    "latest_public_reply_email_status"
+                ),
                 ticket_update_actor_type=automation_data.get("ticket_update_actor_type"),
             )
         )

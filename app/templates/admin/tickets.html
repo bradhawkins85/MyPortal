@@ -437,6 +437,10 @@
                     <span>Updated</span>
                   </label>
                   <label class="ticket-columns__option">
+                    <input type="checkbox" class="ticket-column-toggle" data-column="last-reply-status" checked />
+                    <span>Last Reply Status</span>
+                  </label>
+                  <label class="ticket-columns__option">
                     <input type="checkbox" class="ticket-column-toggle" data-column="review-date" />
                     <span>Review Date</span>
                   </label>
@@ -661,6 +665,7 @@
                 <th scope="col" data-sort="string" data-column="company" class="tickets-table__column tickets-table__column--company">Company</th>
                 <th scope="col" data-sort="string" data-column="assigned" class="tickets-table__column tickets-table__column--assigned">Assigned</th>
                 <th scope="col" data-sort="string" data-column="updated" class="tickets-table__column tickets-table__column--updated">Updated</th>
+                <th scope="col" data-sort="string" data-column="last-reply-status" class="tickets-table__column tickets-table__column--last-reply-status">Last Reply Status</th>
                 <th scope="col" data-sort="string" data-column="review-date" class="tickets-table__column tickets-table__column--review-date">Review Date</th>
                 <th scope="col" data-sort="string" data-column="category" class="tickets-table__column tickets-table__column--category">Category</th>
                 <th scope="col" data-sort="string" data-column="requester" class="tickets-table__column tickets-table__column--requester">Requester</th>
@@ -742,6 +747,21 @@
                     <td data-label="Company" data-column="company" class="tickets-table__cell tickets-table__cell--company">{{ company.name if company else (ticket.company_id or '—') }}</td>
                     <td data-label="Assigned" data-column="assigned" class="tickets-table__cell tickets-table__cell--assigned">{{ assigned_label }}</td>
                     <td data-label="Updated" data-column="updated" class="tickets-table__cell tickets-table__cell--updated">{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</td>
+                    {% set automation_data = (ticket_automation_filter_lookup or {}).get(ticket.id, {}) %}
+                    {% set last_reply_status = automation_data.get('latest_public_reply_email_status') %}
+                    {% set last_reply_status_class = {
+                      'Bounced': 'badge--danger',
+                      'Read': 'badge--success',
+                      'Delivered': 'badge--info',
+                      'Sent': 'badge--muted'
+                    }.get(last_reply_status, 'badge--muted') %}
+                    <td data-label="Last Reply Status" data-column="last-reply-status" class="tickets-table__cell tickets-table__cell--last-reply-status">
+                      {% if last_reply_status %}
+                        <span class="badge {{ last_reply_status_class }}">{{ last_reply_status }}</span>
+                      {% else %}
+                        —
+                      {% endif %}
+                    </td>
                     {% set review_date = ticket.review_date %}
                     {% set review_date_class = 'ticket-review-date--past' if review_date and review_date < ticket_dashboard_now.date() else ('ticket-review-date--future' if review_date and review_date > ticket_dashboard_now.date() else '') %}
                     <td data-label="Review Date" data-column="review-date" class="tickets-table__cell tickets-table__cell--review-date {{ review_date_class }}">{{ review_date.isoformat() if review_date else '—' }}</td>
@@ -760,7 +780,6 @@
                     {% set time_data = (ticket_time_lookup or {}).get(ticket.id, {}) %}
                     <td data-label="Billable Mins" data-column="billable-minutes" class="tickets-table__cell tickets-table__cell--billable-minutes">{{ time_data.get('billable_minutes', 0) }}</td>
                     <td data-label="Non-Billable Mins" data-column="non-billable-minutes" class="tickets-table__cell tickets-table__cell--non-billable-minutes">{{ time_data.get('non_billable_minutes', 0) }}</td>
-                    {% set automation_data = (ticket_automation_filter_lookup or {}).get(ticket.id, {}) %}
                     {% set requester_email = ticket.requester_email or (requester.email if requester else '') %}
                     {% set assigned_email = assigned.email if assigned else '' %}
                     {% set created_age_days = ((ticket_dashboard_now - ticket.created_at).total_seconds() // 86400) | int if ticket.created_at else '' %}
@@ -792,7 +811,7 @@
                 {% endfor %}
               {% else %}
                 <tr>
-                  <td colspan="{{ 38 + (1 if can_bulk_delete_tickets or can_merge_tickets or can_bulk_edit_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
+                  <td colspan="{{ 39 + (1 if can_bulk_delete_tickets or can_merge_tickets or can_bulk_edit_tickets else 0) }}" class="table__empty">No tickets found for the selected filters.</td>
                 </tr>
               {% endif %}
             </tbody>

@@ -201,6 +201,7 @@ class TicketDashboardRow(BaseModel):
     last_reply_age_hours: Optional[int] = None
     latest_reply_is_internal: Optional[bool] = None
     latest_reply_kind: Optional[str] = None
+    latest_public_reply_email_status: Optional[str] = None
     ticket_update_actor_type: Optional[str] = None
 
     class Config:
