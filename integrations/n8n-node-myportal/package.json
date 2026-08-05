@@ -23,11 +23,15 @@
     ],
     "nodes": [
       "dist/nodes/MyPortal/MyPortal.node.js"
-    ]
+    ],
+    "strict": true
   },
   "devDependencies": {
     "@types/node": "^20.14.9",
-    "n8n-workflow": "^1.82.0",
-    "typescript": "^5.5.3"
+    "typescript": "^5.5.3",
+    "@n8n/node-cli": "*"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
   }
 }
