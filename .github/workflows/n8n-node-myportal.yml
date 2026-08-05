@@ -46,6 +46,9 @@ jobs:
           PACKAGE_TARBALL="$(find . -maxdepth 1 -name 'n8n-nodes-myportal-*.tgz' -print -quit)"
           test -n "$PACKAGE_TARBALL"
           tar -tzf "$PACKAGE_TARBALL" >/dev/null
+          tar -tzf "$PACKAGE_TARBALL" | grep -Fx 'package/dist/nodes/MyPortal/MyPortal.node.js'
+          tar -tzf "$PACKAGE_TARBALL" | grep -Fx 'package/dist/credentials/MyPortalApi.credentials.js'
+          tar -tzf "$PACKAGE_TARBALL" | grep -Fx 'package/dist/nodes/MyPortal/myportal.svg'
           npm install --dry-run "$PACKAGE_TARBALL"
 
       - name: Upload package artifact
