@@ -30,10 +30,12 @@
     ],
     "strict": true
   },
+  "dependencies": {
+    "n8n-workflow": "2.33.0"
+  },
   "devDependencies": {
     "@types/node": "^20.14.9",
     "typescript": "^5.5.3",
-    "@n8n/node-cli": "0.42.0",
-    "n8n-workflow": "2.33.0"
+    "@n8n/node-cli": "0.42.0"
   }
 }
