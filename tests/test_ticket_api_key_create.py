@@ -122,7 +122,7 @@ def test_create_ticket_with_api_key_authentication(monkeypatch):
     async def mock_resolve_status(status):
         return status or "open"
     
-    async def mock_validate_status(status):
+    async def mock_validate_status(status, *, allow_hidden: bool = True):
         return status
     
     async def mock_refresh_ai(*args, **kwargs):
