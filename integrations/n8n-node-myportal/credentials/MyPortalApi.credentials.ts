@@ -1,9 +1,25 @@
-import type { ICredentialType, INodeProperties } from 'n8n-workflow';
+import type { IAuthenticateGeneric, ICredentialTestRequest, ICredentialType, INodeProperties } from 'n8n-workflow';
 
 export class MyPortalApi implements ICredentialType {
 	name = 'myPortalApi';
 	displayName = 'MyPortal API';
+	icon = 'file:../nodes/MyPortal/myportal.svg' as const;
 	documentationUrl = 'https://github.com/';
+	authenticate: IAuthenticateGeneric = {
+		type: 'generic',
+		properties: {
+			headers: { 'x-api-key': '={{$credentials.apiKey}}' },
+		},
+	};
+
+	test: ICredentialTestRequest = {
+		request: {
+			baseURL: "={{$credentials.baseUrl.replace(new RegExp('/+$'), '')}}",
+			url: '/api/staff',
+			method: 'GET',
+		},
+	};
+
 	properties: INodeProperties[] = [
 		{
 			displayName: 'Base URL',
