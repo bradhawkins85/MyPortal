@@ -86,6 +86,25 @@ npm install /path/to/n8n-nodes-myportal-0.1.0.tgz
 
 6. Restart n8n, then create a **MyPortal API** credential and add the **MyPortal** node to a workflow.
 
+If `npm install /path/to/n8n-nodes-myportal-0.1.0.tgz` reports that it added a package but the node
+does not appear, confirm that the command ran in the n8n user directory used by the running process
+(typically `/home/node/.n8n` in Docker, not the host's `~/.n8n`) and check that n8n can see the
+package metadata:
+
+```bash
+cd ~/.n8n
+node -e "const p=require('./node_modules/n8n-nodes-myportal/package.json'); console.log(p.n8n.nodes, p.n8n.credentials)"
+```
+
+If that command fails or points to an old package, remove and reinstall the package in the same
+directory, then restart n8n:
+
+```bash
+cd ~/.n8n
+npm remove n8n-nodes-myportal
+npm install /path/to/n8n-nodes-myportal-0.1.0.tgz
+```
+
 ### Option 3: Install in Docker
 
 For Docker-based n8n deployments, mount or copy the tarball into the container and install it in the
