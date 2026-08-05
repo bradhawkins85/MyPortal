@@ -229,6 +229,35 @@ def test_table_cell_data_column_attributes():
         )
 
 
+def test_ticket_refresh_rows_include_last_reply_status_column():
+    """Refreshed ticket rows must include Last Reply Status to stay aligned with headers."""
+    javascript = (
+        TEMPLATE_PATH.parent.parent.parent / "static" / "js" / "admin.js"
+    ).read_text(encoding="utf-8")
+
+    build_row_start = javascript.index("function buildRow(ticket)")
+    build_row_end = javascript.index("function patchRows(items)", build_row_start)
+    build_row = javascript[build_row_start:build_row_end]
+
+    updated_cell_index = build_row.index("appendTextCell('updated', 'Updated'")
+    last_reply_cell_index = build_row.index(
+        "row.appendChild(createLastReplyStatusCell(ticket.latest_public_reply_email_status))"
+    )
+    review_date_cell_index = build_row.index("appendTextCell('review-date', 'Review Date'")
+
+    assert updated_cell_index < last_reply_cell_index < review_date_cell_index
+    assert "cell.dataset.column = 'last-reply-status'" in javascript
+    assert "No email status" in javascript
+
+
+def test_last_reply_status_empty_state_is_visible():
+    """The Last Reply Status column should not appear blank when no email tracking exists."""
+    html = _template_html()
+    last_reply_cell = html[html.index('data-column="last-reply-status"', html.index('<tbody>')):]
+    last_reply_cell = last_reply_cell[:last_reply_cell.index("</td>")]
+
+    assert '<span class="badge badge--muted">No email status</span>' in last_reply_cell
+
 
 def test_ticket_update_actor_type_column_is_available():
     """The automation variable ticket_update.actor_type should be available as a ticket column."""

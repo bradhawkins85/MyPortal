@@ -1197,6 +1197,26 @@
       return cell;
     }
 
+    function createLastReplyStatusCell(status) {
+      const cell = document.createElement('td');
+      cell.dataset.label = 'Last Reply Status';
+      cell.dataset.column = 'last-reply-status';
+      cell.className = 'tickets-table__cell tickets-table__cell--last-reply-status';
+
+      const badgeClasses = {
+        Bounced: 'badge--danger',
+        Read: 'badge--success',
+        Delivered: 'badge--info',
+        Sent: 'badge--muted',
+      };
+      const displayStatus = status ? String(status) : 'No email status';
+      const badge = document.createElement('span');
+      badge.className = `badge ${badgeClasses[displayStatus] || 'badge--muted'}`;
+      badge.textContent = displayStatus;
+      cell.appendChild(badge);
+      return cell;
+    }
+
 
     function applyColumnVisibility() {
       const toggles = Array.from(document.querySelectorAll('[data-ticket-columns] .ticket-column-toggle'));
@@ -1281,6 +1301,7 @@
       appendTextCell('company', 'Company', companyDisplay);
       appendTextCell('assigned', 'Assigned', ticket.assigned_user_email || '—');
       appendTextCell('updated', 'Updated', formatUpdatedAt(ticket.updated_at), { value: ticket.updated_at || '' });
+      row.appendChild(createLastReplyStatusCell(ticket.latest_public_reply_email_status));
       appendTextCell('review-date', 'Review Date', formatReviewDate(ticket.review_date), { value: ticket.review_date || '', className: reviewDateClass(ticket.review_date) });
       appendTextCell('category', 'Category', ticket.category || '—');
       appendTextCell('requester', 'Requester', ticket.requester_label || ticket.requester_email || ticket.requester_id || '—');

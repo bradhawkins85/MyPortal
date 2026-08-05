@@ -759,7 +759,7 @@
                       {% if last_reply_status %}
                         <span class="badge {{ last_reply_status_class }}">{{ last_reply_status }}</span>
                       {% else %}
-                        —
+                        <span class="badge badge--muted">No email status</span>
                       {% endif %}
                     </td>
                     {% set review_date = ticket.review_date %}
