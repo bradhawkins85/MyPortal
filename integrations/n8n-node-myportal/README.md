@@ -135,7 +135,27 @@ installing it manually in a running container.
 
 ## Development
 
+Use Node.js 22 or 24 when installing and building this package locally. Current n8n development
+dependencies include native modules that do not build correctly on older Node.js versions.
+
 ```bash
 npm install
 npm run build
 ```
+
+If `npm install` fails with an error like
+`404 Not Found - GET https://registry.npmjs.org/@npmcli%2fdocs`, the missing package is not a
+MyPortal dependency. It is usually caused by a broken or stale npm CLI/cache while npm is resolving
+dependencies. Switch to a supported Node.js release, refresh npm's cache, and reinstall from a clean
+dependency tree:
+
+```bash
+node --version
+npm --version
+npm cache verify
+rm -rf node_modules package-lock.json
+npm install
+```
+
+If the same `@npmcli/docs` 404 continues after the clean install, reinstall Node.js 22 or 24 with a
+fresh bundled npm and run `npm install` again before changing this package's dependencies.
