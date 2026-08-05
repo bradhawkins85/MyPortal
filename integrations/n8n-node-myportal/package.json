@@ -7,6 +7,10 @@
     "myportal"
   ],
   "license": "MIT",
+  "engines": {
+    "node": ">=22 <25",
+    "npm": ">=10"
+  },
   "main": "dist/nodes/MyPortal/MyPortal.node.js",
   "scripts": {
     "build": "tsc && mkdir -p dist/nodes/MyPortal && cp nodes/MyPortal/myportal.svg dist/nodes/MyPortal/myportal.svg",
