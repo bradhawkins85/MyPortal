@@ -7,6 +7,10 @@
     "myportal"
   ],
   "license": "MIT",
+  "engines": {
+    "node": ">=22 <25",
+    "npm": ">=10"
+  },
   "main": "dist/nodes/MyPortal/MyPortal.node.js",
   "scripts": {
     "build": "tsc && mkdir -p dist/nodes/MyPortal && cp nodes/MyPortal/myportal.svg dist/nodes/MyPortal/myportal.svg",
@@ -29,7 +33,7 @@
   "devDependencies": {
     "@types/node": "^20.14.9",
     "typescript": "^5.5.3",
-    "@n8n/node-cli": "*",
-    "n8n-workflow": "*"
+    "@n8n/node-cli": "0.42.0",
+    "n8n-workflow": "2.33.0"
   }
 }
