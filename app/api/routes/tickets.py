@@ -894,9 +894,14 @@ async def create_tacticalrmm_ticket(
 
 @router.get("/{ticket_id}", response_model=TicketDetail)
 async def get_ticket(
-    ticket_id: int, current_user: dict = Depends(get_current_user)
+    ticket_id: int,
+    actor: dict = Depends(_resolve_ticket_actor),
 ) -> TicketDetail:
-    return await _build_ticket_detail(ticket_id, current_user)
+    current_user: dict | None = actor.get("user")
+    api_key_record: dict | None = actor.get("api_key")
+    # API key requests get full helpdesk access via a synthetic super-admin user dict
+    effective_user = current_user if current_user else {"id": None, "is_super_admin": True}
+    return await _build_ticket_detail(ticket_id, effective_user)
 
 
 @router.put("/{ticket_id}", response_model=TicketDetail)
@@ -904,8 +909,31 @@ async def update_ticket(
     ticket_id: int,
     payload: TicketUpdate,
     request: Request,
-    current_user: dict = Depends(require_helpdesk_technician),
+    actor: dict = Depends(_resolve_ticket_actor),
 ) -> TicketDetail:
+    current_user: dict | None = actor.get("user")
+    api_key_record: dict | None = actor.get("api_key")
+    # For session users, enforce helpdesk technician permission
+    if current_user is not None:
+        if not current_user.get("is_super_admin"):
+            user_id = current_user.get("id")
+            try:
+                user_id_int = int(user_id)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Helpdesk technician privileges required",
+                ) from None
+            has_permission = await membership_repo.user_has_permission(
+                user_id_int, tickets_service.HELPDESK_PERMISSION_KEY
+            )
+            if not has_permission:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Helpdesk technician privileges required",
+                )
+    # API key auth gets full access; build an effective user for downstream helpers
+    effective_user = current_user if current_user else {"id": None, "is_super_admin": True}
     existing = await tickets_repo.get_ticket(ticket_id)
     if not existing:
         raise HTTPException(
@@ -917,7 +945,7 @@ async def update_ticket(
     if "status" in fields and fields["status"] is not None:
         try:
             fields["status"] = await tickets_service.validate_status_choice(
-                fields["status"], allow_hidden=bool(current_user.get("is_super_admin"))
+                fields["status"], allow_hidden=bool(effective_user.get("is_super_admin"))
             )
         except ValueError as exc:
             error_id = new_error_id()
@@ -954,8 +982,8 @@ async def update_ticket(
     await tickets_service.broadcast_ticket_event(action="updated", ticket_id=ticket_id)
     await tickets_service.emit_ticket_updated_event(
         ticket_id,
-        actor_type="technician",
-        actor=current_user,
+        actor_type="technician" if current_user else "api_key",
+        actor=effective_user,
     )
     updated_ticket = await tickets_repo.get_ticket(ticket_id)
     # Determine the most descriptive audit action: prefer status_change /
@@ -967,24 +995,31 @@ async def update_ticket(
         "assigned_user_id"
     ) != fields.get("assigned_user_id"):
         audit_action = "ticket.assign"
-    await audit_service.record(
-        action=audit_action,
-        request=request,
-        user_id=int(current_user["id"]),
-        entity_type="ticket",
-        entity_id=ticket_id,
-        before=_audit_ticket_view(existing),
-        after=_audit_ticket_view(updated_ticket or existing),
-    )
-    return await _build_ticket_detail(ticket_id, current_user)
+    if effective_user.get("id") is not None:
+        await audit_service.record(
+            action=audit_action,
+            request=request,
+            user_id=int(effective_user["id"]),
+            entity_type="ticket",
+            entity_id=ticket_id,
+            before=_audit_ticket_view(existing),
+            after=_audit_ticket_view(updated_ticket or existing),
+        )
+    return await _build_ticket_detail(ticket_id, effective_user)
 
 
 @router.delete("/{ticket_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_ticket(
     ticket_id: int,
     request: Request,
-    current_user: dict = Depends(require_super_admin),
+    actor: dict = Depends(_resolve_ticket_actor),
 ) -> None:
+    current_user: dict | None = actor.get("user")
+    api_key_record: dict | None = actor.get("api_key")
+    # For session users, require super admin
+    if current_user is not None and not current_user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    effective_user = current_user if current_user else {"id": None, "is_super_admin": True}
     existing = await tickets_repo.get_ticket(ticket_id)
     if not existing:
         raise HTTPException(
@@ -992,15 +1027,16 @@ async def delete_ticket(
         )
     await tickets_repo.delete_ticket(ticket_id)
     await tickets_service.broadcast_ticket_event(action="deleted", ticket_id=ticket_id)
-    await audit_service.record(
-        action="ticket.deleted",
-        request=request,
-        user_id=int(current_user["id"]),
-        entity_type="ticket",
-        entity_id=ticket_id,
-        before=_audit_ticket_view(existing),
-        after=None,
-    )
+    if effective_user.get("id") is not None:
+        await audit_service.record(
+            action="ticket.deleted",
+            request=request,
+            user_id=int(effective_user["id"]),
+            entity_type="ticket",
+            entity_id=ticket_id,
+            before=_audit_ticket_view(existing),
+            after=None,
+        )
 
 
 @router.post(

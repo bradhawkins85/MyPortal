@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 
-from app.api.dependencies.auth import get_current_user, require_super_admin
-from app.api.dependencies.api_keys import require_api_key
+from app.api.dependencies.auth import get_current_user, get_optional_user, require_super_admin
+from app.api.dependencies.api_keys import get_optional_api_key, require_api_key
 from app.api.dependencies.database import require_database
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
@@ -167,13 +167,18 @@ async def list_staff(
     cursor: str | None = Query(default=None, alias="cursor"),
     page_size: int | None = Query(default=200, alias="pageSize", ge=1, le=500),
     _: None = Depends(require_database),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict | None = Depends(get_optional_user),
+    api_key_record: dict | None = Depends(get_optional_api_key),
 ):
+    if current_user is None and api_key_record is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    # API keys have full (super-admin equivalent) access
+    is_api_key_auth = api_key_record is not None and current_user is None
     # If company_id is provided, only helpdesk technicians and super admins can access
     if company_id is not None:
-        is_super_admin = current_user.get("is_super_admin", False)
+        is_super_admin = is_api_key_auth or (current_user or {}).get("is_super_admin", False)
         if not is_super_admin:
-            user_id = current_user.get("id")
+            user_id = (current_user or {}).get("id")
             try:
                 user_id_int = int(user_id)
                 has_helpdesk = await membership_repo.user_has_permission(
@@ -218,8 +223,8 @@ async def list_staff(
             response.headers["X-Next-Cursor"] = next_cursor
         records = page_records
     else:
-        # Listing all staff requires super admin
-        if not current_user.get("is_super_admin", False):
+        # Listing all staff requires super admin or API key
+        if not is_api_key_auth and not (current_user or {}).get("is_super_admin", False):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Insufficient permissions to list all staff"
@@ -244,15 +249,22 @@ async def list_staff(
 async def create_staff(
     payload: StaffCreate,
     _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    current_user: dict | None = Depends(get_optional_user),
+    api_key_record: dict | None = Depends(get_optional_api_key),
 ):
+    if current_user is None and api_key_record is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    # Session users must be super admins; API key auth is always permitted at this level
+    if current_user is not None and not current_user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    acting_user_id = int(current_user["id"]) if current_user and current_user.get("id") is not None else None
     payload_data = payload.model_dump(by_alias=False)
     custom_fields = payload_data.pop("custom_fields", None) or {}
     payload_data.setdefault("onboarding_status", "approved")
     payload_data.setdefault("onboarding_complete", False)
     payload_data.setdefault("onboarding_completed_at", None)
     payload_data.setdefault("approval_status", "approved")
-    payload_data.setdefault("approved_by_user_id", int(__.get("id")) if __.get("id") is not None else None)
+    payload_data.setdefault("approved_by_user_id", acting_user_id)
     payload_data.setdefault("approved_at", datetime.now(tz=timezone.utc))
     created = await staff_repo.create_staff(**payload_data)
     await staff_custom_fields_repo.set_staff_field_values_by_name(
@@ -264,7 +276,7 @@ async def create_staff(
     await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
         company_id=int(created["company_id"]),
         staff_id=int(created["id"]),
-        initiated_by_user_id=int(__.get("id")) if __.get("id") is not None else None,
+        initiated_by_user_id=acting_user_id,
     )
     created["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(int(created["id"]))
     return StaffResponse.model_validate(created)
@@ -1231,8 +1243,11 @@ async def get_staff_workflow_history(
 async def get_staff(
     staff_id: int,
     _: None = Depends(require_database),
-    __: dict = Depends(get_current_user),
+    current_user: dict | None = Depends(get_optional_user),
+    api_key_record: dict | None = Depends(get_optional_api_key),
 ):
+    if current_user is None and api_key_record is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     staff = await staff_repo.get_staff_by_id(staff_id)
     if not staff:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
@@ -1245,8 +1260,14 @@ async def update_staff(
     staff_id: int,
     payload: StaffUpdate,
     _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    current_user: dict | None = Depends(get_optional_user),
+    api_key_record: dict | None = Depends(get_optional_api_key),
 ):
+    if current_user is None and api_key_record is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if current_user is not None and not current_user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    acting_user_id = int(current_user["id"]) if current_user and current_user.get("id") is not None else None
     existing = await staff_repo.get_staff_by_id(staff_id)
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
@@ -1301,7 +1322,7 @@ async def update_staff(
         await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
             company_id=int(updated["company_id"]),
             staff_id=staff_id,
-            initiated_by_user_id=int(__.get("id")) if __.get("id") is not None else None,
+            initiated_by_user_id=acting_user_id,
             direction=(
                 staff_onboarding_workflow_service.DIRECTION_OFFBOARDING
                 if status_value == staff_onboarding_workflow_service.STATE_OFFBOARDING_APPROVED
@@ -1317,8 +1338,13 @@ async def update_staff(
 async def delete_staff(
     staff_id: int,
     _: None = Depends(require_database),
-    __: dict = Depends(require_super_admin),
+    current_user: dict | None = Depends(get_optional_user),
+    api_key_record: dict | None = Depends(get_optional_api_key),
 ):
+    if current_user is None and api_key_record is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if current_user is not None and not current_user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
     existing = await staff_repo.get_staff_by_id(staff_id)
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found")
