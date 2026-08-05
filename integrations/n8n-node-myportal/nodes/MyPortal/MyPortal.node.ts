@@ -4,9 +4,9 @@ import type {
 	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
-	IRequestOptions,
+	IHttpRequestOptions,
 } from 'n8n-workflow';
-import { NodeOperationError } from 'n8n-workflow';
+import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
 function compactObject(values: IDataObject): IDataObject {
 	return Object.fromEntries(
@@ -18,7 +18,7 @@ function parseJsonObject(value: string, fieldName: string): IDataObject | undefi
 	if (!value.trim()) return undefined;
 	const parsed = JSON.parse(value) as unknown;
 	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-		throw new Error(`${fieldName} must be a JSON object`);
+		throw new NodeOperationError({ name: 'MyPortal' } as never, `${fieldName} must be a JSON object`);
 	}
 	return parsed as IDataObject;
 }
@@ -37,13 +37,15 @@ export class MyPortal implements INodeType {
 		subtitle: '={{$parameter["resource"] + ": " + $parameter["operation"]}}',
 		description: 'Create, get, get all, update, and delete MyPortal staff and tickets',
 		defaults: { name: 'MyPortal' },
-		inputs: ['main'],
-		outputs: ['main'],
+		inputs: [NodeConnectionTypes.Main],
+		outputs: [NodeConnectionTypes.Main],
 		credentials: [{ name: 'myPortalApi', required: true }],
+		usableAsTool: true,
 		properties: [
 			{
 				displayName: 'Resource',
 				name: 'resource',
+				noDataExpression: true,
 				type: 'options',
 				default: 'ticket',
 				options: [
@@ -54,13 +56,14 @@ export class MyPortal implements INodeType {
 			{
 				displayName: 'Operation',
 				name: 'operation',
+				noDataExpression: true,
 				type: 'options',
 				default: 'getAll',
 				options: [
 					{ name: 'Create', value: 'create', action: 'Create a record' },
 					{ name: 'Delete', value: 'delete', action: 'Delete a record' },
 					{ name: 'Get', value: 'get', action: 'Get a record' },
-					{ name: 'Get All', value: 'getAll', action: 'Get many records' },
+					{ name: 'Get Many', value: 'getAll', action: 'Get many records' },
 					{ name: 'Update', value: 'update', action: 'Update a record' },
 				],
 			},
@@ -75,7 +78,7 @@ export class MyPortal implements INodeType {
 			},
 			{ displayName: 'First Name', name: 'firstName', type: 'string', default: '', displayOptions: { show: { resource: ['staff'], operation: ['create', 'update'] } } },
 			{ displayName: 'Last Name', name: 'lastName', type: 'string', default: '', displayOptions: { show: { resource: ['staff'], operation: ['create', 'update'] } } },
-			{ displayName: 'Email', name: 'email', type: 'string', default: '', displayOptions: { show: { resource: ['staff'], operation: ['create', 'update', 'getAll'] } } },
+			{ displayName: 'Email', name: 'email', type: 'string', default: '', placeholder: 'name@email.com', displayOptions: { show: { resource: ['staff'], operation: ['create', 'update', 'getAll'] } } },
 			{ displayName: 'Mobile Phone', name: 'mobilePhone', type: 'string', default: '', displayOptions: { show: { resource: ['staff'], operation: ['create', 'update'] } } },
 			{ displayName: 'Enabled', name: 'enabled', type: 'boolean', default: true, displayOptions: { show: { resource: ['staff'], operation: ['create', 'update'] } } },
 			{ displayName: 'Department', name: 'department', type: 'string', default: '', displayOptions: { show: { resource: ['staff'], operation: ['create', 'update'] } } },
@@ -91,7 +94,7 @@ export class MyPortal implements INodeType {
 			{ displayName: 'Company ID', name: 'ticketCompanyId', type: 'number', default: 0, displayOptions: { show: { resource: ['ticket'], operation: ['create', 'update', 'getAll'] } } },
 			{ displayName: 'Assigned User ID', name: 'assignedUserId', type: 'number', default: 0, displayOptions: { show: { resource: ['ticket'], operation: ['create', 'update', 'getAll'] } } },
 			{ displayName: 'Search', name: 'search', type: 'string', default: '', displayOptions: { show: { resource: ['ticket'], operation: ['getAll'] } } },
-			{ displayName: 'Limit', name: 'limit', type: 'number', default: 50, typeOptions: { minValue: 1, maxValue: 500 }, displayOptions: { show: { resource: ['ticket'], operation: ['getAll'] } } },
+			{ displayName: 'Limit', name: 'limit', type: 'number', default: 50, typeOptions: { minValue: 1, maxValue: 500 }, description: 'Max number of results to return', displayOptions: { show: { resource: ['ticket'], operation: ['getAll'] } } },
 			{ displayName: 'Raw JSON Body', name: 'rawJsonBody', type: 'json', default: '{}', displayOptions: { show: { operation: ['create', 'update'] } }, description: 'Optional JSON object merged into the request body; useful for advanced MyPortal fields' },
 		],
 	};
@@ -107,7 +110,7 @@ export class MyPortal implements INodeType {
 				const operation = this.getNodeParameter('operation', i) as string;
 				const path = resource === 'staff' ? '/api/staff' : '/api/tickets';
 				const qs: IDataObject = {};
-				let method: IRequestOptions['method'] = 'GET';
+				let method: IHttpRequestOptions['method'] = 'GET';
 				let uri = `${baseUrl}${path}${resource === 'ticket' ? '/' : ''}`;
 				let body: IDataObject | undefined;
 
@@ -154,9 +157,9 @@ export class MyPortal implements INodeType {
 					}
 				}
 
-				const response = await this.helpers.request({ method, uri, qs, body, json: true, headers: { 'x-api-key': credentials.apiKey as string } });
+				const response = await this.helpers.httpRequestWithAuthentication.call(this, 'myPortalApi', { method, url: uri, qs, body, json: true });
 				if (operation === 'delete') {
-					returnData.push({ json: { success: true, id: this.getNodeParameter('id', i) } });
+					returnData.push({ json: { success: true, id: this.getNodeParameter('id', i) }, pairedItem: { item: i } });
 				} else if (resource === 'ticket' && operation === 'getAll' && response?.items) {
 					returnData.push(...this.helpers.returnJsonArray(response.items as IDataObject[]));
 				} else {
