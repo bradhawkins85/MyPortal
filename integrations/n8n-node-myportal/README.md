@@ -139,6 +139,226 @@ docker restart <n8n-container>
 For immutable production images, bake the tarball install into your custom n8n image instead of
 installing it manually in a running container.
 
+## Curl replacements for the n8n node
+
+If the n8n community node is not working, you can perform the same HTTP actions directly with `curl`. The node sends the API key as `x-api-key`, uses JSON request bodies for create/update operations, and trims trailing slashes from the configured base URL.
+
+Set these variables once before running the examples:
+
+```bash
+BASE_URL="https://portal.example.com"
+API_KEY="replace-with-your-myportal-api-key"
+```
+
+All JSON examples use single quotes around the shell argument so the JSON is passed to MyPortal unchanged. Replace IDs, emails, company IDs, requester IDs, and assignee IDs with values from your portal.
+
+### Staff actions
+
+#### Get many staff
+
+Matches the n8n **Staff → Get Many** operation. `companyId`, `email`, and `accountAction` are optional filters.
+
+```bash
+curl -sS -G "${BASE_URL%/}/api/staff" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "Accept: application/json" \
+  --data-urlencode "companyId=123" \
+  --data-urlencode "email=jane.doe@example.com" \
+  --data-urlencode "accountAction=onboard"
+```
+
+For the company-scoped polling fields that are available on the same endpoint, add filters such as `updatedAfter`, `cursor`, and `pageSize`:
+
+```bash
+curl -sS -G "${BASE_URL%/}/api/staff" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "Accept: application/json" \
+  --data-urlencode "companyId=123" \
+  --data-urlencode "updatedAfter=2026-08-01T00:00:00Z" \
+  --data-urlencode "pageSize=200"
+```
+
+#### Get one staff member
+
+Matches **Staff → Get**.
+
+```bash
+STAFF_ID=456
+
+curl -sS "${BASE_URL%/}/api/staff/${STAFF_ID}" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "Accept: application/json"
+```
+
+#### Create staff
+
+Matches **Staff → Create**. The n8n node maps `companyId`, `firstName`, `lastName`, `mobilePhone`, `jobTitle`, `accountAction`, and `customFields` using camelCase JSON keys.
+
+```bash
+curl -sS -X POST "${BASE_URL%/}/api/staff" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "companyId": 123,
+    "firstName": "Jane",
+    "lastName": "Doe",
+    "email": "jane.doe@example.com",
+    "mobilePhone": "+15551234567",
+    "enabled": true,
+    "department": "Operations",
+    "jobTitle": "Operations Manager",
+    "accountAction": "onboard",
+    "customFields": {
+      "Employee Number": "E-10045"
+    }
+  }'
+```
+
+#### Update staff
+
+Matches **Staff → Update**. Send only fields you want to change.
+
+```bash
+STAFF_ID=456
+
+curl -sS -X PUT "${BASE_URL%/}/api/staff/${STAFF_ID}" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "mobilePhone": "+15557654321",
+    "department": "Service Desk",
+    "jobTitle": "Senior Technician",
+    "enabled": true,
+    "customFields": {
+      "Employee Number": "E-10045"
+    }
+  }'
+```
+
+#### Delete staff
+
+Matches **Staff → Delete**. MyPortal returns `204 No Content` on success.
+
+```bash
+STAFF_ID=456
+
+curl -sS -i -X DELETE "${BASE_URL%/}/api/staff/${STAFF_ID}" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "Accept: application/json"
+```
+
+### Ticket actions
+
+#### Get many tickets
+
+Matches **Ticket → Get Many**. The n8n node calls `/api/tickets/` and passes optional `status`, `company_id`, `assigned_user_id`, `search`, and `limit` query parameters.
+
+```bash
+curl -sS -G "${BASE_URL%/}/api/tickets/" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "Accept: application/json" \
+  --data-urlencode "status=open" \
+  --data-urlencode "company_id=123" \
+  --data-urlencode "assigned_user_id=789" \
+  --data-urlencode "search=printer offline" \
+  --data-urlencode "limit=50"
+```
+
+The API returns a wrapper object for ticket searches. n8n flattens `items`, so use `jq '.items[]'` if you want similar one-record-at-a-time output:
+
+```bash
+curl -sS -G "${BASE_URL%/}/api/tickets/" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "Accept: application/json" \
+  --data-urlencode "search=printer offline" \
+  --data-urlencode "limit=50" | jq '.items[]'
+```
+
+#### Get one ticket
+
+Matches **Ticket → Get**.
+
+```bash
+TICKET_ID=1001
+
+curl -sS "${BASE_URL%/}/api/tickets/${TICKET_ID}" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "Accept: application/json"
+```
+
+#### Create ticket
+
+Matches **Ticket → Create**. When using API-key authentication, `requester_id` is required.
+
+```bash
+curl -sS -X POST "${BASE_URL%/}/api/tickets/" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "subject": "Printer offline",
+    "description": "The reception printer is offline and users cannot print.",
+    "status": "open",
+    "priority": "normal",
+    "requester_id": 456,
+    "company_id": 123,
+    "assigned_user_id": 789
+  }'
+```
+
+#### Update ticket
+
+Matches **Ticket → Update**. Send only fields you want to change.
+
+```bash
+TICKET_ID=1001
+
+curl -sS -X PUT "${BASE_URL%/}/api/tickets/${TICKET_ID}" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "status": "in_progress",
+    "priority": "high",
+    "assigned_user_id": 789,
+    "description": "Updated ticket description from external automation."
+  }'
+```
+
+#### Delete ticket
+
+Matches **Ticket → Delete**. MyPortal returns `204 No Content` on success.
+
+```bash
+TICKET_ID=1001
+
+curl -sS -i -X DELETE "${BASE_URL%/}/api/tickets/${TICKET_ID}" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "Accept: application/json"
+```
+
+### Raw JSON body equivalents
+
+The n8n node's **Raw JSON Body** field is merged into the generated request body for create and update operations. In `curl`, include those advanced fields directly in the JSON payload. For example, to create a ticket with fields not exposed as dedicated n8n inputs:
+
+```bash
+curl -sS -X POST "${BASE_URL%/}/api/tickets/" \
+  -H "x-api-key: ${API_KEY}" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "subject": "Quarterly access review",
+    "description": "Please complete the quarterly review.",
+    "requester_id": 456,
+    "company_id": 123,
+    "category": "security",
+    "module_slug": "compliance",
+    "external_reference": "n8n-fallback-2026-08"
+  }'
+```
+
 ## Development
 
 Use Node.js 22 or 24 when installing and building this package locally. Current n8n development
