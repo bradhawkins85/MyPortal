@@ -11,7 +11,7 @@ TEMPLATE_PATH = (
     / "app" / "templates" / "admin" / "tickets.html"
 )
 
-EXPECTED_COLUMNS = ["id", "status", "priority", "company", "assigned", "updated"]
+EXPECTED_COLUMNS = ["id", "status", "priority", "company", "assigned", "updated", "last-reply-status"]
 ALWAYS_VISIBLE_COLUMNS = ["subject"]
 
 

@@ -1642,6 +1642,7 @@ async def get_automation_filter_context_by_ticket_ids(
             "latest_reply_at": None,
             "latest_reply_is_internal": None,
             "latest_reply_kind": None,
+            "latest_public_reply_email_status": None,
             "ticket_update_actor_type": None,
         }
         for ticket_id in unique_ids
@@ -1751,6 +1752,44 @@ async def get_automation_filter_context_by_ticket_ids(
         result[ticket_id]["latest_reply_kind"] = row.get("kind")
         result[ticket_id]["ticket_update_actor_type"] = row.get(
             "ticket_update_actor_type"
+        )
+
+    latest_public_reply_rows = await db.fetch_all(
+        f"""
+        SELECT
+            tr.ticket_id,
+            CASE
+                WHEN tr.email_bounced_at IS NOT NULL THEN 'Bounced'
+                WHEN tr.email_opened_at IS NOT NULL THEN 'Read'
+                WHEN tr.email_delivered_at IS NOT NULL THEN 'Delivered'
+                WHEN tr.email_sent_at IS NOT NULL
+                    OR tr.email_tracking_id IS NOT NULL
+                    OR tr.smtp2go_message_id IS NOT NULL THEN 'Sent'
+                ELSE NULL
+            END AS email_status
+        FROM ticket_replies AS tr
+        INNER JOIN (
+            SELECT ticket_id, MAX(id) AS latest_reply_id
+            FROM ticket_replies
+            WHERE ticket_id IN ({placeholders})
+              AND is_internal = 0
+              AND (
+                  email_sent_at IS NOT NULL
+                  OR email_tracking_id IS NOT NULL
+                  OR smtp2go_message_id IS NOT NULL
+                  OR email_delivered_at IS NOT NULL
+                  OR email_opened_at IS NOT NULL
+                  OR email_bounced_at IS NOT NULL
+              )
+            GROUP BY ticket_id
+        ) AS latest_public ON latest_public.latest_reply_id = tr.id
+        """,
+        tuple(unique_ids),
+    )
+    for row in latest_public_reply_rows:
+        ticket_id = int(row["ticket_id"])
+        result[ticket_id]["latest_public_reply_email_status"] = row.get(
+            "email_status"
         )
 
     return result
