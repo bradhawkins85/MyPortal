@@ -126,10 +126,18 @@ def _is_missing_scalar(value: Any) -> bool:
     return value in (None, "")
 
 
-def _is_delivered_in_full(snapshot_payload: Mapping[str, Any] | None) -> bool:
+def _normalised_snapshot_status(snapshot_payload: Mapping[str, Any] | None) -> str:
     if not snapshot_payload:
-        return False
-    return str(snapshot_payload.get("status") or "").strip().casefold() == DELIVERED_IN_FULL_STATUS
+        return ""
+    return str(snapshot_payload.get("status") or "").strip().casefold()
+
+
+def _is_delivered_in_full(snapshot_payload: Mapping[str, Any] | None) -> bool:
+    return _normalised_snapshot_status(snapshot_payload) == DELIVERED_IN_FULL_STATUS
+
+
+def _is_in_transit(snapshot_payload: Mapping[str, Any] | None) -> bool:
+    return _normalised_snapshot_status(snapshot_payload) == "in transit"
 
 
 def _snapshot_payload(snapshot: CanonicalShipmentSnapshot | Mapping[str, Any] | None) -> dict[str, Any] | None:
@@ -699,7 +707,8 @@ async def process_due_shipment_watches(*, limit: int = 200) -> dict[str, int]:
                     await shipment_watch_repo.disable_watch(ticket_id)
 
                 first_success = previous_hash is None
-                has_update = changed_now or first_success
+                missing_public_update = refreshed.get("last_posted_update_at") is None
+                has_update = changed_now or first_success or (missing_public_update and _is_in_transit(snapshot_payload))
                 if not has_update:
                     continue
                 # `changed` tracks detected shipment updates, while `posted`
