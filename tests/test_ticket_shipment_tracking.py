@@ -425,6 +425,65 @@ async def test_process_due_shipment_watches_skips_not_due(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_process_due_shipment_watches_posts_unposted_in_transit_snapshot(monkeypatch):
+    now = datetime.now(timezone.utc)
+    previous_snapshot = {
+        "status": "In transit",
+        "eta_date": "2026-07-20",
+        "proof_of_delivery_date": None,
+        "signatory": None,
+        "items_in_transit": 1,
+        "onboard_for_delivery": 0,
+        "items_delivered": 0,
+        "tracking_events": [],
+    }
+    due_watch = {
+        "id": 1,
+        "ticket_id": 10,
+        "provider": "startrack",
+        "tracking_url": "https://www.startrack.com.au/track/ABC123",
+        "poll_interval_seconds": 60,
+        "last_checked_at": now - timedelta(minutes=5),
+        "last_snapshot": previous_snapshot,
+        "last_snapshot_hash": "existing-hash",
+        "last_posted_update_at": None,
+        "active": True,
+        "public_comments_enabled": True,
+    }
+
+    async def fake_list(limit=200):
+        return [due_watch]
+
+    async def fake_get(watch_id):
+        return due_watch
+
+    monkeypatch.setattr(svc.shipment_watch_repo, "list_active_watches", fake_list)
+    monkeypatch.setattr(svc.shipment_watch_repo, "get_watch_by_id", fake_get)
+    monkeypatch.setattr(svc.shipment_watch_repo, "update_watch_check_state", AsyncMock(return_value=None))
+
+    provider = svc.StarTrackProviderAdapter()
+    monkeypatch.setattr(provider, "fetch", AsyncMock(return_value={"url": due_watch["tracking_url"], "html": "", "text": "In transit"}))
+    monkeypatch.setattr(provider, "normalize", AsyncMock(return_value=svc.CanonicalShipmentSnapshot(**previous_snapshot)))
+    monkeypatch.setattr(svc, "detect_provider", lambda url: provider)
+
+    @asynccontextmanager
+    async def fake_lock(name, timeout=1):
+        yield True
+
+    monkeypatch.setattr(svc.db, "acquire_lock", fake_lock)
+    create_reply_mock = AsyncMock(return_value={"id": 100})
+    monkeypatch.setattr(svc.tickets_repo, "create_reply", create_reply_mock)
+    monkeypatch.setattr(svc.tickets_service, "emit_ticket_replied_event", AsyncMock(return_value=None))
+    monkeypatch.setattr(svc.tickets_service, "emit_ticket_updated_event", AsyncMock(return_value=None))
+
+    result = await svc.process_due_shipment_watches(limit=10)
+
+    assert result["changed"] == 1
+    assert result["posted"] == 1
+    create_reply_mock.assert_awaited_once()
+
+
+@pytest.mark.anyio
 async def test_process_due_shipment_watches_skips_public_reply_when_disabled(monkeypatch):
     now = datetime.now(timezone.utc)
     due_watch = {
