@@ -35,9 +35,10 @@ The workflow:
 
 Download the `n8n-nodes-myportal` artifact from a successful workflow run when you want to install
 the built package without publishing it to npm. GitHub downloads workflow artifacts as `.zip` files;
-unzip the artifact first and install the `n8n-nodes-myportal-*.tgz` file inside it. Installing the
-artifact `.zip` directly with npm causes `TAR_BAD_ARCHIVE` / checksum errors because npm expects a
-gzip-compressed npm package tarball, not GitHub's artifact wrapper.
+unzip the artifact first and install the `n8n-nodes-myportal-*.tgz` file inside it. Do not rename
+the downloaded `.zip` to `.tgz`: that still leaves a ZIP file on disk, and `npm install` will fail
+with `TAR_BAD_ARCHIVE` because npm expects a gzip-compressed npm package tarball, not GitHub's
+artifact wrapper.
 
 ## Install in n8n
 
@@ -64,8 +65,18 @@ Use this when the package has not been published to npm yet.
 
 1. Run the **Build n8n MyPortal Node** GitHub Actions workflow.
 2. Download the `n8n-nodes-myportal` artifact `.zip`.
-3. Unzip it and verify that you have the generated `n8n-nodes-myportal-*.tgz` file.
-4. Copy or upload only the `.tgz` file to your n8n host.
+3. Unzip it and verify that you have the generated `n8n-nodes-myportal-*.tgz` file:
+
+   ```bash
+   unzip n8n-nodes-myportal.zip
+   file n8n-nodes-myportal-0.1.0.tgz
+   tar -tzf n8n-nodes-myportal-0.1.0.tgz >/dev/null
+   ```
+
+   The `file` command should report gzip-compressed data. If it reports Zip archive data, you are
+   still pointing npm at the GitHub artifact wrapper and need to unzip it first.
+
+4. Copy or upload only the extracted `.tgz` file to your n8n host.
 5. Install it from the n8n user directory:
 
 ```bash
@@ -81,6 +92,8 @@ For Docker-based n8n deployments, mount or copy the tarball into the container a
 n8n user directory. One common pattern is:
 
 ```bash
+# If you downloaded the GitHub Actions artifact, unzip it on your host first.
+unzip n8n-nodes-myportal.zip
 docker cp n8n-nodes-myportal-0.1.0.tgz <n8n-container>:/tmp/
 docker exec -it <n8n-container> sh -lc 'cd ~/.n8n && npm install /tmp/n8n-nodes-myportal-0.1.0.tgz'
 docker restart <n8n-container>
