@@ -76,6 +76,12 @@ Use this when the package has not been published to npm yet.
    The `file` command should report gzip-compressed data. If it reports Zip archive data, you are
    still pointing npm at the GitHub artifact wrapper and need to unzip it first.
 
+   You can also verify that the tarball includes the compiled node files before installing it:
+
+   ```bash
+   tar -tzf n8n-nodes-myportal-0.1.0.tgz | grep -E 'package/dist/(nodes/MyPortal/MyPortal.node.js|credentials/MyPortalApi.credentials.js|nodes/MyPortal/myportal.svg)$'
+   ```
+
 4. Copy or upload only the extracted `.tgz` file to your n8n host.
 5. Install it from the n8n user directory:
 
