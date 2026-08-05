@@ -30,6 +30,10 @@
     ],
     "strict": true
   },
+  "allowScripts": {
+    "ssh2": true,
+    "isolated-vm": true
+  },
   "dependencies": {
     "n8n-workflow": "2.33.0"
   },
