@@ -247,6 +247,16 @@ def test_ticket_refresh_rows_include_last_reply_status_column():
 
     assert updated_cell_index < last_reply_cell_index < review_date_cell_index
     assert "cell.dataset.column = 'last-reply-status'" in javascript
+    assert "No email status" in javascript
+
+
+def test_last_reply_status_empty_state_is_visible():
+    """The Last Reply Status column should not appear blank when no email tracking exists."""
+    html = _template_html()
+    last_reply_cell = html[html.index('data-column="last-reply-status"', html.index('<tbody>')):]
+    last_reply_cell = last_reply_cell[:last_reply_cell.index("</td>")]
+
+    assert '<span class="badge badge--muted">No email status</span>' in last_reply_cell
 
 
 def test_ticket_update_actor_type_column_is_available():

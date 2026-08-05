@@ -1203,20 +1203,16 @@
       cell.dataset.column = 'last-reply-status';
       cell.className = 'tickets-table__cell tickets-table__cell--last-reply-status';
 
-      if (!status) {
-        cell.textContent = '—';
-        return cell;
-      }
-
       const badgeClasses = {
         Bounced: 'badge--danger',
         Read: 'badge--success',
         Delivered: 'badge--info',
         Sent: 'badge--muted',
       };
+      const displayStatus = status ? String(status) : 'No email status';
       const badge = document.createElement('span');
-      badge.className = `badge ${badgeClasses[status] || 'badge--muted'}`;
-      badge.textContent = String(status);
+      badge.className = `badge ${badgeClasses[displayStatus] || 'badge--muted'}`;
+      badge.textContent = displayStatus;
       cell.appendChild(badge);
       return cell;
     }
