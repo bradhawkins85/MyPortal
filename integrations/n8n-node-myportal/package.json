@@ -29,9 +29,7 @@
   "devDependencies": {
     "@types/node": "^20.14.9",
     "typescript": "^5.5.3",
-    "@n8n/node-cli": "*"
-  },
-  "peerDependencies": {
+    "@n8n/node-cli": "*",
     "n8n-workflow": "*"
   }
 }

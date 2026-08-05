@@ -87,9 +87,16 @@ npm install /path/to/n8n-nodes-myportal-0.1.0.tgz
 6. Restart n8n, then create a **MyPortal API** credential and add the **MyPortal** node to a workflow.
 
 If `npm install /path/to/n8n-nodes-myportal-0.1.0.tgz` reports that it added a package but the node
-does not appear, confirm that the command ran in the n8n user directory used by the running process
-(typically `/home/node/.n8n` in Docker, not the host's `~/.n8n`) and check that n8n can see the
-package metadata:
+does not appear, first make sure you are installing a package built from this version or newer. Older
+tarballs declared `n8n-workflow` as a peer dependency, which can make npm install an extra copy of
+n8n runtime packages under the community node package. That install path can trigger messages such as
+`1 package had install scripts blocked because they are not covered by allowScripts` for
+`isolated-vm`, and n8n may then skip or fail to load the community node even though npm reports a
+successful install. This package keeps `n8n-workflow` as a development-only dependency so the packed
+community node contains only the compiled MyPortal node and credential files.
+
+Then confirm that the command ran in the n8n user directory used by the running process (typically
+`/home/node/.n8n` in Docker, not the host's `~/.n8n`) and check that n8n can see the package metadata:
 
 ```bash
 cd ~/.n8n
@@ -101,9 +108,14 @@ directory, then restart n8n:
 
 ```bash
 cd ~/.n8n
-npm remove n8n-nodes-myportal
+npm remove n8n-nodes-myportal n8n-workflow @n8n/expression-runtime isolated-vm
 npm install /path/to/n8n-nodes-myportal-0.1.0.tgz
 ```
+
+After reinstalling, this package should not add `n8n-workflow`, `@n8n/expression-runtime`, or
+`isolated-vm` under `~/.n8n/node_modules` as dependencies of `n8n-nodes-myportal`. If npm still asks
+you to approve the `isolated-vm` install script while installing only this tarball, verify that you
+are using a freshly generated tarball and not an older artifact.
 
 ### Option 3: Install in Docker
 
