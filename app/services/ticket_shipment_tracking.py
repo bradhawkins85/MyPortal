@@ -712,12 +712,9 @@ async def process_due_shipment_watches(*, limit: int = 200) -> dict[str, int]:
                 if not has_update:
                     continue
                 # `changed` tracks detected shipment updates, while `posted`
-                # only tracks the subset that are emitted as public ticket
-                # comments.
+                # tracks the updates added to the ticket as either public or
+                # private comments.
                 changed += 1
-
-                if not refreshed["public_comments_enabled"]:
-                    continue
 
                 reply_external_ref = f"shipment-watch:{provider.slug}:{current_hash[:32]}"
                 reply_body = _render_ticket_reply(snapshot_payload, refreshed)
@@ -725,7 +722,7 @@ async def process_due_shipment_watches(*, limit: int = 200) -> dict[str, int]:
                     ticket_id=ticket_id,
                     author_id=None,
                     body=reply_body,
-                    is_internal=False,
+                    is_internal=not bool(refreshed["public_comments_enabled"]),
                     external_reference=reply_external_ref[:128],
                 )
                 await shipment_watch_repo.update_watch_check_state(
