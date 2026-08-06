@@ -484,7 +484,7 @@ async def test_process_due_shipment_watches_posts_unposted_in_transit_snapshot(m
 
 
 @pytest.mark.anyio
-async def test_process_due_shipment_watches_skips_public_reply_when_disabled(monkeypatch):
+async def test_process_due_shipment_watches_posts_private_reply_when_public_comments_disabled(monkeypatch):
     now = datetime.now(timezone.utc)
     due_watch = {
         "id": 1,
@@ -551,10 +551,11 @@ async def test_process_due_shipment_watches_skips_public_reply_when_disabled(mon
 
     assert result["checked"] == 1
     assert result["changed"] == 1
-    assert result["posted"] == 0
-    create_reply_mock.assert_not_awaited()
-    emit_replied_mock.assert_not_awaited()
-    emit_updated_mock.assert_not_awaited()
+    assert result["posted"] == 1
+    create_reply_mock.assert_awaited_once()
+    assert create_reply_mock.await_args.kwargs["is_internal"] is True
+    emit_replied_mock.assert_awaited_once()
+    emit_updated_mock.assert_awaited_once()
     assert any(entry["watch_id"] == 1 for entry in updates)
 
 
