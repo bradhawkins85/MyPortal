@@ -42,7 +42,16 @@ class StaffCreate(StaffBase):
     custom_fields: dict[str, Any] | None = Field(default=None, validation_alias="customFields")
 
 
-class StaffRequestCreate(StaffBase):
+class StaffRequestCreate(BaseModel):
+    first_name: str = Field(validation_alias="firstName")
+    last_name: str = Field(validation_alias="lastName")
+    email: Optional[EmailStr] = None
+    mobile_phone: Optional[str] = Field(default=None, validation_alias="mobilePhone")
+    date_onboarded: Optional[datetime] = Field(default=None, validation_alias="dateOnboarded")
+    department: Optional[str] = None
+    enabled: bool = True
+    job_title: Optional[str] = Field(default=None, validation_alias="jobTitle")
+    request_notes: Optional[str] = Field(default=None, validation_alias="requestNotes")
     custom_fields: dict[str, Any] | None = Field(default=None, validation_alias="customFields")
 
 
@@ -157,6 +166,7 @@ class StaffRequestResponse(BaseModel):
     mobile_phone: Optional[str] = None
     date_onboarded: Optional[datetime] = None
     department: Optional[str] = None
+    enabled: bool = True
     job_title: Optional[str] = None
     request_notes: Optional[str] = None
     custom_fields: dict[str, Any] = Field(default_factory=dict)

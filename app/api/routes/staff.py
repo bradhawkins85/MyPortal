@@ -30,12 +30,52 @@ from app.schemas.staff import (
     StaffUpdate,
 )
 from app.services import audit as audit_service
+from app.services import staff_field_config as staff_field_config_service
 from app.services import staff_onboarding_workflows as staff_onboarding_workflow_service
 
 
 router = APIRouter(prefix="/api/staff", tags=["Staff"])
 STAFF_REQUEST_PERMISSION = "staff.request"
 STAFF_APPROVE_PERMISSION = "staff.approve"
+
+
+def _validate_custom_field_values(
+    values: dict[str, object], definitions: list[dict]
+) -> tuple[dict[str, object], list[str]]:
+    definitions_by_name = {
+        str(item.get("name") or "").strip(): item for item in definitions
+    }
+    errors: list[str] = []
+    normalized: dict[str, object] = {}
+    for name, value in values.items():
+        definition = definitions_by_name.get(str(name))
+        if definition is None:
+            errors.append(f"Unknown custom field: {name}")
+            continue
+        field_type = str(definition.get("field_type") or "text").lower()
+        allowed = {
+            str(option.get("value") or "")
+            for option in definition.get("options") or []
+        }
+        if field_type == "checkbox":
+            if not isinstance(value, bool):
+                errors.append(f"{name} must be true or false")
+                continue
+            normalized[name] = value
+        elif field_type == "multiselect":
+            selected = value if isinstance(value, list) else str(value or "").split(",")
+            selected = [str(item).strip() for item in selected if str(item).strip()]
+            if allowed and any(item not in allowed for item in selected):
+                errors.append(f"{name} contains an invalid option")
+                continue
+            normalized[name] = ",".join(selected) or None
+        else:
+            text_value = str(value or "").strip() or None
+            if field_type == "select" and text_value and allowed and text_value not in allowed:
+                errors.append(f"{name} has an invalid option")
+                continue
+            normalized[name] = text_value
+    return normalized, errors
 
 
 async def _ensure_company_exists(company_id: int) -> None:
@@ -312,6 +352,26 @@ async def create_staff_request(
     payload_data = payload.model_dump(by_alias=False)
     payload_data.pop("company_id", None)
     custom_fields: dict = payload_data.pop("custom_fields", None) or {}
+    if current_user is None:
+        field_config = await staff_field_config_service.load_effective_company_staff_fields(company_id)
+        standard_values, validation_errors = staff_field_config_service.validate_staff_form_values(
+            payload_data, field_config
+        )
+        if validation_errors:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=validation_errors,
+            )
+        payload_data.update(standard_values)
+        custom_definitions = await staff_custom_fields_repo.list_field_definitions(company_id)
+        custom_fields, custom_field_errors = _validate_custom_field_values(
+            custom_fields, custom_definitions
+        )
+        if custom_field_errors:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=custom_field_errors,
+            )
     if custom_fields and current_user is not None and not await _can_submit_group_mapped_custom_fields(current_user, company_id):
         policy = await staff_workflow_repo.get_company_workflow_policy(company_id)
         policy_config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
@@ -334,6 +394,7 @@ async def create_staff_request(
         mobile_phone=str(payload_data.get("mobile_phone") or "").strip() or None,
         date_onboarded=payload_data.get("date_onboarded"),
         department=str(payload_data.get("department") or "").strip() or None,
+        enabled=bool(payload_data.get("enabled", True)),
         job_title=str(payload_data.get("job_title") or "").strip() or None,
         request_notes=str(payload_data.get("request_notes") or "").strip() or None,
         custom_fields=custom_fields or None,
@@ -408,6 +469,7 @@ async def approve_staff_request_entry(
             mobile_phone=staff_request.get("mobile_phone"),
             date_onboarded=staff_request.get("date_onboarded"),
             department=staff_request.get("department"),
+            enabled=bool(staff_request.get("enabled", True)),
             job_title=staff_request.get("job_title"),
             onboarding_status="approved",
             onboarding_complete=False,

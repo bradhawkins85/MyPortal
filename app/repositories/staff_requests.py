@@ -37,6 +37,7 @@ async def create_request(
     mobile_phone: str | None = None,
     date_onboarded: datetime | None = None,
     department: str | None = None,
+    enabled: bool = True,
     job_title: str | None = None,
     request_notes: str | None = None,
     custom_fields: dict[str, Any] | None = None,
@@ -48,9 +49,9 @@ async def create_request(
         """
         INSERT INTO staff_requests (
             company_id, first_name, last_name, email, mobile_phone,
-            date_onboarded, department, job_title, request_notes,
+            date_onboarded, department, enabled, job_title, request_notes,
             custom_fields_json, status, requested_by_user_id, requested_at
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s, %s)
         """,
         (
             company_id,
@@ -60,6 +61,7 @@ async def create_request(
             mobile_phone,
             _coerce_datetime(date_onboarded),
             department,
+            1 if enabled else 0,
             job_title,
             request_notes,
             custom_fields_json,

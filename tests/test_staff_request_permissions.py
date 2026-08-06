@@ -233,6 +233,26 @@ async def test_create_staff_request_allows_api_key_for_selected_company(monkeypa
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(staff.audit_service, "log_action", AsyncMock())
+    monkeypatch.setattr(
+        staff.staff_field_config_service,
+        "load_effective_company_staff_fields",
+        AsyncMock(
+            return_value=[
+                {"key": "first_name", "label": "First name", "type": "text", "required": True},
+                {"key": "last_name", "label": "Last name", "type": "text", "required": True},
+                {"key": "enabled", "label": "Enabled", "type": "checkbox", "required": False},
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        staff.staff_custom_fields_repo,
+        "list_field_definitions",
+        AsyncMock(
+            return_value=[
+                {"name": "office_location", "field_type": "select", "options": [{"value": "sydney"}]}
+            ]
+        ),
+    )
     create_mock = AsyncMock(
         return_value={
             "id": 101,
@@ -248,7 +268,11 @@ async def test_create_staff_request_allows_api_key_for_selected_company(monkeypa
 
     result = await staff.create_staff_request(
         payload=StaffRequestCreate(
-            firstName="API", lastName="User", email="api@example.com"
+            firstName="API",
+            lastName="User",
+            email="api@example.com",
+            enabled=False,
+            customFields={"office_location": "sydney"},
         ),
         company_id=9,
         _=None,
@@ -258,6 +282,8 @@ async def test_create_staff_request_allows_api_key_for_selected_company(monkeypa
 
     assert result.company_id == 9
     assert create_mock.await_args.kwargs["requested_by_user_id"] is None
+    assert create_mock.await_args.kwargs["enabled"] is False
+    assert create_mock.await_args.kwargs["custom_fields"] == {"office_location": "sydney"}
 
 
 @pytest.mark.anyio
