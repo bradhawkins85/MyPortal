@@ -83,6 +83,13 @@ class StaffApprovalDecision(BaseModel):
     reason: Optional[str] = None
 
 
+class StaffOffboardingRequestCreate(BaseModel):
+    company_id: Optional[int] = Field(default=None, validation_alias="companyId")
+    date_offboarded: datetime = Field(validation_alias="dateOffboarded")
+    offboarding_type: str = Field(validation_alias="offboardingType")
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+
 class StaffWorkflowStatus(BaseModel):
     direction: Optional[str] = None
     state: Optional[str] = None

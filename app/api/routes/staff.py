@@ -20,6 +20,7 @@ from app.schemas.staff import (
     StaffCreate,
     StaffExternalCheckpointCallback,
     StaffExternalCheckpointResponse,
+    StaffOffboardingRequestCreate,
     StaffWorkflowWebhookCallback,
     StaffWorkflowManualActionRequest,
     StaffWorkflowManualActionResponse,
@@ -300,14 +301,18 @@ async def create_staff_request(
     payload: StaffRequestCreate,
     company_id: int = Query(..., alias="companyId"),
     _: None = Depends(require_database),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict | None = Depends(get_optional_user),
+    api_key_record: dict | None = Depends(get_optional_api_key),
 ):
+    if current_user is None and api_key_record is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     await _ensure_company_exists(company_id)
-    await _require_staff_request_access(current_user, company_id)
+    if current_user is not None:
+        await _require_staff_request_access(current_user, company_id)
     payload_data = payload.model_dump(by_alias=False)
     payload_data.pop("company_id", None)
     custom_fields: dict = payload_data.pop("custom_fields", None) or {}
-    if custom_fields and not await _can_submit_group_mapped_custom_fields(current_user, company_id):
+    if custom_fields and current_user is not None and not await _can_submit_group_mapped_custom_fields(current_user, company_id):
         policy = await staff_workflow_repo.get_company_workflow_policy(company_id)
         policy_config = policy.get("config") if isinstance(policy.get("config"), dict) else {}
         mapped_custom_fields = set(staff_onboarding_workflow_service._normalise_custom_field_group_mappings(policy_config).keys())
@@ -316,7 +321,11 @@ async def create_staff_request(
             for field_name, value in custom_fields.items()
             if field_name not in mapped_custom_fields
         }
-    requester_id = int(current_user.get("id")) if current_user.get("id") is not None else None
+    requester_id = (
+        int(current_user["id"])
+        if current_user is not None and current_user.get("id") is not None
+        else None
+    )
     created = await staff_requests_repo.create_request(
         company_id=company_id,
         first_name=str(payload_data.get("first_name") or "").strip(),
@@ -613,6 +622,105 @@ async def deny_staff_request(
         },
     )
     updated["workflow_status"] = await staff_onboarding_workflow_service.get_staff_workflow_status(staff_id)
+    return StaffResponse.model_validate(updated)
+
+
+@router.post("/{staff_id}/offboarding/request", response_model=StaffResponse)
+async def request_staff_offboarding(
+    staff_id: int,
+    payload: StaffOffboardingRequestCreate,
+    _: None = Depends(require_database),
+    api_key_record: dict = Depends(require_api_key),
+):
+    staff = await staff_repo.get_staff_by_id(staff_id)
+    if not staff:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Staff not found"
+        )
+    company_id = int(staff["company_id"])
+    if payload.company_id is not None and payload.company_id != company_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Staff member does not belong to company",
+        )
+    if not bool(staff.get("enabled", False)) or bool(staff.get("is_ex_staff", False)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only active staff members can be offboarding requested",
+        )
+    if str(staff.get("account_action") or "").strip().lower() == "offboard requested":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An offboarding request is already pending for this staff member",
+        )
+    offboarding_type = payload.offboarding_type.strip().title()
+    if offboarding_type not in {"Resignation", "Termination"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Offboarding type must be Resignation or Termination",
+        )
+    notes = (payload.notes or "").strip() or None
+    request_notes = f"Type: {offboarding_type}" + (
+        f"\n\nNotes: {notes}" if notes else ""
+    )
+    requested_at = payload.date_offboarded
+    if requested_at.tzinfo is None:
+        requested_at = requested_at.replace(tzinfo=timezone.utc)
+    else:
+        requested_at = requested_at.astimezone(timezone.utc)
+    updated = await staff_repo.update_staff(
+        staff_id,
+        company_id=company_id,
+        first_name=staff.get("first_name") or "",
+        last_name=staff.get("last_name") or "",
+        email=staff.get("email") or "",
+        mobile_phone=staff.get("mobile_phone"),
+        date_onboarded=staff.get("date_onboarded"),
+        date_offboarded=requested_at,
+        enabled=True,
+        is_ex_staff=False,
+        street=staff.get("street"),
+        city=staff.get("city"),
+        state=staff.get("state"),
+        postcode=staff.get("postcode"),
+        country=staff.get("country"),
+        department=staff.get("department"),
+        job_title=staff.get("job_title"),
+        org_company=staff.get("org_company"),
+        manager_name=staff.get("manager_name"),
+        account_action="Offboard Requested",
+        syncro_contact_id=staff.get("syncro_contact_id"),
+        onboarding_status=staff_onboarding_workflow_service.STATE_OFFBOARDING_AWAITING_APPROVAL,
+        onboarding_complete=bool(staff.get("onboarding_complete", False)),
+        onboarding_completed_at=staff.get("onboarding_completed_at"),
+        approval_status="pending",
+        requested_by_user_id=None,
+        requested_at=datetime.now(tz=timezone.utc),
+        approved_by_user_id=None,
+        approved_at=None,
+        request_notes=request_notes,
+        approval_notes=None,
+    )
+    approvers = await staff_onboarding_workflow_service.notify_staff_approval_requested(
+        company_id=company_id,
+        staff=updated,
+        requester_user_id=None,
+        direction=staff_onboarding_workflow_service.DIRECTION_OFFBOARDING,
+    )
+    await audit_service.log_action(
+        user_id=None,
+        action="staff.offboarding.requested",
+        entity_type="staff",
+        entity_id=staff_id,
+        metadata={
+            "company_id": company_id,
+            "api_key_id": api_key_record.get("id"),
+            "approver_user_ids": approvers,
+        },
+    )
+    updated["workflow_status"] = (
+        await staff_onboarding_workflow_service.get_staff_workflow_status(staff_id)
+    )
     return StaffResponse.model_validate(updated)
 
 

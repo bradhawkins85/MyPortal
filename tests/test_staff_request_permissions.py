@@ -219,3 +219,102 @@ async def test_create_staff_request_allows_group_mapped_custom_fields_for_depart
 
     create_kwargs = create_mock.await_args.kwargs
     assert create_kwargs["custom_fields"] == {"entra_admin": True, "location": "NYC"}
+
+
+@pytest.mark.anyio
+async def test_create_staff_request_allows_api_key_for_selected_company(monkeypatch):
+    from app.api.routes import staff
+    from app.schemas.staff import StaffRequestCreate
+
+    monkeypatch.setattr(staff, "_ensure_company_exists", AsyncMock())
+    monkeypatch.setattr(
+        staff.staff_onboarding_workflow_service,
+        "notify_staff_approval_requested",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(staff.audit_service, "log_action", AsyncMock())
+    create_mock = AsyncMock(
+        return_value={
+            "id": 101,
+            "company_id": 9,
+            "first_name": "API",
+            "last_name": "User",
+            "email": "api@example.com",
+            "status": "pending",
+            "custom_fields": {},
+        }
+    )
+    monkeypatch.setattr(staff.staff_requests_repo, "create_request", create_mock)
+
+    result = await staff.create_staff_request(
+        payload=StaffRequestCreate(
+            firstName="API", lastName="User", email="api@example.com"
+        ),
+        company_id=9,
+        _=None,
+        current_user=None,
+        api_key_record={"id": 12},
+    )
+
+    assert result.company_id == 9
+    assert create_mock.await_args.kwargs["requested_by_user_id"] is None
+
+
+@pytest.mark.anyio
+async def test_api_key_can_flag_staff_for_offboarding_approval(monkeypatch):
+    from app.api.routes import staff
+    from app.schemas.staff import StaffOffboardingRequestCreate
+
+    record = {
+        "id": 44,
+        "company_id": 9,
+        "first_name": "Alex",
+        "last_name": "Smith",
+        "email": "alex@example.com",
+        "enabled": True,
+        "is_ex_staff": False,
+        "account_action": None,
+        "onboarding_complete": True,
+    }
+    monkeypatch.setattr(
+        staff.staff_repo, "get_staff_by_id", AsyncMock(return_value=record)
+    )
+    update_mock = AsyncMock(
+        return_value={
+            **record,
+            "account_action": "Offboard Requested",
+            "onboarding_status": "offboarding_awaiting_approval",
+            "approval_status": "pending",
+            "date_offboarded": "2026-08-10T02:00:00+00:00",
+        }
+    )
+    monkeypatch.setattr(staff.staff_repo, "update_staff", update_mock)
+    monkeypatch.setattr(
+        staff.staff_onboarding_workflow_service,
+        "notify_staff_approval_requested",
+        AsyncMock(return_value=[2]),
+    )
+    monkeypatch.setattr(
+        staff.staff_onboarding_workflow_service,
+        "get_staff_workflow_status",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(staff.audit_service, "log_action", AsyncMock())
+
+    result = await staff.request_staff_offboarding(
+        staff_id=44,
+        payload=StaffOffboardingRequestCreate(
+            companyId=9,
+            dateOffboarded="2026-08-10T12:00:00+10:00",
+            offboardingType="resignation",
+            notes="Final day",
+        ),
+        _=None,
+        api_key_record={"id": 12},
+    )
+
+    assert result.approval_status == "pending"
+    kwargs = update_mock.await_args.kwargs
+    assert kwargs["account_action"] == "Offboard Requested"
+    assert kwargs["onboarding_status"] == "offboarding_awaiting_approval"
+    assert kwargs["date_offboarded"].isoformat() == "2026-08-10T02:00:00+00:00"
