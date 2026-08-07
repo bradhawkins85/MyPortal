@@ -460,6 +460,42 @@ async def approve_staff_request_entry(
 
     if existing_staff:
         staff_id = int(existing_staff["id"])
+        # A request can match an inactive/ex-staff record left by an earlier
+        # lifecycle. Treat approval as a new onboarding decision rather than
+        # merely linking the request to that hidden record.
+        await staff_repo.update_staff(
+            staff_id,
+            company_id=int(staff_request["company_id"]),
+            first_name=str(staff_request.get("first_name") or existing_staff.get("first_name") or ""),
+            last_name=str(staff_request.get("last_name") or existing_staff.get("last_name") or ""),
+            email=staff_request.get("email") or existing_staff.get("email"),
+            mobile_phone=staff_request.get("mobile_phone") or existing_staff.get("mobile_phone"),
+            date_onboarded=staff_request.get("date_onboarded") or existing_staff.get("date_onboarded"),
+            date_offboarded=None,
+            enabled=bool(staff_request.get("enabled", True)),
+            is_ex_staff=False,
+            street=existing_staff.get("street"),
+            city=existing_staff.get("city"),
+            state=existing_staff.get("state"),
+            postcode=existing_staff.get("postcode"),
+            country=existing_staff.get("country"),
+            department=staff_request.get("department") or existing_staff.get("department"),
+            job_title=staff_request.get("job_title") or existing_staff.get("job_title"),
+            org_company=existing_staff.get("org_company"),
+            manager_name=existing_staff.get("manager_name"),
+            account_action=None,
+            syncro_contact_id=existing_staff.get("syncro_contact_id"),
+            onboarding_status="approved",
+            onboarding_complete=False,
+            onboarding_completed_at=None,
+            approval_status="approved",
+            requested_by_user_id=staff_request.get("requested_by_user_id"),
+            requested_at=staff_request.get("requested_at"),
+            approved_by_user_id=approver_id,
+            approved_at=now,
+            request_notes=staff_request.get("request_notes"),
+            approval_notes=approval_comment,
+        )
     else:
         created_staff = await staff_repo.create_staff(
             company_id=int(staff_request["company_id"]),
@@ -481,18 +517,21 @@ async def approve_staff_request_entry(
             requested_at=staff_request.get("requested_at"),
         )
         staff_id = int(created_staff["id"])
-        custom_fields = staff_request.get("custom_fields") or {}
-        if custom_fields:
-            await staff_custom_fields_repo.set_staff_field_values_by_name(
-                company_id=int(staff_request["company_id"]),
-                staff_id=staff_id,
-                values=custom_fields,
-            )
-        await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
+
+    custom_fields = staff_request.get("custom_fields") or {}
+    if custom_fields:
+        await staff_custom_fields_repo.set_staff_field_values_by_name(
             company_id=int(staff_request["company_id"]),
             staff_id=staff_id,
-            initiated_by_user_id=approver_id,
+            values=custom_fields,
         )
+    # Queue for both newly-created and reactivated staff. Previously the
+    # existing-record path skipped workflow execution entirely.
+    await staff_onboarding_workflow_service.enqueue_staff_onboarding_workflow(
+        company_id=int(staff_request["company_id"]),
+        staff_id=staff_id,
+        initiated_by_user_id=approver_id,
+    )
 
     updated_request = await staff_requests_repo.update_request_status(
         request_id,
