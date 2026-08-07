@@ -516,6 +516,14 @@ async def get_staff_by_id(staff_id: int) -> dict[str, Any] | None:
     return mapped
 
 
+async def update_mobile_phone(staff_id: int, mobile_phone: str) -> None:
+    """Update only the mobile number on an existing staff record."""
+    await db.execute(
+        "UPDATE staff SET mobile_phone = %s WHERE id = %s",
+        (mobile_phone, staff_id),
+    )
+
+
 async def get_staff_by_company_and_email(
     company_id: int, email: str
 ) -> dict[str, Any] | None:

@@ -48,6 +48,13 @@
     }
   }
 
+  // Phone numbers added after page load (for example, Outlook contact search
+  // results) can use the same configured desk-phone integration.
+  window.__portalClickToCall = {
+    call,
+    isEnabled: () => enabled,
+  };
+
   function linkify(root) {
     if (!enabled || !root || root.nodeType !== Node.ELEMENT_NODE) return;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
