@@ -5973,15 +5973,18 @@ async def admin_bulk_create_scheduled_tasks(request: Request):
         return flash_redirect("/admin/scheduled-tasks", "Select a task option to bulk create.", "error")
 
     cron_fields = cron.split()
-    if len(cron_fields) not in {5, 6}:
-        return flash_redirect("/admin/scheduled-tasks", "Enter a valid five- or six-field cron expression.", "error")
-    try:
-        start_minute = int(cron_fields[0])
-        start_hour = int(cron_fields[1])
-    except (TypeError, ValueError):
-        return flash_redirect("/admin/scheduled-tasks", "Bulk create requires numeric minute and hour cron fields.", "error")
-    if start_minute < 0 or start_minute > 59 or start_hour < 0 or start_hour > 23:
-        return flash_redirect("/admin/scheduled-tasks", "Cron start time must be between 00:00 and 23:59 UTC.", "error")
+    start_minute: int | None = None
+    start_hour: int | None = None
+    if cron:
+        if len(cron_fields) not in {5, 6}:
+            return flash_redirect("/admin/scheduled-tasks", "Enter a valid five- or six-field cron expression.", "error")
+        try:
+            start_minute = int(cron_fields[0])
+            start_hour = int(cron_fields[1])
+        except (TypeError, ValueError):
+            return flash_redirect("/admin/scheduled-tasks", "Bulk create requires numeric minute and hour cron fields.", "error")
+        if start_minute < 0 or start_minute > 59 or start_hour < 0 or start_hour > 23:
+            return flash_redirect("/admin/scheduled-tasks", "Cron start time must be between 00:00 and 23:59 UTC.", "error")
 
     company_ids: list[int] = []
     seen: set[int] = set()
@@ -6027,15 +6030,19 @@ async def admin_bulk_create_scheduled_tasks(request: Request):
     exclude_from_calendar = form.get("excludeFromCalendar") is not None
     created_count = 0
     for offset, company_id in enumerate(company_ids):
-        fields = list(cron_fields)
-        total_minutes = start_hour * 60 + start_minute + offset
-        fields[0] = str(total_minutes % 60)
-        fields[1] = str((total_minutes // 60) % 24)
+        if start_hour is None or start_minute is None:
+            task_cron = _random_daily_cron()
+        else:
+            fields = list(cron_fields)
+            total_minutes = start_hour * 60 + start_minute + offset
+            fields[0] = str(total_minutes % 60)
+            fields[1] = str((total_minutes // 60) % 24)
+            task_cron = " ".join(fields)
         company_name = active_company_lookup[company_id]
         await scheduled_tasks_repo.create_task(
             name=f"{company_name} — {command_label}",
             command=command,
-            cron=" ".join(fields),
+            cron=task_cron,
             company_id=company_id,
             description=description,
             active=active,
@@ -6062,7 +6069,11 @@ async def admin_bulk_create_scheduled_tasks(request: Request):
     base_url = "/admin/scheduled-tasks"
     redirect_url = f"{base_url}?show_inactive={show_inactive_param}" if show_inactive_param else base_url
     response = RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
-    set_flash(response, f"Created {created_count} scheduled {noun} from {start_hour:02d}:{start_minute:02d} UTC.", "success")
+    if start_hour is None or start_minute is None:
+        success_message = f"Created {created_count} scheduled {noun} at random daily times."
+    else:
+        success_message = f"Created {created_count} scheduled {noun} from {start_hour:02d}:{start_minute:02d} UTC."
+    set_flash(response, success_message, "success")
     return response
 
 
