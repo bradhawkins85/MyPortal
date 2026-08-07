@@ -367,9 +367,9 @@
           <p class="form-help">One scheduled task will be created for each selected company.</p>
         </div>
         <div class="form-field">
-          <label class="form-label" for="bulk-task-cron">Desired start cron expression</label>
-          <input class="form-input" id="bulk-task-cron" name="cron" required placeholder="0 2 * * *" pattern="^[^\s]+(\s+[^\s]+){4,5}$" />
-          <p class="form-help">The minute and hour are auto-incremented by one minute per company, starting from this UTC time.</p>
+          <label class="form-label" for="bulk-task-cron">Desired start cron expression (optional)</label>
+          <input class="form-input" id="bulk-task-cron" name="cron" placeholder="0 2 * * *" pattern="^[^\s]+(\s+[^\s]+){4,5}$" />
+          <p class="form-help">Leave blank to assign each company a random daily time. When provided, the minute and hour are auto-incremented by one minute per company, starting from this UTC time.</p>
         </div>
         <div class="form-field" id="bulk-task-description-field">
           <label class="form-label" for="bulk-task-description">Description</label>
