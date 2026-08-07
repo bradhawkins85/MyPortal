@@ -25,10 +25,47 @@
         phones.forEach((item) => {
           const line = document.createElement('p');
           line.className = 'form-help';
-          const link = document.createElement('a');
-          link.href = `tel:${item.phone}`;
-          link.textContent = item.phone;
-          line.append(`${item.name}: `, link);
+          const dialButton = document.createElement('button');
+          dialButton.type = 'button';
+          dialButton.className = 'click-to-call';
+          dialButton.textContent = item.phone;
+          dialButton.title = `Call ${item.phone}`;
+          dialButton.addEventListener('click', () => {
+            const clickToCall = window.__portalClickToCall;
+            if (clickToCall && clickToCall.isEnabled()) {
+              clickToCall.call(item.phone);
+              return;
+            }
+            status.textContent = 'Enable click to call in your profile to dial this number.';
+          });
+          line.append(`${item.name}: `, dialButton);
+
+          const staffId = root.dataset.requesterStaffId;
+          const ticketId = root.dataset.ticketId;
+          if (staffId && ticketId) {
+            const attachButton = document.createElement('button');
+            attachButton.type = 'button';
+            attachButton.className = 'button button--ghost button--small';
+            attachButton.textContent = 'Attach to contact';
+            attachButton.addEventListener('click', async () => {
+              attachButton.disabled = true;
+              try {
+                const attachResponse = await fetch(`/api/tickets/${encodeURIComponent(ticketId)}/requester/mobile`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ phone: item.phone }),
+                });
+                const attachPayload = await attachResponse.json().catch(() => ({}));
+                if (!attachResponse.ok) throw new Error(attachPayload.detail || 'Unable to attach number');
+                attachButton.textContent = 'Attached';
+                status.textContent = 'Mobile number attached to the requester contact.';
+              } catch (error) {
+                attachButton.disabled = false;
+                status.textContent = error.message || 'Unable to attach number.';
+              }
+            });
+            line.append(' ', attachButton);
+          }
           results.appendChild(line);
         });
       } catch (error) {

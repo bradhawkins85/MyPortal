@@ -5645,6 +5645,29 @@ async def profile_m365_contact_phones(request: Request, name: str = Query(..., m
     return JSONResponse({"phones": phones})
 
 
+@app.post("/api/tickets/{ticket_id}/requester/mobile", response_class=JSONResponse)
+async def attach_ticket_requester_mobile(request: Request, ticket_id: int):
+    _, redirect = await _require_authenticated_user(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket or ticket.get("requester_staff_id") is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket requester contact not found")
+
+    payload = await request.json()
+    phone = str(payload.get("phone") or "").strip() if isinstance(payload, dict) else ""
+    normalized = re.sub(r"[^0-9+]", "", phone)
+    if not re.fullmatch(r"\+?[0-9]{3,15}", normalized):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid phone number")
+
+    staff_id = int(ticket["requester_staff_id"])
+    if not await staff_repo.get_staff_by_id(staff_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket requester contact not found")
+    await staff_repo.update_mobile_phone(staff_id, phone)
+    return JSONResponse({"ok": True, "staff_id": staff_id, "mobile_phone": phone})
+
+
 @app.get("/api/rag/relationships/metrics", response_class=JSONResponse)
 async def rag_relationship_metrics():
     from app.repositories import rag_relationships as rel_repo
