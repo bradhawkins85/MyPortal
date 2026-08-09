@@ -1,0 +1,7 @@
+{
+  "guid": "dbda020e-6230-445d-ab49-2cf933e9cd44",
+  "occurred_at": "2026-08-09T00:00:00Z",
+  "change_type": "Maintenance",
+  "summary": "Remove the n8n community node source, build workflow, package artifacts, and Node.js dependencies while retaining standalone curl examples for MyPortal Staff and Ticket HTTP APIs.",
+  "content_hash": "65d3ea5b1527622edbb6242a7fb754e7fc932cfadf4cb109bc157339be0c3a04"
+}
