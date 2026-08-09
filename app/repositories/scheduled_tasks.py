@@ -55,6 +55,28 @@ async def get_commands_for_company(company_id: int) -> set[str]:
     )
     return {row["command"] for row in rows}
 
+
+async def count_tasks_by_company_ids(company_ids: Sequence[int]) -> dict[int, int]:
+    """Return scheduled-task counts grouped by company."""
+    unique_ids = sorted({int(company_id) for company_id in company_ids})
+    if not unique_ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(unique_ids))
+    rows = await db.fetch_all(
+        f"""
+        SELECT company_id, COUNT(*) AS task_count
+        FROM scheduled_tasks
+        WHERE company_id IN ({placeholders})
+        GROUP BY company_id
+        """,
+        tuple(unique_ids),
+    )
+    return {
+        int(row["company_id"]): int(row["task_count"])
+        for row in rows
+        if row.get("company_id") is not None
+    }
+
 async def get_task_for_company_by_command(company_id: int, command: str) -> dict[str, Any] | None:
     """Return the first task matching *command* for *company_id*, or None."""
     row = await db.fetch_one(

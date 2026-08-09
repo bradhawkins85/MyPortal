@@ -27,6 +27,28 @@ async def list_company_recurring_invoice_items(company_id: int) -> Sequence[dict
     return rows
 
 
+async def count_items_by_company_ids(company_ids: Sequence[int]) -> dict[int, int]:
+    """Return recurring invoice item counts grouped by company."""
+    unique_ids = sorted({int(company_id) for company_id in company_ids})
+    if not unique_ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(unique_ids))
+    rows = await db.fetch_all(
+        f"""
+        SELECT company_id, COUNT(*) AS item_count
+        FROM company_recurring_invoice_items
+        WHERE company_id IN ({placeholders})
+        GROUP BY company_id
+        """,
+        tuple(unique_ids),
+    )
+    return {
+        int(row["company_id"]): int(row["item_count"])
+        for row in rows
+        if row.get("company_id") is not None
+    }
+
+
 async def get_recurring_invoice_item(item_id: int) -> Optional[dict[str, Any]]:
     """Get a single recurring invoice item by ID."""
     row = await db.fetch_one(
