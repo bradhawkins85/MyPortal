@@ -119,8 +119,10 @@ async def _render_companies_dashboard(
     include_archived: bool = False,
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
+    from app.repositories import company_recurring_invoice_items as recurring_items_repo
     from app.repositories import m365 as m365_repo
     from app.repositories import roles as role_repo
+    from app.repositories import scheduled_tasks as scheduled_tasks_repo
     from app.repositories import user_companies as user_company_repo
     from app.services import m365 as m365_service
 
@@ -142,14 +144,21 @@ async def _render_companies_dashboard(
         company_ids_with_rows.append((company_id, company))
 
     if company_ids_with_rows:
-        credentials_rows = await asyncio.gather(
-            *(
-                m365_repo.get_credentials(company_id)
-                for company_id, _ in company_ids_with_rows
-            )
+        company_ids = [company_id for company_id, _ in company_ids_with_rows]
+        credentials_rows, automation_counts, recurring_item_counts = await asyncio.gather(
+            asyncio.gather(
+                *(m365_repo.get_credentials(company_id) for company_id in company_ids)
+            ),
+            scheduled_tasks_repo.count_tasks_by_company_ids(company_ids),
+            recurring_items_repo.count_items_by_company_ids(company_ids),
         )
         for (_, company), credentials in zip(company_ids_with_rows, credentials_rows):
             company["m365_tenant_id"] = (credentials or {}).get("tenant_id", "").strip()
+        for company_id, company in company_ids_with_rows:
+            company["automation_count"] = automation_counts.get(company_id, 0)
+            company["recurring_invoice_item_count"] = recurring_item_counts.get(
+                company_id, 0
+            )
 
     # Fetch M365 consent status for companies that have credentials configured.
     m365_company_ids = [

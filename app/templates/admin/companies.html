@@ -15,6 +15,8 @@
   {"key": "syncro_id", "module": "syncro",     "label": "Syncro ID",     "default_visible": false},
   {"key": "xero_id", "module": "xero",       "label": "Xero ID",       "default_visible": false},
   {"key": "email_domains", "label": "Email domains", "default_visible": false},
+  {"key": "automations", "label": "Company automations", "default_visible": false},
+  {"key": "recurring_invoice_items", "label": "Recurring invoice items", "default_visible": false},
   {"key": "tacticalrmm_client_id", "module": "tacticalrmm",     "label": "Tactical RMM client ID",      "default_visible": false},
   {"key": "hudu_id", "module": "hudu",                   "label": "Hudu ID",                      "default_visible": false},
   {"key": "huntress_organization_id", "module": "huntress",  "label": "Huntress organisation ID",     "default_visible": false},
@@ -67,6 +69,8 @@
                 {% if module_enabled.get('syncro', false) %}<th scope="col" data-sort="string" data-column-key="syncro_id">Syncro ID</th>{% endif %}
                 {% if module_enabled.get('xero', false) %}<th scope="col" data-sort="string" data-column-key="xero_id">Xero ID</th>{% endif %}
                 <th scope="col" data-sort="string" data-column-key="email_domains">Email domains</th>
+                <th scope="col" data-sort="number" data-column-key="automations">Company automations</th>
+                <th scope="col" data-sort="number" data-column-key="recurring_invoice_items">Recurring invoice items</th>
                 {% if module_enabled.get('tacticalrmm', false) %}<th scope="col" data-sort="string" data-column-key="tacticalrmm_client_id">Tactical RMM client ID</th>{% endif %}
                 {% if module_enabled.get('hudu', false) %}<th scope="col" data-sort="string" data-column-key="hudu_id">Hudu ID</th>{% endif %}
                 {% if module_enabled.get('huntress', false) %}<th scope="col" data-sort="string" data-column-key="huntress_organization_id">Huntress organisation ID</th>{% endif %}
@@ -85,7 +89,7 @@
               {% if managed_companies %}
                 {% for company in managed_companies %}
                   <tr>
-                    <td data-label="Name" data-column-key="name">{{ company.name }}</td>
+                    <td data-label="Name" data-column-key="name"><a href="/admin/companies/{{ company.id }}/edit">{{ company.name }}</a></td>
                     {% if module_enabled.get('syncro', false) %}<td data-label="Syncro ID" data-value="{{ company.syncro_company_id or '' }}" data-column-key="syncro_id">
                       {% if company.syncro_company_id %}
                         {{ company.syncro_company_id }}
@@ -107,6 +111,8 @@
                         <span class="text-muted">—</span>
                       {% endif %}
                     </td>
+                    <td data-label="Company automations" data-value="{{ company.automation_count }}" data-column-key="automations">{{ company.automation_count }}</td>
+                    <td data-label="Recurring invoice items" data-value="{{ company.recurring_invoice_item_count }}" data-column-key="recurring_invoice_items">{{ company.recurring_invoice_item_count }}</td>
                     {% if module_enabled.get('tacticalrmm', false) %}<td data-label="Tactical RMM client ID" data-value="{{ company.tacticalrmm_client_id or '' }}" data-column-key="tacticalrmm_client_id">
                       {% if company.tacticalrmm_client_id %}
                         {{ company.tacticalrmm_client_id }}
