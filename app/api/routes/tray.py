@@ -33,6 +33,7 @@ from app.api.dependencies.auth import (
     get_current_user,
     require_super_admin,
 )
+from app.api.dependencies.api_keys import require_api_key
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import assets as assets_repo
@@ -63,6 +64,8 @@ from app.schemas.tray import (
     TrayTicketSubmitResponse,
     TrayTRMMScriptRunRequest,
     TrayTRMMScriptRunResponse,
+    TrayTRMMSyncRequest,
+    TrayTRMMSyncResponse,
 )
 from app.services import audit as audit_service
 from app.services import chat_ticket_sync
@@ -74,6 +77,7 @@ from app.services import tickets as tickets_service
 from app.services import syncro as syncro_service
 from app.services import tray as tray_service
 from app.services import tray_ticket_questions as tq_service
+from app.services import asset_importer
 from app.services.sanitization import sanitize_rich_text
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.repositories import tray_ticket_questions as tq_repo
@@ -257,6 +261,57 @@ async def enrol_device(
         auth_token=auth_token,
         company_id=device.get("company_id"),
         asset_id=device.get("asset_id"),
+    )
+
+
+@router.post(
+    "/trmm-sync",
+    response_model=TrayTRMMSyncResponse,
+    summary="Immediately link a Tactical RMM agent to an enrolled tray device",
+)
+async def sync_trmm_agent(
+    payload: TrayTRMMSyncRequest,
+    api_key: dict = Depends(require_api_key),
+) -> TrayTRMMSyncResponse:
+    """Synchronise one agent without waiting for the scheduled TRMM import.
+
+    This endpoint is intended for an agent-side Tactical RMM script.  The
+    MyPortal API key may be restricted to this exact route and POST method.
+    """
+
+    tray_agent_id = payload.tray_agent_id.strip()
+    agent_id = payload.agent_id.strip()
+    device = await tray_repo.get_device_by_uid(tray_agent_id)
+    if not device or device.get("status") == "revoked":
+        raise HTTPException(status_code=404, detail="Tray device not found")
+    company_id = device.get("company_id")
+    if company_id is None:
+        raise HTTPException(
+            status_code=409, detail="Tray device is not assigned to a company"
+        )
+
+    try:
+        asset_id = await asset_importer.sync_tactical_agent(
+            int(company_id), agent_id=agent_id, tray_device_uid=tray_agent_id
+        )
+    except tacticalrmm_service.TacticalRMMConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except tacticalrmm_service.TacticalRMMAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    log_info(
+        "Tactical RMM agent pushed tray link",
+        api_key_id=api_key.get("id"),
+        company_id=company_id,
+        device_id=device.get("id"),
+        asset_id=asset_id,
+        trmm_agent_id=agent_id,
+    )
+    return TrayTRMMSyncResponse(
+        status="linked",
+        device_id=int(device["id"]),
+        asset_id=asset_id,
+        agent_id=agent_id,
     )
 
 
@@ -864,7 +919,7 @@ def _render_ticket_form(
                 option_html.append(
                     f'<option value="{_html.escape(opt_s)}"{selected}>{_html.escape(opt_s)}</option>'
                 )
-            control = f'<select {attrs}>{"".join(option_html)}</select>'
+            control = f"<select {attrs}>{''.join(option_html)}</select>"
         elif field_type == "boolean":
             checked = " checked" if value.lower() in {"yes", "true", "1", "on"} else ""
             control = f'<label class="check"><input type="checkbox" {attrs} value="Yes"{checked}> Yes</label>'
@@ -898,7 +953,7 @@ def _render_ticket_form(
 .actions{{display:flex;justify-content:flex-end;gap:12px;margin-top:24px}}button{{border:0;border-radius:10px;padding:12px 18px;font-weight:700;cursor:pointer}}.primary{{background:var(--primary);color:white}}.secondary{{background:#e5e7eb;color:#111827}}
 .alert{{border-radius:12px;padding:12px 14px;margin-bottom:18px}}.alert-error{{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}}.alert-success{{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}}
 @media(max-width:760px){{.shell{{display:block}}.nav{{padding:16px}}.main{{padding:16px}}}}
-</style></head><body><div class="shell"><aside class="nav"><div class="brand"><img src="{_html.escape(branding_icon_url, quote=True)}" alt=""><h1>{_html.escape(brand_name)}</h1></div><p>This secure tray form is authenticated by your enrolled tray device and links the request to this computer.</p></aside><header class="header"><h2>{_html.escape(title)}</h2><p>{_html.escape(intro)}</p></header><main class="main"><form class="card" method="post" action="/api/tray/ticket-form"><input type="hidden" name="token" value="{_html.escape(token)}"><input type="hidden" name="csrf" value="{_html.escape(csrf)}"><input type="hidden" id="question-meta" value="{meta_json}">{notice}{done}{''.join(fields)}<div class="actions"><button type="button" class="secondary" onclick="window.close()">Cancel</button><button class="primary" type="submit"{disabled}>Send Request</button></div></form></main></div>
+</style></head><body><div class="shell"><aside class="nav"><div class="brand"><img src="{_html.escape(branding_icon_url, quote=True)}" alt=""><h1>{_html.escape(brand_name)}</h1></div><p>This secure tray form is authenticated by your enrolled tray device and links the request to this computer.</p></aside><header class="header"><h2>{_html.escape(title)}</h2><p>{_html.escape(intro)}</p></header><main class="main"><form class="card" method="post" action="/api/tray/ticket-form"><input type="hidden" name="token" value="{_html.escape(token)}"><input type="hidden" name="csrf" value="{_html.escape(csrf)}"><input type="hidden" id="question-meta" value="{meta_json}">{notice}{done}{"".join(fields)}<div class="actions"><button type="button" class="secondary" onclick="window.close()">Cancel</button><button class="primary" type="submit"{disabled}>Send Request</button></div></form></main></div>
 <script>
 const meta=JSON.parse(document.getElementById('question-meta').value||'[]');
 function valueFor(id){{const el=document.querySelector(`[data-question-input="${{id}}"]`);if(!el)return'';if(el.type==='checkbox')return el.checked?'Yes':'No';return (el.value||'').trim();}}
@@ -2021,7 +2076,9 @@ async def admin_list_versions(
                 "rollout_start_at": (
                     rollout_start.isoformat()
                     if hasattr(rollout_start, "isoformat")
-                    else str(rollout_start) if rollout_start else None
+                    else str(rollout_start)
+                    if rollout_start
+                    else None
                 ),
                 "devices_on_version": devices_on_version,
                 "total_devices": total_devices,
