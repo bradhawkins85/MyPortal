@@ -86,6 +86,7 @@ router.add_api_route(
 )
 router.add_api_route("/staff", handlers.create_staff_member, methods=["POST"], response_class=HTMLResponse)
 router.add_api_route("/staff/{staff_id}", handlers.update_staff_member, methods=["PUT"])
+router.add_api_route("/api/staff/{staff_id}/tickets", handlers.staff_member_tickets, methods=["GET"])
 router.add_api_route(
     "/api/staff/{staff_id}/offboarding/request",
     handlers.request_staff_offboarding,

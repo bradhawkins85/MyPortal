@@ -450,6 +450,7 @@ async def list_tickets(
     limit: int | None = 50,
     offset: int = 0,
     requester_id: int | None = None,
+    requester_staff_id: int | None = None,
     cursor_updated_at: datetime | None = None,
     cursor_id: int | None = None,
 ) -> list[TicketRecord]:
@@ -460,6 +461,7 @@ async def list_tickets(
         company_id=company_id,
         assigned_user_id=assigned_user_id,
         requester_id=requester_id,
+        requester_staff_id=requester_staff_id,
         limit=limit,
         offset=offset,
     )
@@ -486,6 +488,9 @@ async def list_tickets(
     if requester_id is not None:
         where.append("requester_id = %s")
         params.append(requester_id)
+    if requester_staff_id is not None:
+        where.append("requester_staff_id = %s")
+        params.append(requester_staff_id)
     _append_ticket_search_filter(where, params, search=search)
     _append_ticket_cursor_filter(
         where,
@@ -895,6 +900,7 @@ async def count_tickets(
     assigned_user_id: int | None = None,
     search: str | None = None,
     requester_id: int | None = None,
+    requester_staff_id: int | None = None,
 ) -> int:
     where: list[str] = []
     params: list[Any] = []
@@ -919,6 +925,9 @@ async def count_tickets(
     if requester_id is not None:
         where.append("requester_id = %s")
         params.append(requester_id)
+    if requester_staff_id is not None:
+        where.append("requester_staff_id = %s")
+        params.append(requester_staff_id)
     _append_ticket_search_filter(where, params, search=search)
     where_clause = " WHERE " + " AND ".join(where) if where else ""
     row = await db.fetch_one(

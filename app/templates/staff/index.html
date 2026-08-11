@@ -245,7 +245,7 @@
               <th scope="col" data-sort="string" data-column="custom-{{ field.name }}">{{ field.display_name or field.name }}</th>
             {% endfor %}
             <th scope="col" data-sort="string" data-column="enabled" data-mobile-priority="supporting">Enabled</th>
-            {% if can_edit_staff or can_request_staff_offboarding %}
+            {% if can_edit_staff or can_request_staff_offboarding or has_admin_technician_access %}
               <th scope="col" class="table__actions" data-mobile-priority="essential">Actions</th>
             {% endif %}
           </tr>
@@ -367,7 +367,7 @@
                   {{ 'Yes' if member.enabled else 'No' }}
                 {% endif %}
               </td>
-              {% if can_edit_staff or can_request_staff_offboarding %}
+              {% if can_edit_staff or can_request_staff_offboarding or has_admin_technician_access %}
                 <td class="table__actions">
                   <details class="header-title-menu__dropdown" data-header-menu>
                     <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
@@ -378,6 +378,19 @@
                       <span class="visually-hidden">Toggle row actions menu</span>
                     </summary>
                     <ul class="header-title-menu__list" role="menu">
+                      {% if has_admin_technician_access %}
+                        <li class="header-title-menu__item" role="none">
+                          <button
+                            type="button"
+                            class="header-title-menu__link"
+                            role="menuitem"
+                            data-staff-tickets="{{ member.id }}"
+                            aria-haspopup="dialog"
+                            aria-controls="staff-tickets-modal"
+                          >Tickets</button>
+                        </li>
+                      {% endif %}
+                      {% if can_edit_staff or can_request_staff_offboarding %}
                       <li class="header-title-menu__item" role="none">
                         <button
                           type="button"
@@ -386,6 +399,7 @@
                           data-staff-edit="{{ member.id }}"
                         >{{ 'Edit' if can_edit_staff else 'Actions' }}</button>
                       </li>
+                      {% endif %}
                       {% if is_super_admin and has_m365 and manual_onedrive_export_enabled and member.email %}
                         <li class="header-title-menu__item" role="none">
                           <button
@@ -414,7 +428,7 @@
             </tr>
           {% else %}
             <tr>
-              <td colspan="{{ (10 if (can_edit_staff or can_request_staff_offboarding) else 9) + (staff_custom_field_definitions|length) }}" class="table__empty">No staff records found.</td>
+              <td colspan="{{ (10 if (can_edit_staff or can_request_staff_offboarding or has_admin_technician_access) else 9) + (staff_custom_field_definitions|length) }}" class="table__empty">No staff records found.</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -442,6 +456,29 @@
     </div>
   </section>
 </div>
+
+{% if has_admin_technician_access %}
+<div class="modal" id="staff-tickets-modal" role="dialog" aria-modal="true" aria-labelledby="staff-tickets-title" hidden>
+  <div class="modal__content modal__content--wide" role="document">
+    <button type="button" class="modal__close" data-modal-close>
+      <span class="visually-hidden">Close staff tickets modal</span>&times;
+    </button>
+    <h2 class="modal__title" id="staff-tickets-title">Tickets</h2>
+    <p class="modal__subtitle" data-staff-tickets-subtitle></p>
+    <div class="table-skeleton" data-staff-tickets-loading hidden>Loading tickets…</div>
+    <p class="alert alert--danger" data-staff-tickets-error hidden role="alert"></p>
+    <div class="table-wrapper">
+      <table class="table tickets-table" id="staff-tickets-table">
+        <thead><tr>
+          <th scope="col">ID</th><th scope="col">Subject</th><th scope="col">Status</th>
+          <th scope="col">Priority</th><th scope="col">Company</th><th scope="col">Assigned</th><th scope="col">Updated</th>
+        </tr></thead>
+        <tbody data-staff-tickets-body></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 {% if can_edit_staff %}
   <div class="modal" id="staff-add-modal" role="dialog" aria-modal="true" hidden>
