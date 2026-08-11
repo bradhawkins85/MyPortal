@@ -135,7 +135,9 @@ async def _sync_tactical_asset_custom_fields(
         field_type: str = field_def["field_type"]
         field_def_id: int = field_def["id"]
 
-        trmm_field = trmm_fields.get(field_name) or trmm_fields_lower.get(field_name.lower())
+        trmm_field = trmm_fields.get(field_name) or trmm_fields_lower.get(
+            field_name.lower()
+        )
 
         if field_type != "checkbox":
             # Non-checkbox: import value directly from matching TRMM field.
@@ -172,7 +174,9 @@ async def _sync_tactical_asset_custom_fields(
             else:
                 # No matching TRMM custom field -> check installed software.
                 if installed_software_lower is None:
-                    sw_names = await tacticalrmm.fetch_agent_installed_software(trmm_agent_id)
+                    sw_names = await tacticalrmm.fetch_agent_installed_software(
+                        trmm_agent_id
+                    )
                     installed_software_lower = {s.lower() for s in sw_names}
                 bool_val = field_name.lower() in installed_software_lower
 
@@ -243,6 +247,79 @@ async def _sync_tactical_tray_device_link(
     await tray_repo.link_device_to_asset(device_id_int, asset_id)
 
 
+async def sync_tactical_agent(
+    company_id: int, *, agent_id: str, tray_device_uid: str
+) -> int:
+    """Import and link one TRMM agent immediately after tray installation."""
+
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise ValueError(f"Company {company_id} not found")
+    device = await tray_repo.get_device_by_uid(tray_device_uid)
+    if not device or int(device.get("company_id") or 0) != int(company_id):
+        raise ValueError("Tray device does not belong to the expected company")
+
+    # In the common case the scheduled TRMM import has already created the
+    # asset and only the TrayAgentID custom-field round trip is outstanding.
+    # Link that existing asset directly, avoiding a second TRMM API request and
+    # making this endpoint useful even while TRMM's detail API is unavailable.
+    existing_asset = await assets_repo.get_asset_by_tactical_id(company_id, agent_id)
+    if existing_asset:
+        existing_asset_id = int(existing_asset["id"])
+        await tray_repo.link_device_to_asset(int(device["id"]), existing_asset_id)
+        return existing_asset_id
+
+    if not _clean_string(company.get("tacticalrmm_client_id")):
+        raise tacticalrmm.TacticalRMMConfigurationError(
+            "Company is missing a Tactical RMM mapping"
+        )
+
+    agent = await tacticalrmm.fetch_agent(agent_id)
+    details = tacticalrmm.extract_agent_details(agent)
+    expected_client_id = _clean_string(company.get("tacticalrmm_client_id"))
+    actual_client_id = _clean_string(details.get("client_id"))
+    if actual_client_id and actual_client_id != expected_client_id:
+        raise tacticalrmm.TacticalRMMAPIError(
+            "Tactical RMM agent does not belong to the tray device company"
+        )
+    asset_id = await assets_repo.upsert_asset(
+        company_id=company_id,
+        name=_clean_string(details.get("name")) or "Asset",
+        type=_clean_string(details.get("type")),
+        machine_type=_clean_string(details.get("machine_type")),
+        serial_number=_clean_string(details.get("serial_number")),
+        status=_clean_string(details.get("status")),
+        os_name=_clean_string(details.get("os_name")),
+        cpu_name=_clean_string(details.get("cpu_name")),
+        ram_gb=details.get("ram_gb"),
+        hdd_size=_clean_string(details.get("hdd_size"), max_length=255),
+        last_sync=details.get("last_sync"),
+        motherboard_manufacturer=_clean_string(details.get("motherboard_manufacturer")),
+        form_factor=_clean_string(details.get("form_factor")),
+        last_user=_clean_string(details.get("last_user")),
+        approx_age=details.get("approx_age"),
+        performance_score=details.get("performance_score"),
+        warranty_status=_clean_string(details.get("warranty_status")),
+        warranty_end_date=details.get("warranty_end_date"),
+        tactical_asset_id=agent_id,
+        match_name=True,
+    )
+    if not asset_id:
+        raise tacticalrmm.TacticalRMMAPIError("Unable to create the MyPortal asset")
+
+    await tray_repo.link_device_to_asset(int(device["id"]), asset_id)
+    try:
+        await _sync_tactical_asset_custom_fields(asset_id, agent_id, agent)
+    except Exception as exc:  # noqa: BLE001 - optional fields must not delay linking
+        log_error(
+            "Failed to sync custom fields during immediate Tactical RMM tray link",
+            asset_id=asset_id,
+            tactical_asset_id=agent_id,
+            error=str(exc),
+        )
+    return asset_id
+
+
 async def import_tactical_assets_for_company(
     company_id: int,
     *,
@@ -253,7 +330,9 @@ async def import_tactical_assets_for_company(
         raise ValueError(f"Company {company_id} not found")
     client_identifier = tactical_client_id or company.get("tacticalrmm_client_id")
     if not client_identifier:
-        raise tacticalrmm.TacticalRMMConfigurationError("Company is missing a Tactical RMM mapping")
+        raise tacticalrmm.TacticalRMMConfigurationError(
+            "Company is missing a Tactical RMM mapping"
+        )
 
     client_id = str(client_identifier).strip()
     log_info(
@@ -288,7 +367,9 @@ async def import_tactical_assets_for_company(
             ram_gb=details.get("ram_gb"),
             hdd_size=_clean_string(details.get("hdd_size"), max_length=255),
             last_sync=details.get("last_sync"),
-            motherboard_manufacturer=_clean_string(details.get("motherboard_manufacturer")),
+            motherboard_manufacturer=_clean_string(
+                details.get("motherboard_manufacturer")
+            ),
             form_factor=_clean_string(details.get("form_factor")),
             last_user=_clean_string(details.get("last_user")),
             approx_age=details.get("approx_age"),
@@ -301,7 +382,11 @@ async def import_tactical_assets_for_company(
         if asset_id and tactical_id:
             try:
                 await _sync_tactical_asset_custom_fields(asset_id, tactical_id, agent)
-            except (tacticalrmm.TacticalRMMAPIError, tacticalrmm.TacticalRMMConfigurationError, OSError) as exc:
+            except (
+                tacticalrmm.TacticalRMMAPIError,
+                tacticalrmm.TacticalRMMConfigurationError,
+                OSError,
+            ) as exc:
                 log_error(
                     "Failed to sync custom fields for Tactical RMM asset",
                     asset_id=asset_id,
@@ -359,7 +444,9 @@ async def import_all_tactical_assets() -> dict[str, Any]:
         if not client_identifier:
             company_name = _clean_string(company.get("name"))
             if company_name:
-                matched_client_id = await company_id_lookup._lookup_tactical_client_id(company_name)
+                matched_client_id = await company_id_lookup._lookup_tactical_client_id(
+                    company_name
+                )
                 if matched_client_id:
                     client_identifier = matched_client_id
                     await company_repo.update_company(
@@ -388,9 +475,7 @@ async def import_all_tactical_assets() -> dict[str, Any]:
                 company_id=company_id,
                 error=str(exc),
             )
-            summary["skipped"].append(
-                {"company_id": company_id, "reason": str(exc)}
-            )
+            summary["skipped"].append({"company_id": company_id, "reason": str(exc)})
             continue
         except tacticalrmm.TacticalRMMAPIError as exc:
             log_error(
@@ -398,9 +483,7 @@ async def import_all_tactical_assets() -> dict[str, Any]:
                 company_id=company_id,
                 error=str(exc),
             )
-            summary["skipped"].append(
-                {"company_id": company_id, "reason": str(exc)}
-            )
+            summary["skipped"].append({"company_id": company_id, "reason": str(exc)})
             continue
 
         summary["companies"][company_id] = {"processed": processed}

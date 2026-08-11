@@ -32,6 +32,20 @@ class TrayEnrolResponse(BaseModel):
     poll_interval_seconds: int = 30
 
 
+class TrayTRMMSyncRequest(BaseModel):
+    """Identifiers posted by a Tactical RMM agent-side sync script."""
+
+    agent_id: str = Field(min_length=1, max_length=255)
+    tray_agent_id: str = Field(min_length=1, max_length=255)
+
+
+class TrayTRMMSyncResponse(BaseModel):
+    status: str
+    device_id: int
+    asset_id: int
+    agent_id: str
+
+
 class TrayHeartbeatRequest(BaseModel):
     console_user: Optional[str] = Field(default=None, max_length=255)
     agent_version: Optional[str] = Field(default=None, max_length=32)
