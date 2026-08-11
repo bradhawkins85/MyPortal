@@ -34,6 +34,7 @@ from app.core.database import db
 from app.repositories import companies as company_repo
 from app.repositories import integration_modules as module_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
+from app.repositories import tickets as tickets_repo
 from app.repositories import webhook_events as webhook_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import call_recordings as call_recordings_service
@@ -1133,6 +1134,14 @@ _ALWAYS_ON_TICKET_ACTION_MODULES: tuple[dict[str, Any], ...] = (
         "name": "Update Ticket Description",
         "description": "Change the description field of an existing ticket.",
         "icon": "📝",
+        "settings": {},
+        "enabled": True,
+    },
+    {
+        "slug": "ai-rename-ticket",
+        "name": "AI Rename Ticket",
+        "description": "Use the current subject and initial problem description to create a more descriptive 3 to 12 word ticket subject.",
+        "icon": "✨",
         "settings": {},
         "enabled": True,
     },
@@ -2382,6 +2391,16 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    "ai-rename-ticket": {
+        "fields": [
+            {
+                "name": "ticket_id",
+                "label": "Ticket ID",
+                "type": "string",
+                "placeholder": "{{ticket.id}}",
+            },
+        ],
+    },
     "reprocess-ai": {
         "fields": [
             {
@@ -2650,6 +2669,7 @@ async def trigger_module(
         "plausible": _validate_plausible,
         "update-ticket": _invoke_update_ticket,
         "update-ticket-description": _invoke_update_ticket_description,
+        "ai-rename-ticket": _invoke_ai_rename_ticket,
         "reprocess-ai": _invoke_reprocess_ai,
         "add-ticket-reply": _invoke_add_ticket_reply,
         "smart-attachment-removal": _invoke_smart_attachment_removal,
@@ -5686,6 +5706,119 @@ async def _invoke_update_ticket_description(
             "updated_fields": ["description"],
         },
     )
+
+
+def _extract_ai_ticket_subject(payload: Any) -> str | None:
+    """Return a clean AI-generated subject only when it is 3 to 12 words."""
+
+    if isinstance(payload, Mapping):
+        candidate = payload.get("subject")
+        if candidate is None:
+            candidate = (
+                payload.get("response") or payload.get("message") or payload.get("text")
+            )
+    else:
+        candidate = payload
+    if not isinstance(candidate, str):
+        return None
+    text = candidate.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE)
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        parsed = None
+    if isinstance(parsed, Mapping):
+        text = str(parsed.get("subject") or "").strip()
+    elif isinstance(parsed, str):
+        text = parsed.strip()
+    text = re.sub(r"^(?:subject|title)\s*:\s*", "", text, flags=re.IGNORECASE)
+    text = text.strip().strip("\"'`").strip()
+    words = text.split()
+    return text if 3 <= len(words) <= 12 else None
+
+
+async def _invoke_ai_rename_ticket(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Generate and persist a concise, descriptive ticket subject with AI."""
+
+    context = (
+        payload.get("context") if isinstance(payload.get("context"), Mapping) else {}
+    )
+    context_ticket = (
+        context.get("ticket") if isinstance(context.get("ticket"), Mapping) else {}
+    )
+    raw_ticket_id = (
+        payload.get("ticket_id") or context_ticket.get("id") or context.get("ticket_id")
+    )
+    try:
+        ticket_id = int(raw_ticket_id)
+    except (TypeError, ValueError):
+        raise ValueError("ticket_id is required and must be a valid integer")
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise ValueError(f"Ticket {ticket_id} not found")
+
+    current_subject = str(ticket.get("subject") or "").strip()
+    initial_description = str(ticket.get("description") or "").strip()
+    if not current_subject and not initial_description:
+        return {
+            "status": "skipped",
+            "reason": "Ticket has no subject or description",
+            "ticket_id": ticket_id,
+        }
+
+    ollama_module = await module_repo.get_module("ollama")
+    if not ollama_module or not ollama_module.get("enabled"):
+        raise ValueError("Ollama AI module is not configured or enabled")
+    ollama_settings = _resolve_module_settings_for_runtime("ollama", ollama_module)
+    prompt = (
+        "Create a more descriptive support ticket subject using the current subject "
+        "and initial problem description below. Return only the new subject, with no "
+        "quotes, label, explanation, analysis, or punctuation-only words. The subject must be "
+        "between 3 and 12 words long.\n\n"
+        f"Current subject: {current_subject}\n"
+        f"Initial problem description: {initial_description}"
+    )
+    ai_result = await _invoke_ollama(
+        ollama_settings,
+        # Reasoning-capable llama.cpp models consume completion tokens while
+        # thinking before placing the final answer in message.content. Sixty
+        # tokens routinely ended with finish_reason="length" and empty content,
+        # even though the HTTP request itself succeeded.
+        {"prompt": prompt, "temperature": 0.2, "max_tokens": 512},
+        event_future=event_future,
+    )
+    if str(ai_result.get("status") or "").lower() != "succeeded":
+        return {**ai_result, "ticket_id": ticket_id}
+    new_subject = _extract_ai_ticket_subject(ai_result.get("response"))
+    if not new_subject:
+        return {
+            **ai_result,
+            "status": "error",
+            "error": (
+                "AI returned no usable subject. The generated subject must contain "
+                "between 3 and 12 words."
+            ),
+            "ticket_id": ticket_id,
+        }
+
+    await tickets_repo.update_ticket(ticket_id, subject=new_subject)
+    await tickets_service.emit_ticket_updated_event(
+        ticket_id, actor_type="automation", trigger_automations=False
+    )
+    return {
+        **ai_result,
+        "ticket_id": ticket_id,
+        "ticket_number": ticket.get("ticket_number"),
+        "subject": new_subject,
+        "previous_values": {"subject": current_subject},
+        "updated_fields": ["subject"],
+    }
 
 
 async def _invoke_reprocess_ai(
