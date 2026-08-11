@@ -298,6 +298,8 @@ async def sync_trmm_agent(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except tacticalrmm_service.TacticalRMMAPIError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     log_info(
         "Tactical RMM agent pushed tray link",

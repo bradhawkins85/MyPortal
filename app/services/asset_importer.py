@@ -255,6 +255,20 @@ async def sync_tactical_agent(
     company = await company_repo.get_company_by_id(company_id)
     if not company:
         raise ValueError(f"Company {company_id} not found")
+    device = await tray_repo.get_device_by_uid(tray_device_uid)
+    if not device or int(device.get("company_id") or 0) != int(company_id):
+        raise ValueError("Tray device does not belong to the expected company")
+
+    # In the common case the scheduled TRMM import has already created the
+    # asset and only the TrayAgentID custom-field round trip is outstanding.
+    # Link that existing asset directly, avoiding a second TRMM API request and
+    # making this endpoint useful even while TRMM's detail API is unavailable.
+    existing_asset = await assets_repo.get_asset_by_tactical_id(company_id, agent_id)
+    if existing_asset:
+        existing_asset_id = int(existing_asset["id"])
+        await tray_repo.link_device_to_asset(int(device["id"]), existing_asset_id)
+        return existing_asset_id
+
     if not _clean_string(company.get("tacticalrmm_client_id")):
         raise tacticalrmm.TacticalRMMConfigurationError(
             "Company is missing a Tactical RMM mapping"
@@ -293,9 +307,6 @@ async def sync_tactical_agent(
     if not asset_id:
         raise tacticalrmm.TacticalRMMAPIError("Unable to create the MyPortal asset")
 
-    device = await tray_repo.get_device_by_uid(tray_device_uid)
-    if not device or int(device.get("company_id") or 0) != int(company_id):
-        raise ValueError("Tray device does not belong to the expected company")
     await tray_repo.link_device_to_asset(int(device["id"]), asset_id)
     try:
         await _sync_tactical_asset_custom_fields(asset_id, agent_id, agent)

@@ -31,9 +31,24 @@ if (-not $trayAgentID) {
 }
 
 $body = @{ agent_id = $AgentID; tray_agent_id = $trayAgentID } | ConvertTo-Json
-$result = Invoke-RestMethod -Method Post `
-    -Uri "$($PortalURL.TrimEnd('/'))/api/tray/trmm-sync" `
-    -Headers @{ 'X-API-Key' = $APIKey } `
-    -ContentType 'application/json' -Body $body
+try {
+    $result = Invoke-RestMethod -Method Post `
+        -Uri "$($PortalURL.TrimEnd('/'))/api/tray/trmm-sync" `
+        -Headers @{ 'X-API-Key' = $APIKey } `
+        -ContentType 'application/json' -Body $body
+} catch {
+    $responseBody = $null
+    if ($_.Exception.Response) {
+        try {
+            $stream = $_.Exception.Response.GetResponseStream()
+            $reader = [System.IO.StreamReader]::new($stream)
+            $responseBody = $reader.ReadToEnd()
+        } catch { }
+    }
+    if (-not $responseBody -and $_.ErrorDetails.Message) {
+        $responseBody = $_.ErrorDetails.Message
+    }
+    throw "MyPortal TRMM sync failed: $responseBody"
+}
 
 Write-Host "Linked TRMM agent $AgentID to MyPortal asset $($result.asset_id) and tray device $trayAgentID."

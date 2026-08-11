@@ -23,6 +23,11 @@ def test_sync_tactical_agent_imports_and_links_one_agent(monkeypatch):
         upsert = AsyncMock(return_value=42)
         monkeypatch.setattr(asset_importer.assets_repo, "upsert_asset", upsert)
         monkeypatch.setattr(
+            asset_importer.assets_repo,
+            "get_asset_by_tactical_id",
+            AsyncMock(return_value=None),
+        )
+        monkeypatch.setattr(
             asset_importer.tray_repo,
             "get_device_by_uid",
             AsyncMock(return_value={"id": 9, "company_id": 7}),
@@ -39,6 +44,39 @@ def test_sync_tactical_agent_imports_and_links_one_agent(monkeypatch):
 
         assert result == 42
         assert upsert.await_args.kwargs["tactical_asset_id"] == "agent-1"
+        link.assert_awaited_once_with(9, 42)
+
+    asyncio.run(run())
+
+
+def test_sync_tactical_agent_links_existing_asset_without_trmm_request(monkeypatch):
+    async def run():
+        monkeypatch.setattr(
+            asset_importer.company_repo,
+            "get_company_by_id",
+            AsyncMock(return_value={"id": 7, "tacticalrmm_client_id": "client-7"}),
+        )
+        monkeypatch.setattr(
+            asset_importer.tray_repo,
+            "get_device_by_uid",
+            AsyncMock(return_value={"id": 9, "company_id": 7}),
+        )
+        monkeypatch.setattr(
+            asset_importer.assets_repo,
+            "get_asset_by_tactical_id",
+            AsyncMock(return_value={"id": 42}),
+        )
+        fetch_agent = AsyncMock()
+        monkeypatch.setattr(tacticalrmm, "fetch_agent", fetch_agent)
+        link = AsyncMock()
+        monkeypatch.setattr(asset_importer.tray_repo, "link_device_to_asset", link)
+
+        result = await asset_importer.sync_tactical_agent(
+            7, agent_id="agent-1", tray_device_uid="tray-1"
+        )
+
+        assert result == 42
+        fetch_agent.assert_not_awaited()
         link.assert_awaited_once_with(9, 42)
 
     asyncio.run(run())
