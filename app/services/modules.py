@@ -12,7 +12,7 @@ from defusedxml import ElementTree as DefusedET
 from defusedxml.common import DefusedXmlException
 from html import unescape
 from html.parser import HTMLParser
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import asyncio
 from pathlib import Path
@@ -639,6 +639,17 @@ def _parse_nullable_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _coerce_boolean(value: Any) -> bool:
+    """Coerce automation JSON/form-style values to a predictable boolean."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().casefold() in {"1", "true", "yes", "on", "enabled"}
 
 
 def _normalise_tool_names(value: Any) -> list[str]:
@@ -2368,11 +2379,24 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
     "update-ticket": {
         "fields": [
             {"name": "ticket_id", "label": "Ticket ID", "type": "string"},
+            {"name": "subject", "label": "Subject", "type": "string"},
+            {"name": "description", "label": "Description", "type": "string"},
             {"name": "status", "label": "Status", "type": "string"},
             {"name": "priority", "label": "Priority", "type": "string"},
             {"name": "assigned_user_id", "label": "Assigned user ID", "type": "string"},
             {"name": "requester_id", "label": "Requester ID", "type": "string"},
+            {"name": "requester_staff_id", "label": "Requester staff ID", "type": "string"},
+            {"name": "company_id", "label": "Company ID", "type": "string"},
             {"name": "category", "label": "Category", "type": "string"},
+            {"name": "external_reference", "label": "External reference", "type": "string"},
+            {"name": "review_date", "label": "Review date (YYYY-MM-DD)", "type": "string"},
+            {"name": "module_slug", "label": "Module slug", "type": "string"},
+            {"name": "ticket_number", "label": "Ticket number", "type": "string"},
+            {"name": "xero_invoice_number", "label": "Xero invoice number", "type": "string"},
+            {"name": "shipment_tracking_url", "label": "Shipping tracking URL", "type": "string"},
+            {"name": "shipment_poll_interval_seconds", "label": "Shipment poll interval (seconds)", "type": "integer"},
+            {"name": "shipment_monitoring_enabled", "label": "Shipment monitoring enabled", "type": "boolean"},
+            {"name": "shipment_public_comments_enabled", "label": "Shipment public comments enabled", "type": "boolean"},
         ],
     },
     "update-ticket-description": {
@@ -5420,8 +5444,9 @@ async def _invoke_update_ticket(
 ) -> dict[str, Any]:
     """Update ticket fields from automation payload.
 
-    Accepts a JSON payload with ticket_id and any combination of:
-    status, priority, assigned_user_id, requester_id, company_id, category.
+    Accepts a JSON payload with ``ticket_id`` and any editable ticket field.  Shipment
+    tracking settings are handled as ticket fields even though they are persisted in
+    the related shipment-watch record.
 
     The ticket_id can be provided directly or via context.ticket.id or context.ticket_id.
     """
@@ -5452,7 +5477,9 @@ async def _invoke_update_ticket(
     if not existing:
         raise ValueError(f"Ticket {ticket_id_int} not found")
 
-    # Build update dict from allowed fields
+    # Build update dict from explicitly supported columns.  Do not pass arbitrary
+    # payload keys to the repository: update_ticket constructs column assignments and
+    # therefore relies on this boundary to prevent SQL identifier injection.
     update_fields: dict[str, Any] = {}
 
     # Status
@@ -5514,7 +5541,56 @@ async def _invoke_update_ticket(
         else:
             update_fields["category"] = str(category_value).strip() or None
 
-    if not update_fields:
+    nullable_text_fields = (
+        "description",
+        "module_slug",
+        "external_reference",
+        "ticket_number",
+        "xero_invoice_number",
+    )
+    for field in nullable_text_fields:
+        if field in payload:
+            value = payload.get(field)
+            update_fields[field] = None if value is None else str(value).strip() or None
+
+    if "subject" in payload:
+        subject = str(payload.get("subject") or "").strip()
+        if not subject:
+            raise ValueError("subject cannot be empty")
+        update_fields["subject"] = subject
+
+    for field in ("requester_staff_id",):
+        if field in payload:
+            value = payload.get(field)
+            parsed = _parse_nullable_int(value)
+            if value is None or value == "" or str(value).lower() == "null":
+                update_fields[field] = None
+            elif parsed is None:
+                raise ValueError(f"{field} must be a valid integer or null")
+            else:
+                update_fields[field] = parsed
+
+    if "review_date" in payload:
+        raw_review_date = payload.get("review_date")
+        if raw_review_date is None or str(raw_review_date).strip() == "":
+            update_fields["review_date"] = None
+        else:
+            try:
+                update_fields["review_date"] = date.fromisoformat(
+                    str(raw_review_date).strip()[:10]
+                )
+            except ValueError as exc:
+                raise ValueError("review_date must be a valid ISO date (YYYY-MM-DD)") from exc
+
+    shipment_keys = {
+        "shipment_tracking_url",
+        "shipment_poll_interval_seconds",
+        "shipment_monitoring_enabled",
+        "shipment_public_comments_enabled",
+    }
+    shipment_requested = any(key in payload for key in shipment_keys)
+
+    if not update_fields and not shipment_requested:
         return {
             "status": "skipped",
             "reason": "No update fields provided",
@@ -5538,9 +5614,51 @@ async def _invoke_update_ticket(
 
     attempt_number = 1
     try:
-        updated_ticket = await tickets_repo.update_ticket(
-            ticket_id_int, **update_fields
-        )
+        if update_fields:
+            await tickets_repo.update_ticket(ticket_id_int, **update_fields)
+
+        shipment_updated_fields: list[str] = []
+        if shipment_requested:
+            from app.services import ticket_shipment_tracking as shipment_tracking
+
+            current_watch = await shipment_tracking.get_watch_for_ticket(ticket_id_int)
+            tracking_url = payload.get("shipment_tracking_url")
+            if tracking_url is None:
+                tracking_url = (current_watch or {}).get("tracking_url")
+            tracking_url = str(tracking_url or "").strip()
+            if not tracking_url:
+                raise ValueError(
+                    "shipment_tracking_url is required when the ticket has no shipment watch"
+                )
+
+            raw_interval = payload.get(
+                "shipment_poll_interval_seconds",
+                (current_watch or {}).get("poll_interval_seconds", 900),
+            )
+            try:
+                poll_interval = max(0, min(86_400, int(raw_interval)))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "shipment_poll_interval_seconds must be a whole number"
+                ) from exc
+            active = payload.get(
+                "shipment_monitoring_enabled",
+                (current_watch or {}).get("active", poll_interval > 0),
+            )
+            public_comments = payload.get(
+                "shipment_public_comments_enabled",
+                (current_watch or {}).get("public_comments_enabled", True),
+            )
+            await shipment_tracking.upsert_watch(
+                ticket_id=ticket_id_int,
+                tracking_url=tracking_url,
+                poll_interval_seconds=poll_interval,
+                active=_coerce_boolean(active),
+                public_comments_enabled=_coerce_boolean(public_comments),
+            )
+            shipment_updated_fields = [
+                key for key in shipment_keys if key in payload
+            ]
 
         # Emit ticket updated event
         await tickets_service.emit_ticket_updated_event(
@@ -5567,11 +5685,25 @@ async def _invoke_update_ticket(
             extra={"ticket_id": ticket_id_int},
         )
 
+    updated_field_names = [*update_fields.keys(), *shipment_updated_fields]
     previous_values = {field: existing.get(field) for field in update_fields.keys()}
+    if shipment_requested:
+        shipment_previous_keys = {
+            "shipment_tracking_url": "tracking_url",
+            "shipment_poll_interval_seconds": "poll_interval_seconds",
+            "shipment_monitoring_enabled": "active",
+            "shipment_public_comments_enabled": "public_comments_enabled",
+        }
+        previous_values.update(
+            {
+                field: (current_watch or {}).get(shipment_previous_keys[field])
+                for field in shipment_updated_fields
+            }
+        )
     response_body = json.dumps(
         {
             "ticket_id": ticket_id_int,
-            "updated_fields": list(update_fields.keys()),
+            "updated_fields": updated_field_names,
             "previous_values": previous_values,
         }
     )
@@ -5585,7 +5717,7 @@ async def _invoke_update_ticket(
         updated_event,
         extra={
             "ticket_id": ticket_id_int,
-            "updated_fields": list(update_fields.keys()),
+            "updated_fields": updated_field_names,
             "previous_values": previous_values,
         },
     )
