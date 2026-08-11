@@ -157,6 +157,83 @@ async def test_invoke_update_ticket_no_fields_skips(monkeypatch, mock_webhook_mo
 
 
 @pytest.mark.asyncio
+async def test_invoke_update_ticket_supports_extended_ticket_fields(
+    monkeypatch, mock_webhook_monitor, mock_record_success
+):
+    """User-facing ticket fields are parsed and passed to the repository."""
+    from app.repositories import tickets as tickets_repo
+    from app.services import tickets as tickets_service
+
+    monkeypatch.setattr(
+        tickets_repo,
+        "get_ticket",
+        AsyncMock(return_value={"id": 12, "external_reference": "OLD"}),
+    )
+    update_mock = AsyncMock(return_value={"id": 12})
+    monkeypatch.setattr(tickets_repo, "update_ticket", update_mock)
+    monkeypatch.setattr(tickets_service, "emit_ticket_updated_event", AsyncMock())
+
+    result = await modules._invoke_update_ticket(
+        {},
+        {
+            "ticket_id": 12,
+            "external_reference": " PO-456 ",
+            "review_date": "2026-09-15",
+            "category": "Shipping",
+        },
+        event_future=None,
+    )
+
+    assert result["status"] == "succeeded"
+    update_mock.assert_awaited_once_with(
+        12,
+        category="Shipping",
+        external_reference="PO-456",
+        review_date=modules.date(2026, 9, 15),
+    )
+
+
+@pytest.mark.asyncio
+async def test_invoke_update_ticket_supports_shipment_fields(
+    monkeypatch, mock_webhook_monitor, mock_record_success
+):
+    """Shipment URL and polling controls update the related shipment watch."""
+    from app.repositories import tickets as tickets_repo
+    from app.services import ticket_shipment_tracking, tickets as tickets_service
+
+    monkeypatch.setattr(tickets_repo, "get_ticket", AsyncMock(return_value={"id": 31}))
+    update_mock = AsyncMock()
+    monkeypatch.setattr(tickets_repo, "update_ticket", update_mock)
+    monkeypatch.setattr(tickets_service, "emit_ticket_updated_event", AsyncMock())
+    monkeypatch.setattr(ticket_shipment_tracking, "get_watch_for_ticket", AsyncMock(return_value=None))
+    upsert_mock = AsyncMock(return_value={"ticket_id": 31})
+    monkeypatch.setattr(ticket_shipment_tracking, "upsert_watch", upsert_mock)
+
+    result = await modules._invoke_update_ticket(
+        {},
+        {
+            "ticket_id": 31,
+            "shipment_tracking_url": "https://auspost.com.au/track/ABC",
+            "shipment_poll_interval_seconds": "1200",
+            "shipment_monitoring_enabled": "true",
+            "shipment_public_comments_enabled": False,
+        },
+        event_future=None,
+    )
+
+    assert result["status"] == "succeeded"
+    update_mock.assert_not_awaited()
+    upsert_mock.assert_awaited_once_with(
+        ticket_id=31,
+        tracking_url="https://auspost.com.au/track/ABC",
+        poll_interval_seconds=1200,
+        active=True,
+        public_comments_enabled=False,
+    )
+    assert "shipment_poll_interval_seconds" in result["updated_fields"]
+
+
+@pytest.mark.asyncio
 async def test_invoke_update_ticket_missing_ticket_id():
     """Test that update-ticket raises error when ticket_id is missing."""
     with pytest.raises(ValueError, match="ticket_id is required"):
