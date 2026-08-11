@@ -5779,23 +5779,33 @@ async def _invoke_ai_rename_ticket(
     prompt = (
         "Create a more descriptive support ticket subject using the current subject "
         "and initial problem description below. Return only the new subject, with no "
-        "quotes, label, explanation, or punctuation-only words. The subject must be "
+        "quotes, label, explanation, analysis, or punctuation-only words. The subject must be "
         "between 3 and 12 words long.\n\n"
         f"Current subject: {current_subject}\n"
         f"Initial problem description: {initial_description}"
     )
     ai_result = await _invoke_ollama(
         ollama_settings,
-        {"prompt": prompt, "temperature": 0.2, "max_tokens": 60},
+        # Reasoning-capable llama.cpp models consume completion tokens while
+        # thinking before placing the final answer in message.content. Sixty
+        # tokens routinely ended with finish_reason="length" and empty content,
+        # even though the HTTP request itself succeeded.
+        {"prompt": prompt, "temperature": 0.2, "max_tokens": 512},
         event_future=event_future,
     )
     if str(ai_result.get("status") or "").lower() != "succeeded":
         return {**ai_result, "ticket_id": ticket_id}
     new_subject = _extract_ai_ticket_subject(ai_result.get("response"))
     if not new_subject:
-        raise ValueError(
-            "AI returned a subject outside the required 3 to 12 word range"
-        )
+        return {
+            **ai_result,
+            "status": "error",
+            "error": (
+                "AI returned no usable subject. The generated subject must contain "
+                "between 3 and 12 words."
+            ),
+            "ticket_id": ticket_id,
+        }
 
     await tickets_repo.update_ticket(ticket_id, subject=new_subject)
     await tickets_service.emit_ticket_updated_event(

@@ -71,6 +71,7 @@ def test_ai_rename_ticket_uses_subject_and_initial_description(monkeypatch):
     prompt = invoke_ai.await_args.args[1]["prompt"]
     assert "Printer issue" in prompt
     assert ticket["description"] in prompt
+    assert invoke_ai.await_args.args[1]["max_tokens"] == 512
     update.assert_awaited_once_with(
         42, subject="Upstairs Printer Jams During Duplex Printing"
     )
@@ -80,7 +81,7 @@ def test_ai_rename_ticket_uses_subject_and_initial_description(monkeypatch):
     assert result["previous_values"] == {"subject": "Printer issue"}
 
 
-def test_ai_rename_ticket_rejects_invalid_ai_subject(monkeypatch):
+def test_ai_rename_ticket_reports_invalid_ai_subject_without_masking_error(monkeypatch):
     monkeypatch.setattr(
         modules.tickets_repo,
         "get_ticket",
@@ -103,6 +104,8 @@ def test_ai_rename_ticket_rejects_invalid_ai_subject(monkeypatch):
     update = AsyncMock()
     monkeypatch.setattr(modules.tickets_repo, "update_ticket", update)
 
-    with pytest.raises(ValueError, match="3 to 12 word"):
-        asyncio.run(modules._invoke_ai_rename_ticket({}, {"ticket_id": 7}))
+    result = asyncio.run(modules._invoke_ai_rename_ticket({}, {"ticket_id": 7}))
+
+    assert result["status"] == "error"
+    assert "between 3 and 12 words" in result["error"]
     update.assert_not_awaited()
