@@ -436,6 +436,7 @@
     const editIdField = getField('edit-staff-id');
     const editCustomFieldsGrid = getField('edit-custom-fields-grid');
     const offboardingModal = document.getElementById('staff-offboarding-modal');
+    const ticketsModal = document.getElementById('staff-tickets-modal');
     const offboardingForm = document.getElementById('staff-offboarding-form');
     const offboardingStaffIdField = getField('offboarding-staff-id');
     const offboardingDateField = getField('offboarding-date');
@@ -481,6 +482,75 @@
     bindModalDismissal(editModal);
     bindModalDismissal(addModal);
     bindModalDismissal(offboardingModal);
+    bindModalDismissal(ticketsModal);
+
+    const ticketsBody = ticketsModal?.querySelector('[data-staff-tickets-body]');
+    const ticketsSubtitle = ticketsModal?.querySelector('[data-staff-tickets-subtitle]');
+    const ticketsLoading = ticketsModal?.querySelector('[data-staff-tickets-loading]');
+    const ticketsError = ticketsModal?.querySelector('[data-staff-tickets-error]');
+
+    function ticketCell(row, label, value) {
+      const cell = document.createElement('td');
+      cell.dataset.label = label;
+      cell.textContent = value == null || value === '' ? '—' : String(value);
+      row.appendChild(cell);
+      return cell;
+    }
+
+    container.querySelectorAll('[data-staff-tickets]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const staffId = button.getAttribute('data-staff-tickets');
+        if (!staffId || !ticketsModal || !ticketsBody) return;
+        ticketsBody.replaceChildren();
+        if (ticketsSubtitle) ticketsSubtitle.textContent = '';
+        if (ticketsError) ticketsError.hidden = true;
+        if (ticketsLoading) ticketsLoading.hidden = false;
+        openModal(ticketsModal);
+        try {
+          const payload = await requestJson(`/api/staff/${encodeURIComponent(staffId)}/tickets`, {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+          });
+          if (ticketsSubtitle) ticketsSubtitle.textContent = `Tickets under ${payload.staffName}`;
+          const tickets = Array.isArray(payload.tickets) ? payload.tickets : [];
+          if (!tickets.length) {
+            const row = document.createElement('tr');
+            const cell = ticketCell(row, '', 'No tickets found for this staff member.');
+            cell.colSpan = 7;
+            cell.className = 'table__empty';
+            ticketsBody.appendChild(row);
+          }
+          tickets.forEach((ticket) => {
+            const row = document.createElement('tr');
+            ticketCell(row, 'ID', ticket.id);
+            const subjectCell = document.createElement('td');
+            subjectCell.dataset.label = 'Subject';
+            const link = document.createElement('a');
+            link.href = `/admin/tickets/${encodeURIComponent(ticket.id)}`;
+            link.textContent = ticket.subject || 'Untitled ticket';
+            subjectCell.appendChild(link);
+            row.appendChild(subjectCell);
+            ticketCell(row, 'Status', ticket.status);
+            ticketCell(row, 'Priority', ticket.priority);
+            ticketCell(row, 'Company', ticket.company);
+            ticketCell(row, 'Assigned', ticket.assigned);
+            const updatedCell = ticketCell(row, 'Updated', '—');
+            if (ticket.updatedAt) {
+              updatedCell.textContent = new Date(ticket.updatedAt).toLocaleString();
+              updatedCell.dataset.value = ticket.updatedAt;
+            }
+            ticketsBody.appendChild(row);
+          });
+        } catch (error) {
+          if (ticketsError) {
+            ticketsError.textContent = `Unable to load tickets: ${error.message}`;
+            ticketsError.hidden = false;
+          }
+        } finally {
+          if (ticketsLoading) ticketsLoading.hidden = true;
+        }
+      });
+    });
 
     function resetAddStaffForm() {
       if (!addForm) {

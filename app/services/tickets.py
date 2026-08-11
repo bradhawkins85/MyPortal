@@ -1877,6 +1877,7 @@ async def load_dashboard_state(
     assigned_user_id: int | None = None,
     search: str | None = None,
     requester_id: int | None = None,
+    requester_staff_id: int | None = None,
     limit: int | None = 200,
     include_reference_data: bool = True,
 ) -> TicketDashboardState:
@@ -1889,6 +1890,7 @@ async def load_dashboard_state(
         assigned_user_id=assigned_user_id,
         search=search,
         requester_id=requester_id,
+        requester_staff_id=requester_staff_id,
         limit=limit,
     )
     status_definitions = await list_status_definitions()
@@ -1900,6 +1902,7 @@ async def load_dashboard_state(
         assigned_user_id=assigned_user_id,
         search=search,
         requester_id=requester_id,
+        requester_staff_id=requester_staff_id,
     )
 
     status_counts: Counter[str] = Counter()

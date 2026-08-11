@@ -388,6 +388,7 @@ async def staff_page(
     is_super_admin = bool(user.get("is_super_admin"))
     is_admin = is_super_admin or bool(membership and membership.get("is_admin"))
     is_helpdesk_technician = await main_module._is_helpdesk_technician(user, request)
+    has_admin_technician_access = await main_module._has_admin_technician_access(user, request)
     membership_data = membership or {}
     raw_staff_menu_access = main_module.normalize_menu_permissions(
         membership_data.get("menu_permissions")
@@ -712,6 +713,7 @@ async def staff_page(
         "is_super_admin": is_super_admin,
         "is_admin": is_admin,
         "is_helpdesk_technician": is_helpdesk_technician,
+        "has_admin_technician_access": has_admin_technician_access,
         "staff_permission": staff_permission,
         "can_edit_staff": can_edit_staff,
         "can_request_staff_offboarding": can_request_staff_offboarding,
@@ -742,6 +744,54 @@ async def staff_page(
         ),
     }
     return await _render_template("staff/index.html", request, user, extra=extra)
+
+
+async def staff_member_tickets(staff_id: int, request: Request) -> JSONResponse:
+    """Return tickets requested by one staff member for the technician modal."""
+    user, redirect = await main_module._require_authenticated_user(request)
+    if redirect or not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if not await main_module._has_admin_technician_access(user, request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Technician access required")
+
+    company_id = user.get("company_id")
+    staff_member = await staff_repo.get_staff_by_id(staff_id)
+    if not staff_member or company_id is None or int(staff_member.get("company_id") or 0) != int(company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staff member not found")
+
+    dashboard = await tickets_service.load_dashboard_state(
+        company_id=int(company_id),
+        requester_staff_id=staff_id,
+        limit=None,
+        include_reference_data=False,
+    )
+    status_labels = {
+        definition.tech_status: definition.tech_label
+        for definition in dashboard.status_definitions
+    }
+    rows = []
+    for ticket in dashboard.tickets:
+        assigned = dashboard.user_lookup.get(int(ticket.get("assigned_user_id") or 0), {})
+        assigned_name = " ".join(
+            str(assigned.get(key) or "").strip() for key in ("first_name", "last_name")
+        ).strip()
+        company = dashboard.company_lookup.get(int(ticket.get("company_id") or 0), {})
+        ticket_status = str(ticket.get("status") or "open")
+        rows.append(
+            {
+                "id": ticket.get("id"),
+                "subject": ticket.get("subject") or "Untitled ticket",
+                "status": status_labels.get(ticket_status, ticket_status.replace("_", " ").title()),
+                "priority": ticket.get("priority") or "normal",
+                "company": company.get("name") or ticket.get("company_id") or "—",
+                "assigned": assigned_name or assigned.get("email") or "—",
+                "updatedAt": ticket.get("updated_at"),
+            }
+        )
+    staff_name = " ".join(
+        str(staff_member.get(key) or "").strip() for key in ("first_name", "last_name")
+    ).strip()
+    return JSONResponse({"staffName": staff_name or staff_member.get("email") or f"Staff {staff_id}", "tickets": _serialise_for_json(rows)})
 
 
 _WORKFLOW_POLICY_FORM_SCHEMA: dict[str, Any] = {
