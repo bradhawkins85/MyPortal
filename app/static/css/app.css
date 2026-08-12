@@ -5560,6 +5560,11 @@ dialog.modal:not([open]) {
     grid-template-columns: minmax(280px, 320px) minmax(360px, 1fr) minmax(0, 1fr);
   }
 
+  /* Keep reference panels compact so replies and conversation remain the focus. */
+  .management__body--ticket-detail-admin {
+    grid-template-columns: minmax(280px, 320px) minmax(360px, 3fr) minmax(0, 7fr);
+  }
+
   .management__body--ticket-detail-two-column {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
