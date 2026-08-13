@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import unquote
 
@@ -106,6 +107,27 @@ def test_build_filter_context_empty_recipients():
     assert context["bcc"] == []
     assert context["is_unread"] is False
     assert context["is_read"] is True
+
+
+def test_message_changed_since_accepts_read_message_moved_after_last_sync():
+    """A recent Graph modification makes a moved, already-read message eligible."""
+    last_sync = datetime(2026, 8, 13, 9, 0, tzinfo=timezone.utc)
+
+    assert m365_mail._message_changed_since(
+        {"isRead": True, "lastModifiedDateTime": "2026-08-13T09:01:00Z"},
+        last_sync,
+    )
+
+
+def test_message_changed_since_rejects_old_or_unparseable_modification():
+    last_sync = datetime(2026, 8, 13, 9, 0, tzinfo=timezone.utc)
+
+    assert not m365_mail._message_changed_since(
+        {"lastModifiedDateTime": "2026-08-13T08:59:59Z"}, last_sync
+    )
+    assert not m365_mail._message_changed_since(
+        {"lastModifiedDateTime": "not-a-date"}, last_sync
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -861,6 +883,7 @@ async def test_sync_account_no_company_resolves_from_email(monkeypatch):
             "mark_as_read": False,
             "filter_query": None,
             "sync_known_only": False,
+            "last_synced_at": datetime(2026, 1, 20, 13, 55, tzinfo=timezone.utc),
         }
 
     async def fake_list_provisioned():
@@ -883,15 +906,21 @@ async def test_sync_account_no_company_resolves_from_email(monkeypatch):
                 "ccRecipients": [],
                 "bccRecipients": [],
                 "replyTo": [],
-                "isRead": False,
+                # Outlook can set this while moving mail into the monitored
+                # mailbox. A modification after the cursor must still import it.
+                "isRead": True,
                 "receivedDateTime": "2026-01-20T14:00:00Z",
+                "lastModifiedDateTime": "2026-01-20T14:01:00Z",
                 "hasAttachments": False,
                 "internetMessageHeaders": [],
             }
         ],
     }
 
+    graph_urls: list[str] = []
+
     async def fake_graph_get(access_token: str, url: str):
+        graph_urls.append(unquote(url))
         return graph_messages
 
     async def fake_get_message(account_id: int, message_uid: str):
@@ -951,6 +980,10 @@ async def test_sync_account_no_company_resolves_from_email(monkeypatch):
     assert len(created_tickets) == 1
     assert created_tickets[0]["company_id"] == 42
     assert created_tickets[0]["requester_id"] == 99
+    assert any(
+        "isRead eq false or lastModifiedDateTime ge 2026-01-20T13:55:00Z" in url
+        for url in graph_urls
+    )
 
 
 async def test_sync_account_skips_already_imported(monkeypatch):
