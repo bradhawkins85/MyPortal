@@ -89,6 +89,33 @@ def account_auth_status(account: Mapping[str, Any]) -> str:
     return "not_configured"
 
 
+def _parse_graph_datetime(value: Any) -> datetime | None:
+    """Return a timezone-aware UTC datetime for database or Graph values."""
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _message_changed_since(
+    message: Mapping[str, Any], last_synced_at: datetime | None
+) -> bool:
+    """Whether Graph reports that a message changed after the prior sync cursor."""
+    if last_synced_at is None:
+        return False
+    modified_at = _parse_graph_datetime(message.get("lastModifiedDateTime"))
+    return modified_at is not None and modified_at >= last_synced_at
+
+
 def enrich_account_response(account: dict[str, Any]) -> dict[str, Any]:
     """Add computed fields before returning an account to the API/template."""
     account = dict(account)
@@ -986,6 +1013,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
     folder = _normalise_string(account.get("folder"), default="Inbox") or "Inbox"
     process_unread_only = bool(account.get("process_unread_only", True))
     mark_as_read = bool(account.get("mark_as_read", True))
+    last_synced_at = _parse_graph_datetime(account.get("last_synced_at"))
 
     # Per-account delegated tokens take priority over company credentials.
     # When the admin has signed in directly for this mailbox, the account
@@ -1075,7 +1103,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             "$select": (
                 "id,subject,body,bodyPreview,from,toRecipients,ccRecipients,bccRecipients,"
                 "replyTo,internetMessageHeaders,internetMessageId,isRead,receivedDateTime,"
-                "hasAttachments,conversationId"
+                "lastModifiedDateTime,hasAttachments,conversationId"
             ),
         }
         using_unread_filter = process_unread_only
@@ -1086,6 +1114,16 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             # page of already-read messages.  Do not combine this with $orderby:
             # some Exchange Online/shared-mailbox configurations reject that shape.
             query_params["$filter"] = "isRead eq false"
+            if last_synced_at is not None:
+                # Outlook commonly marks a message as read while a technician is
+                # moving it into a monitored folder or shared mailbox. Include
+                # messages changed since the previous run so those newly-arrived
+                # read messages are not invisible to an unread-only sync. The
+                # local import record still provides idempotency.
+                changed_since = last_synced_at.isoformat().replace("+00:00", "Z")
+                query_params["$filter"] += (
+                    f" or lastModifiedDateTime ge {changed_since}"
+                )
         else:
             query_params["$orderby"] = "receivedDateTime asc"
         full_url = (
@@ -1241,8 +1279,15 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     "received_at": msg.get("receivedDateTime"),
                 }
 
-                # Skip already-read messages when only processing unread
-                if process_unread_only and msg.get("isRead", False):
+                # Read messages are normally excluded in unread-only mode. A read
+                # message modified since the previous run may have just been moved
+                # into this monitored folder, however, so it must be imported once.
+                recently_changed = _message_changed_since(msg, last_synced_at)
+                if (
+                    process_unread_only
+                    and msg.get("isRead", False)
+                    and not recently_changed
+                ):
                     _remember_message_action(
                         {
                             **message_log_base,
@@ -1756,7 +1801,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
 
     await mail_repo.update_account(
         int(account_id),
-        last_synced_at=datetime.now(timezone.utc),
+        # Use the start of the run as the next cursor. Changes made while this run
+        # was in progress will therefore remain eligible on the next run.
+        last_synced_at=started_at,
     )
     created_count = sum(
         1 for action in message_actions if action.get("outcome") == "created_new_ticket"
