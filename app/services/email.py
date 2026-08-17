@@ -107,9 +107,17 @@ async def send_email(
     # alternative transport, not an SMTP enhancement.  Each recipient gets a
     # distinct Inbox item so Graph can report that person's read state.
     try:
-        from app.services import modules as modules_service
+        from app.repositories import module as module_repo
 
-        direct_module = await modules_service.get_module("m365-direct-delivery", redact=False)
+        module_row = await module_repo.get_by_name("m365-direct-delivery")
+        direct_module = (
+            {
+                "enabled": bool(getattr(module_row, "enabled", False)),
+                "settings": getattr(module_row, "settings", None),
+            }
+            if module_row
+            else None
+        )
     except Exception as exc:  # pragma: no cover - defensive logging
         direct_module = None
         logger.debug("M365 direct-delivery module check failed", error=str(exc))
