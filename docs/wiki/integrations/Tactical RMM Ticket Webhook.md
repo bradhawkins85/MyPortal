@@ -23,9 +23,38 @@ Example alert body:
   "status": "new",
   "priority": "normal",
   "category": "{{alert.alert_type}}",
-  "company_id": "{{alert.client.id}}"
+  "company_id": "{{alert.client.id}}",
+  "agent_id": "{{alert.agent.id}}",
+  "alert_id": "{{alert.id}}"
 }
 ```
+
+`alert_id` is required and must contain Tactical RMM's `Alert` primary key.
+MyPortal stores it as the namespaced ticket external reference
+`tacticalrmm:alert:<alert_id>`. This makes delivery retries idempotent: posting
+the same alert again returns its existing ticket instead of creating a
+duplicate. The endpoint does not accept a caller-selected external reference.
+
+Configure a second webhook for Tactical RMM's resolved alert notification:
+
+```text
+POST /api/tickets/tacticalrmm/resolved
+X-API-Key: <MyPortal API key>
+Content-Type: application/json
+```
+
+Resolved alert body:
+
+```json
+{
+  "alert_id": "{{alert.id}}"
+}
+```
+
+The resolved webhook locates the ticket by its generated external reference
+and changes it to MyPortal's `resolved` status. Repeated resolved notifications
+are safe and return the already-resolved ticket. A missing alert association
+returns `404` without changing any ticket.
 
 `requester_id` and `assigned_user_id` are optional and should normally be
 omitted. If an existing Tactical RMM template sends them, the endpoint accepts

@@ -47,7 +47,19 @@ class TacticalRMMTicketCreate(BaseModel):
     )
     requester_id: str | int | None = None
     assigned_user_id: str | int | None = None
-    external_reference: Optional[str] = Field(default=None, max_length=128)
+    alert_id: str | int = Field(
+        ...,
+        description="Tactical RMM Alert primary key (for example {{alert.id}})",
+    )
+
+
+class TacticalRMMTicketResolve(BaseModel):
+    """Payload sent by a Tactical RMM alert resolved webhook."""
+
+    alert_id: str | int = Field(
+        ...,
+        description="Tactical RMM Alert primary key (for example {{alert.id}})",
+    )
 
 
 class TicketUpdate(BaseModel):
