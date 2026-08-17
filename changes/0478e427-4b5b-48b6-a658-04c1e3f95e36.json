@@ -1,0 +1,7 @@
+{
+  "guid": "0478e427-4b5b-48b6-a658-04c1e3f95e36",
+  "occurred_at": "2026-08-17T00:00Z",
+  "change_type": "Feature",
+  "summary": "Correlate Tactical RMM alerts with MyPortal tickets and resolve tickets from resolved alert webhooks.",
+  "content_hash": "062d62e74e846b4d26587fff556a0b74f285b26658eca315524cdc26c39726d2"
+}
