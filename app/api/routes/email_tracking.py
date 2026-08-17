@@ -309,6 +309,7 @@ async def list_reply_recipients(
         # Don't leak ticket existence to unauthorised callers.
         raise HTTPException(status_code=404, detail="Reply not found")
 
+    await email_recipients.refresh_m365_read_status(reply_id)
     rows = await email_recipients.get_recipients_for_reply(reply_id)
 
     formatted: list[dict[str, object]] = []
