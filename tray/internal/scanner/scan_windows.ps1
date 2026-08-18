@@ -1,5 +1,10 @@
 $ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+
+# Do not set [Console]::OutputEncoding here. The scanner is launched by the
+# Windows service without an attached console, so accessing that property can
+# throw "The handle is invalid" before discovery has even started. The JSON
+# emitted below is ASCII-safe (ConvertTo-Json escapes non-ASCII characters) and
+# is read directly from PowerShell's redirected stdout by the service.
 
 # A deliberately bounded, dependency-free approximation of a basic Nmap scan.
 # Every connected network is limited to its local /24 to avoid unexpectedly
