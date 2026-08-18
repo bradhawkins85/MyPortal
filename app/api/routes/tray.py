@@ -377,7 +377,17 @@ async def upload_network_scan(
 async def get_scanner_wan_ip(
     request: Request, _device: dict = Depends(get_current_tray_device)
 ) -> dict[str, str]:
-    """Return the authenticated agent's address as observed by the portal."""
+    """Tell the agent how to determine its public address.
+
+    The agent, rather than the portal, calls the configured source so the
+    result describes the network being scanned.  Without a configured source,
+    retain the legacy portal-observed address behaviour.
+    """
+    if _settings.wan_ip_source_url:
+        return {
+            "source_url": str(_settings.wan_ip_source_url),
+            "source_field": _settings.wan_ip_source_field.strip(),
+        }
     wan_ip = get_client_ip(request, default=None)
     if not wan_ip:
         raise HTTPException(status_code=503, detail="Unable to determine WAN IP")

@@ -161,6 +161,52 @@ func TestGetWANIP(t *testing.T) {
 	}
 }
 
+func TestGetWANIPFromConfiguredWhoamiSource(t *testing.T) {
+	whoami := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("Name: scanner\nCf-Connecting-Ip: 180.150.103.160\nX-Forwarded-For: 198.51.100.7\n"))
+	}))
+	defer whoami.Close()
+
+	portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/tray/wan-ip" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"source_url": whoami.URL, "source_field": "cf-connecting-ip",
+		})
+	}))
+	defer portal.Close()
+
+	client := api.New(portal.URL)
+	wanIP, err := client.GetWANIP(context.Background())
+	if err != nil {
+		t.Fatalf("GetWANIP: %v", err)
+	}
+	if wanIP != "180.150.103.160" {
+		t.Fatalf("WAN IP = %q, want 180.150.103.160", wanIP)
+	}
+}
+
+func TestGetWANIPFromConfiguredForwardedChain(t *testing.T) {
+	whoami := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("X-Forwarded-For: 203.0.113.9, 172.18.0.1\n"))
+	}))
+	defer whoami.Close()
+	portal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"source_url": whoami.URL, "source_field": "X-Forwarded-For",
+		})
+	}))
+	defer portal.Close()
+
+	client := api.New(portal.URL)
+	wanIP, err := client.GetWANIP(context.Background())
+	if err != nil || wanIP != "203.0.113.9" {
+		t.Fatalf("GetWANIP = %q, %v; want 203.0.113.9", wanIP, err)
+	}
+}
+
 func TestGetVersion(t *testing.T) {
 	srv := newStubServer(t)
 	defer srv.Close()
