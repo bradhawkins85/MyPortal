@@ -1,0 +1,7 @@
+{
+  "guid": "1f028131-b92c-4f39-b6ea-b47280ce9dc1",
+  "occurred_at": "2026-08-18T00:00Z",
+  "change_type": "Improvement",
+  "summary": "Simplify subnet scanner management by showing enabled scanners and a single asset selector for adding another scanner.",
+  "content_hash": "86f08e74597e009332734fa059f9cb04c6eab046575740b794d3892144a52253"
+}

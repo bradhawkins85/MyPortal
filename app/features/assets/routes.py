@@ -328,6 +328,13 @@ async def network_devices_page(request: Request):
     user, membership, company, company_id, redirect = await _load_asset_context(request)
     if redirect:
         return redirect
+    scanner_assets = await network_devices_repo.list_scanners(company_id)
+    enabled_scanners = [
+        scanner for scanner in scanner_assets if scanner.get("network_scanner_enabled")
+    ]
+    available_scanners = [
+        scanner for scanner in scanner_assets if not scanner.get("network_scanner_enabled")
+    ]
     return await main_module._render_template(
         "devices/index.html",
         request,
@@ -336,13 +343,39 @@ async def network_devices_page(request: Request):
             "title": "Network Devices",
             "company": company,
             "devices": await network_devices_repo.list_for_company(company_id),
-            "scanners": await network_devices_repo.list_scanners(company_id),
+            "scanners": enabled_scanners,
+            "available_scanners": available_scanners,
             "can_configure": bool(user.get("is_super_admin"))
             or main_module._membership_menu_can(
                 user, membership, "menu.assets", write=True
             ),
         },
     )
+
+
+@router.post("/devices/scanners")
+async def add_network_scanner(request: Request):
+    main_module = _main()
+    user, membership, _company, company_id, redirect = await _load_asset_context(
+        request
+    )
+    if redirect:
+        return redirect
+    if not (
+        user.get("is_super_admin")
+        or main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+    ):
+        raise HTTPException(status_code=403, detail="Asset write access required")
+
+    form = await request.form()
+    try:
+        device_id = int(form.get("device_id"))
+        interval = max(5, min(10080, int(form.get("interval_minutes", 60))))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Select an asset and valid interval")
+
+    await network_devices_repo.configure_scanner(device_id, company_id, True, interval)
+    return RedirectResponse(url="/devices", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/devices/scanners/{device_id}")
