@@ -273,7 +273,7 @@ func (d *daemon) runNetworkScan(source string) {
 		return
 	}
 	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
-	err = d.client.UploadNetworkScan(ctx, wanIP, hosts)
+	err = d.client.UploadNetworkScan(ctx, wanIP, scanner.ConnectedSubnets(), hosts)
 	cancel()
 	if err != nil {
 		logger.Warn("Network scan (%s) upload: %v", source, err)

@@ -9,15 +9,74 @@ from app.core.database import db
 async def list_for_company(company_id: int) -> list[dict[str, Any]]:
     return list(
         await db.fetch_all(
-            """SELECT nd.*, a.name AS matched_asset_name, td.hostname AS scanner_hostname
+            """SELECT nd.*, a.name AS matched_asset_name, td.hostname AS scanner_hostname,
+                  td.asset_id AS scanner_asset_id, scanner_asset.name AS scanner_asset_name,
+                  dt.name AS device_type_name
            FROM network_devices nd
            LEFT JOIN assets a ON a.id = nd.matched_asset_id
            JOIN tray_devices td ON td.id = nd.scanner_tray_device_id
+           LEFT JOIN assets scanner_asset ON scanner_asset.id = td.asset_id
+           LEFT JOIN network_device_types dt ON dt.id = nd.device_type_id
            WHERE nd.company_id = %s ORDER BY nd.last_seen_at DESC, nd.ip_address""",
             (company_id,),
         )
         or []
     )
+
+
+async def list_device_types() -> list[dict[str, Any]]:
+    return list(
+        await db.fetch_all(
+            "SELECT id, name FROM network_device_types ORDER BY name"
+        )
+        or []
+    )
+
+
+async def create_device_type(name: str) -> None:
+    await db.execute(
+        "INSERT IGNORE INTO network_device_types (name) VALUES (%s)", (name,)
+    )
+
+
+async def delete_device_type(device_type_id: int) -> None:
+    await db.execute("DELETE FROM network_device_types WHERE id=%s", (device_type_id,))
+
+
+async def update_device(
+    device_id: int,
+    company_id: int,
+    state: str,
+    device_type_id: int | None,
+    description: str | None,
+) -> None:
+    await db.execute(
+        """UPDATE network_devices
+           SET state=%s, device_type_id=%s, description=%s
+           WHERE id=%s AND company_id=%s""",
+        (state, device_type_id, description, device_id, company_id),
+    )
+
+
+async def register_scanned_subnets(
+    company_id: int, scanner_id: int, subnets: list[str]
+) -> set[str]:
+    """Record subnet baselines and return the subnets never scanned before."""
+    new_subnets: set[str] = set()
+    for subnet in subnets:
+        existing = await db.fetch_one(
+            "SELECT id FROM network_scan_subnets WHERE company_id=%s AND subnet=%s",
+            (company_id, subnet),
+        )
+        if existing:
+            continue
+        await db.execute(
+            """INSERT IGNORE INTO network_scan_subnets
+               (company_id, scanner_tray_device_id, subnet) VALUES (%s,%s,%s)""",
+            (company_id, scanner_id, subnet),
+        )
+        new_subnets.add(subnet)
+    return new_subnets
 
 
 async def list_scanners(company_id: int) -> list[dict[str, Any]]:
@@ -46,7 +105,8 @@ async def configure_scanner(
 
 async def upsert_scan(
     company_id: int, scanner_id: int, wan_ip: str, hosts: list[dict[str, Any]]
-) -> None:
+) -> list[dict[str, Any]]:
+    newly_discovered: list[dict[str, Any]] = []
     for host in hosts:
         mac = host.get("mac_address") or None
         matched = None
@@ -85,12 +145,25 @@ async def upsert_scan(
             await db.execute(
                 """UPDATE network_devices SET scanner_tray_device_id=%s, wan_ip=%s, ip_address=%s, mac_address=%s,
                    hostname=%s, vendor=%s, os_details=%s, open_ports=%s, matched_asset_id=%s,
+                   state=CASE WHEN %s IS NOT NULL THEN 'Known' ELSE state END,
                    last_seen_at=CURRENT_TIMESTAMP WHERE id=%s""",
-                values + (existing["id"],),
+                values + (matched, existing["id"]),
             )
         else:
-            await db.execute(
+            device_id = await db.execute_returning_lastrowid(
                 """INSERT INTO network_devices (company_id, scanner_tray_device_id, wan_ip, ip_address, mac_address,
-                   hostname, vendor, os_details, open_ports, matched_asset_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (company_id,) + values,
+                   hostname, vendor, os_details, open_ports, matched_asset_id, state)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (company_id,) + values + ("Known" if matched else "New",),
             )
+            newly_discovered.append(
+                {
+                    "id": device_id,
+                    "ip_address": host["ip_address"],
+                    "mac_address": mac,
+                    "hostname": host.get("hostname"),
+                    "vendor": host.get("vendor"),
+                    "matched_asset_id": matched,
+                }
+            )
+    return newly_discovered

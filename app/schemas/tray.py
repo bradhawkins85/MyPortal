@@ -117,6 +117,7 @@ class NetworkScanHost(BaseModel):
 
 class NetworkScanRequest(BaseModel):
     wan_ip: IPvAnyAddress
+    subnets: list[str] = Field(default_factory=list, max_length=128)
     hosts: list[NetworkScanHost] = Field(max_length=4096)
 
 

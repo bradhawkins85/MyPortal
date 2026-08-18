@@ -18,6 +18,7 @@ import asyncio
 import hashlib
 import html as _html
 import json
+import ipaddress
 import secrets
 import zlib
 from datetime import date, datetime, timedelta, timezone
@@ -367,9 +368,72 @@ async def upload_network_scan(
         mac = str(host.get("mac_address") or "").upper().replace("-", ":").strip()
         host["mac_address"] = mac or None
         hosts.append(host)
-    await network_devices_repo.upsert_scan(
+    subnets: list[str] = []
+    for raw_subnet in payload.subnets:
+        try:
+            subnet = str(ipaddress.ip_network(raw_subnet, strict=False))
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid subnet: {raw_subnet}")
+        if subnet not in subnets:
+            subnets.append(subnet)
+    # Older agents do not report scan targets. A /24 baseline preserves the
+    # no-alert-on-first-scan guarantee until those agents upgrade.
+    if not subnets:
+        for host in hosts:
+            try:
+                subnet = str(ipaddress.ip_network(f"{host['ip_address']}/24", strict=False))
+            except ValueError:
+                continue
+            if subnet not in subnets:
+                subnets.append(subnet)
+    baseline_subnets = await network_devices_repo.register_scanned_subnets(
+        int(device["company_id"]), int(device["id"]), subnets
+    )
+    new_devices = await network_devices_repo.upsert_scan(
         int(device["company_id"]), int(device["id"]), str(payload.wan_ip), hosts
     )
+    company = await companies_repo.get_company_by_id(int(device["company_id"]))
+    if company and company.get("network_device_ticket_alerts_enabled"):
+        baseline_networks = [ipaddress.ip_network(item) for item in baseline_subnets]
+        for discovered in new_devices:
+            try:
+                address = ipaddress.ip_address(discovered["ip_address"])
+            except ValueError:
+                continue
+            if discovered.get("matched_asset_id") or any(
+                address in network for network in baseline_networks
+            ):
+                continue
+            label = discovered.get("hostname") or discovered["ip_address"]
+            description = (
+                "A previously unseen device was discovered during a network scan.\n\n"
+                f"Device: {label}\n"
+                f"IP address: {discovered['ip_address']}\n"
+                f"MAC address: {discovered.get('mac_address') or 'Not reported'}\n"
+                f"MAC vendor: {discovered.get('vendor') or 'Not reported'}\n\n"
+                "Investigate this device and determine whether a management agent "
+                "needs to be installed."
+            )
+            try:
+                await tickets_service.create_ticket(
+                    subject=f"New network device discovered: {label}",
+                    description=description,
+                    requester_id=None,
+                    company_id=int(device["company_id"]),
+                    assigned_user_id=None,
+                    priority="normal",
+                    status="open",
+                    category=None,
+                    module_slug="network-discovery",
+                    external_reference=f"network-device:{discovered['id']}",
+                    trigger_automations=True,
+                )
+            except Exception as exc:  # pragma: no cover - scan ingestion must continue
+                log_error(
+                    "Failed to create network discovery ticket",
+                    device_id=discovered["id"],
+                    error=str(exc),
+                )
     return {"accepted": len(hosts)}
 
 

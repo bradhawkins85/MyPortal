@@ -20,8 +20,12 @@ EXPECTED = {
     ("GET", "/assets/{asset_id}"),
     ("GET", "/assets/settings"),
     ("GET", "/devices"),
+    ("POST", "/devices/discovered/{device_id}"),
+    ("POST", "/devices/alerts"),
     ("POST", "/devices/scanners"),
     ("POST", "/devices/scanners/{device_id}"),
+    ("POST", "/assets/settings/device-types"),
+    ("POST", "/assets/settings/device-types/{device_type_id}/delete"),
     ("DELETE", "/assets/{asset_id}"),
 }
 
