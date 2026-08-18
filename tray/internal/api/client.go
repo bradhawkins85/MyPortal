@@ -205,8 +205,8 @@ func (c *Client) getWANIPFromSource(ctx context.Context, sourceURL, sourceField 
 	return "", fmt.Errorf("WAN IP source field %q was not found", sourceField)
 }
 
-func (c *Client) UploadNetworkScan(ctx context.Context, wanIP string, hosts []NetworkHost) error {
-	body, err := json.Marshal(map[string]interface{}{"wan_ip": wanIP, "hosts": hosts})
+func (c *Client) UploadNetworkScan(ctx context.Context, wanIP string, subnets []string, hosts []NetworkHost) error {
+	body, err := json.Marshal(map[string]interface{}{"wan_ip": wanIP, "subnets": subnets, "hosts": hosts})
 	if err != nil {
 		return err
 	}

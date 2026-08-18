@@ -316,6 +316,7 @@ async def assets_settings_page(request: Request):
     extra = {
         "title": "Asset Custom Fields Settings",
         "is_super_admin": True,
+        "device_types": await network_devices_repo.list_device_types(),
     }
     return await main_module._render_template(
         "assets/settings.html", request, user, extra=extra
@@ -343,6 +344,7 @@ async def network_devices_page(request: Request):
             "title": "Network Devices",
             "company": company,
             "devices": await network_devices_repo.list_for_company(company_id),
+            "device_types": await network_devices_repo.list_device_types(),
             "scanners": enabled_scanners,
             "available_scanners": available_scanners,
             "can_configure": bool(user.get("is_super_admin"))
@@ -351,6 +353,88 @@ async def network_devices_page(request: Request):
             ),
         },
     )
+
+
+@router.post("/devices/discovered/{device_id}")
+async def update_network_device(request: Request, device_id: int):
+    main_module = _main()
+    user, membership, _company, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    if not (
+        user.get("is_super_admin")
+        or main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+    ):
+        raise HTTPException(status_code=403, detail="Asset write access required")
+
+    form = await request.form()
+    state_value = str(form.get("state") or "").title()
+    if state_value not in {"New", "Known", "Unknown"}:
+        raise HTTPException(status_code=422, detail="Invalid device state")
+    raw_type = form.get("device_type_id")
+    try:
+        device_type_id = int(raw_type) if raw_type else None
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid device type") from exc
+    valid_type_ids = {
+        int(item["id"]) for item in await network_devices_repo.list_device_types()
+    }
+    if device_type_id is not None and device_type_id not in valid_type_ids:
+        raise HTTPException(status_code=422, detail="Invalid device type")
+    description = str(form.get("description") or "").strip() or None
+    if description and len(description) > 2000:
+        raise HTTPException(status_code=422, detail="Description is too long")
+    await network_devices_repo.update_device(
+        device_id, company_id, state_value, device_type_id, description
+    )
+    return RedirectResponse(url="/devices", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/devices/alerts")
+async def configure_network_device_alerts(request: Request):
+    main_module = _main()
+    user, membership, _company, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    if not (
+        user.get("is_super_admin")
+        or main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+    ):
+        raise HTTPException(status_code=403, detail="Asset write access required")
+    form = await request.form()
+    await company_repo.update_company(
+        company_id,
+        network_device_ticket_alerts_enabled=1
+        if form.get("network_device_ticket_alerts_enabled") == "1"
+        else 0,
+    )
+    return RedirectResponse(url="/devices", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/assets/settings/device-types")
+async def add_network_device_type(request: Request):
+    user, _membership, _company, _company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    form = await request.form()
+    name = str(form.get("name") or "").strip()
+    if not name or len(name) > 100:
+        raise HTTPException(status_code=422, detail="Enter a device type name")
+    await network_devices_repo.create_device_type(name)
+    return RedirectResponse(url="/assets/settings", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/assets/settings/device-types/{device_type_id}/delete")
+async def delete_network_device_type(request: Request, device_type_id: int):
+    user, _membership, _company, _company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    await network_devices_repo.delete_device_type(device_type_id)
+    return RedirectResponse(url="/assets/settings", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/devices/scanners")

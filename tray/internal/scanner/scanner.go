@@ -62,3 +62,8 @@ func connectedSubnets() []string {
 	sort.Strings(result)
 	return result
 }
+
+// ConnectedSubnets returns the canonical CIDR targets used by network scans.
+func ConnectedSubnets() []string {
+	return connectedSubnets()
+}

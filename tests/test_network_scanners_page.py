@@ -53,6 +53,9 @@ async def test_devices_page_separates_enabled_and_available_scanners(monkeypatch
     monkeypatch.setattr(
         assets_routes.network_devices_repo, "list_for_company", AsyncMock(return_value=[])
     )
+    monkeypatch.setattr(
+        assets_routes.network_devices_repo, "list_device_types", AsyncMock(return_value=[])
+    )
 
     async def render(template, request, user, *, extra=None):
         assert template == "devices/index.html"
@@ -118,3 +121,30 @@ async def test_add_scanner_requires_asset_selection(monkeypatch):
         await assets_routes.add_network_scanner(request)
 
     assert exc_info.value.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_update_discovered_device_saves_admin_metadata(monkeypatch):
+    request = _request("/devices/discovered/12", "POST")
+    request._form = {
+        "state": "unknown",
+        "device_type_id": "3",
+        "description": "Printer beside reception",
+    }
+    monkeypatch.setattr(
+        assets_routes,
+        "_load_asset_context",
+        AsyncMock(return_value=({"id": 7, "is_super_admin": True}, None, {}, 42, None)),
+    )
+    monkeypatch.setattr(
+        assets_routes.network_devices_repo,
+        "list_device_types",
+        AsyncMock(return_value=[{"id": 3, "name": "Printer"}]),
+    )
+    update = AsyncMock()
+    monkeypatch.setattr(assets_routes.network_devices_repo, "update_device", update)
+
+    response = await assets_routes.update_network_device(request, 12)
+
+    update.assert_awaited_once_with(12, 42, "Unknown", 3, "Printer beside reception")
+    assert response.status_code == 303
