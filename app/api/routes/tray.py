@@ -52,6 +52,7 @@ from app.schemas.tray import (
     TrayEnrolRequest,
     TrayEnrolResponse,
     TrayHeartbeatRequest,
+    NetworkScanRequest,
     TrayInstallTokenCreate,
     TrayInstallTokenResponse,
     TrayMenuConfigCreate,
@@ -81,6 +82,7 @@ from app.services import asset_importer
 from app.services.sanitization import sanitize_rich_text
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.repositories import tray_ticket_questions as tq_repo
+from app.repositories import network_devices as network_devices_repo
 
 router = APIRouter(prefix="/api/tray", tags=["Tray App"])
 
@@ -343,7 +345,31 @@ async def get_device_config(
         env_allowlist=config.get("env_allowlist") or [],
         chat_enabled=chat_enabled,
         chat_client_mode=config.get("chat_client_mode") or None,
+        network_scanner_enabled=bool(device.get("network_scanner_enabled")),
+        network_scan_interval_minutes=max(
+            5, int(device.get("network_scan_interval_minutes") or 60)
+        ),
     )
+
+
+@router.post("/network-scan", summary="Upload network discovery results")
+async def upload_network_scan(
+    payload: NetworkScanRequest, device: dict = Depends(get_current_tray_device)
+) -> dict[str, int]:
+    if not device.get("network_scanner_enabled") or not device.get("company_id"):
+        raise HTTPException(
+            status_code=403, detail="Network scanning is not enabled for this device"
+        )
+    hosts = []
+    for item in payload.hosts:
+        host = item.model_dump()
+        mac = str(host.get("mac_address") or "").upper().replace("-", ":").strip()
+        host["mac_address"] = mac or None
+        hosts.append(host)
+    await network_devices_repo.upsert_scan(
+        int(device["company_id"]), int(device["id"]), hosts
+    )
+    return {"accepted": len(hosts)}
 
 
 def _find_trmm_script_node(

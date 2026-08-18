@@ -124,7 +124,34 @@ type ConfigResponse struct {
 	// "browser": always open in the default system browser (legacy behaviour).
 	// "shell": require the dedicated chat shell; log a warning if absent rather
 	// than falling back to the browser.
-	ChatClientMode string `json:"chat_client_mode,omitempty"`
+	ChatClientMode             string `json:"chat_client_mode,omitempty"`
+	NetworkScannerEnabled      bool   `json:"network_scanner_enabled"`
+	NetworkScanIntervalMinutes int    `json:"network_scan_interval_minutes"`
+}
+
+type NetworkHost struct {
+	IPAddress  string `json:"ip_address"`
+	MACAddress string `json:"mac_address,omitempty"`
+	Hostname   string `json:"hostname,omitempty"`
+	Vendor     string `json:"vendor,omitempty"`
+	OSDetails  string `json:"os_details,omitempty"`
+	OpenPorts  string `json:"open_ports,omitempty"`
+}
+
+func (c *Client) UploadNetworkScan(ctx context.Context, hosts []NetworkHost) error {
+	body, err := json.Marshal(map[string]interface{}{"hosts": hosts})
+	if err != nil {
+		return err
+	}
+	resp, err := c.post(ctx, "/api/tray/network-scan", body, true)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("network scan upload: HTTP %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // GetConfig fetches the resolved menu configuration for this device.

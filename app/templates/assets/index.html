@@ -12,6 +12,7 @@
   {% if is_super_admin %}
     {% set _ = asset_actions.append({"label": "Settings", "type": "link", "href": "/assets/settings"}) %}
   {% endif %}
+  {% set _ = asset_actions.append({"label": "Network devices", "type": "link", "href": "/devices"}) %}
   {{ page_header_actions(asset_actions) }}
 {% endblock %}
 
