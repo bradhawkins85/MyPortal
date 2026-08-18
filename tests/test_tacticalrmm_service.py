@@ -4,6 +4,26 @@ import pytest
 from app.services import tacticalrmm
 
 
+def test_extract_agent_details_includes_all_unique_mac_addresses():
+    agent = {
+        "hostname": "MULTI-NIC",
+        "mac_addresses": ["00-11-22-33-44-55", "00:11:22:33:44:55"],
+        "wmi_detail": {
+            "network_config": [
+                {"MACAddress": "AA:BB:CC:DD:EE:FF"},
+                {"PhysicalAddress": "112233445566"},
+                {"MACAddress": "00:00:00:00:00:00"},
+            ]
+        },
+    }
+
+    details = tacticalrmm.extract_agent_details(agent)
+
+    assert details["mac_address"] == (
+        "00:11:22:33:44:55,AA:BB:CC:DD:EE:FF,11:22:33:44:55:66"
+    )
+
+
 def test_extract_agent_page_handles_beta_results():
     response = {
         "count": 1,

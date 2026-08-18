@@ -239,6 +239,47 @@ def _join_list(value: Any, separator: str = ", ") -> str | None:
     return str(value).strip() or None
 
 
+def _extract_mac_addresses(*sources: Any) -> str | None:
+    """Return every unique hardware MAC address in TRMM's agent payload."""
+    addresses: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: Any) -> None:
+        if isinstance(value, Mapping):
+            for key, nested in value.items():
+                normalised_key = re.sub(r"[^a-z]", "", str(key).lower())
+                if normalised_key in {
+                    "mac",
+                    "macaddress",
+                    "macaddresses",
+                    "physicaladdress",
+                }:
+                    add(nested)
+                elif isinstance(nested, (Mapping, list, tuple)):
+                    add(nested)
+            return
+        if isinstance(value, (list, tuple)):
+            for nested in value:
+                add(nested)
+            return
+        if value is None:
+            return
+        for candidate in re.findall(
+            r"(?i)(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}|[0-9a-f]{12}", str(value)
+        ):
+            compact = re.sub(r"[^0-9A-Fa-f]", "", candidate).upper()
+            if len(compact) != 12 or compact == "000000000000":
+                continue
+            mac = ":".join(compact[index : index + 2] for index in range(0, 12, 2))
+            if mac not in seen:
+                seen.add(mac)
+                addresses.append(mac)
+
+    for source in sources:
+        add(source)
+    return ",".join(addresses) or None
+
+
 def _normalise_machine_type(value: Any) -> str | None:
     """Return ``Physical`` or ``Virtual`` when a source value clearly identifies it."""
     if value in (None, ""):
@@ -412,6 +453,29 @@ def extract_agent_details(agent: Mapping[str, Any]) -> dict[str, Any]:
         "warranty_status": _clean_text(_lookup(agent, "warranty_status")),
         "warranty_end_date": _lookup(
             agent, "warranty_expires", "warranty_end", "warranty_expiration"
+        ),
+        "mac_address": _extract_mac_addresses(
+            _lookup(
+                agent,
+                "mac_address",
+                "mac_addresses",
+                "network_interfaces",
+                "network_adapters",
+            ),
+            _lookup(
+                wmi_detail,
+                "network_config",
+                "network_adapters",
+                "network_interfaces",
+                "nics",
+            ),
+            _lookup(
+                generic_hw,
+                "network_config",
+                "network_adapters",
+                "network_interfaces",
+                "nics",
+            ),
         ),
         "tactical_asset_id": _clean_text(_lookup(agent, "agent_id", "id", "pk")),
         "client_id": _clean_text(
