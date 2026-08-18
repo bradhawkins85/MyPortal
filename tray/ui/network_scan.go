@@ -14,5 +14,7 @@ func requestNetworkScan() {
 	}
 	if err := ipc.SendTo(gIPCConn, ipc.Message{Type: "scan_network"}); err != nil {
 		logger.Warn("Manual network scan request failed: %v", err)
+		return
 	}
+	logger.Info("Manual network scan request sent to service")
 }

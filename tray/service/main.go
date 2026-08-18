@@ -149,6 +149,7 @@ func (d *daemon) run() {
 			d.ipcSrv.Broadcast(ipc.Message{Type: "config_changed"})
 		})
 		d.ipcSrv.On("scan_network", func(msg ipc.Message) {
+			logger.Info("Manual network scan request received from UI")
 			go d.manualNetworkScan()
 		})
 
@@ -207,25 +208,26 @@ func (d *daemon) networkScannerLoop() {
 	defer ticker.Stop()
 	var lastScan time.Time
 	for {
-		select {
-		case <-d.stopCh:
-			return
-		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			cfg, err := d.client.GetConfig(ctx)
-			cancel()
-			if err != nil || !cfg.NetworkScannerEnabled {
-				continue
-			}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		cfg, err := d.client.GetConfig(ctx)
+		cancel()
+		if err != nil {
+			logger.Warn("Interval network scan config lookup: %v", err)
+		} else if cfg.NetworkScannerEnabled {
 			interval := time.Duration(cfg.NetworkScanIntervalMinutes) * time.Minute
 			if interval < 5*time.Minute {
 				interval = 5 * time.Minute
 			}
-			if !lastScan.IsZero() && time.Since(lastScan) < interval {
-				continue
+			if lastScan.IsZero() || time.Since(lastScan) >= interval {
+				lastScan = time.Now()
+				d.runNetworkScan("interval")
 			}
-			lastScan = time.Now()
-			d.runNetworkScan("interval")
+		}
+
+		select {
+		case <-d.stopCh:
+			return
+		case <-ticker.C:
 		}
 	}
 }
