@@ -878,6 +878,18 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         },
     },
     {
+        "slug": "m365-direct-delivery",
+        "name": "M365 Direct Delivery",
+        "description": "Deposit notifications directly into Microsoft 365 inboxes without SMTP transport.",
+        "icon": "📨",
+        "settings": {
+            "company_id": 0,
+            "recipient_domains": [],
+            "fallback_to_smtp": True,
+            "track_read_status": True,
+        },
+    },
+    {
         "slug": "imap",
         "name": "IMAP Mailboxes",
         "description": "Import support emails from mailboxes into the ticketing queue.",
@@ -1259,6 +1271,9 @@ _ENV_BACKED_MODULE_FIELDS: dict[str, tuple[str, ...]] = {
         "webhook_secret",
         "disable_webhook_signature_verification",
     ),
+    "m365-direct-delivery": (
+        "company_id", "recipient_domains", "fallback_to_smtp", "track_read_status"
+    ),
     "solidtime": (
         "base_url",
         "api_token",
@@ -1476,11 +1491,19 @@ def _coerce_settings(
         _env = os.getenv("SMTP2GO_DISABLE_WEBHOOK_SIGNATURE_VERIFICATION", "").strip()
         if _env:
             merged["disable_webhook_signature_verification"] = _env.lower() not in (
-                "false",
-                "0",
-                "no",
-                "off",
+                "false", "0", "no", "off"
             )
+    elif slug == "m365-direct-delivery":
+        try:
+            company_id = int(merged.get("company_id") or 0)
+        except (TypeError, ValueError):
+            company_id = 0
+        merged.update({
+            "company_id": max(0, company_id),
+            "recipient_domains": [str(value).strip().lower().lstrip("@") for value in _ensure_list(merged.get("recipient_domains")) if str(value).strip()],
+            "fallback_to_smtp": _ensure_bool(merged.get("fallback_to_smtp"), True),
+            "track_read_status": _ensure_bool(merged.get("track_read_status"), True),
+        })
     elif slug == "syncro":
         base_url = str(merged.get("base_url") or "").strip().rstrip("/")
         api_key_override = payload.get("api_key") if payload else None

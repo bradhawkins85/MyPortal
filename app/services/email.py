@@ -103,6 +103,88 @@ async def send_email(
         logger.warning("Email delivery skipped because no recipients were provided", subject=subject)
         return False, None
 
+    # M365 direct delivery is evaluated before SMTP availability: it is an
+    # alternative transport, not an SMTP enhancement.  Each recipient gets a
+    # distinct Inbox item so Graph can report that person's read state.
+    try:
+        from app.repositories import module as module_repo
+
+        module_row = await module_repo.get_by_name("m365-direct-delivery")
+        direct_module = (
+            {
+                "enabled": bool(getattr(module_row, "enabled", False)),
+                "settings": getattr(module_row, "settings", None),
+            }
+            if module_row
+            else None
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        direct_module = None
+        logger.debug("M365 direct-delivery module check failed", error=str(exc))
+    if direct_module and direct_module.get("enabled"):
+        direct_settings = dict(direct_module.get("settings") or {})
+        try:
+            direct_company_id = int(direct_settings.get("company_id") or 0)
+        except (TypeError, ValueError):
+            direct_company_id = 0
+        configured_domains = {
+            str(domain).strip().lower().lstrip("@")
+            for domain in direct_settings.get("recipient_domains") or []
+            if str(domain).strip()
+        }
+        direct_recipients = [
+            address for address in to_addresses
+            if not configured_domains or address.rsplit("@", 1)[-1].lower() in configured_domains
+        ]
+        delivered: list[str] = []
+        direct_errors: list[tuple[str, Exception]] = []
+        if direct_company_id:
+            from app.services import m365_direct_delivery
+
+            for address in direct_recipients:
+                try:
+                    result = await m365_direct_delivery.deposit_message(
+                        company_id=direct_company_id,
+                        recipient=address,
+                        subject=subject,
+                        html_body=html_body,
+                        text_body=text_body,
+                        sender=sender,
+                        reply_to=reply_to,
+                        attachments=attachments,
+                    )
+                    delivered.append(address)
+                    if ticket_reply_id and result.get("message_id"):
+                        from app.services import email_recipients
+
+                        await email_recipients.record_m365_delivery(
+                            reply_id=ticket_reply_id,
+                            recipient_email=address,
+                            company_id=direct_company_id,
+                            message_id=result["message_id"],
+                        )
+                except Exception as exc:
+                    direct_errors.append((address, exc))
+                    logger.warning(
+                        "M365 direct delivery failed",
+                        recipient=address, subject=subject, error=str(exc),
+                    )
+        elif direct_recipients:
+            logger.error("M365 direct delivery is enabled without a company_id")
+        to_addresses = [address for address in to_addresses if address not in delivered]
+        if direct_errors and not direct_settings.get("fallback_to_smtp", True):
+            failed = ", ".join(address for address, _ in direct_errors)
+            raise EmailDispatchError(f"M365 direct delivery failed for: {failed}")
+        if not to_addresses:
+            logger.info(
+                "Email deposited directly into M365 inboxes",
+                subject=subject, recipients=delivered, tracking=bool(ticket_reply_id),
+            )
+            return True, {
+                "status": "succeeded", "provider": "m365-direct-delivery",
+                "recipients": delivered,
+            }
+
     if not settings.smtp_host:
         logger.warning("SMTP host not configured; email delivery skipped", subject=subject)
         return False, None

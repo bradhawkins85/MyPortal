@@ -230,7 +230,7 @@ async def get_recipients_for_reply(reply_id: int) -> list[dict[str, Any]]:
         rows = await db.fetch_all(
             """
             SELECT id, ticket_reply_id, recipient_email, recipient_role, recipient_name,
-                   tracking_id, smtp2go_message_id,
+                   tracking_id, smtp2go_message_id, m365_message_id, m365_company_id,
                    email_sent_at, email_processed_at, email_delivered_at,
                    email_opened_at, email_open_count,
                    email_bounced_at, email_rejected_at, email_spam_at,
@@ -251,6 +251,70 @@ async def get_recipients_for_reply(reply_id: int) -> list[dict[str, Any]]:
         return []
 
     return [dict(row) for row in rows]
+
+
+async def record_m365_delivery(
+    *, reply_id: int, recipient_email: str, company_id: int, message_id: str
+) -> None:
+    """Record a successful direct Inbox deposit for later read-status checks."""
+    now = datetime.now(timezone.utc)
+    await record_recipients(
+        reply_id=reply_id, tracking_id=None, smtp2go_message_id=None,
+        to=[recipient_email], sent_at=now,
+    )
+    await db.execute(
+        """UPDATE ticket_reply_email_recipients
+              SET m365_message_id = :message_id, m365_company_id = :company_id,
+                  email_delivered_at = COALESCE(email_delivered_at, :now),
+                  last_event_at = :now, last_event_type = 'delivered', updated_at = :now
+            WHERE ticket_reply_id = :reply_id AND recipient_email = :email""",
+        {"message_id": message_id, "company_id": company_id, "now": now,
+         "reply_id": int(reply_id), "email": _normalise_email(recipient_email)},
+    )
+
+
+async def refresh_m365_read_status(reply_id: int) -> None:
+    """Refresh unread direct-delivery rows from Graph on demand."""
+    module_row = await db.fetch_one(
+        """SELECT enabled, settings
+             FROM modules
+            WHERE slug = :slug
+            LIMIT 1""",
+        {"slug": "m365-direct-delivery"},
+    )
+    if not module_row:
+        return
+    module_enabled = bool(module_row["enabled"])
+    module_settings = module_row["settings"] or {}
+    if not module_enabled:
+        return
+    if not module_settings.get("track_read_status", True):
+        return
+    rows = await db.fetch_all(
+        """SELECT id, recipient_email, m365_message_id, m365_company_id
+             FROM ticket_reply_email_recipients
+            WHERE ticket_reply_id = :reply_id AND m365_message_id IS NOT NULL
+              AND email_opened_at IS NULL""",
+        {"reply_id": int(reply_id)},
+    )
+    from app.services import m365_direct_delivery
+    for row in rows:
+        try:
+            is_read = await m365_direct_delivery.get_read_status(
+                company_id=int(row["m365_company_id"]), recipient=row["recipient_email"],
+                message_id=row["m365_message_id"],
+            )
+            if is_read:
+                now = datetime.now(timezone.utc)
+                await db.execute(
+                    """UPDATE ticket_reply_email_recipients
+                          SET email_opened_at = :now, email_open_count = 1,
+                              last_event_at = :now, last_event_type = 'open', updated_at = :now
+                        WHERE id = :id AND email_opened_at IS NULL""",
+                    {"now": now, "id": row["id"]},
+                )
+        except Exception as exc:  # a deleted message must not break the status popup
+            logger.debug("Unable to refresh M365 message read status", recipient_id=row["id"], error=str(exc))
 
 
 async def get_recipient_count_map(reply_ids: Iterable[int]) -> dict[int, int]:

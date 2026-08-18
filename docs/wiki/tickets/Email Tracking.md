@@ -33,6 +33,24 @@ Limitations:
   aggregate badge but the popup displays a note explaining this.
 - Generic non-SMTP2Go SMTP relay sends only record `sent_at` per recipient
   because that path has no asynchronous delivery / open feedback channel.
+- M365 Direct Delivery marks a recipient delivered as soon as Graph creates the
+  Inbox item. Opening the delivery-status popup refreshes Graph's `isRead` value
+  and records the first observed read time for that recipient.
+
+## M365 Direct Delivery
+
+Enable the **M365 Direct Delivery** integration module to bypass SMTP transport
+for Microsoft 365 recipients. Configure `company_id` with the company whose M365
+application credentials own the target mailboxes. The provisioned application
+must have the `Mail.ReadWrite` application permission (included in MyPortal's
+standard M365 provisioning permissions).
+
+`recipient_domains` is an optional list such as `["example.com"]`. When present,
+only matching addresses are deposited directly and other addresses continue via
+the configured SMTP/SMTP2Go transport. With an empty list, Graph delivery is
+attempted for every recipient, which is useful when delivering into a customer
+tenant. Keep `fallback_to_smtp` enabled to send addresses through the normal
+transport when Graph cannot locate or write to a mailbox.
 
 ### App Analytics (Page Views)
 - **Automatic Page Tracking**: Track page views across the entire application
