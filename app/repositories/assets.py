@@ -30,12 +30,13 @@ async def list_company_assets(company_id: int) -> list[dict[str, Any]]:
             warranty_status,
             warranty_end_date,
             syncro_asset_id,
-            tactical_asset_id
+            tactical_asset_id,
+            mac_address
         FROM assets
         WHERE company_id = %s
         ORDER BY name ASC, id ASC
         """,
-        (company_id,)
+        (company_id,),
     )
     return list(rows or [])
 
@@ -159,6 +160,7 @@ async def upsert_asset(
     warranty_end_date: Any = None,
     syncro_asset_id: str | None = None,
     tactical_asset_id: str | None = None,
+    mac_address: str | None = None,
     match_name: bool = False,
 ) -> int:
     sync_id = str(syncro_asset_id) if syncro_asset_id else None
@@ -211,6 +213,7 @@ async def upsert_asset(
         sync_id,
         tactical_id,
         serial_number,
+        mac_address,
     )
 
     if row:
@@ -235,7 +238,8 @@ async def upsert_asset(
                 warranty_end_date = %s,
                 syncro_asset_id = %s,
                 tactical_asset_id = %s,
-                serial_number = %s
+                serial_number = %s,
+                mac_address = %s
             WHERE id = %s
             """,
             params + (row["id"],),
@@ -264,8 +268,9 @@ async def upsert_asset(
                 warranty_status,
                 warranty_end_date,
                 syncro_asset_id,
-                tactical_asset_id
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                tactical_asset_id,
+                mac_address
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 company_id,
@@ -288,6 +293,7 @@ async def upsert_asset(
                 warranty_end_db,
                 sync_id,
                 tactical_id,
+                mac_address,
             ),
         )
 
@@ -335,12 +341,12 @@ async def count_active_assets_by_type(
     device_type: str | None = None,
 ) -> int:
     """Return the number of assets of a specific type that have synced since the provided date.
-    
+
     Args:
         company_id: Company ID to filter by
         since: Only count assets that synced since this datetime
         device_type: Device type to filter by (e.g., 'Workstation', 'Server', 'User')
-    
+
     Returns:
         Count of matching assets
     """

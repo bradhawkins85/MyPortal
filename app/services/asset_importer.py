@@ -301,6 +301,7 @@ async def sync_tactical_agent(
         performance_score=details.get("performance_score"),
         warranty_status=_clean_string(details.get("warranty_status")),
         warranty_end_date=details.get("warranty_end_date"),
+        mac_address=_clean_string(details.get("mac_address")),
         tactical_asset_id=agent_id,
         match_name=True,
     )
@@ -376,6 +377,7 @@ async def import_tactical_assets_for_company(
             performance_score=details.get("performance_score"),
             warranty_status=_clean_string(details.get("warranty_status")),
             warranty_end_date=details.get("warranty_end_date"),
+            mac_address=_clean_string(details.get("mac_address")),
             tactical_asset_id=tactical_id,
             match_name=True,
         )

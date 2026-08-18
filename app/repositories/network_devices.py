@@ -52,7 +52,8 @@ async def upsert_scan(
         matched = None
         if mac:
             matched_row = await db.fetch_one(
-                "SELECT id FROM assets WHERE company_id=%s AND UPPER(REPLACE(mac_address, '-', ':'))=%s LIMIT 1",
+                "SELECT id FROM assets WHERE company_id=%s AND "
+                "FIND_IN_SET(%s, REPLACE(UPPER(REPLACE(mac_address, '-', ':')), ' ', '')) > 0 LIMIT 1",
                 (company_id, mac),
             )
             matched = matched_row.get("id") if matched_row else None
@@ -67,11 +68,7 @@ async def upsert_scan(
                 else "mac_address IS NULL AND wan_ip=%s AND ip_address=%s"
             )
             + " LIMIT 1",
-            (
-                (company_id, mac)
-                if mac
-                else (company_id, wan_ip, host["ip_address"])
-            ),
+            ((company_id, mac) if mac else (company_id, wan_ip, host["ip_address"])),
         )
         values = (
             scanner_id,

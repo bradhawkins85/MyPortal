@@ -44,6 +44,7 @@ async def test_import_tactical_assets_for_company_upserts(monkeypatch):
             "performance_score": 92,
             "warranty_status": "active",
             "warranty_end_date": "2025-01-01",
+            "mac_address": "00:11:22:33:44:55,AA:BB:CC:DD:EE:FF",
             "tactical_asset_id": "agent-101",
         },
         102: {
@@ -91,6 +92,7 @@ async def test_import_tactical_assets_for_company_upserts(monkeypatch):
     machine_types = {entry["machine_type"] for entry in captured}
     assert machine_types == {"Physical", "Virtual"}
     assert all(entry.get("match_name") is True for entry in captured)
+    assert captured[0]["mac_address"] == "00:11:22:33:44:55,AA:BB:CC:DD:EE:FF"
 
 
 @pytest.mark.anyio
