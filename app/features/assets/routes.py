@@ -14,6 +14,7 @@ from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import assets as asset_repo
 from app.repositories import companies as company_repo
 from app.repositories import tray as tray_repo
+from app.repositories import network_devices as network_devices_repo
 from app.repositories import user_companies as user_company_repo
 
 
@@ -30,10 +31,20 @@ _ASSET_TABLE_COLUMNS: list[dict[str, str]] = [
     {"key": "ram_gb", "label": "RAM (GB)", "sort": "number"},
     {"key": "hdd_size", "label": "Storage", "sort": "string"},
     {"key": "last_sync", "label": "Last sync", "sort": "date", "priority": "essential"},
-    {"key": "tray_agent_synced", "label": "TrayAgentID synced", "sort": "number", "field_type": "checkbox"},
+    {
+        "key": "tray_agent_synced",
+        "label": "TrayAgentID synced",
+        "sort": "number",
+        "field_type": "checkbox",
+    },
     {"key": "motherboard_manufacturer", "label": "Motherboard", "sort": "string"},
     {"key": "form_factor", "label": "Form factor", "sort": "string"},
-    {"key": "last_user", "label": "Last user", "sort": "string", "priority": "essential"},
+    {
+        "key": "last_user",
+        "label": "Last user",
+        "sort": "string",
+        "priority": "essential",
+    },
     {"key": "approx_age", "label": "Approx age", "sort": "number"},
     {"key": "performance_score", "label": "Performance score", "sort": "number"},
     {"key": "warranty_status", "label": "Warranty status", "sort": "string"},
@@ -63,7 +74,9 @@ async def _load_asset_context(request: Request):
     try:
         company_id = int(company_id_raw)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier"
+        ) from exc
 
     membership = await user_company_repo.get_user_company(user["id"], company_id)
     can_view_assets = main_module._membership_menu_can(user, membership, "menu.assets")
@@ -87,7 +100,9 @@ async def assets_page(request: Request):
     if redirect:
         return redirect
 
-    can_export_assets = main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+    can_export_assets = main_module._membership_menu_can(
+        user, membership, "menu.assets", write=True
+    )
 
     rows = await asset_repo.list_company_assets(company_id)
     field_definitions = await asset_custom_fields_repo.list_field_definitions()
@@ -152,7 +167,9 @@ async def assets_page(request: Request):
             "os_name": _clean_text(row.get("os_name")),
             "cpu_name": _clean_text(row.get("cpu_name")),
             "hdd_size": _clean_text(row.get("hdd_size")),
-            "motherboard_manufacturer": _clean_text(row.get("motherboard_manufacturer")),
+            "motherboard_manufacturer": _clean_text(
+                row.get("motherboard_manufacturer")
+            ),
             "form_factor": _clean_text(row.get("form_factor")),
             "last_user": _clean_text(row.get("last_user")),
             "warranty_status": _clean_text(row.get("warranty_status")),
@@ -162,7 +179,9 @@ async def assets_page(request: Request):
 
         ram_display, ram_sort = _format_number(row.get("ram_gb"))
         approx_display, approx_sort = _format_number(row.get("approx_age"))
-        performance_display, performance_sort = _format_number(row.get("performance_score"))
+        performance_display, performance_sort = _format_number(
+            row.get("performance_score")
+        )
         record["ram_gb"] = ram_display
         record["ram_gb_sort"] = ram_sort
         record["approx_age"] = approx_display
@@ -216,15 +235,25 @@ async def assets_page(request: Request):
         prepared.append(record)
 
     asset_ids = [r["id"] for r in prepared if r.get("id")]
-    cf_values_by_asset = await asset_custom_fields_repo.get_all_asset_field_values(asset_ids)
+    cf_values_by_asset = await asset_custom_fields_repo.get_all_asset_field_values(
+        asset_ids
+    )
     tray_devices_by_asset = await tray_repo.list_active_devices_by_asset_ids(asset_ids)
 
     for record in prepared:
-        tray_device = tray_devices_by_asset.get(int(record["id"])) if record.get("id") else None
-        record["tray_device_uid"] = tray_device.get("device_uid") if tray_device else None
-        record["tray_device_hostname"] = tray_device.get("hostname") if tray_device else None
+        tray_device = (
+            tray_devices_by_asset.get(int(record["id"])) if record.get("id") else None
+        )
+        record["tray_device_uid"] = (
+            tray_device.get("device_uid") if tray_device else None
+        )
+        record["tray_device_hostname"] = (
+            tray_device.get("hostname") if tray_device else None
+        )
         record["tray_agent_synced"] = bool(record["tray_device_uid"])
-        record["can_open_chat"] = bool(record["tray_device_uid"] and main_module.settings.matrix_enabled)
+        record["can_open_chat"] = bool(
+            record["tray_device_uid"] and main_module.settings.matrix_enabled
+        )
         asset_id = record.get("id")
         asset_cf = cf_values_by_asset.get(asset_id, {})
         for field_def in field_definitions:
@@ -235,9 +264,9 @@ async def assets_page(request: Request):
         {
             "key": f"cf_{field_def['id']}",
             "label": field_def["display_name"] or field_def["name"],
-            "sort": "date" if field_def["field_type"] == "date" else (
-                "number" if field_def["field_type"] == "checkbox" else "string"
-            ),
+            "sort": "date"
+            if field_def["field_type"] == "date"
+            else ("number" if field_def["field_type"] == "checkbox" else "string"),
             "field_type": field_def["field_type"],
         }
         for field_def in field_definitions
@@ -266,7 +295,9 @@ async def assets_page(request: Request):
         "has_asset_actions": has_asset_actions,
         "matrix_enabled": main_module.settings.matrix_enabled,
     }
-    return await main_module._render_template("assets/index.html", request, user, extra=extra)
+    return await main_module._render_template(
+        "assets/index.html", request, user, extra=extra
+    )
 
 
 @router.get("/assets/settings", response_class=HTMLResponse)
@@ -286,7 +317,56 @@ async def assets_settings_page(request: Request):
         "title": "Asset Custom Fields Settings",
         "is_super_admin": True,
     }
-    return await main_module._render_template("assets/settings.html", request, user, extra=extra)
+    return await main_module._render_template(
+        "assets/settings.html", request, user, extra=extra
+    )
+
+
+@router.get("/devices", response_class=HTMLResponse)
+async def network_devices_page(request: Request):
+    main_module = _main()
+    user, membership, company, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    return await main_module._render_template(
+        "devices/index.html",
+        request,
+        user,
+        extra={
+            "title": "Network Devices",
+            "company": company,
+            "devices": await network_devices_repo.list_for_company(company_id),
+            "scanners": await network_devices_repo.list_scanners(company_id),
+            "can_configure": bool(user.get("is_super_admin"))
+            or main_module._membership_menu_can(
+                user, membership, "menu.assets", write=True
+            ),
+        },
+    )
+
+
+@router.post("/devices/scanners/{device_id}")
+async def configure_network_scanner(request: Request, device_id: int):
+    main_module = _main()
+    user, membership, _company, company_id, redirect = await _load_asset_context(
+        request
+    )
+    if redirect:
+        return redirect
+    if not (
+        user.get("is_super_admin")
+        or main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+    ):
+        raise HTTPException(status_code=403, detail="Asset write access required")
+    form = await request.form()
+    try:
+        interval = max(5, min(10080, int(form.get("interval_minutes", 60))))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Scan interval must be a number")
+    await network_devices_repo.configure_scanner(
+        device_id, company_id, form.get("enabled") == "1", interval
+    )
+    return RedirectResponse(url="/devices", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/assets/{asset_id}", response_class=RedirectResponse)
@@ -298,12 +378,16 @@ async def asset_detail_page(request: Request, asset_id: int):
     record = await asset_repo.get_asset_by_id(asset_id)
     record_company_id = record.get("company_id") if record else None
     if record_company_id is None or int(record_company_id) != company_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found"
+        )
 
     safe_asset_id = int(asset_id)
     if safe_asset_id <= 0:
         return RedirectResponse(url="/assets", status_code=status.HTTP_303_SEE_OTHER)
-    return RedirectResponse(url=f"/assets#asset-{safe_asset_id}", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        url=f"/assets#asset-{safe_asset_id}", status_code=status.HTTP_303_SEE_OTHER
+    )
 
 
 @router.delete("/assets/{asset_id}", response_class=JSONResponse)
@@ -322,7 +406,9 @@ async def delete_asset(request: Request, asset_id: int):
 
     record = await asset_repo.get_asset_by_id(asset_id)
     if not record or int(record.get("company_id", 0) or 0) != company_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found"
+        )
 
     await asset_repo.delete_asset(asset_id)
     log_info(

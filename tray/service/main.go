@@ -44,6 +44,7 @@ import (
 	"github.com/bradhawkins85/myportal-tray/internal/ipc"
 	"github.com/bradhawkins85/myportal-tray/internal/logger"
 	"github.com/bradhawkins85/myportal-tray/internal/notify"
+	"github.com/bradhawkins85/myportal-tray/internal/scanner"
 	"github.com/bradhawkins85/myportal-tray/internal/updater"
 )
 
@@ -186,6 +187,7 @@ func (d *daemon) run() {
 	// Main WS + heartbeat loop.
 	go d.wsLoop()
 	go d.heartbeatLoop()
+	go d.networkScannerLoop()
 
 	<-d.stopCh
 	cancelUpdate()
@@ -193,6 +195,46 @@ func (d *daemon) run() {
 		d.ipcSrv.Close()
 	}
 	logger.Info("MyPortal Tray Service stopped")
+}
+
+func (d *daemon) networkScannerLoop() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	var lastScan time.Time
+	for {
+		select {
+		case <-d.stopCh:
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			cfg, err := d.client.GetConfig(ctx)
+			cancel()
+			if err != nil || !cfg.NetworkScannerEnabled {
+				continue
+			}
+			interval := time.Duration(cfg.NetworkScanIntervalMinutes) * time.Minute
+			if interval < 5*time.Minute {
+				interval = 5 * time.Minute
+			}
+			if !lastScan.IsZero() && time.Since(lastScan) < interval {
+				continue
+			}
+			lastScan = time.Now()
+			hosts, err := scanner.Scan()
+			if err != nil {
+				logger.Warn("Network scan: %v", err)
+				continue
+			}
+			ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+			err = d.client.UploadNetworkScan(ctx, hosts)
+			cancel()
+			if err != nil {
+				logger.Warn("Network scan upload: %v", err)
+			} else {
+				logger.Info("Network scan uploaded (%d hosts)", len(hosts))
+			}
+		}
+	}
 }
 
 func (d *daemon) ensureEnrolled() error {

@@ -19,6 +19,8 @@ EXPECTED = {
     ("GET", "/assets"),
     ("GET", "/assets/{asset_id}"),
     ("GET", "/assets/settings"),
+    ("GET", "/devices"),
+    ("POST", "/devices/scanners/{device_id}"),
     ("DELETE", "/assets/{asset_id}"),
 }
 

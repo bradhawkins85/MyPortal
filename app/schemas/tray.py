@@ -101,6 +101,21 @@ class TrayConfigResponse(BaseModel):
     # "browser" = always open in the default system browser.
     # "shell"   = require the dedicated chat shell; no browser fallback.
     chat_client_mode: Optional[str] = None
+    network_scanner_enabled: bool = False
+    network_scan_interval_minutes: int = 60
+
+
+class NetworkScanHost(BaseModel):
+    ip_address: str = Field(min_length=1, max_length=45)
+    mac_address: Optional[str] = Field(default=None, max_length=17)
+    hostname: Optional[str] = Field(default=None, max_length=255)
+    vendor: Optional[str] = Field(default=None, max_length=255)
+    os_details: Optional[str] = Field(default=None, max_length=500)
+    open_ports: Optional[str] = None
+
+
+class NetworkScanRequest(BaseModel):
+    hosts: list[NetworkScanHost] = Field(max_length=4096)
 
 
 class TrayMenuConfigCreate(BaseModel):

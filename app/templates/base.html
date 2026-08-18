@@ -311,6 +311,12 @@
                 <span class="menu__label">Assets</span>
               </a>
             </li>
+            <li class="menu__item">
+              <a href="/devices" {% if current_path.startswith('/devices') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zm10 0h6v6h-6zM9 14h6v6H9zM7 10v2h4v2h2v-2h4v-2h-2v-1h-2v1z"/></svg></span>
+                <span class="menu__label">Network Devices</span>
+              </a>
+            </li>
           {% endif %}
           {% if can_manage_licenses %}
             {% set m365_active = current_path.startswith('/m365') or current_path.startswith('/licenses') %}
