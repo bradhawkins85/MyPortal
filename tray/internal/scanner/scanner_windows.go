@@ -4,7 +4,6 @@ package scanner
 
 import (
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -29,8 +28,8 @@ func Scan() ([]api.NetworkHost, error) {
 		}
 		return nil, fmt.Errorf("PowerShell network scan: %w", err)
 	}
-	var hosts []api.NetworkHost
-	if err := json.Unmarshal(out, &hosts); err != nil {
+	hosts, err := parseNetworkHostsJSON(out)
+	if err != nil {
 		return nil, fmt.Errorf("parse PowerShell network scan output: %w", err)
 	}
 	for i := range hosts {
