@@ -53,6 +53,14 @@ func newStubServer(t *testing.T) *httptest.Server {
 		w.WriteHeader(http.StatusOK)
 	})
 
+	mux.HandleFunc("/api/tray/wan-ip", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-auth-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"wan_ip": "203.0.113.42"})
+	})
+
 	mux.HandleFunc("/api/tray/version", func(w http.ResponseWriter, r *http.Request) {
 		// Echo the X-Tray-OS header back so tests can assert it was sent.
 		osHeader := r.Header.Get("X-Tray-OS")
@@ -135,6 +143,21 @@ func TestHeartbeat(t *testing.T) {
 		AgentVersion: "0.1.0",
 	}); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
+	}
+}
+
+func TestGetWANIP(t *testing.T) {
+	srv := newStubServer(t)
+	defer srv.Close()
+
+	client := api.New(srv.URL)
+	client.SetAuth("test-device-uid", "test-auth-token")
+	wanIP, err := client.GetWANIP(context.Background())
+	if err != nil {
+		t.Fatalf("GetWANIP: %v", err)
+	}
+	if wanIP != "203.0.113.42" {
+		t.Fatalf("WAN IP = %q, want 203.0.113.42", wanIP)
 	}
 }
 

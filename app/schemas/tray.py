@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, IPvAnyAddress
 
 
 class TrayDeviceFacts(BaseModel):
@@ -115,6 +115,7 @@ class NetworkScanHost(BaseModel):
 
 
 class NetworkScanRequest(BaseModel):
+    wan_ip: IPvAnyAddress
     hosts: list[NetworkScanHost] = Field(max_length=4096)
 
 

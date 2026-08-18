@@ -36,6 +36,7 @@ from app.api.dependencies.auth import (
 from app.api.dependencies.api_keys import require_api_key
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info
+from app.security.client_ip import get_client_ip
 from app.repositories import assets as assets_repo
 from app.repositories import chat as chat_repo
 from app.repositories import companies as companies_repo
@@ -367,9 +368,20 @@ async def upload_network_scan(
         host["mac_address"] = mac or None
         hosts.append(host)
     await network_devices_repo.upsert_scan(
-        int(device["company_id"]), int(device["id"]), hosts
+        int(device["company_id"]), int(device["id"]), str(payload.wan_ip), hosts
     )
     return {"accepted": len(hosts)}
+
+
+@router.get("/wan-ip", summary="Determine this scanner's WAN IP address")
+async def get_scanner_wan_ip(
+    request: Request, _device: dict = Depends(get_current_tray_device)
+) -> dict[str, str]:
+    """Return the authenticated agent's address as observed by the portal."""
+    wan_ip = get_client_ip(request, default=None)
+    if not wan_ip:
+        raise HTTPException(status_code=503, detail="Unable to determine WAN IP")
+    return {"wan_ip": wan_ip}
 
 
 def _find_trmm_script_node(
