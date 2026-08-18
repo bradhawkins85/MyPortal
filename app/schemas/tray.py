@@ -67,6 +67,7 @@ class TrayMenuNode(BaseModel):
     * ``submit_ticket`` — opens the submit-a-ticket dialog.
     * ``submit_syncro_ticket`` — opens the same dialog and creates the ticket in Syncro.
     * ``TRMM_Script`` — asks MyPortal to run a selected Tactical RMM script on the linked asset.
+    * ``scan_network`` — asks an enabled network-scanner device to scan now.
     * ``refresh_config`` — asks the tray service to pull the latest menu config.
     * ``separator`` — visual divider.
     * ``quit`` — exits the tray application.
