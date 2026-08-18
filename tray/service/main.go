@@ -112,6 +112,8 @@ type daemon struct {
 
 	pendingUIMu      sync.Mutex
 	pendingUIMessage *ipc.Message
+
+	networkScanMu sync.Mutex
 }
 
 func newDaemon(cfg *config.Config) *daemon {
@@ -145,6 +147,9 @@ func (d *daemon) run() {
 			logger.Info("refresh_config received from UI — re-fetching config")
 			d.refreshConfig()
 			d.ipcSrv.Broadcast(ipc.Message{Type: "config_changed"})
+		})
+		d.ipcSrv.On("scan_network", func(msg ipc.Message) {
+			go d.manualNetworkScan()
 		})
 
 		// Re-deliver the latest config_changed event to any UI agent
@@ -219,31 +224,60 @@ func (d *daemon) networkScannerLoop() {
 			if !lastScan.IsZero() && time.Since(lastScan) < interval {
 				continue
 			}
-			// Resolve the location before starting the scan. A portable scanner can
-			// move between networks, so each result must carry its current WAN IP.
-			ctx, cancel = context.WithTimeout(context.Background(), 15*time.Second)
-			wanIP, err := d.client.GetWANIP(ctx)
-			cancel()
-			if err != nil {
-				logger.Warn("Network scan WAN IP lookup: %v", err)
-				continue
-			}
 			lastScan = time.Now()
-			hosts, err := scanner.Scan()
-			if err != nil {
-				logger.Warn("Network scan: %v", err)
-				continue
-			}
-			ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
-			err = d.client.UploadNetworkScan(ctx, wanIP, hosts)
-			cancel()
-			if err != nil {
-				logger.Warn("Network scan upload: %v", err)
-			} else {
-				logger.Info("Network scan uploaded (%d hosts)", len(hosts))
-			}
+			d.runNetworkScan("interval")
 		}
 	}
+}
+
+func (d *daemon) manualNetworkScan() {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	cfg, err := d.client.GetConfig(ctx)
+	cancel()
+	if err != nil {
+		logger.Warn("Manual network scan config lookup: %v", err)
+		return
+	}
+	if !cfg.NetworkScannerEnabled {
+		logger.Warn("Manual network scan ignored: network scanning is not enabled for this device")
+		return
+	}
+	d.runNetworkScan("manual")
+}
+
+func (d *daemon) runNetworkScan(source string) {
+	if !d.networkScanMu.TryLock() {
+		logger.Info("Network scan (%s) ignored: another scan is already running", source)
+		return
+	}
+	defer d.networkScanMu.Unlock()
+
+	started := time.Now()
+	logger.Info("Network scan (%s) started", source)
+	defer func() {
+		logger.Info("Network scan (%s) stopped after %s", source, time.Since(started).Round(time.Millisecond))
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	wanIP, err := d.client.GetWANIP(ctx)
+	cancel()
+	if err != nil {
+		logger.Warn("Network scan (%s) WAN IP lookup: %v", source, err)
+		return
+	}
+	hosts, err := scanner.Scan()
+	if err != nil {
+		logger.Warn("Network scan (%s): %v", source, err)
+		return
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+	err = d.client.UploadNetworkScan(ctx, wanIP, hosts)
+	cancel()
+	if err != nil {
+		logger.Warn("Network scan (%s) upload: %v", source, err)
+		return
+	}
+	logger.Info("Network scan (%s) uploaded (%d hosts)", source, len(hosts))
 }
 
 func (d *daemon) ensureEnrolled() error {

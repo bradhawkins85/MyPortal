@@ -313,6 +313,21 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 			}
 		}(node)
 
+	case "scan_network":
+		if !cfg.NetworkScannerEnabled {
+			return
+		}
+		label := node.Label
+		if label == "" {
+			label = "Scan Network"
+		}
+		item := addTrayMenuItem(parent, label, "Scan the local network now")
+		go func() {
+			for range item.ClickedCh {
+				requestNetworkScan()
+			}
+		}()
+
 	case "refresh_config":
 		label := node.Label
 		if label == "" {
