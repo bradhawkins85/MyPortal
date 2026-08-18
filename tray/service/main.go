@@ -219,6 +219,15 @@ func (d *daemon) networkScannerLoop() {
 			if !lastScan.IsZero() && time.Since(lastScan) < interval {
 				continue
 			}
+			// Resolve the location before starting Nmap. A portable scanner can
+			// move between networks, so each result must carry its current WAN IP.
+			ctx, cancel = context.WithTimeout(context.Background(), 15*time.Second)
+			wanIP, err := d.client.GetWANIP(ctx)
+			cancel()
+			if err != nil {
+				logger.Warn("Network scan WAN IP lookup: %v", err)
+				continue
+			}
 			lastScan = time.Now()
 			hosts, err := scanner.Scan()
 			if err != nil {
@@ -226,7 +235,7 @@ func (d *daemon) networkScannerLoop() {
 				continue
 			}
 			ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
-			err = d.client.UploadNetworkScan(ctx, hosts)
+			err = d.client.UploadNetworkScan(ctx, wanIP, hosts)
 			cancel()
 			if err != nil {
 				logger.Warn("Network scan upload: %v", err)

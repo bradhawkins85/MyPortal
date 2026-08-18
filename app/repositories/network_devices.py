@@ -45,7 +45,7 @@ async def configure_scanner(
 
 
 async def upsert_scan(
-    company_id: int, scanner_id: int, hosts: list[dict[str, Any]]
+    company_id: int, scanner_id: int, wan_ip: str, hosts: list[dict[str, Any]]
 ) -> None:
     for host in hosts:
         mac = host.get("mac_address") or None
@@ -56,15 +56,26 @@ async def upsert_scan(
                 (company_id, mac),
             )
             matched = matched_row.get("id") if matched_row else None
-        # MAC is the stable identity. Hosts without one are updated by company/IP.
+        # MAC is the stable identity across locations. For hosts without one,
+        # include the WAN address so identical private IPs on different networks
+        # do not overwrite each other.
         existing = await db.fetch_one(
             "SELECT id FROM network_devices WHERE company_id=%s AND "
-            + ("mac_address=%s" if mac else "mac_address IS NULL AND ip_address=%s")
+            + (
+                "mac_address=%s"
+                if mac
+                else "mac_address IS NULL AND wan_ip=%s AND ip_address=%s"
+            )
             + " LIMIT 1",
-            (company_id, mac or host["ip_address"]),
+            (
+                (company_id, mac)
+                if mac
+                else (company_id, wan_ip, host["ip_address"])
+            ),
         )
         values = (
             scanner_id,
+            wan_ip,
             host["ip_address"],
             mac,
             host.get("hostname"),
@@ -75,14 +86,14 @@ async def upsert_scan(
         )
         if existing:
             await db.execute(
-                """UPDATE network_devices SET scanner_tray_device_id=%s, ip_address=%s, mac_address=%s,
+                """UPDATE network_devices SET scanner_tray_device_id=%s, wan_ip=%s, ip_address=%s, mac_address=%s,
                    hostname=%s, vendor=%s, os_details=%s, open_ports=%s, matched_asset_id=%s,
                    last_seen_at=CURRENT_TIMESTAMP WHERE id=%s""",
                 values + (existing["id"],),
             )
         else:
             await db.execute(
-                """INSERT INTO network_devices (company_id, scanner_tray_device_id, ip_address, mac_address,
-                   hostname, vendor, os_details, open_ports, matched_asset_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                """INSERT INTO network_devices (company_id, scanner_tray_device_id, wan_ip, ip_address, mac_address,
+                   hostname, vendor, os_details, open_ports, matched_asset_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (company_id,) + values,
             )

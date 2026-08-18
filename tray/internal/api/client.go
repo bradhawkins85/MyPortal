@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -138,8 +139,31 @@ type NetworkHost struct {
 	OpenPorts  string `json:"open_ports,omitempty"`
 }
 
-func (c *Client) UploadNetworkScan(ctx context.Context, hosts []NetworkHost) error {
-	body, err := json.Marshal(map[string]interface{}{"hosts": hosts})
+// GetWANIP asks the portal which public address this agent's request arrived
+// from. Using the portal avoids depending on a third-party IP lookup service.
+func (c *Client) GetWANIP(ctx context.Context) (string, error) {
+	resp, err := c.get(ctx, "/api/tray/wan-ip")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("WAN IP lookup: HTTP %d", resp.StatusCode)
+	}
+	var out struct {
+		WANIP string `json:"wan_ip"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	if net.ParseIP(out.WANIP) == nil {
+		return "", fmt.Errorf("WAN IP lookup returned an invalid address")
+	}
+	return out.WANIP, nil
+}
+
+func (c *Client) UploadNetworkScan(ctx context.Context, wanIP string, hosts []NetworkHost) error {
+	body, err := json.Marshal(map[string]interface{}{"wan_ip": wanIP, "hosts": hosts})
 	if err != nil {
 		return err
 	}
