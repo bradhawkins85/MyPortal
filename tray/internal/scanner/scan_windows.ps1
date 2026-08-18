@@ -72,4 +72,10 @@ foreach ($ip in $targets) {
     })
 }
 $ping.Dispose()
-ConvertTo-Json -InputObject @($results) -Compress -Depth 3
+if ($results.Count -eq 0) {
+    # Windows PowerShell can emit no stdout when an empty collection reaches
+    # ConvertTo-Json. Always preserve the scanner's JSON output contract.
+    Write-Output '[]'
+} else {
+    ConvertTo-Json -InputObject @($results) -Compress -Depth 3
+}
