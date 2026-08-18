@@ -4,6 +4,7 @@ package api
 
 import (
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -139,8 +140,9 @@ type NetworkHost struct {
 	OpenPorts  string `json:"open_ports,omitempty"`
 }
 
-// GetWANIP asks the portal which public address this agent's request arrived
-// from. Using the portal avoids depending on a third-party IP lookup service.
+// GetWANIP obtains the public address using the whoami-compatible source
+// configured by the portal. The source is called by this agent so it observes
+// the WAN address of the network being scanned.
 func (c *Client) GetWANIP(ctx context.Context) (string, error) {
 	resp, err := c.get(ctx, "/api/tray/wan-ip")
 	if err != nil {
@@ -151,15 +153,56 @@ func (c *Client) GetWANIP(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("WAN IP lookup: HTTP %d", resp.StatusCode)
 	}
 	var out struct {
-		WANIP string `json:"wan_ip"`
+		WANIP       string `json:"wan_ip"`
+		SourceURL   string `json:"source_url"`
+		SourceField string `json:"source_field"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return "", err
+	}
+	if out.SourceURL != "" {
+		return c.getWANIPFromSource(ctx, out.SourceURL, out.SourceField)
 	}
 	if net.ParseIP(out.WANIP) == nil {
 		return "", fmt.Errorf("WAN IP lookup returned an invalid address")
 	}
 	return out.WANIP, nil
+}
+
+func (c *Client) getWANIPFromSource(ctx context.Context, sourceURL, sourceField string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("WAN IP source request: %w", err)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("WAN IP source request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("WAN IP source: HTTP %d", resp.StatusCode)
+	}
+
+	scanner := bufio.NewScanner(io.LimitReader(resp.Body, 1<<20))
+	for scanner.Scan() {
+		name, value, found := strings.Cut(scanner.Text(), ":")
+		if !found || !strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(sourceField)) {
+			continue
+		}
+		// Forwarded fields can contain a comma-separated proxy chain. The first
+		// valid address is the original client and therefore the scanner WAN IP.
+		for _, candidate := range strings.Split(value, ",") {
+			candidate = strings.TrimSpace(candidate)
+			if net.ParseIP(candidate) != nil {
+				return candidate, nil
+			}
+		}
+		return "", fmt.Errorf("WAN IP source field %q did not contain a valid address", sourceField)
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("read WAN IP source: %w", err)
+	}
+	return "", fmt.Errorf("WAN IP source field %q was not found", sourceField)
 }
 
 func (c *Client) UploadNetworkScan(ctx context.Context, wanIP string, hosts []NetworkHost) error {

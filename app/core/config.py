@@ -589,6 +589,18 @@ class Settings(BaseSettings):
         validation_alias="TRUSTED_PROXIES",
     )
 
+    # Optional whoami-compatible endpoint used by tray network scanners to
+    # discover the WAN address from the scanner's own network.
+    wan_ip_source_url: AnyHttpUrl | None = Field(
+        default=None,
+        validation_alias="WAN_IP_SOURCE_URL",
+    )
+    wan_ip_source_field: str = Field(
+        default="X-Forwarded-For",
+        validation_alias="WAN_IP_SOURCE_FIELD",
+        min_length=1,
+    )
+
     # Huntress integration. Credentials are kept in environment variables so the
     # module exposes only an enable/disable toggle in the modules admin UI.
     huntress_api_key: str | None = Field(
