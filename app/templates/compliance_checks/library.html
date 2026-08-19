@@ -217,7 +217,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('seed-btn')?.addEventListener('click', async () => {
     if (!confirm('Re-seed predefined GMP/GLP checks? Existing entries will not be overwritten.')) return;
     try {
-      const resp = await fetch('/api/compliance-checks/checks', { method: 'GET' });
+      await fetch('/api/compliance-checks/checks', { method: 'GET' });
       alert('Seeding happens via the database migration. To re-seed, re-run migration 213.');
     } catch {
       alert('Error');
