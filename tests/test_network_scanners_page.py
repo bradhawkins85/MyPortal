@@ -38,6 +38,10 @@ def test_discovered_devices_loads_shared_column_filters():
     assert '<th class="table__actions">Actions</th>' in TEMPLATE
     assert 'name="agent_not_required" value="1"' in TEMPLATE
     assert "Agent not required" in TEMPLATE
+    assert '<th data-sort="date">First seen</th>' in TEMPLATE
+    assert '<th data-sort="date">Last seen</th>' in TEMPLATE
+    assert "device.first_seen_at.strftime('%Y-%m-%d %H:%M')" in TEMPLATE
+    assert "device.last_seen_at.strftime('%Y-%m-%d %H:%M')" in TEMPLATE
 
 
 @pytest.mark.anyio
