@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/tables.html" import table_column_picker %}
 {% block title %}Network Devices{% endblock %}
 {% block header_title %}<span class="header__title-text">Network Devices</span>{% endblock %}
 {% block content %}
@@ -17,24 +18,39 @@
   </section>
 
   <section class="card card--panel admin-grid__full">
+    {% set discovered_device_columns = [
+      {"key": "hostname", "label": "Hostname"},
+      {"key": "state", "label": "State"},
+      {"key": "type", "label": "Type"},
+      {"key": "description", "label": "Description"},
+      {"key": "discovered-by", "label": "Discovered by"},
+      {"key": "wan-ip", "label": "WAN IP"},
+      {"key": "local-ip", "label": "Local IP"},
+      {"key": "mac-address", "label": "MAC address"},
+      {"key": "mac-vendor-os", "label": "MAC vendor / OS"},
+      {"key": "open-ports", "label": "Open ports"},
+      {"key": "first-seen", "label": "First seen"},
+      {"key": "last-seen", "label": "Last seen"},
+      {"key": "myportal-asset", "label": "MyPortal asset"}
+    ] %}
     <header class="card__header card__header--stacked">
       <div><h2>Discovered devices</h2><p class="card__lede">Asset matches use normalized MAC addresses. WAN IP identifies the network where each device was most recently seen.</p></div>
-      {% if devices %}<div class="card__controls"><label class="visually-hidden" for="network-device-search">Search devices</label><input id="network-device-search" class="input" type="search" placeholder="Search devices" data-table-filter="network-devices"></div>{% endif %}
+      {% if devices %}<div class="card__controls"><label class="visually-hidden" for="network-device-search">Search devices</label><input id="network-device-search" class="input" type="search" placeholder="Search devices" data-table-filter="network-devices">{% if can_configure %}{{ table_column_picker("network-devices", discovered_device_columns) }}{% endif %}</div>{% endif %}
     </header>
     {% if devices %}
       <div class="table-wrapper"><table class="table" id="network-devices-table" data-table data-table-id="network-devices">
-        <thead><tr><th data-sort="string">Hostname</th><th data-sort="string">State</th><th data-sort="string">Type</th><th data-sort="string">Description</th><th data-sort="string">Discovered by</th><th data-sort="string">WAN IP</th><th data-sort="string">Local IP</th><th data-sort="string">MAC address</th><th data-sort="string">MAC vendor / OS</th><th data-sort="string">Open ports</th><th data-sort="date">First seen</th><th data-sort="date">Last seen</th><th data-sort="string">MyPortal asset</th>{% if can_configure %}<th class="table__actions">Actions</th>{% endif %}</tr></thead>
+        <thead><tr><th data-column-key="hostname" data-sort="string">Hostname</th><th data-column-key="state" data-sort="string">State</th><th data-column-key="type" data-sort="string">Type</th><th data-column-key="description" data-sort="string">Description</th><th data-column-key="discovered-by" data-sort="string">Discovered by</th><th data-column-key="wan-ip" data-sort="string">WAN IP</th><th data-column-key="local-ip" data-sort="string">Local IP</th><th data-column-key="mac-address" data-sort="string">MAC address</th><th data-column-key="mac-vendor-os" data-sort="string">MAC vendor / OS</th><th data-column-key="open-ports" data-sort="string">Open ports</th><th data-column-key="first-seen" data-sort="date">First seen</th><th data-column-key="last-seen" data-sort="date">Last seen</th><th data-column-key="myportal-asset" data-sort="string">MyPortal asset</th>{% if can_configure %}<th class="table__actions">Actions</th>{% endif %}</tr></thead>
         <tbody>{% for device in devices %}<tr>
-          <td>{{ device.hostname or '—' }}</td>
-          <td><span class="tag{% if device.state == 'New' %} tag--warning{% endif %}">{{ device.state }}</span></td>
-          <td>{{ device.device_type_name or '—' }}</td>
-          <td>{{ device.description or '—' }}</td>
-          <td>{% if device.scanner_asset_id %}<a href="/assets/{{ device.scanner_asset_id }}">{{ device.scanner_asset_name or device.scanner_hostname }}</a>{% else %}{{ device.scanner_hostname or '—' }}{% endif %}</td>
-          <td><code>{{ device.wan_ip or '—' }}</code></td><td>{{ device.ip_address }}</td><td><code>{{ device.mac_address or '—' }}</code></td>
-          <td>{{ device.mac_vendor or '—' }}{% if device.os_details %}<br><small>{{ device.os_details }}</small>{% endif %}</td><td>{{ device.open_ports or '—' }}</td>
-          <td data-value="{{ device.first_seen_at or '' }}">{{ device.first_seen_at.strftime('%Y-%m-%d %H:%M') if device.first_seen_at else '—' }}</td>
-          <td data-value="{{ device.last_seen_at or '' }}">{{ device.last_seen_at.strftime('%Y-%m-%d %H:%M') if device.last_seen_at else '—' }}</td>
-          <td>{% if device.matched_asset_id %}<a href="/assets/{{ device.matched_asset_id }}"><span class="tag">{{ device.matched_asset_name }}</span></a>{% elif device.agent_not_required %}<span class="tag">Agent not required</span>{% else %}<span class="tag tag--warning">Agent may be required</span>{% endif %}</td>
+          <td data-column-key="hostname">{{ device.hostname or '—' }}</td>
+          <td data-column-key="state"><span class="tag{% if device.state == 'New' %} tag--warning{% endif %}">{{ device.state }}</span></td>
+          <td data-column-key="type">{{ device.device_type_name or '—' }}</td>
+          <td data-column-key="description">{{ device.description or '—' }}</td>
+          <td data-column-key="discovered-by">{% if device.scanner_asset_id %}<a href="/assets/{{ device.scanner_asset_id }}">{{ device.scanner_asset_name or device.scanner_hostname }}</a>{% else %}{{ device.scanner_hostname or '—' }}{% endif %}</td>
+          <td data-column-key="wan-ip"><code>{{ device.wan_ip or '—' }}</code></td><td data-column-key="local-ip">{{ device.ip_address }}</td><td data-column-key="mac-address"><code>{{ device.mac_address or '—' }}</code></td>
+          <td data-column-key="mac-vendor-os">{{ device.mac_vendor or '—' }}{% if device.os_details %}<br><small>{{ device.os_details }}</small>{% endif %}</td><td data-column-key="open-ports">{{ device.open_ports or '—' }}</td>
+          <td data-column-key="first-seen" data-value="{{ device.first_seen_at or '' }}">{{ device.first_seen_at.strftime('%Y-%m-%d %H:%M') if device.first_seen_at else '—' }}</td>
+          <td data-column-key="last-seen" data-value="{{ device.last_seen_at or '' }}">{{ device.last_seen_at.strftime('%Y-%m-%d %H:%M') if device.last_seen_at else '—' }}</td>
+          <td data-column-key="myportal-asset">{% if device.matched_asset_id %}<a href="/assets/{{ device.matched_asset_id }}"><span class="tag">{{ device.matched_asset_name }}</span></a>{% elif device.agent_not_required %}<span class="tag">Agent not required</span>{% else %}<span class="tag tag--warning">Agent may be required</span>{% endif %}</td>
           {% if can_configure %}<td class="table__actions">
             <details class="header-title-menu__dropdown" data-header-menu><summary class="header-title-menu__toggle" data-header-menu-toggle>Actions <span aria-hidden="true">▾</span></summary>
               <div class="header-title-menu__list discovered-device-menu">
