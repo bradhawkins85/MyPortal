@@ -16,26 +16,34 @@ $serviceNames = @{
     8080 = 'http-proxy'; 8443 = 'https-alt'
 }
 $ports = @($serviceNames.Keys | Sort-Object)
-$localAddresses = @(Get-NetIPAddress -AddressFamily IPv4 -AddressState Preferred -ErrorAction Stop |
-    Where-Object { $_.IPAddress -notlike '127.*' -and $_.InterfaceAlias -notmatch 'Loopback' })
+$legacyWindows = [Environment]::OSVersion.Version.Major -lt 10
+if ($legacyWindows) {
+    $localAddresses = @(Get-WmiObject -Class Win32_NetworkAdapterConfiguration -Filter 'IPEnabled = True' -ErrorAction Stop |
+        ForEach-Object { $_.IPAddress } |
+        Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}$' -and $_ -notlike '127.*' })
+} else {
+    $localAddresses = @(Get-NetIPAddress -AddressFamily IPv4 -AddressState Preferred -ErrorAction Stop |
+        Where-Object { $_.IPAddress -notlike '127.*' -and $_.InterfaceAlias -notmatch 'Loopback' } |
+        ForEach-Object { $_.IPAddress })
+}
 if ($localAddresses.Count -eq 0) { throw 'No connected IPv4 subnet found' }
 
-$targets = [Collections.Generic.HashSet[string]]::new()
+$targets = New-Object 'Collections.Generic.HashSet[string]'
 foreach ($address in $localAddresses) {
-    $octets = $address.IPAddress.Split('.')
+    $octets = $address.Split('.')
     $prefix = '{0}.{1}.{2}' -f $octets[0], $octets[1], $octets[2]
     foreach ($hostNumber in 1..254) { [void]$targets.Add("$prefix.$hostNumber") }
 }
 
-$results = [Collections.Generic.List[object]]::new()
-$ping = [Net.NetworkInformation.Ping]::new()
+$results = New-Object 'Collections.Generic.List[object]'
+$ping = New-Object Net.NetworkInformation.Ping
 foreach ($ip in $targets) {
     $reply = $null
     try { $reply = $ping.Send($ip, 150) } catch { }
-    $openPorts = [Collections.Generic.List[string]]::new()
-    $connections = [Collections.Generic.List[object]]::new()
+    $openPorts = New-Object 'Collections.Generic.List[string]'
+    $connections = New-Object 'Collections.Generic.List[object]'
     foreach ($port in $ports) {
-        $client = [Net.Sockets.TcpClient]::new()
+        $client = New-Object Net.Sockets.TcpClient
         try {
             $connect = $client.BeginConnect($ip, $port, $null, $null)
             $connections.Add([pscustomobject]@{ Port = $port; Client = $client; Connect = $connect })
@@ -51,9 +59,23 @@ foreach ($ip in $targets) {
             }
         } catch { } finally { $connection.Client.Dispose() }
     }
-    $neighbor = Get-NetNeighbor -IPAddress $ip -ErrorAction SilentlyContinue |
-        Where-Object { $_.State -ne 'Unreachable' -and $_.LinkLayerAddress } | Select-Object -First 1
-    if (($null -eq $reply -or $reply.Status -ne 'Success') -and $openPorts.Count -eq 0 -and $null -eq $neighbor) { continue }
+    $macAddress = ''
+    if ($legacyWindows) {
+        # The NetTCPIP module can fail to load on Windows Server 2012 R2. Use
+        # the inbox WMI and arp.exe interfaces only on these older systems.
+        $escapedIP = [Regex]::Escape($ip)
+        foreach ($line in (& "$env:SystemRoot\System32\arp.exe" -a $ip 2>$null)) {
+            if ($line -match ("^\s*{0}\s+([0-9a-fA-F]{{2}}(?:-[0-9a-fA-F]{{2}}){{5}})\s+" -f $escapedIP)) {
+                $macAddress = $matches[1]
+                break
+            }
+        }
+    } else {
+        $neighbor = Get-NetNeighbor -IPAddress $ip -ErrorAction SilentlyContinue |
+            Where-Object { $_.State -ne 'Unreachable' -and $_.LinkLayerAddress } | Select-Object -First 1
+        if ($null -ne $neighbor) { $macAddress = $neighbor.LinkLayerAddress }
+    }
+    if (($null -eq $reply -or $reply.Status -ne 'Success') -and $openPorts.Count -eq 0 -and -not $macAddress) { continue }
     $hostname = ''
     try { $hostname = [Net.Dns]::GetHostEntry($ip).HostName } catch { }
     $os = ''
@@ -64,7 +86,7 @@ foreach ($ip in $targets) {
     }
     $results.Add([pscustomobject]@{
         ip_address = $ip
-        mac_address = if ($null -ne $neighbor) { $neighbor.LinkLayerAddress } else { '' }
+        mac_address = $macAddress
         hostname = $hostname
         vendor = ''
         os_details = $os

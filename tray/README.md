@@ -153,7 +153,9 @@ The chat shell binary is installed to:
 ### Network scanning
 
 When network scanning is enabled by the portal, the Windows service uses the
-Windows PowerShell and .NET networking APIs already included with Windows. It
+Windows PowerShell and .NET networking APIs already included with Windows. On
+Windows Server 2012 R2 and older systems, it uses WMI and `arp.exe` compatibility
+fallbacks instead of the newer NetTCPIP module. It
 discovers hosts with ICMP, the neighbor table, reverse DNS, and a bounded scan
 of common TCP ports. Each connected network is limited to its local `/24`, so
 the tray no longer installs or requires Nmap on Windows. macOS and Linux builds

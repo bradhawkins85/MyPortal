@@ -3,9 +3,34 @@ package scanner
 import (
 	"encoding/base64"
 	"encoding/binary"
+	"os"
+	"strings"
 	"testing"
 	"unicode/utf16"
 )
+
+func TestWindowsScanScriptSupportsLegacyPowerShell(t *testing.T) {
+	scriptBytes, err := os.ReadFile("scan_windows.ps1")
+	if err != nil {
+		t.Fatalf("read Windows scan script: %v", err)
+	}
+	script := string(scriptBytes)
+	for _, unsupported := range []string{"::new()"} {
+		if strings.Contains(script, unsupported) {
+			t.Errorf("Windows scan script uses legacy-incompatible %q", unsupported)
+		}
+	}
+	for _, fallback := range []string{"$legacyWindows = [Environment]::OSVersion.Version.Major -lt 10", "Win32_NetworkAdapterConfiguration", "arp.exe"} {
+		if !strings.Contains(script, fallback) {
+			t.Errorf("Windows scan script does not use compatibility fallback %q", fallback)
+		}
+	}
+	for _, modern := range []string{"Get-NetIPAddress -", "Get-NetNeighbor -"} {
+		if !strings.Contains(script, modern) {
+			t.Errorf("Windows scan script does not preserve modern command %q", modern)
+		}
+	}
+}
 
 func TestEncodePowerShellCommandUsesUTF16LE(t *testing.T) {
 	script := "Write-Output '✓'\n"
