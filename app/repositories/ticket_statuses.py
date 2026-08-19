@@ -155,7 +155,7 @@ async def replace_statuses(definitions: Sequence[dict[str, Any]]) -> list[dict[s
                                 (label, public_status, is_default, int(bool(definition.get("hide_from_technicians", False))), int(bool(definition.get("hide_from_admins", False))), original_slug),
                             )
                         else:
-                            if slug in current_slugs and slug != original_slug:
+                            if slug in current_slugs:
                                 raise ValueError("Tech status values must be unique.")
                             if slug in encountered:
                                 raise ValueError("Tech status values must be unique.")
