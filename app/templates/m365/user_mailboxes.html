@@ -228,16 +228,17 @@
     var csrfToken = '{{ csrf_token }}';
     var syncBtn = document.querySelector('[data-sync-mailboxes]');
     var runAllBtn = document.querySelector('[data-start-managed-folder-assistant-all]');
+    var csrfMeta = document.querySelector('meta[name="csrf-token"]');
+    var csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : '';
     if (syncBtn) {
       syncBtn.addEventListener('click', function () {
         syncBtn.disabled = true;
         var originalText = syncBtn.textContent;
+        var syncHeaders = { 'Content-Type': 'application/json' };
+        if (csrfToken) { syncHeaders['X-CSRF-Token'] = csrfToken; }
         fetch('/m365/mailboxes/sync', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': csrfToken
-          }
+          headers: syncHeaders
         })
         .then(function (resp) { return resp.json(); })
         .then(function () {
@@ -261,12 +262,11 @@
         runAllBtn.disabled = true;
         var originalText = runAllBtn.textContent;
         runAllBtn.textContent = 'Starting…';
+        var runAllHeaders = { 'Content-Type': 'application/json' };
+        if (csrfToken) { runAllHeaders['X-CSRF-Token'] = csrfToken; }
         fetch('/m365/mailboxes/start-managed-folder-assistant/all', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': csrfToken
-          }
+          headers: runAllHeaders
         })
         .then(function (resp) {
           return resp.json().then(function (data) { return { ok: resp.ok, data: data }; });
