@@ -316,7 +316,6 @@ async def assets_settings_page(request: Request):
     extra = {
         "title": "Asset Custom Fields Settings",
         "is_super_admin": True,
-        "device_types": await network_devices_repo.list_device_types(),
     }
     return await main_module._render_template(
         "assets/settings.html", request, user, extra=extra
@@ -347,6 +346,7 @@ async def network_devices_page(request: Request):
             "device_types": await network_devices_repo.list_device_types(),
             "scanners": enabled_scanners,
             "available_scanners": available_scanners,
+            "can_manage_device_types": bool(user.get("is_super_admin")),
             "can_configure": bool(user.get("is_super_admin"))
             or main_module._membership_menu_can(
                 user, membership, "menu.assets", write=True
@@ -393,6 +393,32 @@ async def update_network_device(request: Request, device_id: int):
         description,
         agent_not_required,
     )
+    return RedirectResponse(url="/devices", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/devices/device-types")
+async def add_device_type_from_devices(request: Request):
+    user, _membership, _company, _company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    form = await request.form()
+    name = str(form.get("name") or "").strip()
+    if not name or len(name) > 100:
+        raise HTTPException(status_code=422, detail="Enter a device type name")
+    await network_devices_repo.create_device_type(name)
+    return RedirectResponse(url="/devices", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/devices/device-types/{device_type_id}/delete")
+async def delete_device_type_from_devices(request: Request, device_type_id: int):
+    user, _membership, _company, _company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    await network_devices_repo.delete_device_type(device_type_id)
     return RedirectResponse(url="/devices", status_code=status.HTTP_303_SEE_OTHER)
 
 

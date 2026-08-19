@@ -1,7 +1,15 @@
 {% extends "base.html" %}
 {% from "macros/tables.html" import table_column_picker %}
+{% from "macros/header.html" import page_header_overflow %}
 {% block title %}Network Devices{% endblock %}
 {% block header_title %}<span class="header__title-text">Network Devices</span>{% endblock %}
+{% block header_actions %}
+  {% if can_manage_device_types %}
+    {{ page_header_overflow("network-device-actions", "Actions", [
+      {"label": "Edit Device Types", "type": "button", "attrs": {"data-device-types-open": true}}
+    ]) }}
+  {% endif %}
+{% endblock %}
 {% block content %}
 <div class="admin-grid admin-grid--columns">
   <section class="card card--panel admin-grid__full">
@@ -70,9 +78,35 @@
     {% else %}<div class="empty-state"><h3 class="empty-state__title">No devices discovered yet</h3><p class="empty-state__subtitle">Enable a scanner above. Its first result will appear after Nmap is available.</p></div>{% endif %}
   </section>
 </div>
+
+{% if can_manage_device_types %}
+<div class="modal" id="device-types-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="device-types-modal-title">
+  <div class="modal__backdrop" data-device-types-close></div>
+  <section class="modal__dialog">
+    <header class="modal__header">
+      <div><h2 id="device-types-modal-title">Edit Device Types</h2><p class="card__lede">Manage the types available when classifying discovered devices.</p></div>
+      <button type="button" class="modal__close" data-device-types-close aria-label="Close device types">&times;</button>
+    </header>
+    <div class="modal__body">
+      {% if device_types %}
+      <div class="table-wrapper"><table class="table"><thead><tr><th>Name</th><th class="table__actions">Actions</th></tr></thead><tbody>
+        {% for device_type in device_types %}<tr><td>{{ device_type.name }}</td><td class="table__actions"><form method="post" action="/devices/device-types/{{ device_type.id }}/delete" data-confirm="Remove this device type? Devices using it will be reset to Not set.">{% include "partials/csrf.html" %}<button class="button button--danger button--small" type="submit">Remove</button></form></td></tr>{% endfor %}
+      </tbody></table></div>
+      {% else %}<p class="empty-state__subtitle">No device types have been added yet.</p>{% endif %}
+      <form method="post" action="/devices/device-types" class="form-stack">
+        {% include "partials/csrf.html" %}
+        <label for="new-device-type">New device type</label>
+        <div class="inline-form"><input id="new-device-type" class="input" name="name" maxlength="100" placeholder="e.g. Firewall" required><button class="button button--primary" type="submit">Add type</button></div>
+      </form>
+    </div>
+    <footer class="modal__footer"><button type="button" class="button button--ghost" data-device-types-close>Close</button></footer>
+  </section>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  {% if can_manage_device_types %}<script src="{{ static_url('/static/js/devices.js') }}" defer></script>{% endif %}
 {% endblock %}

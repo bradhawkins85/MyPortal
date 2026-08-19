@@ -15,15 +15,6 @@
 <div class="admin-grid admin-grid--columns">
   <section class="card card--panel admin-grid__full">
     <header class="card__header card__header--stacked">
-      <div><h2 class="card__title">Network device types</h2><p class="card__subtitle">Configure the types available when classifying discovered devices across all companies.</p></div>
-    </header>
-    <div class="table-wrapper"><table class="table"><thead><tr><th>Name</th><th>Actions</th></tr></thead><tbody>
-      {% for device_type in device_types %}<tr><td>{{ device_type.name }}</td><td><form method="post" action="/assets/settings/device-types/{{ device_type.id }}/delete">{% include "partials/csrf.html" %}<button class="button button--danger" type="submit">Delete</button></form></td></tr>{% endfor %}
-      <tr><td><input class="input" form="add-device-type" name="name" maxlength="100" placeholder="e.g. Firewall" required></td><td><form id="add-device-type" method="post" action="/assets/settings/device-types">{% include "partials/csrf.html" %}<button class="button button--primary" type="submit">Add type</button></form></td></tr>
-    </tbody></table></div>
-  </section>
-  <section class="card card--panel admin-grid__full">
-    <header class="card__header card__header--stacked">
       <div>
         <h2 class="card__title">Custom Fields Configuration</h2>
         <p class="card__subtitle">
