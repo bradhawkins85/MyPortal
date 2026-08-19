@@ -176,7 +176,7 @@ def _compute_package_metrics(
 
         if quantity <= 0:
             stock_levels.append(stock)
-        elif quantity > 0:
+        else:
             stock_levels.append(stock // quantity)
 
     if not stock_levels:
