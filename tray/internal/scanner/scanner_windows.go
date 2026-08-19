@@ -32,7 +32,7 @@ func Scan() ([]api.NetworkHost, error) {
 		return nil, fmt.Errorf("parse PowerShell network scan output: %w", err)
 	}
 	for i := range hosts {
-		hosts[i].MACAddress = strings.ToUpper(strings.ReplaceAll(hosts[i].MACAddress, "-", ":"))
+		hosts[i].MACAddress = normalizeMACAddress(hosts[i].MACAddress)
 	}
 	return hosts, nil
 }

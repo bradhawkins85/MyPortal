@@ -17,14 +17,26 @@ $serviceNames = @{
 }
 $ports = @($serviceNames.Keys | Sort-Object)
 $legacyWindows = [Environment]::OSVersion.Version.Major -lt 10
+$localMacAddresses = @{}
 if ($legacyWindows) {
-    $localAddresses = @(Get-WmiObject -Class Win32_NetworkAdapterConfiguration -Filter 'IPEnabled = True' -ErrorAction Stop |
-        ForEach-Object { $_.IPAddress } |
-        Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}$' -and $_ -notlike '127.*' })
+    $localAdapters = @(Get-WmiObject -Class Win32_NetworkAdapterConfiguration -Filter 'IPEnabled = True' -ErrorAction Stop)
+    $localAddresses = @($localAdapters | ForEach-Object {
+        $adapter = $_
+        foreach ($adapterAddress in $adapter.IPAddress) {
+            if ($adapterAddress -match '^\d{1,3}(\.\d{1,3}){3}$' -and $adapterAddress -notlike '127.*') {
+                if ($adapter.MACAddress) { $localMacAddresses[$adapterAddress] = $adapter.MACAddress }
+                $adapterAddress
+            }
+        }
+    })
 } else {
     $localAddresses = @(Get-NetIPAddress -AddressFamily IPv4 -AddressState Preferred -ErrorAction Stop |
         Where-Object { $_.IPAddress -notlike '127.*' -and $_.InterfaceAlias -notmatch 'Loopback' } |
-        ForEach-Object { $_.IPAddress })
+        ForEach-Object {
+            $adapter = Get-NetAdapter -InterfaceIndex $_.InterfaceIndex -ErrorAction SilentlyContinue
+            if ($null -ne $adapter -and $adapter.MacAddress) { $localMacAddresses[$_.IPAddress] = $adapter.MacAddress }
+            $_.IPAddress
+        })
 }
 if ($localAddresses.Count -eq 0) { throw 'No connected IPv4 subnet found' }
 
@@ -60,12 +72,16 @@ foreach ($ip in $targets) {
         } catch { } finally { $connection.Client.Dispose() }
     }
     $macAddress = ''
-    if ($legacyWindows) {
+    if ($localMacAddresses.ContainsKey($ip)) {
+        # A host does not have an ARP/neighbor entry for itself, so obtain the
+        # scanner's MAC directly from the interface that owns its local IP.
+        $macAddress = $localMacAddresses[$ip]
+    } elseif ($legacyWindows) {
         # The NetTCPIP module can fail to load on Windows Server 2012 R2. Use
         # the inbox WMI and arp.exe interfaces only on these older systems.
         $escapedIP = [Regex]::Escape($ip)
         foreach ($line in (& "$env:SystemRoot\System32\arp.exe" -a $ip 2>$null)) {
-            if ($line -match ("^\s*{0}\s+([0-9a-fA-F]{{2}}(?:-[0-9a-fA-F]{{2}}){{5}})\s+" -f $escapedIP)) {
+            if ($line -match ("^\s*{0}\s+([0-9a-fA-F]{{2}}(?:(?:-|:)?[0-9a-fA-F]{{2}}){{5}})\s+" -f $escapedIP)) {
                 $macAddress = $matches[1]
                 break
             }
@@ -74,6 +90,12 @@ foreach ($ip in $targets) {
         $neighbor = Get-NetNeighbor -IPAddress $ip -ErrorAction SilentlyContinue |
             Where-Object { $_.State -ne 'Unreachable' -and $_.LinkLayerAddress } | Select-Object -First 1
         if ($null -ne $neighbor) { $macAddress = $neighbor.LinkLayerAddress }
+    }
+    if ($macAddress) {
+        $macHex = $macAddress -replace '[^0-9a-fA-F]', ''
+        if ($macHex.Length -eq 12) {
+            $macAddress = (([Regex]::Matches($macHex, '.{2}') | ForEach-Object { $_.Value }) -join ':').ToUpperInvariant()
+        }
     }
     if (($null -eq $reply -or $reply.Status -ne 'Success') -and $openPorts.Count -eq 0 -and -not $macAddress) { continue }
     $hostname = ''

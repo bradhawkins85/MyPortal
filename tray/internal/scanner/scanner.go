@@ -40,6 +40,21 @@ func parseNetworkHostsJSON(out []byte) ([]api.NetworkHost, error) {
 	return hosts, nil
 }
 
+// normalizeMACAddress produces the canonical representation used by MyPortal,
+// including for the unseparated hexadecimal form returned by some arp.exe
+// versions and localized Windows builds.
+func normalizeMACAddress(address string) string {
+	hex := strings.NewReplacer(":", "", "-", "", ".", "").Replace(strings.TrimSpace(address))
+	if len(hex) != 12 {
+		return strings.ToUpper(address)
+	}
+	parts := make([]string, 0, 6)
+	for i := 0; i < len(hex); i += 2 {
+		parts = append(parts, hex[i:i+2])
+	}
+	return strings.ToUpper(strings.Join(parts, ":"))
+}
+
 func connectedSubnets() []string {
 	seen := map[string]bool{}
 	var result []string
