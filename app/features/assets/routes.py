@@ -384,8 +384,14 @@ async def update_network_device(request: Request, device_id: int):
     description = str(form.get("description") or "").strip() or None
     if description and len(description) > 2000:
         raise HTTPException(status_code=422, detail="Description is too long")
+    agent_not_required = form.get("agent_not_required") == "1"
     await network_devices_repo.update_device(
-        device_id, company_id, state_value, device_type_id, description
+        device_id,
+        company_id,
+        state_value,
+        device_type_id,
+        description,
+        agent_not_required,
     )
     return RedirectResponse(url="/devices", status_code=status.HTTP_303_SEE_OTHER)
 
