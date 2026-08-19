@@ -17,7 +17,6 @@ from app.repositories import tray as tray_repo
 from app.repositories import network_devices as network_devices_repo
 from app.repositories import user_companies as user_company_repo
 
-
 router = APIRouter(tags=["Assets"])
 
 _ASSET_TABLE_COLUMNS: list[dict[str, str]] = [
@@ -264,9 +263,11 @@ async def assets_page(request: Request):
         {
             "key": f"cf_{field_def['id']}",
             "label": field_def["display_name"] or field_def["name"],
-            "sort": "date"
-            if field_def["field_type"] == "date"
-            else ("number" if field_def["field_type"] == "checkbox" else "string"),
+            "sort": (
+                "date"
+                if field_def["field_type"] == "date"
+                else ("number" if field_def["field_type"] == "checkbox" else "string")
+            ),
             "field_type": field_def["field_type"],
         }
         for field_def in field_definitions
@@ -333,7 +334,9 @@ async def network_devices_page(request: Request):
         scanner for scanner in scanner_assets if scanner.get("network_scanner_enabled")
     ]
     available_scanners = [
-        scanner for scanner in scanner_assets if not scanner.get("network_scanner_enabled")
+        scanner
+        for scanner in scanner_assets
+        if not scanner.get("network_scanner_enabled")
     ]
     return await main_module._render_template(
         "devices/index.html",
@@ -358,7 +361,9 @@ async def network_devices_page(request: Request):
 @router.post("/devices/discovered/{device_id}")
 async def update_network_device(request: Request, device_id: int):
     main_module = _main()
-    user, membership, _company, company_id, redirect = await _load_asset_context(request)
+    user, membership, _company, company_id, redirect = await _load_asset_context(
+        request
+    )
     if redirect:
         return redirect
     if not (
@@ -396,9 +401,74 @@ async def update_network_device(request: Request, device_id: int):
     return RedirectResponse(url="/devices", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@router.post("/devices/discovered-bulk-update")
+async def bulk_update_network_devices(request: Request):
+    main_module = _main()
+    user, membership, _company, company_id, redirect = await _load_asset_context(
+        request
+    )
+    if redirect:
+        return redirect
+    if not (
+        user.get("is_super_admin")
+        or main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+    ):
+        raise HTTPException(status_code=403, detail="Asset write access required")
+
+    form = await request.form()
+    raw_ids = form.getlist("device_ids")
+    try:
+        device_ids = list(dict.fromkeys(int(value) for value in raw_ids))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid device selection") from exc
+    if not device_ids or len(device_ids) > 500:
+        raise HTTPException(status_code=422, detail="Select between 1 and 500 devices")
+
+    action = str(form.get("bulk_action") or "")
+    updates: dict[str, object] = {}
+    if action == "state":
+        state_value = str(form.get("state") or "").title()
+        if state_value not in {"New", "Known", "Unknown"}:
+            raise HTTPException(status_code=422, detail="Invalid device state")
+        updates["state"] = state_value
+    elif action == "device_type":
+        raw_type = form.get("device_type_id")
+        try:
+            device_type_id = int(raw_type) if raw_type else None
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="Invalid device type") from exc
+        valid_type_ids = {
+            int(item["id"]) for item in await network_devices_repo.list_device_types()
+        }
+        if device_type_id is not None and device_type_id not in valid_type_ids:
+            raise HTTPException(status_code=422, detail="Invalid device type")
+        updates.update(device_type_id=device_type_id, clear_device_type=True)
+    elif action == "description":
+        description = str(form.get("description") or "").strip() or None
+        if description and len(description) > 2000:
+            raise HTTPException(status_code=422, detail="Description is too long")
+        updates.update(description=description, update_description=True)
+    elif action == "agent_not_required":
+        value = str(form.get("agent_not_required") or "")
+        if value not in {"0", "1"}:
+            raise HTTPException(status_code=422, detail="Invalid agent requirement")
+        updates["agent_not_required"] = value == "1"
+    else:
+        raise HTTPException(status_code=422, detail="Select a bulk action")
+
+    await network_devices_repo.bulk_update_devices(device_ids, company_id, **updates)
+    return main_module.flash_redirect(
+        "/devices",
+        f"Updated {len(device_ids)} discovered device{'s' if len(device_ids) != 1 else ''}.",
+        "success",
+    )
+
+
 @router.post("/devices/device-types")
 async def add_device_type_from_devices(request: Request):
-    user, _membership, _company, _company_id, redirect = await _load_asset_context(request)
+    user, _membership, _company, _company_id, redirect = await _load_asset_context(
+        request
+    )
     if redirect:
         return redirect
     if not user.get("is_super_admin"):
@@ -413,7 +483,9 @@ async def add_device_type_from_devices(request: Request):
 
 @router.post("/devices/device-types/{device_type_id}/delete")
 async def delete_device_type_from_devices(request: Request, device_type_id: int):
-    user, _membership, _company, _company_id, redirect = await _load_asset_context(request)
+    user, _membership, _company, _company_id, redirect = await _load_asset_context(
+        request
+    )
     if redirect:
         return redirect
     if not user.get("is_super_admin"):
@@ -425,7 +497,9 @@ async def delete_device_type_from_devices(request: Request, device_type_id: int)
 @router.post("/devices/alerts")
 async def configure_network_device_alerts(request: Request):
     main_module = _main()
-    user, membership, _company, company_id, redirect = await _load_asset_context(request)
+    user, membership, _company, company_id, redirect = await _load_asset_context(
+        request
+    )
     if redirect:
         return redirect
     if not (
@@ -436,16 +510,18 @@ async def configure_network_device_alerts(request: Request):
     form = await request.form()
     await company_repo.update_company(
         company_id,
-        network_device_ticket_alerts_enabled=1
-        if form.get("network_device_ticket_alerts_enabled") == "1"
-        else 0,
+        network_device_ticket_alerts_enabled=(
+            1 if form.get("network_device_ticket_alerts_enabled") == "1" else 0
+        ),
     )
     return RedirectResponse(url="/devices", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/assets/settings/device-types")
 async def add_network_device_type(request: Request):
-    user, _membership, _company, _company_id, redirect = await _load_asset_context(request)
+    user, _membership, _company, _company_id, redirect = await _load_asset_context(
+        request
+    )
     if redirect:
         return redirect
     if not user.get("is_super_admin"):
@@ -455,18 +531,24 @@ async def add_network_device_type(request: Request):
     if not name or len(name) > 100:
         raise HTTPException(status_code=422, detail="Enter a device type name")
     await network_devices_repo.create_device_type(name)
-    return RedirectResponse(url="/assets/settings", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        url="/assets/settings", status_code=status.HTTP_303_SEE_OTHER
+    )
 
 
 @router.post("/assets/settings/device-types/{device_type_id}/delete")
 async def delete_network_device_type(request: Request, device_type_id: int):
-    user, _membership, _company, _company_id, redirect = await _load_asset_context(request)
+    user, _membership, _company, _company_id, redirect = await _load_asset_context(
+        request
+    )
     if redirect:
         return redirect
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=403, detail="Super admin privileges required")
     await network_devices_repo.delete_device_type(device_type_id)
-    return RedirectResponse(url="/assets/settings", status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        url="/assets/settings", status_code=status.HTTP_303_SEE_OTHER
+    )
 
 
 @router.post("/devices/scanners")
@@ -488,7 +570,9 @@ async def add_network_scanner(request: Request):
         device_id = int(form.get("device_id"))
         interval = max(5, min(10080, int(form.get("interval_minutes", 60))))
     except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="Select an asset and valid interval")
+        raise HTTPException(
+            status_code=422, detail="Select an asset and valid interval"
+        )
 
     await network_devices_repo.configure_scanner(device_id, company_id, True, interval)
     return RedirectResponse(url="/devices", status_code=status.HTTP_303_SEE_OTHER)
