@@ -35,12 +35,12 @@
           <td>{% if device.matched_asset_id %}<a href="/assets/{{ device.matched_asset_id }}"><span class="tag">{{ device.matched_asset_name }}</span></a>{% else %}<span class="tag tag--warning">Agent may be required</span>{% endif %}</td>
           {% if can_configure %}<td class="table__actions">
             <details class="header-title-menu__dropdown" data-header-menu><summary class="header-title-menu__toggle" data-header-menu-toggle>Actions <span aria-hidden="true">▾</span></summary>
-              <div class="header-title-menu__list" style="min-width:20rem;padding:1rem">
-                <form method="post" action="/devices/discovered/{{ device.id }}" class="form-stack">
+              <div class="header-title-menu__list discovered-device-menu">
+                <form method="post" action="/devices/discovered/{{ device.id }}" class="discovered-device-form">
                   {% include "partials/csrf.html" %}
                   <label>State<select class="input" name="state">{% for state in ['New', 'Known', 'Unknown'] %}<option value="{{ state }}" {% if device.state == state %}selected{% endif %}>{{ state }}</option>{% endfor %}</select></label>
                   <label>Device type<select class="input" name="device_type_id"><option value="">Not set</option>{% for device_type in device_types %}<option value="{{ device_type.id }}" {% if device.device_type_id == device_type.id %}selected{% endif %}>{{ device_type.name }}</option>{% endfor %}</select></label>
-                  <label>Description<textarea class="input" name="description" maxlength="2000" rows="3" placeholder="Identify this device">{{ device.description or '' }}</textarea></label>
+                  <label class="discovered-device-form__description">Description<textarea class="input" name="description" maxlength="2000" rows="3" placeholder="Identify this device">{{ device.description or '' }}</textarea></label>
                   <button class="button button--primary" type="submit">Save device</button>
                 </form>
               </div>
