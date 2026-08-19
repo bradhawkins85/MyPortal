@@ -510,7 +510,21 @@ TASK_COMMAND_LABELS: dict[str, str] = {
     "rag_matching_pause": "RAG pause matching",
     "rag_matching_resume": "RAG resume matching",
     "rag_cleanup_stale_matches": "RAG cleanup stale matches",
+    "sync_tactical_assets": "Sync Tactical RMM assets",
+    "system_update": "Update MyPortal system",
+    "update_products": "Update Shop Products",
+    "update_stock_feed": "Update Shop Stock Feed",
 }
+
+
+def _scheduled_task_command_label(command: str) -> str:
+    """Return a friendly display label for a scheduled task command."""
+    if command in TASK_COMMAND_LABELS:
+        return TASK_COMMAND_LABELS[command]
+    if command.startswith("m365_mail_sync:"):
+        account_id = command.partition(":")[2]
+        return f"Sync Microsoft 365 mailbox {account_id}"
+    return command.replace("_", " ").replace(":", " ").strip().title()
 
 app = FastAPI(
     title=settings.app_name,
@@ -5892,37 +5906,28 @@ async def admin_scheduled_tasks(
         if mod_slug in disabled_module_slugs:
             disabled_commands_global.update(cmds)
 
+    available_commands = (
+        "update_mac_vendors", "sync_staff", "sync_m365_data", "sync_m365_licenses",
+        "sync_m365_contacts", "sync_m365_mailboxes", "refresh_m365_consent_status",
+        "sync_huntress", "sync_to_xero", "sync_to_xero_auto_send", "generate_invoice",
+        "unbill_time_entries", "send_price_change_notifications", "create_scheduled_ticket",
+        "sync_recordings", "sync_unifi_talk_recordings", "queue_transcriptions",
+        "process_transcription", "update_tray_icon_installer", "rag_index_start",
+        "rag_index_stop", "rag_matching_pause", "rag_matching_resume",
+        "rag_cleanup_stale_matches",
+    )
     command_options = [
-        {"value": "update_mac_vendors", "label": "Update MAC vendor list"},
-        {"value": "sync_staff", "label": "Sync staff directory"},
-        {"value": "sync_m365_data", "label": "Sync Microsoft 365 data (legacy)"},
-        {"value": "sync_m365_licenses", "label": "Sync Microsoft 365 licenses"},
-        {"value": "sync_m365_contacts", "label": "Sync Microsoft 365 contacts"},
-        {"value": "sync_m365_mailboxes", "label": "Sync Microsoft 365 mailboxes"},
-        {"value": "refresh_m365_consent_status", "label": "Refresh Microsoft 365 consent status"},
-        {"value": "sync_huntress", "label": "Sync Huntress data"},
-        {"value": "sync_to_xero", "label": "Sync to Xero"},
-        {"value": "sync_to_xero_auto_send", "label": "Sync to Xero (Auto Send)"},
-        {"value": "generate_invoice", "label": "Generate Invoice"},
-        {"value": "unbill_time_entries", "label": "Un-Bill Time Entries"},
-        {"value": "send_price_change_notifications", "label": "Send Price Change Notification"},
-        {"value": "create_scheduled_ticket", "label": "Create scheduled ticket"},
-        {"value": "sync_recordings", "label": "Sync call recordings"},
-        {"value": "sync_unifi_talk_recordings", "label": "Sync Unifi Talk recordings"},
-        {"value": "queue_transcriptions", "label": "Queue transcriptions"},
-        {"value": "process_transcription", "label": "Process transcription"},
-        {"value": "update_tray_icon_installer", "label": "Update Tray Icon Installer"},
-        {"value": "rag_index_start", "label": "RAG start indexing"},
-        {"value": "rag_index_stop", "label": "RAG stop indexing"},
-        {"value": "rag_matching_pause", "label": "RAG pause matching"},
-        {"value": "rag_matching_resume", "label": "RAG resume matching"},
-        {"value": "rag_cleanup_stale_matches", "label": "RAG cleanup stale matches"},
+        {"value": command, "label": _scheduled_task_command_label(command)}
+        for command in available_commands
     ]
     command_options = [o for o in command_options if o["value"] not in disabled_commands_global]
     existing_commands = {task.get("command") for task in tasks if task.get("command")}
     for command in sorted(existing_commands):
         if command and command not in {option["value"] for option in command_options} and command not in disabled_commands_global:
-            command_options.append({"value": str(command), "label": str(command)})
+            command_options.append(
+                {"value": str(command), "label": _scheduled_task_command_label(str(command))}
+            )
+    command_options.sort(key=lambda option: option["label"].casefold())
 
     company_options = [{"value": "", "label": "All companies"}]
     for cid, cname in sorted(company_lookup.items(), key=lambda item: item[1].lower()):
