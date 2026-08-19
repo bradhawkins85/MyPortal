@@ -56,11 +56,11 @@
     }
   },
   "devDependencies": {
-    "electron": "^39.8.10",
-    "electron-builder": "^26.15.2"
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3"
   },
   "overrides": {
-    "js-yaml": "4.3.0",
+    "js-yaml": "4.3.1",
     "tar": "7.5.22",
     "minimatch@3.1.5": {
       ".": "5.1.9",

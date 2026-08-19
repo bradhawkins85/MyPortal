@@ -397,7 +397,7 @@ document.addEventListener('DOMContentLoaded', function() {
   const heatmapCells = document.querySelectorAll('.heatmap-cell');
   heatmapCells.forEach((cell, index) => {
     cell.addEventListener('keydown', function(e) {
-      let targetIndex = index;
+      let targetIndex;
       const cols = 4; // 4x4 grid
       
       switch(e.key) {
