@@ -1,0 +1,7 @@
+{
+  "guid": "f4a8b11c-531f-4e91-b1f2-640a2b7b6ed5",
+  "occurred_at": "2026-08-19T00:00Z",
+  "change_type": "Fix",
+  "summary": "Updated brace-expansion overrides to patched releases that prevent denial-of-service through unbounded intermediate arrays.",
+  "content_hash": "9f1fa66ebeb758f7d3666518bfb6168927555868fac20da7ae1abfe83f8c88ff"
+}
