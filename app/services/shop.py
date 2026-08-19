@@ -118,7 +118,7 @@ async def maybe_send_stock_notification_by_id(
     if previous_stock > 0 and new_stock <= 0:
         message = f"{product_name} ({product_sku}) is now out of stock (was {previous_stock})."
     elif previous_stock <= 0 and new_stock > 0:
-        message = f"{product_name} ({product_sku}) is back in stock with {max(new_stock, 0)} available."
+        message = f"{product_name} ({product_sku}) is back in stock with {new_stock} available."
 
     if message:
         await emit_notification(
