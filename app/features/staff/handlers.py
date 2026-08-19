@@ -3198,62 +3198,44 @@ async def update_staff_member(staff_id: int, request: Request):
             }
         )
 
-    if is_super_admin:
-        first_name = (
-            get_value("firstName", "first_name") or existing.get("first_name") or ""
-        ).strip()
-        last_name = (
-            get_value("lastName", "last_name") or existing.get("last_name") or ""
-        ).strip()
-        email = (get_value("email") or existing.get("email") or "").strip()
-        mobile_phone = (
-            get_value("mobilePhone", "mobile_phone")
-            or existing.get("mobile_phone")
-            or ""
-        ).strip() or None
-        date_onboarded = _parse_input_datetime(
-            get_value("dateOnboarded", "date_onboarded"), assume_midnight=True
-        ) or _parse_input_datetime(existing.get("date_onboarded"))
-        if existing.get("date_onboarded") and not get_value(
-            "dateOnboarded", "date_onboarded"
-        ):
-            date_onboarded = _parse_input_datetime(existing.get("date_onboarded"))
-        enabled = bool(
-            get_value("enabled")
-            if get_value("enabled") is not None
-            else existing.get("enabled", True)
-        )
-        street = get_value("street") or existing.get("street")
-        city = get_value("city") or existing.get("city")
-        state_val = get_value("state") or existing.get("state")
-        postcode = get_value("postcode") or existing.get("postcode")
-        country = get_value("country") or existing.get("country")
-        department = get_value("department") or existing.get("department")
-        job_title = get_value("jobTitle", "job_title") or existing.get("job_title")
-        org_company = get_value("company", "org_company") or existing.get("org_company")
-        manager_name = get_value("managerName", "manager_name") or existing.get(
-            "manager_name"
-        )
-        account_action = get_value("accountAction", "account_action") or existing.get(
-            "account_action"
-        )
-    else:
-        first_name = existing.get("first_name") or ""
-        last_name = existing.get("last_name") or ""
-        email = existing.get("email") or ""
-        mobile_phone = existing.get("mobile_phone")
+    first_name = (
+        get_value("firstName", "first_name") or existing.get("first_name") or ""
+    ).strip()
+    last_name = (
+        get_value("lastName", "last_name") or existing.get("last_name") or ""
+    ).strip()
+    email = (get_value("email") or existing.get("email") or "").strip()
+    mobile_phone = (
+        get_value("mobilePhone", "mobile_phone")
+        or existing.get("mobile_phone")
+        or ""
+    ).strip() or None
+    date_onboarded = _parse_input_datetime(
+        get_value("dateOnboarded", "date_onboarded"), assume_midnight=True
+    ) or _parse_input_datetime(existing.get("date_onboarded"))
+    if existing.get("date_onboarded") and not get_value(
+        "dateOnboarded", "date_onboarded"
+    ):
         date_onboarded = _parse_input_datetime(existing.get("date_onboarded"))
-        enabled = bool(existing.get("enabled", True))
-        street = existing.get("street")
-        city = existing.get("city")
-        state_val = existing.get("state")
-        postcode = existing.get("postcode")
-        country = existing.get("country")
-        department = existing.get("department")
-        job_title = existing.get("job_title")
-        org_company = existing.get("org_company")
-        manager_name = existing.get("manager_name")
-        account_action = existing.get("account_action")
+    enabled = bool(
+        get_value("enabled")
+        if get_value("enabled") is not None
+        else existing.get("enabled", True)
+    )
+    street = get_value("street") or existing.get("street")
+    city = get_value("city") or existing.get("city")
+    state_val = get_value("state") or existing.get("state")
+    postcode = get_value("postcode") or existing.get("postcode")
+    country = get_value("country") or existing.get("country")
+    department = get_value("department") or existing.get("department")
+    job_title = get_value("jobTitle", "job_title") or existing.get("job_title")
+    org_company = get_value("company", "org_company") or existing.get("org_company")
+    manager_name = get_value("managerName", "manager_name") or existing.get(
+        "manager_name"
+    )
+    account_action = get_value("accountAction", "account_action") or existing.get(
+        "account_action"
+    )
 
     date_offboarded = _parse_input_datetime(
         get_value("dateOffboarded", "date_offboarded")
