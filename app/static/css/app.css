@@ -1341,6 +1341,37 @@ html {
   list-style: none;
 }
 
+.discovered-device-menu {
+  width: min(26rem, calc(100vw - 2rem));
+  padding: 1rem;
+}
+
+.discovered-device-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+.discovered-device-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.discovered-device-form__description,
+.discovered-device-form .button {
+  grid-column: 1 / -1;
+}
+
+.discovered-device-form textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.discovered-device-form .button {
+  justify-self: start;
+}
+
 .header-title-menu__form {
   display: contents;
 }
