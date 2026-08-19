@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -7,6 +8,11 @@ from starlette.responses import HTMLResponse
 
 import app.main as main_module
 from app.features.assets import routes as assets_routes
+
+
+TEMPLATE = (
+    Path(__file__).resolve().parents[1] / "app/templates/devices/index.html"
+).read_text(encoding="utf-8")
 
 
 @pytest.fixture
@@ -24,6 +30,12 @@ def _request(path: str = "/devices", method: str = "GET") -> Request:
             "headers": [],
         }
     )
+
+
+def test_discovered_devices_loads_shared_column_filters():
+    assert 'data-table data-table-id="network-devices"' in TEMPLATE
+    assert "static/js/tables.js" in TEMPLATE
+    assert '<th class="table__actions">Actions</th>' in TEMPLATE
 
 
 @pytest.mark.anyio
