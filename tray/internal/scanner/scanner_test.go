@@ -35,6 +35,12 @@ func TestWindowsScanScriptSupportsLegacyPowerShell(t *testing.T) {
 			t.Errorf("Windows scan script does not preserve modern command %q", modern)
 		}
 	}
+	if !strings.Contains(script, "$resultArray = $results.ToArray()") {
+		t.Error("Windows scan script does not convert its generic result list before JSON serialization")
+	}
+	if strings.Contains(script, "ConvertTo-Json -InputObject @($results)") {
+		t.Error("Windows scan script uses the Windows PowerShell 5.1-incompatible generic list array expression")
+	}
 }
 
 func TestEncodePowerShellCommandUsesUTF16LE(t *testing.T) {
