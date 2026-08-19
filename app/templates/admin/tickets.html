@@ -248,6 +248,9 @@
     </form>
   {% endif %}
 
+{% endblock %}
+
+{% block content %}
   {% if can_bulk_edit_tickets %}
     <div class="modal" id="bulk-edit-tickets-modal" data-ticket-bulk-edit-modal hidden role="dialog" aria-modal="true" aria-labelledby="bulk-edit-tickets-title">
       <div class="modal__backdrop" data-ticket-bulk-edit-close></div>
@@ -303,9 +306,7 @@
       </div>
     </div>
   {% endif %}
-{% endblock %}
 
-{% block content %}
   <div class="management management--single" data-layout>
     <section class="management__content">
       <div class="management__body" data-ticket-view-manager>

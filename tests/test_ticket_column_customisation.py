@@ -128,6 +128,15 @@ def test_next_ticket_number_handler_is_always_rendered():
     assert "{% if show_next_ticket_number %}\n    <script>" not in html
 
 
+def test_bulk_action_modals_render_outside_the_filtered_page_header():
+    """Fixed ticket modals must use the viewport, not the header containing block."""
+    html = _template_html()
+    content_block_index = html.index("{% block content %}")
+
+    assert content_block_index < html.index('id="bulk-edit-tickets-modal"')
+    assert content_block_index < html.index('id="merge-tickets-modal"')
+
+
 def test_column_panel_present():
     """The column customisation panel should be rendered."""
     html = _template_html()
