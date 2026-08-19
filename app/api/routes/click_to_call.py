@@ -108,7 +108,7 @@ async def make_call(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Click to call is not enabled")
     try:
         password = decrypt_secret(str(settings.get("password_encrypted") or ""))
-        async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
                 f"https://{settings['phone_ip']}/cgi-bin/api-make_call",
                 params={
