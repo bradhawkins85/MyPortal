@@ -466,7 +466,7 @@
       rows.forEach(row => {
         let shouldShow = true;
 
-        shouldShow = shouldShow && this.rowMatchesColumnFilters(row);
+        shouldShow = this.rowMatchesColumnFilters(row);
 
         // Status filter
         if (this.filterState.statuses.length > 0) {
@@ -513,7 +513,7 @@
       rows.forEach(row => {
         let shouldShow = true;
 
-        shouldShow = shouldShow && this.rowMatchesColumnFilters(row);
+        shouldShow = this.rowMatchesColumnFilters(row);
 
         // Priority filter is client-side only (API does not support priority filtering)
         if (this.filterState.priorities.length > 0) {
