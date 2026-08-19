@@ -29,9 +29,7 @@ async def list_for_company(company_id: int) -> list[dict[str, Any]]:
 
 async def list_device_types() -> list[dict[str, Any]]:
     return list(
-        await db.fetch_all(
-            "SELECT id, name FROM network_device_types ORDER BY name"
-        )
+        await db.fetch_all("SELECT id, name FROM network_device_types ORDER BY name")
         or []
     )
 
@@ -66,6 +64,46 @@ async def update_device(
             device_id,
             company_id,
         ),
+    )
+
+
+async def bulk_update_devices(
+    device_ids: list[int],
+    company_id: int,
+    *,
+    state: str | None = None,
+    device_type_id: int | None = None,
+    clear_device_type: bool = False,
+    description: str | None = None,
+    update_description: bool = False,
+    agent_not_required: bool | None = None,
+) -> None:
+    """Apply only the requested fields to company-owned discovered devices."""
+    if not device_ids:
+        return
+
+    assignments: list[str] = []
+    values: list[Any] = []
+    if state is not None:
+        assignments.append("state=%s")
+        values.append(state)
+    if device_type_id is not None or clear_device_type:
+        assignments.append("device_type_id=%s")
+        values.append(device_type_id)
+    if update_description:
+        assignments.append("description=%s")
+        values.append(description)
+    if agent_not_required is not None:
+        assignments.append("agent_not_required=%s")
+        values.append(1 if agent_not_required else 0)
+    if not assignments:
+        return
+
+    placeholders = ",".join("%s" for _ in device_ids)
+    await db.execute(
+        f"UPDATE network_devices SET {', '.join(assignments)} "
+        f"WHERE company_id=%s AND id IN ({placeholders})",
+        tuple(values + [company_id, *device_ids]),
     )
 
 

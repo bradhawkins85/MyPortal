@@ -43,12 +43,13 @@
     ] %}
     <header class="card__header card__header--stacked">
       <div><h2>Discovered devices</h2><p class="card__lede">Asset matches use normalized MAC addresses. WAN IP identifies the network where each device was most recently seen.</p></div>
-      {% if devices %}<div class="card__controls"><label class="visually-hidden" for="network-device-search">Search devices</label><input id="network-device-search" class="input" type="search" placeholder="Search devices" data-table-filter="network-devices">{% if can_configure %}{{ table_column_picker("network-devices", discovered_device_columns) }}{% endif %}</div>{% endif %}
+      {% if devices %}<div class="card__controls"><label class="visually-hidden" for="network-device-search">Search devices</label><input id="network-device-search" class="input" type="search" placeholder="Search devices" data-table-filter="network-devices">{% if can_configure %}{{ table_column_picker("network-devices", discovered_device_columns) }}<button class="button button--secondary" type="button" data-device-bulk-open disabled>Update selected <span data-device-selected-count>(0)</span></button>{% endif %}</div>{% endif %}
     </header>
     {% if devices %}
       <div class="table-wrapper"><table class="table" id="network-devices-table" data-table data-table-id="network-devices">
-        <thead><tr><th data-column-key="hostname" data-sort="string">Hostname</th><th data-column-key="state" data-sort="string">State</th><th data-column-key="type" data-sort="string">Type</th><th data-column-key="description" data-sort="string">Description</th><th data-column-key="discovered-by" data-sort="string">Discovered by</th><th data-column-key="wan-ip" data-sort="string">WAN IP</th><th data-column-key="local-ip" data-sort="string">Local IP</th><th data-column-key="mac-address" data-sort="string">MAC address</th><th data-column-key="mac-vendor-os" data-sort="string">MAC vendor / OS</th><th data-column-key="open-ports" data-sort="string">Open ports</th><th data-column-key="first-seen" data-sort="date">First seen</th><th data-column-key="last-seen" data-sort="date">Last seen</th><th data-column-key="myportal-asset" data-sort="string">MyPortal asset</th>{% if can_configure %}<th class="table__actions">Actions</th>{% endif %}</tr></thead>
+        <thead><tr>{% if can_configure %}<th><input type="checkbox" data-device-select-all aria-label="Select all visible devices"></th>{% endif %}<th data-column-key="hostname" data-sort="string">Hostname</th><th data-column-key="state" data-sort="string">State</th><th data-column-key="type" data-sort="string">Type</th><th data-column-key="description" data-sort="string">Description</th><th data-column-key="discovered-by" data-sort="string">Discovered by</th><th data-column-key="wan-ip" data-sort="string">WAN IP</th><th data-column-key="local-ip" data-sort="string">Local IP</th><th data-column-key="mac-address" data-sort="string">MAC address</th><th data-column-key="mac-vendor-os" data-sort="string">MAC vendor / OS</th><th data-column-key="open-ports" data-sort="string">Open ports</th><th data-column-key="first-seen" data-sort="date">First seen</th><th data-column-key="last-seen" data-sort="date">Last seen</th><th data-column-key="myportal-asset" data-sort="string">MyPortal asset</th>{% if can_configure %}<th class="table__actions">Actions</th>{% endif %}</tr></thead>
         <tbody>{% for device in devices %}<tr>
+          {% if can_configure %}<td><input type="checkbox" value="{{ device.id }}" data-device-select aria-label="Select {{ device.hostname or device.ip_address }}"></td>{% endif %}
           <td data-column-key="hostname">{{ device.hostname or '—' }}</td>
           <td data-column-key="state"><span class="tag{% if device.state == 'New' %} tag--warning{% endif %}">{{ device.state }}</span></td>
           <td data-column-key="type">{{ device.device_type_name or '—' }}</td>
@@ -79,6 +80,26 @@
   </section>
 </div>
 
+{% if can_configure %}
+<div class="modal" id="device-bulk-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="device-bulk-modal-title">
+  <div class="modal__backdrop" data-device-bulk-close></div>
+  <section class="modal__dialog">
+    <header class="modal__header"><div><h2 id="device-bulk-modal-title">Update selected devices</h2><p class="card__lede">Apply one change to <strong data-device-bulk-count>0</strong> selected devices.</p></div><button type="button" class="modal__close" data-device-bulk-close aria-label="Close bulk update">&times;</button></header>
+    <form method="post" action="/devices/discovered-bulk-update" data-device-bulk-form>
+      <div class="modal__body form-stack">
+        {% include "partials/csrf.html" %}<div data-device-bulk-ids></div>
+        <label for="device-bulk-action">Action</label><select class="input" id="device-bulk-action" name="bulk_action" required data-device-bulk-action><option value="" selected disabled>Select an action…</option><option value="state">Set state</option><option value="device_type">Set device type</option><option value="description">Set description</option><option value="agent_not_required">Set agent requirement</option></select>
+        <label data-device-bulk-field="state" hidden>State<select class="input" name="state"><option>New</option><option>Known</option><option>Unknown</option></select></label>
+        <label data-device-bulk-field="device_type" hidden>Device type<select class="input" name="device_type_id"><option value="">Not set</option>{% for device_type in device_types %}<option value="{{ device_type.id }}">{{ device_type.name }}</option>{% endfor %}</select></label>
+        <label data-device-bulk-field="description" hidden>Description<textarea class="input" name="description" maxlength="2000" rows="3" placeholder="Leave empty to clear descriptions"></textarea></label>
+        <label data-device-bulk-field="agent_not_required" hidden>Agent requirement<select class="input" name="agent_not_required"><option value="1">Agent not required</option><option value="0">Agent may be required</option></select></label>
+      </div>
+      <footer class="modal__footer"><button type="button" class="button button--ghost" data-device-bulk-close>Cancel</button><button class="button button--primary" type="submit">Update devices</button></footer>
+    </form>
+  </section>
+</div>
+{% endif %}
+
 {% if can_manage_device_types %}
 <div class="modal" id="device-types-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="device-types-modal-title">
   <div class="modal__backdrop" data-device-types-close></div>
@@ -108,5 +129,5 @@
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
-  {% if can_manage_device_types %}<script src="{{ static_url('/static/js/devices.js') }}" defer></script>{% endif %}
+  {% if can_configure %}<script src="{{ static_url('/static/js/devices.js') }}" defer></script>{% endif %}
 {% endblock %}

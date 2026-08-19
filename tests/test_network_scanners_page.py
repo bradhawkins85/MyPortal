@@ -4,11 +4,11 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
+from starlette.datastructures import FormData
 from starlette.responses import HTMLResponse
 
 import app.main as main_module
 from app.features.assets import routes as assets_routes
-
 
 TEMPLATE = (
     Path(__file__).resolve().parents[1] / "app/templates/devices/index.html"
@@ -34,7 +34,9 @@ def _request(path: str = "/devices", method: str = "GET") -> Request:
 
 def test_discovered_devices_loads_shared_column_filters():
     assert 'data-table data-table-id="network-devices"' in TEMPLATE
-    assert 'table_column_picker("network-devices", discovered_device_columns)' in TEMPLATE
+    assert (
+        'table_column_picker("network-devices", discovered_device_columns)' in TEMPLATE
+    )
     assert 'data-column-key="hostname"' in TEMPLATE
     assert 'data-column-key="myportal-asset"' in TEMPLATE
     assert "static/js/tables.js" in TEMPLATE
@@ -48,6 +50,10 @@ def test_discovered_devices_loads_shared_column_filters():
     assert 'page_header_overflow("network-device-actions", "Actions"' in TEMPLATE
     assert 'id="device-types-modal" hidden' in TEMPLATE
     assert 'action="/devices/device-types"' in TEMPLATE
+    assert "data-device-select-all" in TEMPLATE
+    assert "data-device-bulk-open disabled" in TEMPLATE
+    assert 'action="/devices/discovered-bulk-update"' in TEMPLATE
+    assert "data-device-bulk-ids" in TEMPLATE
 
 
 @pytest.mark.anyio
@@ -75,10 +81,14 @@ async def test_devices_page_separates_enabled_and_available_scanners(monkeypatch
         AsyncMock(return_value=scanner_assets),
     )
     monkeypatch.setattr(
-        assets_routes.network_devices_repo, "list_for_company", AsyncMock(return_value=[])
+        assets_routes.network_devices_repo,
+        "list_for_company",
+        AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
-        assets_routes.network_devices_repo, "list_device_types", AsyncMock(return_value=[])
+        assets_routes.network_devices_repo,
+        "list_device_types",
+        AsyncMock(return_value=[]),
     )
 
     async def render(template, request, user, *, extra=None):
@@ -200,3 +210,54 @@ async def test_update_discovered_device_clears_agent_not_required_when_unchecked
 
     update.assert_awaited_once_with(12, 42, "Known", None, None, False)
     assert response.status_code == 303
+
+
+@pytest.mark.anyio
+async def test_bulk_update_discovered_devices_applies_selected_action(monkeypatch):
+    request = _request("/devices/discovered-bulk-update", "POST")
+    request._form = FormData(
+        [
+            ("device_ids", "12"),
+            ("device_ids", "18"),
+            ("bulk_action", "state"),
+            ("state", "known"),
+        ]
+    )
+    monkeypatch.setattr(
+        assets_routes,
+        "_load_asset_context",
+        AsyncMock(return_value=({"id": 7, "is_super_admin": True}, None, {}, 42, None)),
+    )
+    update = AsyncMock()
+    monkeypatch.setattr(
+        assets_routes.network_devices_repo, "bulk_update_devices", update
+    )
+    monkeypatch.setattr(
+        main_module,
+        "flash_redirect",
+        lambda url, message, category: HTMLResponse(
+            f"{url}|{message}|{category}", status_code=303
+        ),
+    )
+
+    response = await assets_routes.bulk_update_network_devices(request)
+
+    update.assert_awaited_once_with([12, 18], 42, state="Known")
+    assert response.status_code == 303
+    assert b"Updated 2 discovered devices" in response.body
+
+
+@pytest.mark.anyio
+async def test_bulk_update_discovered_devices_rejects_empty_selection(monkeypatch):
+    request = _request("/devices/discovered-bulk-update", "POST")
+    request._form = FormData([("bulk_action", "state"), ("state", "Known")])
+    monkeypatch.setattr(
+        assets_routes,
+        "_load_asset_context",
+        AsyncMock(return_value=({"id": 7, "is_super_admin": True}, None, {}, 42, None)),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await assets_routes.bulk_update_network_devices(request)
+
+    assert exc_info.value.status_code == 422
