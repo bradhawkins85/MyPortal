@@ -486,6 +486,7 @@ tags_metadata = [
 
 # Human-readable labels for scheduled task commands used when auto-generating task names.
 TASK_COMMAND_LABELS: dict[str, str] = {
+    "update_mac_vendors": "Update MAC vendor list",
     "sync_staff": "Sync staff directory",
     "sync_m365_data": "Sync Microsoft 365 data (legacy)",
     "sync_m365_licenses": "Sync Microsoft 365 licenses",
@@ -5892,6 +5893,7 @@ async def admin_scheduled_tasks(
             disabled_commands_global.update(cmds)
 
     command_options = [
+        {"value": "update_mac_vendors", "label": "Update MAC vendor list"},
         {"value": "sync_staff", "label": "Sync staff directory"},
         {"value": "sync_m365_data", "label": "Sync Microsoft 365 data (legacy)"},
         {"value": "sync_m365_licenses", "label": "Sync Microsoft 365 licenses"},
