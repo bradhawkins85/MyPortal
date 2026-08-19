@@ -121,5 +121,9 @@ if ($results.Count -eq 0) {
     # ConvertTo-Json. Always preserve the scanner's JSON output contract.
     Write-Output '[]'
 } else {
-    ConvertTo-Json -InputObject @($results) -Compress -Depth 3
+    # Windows PowerShell 5.1's dynamic binder can throw "Argument types do not
+    # match" when an array subexpression enumerates List[object]. Convert the
+    # generic list explicitly while retaining an array for the single-host case.
+    $resultArray = $results.ToArray()
+    ConvertTo-Json -InputObject $resultArray -Compress -Depth 3
 }
