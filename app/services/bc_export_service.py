@@ -285,11 +285,8 @@ def _add_docx_table(
         col_labels = [col.get("label", col.get("column_id")) for col in columns]
     else:
         # Infer from first row
-        if table_data:
-            col_ids = list(table_data[0].keys())
-            col_labels = [col.replace("_", " ").title() for col in col_ids]
-        else:
-            return
+        col_ids = list(table_data[0].keys())
+        col_labels = [col.replace("_", " ").title() for col in col_ids]
     
     # Create table with header row
     table = doc.add_table(rows=1 + len(table_data), cols=len(col_ids))

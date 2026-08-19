@@ -1415,7 +1415,7 @@
         }
         try {
           setInlineError(editActionError, '');
-          await sendInvite(currentEditStaffId, getActionNote());
+          await sendInvite(currentEditStaffId);
         } catch (error) {
           setInlineError(editActionError, `Failed to send invitation: ${error.message}`);
         }

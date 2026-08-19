@@ -350,10 +350,8 @@ async def _render_company_edit_page(
                 name_parts = [part for part in (first_name, last_name) if part]
                 has_name = bool(name_parts)
                 label: str
-                if has_name and email:
+                if has_name:
                     label = f"{' '.join(name_parts)} ({email})"
-                elif has_name:
-                    label = " ".join(name_parts)
                 else:
                     label = email
                 user_id_value = row.get("user_id")
