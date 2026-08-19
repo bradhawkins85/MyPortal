@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Windows Defender · MyPortal{% endblock %}
+{% block content %}
+<section class="page-header">
+  <div><p class="eyebrow">Endpoint security</p><h1>Windows Defender</h1>
+    <p>Monitor protection health, detections and exclusions reported by the MyPortal tray agent.</p></div>
+</section>
+{% if not defender_enabled %}
+  <section class="card"><div class="empty-state"><h2>Defender management is disabled</h2>
+    <p>This opt-in service is disabled for this company. A super administrator can enable it here.</p>
+    {% if is_super_admin %}<button class="button button--primary" data-defender-enable>Enable Defender management</button>{% endif %}
+  </div></section>
+{% else %}
+  <div class="metric-grid">
+    <article class="card"><span class="eyebrow">Enrolled endpoints</span><h2>{{ defender_devices|length }}</h2></article>
+    <article class="card"><span class="eyebrow">Active detections</span><h2>{{ defender_detections|selectattr('status','equalto','active')|list|length }}</h2></article>
+    <article class="card"><span class="eyebrow">Configured exclusions</span><h2>{{ defender_exclusions|length }}</h2></article>
+    <article class="card"><span class="eyebrow">Stale agents</span><h2>{{ defender_devices|selectattr('is_stale')|list|length }}</h2><small>No heartbeat for 15 minutes</small></article>
+  </div>
+  {% if defender_can_write %}<section class="card"><h2>Protection policy</h2>
+    <form id="defender-settings-form" class="form-grid">
+      <label>Scheduled scan<select name="scheduled_scan_type"><option value="">Disabled</option><option value="quick" {% if defender_settings.defender_scheduled_scan_type == 'quick' %}selected{% endif %}>Quick scan</option><option value="full" {% if defender_settings.defender_scheduled_scan_type == 'full' %}selected{% endif %}>Full scan</option></select></label>
+      <label>Day<select name="scheduled_scan_day">{% for label in ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'] %}<option value="{{ loop.index0 }}" {% if defender_settings.defender_scheduled_scan_day == loop.index0 %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+      <label>Time<input type="time" name="scheduled_scan_time" value="{{ defender_settings.defender_scheduled_scan_time or '02:00' }}"></label>
+      <label>Automatic tickets<select name="auto_ticket_min_severity"><option value="">Disabled</option>{% for severity in ['low','medium','high','critical'] %}<option value="{{ severity }}" {% if defender_settings.defender_auto_ticket_min_severity == severity %}selected{% endif %}>{{ severity|title }} and above</option>{% endfor %}</select></label>
+      <button class="button button--primary" type="submit">Save policy</button>
+    </form></section>{% endif %}
+
+  <section class="card">
+    <div class="section-heading"><div><h2>Endpoint protection</h2><p>Click any column heading to sort. Search filters all endpoint fields.</p></div>
+      <label class="form-label" for="defender-device-filter">Quick search
+        <input id="defender-device-filter" class="form-input" type="search" placeholder="Filter endpoints" data-table-filter="defender-devices-table">
+      </label></div>
+    <div class="table-wrapper"><table class="table" id="defender-devices-table" data-table data-table-id="defender-devices" data-table-empty-label="No endpoints match the selected filter.">
+      <thead><tr><th data-sort="string">Device</th><th data-sort="string">Agent</th><th data-sort="string">Health</th><th data-sort="string">Antivirus</th><th data-sort="string">Real-time</th><th data-sort="string">Tamper protection</th><th data-sort="date">Signatures</th><th data-sort="int">Detections</th><th>Actions</th></tr></thead>
+      <tbody>{% for d in defender_devices %}<tr>
+        <td data-label="Device">{{ d.hostname or ('Device #' ~ d.id) }}</td>
+        <td data-label="Agent" data-value="{{ 'stale' if d.is_stale else 'online' }}"><span class="status-badge">{{ 'Stale' if d.is_stale else 'Online' }}</span></td>
+        <td data-label="Health" data-value="{{ d.health_status or 'unknown' }}"><span class="status-badge">{{ d.health_status or 'Awaiting report' }}</span></td>
+        <td data-label="Antivirus" data-value="{{ 'on' if d.antivirus_enabled else 'off' }}">{{ 'On' if d.antivirus_enabled else 'Off' }}</td>
+        <td data-label="Real-time" data-value="{{ 'on' if d.realtime_protection_enabled else 'off' }}">{{ 'On' if d.realtime_protection_enabled else 'Off' }}</td>
+        <td data-label="Tamper protection" data-value="{{ 'on' if d.tamper_protection_enabled else 'off' }}">{{ 'On' if d.tamper_protection_enabled else 'Off' }}</td>
+        <td data-label="Signatures" data-value="{{ d.signatures_updated_at or '' }}">{{ d.signatures_updated_at or '—' }}</td>
+        <td data-label="Detections" data-value="{{ d.threat_count or 0 }}">{{ d.threat_count or 0 }}</td>
+        <td data-label="Actions">{% if defender_can_write %}<button class="button button--small" data-defender-command="quick_scan" data-device-id="{{ d.id }}">Quick scan</button> <button class="button button--small" data-defender-command="full_scan" data-device-id="{{ d.id }}">Full scan</button> <button class="button button--small" data-defender-command="signature_update" data-device-id="{{ d.id }}">Update signatures</button> <button class="button button--small" data-ticket-device="{{ d.id }}">Create ticket</button>{% else %}—{% endif %}</td>
+      </tr>{% else %}<tr><td colspan="9">No tray endpoints have reported Defender status yet.</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+
+  <section class="card">
+    <div class="section-heading"><div><h2>Exclusions</h2><p>Effective policy combines global, company and device exclusions.</p></div>
+      <label class="form-label" for="defender-exclusion-filter">Quick search
+        <input id="defender-exclusion-filter" class="form-input" type="search" placeholder="Filter exclusions" data-table-filter="defender-exclusions-table">
+      </label></div>
+    {% if defender_can_write %}<form id="defender-exclusion-form" class="form-grid">
+      <label>Scope<select name="scope"><option value="company">Company</option>{% if is_super_admin %}<option value="global">Global</option>{% endif %}<option value="device">Device</option></select></label>
+      <label>Type<select name="exclusion_type"><option value="path">Path</option><option value="process">Process</option><option value="extension">Extension</option></select></label>
+      <label>Device<select name="tray_device_id"><option value="">Not device-specific</option>{% for d in defender_devices %}<option value="{{ d.id }}">{{ d.hostname }}</option>{% endfor %}</select></label>
+      <label>Value<input name="value" required maxlength="1000" placeholder="C:\Trusted\"></label><button class="button button--primary" type="submit">Add exclusion</button>
+    </form>{% endif %}
+    <div class="table-wrapper"><table class="table" id="defender-exclusions-table" data-table data-table-id="defender-exclusions" data-table-empty-label="No exclusions match the selected filter.">
+      <thead><tr><th data-sort="string">Scope</th><th data-sort="string">Type</th><th data-sort="string">Value</th><th data-sort="string">Device</th><th>Actions</th></tr></thead>
+      <tbody>{% for e in defender_exclusions %}<tr><td data-label="Scope">{{ e.scope }}</td><td data-label="Type">{{ e.exclusion_type }}</td><td data-label="Value"><code>{{ e.value }}</code></td><td data-label="Device">{{ e.hostname or 'All' }}</td><td data-label="Actions">{% if defender_can_write %}<button class="button button--danger button--small" data-delete-exclusion="{{ e.id }}">Remove</button>{% else %}—{% endif %}</td></tr>{% else %}<tr><td colspan="5">No exclusions configured.</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+
+  <section class="card">
+    <div class="section-heading"><div><h2>Detections</h2><p>Reported threats and their linked helpdesk tickets.</p></div>
+      <label class="form-label" for="defender-detection-filter">Quick search
+        <input id="defender-detection-filter" class="form-input" type="search" placeholder="Filter detections" data-table-filter="defender-detections-table">
+      </label></div>
+    <div class="table-wrapper"><table class="table" id="defender-detections-table" data-table data-table-id="defender-detections" data-table-empty-label="No detections match the selected filter.">
+      <thead><tr><th data-sort="date">Detected</th><th data-sort="string">Device</th><th data-sort="string">Threat</th><th data-sort="string">Severity</th><th data-sort="string">Status</th><th data-sort="int">Ticket</th><th>Actions</th></tr></thead>
+      <tbody>{% for d in defender_detections %}<tr><td data-label="Detected" data-value="{{ d.detected_at }}">{{ d.detected_at }}</td><td data-label="Device">{{ d.hostname }}</td><td data-label="Threat">{{ d.threat_name }}</td><td data-label="Severity">{{ d.severity }}</td><td data-label="Status">{{ d.status }}{% if d.acknowledged_at %} · acknowledged{% endif %}</td><td data-label="Ticket" data-value="{{ d.ticket_id or 0 }}">{% if d.ticket_id %}<a href="/tickets/{{ d.ticket_id }}">#{{ d.ticket_id }}</a>{% elif defender_can_write %}<button class="button button--small" data-ticket-detection="{{ d.id }}">Create ticket</button>{% else %}—{% endif %}</td><td data-label="Actions">{% if defender_can_write %}{% if not d.acknowledged_at %}<button class="button button--small" data-detection-action="acknowledge" data-detection-id="{{ d.id }}">Acknowledge</button>{% endif %}<button class="button button--small" data-detection-action="quarantine" data-detection-id="{{ d.id }}">Quarantine</button> <button class="button button--small" data-detection-action="remediate" data-detection-id="{{ d.id }}">Remediate</button> <button class="button button--small" data-detection-action="{{ 'reopen' if d.status == 'resolved' else 'resolve' }}" data-detection-id="{{ d.id }}">{{ 'Reopen' if d.status == 'resolved' else 'Resolve' }}</button>{% else %}—{% endif %}</td></tr>{% else %}<tr><td colspan="7">No detections reported.</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </section>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/defender.js') }}" defer></script>
+{% endblock %}

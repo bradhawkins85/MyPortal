@@ -100,6 +100,7 @@ from app.api.routes import (
     xero,
     chat as chat_api,
     features as features_api,
+    defender as defender_api,
 )
 from uuid import uuid4
 
@@ -1153,6 +1154,7 @@ app.include_router(asset_custom_fields.router)
 app.include_router(tag_exclusions.router)
 app.include_router(chat_api.router)
 app.include_router(tray_api.router)
+app.include_router(defender_api.router)
 app.include_router(features_api.router)
 app.include_router(plugins_api.router)
 
