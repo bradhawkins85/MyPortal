@@ -25,6 +25,11 @@ func TestWindowsScanScriptSupportsLegacyPowerShell(t *testing.T) {
 			t.Errorf("Windows scan script does not use compatibility fallback %q", fallback)
 		}
 	}
+	for _, localMAC := range []string{"$localMacAddresses", "$adapter.MACAddress", "$localMacAddresses.ContainsKey($ip)"} {
+		if !strings.Contains(script, localMAC) {
+			t.Errorf("Windows scan script does not discover the scanner's own MAC with %q", localMAC)
+		}
+	}
 	for _, modern := range []string{"Get-NetIPAddress -", "Get-NetNeighbor -"} {
 		if !strings.Contains(script, modern) {
 			t.Errorf("Windows scan script does not preserve modern command %q", modern)
@@ -75,5 +80,18 @@ func TestParseNetworkHostsJSONParsesHosts(t *testing.T) {
 func TestParseNetworkHostsJSONRejectsMalformedOutput(t *testing.T) {
 	if _, err := parseNetworkHostsJSON([]byte(`[{`)); err == nil {
 		t.Fatal("parseNetworkHostsJSON accepted malformed JSON")
+	}
+}
+
+func TestNormalizeMACAddress(t *testing.T) {
+	for input, want := range map[string]string{
+		"8e59972a73d9":      "8E:59:97:2A:73:D9",
+		"8e-59-97-2a-73-d9": "8E:59:97:2A:73:D9",
+		"8e:59:97:2a:73:d9": "8E:59:97:2A:73:D9",
+		"8e59.972a.73d9":    "8E:59:97:2A:73:D9",
+	} {
+		if got := normalizeMACAddress(input); got != want {
+			t.Errorf("normalizeMACAddress(%q) = %q; want %q", input, got, want)
+		}
 	}
 }
