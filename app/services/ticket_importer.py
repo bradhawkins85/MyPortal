@@ -1723,7 +1723,6 @@ async def _resolve_company_id(ticket: dict[str, Any]) -> int | None:
         return int(created_id)
     except (TypeError, ValueError):
         return None
-    return None
 
 
 async def _upsert_ticket_metadata_note(

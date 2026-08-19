@@ -522,12 +522,11 @@
         btn.disabled = true;
         var originalText = btn.textContent;
         btn.textContent = 'Starting…';
+        var reqHeaders = { 'Content-Type': 'application/json' };
+        {% if csrf_token %}reqHeaders['X-CSRF-Token'] = '{{ csrf_token }}';{% endif %}
         fetch('/m365/mailboxes/start-managed-folder-assistant', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'{% if csrf_token %},
-            'X-CSRF-Token': '{{ csrf_token }}'{% endif %}
-          },
+          headers: reqHeaders,
           body: JSON.stringify({ upn: upn })
         })
         .then(function (resp) {

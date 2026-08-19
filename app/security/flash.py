@@ -23,7 +23,7 @@ import hmac
 import json
 import re
 from typing import Literal
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, urlparse
 
 from fastapi import Request, Response
 from fastapi.responses import RedirectResponse
@@ -137,7 +137,7 @@ def _safe_redirect_target(url: str, *, fallback: str = "/") -> str:
     if not candidate:
         return fallback
     candidate = candidate.replace("\\", "/")
-    parsed = urlsplit(candidate)
+    parsed = urlparse(candidate)
     if parsed.scheme or parsed.netloc:
         return fallback
     if not candidate.startswith("/") or candidate.startswith("//"):
@@ -158,13 +158,13 @@ def flash_redirect(
 
         return flash_redirect("/admin/foo", "Saved.", "success")
     """
-    candidate = unquote(str(url or "").strip()).replace("\\", "/")
-    if not candidate:
-        candidate = "/"
+    # Decode percent-encoding and normalise backslashes before validating.
+    decoded = unquote(str(url or "").strip()).replace("\\", "/")
+    parsed = urlparse(decoded)
+    if decoded and not parsed.scheme and not parsed.netloc and decoded.startswith("/") and not decoded.startswith("//"):
+        safe_url = decoded
     else:
-        parsed = urlsplit(candidate)
-        if parsed.scheme or parsed.netloc or not candidate.startswith("/") or candidate.startswith("//"):
-            candidate = "/"
-    response = RedirectResponse(url=candidate, status_code=status_code)
+        safe_url = "/"
+    response = RedirectResponse(url=safe_url, status_code=status_code)
     set_flash(response, message, variant)
     return response
