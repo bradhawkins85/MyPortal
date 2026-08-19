@@ -9,7 +9,8 @@ from app.core.database import db
 async def list_for_company(company_id: int) -> list[dict[str, Any]]:
     return list(
         await db.fetch_all(
-            """SELECT nd.*, a.name AS matched_asset_name, td.hostname AS scanner_hostname,
+            """SELECT nd.*, COALESCE(mv.vendor, nd.vendor) AS mac_vendor,
+                  a.name AS matched_asset_name, td.hostname AS scanner_hostname,
                   td.asset_id AS scanner_asset_id, scanner_asset.name AS scanner_asset_name,
                   dt.name AS device_type_name
            FROM network_devices nd
@@ -17,6 +18,8 @@ async def list_for_company(company_id: int) -> list[dict[str, Any]]:
            JOIN tray_devices td ON td.id = nd.scanner_tray_device_id
            LEFT JOIN assets scanner_asset ON scanner_asset.id = td.asset_id
            LEFT JOIN network_device_types dt ON dt.id = nd.device_type_id
+           LEFT JOIN mac_vendors mv ON mv.oui_prefix =
+             SUBSTRING(UPPER(REPLACE(REPLACE(REPLACE(nd.mac_address, ':', ''), '-', ''), '.', '')), 1, 6)
            WHERE nd.company_id = %s ORDER BY nd.last_seen_at DESC, nd.ip_address""",
             (company_id,),
         )

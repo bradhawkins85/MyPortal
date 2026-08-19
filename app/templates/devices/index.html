@@ -31,7 +31,7 @@
           <td>{{ device.description or '—' }}</td>
           <td>{% if device.scanner_asset_id %}<a href="/assets/{{ device.scanner_asset_id }}">{{ device.scanner_asset_name or device.scanner_hostname }}</a>{% else %}{{ device.scanner_hostname or '—' }}{% endif %}</td>
           <td><code>{{ device.wan_ip or '—' }}</code></td><td>{{ device.ip_address }}</td><td><code>{{ device.mac_address or '—' }}</code></td>
-          <td>{{ device.vendor or '—' }}{% if device.os_details %}<br><small>{{ device.os_details }}</small>{% endif %}</td><td>{{ device.open_ports or '—' }}</td><td>{{ device.last_seen_at }}</td>
+          <td>{{ device.mac_vendor or '—' }}{% if device.os_details %}<br><small>{{ device.os_details }}</small>{% endif %}</td><td>{{ device.open_ports or '—' }}</td><td>{{ device.last_seen_at }}</td>
           <td>{% if device.matched_asset_id %}<a href="/assets/{{ device.matched_asset_id }}"><span class="tag">{{ device.matched_asset_name }}</span></a>{% else %}<span class="tag tag--warning">Agent may be required</span>{% endif %}</td>
           {% if can_configure %}<td class="table__actions">
             <details class="header-title-menu__dropdown" data-header-menu><summary class="header-title-menu__toggle" data-header-menu-toggle>Actions <span aria-hidden="true">▾</span></summary>

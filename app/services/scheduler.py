@@ -23,6 +23,7 @@ from app.services import company_id_lookup
 from app.services import imap as imap_service
 from app.services import invoice_generator as invoice_generator_service
 from app.services import m365 as m365_service
+from app.services import mac_vendors as mac_vendors_service
 from app.services import modules as modules_service
 from app.services import products as products_service
 from app.services import staff_importer
@@ -642,7 +643,11 @@ class SchedulerService:
             details: str | None = None
 
             try:
-                if command == "sync_staff":
+                if command == "update_mac_vendors":
+                    details = json.dumps(
+                        await mac_vendors_service.update_mac_vendors(), default=str
+                    )
+                elif command == "sync_staff":
                     company_id = task.get("company_id")
                     if company_id:
                         await staff_importer.import_contacts_for_company(
