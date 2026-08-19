@@ -45,6 +45,9 @@ def test_discovered_devices_loads_shared_column_filters():
     assert 'data-column-key="last-seen" data-sort="date">Last seen</th>' in TEMPLATE
     assert "device.first_seen_at.strftime('%Y-%m-%d %H:%M')" in TEMPLATE
     assert "device.last_seen_at.strftime('%Y-%m-%d %H:%M')" in TEMPLATE
+    assert 'page_header_overflow("network-device-actions", "Actions"' in TEMPLATE
+    assert 'id="device-types-modal" hidden' in TEMPLATE
+    assert 'action="/devices/device-types"' in TEMPLATE
 
 
 @pytest.mark.anyio
