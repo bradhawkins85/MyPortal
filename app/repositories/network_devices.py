@@ -52,12 +52,20 @@ async def update_device(
     state: str,
     device_type_id: int | None,
     description: str | None,
+    agent_not_required: bool,
 ) -> None:
     await db.execute(
         """UPDATE network_devices
-           SET state=%s, device_type_id=%s, description=%s
+           SET state=%s, device_type_id=%s, description=%s, agent_not_required=%s
            WHERE id=%s AND company_id=%s""",
-        (state, device_type_id, description, device_id, company_id),
+        (
+            state,
+            device_type_id,
+            description,
+            1 if agent_not_required else 0,
+            device_id,
+            company_id,
+        ),
     )
 
 

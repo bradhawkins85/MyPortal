@@ -32,7 +32,7 @@
           <td>{% if device.scanner_asset_id %}<a href="/assets/{{ device.scanner_asset_id }}">{{ device.scanner_asset_name or device.scanner_hostname }}</a>{% else %}{{ device.scanner_hostname or '—' }}{% endif %}</td>
           <td><code>{{ device.wan_ip or '—' }}</code></td><td>{{ device.ip_address }}</td><td><code>{{ device.mac_address or '—' }}</code></td>
           <td>{{ device.mac_vendor or '—' }}{% if device.os_details %}<br><small>{{ device.os_details }}</small>{% endif %}</td><td>{{ device.open_ports or '—' }}</td><td>{{ device.last_seen_at }}</td>
-          <td>{% if device.matched_asset_id %}<a href="/assets/{{ device.matched_asset_id }}"><span class="tag">{{ device.matched_asset_name }}</span></a>{% else %}<span class="tag tag--warning">Agent may be required</span>{% endif %}</td>
+          <td>{% if device.matched_asset_id %}<a href="/assets/{{ device.matched_asset_id }}"><span class="tag">{{ device.matched_asset_name }}</span></a>{% elif device.agent_not_required %}<span class="tag">Agent not required</span>{% else %}<span class="tag tag--warning">Agent may be required</span>{% endif %}</td>
           {% if can_configure %}<td class="table__actions">
             <details class="header-title-menu__dropdown" data-header-menu><summary class="header-title-menu__toggle" data-header-menu-toggle>Actions <span aria-hidden="true">▾</span></summary>
               <div class="header-title-menu__list discovered-device-menu">
@@ -41,6 +41,7 @@
                   <label>State<select class="input" name="state">{% for state in ['New', 'Known', 'Unknown'] %}<option value="{{ state }}" {% if device.state == state %}selected{% endif %}>{{ state }}</option>{% endfor %}</select></label>
                   <label>Device type<select class="input" name="device_type_id"><option value="">Not set</option>{% for device_type in device_types %}<option value="{{ device_type.id }}" {% if device.device_type_id == device_type.id %}selected{% endif %}>{{ device_type.name }}</option>{% endfor %}</select></label>
                   <label class="discovered-device-form__description">Description<textarea class="input" name="description" maxlength="2000" rows="3" placeholder="Identify this device">{{ device.description or '' }}</textarea></label>
+                  <label class="checkbox"><input type="checkbox" name="agent_not_required" value="1" {% if device.agent_not_required %}checked{% endif %}> <span>Agent not required</span></label>
                   <button class="button button--primary" type="submit">Save device</button>
                 </form>
               </div>
