@@ -234,8 +234,8 @@
         fetch('/m365/mailboxes/sync', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'{% if csrf_token %},
-            'X-CSRF-Token': '{{ csrf_token }}'{% endif %}
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || document.createElement('meta')).getAttribute('content') || ''
           }
         })
         .then(function (resp) { return resp.json(); })
@@ -263,8 +263,8 @@
         fetch('/m365/mailboxes/start-managed-folder-assistant/all', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'{% if csrf_token %},
-            'X-CSRF-Token': '{{ csrf_token }}'{% endif %}
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || document.createElement('meta')).getAttribute('content') || ''
           }
         })
         .then(function (resp) {
@@ -492,8 +492,8 @@
         fetch('/m365/mailboxes/permissions/request', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'{% if csrf_token %},
-            'X-CSRF-Token': '{{ csrf_token }}'{% endif %}
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || document.createElement('meta')).getAttribute('content') || ''
 
           },
           body: JSON.stringify({
@@ -543,7 +543,10 @@
         {% if csrf_token %}mfaHeaders['X-CSRF-Token'] = '{{ csrf_token }}';{% endif %}
         fetch('/m365/mailboxes/start-managed-folder-assistant', {
           method: 'POST',
-          headers: mfaHeaders,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || document.createElement('meta')).getAttribute('content') || ''
+          },
           body: JSON.stringify({ upn: upn })
         })
         .then(function (resp) {
@@ -589,8 +592,8 @@
         fetch('/m365/mailboxes/enable-archive', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'{% if csrf_token %},
-            'X-CSRF-Token': '{{ csrf_token }}'{% endif %}
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || document.createElement('meta')).getAttribute('content') || ''
           },
           body: JSON.stringify({ upn: upn })
         })
