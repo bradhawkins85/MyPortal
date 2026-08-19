@@ -1,7 +1,6 @@
 (function () {
   'use strict';
 
-  const TOAST_VARIANTS = ['info', 'success', 'warning', 'error'];
   const TOAST_CLASSES = [
     'notification-toast--info',
     'notification-toast--success',
