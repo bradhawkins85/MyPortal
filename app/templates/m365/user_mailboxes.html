@@ -225,6 +225,7 @@
   </script>
   <script>
   (function () {
+    var csrfToken = '{{ csrf_token }}';
     var syncBtn = document.querySelector('[data-sync-mailboxes]');
     var runAllBtn = document.querySelector('[data-start-managed-folder-assistant-all]');
     if (syncBtn) {
@@ -235,7 +236,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || document.createElement('meta')).getAttribute('content') || ''
+            'X-CSRF-Token': csrfToken
           }
         })
         .then(function (resp) { return resp.json(); })
@@ -264,7 +265,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || document.createElement('meta')).getAttribute('content') || ''
+            'X-CSRF-Token': csrfToken
           }
         })
         .then(function (resp) {
@@ -293,6 +294,7 @@
   </script>
   <script>
   (function () {
+    var csrfToken = '{{ csrf_token }}';
     var modal = document.getElementById('mailbox-perm-modal');
     if (!modal) return;
 
@@ -493,7 +495,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || document.createElement('meta')).getAttribute('content') || ''
+            'X-CSRF-Token': csrfToken
 
           },
           body: JSON.stringify({
@@ -526,6 +528,7 @@
   </script>
   <script>
   (function () {
+    var csrfToken = '{{ csrf_token }}';
     var buttons = document.querySelectorAll('[data-start-managed-folder-assistant-btn]');
     if (!buttons.length) return;
     buttons.forEach(function (btn) {
@@ -545,7 +548,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || document.createElement('meta')).getAttribute('content') || ''
+            'X-CSRF-Token': csrfToken
           },
           body: JSON.stringify({ upn: upn })
         })
@@ -576,6 +579,7 @@
   </script>
   <script>
   (function () {
+    var csrfToken = '{{ csrf_token }}';
     var buttons = document.querySelectorAll('[data-enable-archive-btn]');
     if (!buttons.length) return;
     buttons.forEach(function (btn) {
@@ -593,7 +597,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || document.createElement('meta')).getAttribute('content') || ''
+            'X-CSRF-Token': csrfToken
           },
           body: JSON.stringify({ upn: upn })
         })
