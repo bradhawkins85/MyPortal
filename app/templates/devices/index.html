@@ -23,7 +23,7 @@
     </header>
     {% if devices %}
       <div class="table-wrapper"><table class="table" id="network-devices-table" data-table data-table-id="network-devices">
-        <thead><tr><th data-sort="string">Hostname</th><th data-sort="string">State</th><th data-sort="string">Type</th><th data-sort="string">Description</th><th data-sort="string">Discovered by</th><th data-sort="string">WAN IP</th><th data-sort="string">Local IP</th><th data-sort="string">MAC address</th><th data-sort="string">MAC vendor / OS</th><th data-sort="string">Open ports</th><th data-sort="date">Last seen</th><th data-sort="string">MyPortal asset</th>{% if can_configure %}<th>Actions</th>{% endif %}</tr></thead>
+        <thead><tr><th data-sort="string">Hostname</th><th data-sort="string">State</th><th data-sort="string">Type</th><th data-sort="string">Description</th><th data-sort="string">Discovered by</th><th data-sort="string">WAN IP</th><th data-sort="string">Local IP</th><th data-sort="string">MAC address</th><th data-sort="string">MAC vendor / OS</th><th data-sort="string">Open ports</th><th data-sort="date">Last seen</th><th data-sort="string">MyPortal asset</th>{% if can_configure %}<th class="table__actions">Actions</th>{% endif %}</tr></thead>
         <tbody>{% for device in devices %}<tr>
           <td>{{ device.hostname or '—' }}</td>
           <td><span class="tag{% if device.state == 'New' %} tag--warning{% endif %}">{{ device.state }}</span></td>
@@ -51,4 +51,9 @@
     {% else %}<div class="empty-state"><h3 class="empty-state__title">No devices discovered yet</h3><p class="empty-state__subtitle">Enable a scanner above. Its first result will appear after Nmap is available.</p></div>{% endif %}
   </section>
 </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
 {% endblock %}
