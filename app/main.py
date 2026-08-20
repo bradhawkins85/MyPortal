@@ -7121,6 +7121,28 @@ async def tray_icon_endpoint() -> Response:
     )
 
 
+@app.get(
+    "/tray/icon.png",
+    include_in_schema=False,
+)
+async def tray_icon_png_endpoint() -> Response:
+    """Serve the active tray icon as a PNG for macOS clients.
+
+    macOS system-tray (NSStatusItem) cannot render ``.ico`` files; it
+    needs a PNG.  This endpoint returns the same icon as ``/tray/icon.ico``
+    but as a raw PNG: the embedded PNG is extracted from uploaded ICO files,
+    or the default PNG is returned when no upload is present.
+    """
+    from app.services import tray_icon as tray_icon_service
+
+    data = await tray_icon_service.get_tray_icon_png_bytes(_private_uploads_path)
+    return Response(
+        content=data,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @app.get("/admin/tray/branding", response_class=HTMLResponse)
 async def admin_tray_branding_page(
     request: Request,
