@@ -202,6 +202,16 @@ def test_m365_menu_item_has_data_menu_key(monkeypatch):
         "in left menu customisation"
     )
 
+
+def test_hidden_expandable_sidebar_items_are_not_displayed():
+    """Expandable groups hidden by user preferences must override their flex display."""
+    stylesheet = Path("app/static/css/app.css").read_text()
+
+    assert ".menu__item--expandable[hidden]" in stylesheet
+    hidden_rule = stylesheet.split(".menu__item--expandable[hidden]", 1)[1].split("}", 1)[0]
+    assert "display: none" in hidden_rule
+
+
 def test_profile_menu_permission_shows_my_profile_for_non_admin(monkeypatch):
     user = {"id": 7, "email": "user@example.com", "is_super_admin": False}
     membership = {
