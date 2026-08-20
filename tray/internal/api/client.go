@@ -245,6 +245,61 @@ type HeartbeatRequest struct {
 	LastIP       string `json:"last_ip,omitempty"`
 }
 
+// DefenderPolicy is the effective Defender configuration for this device.
+// A disabled policy is also returned when the company has not opted in.
+type DefenderPolicy struct {
+	Enabled bool `json:"enabled"`
+}
+
+// DefenderStatus is the protection state collected by the Windows service.
+type DefenderStatus struct {
+	AntivirusEnabled          bool                   `json:"antivirus_enabled"`
+	RealtimeProtectionEnabled bool                   `json:"realtime_protection_enabled"`
+	TamperProtectionEnabled   bool                   `json:"tamper_protection_enabled"`
+	SignaturesUpdatedAt       *time.Time             `json:"signatures_updated_at,omitempty"`
+	LastScanAt                *time.Time             `json:"last_scan_at,omitempty"`
+	HealthStatus              string                 `json:"health_status"`
+	Details                   map[string]interface{} `json:"details"`
+}
+
+// GetDefenderPolicy checks whether Defender reporting is enabled. The server
+// intentionally returns 404 for devices whose company has not opted in.
+func (c *Client) GetDefenderPolicy(ctx context.Context) (*DefenderPolicy, error) {
+	resp, err := c.get(ctx, "/api/tray/defender/policy")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return &DefenderPolicy{Enabled: false}, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("defender policy: HTTP %d", resp.StatusCode)
+	}
+	var out DefenderPolicy
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ReportDefenderStatus uploads the latest endpoint protection state.
+func (c *Client) ReportDefenderStatus(ctx context.Context, status DefenderStatus) error {
+	body, err := json.Marshal(status)
+	if err != nil {
+		return err
+	}
+	resp, err := c.post(ctx, "/api/tray/defender/status", body, true)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("defender status: HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // Heartbeat sends a liveness ping and updates device facts on the server.
 func (c *Client) Heartbeat(ctx context.Context, req HeartbeatRequest) error {
 	body, err := json.Marshal(req)

@@ -53,6 +53,27 @@ func newStubServer(t *testing.T) *httptest.Server {
 		w.WriteHeader(http.StatusOK)
 	})
 
+	mux.HandleFunc("/api/tray/defender/policy", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-auth-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(api.DefenderPolicy{Enabled: true})
+	})
+
+	mux.HandleFunc("/api/tray/defender/status", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-auth-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		var status api.DefenderStatus
+		if err := json.NewDecoder(r.Body).Decode(&status); err != nil || status.HealthStatus != "healthy" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
 	mux.HandleFunc("/api/tray/wan-ip", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-auth-token" {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -73,6 +94,28 @@ func newStubServer(t *testing.T) *httptest.Server {
 	})
 
 	return httptest.NewServer(mux)
+}
+
+func TestDefenderStatusReporting(t *testing.T) {
+	srv := newStubServer(t)
+	defer srv.Close()
+
+	client := api.New(srv.URL)
+	client.SetAuth("test-device-uid", "test-auth-token")
+	policy, err := client.GetDefenderPolicy(context.Background())
+	if err != nil {
+		t.Fatalf("GetDefenderPolicy: %v", err)
+	}
+	if !policy.Enabled {
+		t.Fatal("expected Defender policy to be enabled")
+	}
+	if err := client.ReportDefenderStatus(context.Background(), api.DefenderStatus{
+		AntivirusEnabled: true,
+		HealthStatus:     "healthy",
+		Details:          map[string]interface{}{},
+	}); err != nil {
+		t.Fatalf("ReportDefenderStatus: %v", err)
+	}
 }
 
 func TestEnrol(t *testing.T) {
