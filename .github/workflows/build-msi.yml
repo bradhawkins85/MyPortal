@@ -93,6 +93,7 @@ jobs:
       - name: Import code-signing certificate
         id: signing-certificate
         shell: pwsh
+        timeout-minutes: 2
         env:
           SIGNING_CERTIFICATE_PFX: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PFX }}
           SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
@@ -123,13 +124,23 @@ jobs:
           if ($null -eq $certificate) {
             throw 'The signing PFX did not contain a certificate with a private key.'
           }
+          "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
 
           # Trust the self-signed certificate on the runner so signature
           # verification fails the build for anything other than a valid file.
+          # Import-Certificate can display an interactive root-store warning,
+          # which hangs a headless GitHub runner. CertUtil's force flag keeps
+          # this operation non-interactive.
           $certificatePath = Join-Path $env:RUNNER_TEMP 'myportal-tray-signing.cer'
-          Export-Certificate -Cert $certificate -FilePath $certificatePath | Out-Null
-          Import-Certificate -FilePath $certificatePath -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
-          "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
+          try {
+            Export-Certificate -Cert $certificate -FilePath $certificatePath | Out-Null
+            & certutil.exe -user -f -addstore Root $certificatePath | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              throw "CertUtil failed to trust the signing certificate (exit code $LASTEXITCODE)."
+            }
+          } finally {
+            Remove-Item $certificatePath -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Sign Windows executables
         shell: pwsh
