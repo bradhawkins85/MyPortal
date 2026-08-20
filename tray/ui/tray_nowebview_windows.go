@@ -253,7 +253,7 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 		item := addTrayMenuItem(parent, label, "Click to copy value")
 		go func(varName string) {
 			for range item.ClickedCh {
-				val := os.Getenv(varName)
+				val := resolveEnvVarValue(varName)
 				if val == "" {
 					val = "(not set)"
 				}
