@@ -12,6 +12,7 @@ class DefenderStatusReport(BaseModel):
     scan_history: list["DefenderScanReport"] = Field(default_factory=list, max_length=20)
     health_status: Literal["healthy", "warning", "critical", "unknown"] = "unknown"
     details: dict[str, Any] = Field(default_factory=dict)
+    detections: list["DefenderDetectionReport"] = Field(default_factory=list, max_length=100)
 
 class DefenderScanReport(BaseModel):
     scan_type: Literal["quick", "full", "custom", "unknown"] = "unknown"

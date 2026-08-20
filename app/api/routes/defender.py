@@ -252,6 +252,11 @@ async def tray_status(payload: DefenderStatusReport, request: Request):
     device_id = int(device["id"])
     company_id = int(device["company_id"])
     await repo.report_status(device_id, company_id, payload)
+    # Protection history is returned by Get-MpThreatDetection even after
+    # Defender has remediated a threat. Persist it rather than relying on the
+    # "current threats" count, which is normally zero after remediation.
+    for detection in payload.detections:
+        await repo.report_detection(device_id, company_id, detection)
     configured = await repo.settings(company_id)
     alerts = {
         "antivirus_off": ("defender_auto_ticket_antivirus_off", payload.antivirus_enabled, "Anti Virus is off"),

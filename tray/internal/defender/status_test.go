@@ -16,7 +16,15 @@ func TestDecodeStatusAcceptsPowerShellUTF8BOM(t *testing.T) {
             "status": "completed"
         }],
         "health_status": "healthy",
-        "details": {"signature_version": "1.2.3"}
+        "details": {"signature_version": "1.2.3"},
+        "detections": [{
+            "detection_uid": "det-123",
+            "threat_name": "Test threat",
+            "severity": "high",
+            "status": "remediated",
+            "detected_at": "2026-08-20T01:02:03Z",
+            "details": {"action_success": true}
+        }]
     }`)...)
 
 	status, err := decodeStatus(output)
@@ -31,6 +39,9 @@ func TestDecodeStatusAcceptsPowerShellUTF8BOM(t *testing.T) {
 	}
 	if len(status.ScanHistory) != 1 || status.ScanHistory[0].ScanType != "quick" {
 		t.Fatalf("unexpected scan history: %+v", status.ScanHistory)
+	}
+	if len(status.Detections) != 1 || status.Detections[0].DetectionUID != "det-123" {
+		t.Fatalf("unexpected detections: %+v", status.Detections)
 	}
 }
 
