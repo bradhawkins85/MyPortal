@@ -323,7 +323,7 @@
             <li class="menu__item">
               <a href="/defender" {% if current_path.startswith('/defender') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5.1 3.4 9.9 8 11 4.6-1.1 8-5.9 8-11V5zm0 3.2 5 1.9V11c0 3.5-2.1 6.9-5 7.9z"/></svg></span>
-                <span class="menu__label">Windows Defender</span>
+                <span class="menu__label">Windows Defender{% if defender_detection_count | default(0) %}<span class="menu__badge" title="{{ defender_detection_count }} active detection{{ 's' if defender_detection_count != 1 else '' }}">{{ defender_detection_count }}</span>{% endif %}</span>
               </a>
             </li>
           {% endif %}

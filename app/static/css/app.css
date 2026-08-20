@@ -4514,6 +4514,10 @@ button.header-title-menu__link,
   word-break: break-word;
 }
 
+.defender-detections-section {
+  margin-top: calc(var(--space-gap-roomy) * 1.5);
+}
+
 .notification-preference__hint {
   font-size: 0.75rem;
   margin-top: 0.25rem;

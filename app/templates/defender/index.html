@@ -1,6 +1,17 @@
 {% extends "base.html" %}
 {% from "macros/counters.html" import counter_strip %}
+{% from "macros/header.html" import page_header_overflow %}
 {% block title %}Windows Defender · MyPortal{% endblock %}
+{% block header_title %}<span class="header__title-text">Windows Defender</span>{% endblock %}
+{% block header_actions %}
+  {% if defender_enabled %}
+    {{ page_header_overflow("defender-page-actions", "Actions", [
+      {"label": "Protection policy", "type": "button", "attrs": {"data-defender-modal-open": "protection-policy-modal"}},
+      {"label": "Ticket actions", "type": "button", "attrs": {"data-defender-modal-open": "ticket-actions-modal"}},
+      {"label": "Manage exclusions", "type": "button", "attrs": {"data-defender-modal-open": "exclusions-modal"}}
+    ]) }}
+  {% endif %}
+{% endblock %}
 {% block content %}
 <section class="page-header">
   <div><p class="eyebrow">Endpoint security</p><h1>Windows Defender</h1>
@@ -18,21 +29,6 @@
     {'label': 'Configured exclusions', 'value': defender_exclusions|length, 'variant': 'success'},
     {'label': 'Stale agents', 'value': defender_devices|selectattr('is_stale')|list|length, 'variant': 'warning', 'title': 'No heartbeat for 15 minutes'}
   ]) }}
-  {% if defender_can_write %}<section class="card"><h2>Protection policy</h2>
-    <form id="defender-settings-form" class="form-grid">
-      <label>Scheduled scan<select name="scheduled_scan_type"><option value="">Disabled</option><option value="quick" {% if defender_settings.defender_scheduled_scan_type == 'quick' %}selected{% endif %}>Quick scan</option><option value="full" {% if defender_settings.defender_scheduled_scan_type == 'full' %}selected{% endif %}>Full scan</option></select></label>
-      <label>Day<select name="scheduled_scan_day">{% for label in ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'] %}<option value="{{ loop.index0 }}" {% if defender_settings.defender_scheduled_scan_day == loop.index0 %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-      <label>Time<input type="time" name="scheduled_scan_time" value="{{ defender_settings.defender_scheduled_scan_time or '02:00' }}"></label>
-      <fieldset><legend>Automatic investigation tickets</legend>
-        <label><input type="checkbox" name="auto_ticket_antivirus_off" {% if defender_settings.defender_auto_ticket_antivirus_off %}checked{% endif %}> Anti Virus is off</label>
-        <label><input type="checkbox" name="auto_ticket_realtime_off" {% if defender_settings.defender_auto_ticket_realtime_off %}checked{% endif %}> Real-time is off</label>
-        <label><input type="checkbox" name="auto_ticket_tamper_off" {% if defender_settings.defender_auto_ticket_tamper_off %}checked{% endif %}> Tamper protection is off</label>
-        <label><input type="checkbox" name="auto_ticket_threat_detected" {% if defender_settings.defender_auto_ticket_threat_detected %}checked{% endif %}> A threat is detected</label>
-      </fieldset>
-      <label>Threat ticket severity<select name="auto_ticket_min_severity"><option value="">Any severity</option>{% for severity in ['low','medium','high','critical'] %}<option value="{{ severity }}" {% if defender_settings.defender_auto_ticket_min_severity == severity %}selected{% endif %}>{{ severity|title }} and above</option>{% endfor %}</select></label>
-      <button class="button button--primary" type="submit">Save policy</button>
-    </form></section>{% endif %}
-
   <section class="card">
     <div class="section-heading"><div><h2>Endpoint protection</h2><p>Click any column heading to sort. Search filters all endpoint fields.</p></div>
       <label class="form-label" for="defender-device-filter">Quick search
@@ -54,24 +50,7 @@
     </table></div>
   </section>
 
-  <section class="card">
-    <div class="section-heading"><div><h2>Exclusions</h2><p>Effective policy combines global, company and device exclusions.</p></div>
-      <label class="form-label" for="defender-exclusion-filter">Quick search
-        <input id="defender-exclusion-filter" class="form-input" type="search" placeholder="Filter exclusions" data-table-filter="defender-exclusions-table">
-      </label></div>
-    {% if defender_can_write %}<form id="defender-exclusion-form" class="form-grid">
-      <label>Scope<select name="scope"><option value="company">Company</option>{% if is_super_admin %}<option value="global">Global</option>{% endif %}<option value="device">Device</option></select></label>
-      <label>Type<select name="exclusion_type"><option value="path">Path</option><option value="process">Process</option><option value="extension">Extension</option></select></label>
-      <label>Device<select name="tray_device_id"><option value="">Not device-specific</option>{% for d in defender_devices %}<option value="{{ d.id }}">{{ d.hostname }}</option>{% endfor %}</select></label>
-      <label>Value<input name="value" required maxlength="1000" placeholder="C:\Trusted\"></label><button class="button button--primary" type="submit">Add exclusion</button>
-    </form>{% endif %}
-    <div class="table-wrapper"><table class="table" id="defender-exclusions-table" data-table data-table-id="defender-exclusions" data-table-empty-label="No exclusions match the selected filter.">
-      <thead><tr><th data-sort="string">Scope</th><th data-sort="string">Type</th><th data-sort="string">Value</th><th data-sort="string">Device</th><th>Actions</th></tr></thead>
-      <tbody>{% for e in defender_exclusions %}<tr><td data-label="Scope">{{ e.scope }}</td><td data-label="Type">{{ e.exclusion_type }}</td><td data-label="Value"><code>{{ e.value }}</code></td><td data-label="Device">{{ e.hostname or 'All' }}</td><td data-label="Actions">{% if defender_can_write %}<button class="button button--danger button--small" data-delete-exclusion="{{ e.id }}">Remove</button>{% else %}—{% endif %}</td></tr>{% else %}<tr><td colspan="5">No exclusions configured.</td></tr>{% endfor %}</tbody>
-    </table></div>
-  </section>
-
-  <section class="card">
+  <section class="card defender-detections-section">
     <div class="section-heading"><div><h2>Detections</h2><p>Reported threats and their linked helpdesk tickets.</p></div>
       <label class="form-label" for="defender-detection-filter">Quick search
         <input id="defender-detection-filter" class="form-input" type="search" placeholder="Filter detections" data-table-filter="defender-detections-table">
@@ -81,6 +60,41 @@
       <tbody>{% for d in defender_detections %}<tr><td data-label="Detected" data-value="{{ d.detected_at }}">{{ d.detected_at }}</td><td data-label="Device">{{ d.hostname }}</td><td data-label="Threat">{{ d.threat_name }}</td><td data-label="Severity">{{ d.severity }}</td><td data-label="Status">{{ d.status }}{% if d.acknowledged_at %} · acknowledged{% endif %}</td><td data-label="Ticket" data-value="{{ d.ticket_id or 0 }}">{% if d.ticket_id %}<a href="/tickets/{{ d.ticket_id }}">#{{ d.ticket_id }}</a>{% else %}Not created{% endif %}</td><td data-label="Actions">{% if defender_can_write %}{% if not d.acknowledged_at %}<button class="button button--small" data-detection-action="acknowledge" data-detection-id="{{ d.id }}">Acknowledge</button>{% endif %}<button class="button button--small" data-detection-action="quarantine" data-detection-id="{{ d.id }}">Quarantine</button> <button class="button button--small" data-detection-action="remediate" data-detection-id="{{ d.id }}">Remediate</button> <button class="button button--small" data-detection-action="{{ 'reopen' if d.status == 'resolved' else 'resolve' }}" data-detection-id="{{ d.id }}">{{ 'Reopen' if d.status == 'resolved' else 'Resolve' }}</button>{% else %}—{% endif %}</td></tr>{% else %}<tr><td colspan="7">No detections reported.</td></tr>{% endfor %}</tbody>
     </table></div>
   </section>
+
+  <div class="modal" id="protection-policy-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="protection-policy-title">
+    <div class="modal__backdrop" data-defender-modal-close></div><section class="modal__dialog">
+      <header class="modal__header"><div><h2 id="protection-policy-title">Protection policy</h2><p>Configure scheduled endpoint scans.</p></div><button class="modal__close" type="button" data-defender-modal-close aria-label="Close">&times;</button></header>
+      <form id="defender-protection-form" data-defender-settings-form><div class="modal__body form-grid">
+        <label>Scheduled scan<select name="scheduled_scan_type" {% if not defender_can_write %}disabled{% endif %}><option value="">Disabled</option><option value="quick" {% if defender_settings.defender_scheduled_scan_type == 'quick' %}selected{% endif %}>Quick scan</option><option value="full" {% if defender_settings.defender_scheduled_scan_type == 'full' %}selected{% endif %}>Full scan</option></select></label>
+        <label>Day<select name="scheduled_scan_day" {% if not defender_can_write %}disabled{% endif %}>{% for label in ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'] %}<option value="{{ loop.index0 }}" {% if defender_settings.defender_scheduled_scan_day == loop.index0 %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        <label>Time<input type="time" name="scheduled_scan_time" value="{{ defender_settings.defender_scheduled_scan_time or '02:00' }}" {% if not defender_can_write %}disabled{% endif %}></label>
+      </div>{% if defender_can_write %}<footer class="modal__footer"><button class="button button--ghost" type="button" data-defender-modal-close>Cancel</button><button class="button button--primary" type="submit">Save policy</button></footer>{% endif %}</form>
+    </section>
+  </div>
+
+  <div class="modal" id="ticket-actions-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="ticket-actions-title">
+    <div class="modal__backdrop" data-defender-modal-close></div><section class="modal__dialog">
+      <header class="modal__header"><div><h2 id="ticket-actions-title">Ticket actions</h2><p>Choose when Defender automatically creates investigation tickets.</p></div><button class="modal__close" type="button" data-defender-modal-close aria-label="Close">&times;</button></header>
+      <form id="defender-ticket-form" data-defender-settings-form><div class="modal__body form-stack"><fieldset><legend>Automatic ticket creation</legend>
+        <label><input type="checkbox" name="auto_ticket_antivirus_off" {% if defender_settings.defender_auto_ticket_antivirus_off %}checked{% endif %} {% if not defender_can_write %}disabled{% endif %}> Anti Virus is off</label>
+        <label><input type="checkbox" name="auto_ticket_realtime_off" {% if defender_settings.defender_auto_ticket_realtime_off %}checked{% endif %} {% if not defender_can_write %}disabled{% endif %}> Real-time protection is off</label>
+        <label><input type="checkbox" name="auto_ticket_tamper_off" {% if defender_settings.defender_auto_ticket_tamper_off %}checked{% endif %} {% if not defender_can_write %}disabled{% endif %}> Tamper protection is off</label>
+        <label><input type="checkbox" name="auto_ticket_threat_detected" {% if defender_settings.defender_auto_ticket_threat_detected %}checked{% endif %} {% if not defender_can_write %}disabled{% endif %}> A threat is detected</label>
+      </fieldset><label>Threat ticket severity<select name="auto_ticket_min_severity" {% if not defender_can_write %}disabled{% endif %}><option value="">Any severity</option>{% for severity in ['low','medium','high','critical'] %}<option value="{{ severity }}" {% if defender_settings.defender_auto_ticket_min_severity == severity %}selected{% endif %}>{{ severity|title }} and above</option>{% endfor %}</select></label></div>
+      {% if defender_can_write %}<footer class="modal__footer"><button class="button button--ghost" type="button" data-defender-modal-close>Cancel</button><button class="button button--primary" type="submit">Save ticket actions</button></footer>{% endif %}</form>
+    </section>
+  </div>
+
+  <div class="modal" id="exclusions-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="exclusions-title">
+    <div class="modal__backdrop" data-defender-modal-close></div><section class="modal__dialog modal__dialog--wide">
+      <header class="modal__header"><div><h2 id="exclusions-title">Manage exclusions</h2><p>Effective policy combines global, company and device exclusions.</p></div><button class="modal__close" type="button" data-defender-modal-close aria-label="Close">&times;</button></header>
+      <div class="modal__body">{% if defender_can_write %}<form id="defender-exclusion-form" class="form-grid">
+        <label>Scope<select name="scope"><option value="company">Company</option>{% if is_super_admin %}<option value="global">Global</option>{% endif %}<option value="device">Device</option></select></label><label>Type<select name="exclusion_type"><option value="path">Path</option><option value="process">Process</option><option value="extension">Extension</option></select></label>
+        <label>Device<select name="tray_device_id"><option value="">Not device-specific</option>{% for d in defender_devices %}<option value="{{ d.id }}">{{ d.hostname }}</option>{% endfor %}</select></label><label>Value<input name="value" required maxlength="1000" placeholder="C:\Trusted\"></label><button class="button button--primary" type="submit">Add exclusion</button>
+      </form>{% endif %}<label class="form-label" for="defender-exclusion-filter">Quick search<input id="defender-exclusion-filter" class="form-input" type="search" placeholder="Filter exclusions" data-table-filter="defender-exclusions-table"></label>
+      <div class="table-wrapper"><table class="table" id="defender-exclusions-table" data-table data-table-id="defender-exclusions" data-table-empty-label="No exclusions match the selected filter."><thead><tr><th data-sort="string">Scope</th><th data-sort="string">Type</th><th data-sort="string">Value</th><th data-sort="string">Device</th><th>Actions</th></tr></thead><tbody>{% for e in defender_exclusions %}<tr><td>{{ e.scope }}</td><td>{{ e.exclusion_type }}</td><td><code>{{ e.value }}</code></td><td>{{ e.hostname or 'All' }}</td><td>{% if defender_can_write %}<button class="button button--danger button--small" data-delete-exclusion="{{ e.id }}">Remove</button>{% else %}—{% endif %}</td></tr>{% else %}<tr><td colspan="5">No exclusions configured.</td></tr>{% endfor %}</tbody></table></div></div>
+    </section>
+  </div>
 {% endif %}
 {% endblock %}
 {% block scripts %}
