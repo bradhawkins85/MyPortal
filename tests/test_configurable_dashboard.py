@@ -128,6 +128,70 @@ def test_stat_colours_and_custom_panel_size_are_validated():
     assert (panel["w"], panel["h"]) == (1, 12)
 
 
+def test_stat_panel_preserves_optional_detail_report():
+    panel = validate_layout(
+        {
+            "panels": [
+                {
+                    "id": "open-tickets",
+                    "type": "stat",
+                    "report": "dashboard-open-tickets",
+                    "detail_report": "all-open-ticket-details",
+                }
+            ]
+        }
+    )["panels"][0]
+
+    assert panel["detail_report"] == "all-open-ticket-details"
+
+
+def test_linked_stat_resolves_permitted_report_url(monkeypatch):
+    layout = validate_layout(
+        {
+            "panels": [
+                {
+                    "id": "open-tickets",
+                    "type": "stat",
+                    "report": "dashboard-open-tickets",
+                    "detail_report": "open-ticket-details",
+                }
+            ]
+        }
+    )
+    monkeypatch.setattr(
+        dashboard_layouts.reporting_repo,
+        "get_query_by_slug",
+        AsyncMock(
+            side_effect=[
+                {"id": 1, "sql_query": "SELECT id FROM tickets"},
+                {"id": 42, "sql_query": "SELECT * FROM tickets"},
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        dashboard_layouts.reporting_service,
+        "run_query_with_context",
+        AsyncMock(return_value={"columns": ["id"], "rows": [{"id": 1}]}),
+    )
+
+    result = asyncio.run(
+        dashboard_layouts.resolve_layout(
+            layout, company_id=None, can_run_all=True, user_id=9
+        )
+    )
+
+    assert result["panels"][0]["detail_url"] == "/reporting?report=42"
+
+
+def test_dashboard_renders_linked_stat_as_accessible_link():
+    script = Path("app/static/js/dashboard.js").read_text()
+    template = Path("app/templates/dashboard.html").read_text()
+
+    assert "panel.type === 'stat' && panel.detail_url" in script
+    assert 'class="dashboard-panel__detail-link"' in script
+    assert 'name="detail_report"' in template
+
+
 def test_listall_stat_preserves_and_returns_every_column(monkeypatch):
     layout = validate_layout(
         {

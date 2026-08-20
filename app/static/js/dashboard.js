@@ -144,7 +144,13 @@
       else body = `<div class="dashboard-panel__value">${esc(panel.value)}</div>`;
 
       const controls = editable ? '<div class="dashboard-panel__controls"><button class="button button--secondary dashboard-panel__edit" type="button" aria-label="Edit panel">Edit</button><button class="dashboard-panel__remove" type="button" aria-label="Remove panel">×</button></div>' : '';
-      element.innerHTML = `<div class="dashboard-panel__top"><h2>${esc(panel.title)}</h2>${controls}</div>${body}`;
+      const title = `<h2>${esc(panel.title)}</h2>`;
+      if (panel.type === 'stat' && panel.detail_url) {
+        element.classList.add('dashboard-panel--linked');
+        element.innerHTML = `<div class="dashboard-panel__top">${controls}</div><a class="dashboard-panel__detail-link" href="${esc(panel.detail_url)}" aria-label="Open ${esc(panel.title)} report">${title}${body}</a>`;
+      } else {
+        element.innerHTML = `<div class="dashboard-panel__top">${title}${controls}</div>${body}`;
+      }
       element.querySelector('.dashboard-panel__edit')?.addEventListener('click', () => openBuilder(panel));
       element.querySelector('.dashboard-panel__remove')?.addEventListener('click', () => {
         state.panels = state.panels.filter(item => item.id !== panel.id);
@@ -208,6 +214,7 @@
     const func = builderForm.elements.function.value;
     dialog.querySelector('[data-panel-report]').hidden = !['stat', 'graph'].includes(type);
     dialog.querySelector('[data-panel-function]').hidden = type !== 'stat';
+    dialog.querySelector('[data-panel-detail-report]').hidden = type !== 'stat';
     dialog.querySelector('[data-panel-count-colours]').hidden = type !== 'stat' || func !== 'count';
     dialog.querySelector('[data-panel-chart]').hidden = type !== 'graph';
     dialog.querySelector('[data-panel-variable]').hidden = type !== 'variable';
@@ -216,8 +223,10 @@
 
   function openBuilder(panel = null) {
     const reports = builderForm.elements.report;
+    const detailReports = builderForm.elements.detail_report;
     const variables = builderForm.elements.variable;
     reports.innerHTML = (catalog?.reports || []).map(report => `<option value="${esc(report.slug)}">${esc(report.name)}</option>`).join('');
+    detailReports.innerHTML = '<option value="">No linked report</option>' + (catalog?.reports || []).map(report => `<option value="${esc(report.slug)}">${esc(report.name)}</option>`).join('');
     variables.innerHTML = (catalog?.variables || []).map(variable => `<option value="${esc(variable.name)}">${esc(variable.name)}</option>`).join('');
     builderForm.reset();
     editingId = panel?.id || null;
@@ -310,6 +319,7 @@
     if (type === 'variable') panel.variable = form.get('variable');
     if (type === 'stat') Object.assign(panel, {
       report: form.get('report'), function: form.get('function'),
+      detail_report: form.get('detail_report'),
       compare_value: Number(form.get('compare_value')), less_colour: form.get('less_colour'),
       equal_colour: form.get('equal_colour'), greater_colour: form.get('greater_colour')
     });
