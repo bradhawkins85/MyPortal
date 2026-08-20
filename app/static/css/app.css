@@ -7618,6 +7618,12 @@ dialog.dialog::backdrop {
   gap: 0.35rem;
 }
 
+/* Keep sidebar preferences effective for expandable items. The author-level
+ * flex display above otherwise overrides the browser's default [hidden] rule. */
+.menu__item--expandable[hidden] {
+  display: none;
+}
+
 .menu__toggle {
   display: flex;
   align-items: center;
