@@ -32,8 +32,10 @@ _RING_RADIUS = 11
 _INNER_RADIUS = 6
 
 _ICO_MAGIC = b"\x00\x00\x01\x00"
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 _default_icon_cache: Optional[bytes] = None
+_default_png_cache: Optional[bytes] = None
 
 
 def _png_chunk(tag: bytes, data: bytes) -> bytes:
@@ -114,12 +116,49 @@ def _wrap_png_in_ico(png_data: bytes) -> bytes:
     return header + entry + png_data
 
 
+def build_default_png_bytes() -> bytes:
+    """Return the default tray icon as a raw PNG (no ICO wrapper).
+
+    Suitable for macOS and other platforms that consume PNG images directly.
+    """
+    global _default_png_cache
+    if _default_png_cache is None:
+        _default_png_cache = _build_default_png()
+    return _default_png_cache
+
+
 def build_default_icon_bytes() -> bytes:
     """Return a default Windows ``.ico`` derived from the website favicon."""
     global _default_icon_cache
     if _default_icon_cache is None:
-        _default_icon_cache = _wrap_png_in_ico(_build_default_png())
+        _default_icon_cache = _wrap_png_in_ico(build_default_png_bytes())
     return _default_icon_cache
+
+
+def _extract_png_from_ico(data: bytes) -> Optional[bytes]:
+    """Try to extract the first embedded PNG image from an ICO container.
+
+    ICO files produced by this module always wrap a raw PNG payload.
+    Third-party ICO files may contain BMP data instead; in that case this
+    function returns ``None`` so callers can fall back to the default PNG.
+    """
+    if not is_valid_ico(data):
+        return None
+    try:
+        count = struct.unpack_from("<H", data, 4)[0]
+        if count < 1:
+            return None
+        # ICONDIRENTRY for image 0 starts at byte 6.
+        # Bytes 14-17: image data size (u32 LE).
+        # Bytes 18-21: image data offset (u32 LE).
+        img_size = struct.unpack_from("<I", data, 14)[0]
+        img_offset = struct.unpack_from("<I", data, 18)[0]
+        img_data = data[img_offset: img_offset + img_size]
+        if img_data[:8] == _PNG_MAGIC:
+            return img_data
+    except struct.error:
+        pass
+    return None
 
 
 def is_valid_ico(data: bytes) -> bool:
@@ -156,8 +195,41 @@ async def get_tray_icon_bytes(uploads_root: Path) -> bytes:
     return build_default_icon_bytes()
 
 
+async def get_tray_icon_png_bytes(uploads_root: Path) -> bytes:
+    """Return the active tray icon as a PNG, suitable for macOS.
+
+    Tries to use the same uploaded icon as ``get_tray_icon_bytes`` but
+    returns a raw PNG rather than an ICO container.  If the uploaded ICO
+    wraps an embedded PNG (as produced by this module) that PNG is extracted
+    and returned directly.  If the ICO contains raw BMP data — or if no
+    upload exists — the default PNG is returned so the endpoint never fails.
+    """
+    try:
+        relative_path = await site_settings_repo.get_tray_icon_path()
+    except Exception:  # pragma: no cover - defensive (e.g. table missing)
+        relative_path = None
+    if relative_path:
+        try:
+            candidate = (uploads_root / relative_path).resolve()
+            uploads_root_resolved = uploads_root.resolve()
+            if (
+                uploads_root_resolved == candidate
+                or uploads_root_resolved in candidate.parents
+            ) and candidate.is_file():
+                data = candidate.read_bytes()
+                if is_valid_ico(data):
+                    png = _extract_png_from_ico(data)
+                    if png is not None:
+                        return png
+        except OSError:
+            pass
+    return build_default_png_bytes()
+
+
 __all__ = [
     "build_default_icon_bytes",
+    "build_default_png_bytes",
     "get_tray_icon_bytes",
+    "get_tray_icon_png_bytes",
     "is_valid_ico",
 ]

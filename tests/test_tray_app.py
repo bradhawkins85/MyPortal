@@ -1216,6 +1216,54 @@ def test_tray_icon_rejects_invalid_magic_bytes():
     assert not is_valid_ico(b"\x00\x00\x02\x00" + b"\x00" * 20)
 
 
+def test_tray_icon_default_png_is_valid_png():
+    """build_default_png_bytes returns a raw PNG (no ICO wrapper)."""
+    from app.services.tray_icon import build_default_png_bytes
+
+    data = build_default_png_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_extract_png_from_ico_round_trips_default():
+    """PNG extracted from the default ICO matches the raw default PNG."""
+    from app.services.tray_icon import (
+        _extract_png_from_ico,
+        build_default_icon_bytes,
+        build_default_png_bytes,
+    )
+
+    png = _extract_png_from_ico(build_default_icon_bytes())
+    assert png is not None
+    assert png == build_default_png_bytes()
+
+
+def test_extract_png_from_ico_returns_none_for_bmp_ico():
+    """_extract_png_from_ico returns None when the ICO payload is not PNG."""
+    import struct
+
+    from app.services.tray_icon import _extract_png_from_ico
+
+    # Construct a minimal ICO containing BMP-style data (no PNG magic).
+    bmp_payload = b"\x28\x00\x00\x00" + b"\x00" * 40  # DIB header stub
+    header = b"\x00\x00\x01\x00" + struct.pack("<H", 1)
+    entry = struct.pack(
+        "<BBBBHHII",
+        32, 32, 0, 0, 1, 32,
+        len(bmp_payload),
+        len(header) + 16,
+    )
+    ico = header + entry + bmp_payload
+    assert _extract_png_from_ico(ico) is None
+
+
+def test_get_tray_icon_png_falls_back_to_default_when_no_upload(tmp_path, run):
+    """get_tray_icon_png_bytes returns the default PNG when no file is uploaded."""
+    from app.services.tray_icon import build_default_png_bytes, get_tray_icon_png_bytes
+
+    data = run(get_tray_icon_png_bytes(tmp_path))
+    assert data == build_default_png_bytes()
+
+
 def test_assets_open_chat_uses_path_room_url():
     source = Path("app/static/js/assets.js").read_text()
     assert "window.location.href = `/chat/${encodeURIComponent(data.room_id)}`;" in source
