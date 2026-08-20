@@ -1,0 +1,7 @@
+{
+  "guid": "5dcfe2e9-c959-4115-b451-6d41ea181943",
+  "occurred_at": "2026-08-20T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed macOS tray branding and restored authenticated Submit Ticket and Chat actions for interactive users.",
+  "content_hash": "b5aaa99abfa2b168b88fd2e0ecbd71bf9694d0180bdf5c150ace4333e1476d96"
+}
