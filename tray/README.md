@@ -241,6 +241,25 @@ See [docs/tray_app.md](../docs/tray_app.md) for the full architecture document.
 MYPORTAL_URL='https://portal.example.com' ENROL_TOKEN='TOKEN' bash installer/macos/install.sh
 ```
 
+### macOS — Tactical RMM
+
+Use `integrations/tacticalrmm/install-tray-macos.sh` instead of the generic
+one-liner above. Add it to TRMM as a **bash** script (run as **root**) and
+configure the required variables as protected Script Variables:
+
+| Variable | Required | Description |
+|---|---|---|
+| `MYPORTAL_URL` | ✅ | Full URL of the MyPortal server |
+| `ENROL_TOKEN` | ✅ | Per-company install token |
+| `AUTO_UPDATE` | — | `true` (default) or `false` |
+| `PORTAL_API_KEY` | — | MyPortal API key — enables immediate TRMM sync |
+| `TRMM_AGENT_ID` | — | Set to `{{agent.agent_id}}` (required with `PORTAL_API_KEY`) |
+
+When `PORTAL_API_KEY` and `TRMM_AGENT_ID` are provided the script also waits
+for initial enrolment and calls `/api/tray/trmm-sync` to link the device
+immediately. See `docs/wiki/integrations/Tactical RMM Tray Agent Sync.md` for
+the full setup guide.
+
 
 ### macOS uninstaller
 
