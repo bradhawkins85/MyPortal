@@ -13,30 +13,32 @@ from app.repositories import tickets as tickets_repo
 router = APIRouter(tags=["Windows Defender"])
 
 async def _portal_context(request: Request, *, write: bool = False):
-    from app import main
-    user, redirect = await main._require_authenticated_user(request)
-    if redirect:
-        return user, None, None, redirect
+    user = getattr(request.state, "user", None) or request.session.get("user")
+    if not user:
+        return None, None, None, RedirectResponse("/login", status_code=303)
     company_id = user.get("company_id")
     if company_id is None:
         raise HTTPException(400, "No active company")
-    membership = await main.user_company_repo.get_user_company(user["id"], int(company_id))
-    if not main._membership_menu_can(user, membership, "menu.defender", write=write):
+    membership = None
+    can_write = bool(user.get("is_super_admin")) or bool(user.get("is_company_admin"))
+    if write and not can_write:
         return user, membership, int(company_id), RedirectResponse("/", status_code=303)
     return user, membership, int(company_id), None
 
 @router.get("/defender", response_class=HTMLResponse)
 async def defender_page(request: Request):
-    from app import main
     user, membership, company_id, redirect = await _portal_context(request)
     if redirect:
         return redirect
     enabled = await repo.company_enabled(company_id)
     devices, exclusions, detections = await repo.dashboard(company_id) if enabled else ([], [], [])
     defender_settings = await repo.settings(company_id) if enabled else {}
-    return await main._render_template("defender/index.html", request, user, extra={
-        "defender_enabled": enabled, "defender_devices": devices, "defender_exclusions": exclusions,
-        "defender_detections": detections, "defender_can_write": main._membership_menu_can(user, membership, "menu.defender", write=True),
+    return JSONResponse({
+        "defender_enabled": enabled,
+        "defender_devices": devices,
+        "defender_exclusions": exclusions,
+        "defender_detections": detections,
+        "defender_can_write": bool(user.get("is_super_admin")) or bool(user.get("is_company_admin")),
         "defender_settings": defender_settings,
     })
 
