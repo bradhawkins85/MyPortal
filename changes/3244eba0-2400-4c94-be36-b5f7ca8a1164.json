@@ -1,0 +1,7 @@
+{
+  "guid": "3244eba0-2400-4c94-be36-b5f7ca8a1164",
+  "occurred_at": "2026-08-20T00:00:00Z",
+  "change_type": "Security",
+  "summary": "Sign every Windows tray release with a consistent self-signed SHA-256 code-signing certificate stored securely in GitHub Actions secrets.",
+  "content_hash": "9c2f9e0267fe9529c9f5de90f459605d9d7a81b238cc32a7e939a7449d25279a"
+}

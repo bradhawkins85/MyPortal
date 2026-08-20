@@ -26,3 +26,6 @@ app/static/tray/*.dmg
 app/static/tray/*.pkg
 tray/chat-shell/build/*.icns
 tray/chat-shell/build/*.iconset/
+tray/signing/
+*.pfx
+*.pfx.base64
