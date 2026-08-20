@@ -117,6 +117,7 @@ def validate_layout(value: Any) -> dict[str, Any]:
         else:
             panel["report"] = str(raw.get("report") or "")[:120]
             if panel_type == "stat":
+                panel["detail_report"] = str(raw.get("detail_report") or "")[:120]
                 panel["function"] = (
                     raw.get("function")
                     if raw.get("function") in {"list", "listall"}
@@ -170,6 +171,21 @@ async def resolve_layout(
                 )
                 rows, columns = result["rows"], result["columns"]
                 if panel["type"] == "stat":
+                    detail_slug = panel.get("detail_report", "")
+                    if detail_slug:
+                        detail_report = await reporting_repo.get_query_by_slug(
+                            detail_slug
+                        )
+                        detail_permitted = detail_report and (
+                            can_run_all
+                            or await reporting_repo.user_has_permission(
+                                detail_report["id"], user_id
+                            )
+                        )
+                        if detail_permitted:
+                            item["detail_url"] = (
+                                f"/reporting?report={int(detail_report['id'])}"
+                            )
                     if panel.get("function") == "count":
                         item["value"] = len(rows)
                     elif panel.get("function") == "listall":
