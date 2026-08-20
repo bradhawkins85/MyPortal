@@ -9,8 +9,16 @@ class DefenderStatusReport(BaseModel):
     tamper_protection_enabled: bool = False
     signatures_updated_at: datetime | None = None
     last_scan_at: datetime | None = None
+    scan_history: list["DefenderScanReport"] = Field(default_factory=list, max_length=20)
     health_status: Literal["healthy", "warning", "critical", "unknown"] = "unknown"
     details: dict[str, Any] = Field(default_factory=dict)
+
+class DefenderScanReport(BaseModel):
+    scan_type: Literal["quick", "full", "custom", "unknown"] = "unknown"
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    duration_seconds: int | None = Field(default=None, ge=0)
+    status: Literal["completed", "running", "cancelled", "failed", "unknown"] = "unknown"
 
 class DefenderDetectionReport(BaseModel):
     detection_uid: str = Field(min_length=1, max_length=255)

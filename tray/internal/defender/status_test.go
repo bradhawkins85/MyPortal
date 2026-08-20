@@ -8,6 +8,13 @@ func TestDecodeStatusAcceptsPowerShellUTF8BOM(t *testing.T) {
         "realtime_protection_enabled": true,
         "tamper_protection_enabled": true,
         "signatures_updated_at": "2026-08-20T01:02:03Z",
+        "scan_history": [{
+            "scan_type": "quick",
+            "started_at": "2026-08-20T01:00:00Z",
+            "completed_at": "2026-08-20T01:02:00Z",
+            "duration_seconds": 120,
+            "status": "completed"
+        }],
         "health_status": "healthy",
         "details": {"signature_version": "1.2.3"}
     }`)...)
@@ -21,6 +28,9 @@ func TestDecodeStatusAcceptsPowerShellUTF8BOM(t *testing.T) {
 	}
 	if status.SignaturesUpdatedAt == nil {
 		t.Fatal("expected signatures timestamp")
+	}
+	if len(status.ScanHistory) != 1 || status.ScanHistory[0].ScanType != "quick" {
+		t.Fatalf("unexpected scan history: %+v", status.ScanHistory)
 	}
 }
 

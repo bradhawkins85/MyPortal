@@ -1,0 +1,7 @@
+{
+  "guid": "0ff1fb05-dff6-43dc-9a5a-0eefba7050cd",
+  "occurred_at": "2026-08-20T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Windows Defender now reports recent quick and full scan history and shows the latest scan details in the endpoints table.",
+  "content_hash": "f312e4ffb412d6b8cefea30a4b9a4cd856e40939da3970a106969541f662fe4e"
+}
