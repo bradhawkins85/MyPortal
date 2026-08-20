@@ -5,7 +5,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from app.api.routes.tray import _resolve_tray_device
 from app.repositories import defender as repo
 from app.schemas.defender import (DefenderCommandResult, DefenderDetectionAction,
-    DefenderDetectionReport, DefenderExclusionCreate, DefenderSettingsUpdate, DefenderStatusReport)
+    DefenderDetectionReport, DefenderExclusionCreate, DefenderExclusionListCreate,
+    DefenderSettingsUpdate, DefenderStatusReport)
+from app.repositories import companies as companies_repo
 from app.services import tickets as tickets_service
 from app.services import audit as audit_service
 from app.repositories import tickets as tickets_repo
@@ -41,14 +43,55 @@ async def defender_page(request: Request):
     enabled = await repo.company_enabled(company_id)
     devices, exclusions, detections = await repo.dashboard(company_id) if enabled else ([], [], [])
     defender_settings = await repo.settings(company_id) if enabled else {}
-    return await _main()._render_template("defender/index.html", request, user, extra={
+    is_super_admin = bool(user.get("is_super_admin"))
+    exclusion_lists = await repo.exclusion_lists() if enabled and is_super_admin else []
+    companies = await companies_repo.list_companies() if enabled and is_super_admin else []
+    extra = {
         "defender_enabled": enabled,
         "defender_devices": devices,
         "defender_exclusions": exclusions,
         "defender_detections": detections,
         "defender_can_write": bool(user.get("is_super_admin")) or bool(user.get("is_company_admin")),
         "defender_settings": defender_settings,
-    })
+    }
+    if is_super_admin:
+        extra.update(defender_exclusion_lists=exclusion_lists, defender_companies=companies)
+    return await _main()._render_template("defender/index.html", request, user, extra=extra)
+
+def _require_super_admin(user: dict | None, redirect) -> None:
+    if redirect or not user or not user.get("is_super_admin"):
+        raise HTTPException(403, "Super administrator access required")
+
+@router.post("/api/defender/exclusion-lists")
+async def create_exclusion_list(payload: DefenderExclusionListCreate, request: Request):
+    user, _, _, redirect = await _portal_context(request)
+    _require_super_admin(user, redirect)
+    list_id = await repo.save_exclusion_list(None, payload.name.strip(), payload.exclusions, payload.company_ids, user["id"])
+    await audit_service.log_action(action="defender.exclusion_list.created", user_id=user["id"],
+        entity_type="defender_exclusion_list", entity_id=list_id, new_value=payload.model_dump(), request=request)
+    return {"id": list_id, "status": "created"}
+
+@router.put("/api/defender/exclusion-lists/{list_id}")
+async def update_exclusion_list(list_id: int, payload: DefenderExclusionListCreate, request: Request):
+    user, _, _, redirect = await _portal_context(request)
+    _require_super_admin(user, redirect)
+    if not await repo.exclusion_list_exists(list_id):
+        raise HTTPException(404, "Exclusion list not found")
+    await repo.save_exclusion_list(list_id, payload.name.strip(), payload.exclusions, payload.company_ids, user["id"])
+    await audit_service.log_action(action="defender.exclusion_list.updated", user_id=user["id"],
+        entity_type="defender_exclusion_list", entity_id=list_id, new_value=payload.model_dump(), request=request)
+    return {"id": list_id, "status": "updated"}
+
+@router.delete("/api/defender/exclusion-lists/{list_id}")
+async def remove_exclusion_list(list_id: int, request: Request):
+    user, _, _, redirect = await _portal_context(request)
+    _require_super_admin(user, redirect)
+    if not await repo.exclusion_list_exists(list_id):
+        raise HTTPException(404, "Exclusion list not found")
+    await repo.delete_exclusion_list(list_id)
+    await audit_service.log_action(action="defender.exclusion_list.deleted", user_id=user["id"],
+        entity_type="defender_exclusion_list", entity_id=list_id, request=request)
+    return {"status": "deleted"}
 
 @router.post("/api/defender/exclusions", response_class=JSONResponse)
 async def create_exclusion(payload: DefenderExclusionCreate, request: Request):
