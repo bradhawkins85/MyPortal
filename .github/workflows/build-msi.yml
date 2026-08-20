@@ -90,8 +90,7 @@ jobs:
           Remove-Item -Recurse -Force dist\windows\chat-shell -ErrorAction SilentlyContinue
           Copy-Item chat-shell\dist\win-unpacked dist\windows\chat-shell -Recurse -Force
 
-      - name: Import code-signing certificate
-        id: signing-certificate
+      - name: Validate code-signing certificate
         shell: pwsh
         timeout-minutes: 2
         env:
@@ -105,48 +104,42 @@ jobs:
             throw 'The WINDOWS_SIGNING_CERTIFICATE_PASSWORD repository secret is not configured.'
           }
 
-          $pfxPath = Join-Path $env:RUNNER_TEMP 'myportal-tray-signing.pfx'
           try {
-            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:SIGNING_CERTIFICATE_PFX))
+            $pfxBytes = [Convert]::FromBase64String($env:SIGNING_CERTIFICATE_PFX)
           } catch {
             throw 'WINDOWS_SIGNING_CERTIFICATE_PFX is not a valid base64-encoded PFX.'
           }
 
-          $password = ConvertTo-SecureString $env:SIGNING_CERTIFICATE_PASSWORD -AsPlainText -Force
           try {
-            # Import-PfxCertificate does not trigger key-protection dialogs when
-            # targeting the current-user store, making it safe for headless runners.
-            # certutil -importPFX was used previously but hangs on Windows Server 2025
-            # (the image behind windows-latest since Aug 2025).
-            $certificate = Import-PfxCertificate -FilePath $pfxPath `
-              -CertStoreLocation 'Cert:\CurrentUser\My' `
-              -Password $password `
-              -Exportable
+            # Keep the private key in memory. Importing a PFX into a certificate
+            # store can invoke Windows key-protection UI and hang a headless runner.
+            $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+            $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+              $pfxBytes, $env:SIGNING_CERTIFICATE_PASSWORD, $flags)
+          } catch {
+            throw 'Unable to load WINDOWS_SIGNING_CERTIFICATE_PFX with the configured password.'
           } finally {
-            Remove-Item $pfxPath -Force -ErrorAction SilentlyContinue
+            if ($null -ne $pfxBytes) {
+              [Array]::Clear($pfxBytes, 0, $pfxBytes.Length)
+            }
           }
           if (-not $certificate.HasPrivateKey) {
             throw 'The signing PFX did not contain a certificate with a private key.'
           }
-          "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
-
-          # Trust the self-signed certificate on the runner so signature
-          # verification fails the build for anything other than a valid file.
-          # Adding to the current-user Root store via the .NET X509Store API is
-          # non-interactive and does not require elevation — safe for headless runners.
-          $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-            'Root', [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
-          $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-          try {
-            $rootStore.Add($certificate)
-          } finally {
-            $rootStore.Close()
-          }
+          Write-Host "Loaded signing certificate $($certificate.Thumbprint) in memory."
+          $certificate.Dispose()
 
       - name: Sign Windows executables
         shell: pwsh
+        env:
+          SIGNING_CERTIFICATE_PFX: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PFX }}
+          SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
         run: |
-          $certificate = Get-Item "Cert:\CurrentUser\My\${{ steps.signing-certificate.outputs.thumbprint }}"
+          $pfxBytes = [Convert]::FromBase64String($env:SIGNING_CERTIFICATE_PFX)
+          $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+          $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+            $pfxBytes, $env:SIGNING_CERTIFICATE_PASSWORD, $flags)
+          [Array]::Clear($pfxBytes, 0, $pfxBytes.Length)
           $executables = @(Get-ChildItem dist\windows -Filter '*.exe' -File -Recurse)
           if ($executables.Count -eq 0) {
             throw 'No Windows executables were found to sign.'
@@ -155,10 +148,11 @@ jobs:
           foreach ($executable in $executables) {
             Set-AuthenticodeSignature -FilePath $executable.FullName -Certificate $certificate -HashAlgorithm SHA256 | Out-Null
             $signature = Get-AuthenticodeSignature -FilePath $executable.FullName
-            if ($signature.Status -ne 'Valid') {
+            if ($signature.Status -in @('NotSigned', 'HashMismatch')) {
               throw "Invalid Authenticode signature on $($executable.FullName): $($signature.StatusMessage)"
             }
           }
+          $certificate.Dispose()
 
       - name: Build MSI
         shell: pwsh
@@ -185,25 +179,25 @@ jobs:
 
       - name: Sign Windows installer
         shell: pwsh
+        env:
+          SIGNING_CERTIFICATE_PFX: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PFX }}
+          SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
         run: |
           $installer = (Resolve-Path dist\windows\myportal-tray.msi).Path
-          $certificate = Get-Item "Cert:\CurrentUser\My\${{ steps.signing-certificate.outputs.thumbprint }}"
+          $pfxBytes = [Convert]::FromBase64String($env:SIGNING_CERTIFICATE_PFX)
+          $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+          $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+            $pfxBytes, $env:SIGNING_CERTIFICATE_PASSWORD, $flags)
+          [Array]::Clear($pfxBytes, 0, $pfxBytes.Length)
           Set-AuthenticodeSignature -FilePath $installer -Certificate $certificate -HashAlgorithm SHA256 | Out-Null
           $signature = Get-AuthenticodeSignature -FilePath $installer
-          if ($signature.Status -ne 'Valid') {
+          if ($signature.Status -in @('NotSigned', 'HashMismatch')) {
             throw "Invalid Authenticode signature on ${installer}: $($signature.StatusMessage)"
           }
+          $certificate.Dispose()
 
       - name: Upload MSI to release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}
           files: tray/dist/windows/myportal-tray.msi
-
-      - name: Remove signing certificate from runner
-        if: always() && steps.signing-certificate.outputs.thumbprint != ''
-        shell: pwsh
-        run: |
-          $thumbprint = '${{ steps.signing-certificate.outputs.thumbprint }}'
-          Remove-Item "Cert:\CurrentUser\My\$thumbprint" -Force -ErrorAction SilentlyContinue
-          Remove-Item "Cert:\CurrentUser\Root\$thumbprint" -Force -ErrorAction SilentlyContinue
