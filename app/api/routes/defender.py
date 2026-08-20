@@ -41,7 +41,7 @@ async def defender_page(request: Request):
     enabled = await repo.company_enabled(company_id)
     devices, exclusions, detections = await repo.dashboard(company_id) if enabled else ([], [], [])
     defender_settings = await repo.settings(company_id) if enabled else {}
-    return JSONResponse({
+    return await _main()._render_template("defender/index.html", request, user, extra={
         "defender_enabled": enabled,
         "defender_devices": devices,
         "defender_exclusions": exclusions,

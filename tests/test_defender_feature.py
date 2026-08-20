@@ -59,6 +59,41 @@ def test_defender_portal_context_preserves_auth_redirect(monkeypatch):
     assert redirect is auth_redirect
 
 
+def test_defender_page_renders_html_template(monkeypatch):
+    request = Request({"type": "http", "method": "GET", "path": "/defender", "headers": []})
+    expected_user = {"company_id": 42, "is_company_admin": True}
+    rendered_response = object()
+
+    async def portal_context(_request):
+        return expected_user, None, 42, None
+
+    async def render_template(template_name, received_request, user, *, extra):
+        assert template_name == "defender/index.html"
+        assert received_request is request
+        assert user is expected_user
+        assert extra == {
+            "defender_enabled": False,
+            "defender_devices": [],
+            "defender_exclusions": [],
+            "defender_detections": [],
+            "defender_can_write": True,
+            "defender_settings": {},
+        }
+        return rendered_response
+
+    monkeypatch.setattr(defender, "_portal_context", portal_context)
+    monkeypatch.setattr(
+        defender.repo,
+        "company_enabled",
+        lambda _company_id: asyncio.sleep(0, result=False),
+    )
+    monkeypatch.setattr(defender, "_main", lambda: SimpleNamespace(_render_template=render_template))
+
+    response = asyncio.run(defender.defender_page(request))
+
+    assert response is rendered_response
+
+
 def test_defender_routes_cover_portal_tray_and_ticket_workflows():
     paths = {route.path for route in router.routes}
     assert {
