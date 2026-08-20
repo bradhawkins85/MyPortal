@@ -3,8 +3,8 @@
 package defender
 
 import (
+	"bytes"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -14,6 +14,7 @@ import (
 )
 
 const statusScript = `$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $s = Get-MpComputerStatus
 $health = if (-not $s.AntivirusEnabled -or -not $s.RealTimeProtectionEnabled) { 'critical' } elseif ($s.AntivirusSignatureAge -gt 7) { 'warning' } else { 'healthy' }
 $lastScan = @($s.QuickScanEndTime, $s.FullScanEndTime) | Where-Object { $_ } | Sort-Object -Descending | Select-Object -First 1
@@ -33,15 +34,14 @@ func collect() (api.DefenderStatus, error) {
 		return api.DefenderStatus{}, fmt.Errorf("locate PowerShell: %w", err)
 	}
 	encoded := encodePowerShell(statusScript)
-	out, err := exec.Command(powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded).CombinedOutput()
+	cmd := exec.Command(powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		return api.DefenderStatus{}, fmt.Errorf("query Microsoft Defender: %w: %s", err, strings.TrimSpace(string(out)))
+		return api.DefenderStatus{}, fmt.Errorf("query Microsoft Defender: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
-	var status api.DefenderStatus
-	if err := json.Unmarshal(out, &status); err != nil {
-		return api.DefenderStatus{}, fmt.Errorf("decode Microsoft Defender status: %w", err)
-	}
-	return status, nil
+	return decodeStatus(out)
 }
 
 func encodePowerShell(script string) string {

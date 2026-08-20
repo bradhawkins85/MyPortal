@@ -1,0 +1,7 @@
+{
+  "guid": "9e35a761-f02e-4b35-98bc-f955a83fe14b",
+  "occurred_at": "2026-08-20T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fix Windows tray agents failing to upload Defender health and signature status when PowerShell emits diagnostic or encoded output.",
+  "content_hash": "a04c1d6c419482f8c801732285bb3c9bea2f8744a14d746d7006ec8417270468"
+}
