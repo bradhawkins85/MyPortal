@@ -40,14 +40,6 @@ jobs:
             goarch: amd64
             ext: .exe
             ui_ldflags_extra: ' -H windowsgui'
-          - goos: darwin
-            goarch: amd64
-            ext: ''
-            ui_ldflags_extra: ''
-          - goos: darwin
-            goarch: arm64
-            ext: ''
-            ui_ldflags_extra: ''
     defaults:
       run:
         working-directory: tray
@@ -82,6 +74,30 @@ jobs:
         with:
           name: tray-${{ matrix.goos }}-${{ matrix.goarch }}
           path: tray/dist/${{ matrix.goos }}-${{ matrix.goarch }}/
+
+  build-macos-native:
+    name: Build native macOS menu-bar agents
+    needs: test
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: tray
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: tray/go.sum
+      - name: Build Intel and Apple Silicon binaries
+        run: make build-darwin-amd64 build-darwin-arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tray-darwin-amd64
+          path: tray/dist/darwin-amd64/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tray-darwin-arm64
+          path: tray/dist/darwin-arm64/
 
   build-chat-shell-win:
     name: Build chat shell (Windows)
@@ -174,7 +190,7 @@ jobs:
 
   build-pkg:
     name: Build macOS .pkg installer
-    needs: [build, build-chat-shell-mac]
+    needs: [build-macos-native, build-chat-shell-mac]
     runs-on: macos-latest
     defaults:
       run:

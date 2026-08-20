@@ -1,10 +1,11 @@
 ## MyPortal Tray App — Makefile
 ## Cross-compiles the service and UI agent for Windows (amd64) and macOS
-## (amd64 + arm64) from a Linux CI host.
+## (amd64 + arm64). The macOS UI must be built on macOS because its menu-bar
+## implementation uses Cocoa through CGO.
 ##
-## Prerequisites (Linux CI):
+## Prerequisites:
 ##   - Go 1.22+
-##   - For macOS builds: zig (used as cross-compiler via GOFLAGS)
+##   - For macOS builds: macOS with Xcode command-line tools (Cocoa/CGO)
 ##   - For Windows builds: MinGW-w64 (for CGO from webview_go)
 ##     OR set CGO_ENABLED=0 and build ui without webview (headless mode)
 ##   - Node.js 20+ and npm (required for chat-shell builds on native hosts)
@@ -52,24 +53,26 @@ build-windows:
 # macOS amd64 (Intel)
 # -----------------------------------------------------------------------
 build-darwin-amd64:
+	@test "$(HOST_OS)" = "Darwin" || (echo "Error: the macOS menu-bar UI must be built on macOS (host: $(HOST_OS))." >&2; exit 1)
 	@mkdir -p $(DIST)/darwin-amd64
 	@echo "Building macOS amd64 service..."
 	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 \
 	  go build -ldflags "$(LDFLAGS)" -o $(DIST)/darwin-amd64/myportal-tray-service ./service
-	@echo "Building macOS amd64 UI (no-CGO, no webview)..."
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 GOFLAGS="-tags=nowebview" \
+	@echo "Building macOS amd64 native menu-bar UI..."
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 \
 	  go build -ldflags "$(LDFLAGS)" -o $(DIST)/darwin-amd64/myportal-tray-ui ./ui
 
 # -----------------------------------------------------------------------
 # macOS arm64 (Apple Silicon)
 # -----------------------------------------------------------------------
 build-darwin-arm64:
+	@test "$(HOST_OS)" = "Darwin" || (echo "Error: the macOS menu-bar UI must be built on macOS (host: $(HOST_OS))." >&2; exit 1)
 	@mkdir -p $(DIST)/darwin-arm64
 	@echo "Building macOS arm64 service..."
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
 	  go build -ldflags "$(LDFLAGS)" -o $(DIST)/darwin-arm64/myportal-tray-service ./service
-	@echo "Building macOS arm64 UI (no-CGO, no webview)..."
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 GOFLAGS="-tags=nowebview" \
+	@echo "Building macOS arm64 native menu-bar UI..."
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 \
 	  go build -ldflags "$(LDFLAGS)" -o $(DIST)/darwin-arm64/myportal-tray-ui ./ui
 
 # -----------------------------------------------------------------------
