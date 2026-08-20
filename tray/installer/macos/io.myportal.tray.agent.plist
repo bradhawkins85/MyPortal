@@ -34,5 +34,9 @@
 
   <key>LimitLoadToSessionType</key>
   <string>Aqua</string>
+
+  <!-- This is a background menu-bar process, not a terminal application. -->
+  <key>ProcessType</key>
+  <string>Interactive</string>
 </dict>
 </plist>
