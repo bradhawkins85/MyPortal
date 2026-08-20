@@ -192,6 +192,20 @@ def test_dashboard_renders_linked_stat_as_accessible_link():
     assert 'name="detail_report"' in template
 
 
+def test_detail_report_picker_reuses_reporting_query_options_after_form_reset():
+    script = Path("app/static/js/dashboard.js").read_text()
+
+    reset = script.index("builderForm.reset();")
+    options = script.index("const reportOptions =", reset)
+    reporting_picker = script.index("reports.innerHTML = reportOptions;", options)
+    detail_picker = script.index(
+        "detailReports.innerHTML = '<option value=\"\">No linked report</option>' + reportOptions;",
+        reporting_picker,
+    )
+
+    assert reset < options < reporting_picker < detail_picker
+
+
 def test_listall_stat_preserves_and_returns_every_column(monkeypatch):
     layout = validate_layout(
         {
