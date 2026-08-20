@@ -120,7 +120,7 @@ jobs:
             # (the image behind windows-latest since Aug 2025).
             $certificate = Import-PfxCertificate -FilePath $pfxPath `
               -CertStoreLocation 'Cert:\CurrentUser\My' `
-              -Password $password `
+****** `
               -Exportable
           } finally {
             Remove-Item $pfxPath -Force -ErrorAction SilentlyContinue
