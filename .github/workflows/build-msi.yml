@@ -137,8 +137,11 @@ jobs:
           $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
             'Root', [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
           $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-          $rootStore.Add($certificate)
-          $rootStore.Close()
+          try {
+            $rootStore.Add($certificate)
+          } finally {
+            $rootStore.Close()
+          }
 
       - name: Sign Windows executables
         shell: pwsh
