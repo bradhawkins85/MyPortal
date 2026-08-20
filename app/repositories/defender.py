@@ -28,6 +28,14 @@ async def dashboard(company_id: int) -> tuple[list[dict[str, Any]], list[dict[st
         ORDER BY dd.detected_at DESC LIMIT 100""", (company_id,))
     return list(devices or []), list(exclusions or []), list(detections or [])
 
+async def active_detection_count(company_id: int) -> int:
+    """Return the number of active detections shown in the company navigation."""
+    row = await db.fetch_one(
+        "SELECT COUNT(*) AS detection_count FROM defender_detections WHERE company_id=%s AND status='active'",
+        (company_id,),
+    )
+    return int((row or {}).get("detection_count") or 0)
+
 async def settings(company_id: int) -> dict[str, Any]:
     return await db.fetch_one("""SELECT defender_scheduled_scan_type, defender_scheduled_scan_day,
       LEFT(CAST(defender_scheduled_scan_time AS CHAR), 5) AS defender_scheduled_scan_time,

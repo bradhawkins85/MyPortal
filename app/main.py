@@ -126,6 +126,7 @@ from app.repositories import forms as forms_repo
 from app.repositories import knowledge_base as knowledge_base_repo
 from app.repositories import m365 as m365_repo
 from app.repositories import notifications as notifications_repo
+from app.repositories import defender as defender_repo
 from app.repositories import reporting as reporting_repo
 from app.repositories import roles as role_repo
 from app.repositories import shop as shop_repo
@@ -2281,6 +2282,14 @@ async def _build_base_context(
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error("Failed to count unread notifications", error=str(exc))
         context["notification_unread_count"] = unread_count
+    if "defender_detection_count" not in context:
+        detection_count = 0
+        if active_company_id is not None and (is_super_admin or _menu_can(menu_access, "menu.defender")):
+            try:
+                detection_count = await defender_repo.active_detection_count(int(active_company_id))
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                log_error("Failed to count active Defender detections", error=str(exc))
+        context["defender_detection_count"] = detection_count
     return context
 
 
@@ -2324,6 +2333,7 @@ async def _build_public_context(
         "plausible_config": {"enabled": False},
         "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": Decimal("0")},
         "notification_unread_count": 0,
+        "defender_detection_count": 0,
         "enable_auto_refresh": bool(settings.enable_auto_refresh),
         "matrix_chat_enabled": settings.matrix_enabled,
         "integration_modules": {},

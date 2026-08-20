@@ -137,15 +137,25 @@ def test_defender_ui_exposes_management_workflows():
     assert 'data-defender-command="quick_scan"' in template
     assert 'data-defender-command="full_scan"' in template
     assert 'data-defender-command="signature_update"' in template
+    assert 'data-defender-modal-open": "protection-policy-modal"' in template
+    assert 'data-defender-modal-open": "ticket-actions-modal"' in template
+    assert 'data-defender-modal-open": "exclusions-modal"' in template
+    assert 'class="card defender-detections-section"' in template
     assert 'data-detection-action="quarantine"' in template
-    assert "Automatic investigation tickets" in template
+    assert "Automatic ticket creation" in template
     assert "Anti Virus is off" in template
-    assert "Real-time is off" in template
+    assert "Real-time protection is off" in template
     assert "Tamper protection is off" in template
     assert "A threat is detected" in template
     assert "data-ticket-device" not in template
     assert "stat-strip" not in template  # rendered through the shared counter macro
     assert 'counter_strip([' in template
+
+
+def test_defender_navigation_shows_active_detection_count():
+    template = Path("app/templates/base.html").read_text()
+    assert "defender_detection_count" in template
+    assert 'class="menu__badge"' in template
 
 
 def test_defender_ticket_options_default_to_disabled():
