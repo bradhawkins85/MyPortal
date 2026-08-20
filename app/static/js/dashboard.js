@@ -225,10 +225,14 @@
     const reports = builderForm.elements.report;
     const detailReports = builderForm.elements.detail_report;
     const variables = builderForm.elements.variable;
-    reports.innerHTML = (catalog?.reports || []).map(report => `<option value="${esc(report.slug)}">${esc(report.name)}</option>`).join('');
-    detailReports.innerHTML = '<option value="">No linked report</option>' + (catalog?.reports || []).map(report => `<option value="${esc(report.slug)}">${esc(report.name)}</option>`).join('');
-    variables.innerHTML = (catalog?.variables || []).map(variable => `<option value="${esc(variable.name)}">${esc(variable.name)}</option>`).join('');
     builderForm.reset();
+    // Build the report choices once so the detail-report picker always mirrors
+    // the Reporting query picker. Resetting first is important: some browsers
+    // restore a select's original markup when a dialog form is reset.
+    const reportOptions = (catalog?.reports || []).map(report => `<option value="${esc(report.slug)}">${esc(report.name)}</option>`).join('');
+    reports.innerHTML = reportOptions;
+    detailReports.innerHTML = '<option value="">No linked report</option>' + reportOptions;
+    variables.innerHTML = (catalog?.variables || []).map(variable => `<option value="${esc(variable.name)}">${esc(variable.name)}</option>`).join('');
     editingId = panel?.id || null;
     dialog.querySelector('[data-panel-dialog-title]').textContent = panel ? 'Edit panel' : 'Add a panel';
     dialog.querySelector('[data-panel-confirm]').textContent = panel ? 'Update panel' : 'Add panel';
