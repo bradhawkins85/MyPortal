@@ -37,7 +37,7 @@
         <input id="defender-device-filter" class="form-input" type="search" placeholder="Filter endpoints" data-table-filter="defender-devices-table">
       </label></div>
     <div class="table-wrapper"><table class="table" id="defender-devices-table" data-table data-table-id="defender-devices" data-table-empty-label="No endpoints match the selected filter.">
-      <thead><tr><th data-sort="string">Device</th><th data-sort="string">Agent</th><th data-sort="string">Health</th><th data-sort="string">Antivirus</th><th data-sort="string">Real-time</th><th data-sort="string">Tamper protection</th><th data-sort="date">Signatures</th><th data-sort="int">Detections</th><th>Actions</th></tr></thead>
+      <thead><tr><th data-sort="string">Device</th><th data-sort="string">Agent</th><th data-sort="string">Health</th><th data-sort="string">Antivirus</th><th data-sort="string">Real-time</th><th data-sort="string">Tamper protection</th><th data-sort="date">Signatures</th><th data-sort="date">Last scan</th><th data-sort="int">Detections</th><th>Actions</th></tr></thead>
       <tbody>{% for d in defender_devices %}<tr>
         <td data-label="Device">{{ d.hostname or ('Device #' ~ d.id) }}</td>
         <td data-label="Agent" data-value="{{ 'stale' if d.is_stale else 'online' }}"><span class="status-badge">{{ 'Stale' if d.is_stale else 'Online' }}</span></td>
@@ -46,9 +46,10 @@
         <td data-label="Real-time" data-value="{{ 'on' if d.realtime_protection_enabled else 'off' }}">{{ 'On' if d.realtime_protection_enabled else 'Off' }}</td>
         <td data-label="Tamper protection" data-value="{{ 'on' if d.tamper_protection_enabled else 'off' }}">{{ 'On' if d.tamper_protection_enabled else 'Off' }}</td>
         <td data-label="Signatures" data-value="{{ d.signatures_updated_at or '' }}">{{ d.signatures_updated_at or '—' }}</td>
+        <td data-label="Last scan" data-value="{{ (d.last_scan.completed_at if d.last_scan else d.last_scan_at) or '' }}">{% if d.last_scan %}<strong>{{ d.last_scan.scan_type|title }} · {{ d.last_scan.status|title }}</strong><br>{% if d.last_scan.completed_at %}<span data-utc="{{ d.last_scan.completed_at }}">{{ d.last_scan.completed_at }}</span>{% elif d.last_scan.started_at %}<span data-utc="{{ d.last_scan.started_at }}">{{ d.last_scan.started_at }}</span>{% endif %}{% if d.last_scan.duration_seconds is not none %}<br><small>{{ d.last_scan.duration_seconds }} seconds</small>{% endif %}{% elif d.last_scan_at %}<span data-utc="{{ d.last_scan_at }}">{{ d.last_scan_at }}</span>{% else %}—{% endif %}</td>
         <td data-label="Detections" data-value="{{ d.threat_count or 0 }}">{{ d.threat_count or 0 }}</td>
         <td data-label="Actions">{% if defender_can_write %}<button class="button button--small" data-defender-command="quick_scan" data-device-id="{{ d.id }}">Quick scan</button> <button class="button button--small" data-defender-command="full_scan" data-device-id="{{ d.id }}">Full scan</button> <button class="button button--small" data-defender-command="signature_update" data-device-id="{{ d.id }}">Update signatures</button>{% else %}—{% endif %}</td>
-      </tr>{% else %}<tr><td colspan="9">No tray endpoints have reported Defender status yet.</td></tr>{% endfor %}</tbody>
+      </tr>{% else %}<tr><td colspan="10">No tray endpoints have reported Defender status yet.</td></tr>{% endfor %}</tbody>
     </table></div>
   </section>
 

@@ -258,8 +258,18 @@ type DefenderStatus struct {
 	TamperProtectionEnabled   bool                   `json:"tamper_protection_enabled"`
 	SignaturesUpdatedAt       *time.Time             `json:"signatures_updated_at,omitempty"`
 	LastScanAt                *time.Time             `json:"last_scan_at,omitempty"`
+	ScanHistory               []DefenderScan         `json:"scan_history"`
 	HealthStatus              string                 `json:"health_status"`
 	Details                   map[string]interface{} `json:"details"`
+}
+
+// DefenderScan describes a recent scan reported by Microsoft Defender.
+type DefenderScan struct {
+	ScanType        string     `json:"scan_type"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	DurationSeconds *int64     `json:"duration_seconds,omitempty"`
+	Status          string     `json:"status"`
 }
 
 // GetDefenderPolicy checks whether Defender reporting is enabled. The server

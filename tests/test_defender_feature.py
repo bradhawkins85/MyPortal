@@ -131,6 +131,28 @@ def test_all_defender_tables_use_shared_filtering_and_sorting():
     assert "/static/js/tables.js" in template
 
 
+def test_defender_endpoint_table_displays_last_scan_details():
+    template = Path("app/templates/defender/index.html").read_text()
+    assert 'data-sort="date">Last scan</th>' in template
+    assert "d.last_scan.scan_type|title" in template
+    assert "d.last_scan.status|title" in template
+    assert "d.last_scan.duration_seconds" in template
+
+
+def test_status_report_accepts_recent_scan_history():
+    report = DefenderStatusReport(
+        scan_history=[{
+            "scan_type": "quick",
+            "started_at": "2026-08-20T01:00:00Z",
+            "completed_at": "2026-08-20T01:02:30Z",
+            "duration_seconds": 150,
+            "status": "completed",
+        }]
+    )
+    assert report.scan_history[0].scan_type == "quick"
+    assert report.scan_history[0].duration_seconds == 150
+
+
 def test_defender_ui_exposes_management_workflows():
     template = Path("app/templates/defender/index.html").read_text()
     assert "Tamper protection" in template
