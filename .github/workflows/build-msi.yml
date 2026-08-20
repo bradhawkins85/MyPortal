@@ -112,21 +112,16 @@ jobs:
             throw 'WINDOWS_SIGNING_CERTIFICATE_PFX is not a valid base64-encoded PFX.'
           }
 
+          $password = ConvertTo-SecureString $env:SIGNING_CERTIFICATE_PASSWORD -AsPlainText -Force
           try {
-            # Import-PfxCertificate can wait indefinitely for a Windows UI
-            # prompt on a headless runner. CertUtil performs the PFX import
-            # without invoking that UI. Its output is suppressed because the
-            # password is supplied as a masked command-line argument.
-            & certutil.exe -user -f -p $env:SIGNING_CERTIFICATE_PASSWORD `
-              -importPFX My $pfxPath NoRoot | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-              throw "CertUtil failed to import the signing PFX (exit code $LASTEXITCODE)."
-            }
-
-            $password = ConvertTo-SecureString $env:SIGNING_CERTIFICATE_PASSWORD -AsPlainText -Force
-            $pfxData = Get-PfxData -FilePath $pfxPath -Password $password
-            $thumbprint = $pfxData.EndEntityCertificates[0].Thumbprint
-            $certificate = Get-Item "Cert:\CurrentUser\My\$thumbprint" -ErrorAction Stop
+            # Import-PfxCertificate does not trigger key-protection dialogs when
+            # targeting the current-user store, making it safe for headless runners.
+            # certutil -importPFX was used previously but hangs on Windows Server 2025
+            # (the image behind windows-latest since Aug 2025).
+            $certificate = Import-PfxCertificate -FilePath $pfxPath `
+              -CertStoreLocation 'Cert:\CurrentUser\My' `
+              -Password $password `
+              -Exportable
           } finally {
             Remove-Item $pfxPath -Force -ErrorAction SilentlyContinue
           }
@@ -137,18 +132,15 @@ jobs:
 
           # Trust the self-signed certificate on the runner so signature
           # verification fails the build for anything other than a valid file.
-          # Import-Certificate can display an interactive root-store warning,
-          # which hangs a headless GitHub runner. CertUtil's force flag keeps
-          # this operation non-interactive.
-          $certificatePath = Join-Path $env:RUNNER_TEMP 'myportal-tray-signing.cer'
+          # Adding to the current-user Root store via the .NET X509Store API is
+          # non-interactive and does not require elevation — safe for headless runners.
+          $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+            'Root', [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
+          $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
           try {
-            Export-Certificate -Cert $certificate -FilePath $certificatePath | Out-Null
-            & certutil.exe -user -f -addstore Root $certificatePath | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-              throw "CertUtil failed to trust the signing certificate (exit code $LASTEXITCODE)."
-            }
+            $rootStore.Add($certificate)
           } finally {
-            Remove-Item $certificatePath -Force -ErrorAction SilentlyContinue
+            $rootStore.Close()
           }
 
       - name: Sign Windows executables
