@@ -47,11 +47,8 @@ fi
 
 # ── Write configuration ────────────────────────────────────────────────────────
 echo "Writing configuration to ${ENV_FILE} ..."
-cat > "${ENV_FILE}" <<EOF
-MYPORTAL_URL=${MYPORTAL_URL}
-ENROL_TOKEN=${ENROL_TOKEN}
-AUTO_UPDATE=${AUTO_UPDATE}
-EOF
+printf 'MYPORTAL_URL=%s\nENROL_TOKEN=%s\nAUTO_UPDATE=%s\n' \
+    "${MYPORTAL_URL}" "${ENROL_TOKEN}" "${AUTO_UPDATE}" > "${ENV_FILE}"
 chmod 600 "${ENV_FILE}"
 
 # ── Install package ────────────────────────────────────────────────────────────
@@ -75,12 +72,14 @@ if [[ -n "${PORTAL_API_KEY:-}" ]]; then
         TRAY_AGENT_ID=""
         while [[ $(date +%s) -lt ${DEADLINE} ]]; do
             if [[ -f "${STATE_FILE}" ]]; then
-                TRAY_AGENT_ID=$(python3 -c "
-import json, sys
+                TRAY_AGENT_ID=$(STATE_FILE="${STATE_FILE}" python3 -c "
+import json, os, sys
 try:
-    d = json.load(open('${STATE_FILE}'))
-    uid = d.get('device_uid','')
-    if uid: print(uid)
+    with open(os.environ['STATE_FILE']) as f:
+        d = json.load(f)
+    uid = d.get('device_uid', '')
+    if uid:
+        print(uid)
 except Exception:
     pass
 " 2>/dev/null || true)
@@ -93,11 +92,15 @@ except Exception:
             echo "WARNING: Tray service did not enrol within ${WAIT_SECONDS}s — skipping TRMM sync." >&2
         else
             echo "Syncing TRMM agent ${TRMM_AGENT_ID} with tray device ${TRAY_AGENT_ID} ..."
+            JSON_BODY=$(TRMM_AGENT_ID="${TRMM_AGENT_ID}" TRAY_AGENT_ID="${TRAY_AGENT_ID}" python3 -c "
+import json, os
+print(json.dumps({'agent_id': os.environ['TRMM_AGENT_ID'], 'tray_agent_id': os.environ['TRAY_AGENT_ID']}))
+")
             HTTP_STATUS=$(curl -fsSL -o /tmp/myportal-trmm-sync.json -w "%{http_code}" \
                 -X POST \
                 -H "Content-Type: application/json" \
                 -H "X-API-Key: ${PORTAL_API_KEY}" \
-                -d "{\"agent_id\":\"${TRMM_AGENT_ID}\",\"tray_agent_id\":\"${TRAY_AGENT_ID}\"}" \
+                -d "${JSON_BODY}" \
                 "${MYPORTAL_URL%/}/api/tray/trmm-sync" 2>/tmp/myportal-trmm-sync.err || echo "000")
             if [[ "${HTTP_STATUS}" == "200" ]]; then
                 ASSET_ID=$(python3 -c "
