@@ -12,10 +12,18 @@ from app.repositories import tickets as tickets_repo
 
 router = APIRouter(tags=["Windows Defender"])
 
+
+def _main():
+    """Import the main module lazily to avoid a router import cycle."""
+    from app import main as main_module
+
+    return main_module
+
+
 async def _portal_context(request: Request, *, write: bool = False):
-    user = getattr(request.state, "user", None) or request.session.get("user")
-    if not user:
-        return None, None, None, RedirectResponse("/login", status_code=303)
+    user, redirect = await _main()._require_authenticated_user(request)
+    if redirect:
+        return None, None, None, redirect
     company_id = user.get("company_id")
     if company_id is None:
         raise HTTPException(400, "No active company")

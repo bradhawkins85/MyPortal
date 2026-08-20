@@ -1,6 +1,12 @@
 """Regression coverage for the Windows Defender management surface."""
+import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
+from starlette.requests import Request
+from starlette.responses import RedirectResponse
+
+from app.api.routes import defender
 from app.api.routes.defender import router
 from app.schemas.defender import DefenderExclusionCreate
 from app.security.menu_permissions import MENU_PERMISSION_MAP
@@ -10,6 +16,47 @@ def test_defender_permission_supports_role_access_levels():
     permission = MENU_PERMISSION_MAP["menu.defender"]
     assert permission.label == "Windows Defender"
     assert permission.admin_only is False
+
+
+def test_defender_portal_context_uses_application_session_auth(monkeypatch):
+    request = Request({"type": "http", "method": "GET", "path": "/defender", "headers": []})
+    expected_user = {"company_id": 42, "is_company_admin": True}
+
+    async def require_authenticated_user(received_request):
+        assert received_request is request
+        return expected_user, None
+
+    monkeypatch.setattr(
+        defender,
+        "_main",
+        lambda: SimpleNamespace(_require_authenticated_user=require_authenticated_user),
+    )
+
+    user, membership, company_id, redirect = asyncio.run(defender._portal_context(request))
+
+    assert user is expected_user
+    assert membership is None
+    assert company_id == 42
+    assert redirect is None
+
+
+def test_defender_portal_context_preserves_auth_redirect(monkeypatch):
+    request = Request({"type": "http", "method": "GET", "path": "/defender", "headers": []})
+    auth_redirect = RedirectResponse("/login", status_code=303)
+
+    async def require_authenticated_user(_request):
+        return None, auth_redirect
+
+    monkeypatch.setattr(
+        defender,
+        "_main",
+        lambda: SimpleNamespace(_require_authenticated_user=require_authenticated_user),
+    )
+
+    user, membership, company_id, redirect = asyncio.run(defender._portal_context(request))
+
+    assert (user, membership, company_id) == (None, None, None)
+    assert redirect is auth_redirect
 
 
 def test_defender_routes_cover_portal_tray_and_ticket_workflows():
