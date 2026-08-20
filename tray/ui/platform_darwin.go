@@ -24,13 +24,14 @@ func showTextWindow(title, text string) {
 
 func openChatWindow(chatURL string, cfg *api.ConfigResponse) {
 	if chatURL == "" {
-		// Try to get an authenticated popup URL; fall back to the plain chat URL.
-		authedURL := requestChatTokenForRoom(0)
-		if authedURL != "" {
-			chatURL = authedURL
-		} else {
-			chatURL = buildChatURL(0)
-		}
+		chatURL = requestChatTokenForRoom(0)
+	}
+	if chatURL == "" {
+		showOSNotification(trayDisplayName(cfg)+" Chat", "Could not open chat. Please try again shortly.")
+		return
+	}
+	if openWithChatShell(chatURL, cfg) {
+		return
 	}
 	w := webview.New(false)
 	defer w.Destroy()
@@ -38,10 +39,6 @@ func openChatWindow(chatURL string, cfg *api.ConfigResponse) {
 	w.SetSize(900, 650, webview.HintNone)
 	w.Navigate(chatURL)
 	w.Run()
-}
-
-func openNewTicketWindow(_ *api.ConfigResponse) {
-	_ = exec.Command("open", gPortalURL+"/tickets/new").Start()
 }
 
 func showOSNotification(title, body string) {

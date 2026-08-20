@@ -1,6 +1,4 @@
-//go:build nowebview
-
-// chat_shell_nowebview.go provides cross-platform helpers for locating and
+// chat_shell.go provides cross-platform helpers for locating and
 // launching the myportal-tray-chat dedicated chat shell.  The chat shell is a
 // minimal Electron application that opens the MyPortal chat page in an
 // isolated app window, completely separate from the user's browser sessions.

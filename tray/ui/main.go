@@ -148,7 +148,7 @@ func defaultConfig() *api.ConfigResponse {
 
 func onTrayReady() {
 	trayReady.Store(true)
-	systray.SetTitle("MyPortal")
+	configureTrayIcon()
 	systray.SetTooltip(trayTooltip(gConfig))
 	// Use a simple built-in icon; real icon bytes loaded from branding URL in Phase 6.
 	buildMenu(gConfig)
@@ -258,7 +258,7 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 		item := addTrayMenuItem(parent, label, "Click to copy value")
 		go func(varName string) {
 			for range item.ClickedCh {
-				val := os.Getenv(varName)
+				val := resolveEnvVarValue(varName)
 				if val == "" {
 					val = "(not set)"
 				}
@@ -287,7 +287,7 @@ func addNode(node api.MenuNode, cfg *api.ConfigResponse, parent *systray.MenuIte
 		item := addTrayMenuItem(parent, label, "Submit a support ticket")
 		go func() {
 			for range item.ClickedCh {
-				go openNewTicketWindow(cfg)
+				go openNewTicketDialog(cfg)
 			}
 		}()
 
