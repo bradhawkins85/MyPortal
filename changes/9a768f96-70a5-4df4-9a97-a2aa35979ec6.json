@@ -1,0 +1,7 @@
+{
+  "guid": "9a768f96-70a5-4df4-9a97-a2aa35979ec6",
+  "occurred_at": "2026-08-20T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added company-level automatic Defender investigation ticket options and a colour-coded Defender stat strip.",
+  "content_hash": "defender-automatic-investigation-ticket-options"
+}

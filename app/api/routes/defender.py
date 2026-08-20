@@ -206,7 +206,33 @@ async def tray_command_result(command_id: int, payload: DefenderCommandResult, r
 @router.post("/api/tray/defender/status")
 async def tray_status(payload: DefenderStatusReport, request: Request):
     device = await _tray(request)
-    await repo.report_status(int(device["id"]), int(device["company_id"]), payload)
+    device_id = int(device["id"])
+    company_id = int(device["company_id"])
+    await repo.report_status(device_id, company_id, payload)
+    configured = await repo.settings(company_id)
+    alerts = {
+        "antivirus_off": ("defender_auto_ticket_antivirus_off", payload.antivirus_enabled, "Anti Virus is off"),
+        "realtime_off": ("defender_auto_ticket_realtime_off", payload.realtime_protection_enabled, "Real-time protection is off"),
+        "tamper_off": ("defender_auto_ticket_tamper_off", payload.tamper_protection_enabled, "Tamper protection is off"),
+    }
+    hostname = device.get("hostname") or f"Device #{device_id}"
+    for alert_type, (setting, protection_enabled, issue) in alerts.items():
+        if protection_enabled or not configured.get(setting):
+            if protection_enabled:
+                await repo.clear_alert_ticket(device_id, alert_type)
+            continue
+        if await repo.alert_ticket(device_id, alert_type):
+            continue
+        ticket = await tickets_service.create_ticket(
+            subject=f"Defender alert: {issue} on {hostname}",
+            description=(f"Windows Defender automatically reported that **{issue}** on **{hostname}**.\n\n"
+                         "This ticket was created automatically for investigation."),
+            requester_id=None, company_id=company_id, assigned_user_id=None, priority="high",
+            status="open", category="Windows Defender", module_slug=None,
+            external_reference=f"defender-alert:{device_id}:{alert_type}", send_creation_notification=False)
+        await repo.link_alert_ticket(company_id, device_id, alert_type, ticket["id"])
+        if device.get("asset_id"):
+            await tickets_repo.replace_ticket_assets(ticket["id"], [device["asset_id"]])
     return {"status": "accepted"}
 
 @router.post("/api/tray/defender/detections")
@@ -216,11 +242,15 @@ async def tray_detection(payload: DefenderDetectionReport, request: Request):
     settings = await repo.settings(int(device["company_id"]))
     threshold = settings.get("defender_auto_ticket_min_severity")
     rank = {"low": 1, "medium": 2, "high": 3, "critical": 4, "unknown": 0}
-    if detection and threshold and not detection.get("ticket_id") and rank.get(payload.severity, 0) >= rank.get(str(threshold), 99):
+    automatic = settings.get("defender_auto_ticket_threat_detected")
+    severity_matches = not threshold or rank.get(payload.severity, 0) >= rank.get(str(threshold), 99)
+    if detection and automatic and severity_matches and not detection.get("ticket_id"):
         ticket = await tickets_service.create_ticket(subject=f"Defender detection: {payload.threat_name}",
             description=f"Windows Defender automatically reported **{payload.threat_name}** ({payload.severity}) on tray device #{device['id']}.",
             requester_id=None, company_id=int(device["company_id"]), assigned_user_id=None,
             priority="high" if payload.severity in {"high", "critical"} else "normal", status="open",
             category="Windows Defender", module_slug=None, external_reference=f"defender:{detection['id']}", send_creation_notification=False)
         await repo.link_ticket(detection["id"], ticket["id"])
+        if device.get("asset_id"):
+            await tickets_repo.replace_ticket_assets(ticket["id"], [device["asset_id"]])
     return {"status": "accepted"}

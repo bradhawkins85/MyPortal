@@ -8,7 +8,7 @@ from starlette.responses import RedirectResponse
 
 from app.api.routes import defender
 from app.api.routes.defender import router
-from app.schemas.defender import DefenderExclusionCreate
+from app.schemas.defender import DefenderExclusionCreate, DefenderSettingsUpdate, DefenderStatusReport
 from app.security.menu_permissions import MENU_PERMISSION_MAP
 
 
@@ -138,4 +138,51 @@ def test_defender_ui_exposes_management_workflows():
     assert 'data-defender-command="full_scan"' in template
     assert 'data-defender-command="signature_update"' in template
     assert 'data-detection-action="quarantine"' in template
-    assert "Automatic tickets" in template
+    assert "Automatic investigation tickets" in template
+    assert "Anti Virus is off" in template
+    assert "Real-time is off" in template
+    assert "Tamper protection is off" in template
+    assert "A threat is detected" in template
+    assert "data-ticket-device" not in template
+    assert "stat-strip" not in template  # rendered through the shared counter macro
+    assert 'counter_strip([' in template
+
+
+def test_defender_ticket_options_default_to_disabled():
+    settings = DefenderSettingsUpdate()
+    assert settings.auto_ticket_antivirus_off is False
+    assert settings.auto_ticket_realtime_off is False
+    assert settings.auto_ticket_tamper_off is False
+    assert settings.auto_ticket_threat_detected is False
+
+
+def test_status_report_automatically_creates_configured_alert_ticket(monkeypatch):
+    request = Request({"type": "http", "method": "POST", "path": "/api/tray/defender/status", "headers": []})
+    created = []
+
+    async def tray(_request):
+        return {"id": 7, "company_id": 42, "hostname": "PC-07", "asset_id": 99}
+
+    async def create_ticket(**kwargs):
+        created.append(kwargs)
+        return {"id": 123}
+
+    monkeypatch.setattr(defender, "_tray", tray)
+    monkeypatch.setattr(defender.repo, "report_status", lambda *_args: asyncio.sleep(0))
+    monkeypatch.setattr(defender.repo, "settings", lambda _company_id: asyncio.sleep(0, result={"defender_auto_ticket_antivirus_off": True}))
+    monkeypatch.setattr(defender.repo, "alert_ticket", lambda *_args: asyncio.sleep(0, result=None))
+    monkeypatch.setattr(defender.repo, "link_alert_ticket", lambda *_args: asyncio.sleep(0))
+    monkeypatch.setattr(defender.repo, "clear_alert_ticket", lambda *_args: asyncio.sleep(0))
+    monkeypatch.setattr(defender.tickets_service, "create_ticket", create_ticket)
+    monkeypatch.setattr(defender.tickets_repo, "replace_ticket_assets", lambda *_args: asyncio.sleep(0))
+
+    response = asyncio.run(defender.tray_status(DefenderStatusReport(
+        antivirus_enabled=False,
+        realtime_protection_enabled=True,
+        tamper_protection_enabled=True,
+    ), request))
+
+    assert response == {"status": "accepted"}
+    assert len(created) == 1
+    assert created[0]["subject"] == "Defender alert: Anti Virus is off on PC-07"
+    assert created[0]["external_reference"] == "defender-alert:7:antivirus_off"

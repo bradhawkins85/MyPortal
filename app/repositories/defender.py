@@ -31,12 +31,19 @@ async def dashboard(company_id: int) -> tuple[list[dict[str, Any]], list[dict[st
 async def settings(company_id: int) -> dict[str, Any]:
     return await db.fetch_one("""SELECT defender_scheduled_scan_type, defender_scheduled_scan_day,
       LEFT(CAST(defender_scheduled_scan_time AS CHAR), 5) AS defender_scheduled_scan_time,
-      defender_auto_ticket_min_severity FROM companies WHERE id=%s""", (company_id,)) or {}
+      defender_auto_ticket_min_severity, defender_auto_ticket_antivirus_off,
+      defender_auto_ticket_realtime_off, defender_auto_ticket_tamper_off,
+      defender_auto_ticket_threat_detected FROM companies WHERE id=%s""", (company_id,)) or {}
 
 async def update_settings(company_id: int, payload: Any) -> None:
     await db.execute("""UPDATE companies SET defender_scheduled_scan_type=%s, defender_scheduled_scan_day=%s,
-      defender_scheduled_scan_time=%s, defender_auto_ticket_min_severity=%s WHERE id=%s""",
-      (payload.scheduled_scan_type, payload.scheduled_scan_day, payload.scheduled_scan_time, payload.auto_ticket_min_severity, company_id))
+      defender_scheduled_scan_time=%s, defender_auto_ticket_min_severity=%s,
+      defender_auto_ticket_antivirus_off=%s, defender_auto_ticket_realtime_off=%s,
+      defender_auto_ticket_tamper_off=%s, defender_auto_ticket_threat_detected=%s WHERE id=%s""",
+      (payload.scheduled_scan_type, payload.scheduled_scan_day, payload.scheduled_scan_time,
+       payload.auto_ticket_min_severity, payload.auto_ticket_antivirus_off,
+       payload.auto_ticket_realtime_off, payload.auto_ticket_tamper_off,
+       payload.auto_ticket_threat_detected, company_id))
 
 async def add_exclusion(scope: str, company_id: int, device_id: int | None, kind: str, value: str, user_id: int) -> None:
     await db.execute("INSERT INTO defender_exclusions (scope,company_id,tray_device_id,exclusion_type,value,created_by_user_id) VALUES (%s,%s,%s,%s,%s,%s)", (scope, None if scope == 'global' else company_id, device_id if scope == 'device' else None, kind, value, user_id))
@@ -55,6 +62,23 @@ async def report_status(device_id: int, company_id: int, payload: Any) -> None:
     await db.execute("""INSERT INTO defender_device_status (tray_device_id,company_id,enabled,antivirus_enabled,realtime_protection_enabled,tamper_protection_enabled,signatures_updated_at,last_scan_at,health_status,details_json)
       VALUES (%s,%s,1,%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE enabled=1,antivirus_enabled=VALUES(antivirus_enabled),realtime_protection_enabled=VALUES(realtime_protection_enabled),tamper_protection_enabled=VALUES(tamper_protection_enabled),signatures_updated_at=VALUES(signatures_updated_at),last_scan_at=VALUES(last_scan_at),health_status=VALUES(health_status),details_json=VALUES(details_json)""",
       (device_id,company_id,payload.antivirus_enabled,payload.realtime_protection_enabled,payload.tamper_protection_enabled,payload.signatures_updated_at,payload.last_scan_at,payload.health_status,json.dumps(payload.details)))
+
+async def alert_ticket(device_id: int, alert_type: str) -> dict[str, Any] | None:
+    return await db.fetch_one(
+        "SELECT ticket_id FROM defender_alert_tickets WHERE tray_device_id=%s AND alert_type=%s",
+        (device_id, alert_type),
+    )
+
+async def link_alert_ticket(company_id: int, device_id: int, alert_type: str, ticket_id: int) -> None:
+    await db.execute("""INSERT INTO defender_alert_tickets (company_id,tray_device_id,alert_type,ticket_id)
+      VALUES (%s,%s,%s,%s) ON DUPLICATE KEY UPDATE ticket_id=VALUES(ticket_id)""",
+      (company_id, device_id, alert_type, ticket_id))
+
+async def clear_alert_ticket(device_id: int, alert_type: str) -> None:
+    await db.execute(
+        "DELETE FROM defender_alert_tickets WHERE tray_device_id=%s AND alert_type=%s",
+        (device_id, alert_type),
+    )
 
 async def report_detection(device_id: int, company_id: int, payload: Any) -> dict[str, Any] | None:
     await db.execute("""INSERT INTO defender_detections (company_id,tray_device_id,detection_uid,threat_name,severity,status,detected_at,details_json)
