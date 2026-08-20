@@ -1,7 +1,7 @@
 """Validated payloads exchanged with the Windows tray agent."""
 from datetime import datetime
 from typing import Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 class DefenderStatusReport(BaseModel):
     antivirus_enabled: bool = False
@@ -25,6 +25,30 @@ class DefenderExclusionCreate(BaseModel):
     exclusion_type: Literal["path", "process", "extension"]
     value: str = Field(min_length=1, max_length=1000)
     tray_device_id: int | None = Field(default=None, ge=1)
+
+class DefenderExclusionListItem(BaseModel):
+    exclusion_type: Literal["path", "process", "extension"]
+    value: str = Field(min_length=1, max_length=1000)
+
+class DefenderExclusionListCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    exclusions: list[DefenderExclusionListItem] = Field(default_factory=list)
+    company_ids: list[int] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Name cannot be blank")
+        return value
+
+    @field_validator("company_ids")
+    @classmethod
+    def validate_company_ids(cls, value: list[int]) -> list[int]:
+        if any(company_id < 1 for company_id in value):
+            raise ValueError("Company IDs must be positive")
+        return list(dict.fromkeys(value))
 
 class DefenderSettingsUpdate(BaseModel):
     scheduled_scan_type: Literal["quick", "full"] | None = None

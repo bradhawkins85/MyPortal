@@ -5,11 +5,13 @@
 {% block header_title %}<span class="header__title-text">Windows Defender</span>{% endblock %}
 {% block header_actions %}
   {% if defender_enabled %}
-    {{ page_header_overflow("defender-page-actions", "Actions", [
+    {% set defender_actions = [
       {"label": "Protection policy", "type": "button", "attrs": {"data-defender-modal-open": "protection-policy-modal"}},
       {"label": "Ticket actions", "type": "button", "attrs": {"data-defender-modal-open": "ticket-actions-modal"}},
       {"label": "Manage exclusions", "type": "button", "attrs": {"data-defender-modal-open": "exclusions-modal"}}
-    ]) }}
+    ] %}
+    {% if is_super_admin %}{% set _ = defender_actions.append({"label": "Exclusion lists", "type": "button", "attrs": {"data-defender-modal-open": "exclusion-lists-modal"}}) %}{% endif %}
+    {{ page_header_overflow("defender-page-actions", "Actions", defender_actions) }}
   {% endif %}
 {% endblock %}
 {% block content %}
@@ -95,6 +97,33 @@
       <div class="table-wrapper"><table class="table" id="defender-exclusions-table" data-table data-table-id="defender-exclusions" data-table-empty-label="No exclusions match the selected filter."><thead><tr><th data-sort="string">Scope</th><th data-sort="string">Type</th><th data-sort="string">Value</th><th data-sort="string">Device</th><th>Actions</th></tr></thead><tbody>{% for e in defender_exclusions %}<tr><td>{{ e.scope }}</td><td>{{ e.exclusion_type }}</td><td><code>{{ e.value }}</code></td><td>{{ e.hostname or 'All' }}</td><td>{% if defender_can_write %}<button class="button button--danger button--small" data-delete-exclusion="{{ e.id }}">Remove</button>{% else %}—{% endif %}</td></tr>{% else %}<tr><td colspan="5">No exclusions configured.</td></tr>{% endfor %}</tbody></table></div></div>
     </section>
   </div>
+  {% if is_super_admin %}
+  <div class="modal" id="exclusion-lists-modal" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="exclusion-lists-title">
+    <div class="modal__backdrop" data-defender-modal-close></div><section class="modal__dialog modal__dialog--wide">
+      <header class="modal__header"><div><h2 id="exclusion-lists-title">Exclusion Lists</h2><p>Create a reusable policy once, then assign it to every company that needs it.</p></div><button class="modal__close" type="button" data-defender-modal-close aria-label="Close">&times;</button></header>
+      <div class="modal__body form-stack">
+        <form class="card form-stack" data-exclusion-list-form>
+          <h3>New exclusion list</h3>
+          <label>Name<input name="name" required maxlength="255" placeholder="Standard line-of-business apps"></label>
+          <div class="form-stack" data-exclusion-list-items><div class="form-grid" data-exclusion-list-item><label>Type<select name="exclusion_type"><option value="path">Path</option><option value="process">Process</option><option value="extension">Extension</option></select></label><label>Value<input name="value" required maxlength="1000" placeholder="C:\Trusted\"></label><button class="button button--ghost" type="button" data-remove-list-item>Remove</button></div></div>
+          <button class="button button--ghost" type="button" data-add-list-item>Add another exclusion</button>
+          <fieldset><legend>Apply to companies</legend><div class="form-grid">{% for company in defender_companies %}<label><input type="checkbox" name="company_ids" value="{{ company.id }}"> {{ company.name }}</label>{% endfor %}</div></fieldset>
+          <div><button class="button button--primary" type="submit">Create list</button></div>
+        </form>
+        {% for exclusion_list in defender_exclusion_lists %}
+        <form class="card form-stack" data-exclusion-list-form data-list-id="{{ exclusion_list.id }}">
+          <div class="section-heading"><h3>{{ exclusion_list.name }}</h3><button class="button button--danger button--small" type="button" data-delete-exclusion-list="{{ exclusion_list.id }}">Delete list</button></div>
+          <label>Name<input name="name" value="{{ exclusion_list.name }}" required maxlength="255"></label>
+          <div class="form-stack" data-exclusion-list-items>{% for item in exclusion_list.exclusions %}<div class="form-grid" data-exclusion-list-item><label>Type<select name="exclusion_type">{% for type in ['path','process','extension'] %}<option value="{{ type }}" {% if item.exclusion_type == type %}selected{% endif %}>{{ type|title }}</option>{% endfor %}</select></label><label>Value<input name="value" value="{{ item.value }}" required maxlength="1000"></label><button class="button button--ghost" type="button" data-remove-list-item>Remove</button></div>{% endfor %}</div>
+          <button class="button button--ghost" type="button" data-add-list-item>Add another exclusion</button>
+          <fieldset><legend>Apply to companies</legend><div class="form-grid">{% for company in defender_companies %}<label><input type="checkbox" name="company_ids" value="{{ company.id }}" {% if company.id in exclusion_list.company_ids %}checked{% endif %}> {{ company.name }}</label>{% endfor %}</div></fieldset>
+          <div><button class="button button--primary" type="submit">Save list</button></div>
+        </form>
+        {% else %}<p class="empty-state">No reusable exclusion lists have been created yet.</p>{% endfor %}
+      </div>
+    </section>
+  </div>
+  {% endif %}
 {% endif %}
 {% endblock %}
 {% block scripts %}

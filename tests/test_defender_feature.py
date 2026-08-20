@@ -8,7 +8,8 @@ from starlette.responses import RedirectResponse
 
 from app.api.routes import defender
 from app.api.routes.defender import router
-from app.schemas.defender import DefenderExclusionCreate, DefenderSettingsUpdate, DefenderStatusReport
+from app.schemas.defender import (DefenderExclusionCreate, DefenderExclusionListCreate,
+    DefenderSettingsUpdate, DefenderStatusReport)
 from app.security.menu_permissions import MENU_PERMISSION_MAP
 
 
@@ -140,6 +141,9 @@ def test_defender_ui_exposes_management_workflows():
     assert 'data-defender-modal-open": "protection-policy-modal"' in template
     assert 'data-defender-modal-open": "ticket-actions-modal"' in template
     assert 'data-defender-modal-open": "exclusions-modal"' in template
+    assert 'data-defender-modal-open": "exclusion-lists-modal"' in template
+    assert 'id="exclusion-lists-modal"' in template
+    assert "Apply to companies" in template
     assert 'class="card defender-detections-section"' in template
     assert 'data-detection-action="quarantine"' in template
     assert "Automatic ticket creation" in template
@@ -150,6 +154,24 @@ def test_defender_ui_exposes_management_workflows():
     assert "data-ticket-device" not in template
     assert "stat-strip" not in template  # rendered through the shared counter macro
     assert 'counter_strip([' in template
+
+
+def test_defender_exclusion_list_payload_supports_reusable_types_and_companies():
+    payload = DefenderExclusionListCreate(name="  Standard apps  ", exclusions=[
+        {"exclusion_type": "path", "value": r"C:\Trusted"},
+        {"exclusion_type": "process", "value": "agent.exe"},
+        {"exclusion_type": "extension", "value": ".cache"},
+    ], company_ids=[42, 84, 42])
+    assert payload.name == "Standard apps"
+    assert [item.exclusion_type for item in payload.exclusions] == ["path", "process", "extension"]
+    assert payload.company_ids == [42, 84]
+
+
+def test_defender_exclusion_list_routes_cover_management_workflow():
+    routes = {(route.path, tuple(route.methods or [])) for route in router.routes}
+    assert any(path == "/api/defender/exclusion-lists" and "POST" in methods for path, methods in routes)
+    assert any(path == "/api/defender/exclusion-lists/{list_id}" and "PUT" in methods for path, methods in routes)
+    assert any(path == "/api/defender/exclusion-lists/{list_id}" and "DELETE" in methods for path, methods in routes)
 
 
 def test_defender_navigation_shows_active_detection_count():

@@ -45,6 +45,33 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!confirm('Remove this Defender exclusion?')) return;
     try { await send(`/api/defender/exclusions/${button.dataset.deleteExclusion}`, { method: 'DELETE' }); location.reload(); } catch (error) { alert(error.message); }
   }));
+  const itemMarkup = '<div class="form-grid" data-exclusion-list-item><label>Type<select name="exclusion_type"><option value="path">Path</option><option value="process">Process</option><option value="extension">Extension</option></select></label><label>Value<input name="value" required maxlength="1000"></label><button class="button button--ghost" type="button" data-remove-list-item>Remove</button></div>';
+  document.querySelectorAll('[data-add-list-item]').forEach((button) => button.addEventListener('click', () => {
+    button.closest('form').querySelector('[data-exclusion-list-items]').insertAdjacentHTML('beforeend', itemMarkup);
+  }));
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-remove-list-item]');
+    if (button) button.closest('[data-exclusion-list-item]').remove();
+  });
+  document.querySelectorAll('[data-exclusion-list-form]').forEach((form) => form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const exclusions = [...form.querySelectorAll('[data-exclusion-list-item]')].map((row) => ({
+      exclusion_type: row.querySelector('[name="exclusion_type"]').value,
+      value: row.querySelector('[name="value"]').value.trim(),
+    })).filter((item) => item.value);
+    const company_ids = [...form.querySelectorAll('[name="company_ids"]:checked')].map((input) => Number(input.value));
+    const listId = form.dataset.listId;
+    try {
+      await send(listId ? `/api/defender/exclusion-lists/${listId}` : '/api/defender/exclusion-lists', {
+        method: listId ? 'PUT' : 'POST', body: JSON.stringify({ name: form.elements.name.value.trim(), exclusions, company_ids }),
+      });
+      location.reload();
+    } catch (error) { alert(error.message); }
+  }));
+  document.querySelectorAll('[data-delete-exclusion-list]').forEach((button) => button.addEventListener('click', async () => {
+    if (!confirm('Delete this exclusion list from every assigned company?')) return;
+    try { await send(`/api/defender/exclusion-lists/${button.dataset.deleteExclusionList}`, { method: 'DELETE' }); location.reload(); } catch (error) { alert(error.message); }
+  }));
   document.querySelectorAll('[data-defender-command]').forEach((button) => button.addEventListener('click', async () => {
     button.disabled = true;
     try { await send(`/api/defender/devices/${button.dataset.deviceId}/commands/${button.dataset.defenderCommand}`, { method: 'POST', body: '{}' }); button.textContent = 'Queued'; } catch (error) { alert(error.message); button.disabled = false; }

@@ -61,9 +61,47 @@ async def delete_exclusion(exclusion_id: int, company_id: int, super_admin: bool
            if super_admin else "DELETE FROM defender_exclusions WHERE id=%s AND company_id=%s")
     await db.execute(sql, (exclusion_id, company_id))
 
+async def exclusion_lists() -> list[dict[str, Any]]:
+    lists = list(await db.fetch_all("""SELECT del.*, COUNT(DISTINCT delc.company_id) AS company_count
+      FROM defender_exclusion_lists del LEFT JOIN defender_exclusion_list_companies delc ON delc.exclusion_list_id=del.id
+      GROUP BY del.id ORDER BY del.name""") or [])
+    for exclusion_list in lists:
+        list_id = exclusion_list["id"]
+        exclusion_list["exclusions"] = list(await db.fetch_all(
+            "SELECT id, exclusion_type, value FROM defender_exclusion_list_items WHERE exclusion_list_id=%s ORDER BY id", (list_id,)) or [])
+        company_rows = await db.fetch_all(
+            "SELECT c.id, c.name FROM defender_exclusion_list_companies delc JOIN companies c ON c.id=delc.company_id WHERE delc.exclusion_list_id=%s ORDER BY c.name", (list_id,))
+        exclusion_list["companies"] = list(company_rows or [])
+        exclusion_list["company_ids"] = [row["id"] for row in company_rows or []]
+    return lists
+
+async def save_exclusion_list(list_id: int | None, name: str, exclusions: list[Any], company_ids: list[int], user_id: int) -> int:
+    if list_id is None:
+        list_id = await db.execute_returning_lastrowid(
+            "INSERT INTO defender_exclusion_lists (name,created_by_user_id) VALUES (%s,%s)", (name, user_id))
+    else:
+        await db.execute("UPDATE defender_exclusion_lists SET name=%s WHERE id=%s", (name, list_id))
+        await db.execute("DELETE FROM defender_exclusion_list_items WHERE exclusion_list_id=%s", (list_id,))
+        await db.execute("DELETE FROM defender_exclusion_list_companies WHERE exclusion_list_id=%s", (list_id,))
+    for exclusion in exclusions:
+        await db.execute("INSERT INTO defender_exclusion_list_items (exclusion_list_id,exclusion_type,value) VALUES (%s,%s,%s)",
+                         (list_id, exclusion.exclusion_type, exclusion.value))
+    for company_id in dict.fromkeys(company_ids):
+        await db.execute("INSERT INTO defender_exclusion_list_companies (exclusion_list_id,company_id) VALUES (%s,%s)", (list_id, company_id))
+    return int(list_id)
+
+async def exclusion_list_exists(list_id: int) -> bool:
+    return bool(await db.fetch_one("SELECT id FROM defender_exclusion_lists WHERE id=%s", (list_id,)))
+
+async def delete_exclusion_list(list_id: int) -> None:
+    await db.execute("DELETE FROM defender_exclusion_lists WHERE id=%s", (list_id,))
+
 async def policy(device_id: int, company_id: int) -> dict[str, Any]:
     rows = await db.fetch_all("""SELECT exclusion_type, value FROM defender_exclusions
-      WHERE scope='global' OR (company_id=%s AND (scope='company' OR tray_device_id=%s)) ORDER BY id""", (company_id, device_id))
+      WHERE scope='global' OR (company_id=%s AND (scope='company' OR tray_device_id=%s))
+      UNION SELECT deli.exclusion_type, deli.value FROM defender_exclusion_list_items deli
+      JOIN defender_exclusion_list_companies delc ON delc.exclusion_list_id=deli.exclusion_list_id
+      WHERE delc.company_id=%s ORDER BY exclusion_type, value""", (company_id, device_id, company_id))
     return {"enabled": await company_enabled(company_id), "exclusions": list(rows or [])}
 
 async def report_status(device_id: int, company_id: int, payload: Any) -> None:
