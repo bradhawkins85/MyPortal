@@ -153,6 +153,47 @@ def test_status_report_accepts_recent_scan_history():
     assert report.scan_history[0].duration_seconds == 150
 
 
+def test_status_report_accepts_defender_protection_history():
+    report = DefenderStatusReport(detections=[{
+        "detection_uid": "det-123",
+        "threat_name": "Trojan:Win32/Example",
+        "severity": "high",
+        "status": "remediated",
+        "detected_at": "2026-08-20T01:02:03Z",
+        "details": {"action_success": True},
+    }])
+    assert report.detections[0].threat_name == "Trojan:Win32/Example"
+    assert report.detections[0].status == "remediated"
+
+
+def test_status_report_persists_embedded_protection_history(monkeypatch):
+    request = Request({"type": "http", "method": "POST", "path": "/api/tray/defender/status", "headers": []})
+    reported = []
+
+    async def tray(_request):
+        return {"id": 7, "company_id": 42, "hostname": "PC-07"}
+
+    async def report_detection(device_id, company_id, detection):
+        reported.append((device_id, company_id, detection.detection_uid))
+
+    monkeypatch.setattr(defender, "_tray", tray)
+    monkeypatch.setattr(defender.repo, "report_status", lambda *_args: asyncio.sleep(0))
+    monkeypatch.setattr(defender.repo, "report_detection", report_detection)
+    monkeypatch.setattr(defender.repo, "settings", lambda _company_id: asyncio.sleep(0, result={}))
+    monkeypatch.setattr(defender.repo, "clear_alert_ticket", lambda *_args: asyncio.sleep(0))
+
+    response = asyncio.run(defender.tray_status(DefenderStatusReport(detections=[{
+        "detection_uid": "det-123",
+        "threat_name": "Trojan:Win32/Example",
+        "severity": "high",
+        "status": "remediated",
+        "detected_at": "2026-08-20T01:02:03Z",
+    }]), request))
+
+    assert response == {"status": "accepted"}
+    assert reported == [(7, 42, "det-123")]
+
+
 def test_defender_ui_exposes_management_workflows():
     template = Path("app/templates/defender/index.html").read_text()
     assert "Tamper protection" in template

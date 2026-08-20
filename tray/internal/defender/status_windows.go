@@ -31,6 +31,28 @@ $scanHistory = @(
     status = if ($_.completed_at) { 'completed' } else { 'running' }
   }
 } | Sort-Object { if ($_.completed_at) { [datetime]$_.completed_at } else { [datetime]$_.started_at } } -Descending
+$threats = @{}
+Get-MpThreat | ForEach-Object { $threats[[string]$_.ThreatID] = $_ }
+$detections = @(Get-MpThreatDetection | Where-Object { $_.InitialDetectionTime -or $_.LastThreatStatusChangeTime } | ForEach-Object {
+  $detectedAt = if ($_.InitialDetectionTime) { $_.InitialDetectionTime } else { $_.LastThreatStatusChangeTime }
+  $uid = if ($_.DetectionID) { [string]$_.DetectionID } else { '{0}:{1}' -f $_.ThreatID, $detectedAt.ToUniversalTime().ToString('o') }
+  $threat = $threats[[string]$_.ThreatID]
+  $severity = switch ([int]$threat.SeverityID) { 1 { 'low' } 2 { 'medium' } 4 { 'high' } 5 { 'critical' } default { 'unknown' } }
+  $active = -not [bool]$_.ActionSuccess
+  [ordered]@{
+    detection_uid = $uid
+    threat_name = if ($threat.ThreatName) { [string]$threat.ThreatName } elseif ($_.ThreatName) { [string]$_.ThreatName } else { 'Microsoft Defender threat ' + $_.ThreatID }
+    severity = $severity
+    status = if ($active) { 'active' } else { 'remediated' }
+    detected_at = $detectedAt.ToUniversalTime().ToString('o')
+    details = [ordered]@{
+      threat_id = $_.ThreatID
+      action_success = [bool]$_.ActionSuccess
+      threat_status_id = $_.ThreatStatusID
+      resources = @($_.Resources)
+    }
+  }
+})
 [ordered]@{
   antivirus_enabled = [bool]$s.AntivirusEnabled
   realtime_protection_enabled = [bool]$s.RealTimeProtectionEnabled
@@ -40,6 +62,7 @@ $scanHistory = @(
   scan_history = @($scanHistory)
   health_status = $health
   details = [ordered]@{ engine_version = $s.AMEngineVersion; product_version = $s.AMProductVersion; signature_version = $s.AntivirusSignatureVersion; signature_age_days = $s.AntivirusSignatureAge }
+  detections = $detections
 } | ConvertTo-Json -Depth 4 -Compress`
 
 func collect() (api.DefenderStatus, error) {
