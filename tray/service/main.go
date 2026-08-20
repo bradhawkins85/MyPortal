@@ -195,6 +195,7 @@ func (d *daemon) run() {
 	go d.wsLoop()
 	go d.heartbeatLoop()
 	go d.defenderStatusLoop()
+	go d.defenderCommandLoop()
 	go d.networkScannerLoop()
 
 	<-d.stopCh
@@ -203,6 +204,49 @@ func (d *daemon) run() {
 		d.ipcSrv.Close()
 	}
 	logger.Info("MyPortal Tray Service stopped")
+}
+
+func (d *daemon) defenderCommandLoop() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		d.processDefenderCommands()
+		select {
+		case <-d.stopCh:
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (d *daemon) processDefenderCommands() {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	commands, err := d.client.GetDefenderCommands(ctx)
+	cancel()
+	if err != nil {
+		logger.Warn("Defender command poll: %v", err)
+		return
+	}
+	for _, command := range commands {
+		logger.Info("Executing Defender command %d (%s)", command.ID, command.CommandType)
+		executeErr := defender.Execute(command.CommandType, command.DetectionUID)
+		status := "completed"
+		result := map[string]interface{}{"message": "Command completed successfully"}
+		if executeErr != nil {
+			status = "failed"
+			result["message"] = executeErr.Error()
+			logger.Warn("Defender command %d failed: %v", command.ID, executeErr)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		err := d.client.ReportDefenderCommandResult(ctx, command.ID, status, result)
+		cancel()
+		if err != nil {
+			logger.Warn("Defender command %d result upload: %v", command.ID, err)
+		}
+	}
 }
 
 func (d *daemon) defenderStatusLoop() {

@@ -74,6 +74,27 @@ func newStubServer(t *testing.T) *httptest.Server {
 		w.WriteHeader(http.StatusOK)
 	})
 
+	mux.HandleFunc("/api/tray/defender/commands", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-auth-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"commands": []api.DefenderCommand{{
+			ID: 17, CommandType: "quick_scan",
+		}}})
+	})
+
+	mux.HandleFunc("/api/tray/defender/commands/17/result", func(w http.ResponseWriter, r *http.Request) {
+		var result struct {
+			Status string `json:"status"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&result); err != nil || result.Status != "completed" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
 	mux.HandleFunc("/api/tray/wan-ip", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-auth-token" {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -115,6 +136,24 @@ func TestDefenderStatusReporting(t *testing.T) {
 		Details:          map[string]interface{}{},
 	}); err != nil {
 		t.Fatalf("ReportDefenderStatus: %v", err)
+	}
+}
+
+func TestDefenderCommandDelivery(t *testing.T) {
+	srv := newStubServer(t)
+	defer srv.Close()
+
+	client := api.New(srv.URL)
+	client.SetAuth("test-device-uid", "test-auth-token")
+	commands, err := client.GetDefenderCommands(context.Background())
+	if err != nil {
+		t.Fatalf("GetDefenderCommands: %v", err)
+	}
+	if len(commands) != 1 || commands[0].ID != 17 || commands[0].CommandType != "quick_scan" {
+		t.Fatalf("unexpected commands: %#v", commands)
+	}
+	if err := client.ReportDefenderCommandResult(context.Background(), 17, "completed", map[string]interface{}{"message": "ok"}); err != nil {
+		t.Fatalf("ReportDefenderCommandResult: %v", err)
 	}
 }
 

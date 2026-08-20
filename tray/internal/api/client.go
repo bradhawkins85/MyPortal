@@ -272,6 +272,55 @@ type DefenderScan struct {
 	Status          string     `json:"status"`
 }
 
+// DefenderCommand is an action queued by an administrator for this endpoint.
+type DefenderCommand struct {
+	ID           int64  `json:"id"`
+	CommandType  string `json:"command_type"`
+	DetectionUID string `json:"detection_uid,omitempty"`
+}
+
+type defenderCommandsResponse struct {
+	Commands []DefenderCommand `json:"commands"`
+}
+
+// GetDefenderCommands claims pending actions for this endpoint.
+func (c *Client) GetDefenderCommands(ctx context.Context) ([]DefenderCommand, error) {
+	resp, err := c.get(ctx, "/api/tray/defender/commands")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("defender commands: HTTP %d", resp.StatusCode)
+	}
+	var out defenderCommandsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Commands, nil
+}
+
+// ReportDefenderCommandResult records the outcome of a claimed endpoint action.
+func (c *Client) ReportDefenderCommandResult(ctx context.Context, commandID int64, status string, result map[string]interface{}) error {
+	body, err := json.Marshal(map[string]interface{}{"status": status, "result": result})
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/api/tray/defender/commands/%d/result", commandID)
+	resp, err := c.post(ctx, path, body, true)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("defender command result: HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // GetDefenderPolicy checks whether Defender reporting is enabled. The server
 // intentionally returns 404 for devices whose company has not opted in.
 func (c *Client) GetDefenderPolicy(ctx context.Context) (*DefenderPolicy, error) {
