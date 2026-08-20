@@ -96,8 +96,24 @@ func loadState() *persistedState {
 func saveState(s persistedState) {
 	dir := stateDir()
 	_ = os.MkdirAll(dir, 0700)
+	if runtime.GOOS == "darwin" {
+		_ = os.Chmod(dir, 0755)
+	}
 	data, _ := json.Marshal(s)
-	_ = os.WriteFile(filepath.Join(dir, stateFileName), data, 0600)
+	path := filepath.Join(dir, stateFileName)
+	mode := os.FileMode(0600)
+	if runtime.GOOS == "darwin" {
+		// The LaunchDaemon runs as root while the LaunchAgent runs as the
+		// interactive user. The UI needs the device token to request the
+		// short-lived chat and ticket-form URLs. macOS has no shared private
+		// group for every possible console user, so make this device-scoped
+		// credential readable (but never writable) by those local users.
+		mode = 0644
+	}
+	_ = os.WriteFile(path, data, mode)
+	// WriteFile preserves the permissions of an existing file. Apply the mode
+	// explicitly so upgrades repair state files created by older releases.
+	_ = os.Chmod(path, mode)
 }
 
 // -----------------------------------------------------------------
