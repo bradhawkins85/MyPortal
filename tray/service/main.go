@@ -41,6 +41,7 @@ import (
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
 	"github.com/bradhawkins85/myportal-tray/internal/config"
+	"github.com/bradhawkins85/myportal-tray/internal/defender"
 	"github.com/bradhawkins85/myportal-tray/internal/ipc"
 	"github.com/bradhawkins85/myportal-tray/internal/logger"
 	"github.com/bradhawkins85/myportal-tray/internal/notify"
@@ -193,6 +194,7 @@ func (d *daemon) run() {
 	// Main WS + heartbeat loop.
 	go d.wsLoop()
 	go d.heartbeatLoop()
+	go d.defenderStatusLoop()
 	go d.networkScannerLoop()
 
 	<-d.stopCh
@@ -201,6 +203,51 @@ func (d *daemon) run() {
 		d.ipcSrv.Close()
 	}
 	logger.Info("MyPortal Tray Service stopped")
+}
+
+func (d *daemon) defenderStatusLoop() {
+	// Report immediately after service startup, then periodically. Previously
+	// the service never called the Defender endpoints, leaving every enrolled
+	// device permanently at "Awaiting report".
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		d.reportDefenderStatus()
+		select {
+		case <-d.stopCh:
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (d *daemon) reportDefenderStatus() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	policy, err := d.client.GetDefenderPolicy(ctx)
+	cancel()
+	if err != nil {
+		logger.Warn("Defender policy: %v", err)
+		return
+	}
+	if !policy.Enabled {
+		return
+	}
+	status, err := defender.Collect()
+	if err != nil {
+		logger.Warn("Defender status collection: %v", err)
+		return
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), 15*time.Second)
+	err = d.client.ReportDefenderStatus(ctx, status)
+	cancel()
+	if err != nil {
+		logger.Warn("Defender status upload: %v", err)
+		return
+	}
+	logger.Debug("Defender status reported (%s)", status.HealthStatus)
 }
 
 func (d *daemon) networkScannerLoop() {
