@@ -112,16 +112,25 @@ jobs:
             throw 'WINDOWS_SIGNING_CERTIFICATE_PFX is not a valid base64-encoded PFX.'
           }
 
-          $password = ConvertTo-SecureString $env:SIGNING_CERTIFICATE_PASSWORD -AsPlainText -Force
           try {
-            $certificate = Import-PfxCertificate `
-              -FilePath $pfxPath `
-              -Password $password `
-              -CertStoreLocation 'Cert:\CurrentUser\My' | Where-Object HasPrivateKey | Select-Object -First 1
+            # Import-PfxCertificate can wait indefinitely for a Windows UI
+            # prompt on a headless runner. CertUtil performs the PFX import
+            # without invoking that UI. Its output is suppressed because the
+            # password is supplied as a masked command-line argument.
+            & certutil.exe -user -f -p $env:SIGNING_CERTIFICATE_PASSWORD `
+              -importPFX My $pfxPath NoRoot | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              throw "CertUtil failed to import the signing PFX (exit code $LASTEXITCODE)."
+            }
+
+            $password = ConvertTo-SecureString $env:SIGNING_CERTIFICATE_PASSWORD -AsPlainText -Force
+            $pfxData = Get-PfxData -FilePath $pfxPath -Password $password
+            $thumbprint = $pfxData.EndEntityCertificates[0].Thumbprint
+            $certificate = Get-Item "Cert:\CurrentUser\My\$thumbprint" -ErrorAction Stop
           } finally {
             Remove-Item $pfxPath -Force -ErrorAction SilentlyContinue
           }
-          if ($null -eq $certificate) {
+          if (-not $certificate.HasPrivateKey) {
             throw 'The signing PFX did not contain a certificate with a private key.'
           }
           "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
