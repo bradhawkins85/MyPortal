@@ -125,6 +125,7 @@
           {% set can_access_orders = (can_access_orders | default(false)) or is_super_admin or membership.get('can_access_orders') or menu_access.get('menu.orders') in ['read', 'write'] %}
           {% set can_access_forms = (can_access_forms | default(false)) or is_super_admin or membership.get('can_access_forms') or menu_access.get('menu.forms') in ['read', 'write'] %}
           {% set can_manage_assets = (can_manage_assets | default(false)) or is_super_admin or membership.get('can_manage_assets') or menu_access.get('menu.assets') in ['read', 'write'] %}
+          {% set can_access_defender = is_super_admin or menu_access.get('menu.defender') in ['read', 'write'] %}
           {% set can_manage_licenses = (can_manage_licenses | default(false)) or is_super_admin or membership.get('can_manage_licenses') or can_access_m365_configuration or can_access_m365_licenses %}
           {% set can_manage_subscriptions = (can_manage_subscriptions | default(false)) or is_super_admin or (membership.get('can_manage_licenses') and membership.get('can_access_cart')) or menu_access.get('menu.subscriptions') in ['read', 'write'] %}
           {% set can_manage_invoices = (can_manage_invoices | default(false)) or is_super_admin or membership.get('can_manage_invoices') or menu_access.get('menu.invoices') in ['read', 'write'] %}
@@ -315,6 +316,14 @@
               <a href="/devices" {% if current_path.startswith('/devices') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zm10 0h6v6h-6zM9 14h6v6H9zM7 10v2h4v2h2v-2h4v-2h-2v-1h-2v1z"/></svg></span>
                 <span class="menu__label">Network Devices</span>
+              </a>
+            </li>
+          {% endif %}
+          {% if can_access_defender %}
+            <li class="menu__item">
+              <a href="/defender" {% if current_path.startswith('/defender') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5.1 3.4 9.9 8 11 4.6-1.1 8-5.9 8-11V5zm0 3.2 5 1.9V11c0 3.5-2.1 6.9-5 7.9z"/></svg></span>
+                <span class="menu__label">Windows Defender</span>
               </a>
             </li>
           {% endif %}
