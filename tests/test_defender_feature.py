@@ -240,3 +240,17 @@ def test_status_report_automatically_creates_configured_alert_ticket(monkeypatch
     assert len(created) == 1
     assert created[0]["subject"] == "Defender alert: Anti Virus is off on PC-07"
     assert created[0]["external_reference"] == "defender-alert:7:antivirus_off"
+
+
+def test_defender_reporting_catalog_supports_reports_and_dashboard_panels():
+    sql = Path("migrations/331_windows_defender_reporting_queries.sql").read_text()
+
+    assert "'defender-device-status'" in sql
+    assert "'defender-detections'" in sql
+    assert "'dashboard-defender-devices'" in sql
+    assert "'dashboard-defender-unhealthy-devices'" in sql
+    assert "'dashboard-defender-health-by-status'" in sql
+    assert "'dashboard-defender-active-detections-by-severity'" in sql
+    assert sql.count("{{current.company}}") == 6
+    assert sql.count(" AS X") == 2
+    assert sql.count(" AS Y") == 2
