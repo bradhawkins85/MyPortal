@@ -19,21 +19,13 @@ document.addEventListener('DOMContentLoaded', () => {
     data.scheduled_scan_day = data.scheduled_scan_type ? Number(data.scheduled_scan_day) : null;
     data.scheduled_scan_time = data.scheduled_scan_type ? data.scheduled_scan_time : null;
     data.auto_ticket_min_severity = data.auto_ticket_min_severity || null;
+    ['auto_ticket_antivirus_off', 'auto_ticket_realtime_off', 'auto_ticket_tamper_off', 'auto_ticket_threat_detected']
+      .forEach((name) => { data[name] = event.currentTarget.elements[name].checked; });
     try { await send('/api/defender/settings', { method: 'PUT', body: JSON.stringify(data) }); location.reload(); } catch (error) { alert(error.message); }
   });
   document.querySelectorAll('[data-delete-exclusion]').forEach((button) => button.addEventListener('click', async () => {
     if (!confirm('Remove this Defender exclusion?')) return;
     try { await send(`/api/defender/exclusions/${button.dataset.deleteExclusion}`, { method: 'DELETE' }); location.reload(); } catch (error) { alert(error.message); }
-  }));
-  document.querySelectorAll('[data-ticket-detection]').forEach((button) => button.addEventListener('click', async () => {
-    button.disabled = true;
-    try { const result = await send(`/api/defender/detections/${button.dataset.ticketDetection}/ticket`, { method: 'POST', body: '{}' }); location.href = result.url; } catch (error) { alert(error.message); button.disabled = false; }
-  }));
-  document.querySelectorAll('[data-ticket-device]').forEach((button) => button.addEventListener('click', async () => {
-    const issue = prompt('Describe the Defender issue for this endpoint:', 'Windows Defender requires investigation');
-    if (issue === null) return;
-    button.disabled = true;
-    try { const result = await send(`/api/defender/devices/${button.dataset.ticketDevice}/ticket`, { method: 'POST', body: JSON.stringify({ issue }) }); location.href = result.url; } catch (error) { alert(error.message); button.disabled = false; }
   }));
   document.querySelectorAll('[data-defender-command]').forEach((button) => button.addEventListener('click', async () => {
     button.disabled = true;

@@ -31,6 +31,10 @@ class DefenderSettingsUpdate(BaseModel):
     scheduled_scan_day: int | None = Field(default=None, ge=0, le=6)
     scheduled_scan_time: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     auto_ticket_min_severity: Literal["low", "medium", "high", "critical"] | None = None
+    auto_ticket_antivirus_off: bool = False
+    auto_ticket_realtime_off: bool = False
+    auto_ticket_tamper_off: bool = False
+    auto_ticket_threat_detected: bool = False
 
 class DefenderCommandResult(BaseModel):
     status: Literal["completed", "failed"]
