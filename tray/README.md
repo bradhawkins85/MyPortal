@@ -87,6 +87,48 @@ In CI these targets run as separate jobs on `windows-latest` and `macos-latest`
 runners respectively. The resulting artifacts are downloaded into `dist/` before
 the MSI / .pkg installer jobs run.
 
+The Windows MSI workflow imports the same password-protected self-signed
+code-signing certificate on every build. It signs and verifies the Go agents,
+the executables in the Electron chat-shell runtime, and the final MSI with
+SHA-256 before uploading the installer. Keeping one PFX means every release has
+the same publisher identity and certificate thumbprint until the certificate is
+deliberately rotated.
+
+#### Set up the Windows signing certificate
+
+Run the setup script once on a trusted Windows workstation with PowerShell 5.1
+or later. Do not run it for each release:
+
+```powershell
+cd tray
+.\scripts\New-WindowsSigningCertificate.ps1 -OutputDirectory .\signing
+```
+
+The script prompts for a PFX password and creates three files:
+
+- `myportal-tray-signing.pfx` — private certificate; store this securely.
+- `myportal-tray-signing.pfx.base64` — value for the GitHub Actions secret.
+- `myportal-tray-signing.cer` — public certificate for endpoint trust policy.
+
+In the GitHub repository, open **Settings → Secrets and variables → Actions**
+and create these repository secrets:
+
+| Secret | Value |
+| --- | --- |
+| `WINDOWS_SIGNING_CERTIFICATE_PFX` | Entire contents of `myportal-tray-signing.pfx.base64` |
+| `WINDOWS_SIGNING_CERTIFICATE_PASSWORD` | Password entered when generating the PFX |
+
+Delete the local base64 file after configuring GitHub. Retain an access-controlled
+backup of the PFX and its password; losing either requires certificate rotation.
+Deploy `myportal-tray-signing.cer` to **Trusted Root Certification Authorities**
+and **Trusted Publishers** on managed endpoints before installing the signed
+agent. A self-signed certificate is not trusted automatically.
+
+To rotate an expiring or compromised certificate, run the script again, replace
+both GitHub secrets together, deploy the new `.cer` to endpoints, and retain the
+old public certificate while older signed releases remain in use. Never commit
+the PFX, password, base64 file, or generated certificate to this repository.
+
 ### Build installer packages
 
 ```sh

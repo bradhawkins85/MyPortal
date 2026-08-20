@@ -90,6 +90,64 @@ jobs:
           Remove-Item -Recurse -Force dist\windows\chat-shell -ErrorAction SilentlyContinue
           Copy-Item chat-shell\dist\win-unpacked dist\windows\chat-shell -Recurse -Force
 
+      - name: Import code-signing certificate
+        id: signing-certificate
+        shell: pwsh
+        env:
+          SIGNING_CERTIFICATE_PFX: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PFX }}
+          SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SIGNING_CERTIFICATE_PFX)) {
+            throw 'The WINDOWS_SIGNING_CERTIFICATE_PFX repository secret is not configured.'
+          }
+          if ([string]::IsNullOrWhiteSpace($env:SIGNING_CERTIFICATE_PASSWORD)) {
+            throw 'The WINDOWS_SIGNING_CERTIFICATE_PASSWORD repository secret is not configured.'
+          }
+
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'myportal-tray-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:SIGNING_CERTIFICATE_PFX))
+          } catch {
+            throw 'WINDOWS_SIGNING_CERTIFICATE_PFX is not a valid base64-encoded PFX.'
+          }
+
+          $password = ConvertTo-SecureString $env:SIGNING_CERTIFICATE_PASSWORD -AsPlainText -Force
+          try {
+            $certificate = Import-PfxCertificate `
+              -FilePath $pfxPath `
+              -Password $password `
+              -CertStoreLocation 'Cert:\CurrentUser\My' | Where-Object HasPrivateKey | Select-Object -First 1
+          } finally {
+            Remove-Item $pfxPath -Force -ErrorAction SilentlyContinue
+          }
+          if ($null -eq $certificate) {
+            throw 'The signing PFX did not contain a certificate with a private key.'
+          }
+
+          # Trust the self-signed certificate on the runner so signature
+          # verification fails the build for anything other than a valid file.
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'myportal-tray-signing.cer'
+          Export-Certificate -Cert $certificate -FilePath $certificatePath | Out-Null
+          Import-Certificate -FilePath $certificatePath -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
+          "thumbprint=$($certificate.Thumbprint)" >> $env:GITHUB_OUTPUT
+
+      - name: Sign Windows executables
+        shell: pwsh
+        run: |
+          $certificate = Get-Item "Cert:\CurrentUser\My\${{ steps.signing-certificate.outputs.thumbprint }}"
+          $executables = @(Get-ChildItem dist\windows -Filter '*.exe' -File -Recurse)
+          if ($executables.Count -eq 0) {
+            throw 'No Windows executables were found to sign.'
+          }
+
+          foreach ($executable in $executables) {
+            Set-AuthenticodeSignature -FilePath $executable.FullName -Certificate $certificate -HashAlgorithm SHA256 | Out-Null
+            $signature = Get-AuthenticodeSignature -FilePath $executable.FullName
+            if ($signature.Status -ne 'Valid') {
+              throw "Invalid Authenticode signature on $($executable.FullName): $($signature.StatusMessage)"
+            }
+          }
+
       - name: Build MSI
         shell: pwsh
         run: |
@@ -113,8 +171,27 @@ jobs:
             -d "ProductVersion=$msiVersion" `
             -o dist\windows\myportal-tray.msi
 
+      - name: Sign Windows installer
+        shell: pwsh
+        run: |
+          $installer = (Resolve-Path dist\windows\myportal-tray.msi).Path
+          $certificate = Get-Item "Cert:\CurrentUser\My\${{ steps.signing-certificate.outputs.thumbprint }}"
+          Set-AuthenticodeSignature -FilePath $installer -Certificate $certificate -HashAlgorithm SHA256 | Out-Null
+          $signature = Get-AuthenticodeSignature -FilePath $installer
+          if ($signature.Status -ne 'Valid') {
+            throw "Invalid Authenticode signature on ${installer}: $($signature.StatusMessage)"
+          }
+
       - name: Upload MSI to release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.release.tag_name || inputs.tag_name || github.ref_name }}
           files: tray/dist/windows/myportal-tray.msi
+
+      - name: Remove signing certificate from runner
+        if: always() && steps.signing-certificate.outputs.thumbprint != ''
+        shell: pwsh
+        run: |
+          $thumbprint = '${{ steps.signing-certificate.outputs.thumbprint }}'
+          Remove-Item "Cert:\CurrentUser\My\$thumbprint" -Force -ErrorAction SilentlyContinue
+          Remove-Item "Cert:\CurrentUser\Root\$thumbprint" -Force -ErrorAction SilentlyContinue
