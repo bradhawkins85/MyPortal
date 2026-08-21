@@ -45,6 +45,18 @@ _add(
     ["POST"],
     response_class=HTMLResponse,
 )
+_add(
+    "/admin/companies/{company_id}/variables",
+    handlers.admin_update_company_variables,
+    ["POST"],
+    response_class=HTMLResponse,
+)
+_add(
+    "/admin/companies/{company_id}/variables/new",
+    handlers.admin_create_company_variable,
+    ["POST"],
+    response_class=HTMLResponse,
+)
 
 # --- Company staff field configuration ---------------------------------------
 _add(

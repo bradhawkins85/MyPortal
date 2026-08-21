@@ -1734,13 +1734,16 @@ async def admin_bulk_delete_tickets(request: Request):
 
 
 
-def _ticket_template_context(ticket: Mapping[str, Any]) -> dict[str, Any]:
+def _ticket_template_context(ticket: Mapping[str, Any], company_variables: Mapping[str, str] | None = None) -> dict[str, Any]:
     requester_name = str(ticket.get("requester_name") or ticket.get("requester_display_name") or "").strip()
     requester_email = str(ticket.get("requester_email") or "").strip()
     return {
         "ticket": dict(ticket),
         "requester": {"name": requester_name, "email": requester_email},
-        "company": {"name": str(ticket.get("company_name") or "").strip()},
+        "company": {
+            "name": str(ticket.get("company_name") or "").strip(),
+            "variables": dict(company_variables or {}),
+        },
     }
 
 
@@ -1835,7 +1838,13 @@ async def admin_list_ticket_canned_responses(ticket_id: int, request: Request):
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     enriched_ticket = await tickets_service._enrich_ticket_context(ticket)
-    context = _ticket_template_context(enriched_ticket)
+    from app.repositories import company_variables as company_variables_repo
+
+    company_id = enriched_ticket.get("company_id")
+    company_variables = (
+        await company_variables_repo.value_map(int(company_id)) if company_id is not None else {}
+    )
+    context = _ticket_template_context(enriched_ticket, company_variables)
     responses = []
     for response in await canned_responses_repo.list_responses():
         responses.append({

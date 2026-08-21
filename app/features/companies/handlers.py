@@ -265,6 +265,7 @@ async def _render_company_edit_page(
     show_inactive_tasks: bool = False,
 ) -> HTMLResponse:
     from app.repositories import billing_contacts as billing_contacts_repo
+    from app.repositories import company_variables as company_variables_repo
     from app.repositories import companies as company_repo
     from app.repositories import pending_staff_access as pending_staff_access_repo
     from app.repositories import company_recurring_invoice_items as recurring_items_repo
@@ -283,6 +284,8 @@ async def _render_company_edit_page(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Company not found"
         )
+
+    company_variables = await company_variables_repo.list_for_company(company_id)
 
     is_super_admin, managed_companies, _ = await _get_company_management_scope(
         request, user
@@ -904,6 +907,7 @@ async def _render_company_edit_page(
         "staff_field_config": staff_field_config,
         "staff_custom_field_definitions": staff_custom_field_definitions,
         "tray_tokens": tray_tokens,
+        "company_variables": company_variables,
     }
 
     response = await _main()._render_template(
@@ -1055,6 +1059,52 @@ async def admin_company_edit_page(
         current_user,
         company_id=company_id,
         show_inactive_tasks=show_inactive,
+    )
+
+
+async def admin_create_company_variable(company_id: int, request: Request):
+    import re
+
+    from app.repositories import company_variables as company_variables_repo
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    name = str(form.get("name") or "").strip().upper()
+    value = str(form.get("value") or "").strip()
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,99}", name):
+        return _main()._company_edit_redirect(
+            company_id=company_id,
+            error="Variable names must start with a letter and contain only letters, numbers, and underscores.",
+        )
+    try:
+        variable_id = await company_variables_repo.create_definition(name)
+    except Exception:
+        return _main()._company_edit_redirect(
+            company_id=company_id, error=f"Company variable {name} already exists."
+        )
+    await company_variables_repo.set_value(company_id, variable_id, value)
+    return _main()._company_edit_redirect(
+        company_id=company_id, success=f"Company variable {name} created."
+    )
+
+
+async def admin_update_company_variables(company_id: int, request: Request):
+    from app.repositories import company_variables as company_variables_repo
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    definitions = await company_variables_repo.list_for_company(company_id)
+    for definition in definitions:
+        variable_id = int(definition["id"])
+        await company_variables_repo.set_value(
+            company_id, variable_id, str(form.get(f"variable_{variable_id}") or "").strip()
+        )
+    return _main()._company_edit_redirect(
+        company_id=company_id, success="Company variable values updated."
     )
 
 
