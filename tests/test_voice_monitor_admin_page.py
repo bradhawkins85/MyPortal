@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from html import unescape
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -85,7 +87,7 @@ def test_admin_voice_monitor_page_is_unavailable_when_module_disabled(
         response = client.get("/admin/voice-monitor")
 
     assert response.status_code == 503
-    assert "Integration module &#39;voice-monitor&#39; is unavailable" in response.text
+    assert "Integration module 'voice-monitor' is unavailable" in unescape(response.text)
 
 
 def test_settings_keep_builtin_voice_monitor_pack_when_legacy_feature_packs_env_is_present(
