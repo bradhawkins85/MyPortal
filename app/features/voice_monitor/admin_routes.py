@@ -15,6 +15,7 @@ from app.services import audit as audit_service
 router = APIRouter(
     prefix="/admin/voice-monitor",
     tags=["Voice Monitor Admin"],
+    dependencies=[Depends(require_module_enabled("voice-monitor"))],
 )
 
 

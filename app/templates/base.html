@@ -649,14 +649,14 @@
                   <span class="menu__label">Feature Packs</span>
                 </a>
               </li>
-              <li class="menu__item">
+              {% if module_enabled.get('voice-monitor', false) %}<li class="menu__item">
                 <a href="/admin/voice-monitor" {% if current_path.startswith('/admin/voice-monitor') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M7 5a5 5 0 0 1 10 0v4a5 5 0 1 1-10 0zm2 0v4a3 3 0 1 0 6 0V5a3 3 0 1 0-6 0zm-4 4a1 1 0 0 1 1 1 6 6 0 0 0 12 0 1 1 0 1 1 2 0 8 8 0 0 1-7 7.94V21h3a1 1 0 1 1 0 2H8a1 1 0 1 1 0-2h3v-2.06A8 8 0 0 1 4 10a1 1 0 0 1 1-1z"/></svg>
                   </span>
                   <span class="menu__label">Voice Monitor</span>
                 </a>
-              </li>
+              </li>{% endif %}
               <li class="menu__item">
                 <a href="/admin/roles" {% if current_path.startswith('/admin/roles') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">

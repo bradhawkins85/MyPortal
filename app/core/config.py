@@ -38,6 +38,15 @@ _MARKETING_ELEMENT_PLACEHOLDER_SAMPLE: str = "element"
 _DEFAULT_FEATURE_PACKS: str = ",".join(discover_builtin_feature_pack_slugs())
 
 
+def _normalize_feature_packs(value: Any) -> str:
+    configured = [slug.strip() for slug in str(value or "").split(",") if slug.strip()]
+    merged: list[str] = []
+    for slug in configured + discover_builtin_feature_pack_slugs():
+        if slug not in merged:
+            merged.append(slug)
+    return ",".join(merged)
+
+
 def _is_weak_secret(value: str | None) -> tuple[bool, str]:
     """Return ``(is_weak, reason)`` for a secret value.
 
@@ -198,6 +207,11 @@ class Settings(BaseSettings):
             "environment variables."
         ),
     )
+    @field_validator("feature_packs", mode="before")
+    @classmethod
+    def ensure_builtin_feature_packs_present(cls, value: Any) -> str:
+        return _normalize_feature_packs(value)
+
     feature_pack_watch: bool = Field(
         default=False,
         validation_alias="FEATURE_PACK_WATCH",

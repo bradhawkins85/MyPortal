@@ -22,6 +22,7 @@ def test_sidebar_links_to_enabled_voice_monitor_for_authorized_users():
     assert 'data-module-slug="voice-monitor"' in template
     assert 'href="/voice-monitor"' in template
     assert "current_path.startswith('/voice-monitor')" in template
+    assert "module_enabled.get('voice-monitor', false)" in template
     assert 'href="/admin/voice-monitor"' in template
     assert "current_path.startswith('/admin/voice-monitor')" in template
 
