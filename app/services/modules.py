@@ -914,6 +914,18 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "enabled": True,
     },
     {
+        "slug": "voice-monitor",
+        "name": "Voice Monitor",
+        "description": "Place bounded health-check calls to subscribed telephone numbers.",
+        "icon": "📞",
+        "settings": {
+            "provider_type": "disabled", "endpoint": "", "credentials_encrypted": "",
+            "caller_identity": "", "per_user_hourly_limit": 3, "per_company_hourly_limit": 10,
+            "recording_retention_days": 30, "worker_concurrency": 5,
+            "worker_lease_seconds": 300, "test_calls_enabled": False,
+        },
+    },
+    {
         "slug": "m365-mail",
         "name": "Office 365 Mailbox Import",
         "description": "Import support emails from Microsoft 365 mailboxes into the ticketing queue.",
