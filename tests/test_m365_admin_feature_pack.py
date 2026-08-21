@@ -26,7 +26,7 @@ def test_m365_admin_pack_is_enabled_by_default():
     assert "m365_admin" in default_feature_packs
 
     env_example = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
-    assert "m365_admin" in env_example
+    assert "FEATURE_PACKS=" not in env_example
 
 
 def test_m365_admin_pack_loads_and_reloads_cleanly():

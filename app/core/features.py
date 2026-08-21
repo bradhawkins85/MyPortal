@@ -50,6 +50,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import importlib.metadata
+import pkgutil
 import re
 import sys
 import time
@@ -62,6 +63,18 @@ from loguru import logger
 
 
 HookCallable = Callable[[], Awaitable[None] | None]
+
+
+def discover_builtin_feature_pack_slugs() -> list[str]:
+    """Return every built-in feature-pack slug under ``app.features``."""
+
+    import app.features as builtins
+
+    return sorted(
+        module.name
+        for module in pkgutil.iter_modules(builtins.__path__)
+        if module.ispkg and not module.name.startswith("_")
+    )
 
 
 def module_name_for_slug(slug: str) -> str:

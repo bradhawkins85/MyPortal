@@ -10,6 +10,12 @@ def test_env_example_sets_auto_refresh_false() -> None:
     assert "ENABLE_AUTO_REFRESH=false" in contents
 
 
+def test_env_example_does_not_expose_feature_pack_toggle() -> None:
+    env_template = PROJECT_ROOT / ".env.example"
+    contents = env_template.read_text(encoding="utf-8")
+    assert "FEATURE_PACKS=" not in contents
+
+
 def test_restart_script_seeds_auto_refresh() -> None:
     script_path = PROJECT_ROOT / "scripts" / "restart.sh"
     contents = script_path.read_text(encoding="utf-8")
