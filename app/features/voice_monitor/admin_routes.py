@@ -54,6 +54,16 @@ class ManualCall(BaseModel):
 
 @router.get("", response_class=HTMLResponse)
 async def page(request: Request):
+    return await _render_management_page(request, subscriptions_page=False)
+
+
+@router.get("/subscriptions", response_class=HTMLResponse)
+async def subscriptions_page(request: Request):
+    """Render Voice Monitor's monitored-number subscription management page."""
+    return await _render_management_page(request, subscriptions_page=True)
+
+
+async def _render_management_page(request: Request, *, subscriptions_page: bool):
     user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
         return redirect
@@ -71,9 +81,14 @@ async def page(request: Request):
         request,
         user,
         extra={
-            "title": "Voice Monitor",
+            "title": (
+                "Manage Voice Monitor Subscriptions"
+                if subscriptions_page
+                else "Voice Monitor"
+            ),
             "companies": companies,
             "voice_monitor_subscriptions": voice_monitor_subscriptions,
+            "subscriptions_page": subscriptions_page,
         },
     )
 

@@ -2,8 +2,13 @@
 {% block content %}
 <div class="admin-page">
   <div class="admin-header">
-    <h1>Voice Monitor</h1>
-    <p class="subtitle">Provision monitored numbers and manage voice monitoring operations.</p>
+    <h1>{% if subscriptions_page %}Manage Voice Monitor Subscriptions{% else %}Voice Monitor{% endif %}</h1>
+    <p class="subtitle">Add the specific phone numbers that should be monitored and manage voice monitoring operations.</p>
+    {% if not subscriptions_page %}
+    <a class="button" href="/admin/voice-monitor/subscriptions">Manage Voice Monitor Subscriptions</a>
+    {% else %}
+    <a href="/admin/voice-monitor">Back to Voice Monitor</a>
+    {% endif %}
   </div>
 
   <section class="card" aria-labelledby="add-number-heading">
@@ -53,7 +58,9 @@
     </form>
     {% else %}
     <p>No active Voice Monitor subscriptions are available. Add a Voice Monitor subscription before provisioning a number.</p>
-    <a class="button" href="/admin/subscriptions">Manage subscriptions</a>
+    {% if not subscriptions_page %}
+    <a class="button" href="/admin/voice-monitor/subscriptions">Manage Voice Monitor Subscriptions</a>
+    {% endif %}
     {% endif %}
   </section>
 </div>
