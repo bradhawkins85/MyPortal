@@ -69,7 +69,7 @@
                         <td>{{ sub.product_name or 'N/A' }}</td>
                         <td>{{ sub.category_name or 'N/A' }}</td>
                         <td>Company #{{ sub.customer_id }}</td>
-                        <td>{{ sub.quantity }}</td>
+                        <td>{{ sub.quantity }}{% if sub.voice_monitor_contract %} monitored number{% if sub.quantity != 1 %}s{% endif %}<br><small>{{ sub.voice_monitor_contract.included_attempts }} calls/month included</small>{% endif %}</td>
                         <td>{{ sub.start_date }}</td>
                         <td>{{ sub.end_date }}</td>
                         <td>
@@ -84,6 +84,7 @@
                             {% else %}
                                 ${{ sub.unit_price }}
                             {% endif %}
+                            {% if sub.voice_monitor_contract %}<br><small>per number; overage ${{ sub.voice_monitor_contract.attempt_overage_price }}/attempt + ${{ sub.voice_monitor_contract.connected_minute_price }}/minute; transcription ${{ sub.voice_monitor_contract.transcription_surcharge }}/completed call</small>{% endif %}
                         </td>
                         <td>
                             {% if sub.auto_renew %}

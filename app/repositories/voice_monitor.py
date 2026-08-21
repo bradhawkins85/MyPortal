@@ -67,6 +67,11 @@ async def _require_owned_subscription(
 async def create_endpoint(company_id: int, values: dict[str, Any]) -> dict[str, Any]:
     """Create an endpoint owned by ``company_id``."""
     await _require_owned_subscription(company_id, values.get("subscription_id"))
+    if values.get("enabled", True):
+        if not values.get("subscription_id"):
+            raise ValueError("enabled endpoints require a Voice Monitor subscription")
+        from app.services.voice_monitor_billing import assert_endpoint_capacity
+        await assert_endpoint_capacity(values["subscription_id"], company_id=company_id)
     columns = [field for field in ENDPOINT_FIELDS if field in values]
     endpoint_id = await db.execute_returning_lastrowid(
         f"INSERT INTO voice_monitor_endpoints (company_id, {', '.join(columns)}) "
@@ -107,6 +112,14 @@ async def update_endpoint(
 ) -> dict[str, Any] | None:
     if "subscription_id" in values:
         await _require_owned_subscription(company_id, values["subscription_id"])
+    current = await get_endpoint(company_id, endpoint_id)
+    if current and values.get("enabled", current.get("enabled")):
+        subscription_id = values.get("subscription_id", current.get("subscription_id"))
+        if not subscription_id:
+            raise ValueError("enabled endpoints require a Voice Monitor subscription")
+        from app.services.voice_monitor_billing import assert_endpoint_capacity
+        await assert_endpoint_capacity(subscription_id, company_id=company_id,
+                                       enabling_endpoint_id=endpoint_id)
     columns = [field for field in ENDPOINT_FIELDS if field in values]
     if columns:
         await db.execute(
@@ -181,10 +194,15 @@ async def enqueue_due_attempts(*, limit: int = 100, now: datetime | None = None)
     """
     now = now or datetime.now(timezone.utc).replace(tzinfo=None)
     due = await db.fetch_all(
-        "SELECT id, company_id, next_run_at, interval_seconds, max_retries "
-        "FROM voice_monitor_endpoints WHERE enabled = 1 AND next_run_at IS NOT NULL "
-        "AND next_run_at <= %s ORDER BY next_run_at, id LIMIT %s",
-        (now, limit),
+        "SELECT e.id, e.company_id, e.subscription_id, e.next_run_at, e.interval_seconds, e.max_retries "
+        "FROM voice_monitor_endpoints e JOIN subscriptions s ON s.id=e.subscription_id "
+        "JOIN subscription_categories c ON c.id=s.subscription_category_id "
+        "WHERE e.enabled=1 AND e.next_run_at IS NOT NULL AND e.next_run_at <= %s "
+        "AND LOWER(c.name)='voice monitor' AND LOWER(s.status)='active' "
+        "AND %s BETWEEN s.start_date AND s.end_date "
+        "AND NOT EXISTS (SELECT 1 FROM subscription_change_requests r WHERE r.subscription_id=s.id AND r.status='pending') "
+        "ORDER BY e.next_run_at, e.id LIMIT %s",
+        (now, now.date(), limit),
     )
     enqueued = 0
     for endpoint in due:
@@ -235,8 +253,13 @@ async def claim_attempts(
     candidates = await db.fetch_all(
         "SELECT a.*, e.destination_e164, e.timeout_seconds, e.expected_behavior, "
         "e.transcription_enabled, e.retry_delay_seconds FROM voice_monitor_attempts a "
-        "LEFT JOIN voice_monitor_endpoints e ON e.id = a.endpoint_id "
+        "JOIN voice_monitor_endpoints e ON e.id = a.endpoint_id "
+        "JOIN subscriptions s ON s.id=e.subscription_id "
+        "JOIN subscription_categories c ON c.id=s.subscription_category_id "
         "WHERE a.completed_at IS NULL AND a.available_at <= %s "
+        "AND e.enabled=1 AND LOWER(c.name)='voice monitor' AND LOWER(s.status)='active' "
+        "AND CURRENT_DATE BETWEEN s.start_date AND s.end_date "
+        "AND NOT EXISTS (SELECT 1 FROM subscription_change_requests r WHERE r.subscription_id=s.id AND r.status='pending') "
         "AND a.delivery_count < a.max_deliveries AND (a.outcome_status IN ('queued','retry_wait') "
         "OR (a.outcome_status IN ('dialing','answered','interrupted') AND a.lease_until < %s)) "
         "ORDER BY a.available_at, a.company_id, a.id LIMIT %s",
@@ -441,14 +464,11 @@ async def create_manual_attempt(
     )
     if existing:
         return existing, False
-    endpoint = await db.fetch_one(
-        "SELECT e.* FROM voice_monitor_endpoints e JOIN subscriptions s ON s.id=e.subscription_id "
-        "WHERE e.id=%s AND e.company_id=%s AND e.enabled=1 AND s.customer_id=%s "
-        "AND LOWER(COALESCE(s.status,''))='active'",
-        (endpoint_id, company_id, company_id),
-    )
+    endpoint = await db.fetch_one("SELECT * FROM voice_monitor_endpoints WHERE id=%s AND company_id=%s AND enabled=1", (endpoint_id, company_id))
     if not endpoint:
         raise ValueError("number is not provisioned under an active subscription")
+    from app.services.voice_monitor_billing import get_entitlement
+    await get_entitlement(endpoint["subscription_id"], company_id=company_id)
     counts = (
         await db.fetch_one(
             "SELECT COUNT(*) AS company_count, SUM(CASE WHEN initiated_by_user_id=%s THEN 1 ELSE 0 END) AS user_count "

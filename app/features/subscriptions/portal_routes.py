@@ -20,6 +20,7 @@ from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
 from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import user_companies as user_company_repo
+from app.services.voice_monitor_billing import contract_display, is_voice_monitor_subscription
 
 
 router = APIRouter(tags=["Subscriptions"])
@@ -101,6 +102,8 @@ async def subscriptions_page(request: Request):
             formatted_sub["end_date"] = sub["end_date"].strftime("%Y-%m-%d")
 
         formatted_sub["contract_term"] = ""
+        if is_voice_monitor_subscription(formatted_sub):
+            formatted_sub["voice_monitor_contract"] = contract_display(formatted_sub)
         formatted.append(formatted_sub)
 
     is_super_admin = bool(user.get("is_super_admin"))
