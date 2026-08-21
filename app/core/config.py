@@ -206,7 +206,8 @@ class Settings(BaseSettings):
             "Comma-separated built-in feature pack slugs discovered from "
             "``app.features`` at startup.  This internal manifest is "
             "auto-populated from the repository rather than configured via "
-            "environment variables."
+            "environment variables. Legacy ``FEATURE_PACKS`` values are "
+            "merged with the built-in set and cannot disable bundled packs."
         ),
     )
 
