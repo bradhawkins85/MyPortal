@@ -11,7 +11,10 @@ async def set_company_enabled(company_id: int, enabled: bool) -> None:
     await db.execute("UPDATE companies SET defender_enabled=%s WHERE id=%s", (enabled, company_id))
 
 async def device_belongs_to_company(device_id: int, company_id: int) -> bool:
-    row = await db.fetch_one("SELECT id FROM tray_devices WHERE id=%s AND company_id=%s", (device_id, company_id))
+    row = await db.fetch_one(
+        "SELECT id FROM tray_devices WHERE id=%s AND company_id=%s AND LOWER(os)='windows'",
+        (device_id, company_id),
+    )
     return bool(row)
 
 async def dashboard(company_id: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -19,7 +22,8 @@ async def dashboard(company_id: int) -> tuple[list[dict[str, Any]], list[dict[st
         ds.realtime_protection_enabled, ds.tamper_protection_enabled, ds.signatures_updated_at, ds.last_scan_at, ds.threat_count, ds.details_json, ds.updated_at,
         CASE WHEN td.last_seen_utc IS NULL OR td.last_seen_utc < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 15 MINUTE) THEN 1 ELSE 0 END AS is_stale
         FROM tray_devices td LEFT JOIN defender_device_status ds ON ds.tray_device_id=td.id
-        WHERE td.company_id=%s AND td.status='active' ORDER BY td.hostname""", (company_id,))
+        WHERE td.company_id=%s AND td.status='active' AND LOWER(td.os)='windows'
+        ORDER BY td.hostname""", (company_id,))
     for device in devices or []:
         details = device.get("details_json")
         if isinstance(details, str):
@@ -40,7 +44,9 @@ async def dashboard(company_id: int) -> tuple[list[dict[str, Any]], list[dict[st
 async def active_detection_count(company_id: int) -> int:
     """Return the number of active detections shown in the company navigation."""
     row = await db.fetch_one(
-        "SELECT COUNT(*) AS detection_count FROM defender_detections WHERE company_id=%s AND status='active'",
+        """SELECT COUNT(*) AS detection_count FROM defender_detections dd
+        JOIN tray_devices td ON td.id=dd.tray_device_id
+        WHERE dd.company_id=%s AND dd.status='active' AND LOWER(td.os)='windows'""",
         (company_id,),
     )
     return int((row or {}).get("detection_count") or 0)
@@ -152,7 +158,8 @@ async def device(device_id: int, company_id: int) -> dict[str, Any] | None:
       ds.antivirus_enabled, ds.realtime_protection_enabled, ds.signatures_updated_at,
       ds.last_scan_at, ds.threat_count FROM tray_devices td
       LEFT JOIN defender_device_status ds ON ds.tray_device_id=td.id
-      WHERE td.id=%s AND td.company_id=%s AND td.status='active'""", (device_id, company_id))
+      WHERE td.id=%s AND td.company_id=%s AND td.status='active'
+      AND LOWER(td.os)='windows'""", (device_id, company_id))
 
 async def link_ticket(detection_id: int, ticket_id: int) -> None:
     await db.execute("UPDATE defender_detections SET ticket_id=%s WHERE id=%s", (ticket_id,detection_id))

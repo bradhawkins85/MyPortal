@@ -8,6 +8,7 @@ from starlette.responses import RedirectResponse
 
 from app.api.routes import defender
 from app.api.routes.defender import router
+from app.repositories import defender as defender_repo
 from app.schemas.defender import (DefenderExclusionCreate, DefenderExclusionListCreate,
     DefenderSettingsUpdate, DefenderStatusReport)
 from app.security.menu_permissions import MENU_PERMISSION_MAP
@@ -295,3 +296,28 @@ def test_defender_reporting_catalog_supports_reports_and_dashboard_panels():
     assert sql.count("{{current.company}}") == 6
     assert sql.count(" AS X") == 2
     assert sql.count(" AS Y") == 2
+
+
+def test_defender_device_queries_only_include_windows_agents(monkeypatch):
+    queries = []
+
+    async def fetch_all(sql, _params):
+        queries.append(sql)
+        return []
+
+    monkeypatch.setattr(defender_repo.db, "fetch_all", fetch_all)
+
+    devices, exclusions, detections = asyncio.run(defender_repo.dashboard(42))
+
+    assert (devices, exclusions, detections) == ([], [], [])
+    assert "LOWER(td.os)='windows'" in queries[0]
+
+
+def test_defender_reporting_migration_excludes_non_windows_agents():
+    sql = Path("migrations/333_defender_windows_devices_only.sql").read_text()
+
+    assert sql.count("LOWER(td.os) = ''windows''") == 4
+    assert "WHERE slug = 'defender-device-status'" in sql
+    assert "WHERE slug = 'dashboard-defender-devices'" in sql
+    assert "WHERE slug = 'dashboard-defender-unhealthy-devices'" in sql
+    assert "WHERE slug = 'dashboard-defender-health-by-status'" in sql
