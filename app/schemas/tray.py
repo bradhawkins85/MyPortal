@@ -103,7 +103,7 @@ class TrayConfigResponse(BaseModel):
     # "shell"   = require the dedicated chat shell; no browser fallback.
     chat_client_mode: Optional[str] = None
     network_scanner_enabled: bool = False
-    network_scan_interval_minutes: int = 60
+    network_scan_interval_minutes: int = 360
 
 
 class NetworkScanHost(BaseModel):

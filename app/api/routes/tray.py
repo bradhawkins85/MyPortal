@@ -349,7 +349,7 @@ async def get_device_config(
         chat_client_mode=config.get("chat_client_mode") or None,
         network_scanner_enabled=bool(device.get("network_scanner_enabled")),
         network_scan_interval_minutes=max(
-            5, int(device.get("network_scan_interval_minutes") or 60)
+            5, int(device.get("network_scan_interval_minutes") or 360)
         ),
     )
 
