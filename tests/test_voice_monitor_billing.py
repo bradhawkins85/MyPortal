@@ -104,7 +104,7 @@ def test_list_voice_monitor_products_normalises_rows():
 
 def test_provision_subscription_rejects_non_voice_monitor_product():
     with patch.object(billing.db, "fetch_one", AsyncMock(return_value=None)):
-        with pytest.raises(ValueError, match="not an active Voice Monitor subscription product"):
+        with pytest.raises(ValueError, match="product is not an active Voice Monitor subscription product"):
             asyncio.run(billing.provision_subscription(7, product_id=99, created_by=1))
 
 

@@ -85,6 +85,9 @@ async def create_endpoint(company_id: int, values: dict[str, Any]) -> dict[str, 
         values["consent_at"] = values.get("consent_at") or datetime.now(timezone.utc).replace(tzinfo=None)
     if values.get("enabled", True):
         if values.get("subscription_id"):
+            # Capacity check: only enforced when a subscription is linked.
+            # Subscription-free endpoints are permitted during initial
+            # provisioning (billing enforcement is added in a later phase).
             from app.services.voice_monitor_billing import assert_endpoint_capacity
             await assert_endpoint_capacity(values["subscription_id"], company_id=company_id)
     columns = [field for field in ENDPOINT_FIELDS if field in values]
