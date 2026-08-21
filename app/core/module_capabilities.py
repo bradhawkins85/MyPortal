@@ -58,6 +58,7 @@ MODULE_CAPABILITIES: dict[str, ModuleCapabilities] = {
     "trello": _c(pack="trello", routes=("webhooks.trello",), services=("trello.api",), ui=("trello",)),
     "solidtime": _c(pack="solidtime", commands=("solidtime_reconcile",), services=("solidtime.api",), ui=("solidtime",)),
     "matrix-chat-assign": _c(pack="matrix_chat_assign", commands=("matrix_chat_assign",), services=("matrix.assignment",), ui=("matrix.chat_assign",)),
+    "voice-monitor": _c(pack="voice_monitor", commands=("voice_monitor_dispatch",), services=("voice_monitor.provider",), ui=("voice_monitor",)),
 }
 
 
