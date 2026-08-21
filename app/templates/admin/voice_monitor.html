@@ -13,7 +13,10 @@
 
   <section class="card" aria-labelledby="add-number-heading">
     <h2 id="add-number-heading">Add monitored number</h2>
-    {% if voice_monitor_subscriptions %}
+    {% if not subscriptions_page and not voice_monitor_subscriptions %}
+    <p>No active Voice Monitor subscriptions are available. Add a Voice Monitor subscription before provisioning a number.</p>
+    <a class="button" href="/admin/voice-monitor/subscriptions">Manage Voice Monitor Subscriptions</a>
+    {% else %}
     <form id="voice-monitor-endpoint-form">
       <div class="form-grid">
         <label>Company
@@ -22,8 +25,9 @@
             {% for company in companies %}<option value="{{ company.id }}">{{ company.name }}</option>{% endfor %}
           </select>
         </label>
-        <label>Voice Monitor subscription
-          <select name="subscription_id" id="voice-monitor-subscription" required disabled>
+        {% if voice_monitor_subscriptions %}
+        <label>Voice Monitor subscription (optional)
+          <select name="subscription_id" id="voice-monitor-subscription" disabled>
             <option value="">Select a company first</option>
             {% for subscription in voice_monitor_subscriptions %}
             <option value="{{ subscription.id }}" data-company-id="{{ subscription.customer_id }}" hidden>
@@ -32,6 +36,7 @@
             {% endfor %}
           </select>
         </label>
+        {% endif %}
         <label>Phone number (E.164)
           <input type="tel" name="destination_e164" placeholder="+61412345678" pattern="\+[0-9 ]+" required>
         </label>
@@ -56,16 +61,11 @@
       <p id="voice-monitor-form-status" role="status" aria-live="polite"></p>
       <button type="submit">Add monitored number</button>
     </form>
-    {% else %}
-    <p>No active Voice Monitor subscriptions are available. Add a Voice Monitor subscription before provisioning a number.</p>
-    {% if not subscriptions_page %}
-    <a class="button" href="/admin/voice-monitor/subscriptions">Manage Voice Monitor Subscriptions</a>
-    {% endif %}
     {% endif %}
   </section>
 </div>
 
-{% if voice_monitor_subscriptions %}
+{% if subscriptions_page or voice_monitor_subscriptions %}
 <script>
 (() => {
   const form = document.getElementById('voice-monitor-endpoint-form');
@@ -73,23 +73,26 @@
   const subscription = document.getElementById('voice-monitor-subscription');
   const status = document.getElementById('voice-monitor-form-status');
 
-  company.addEventListener('change', () => {
-    let available = 0;
-    subscription.value = '';
-    for (const option of subscription.querySelectorAll('option[data-company-id]')) {
-      option.hidden = option.dataset.companyId !== company.value;
-      if (!option.hidden) available += 1;
-    }
-    subscription.disabled = !company.value || available === 0;
-    subscription.options[0].textContent = available ? 'Select a subscription' : 'No active subscription for this company';
-  });
+  if (company && subscription) {
+    company.addEventListener('change', () => {
+      let available = 0;
+      subscription.value = '';
+      for (const option of subscription.querySelectorAll('option[data-company-id]')) {
+        option.hidden = option.dataset.companyId !== company.value;
+        if (!option.hidden) available += 1;
+      }
+      subscription.disabled = !company.value || available === 0;
+      subscription.options[0].textContent = available ? 'Select a subscription (optional)' : 'No active subscription for this company';
+    });
+  }
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const data = new FormData(form);
     const companyId = data.get('company_id');
+    const subscriptionId = subscription ? (data.get('subscription_id') || null) : null;
     const payload = {
-      subscription_id: data.get('subscription_id'), destination_e164: data.get('destination_e164'),
+      subscription_id: subscriptionId, destination_e164: data.get('destination_e164'),
       display_label: data.get('display_label'), interval_seconds: Number(data.get('interval_seconds')),
       timezone: data.get('timezone'), consent_granted: data.has('consent_granted'),
       ticket_on_failure: data.has('ticket_on_failure'), transcription_enabled: data.has('transcription_enabled')
@@ -103,7 +106,8 @@
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail || 'Unable to add the monitored number.');
       status.textContent = `Added ${result.display_label}.`;
-      form.reset(); subscription.disabled = true;
+      form.reset();
+      if (subscription) subscription.disabled = true;
     } catch (error) { status.textContent = error.message; }
   });
 })();

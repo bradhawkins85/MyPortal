@@ -84,10 +84,9 @@ async def create_endpoint(company_id: int, values: dict[str, Any]) -> dict[str, 
     if values.get("consent_granted"):
         values["consent_at"] = values.get("consent_at") or datetime.now(timezone.utc).replace(tzinfo=None)
     if values.get("enabled", True):
-        if not values.get("subscription_id"):
-            raise ValueError("enabled endpoints require a Voice Monitor subscription")
-        from app.services.voice_monitor_billing import assert_endpoint_capacity
-        await assert_endpoint_capacity(values["subscription_id"], company_id=company_id)
+        if values.get("subscription_id"):
+            from app.services.voice_monitor_billing import assert_endpoint_capacity
+            await assert_endpoint_capacity(values["subscription_id"], company_id=company_id)
     columns = [field for field in ENDPOINT_FIELDS if field in values]
     endpoint_id = await db.execute_returning_lastrowid(
         f"INSERT INTO voice_monitor_endpoints (company_id, {', '.join(columns)}) "
@@ -139,11 +138,10 @@ async def update_endpoint(
         values["enabled"] = False
     if current and values.get("enabled", current.get("enabled")):
         subscription_id = values.get("subscription_id", current.get("subscription_id"))
-        if not subscription_id:
-            raise ValueError("enabled endpoints require a Voice Monitor subscription")
-        from app.services.voice_monitor_billing import assert_endpoint_capacity
-        await assert_endpoint_capacity(subscription_id, company_id=company_id,
-                                       enabling_endpoint_id=endpoint_id)
+        if subscription_id:
+            from app.services.voice_monitor_billing import assert_endpoint_capacity
+            await assert_endpoint_capacity(subscription_id, company_id=company_id,
+                                           enabling_endpoint_id=endpoint_id)
     columns = [field for field in ENDPOINT_FIELDS if field in values]
     if columns:
         await db.execute(

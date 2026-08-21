@@ -124,6 +124,37 @@ def test_voice_monitor_subscriptions_page_manages_monitored_numbers(
     assert "/admin/voice-monitor/endpoints?company_id=" in response.text
 
 
+def test_voice_monitor_subscriptions_page_shows_form_without_subscriptions(
+    monkeypatch, module_enabled_context
+):
+    """The subscriptions page must show the add-number form even with no subscriptions."""
+    async def fake_require_super_admin_page(request):
+        return {"id": 1, "email": "admin@example.com", "is_super_admin": True}, None
+
+    monkeypatch.setattr(
+        main_module, "_require_super_admin_page", fake_require_super_admin_page
+    )
+    monkeypatch.setattr(
+        admin_routes.company_repo,
+        "list_companies",
+        AsyncMock(return_value=[{"id": 7, "name": "Example Co"}]),
+    )
+    monkeypatch.setattr(
+        admin_routes.subscriptions_repo,
+        "list_subscriptions",
+        AsyncMock(return_value=[]),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/admin/voice-monitor/subscriptions")
+
+    assert response.status_code == 200
+    assert "Manage Voice Monitor Subscriptions" in response.text
+    assert "Add monitored number" in response.text
+    assert "Phone number (E.164)" in response.text
+    assert "/admin/voice-monitor/endpoints?company_id=" in response.text
+
+
 def test_admin_voice_monitor_page_is_unavailable_when_module_disabled(
     super_admin_context, module_disabled_context
 ):
