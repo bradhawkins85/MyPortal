@@ -79,3 +79,56 @@ def test_usage_invoice_lines_are_ready_for_existing_invoice_export():
         {"description": "Voice Monitor connected minutes", "quantity": 8, "unit_price": Decimal("0.02"), "amount": Decimal("0.16")},
         {"description": "Voice Monitor transcription surcharge", "quantity": 2, "unit_price": Decimal("0.10"), "amount": Decimal("0.20")},
     ]
+
+
+def test_list_voice_monitor_products_queries_by_category_name():
+    with patch.object(billing.db, "fetch_all", AsyncMock(return_value=[])) as fetch:
+        asyncio.run(billing.list_voice_monitor_products())
+    query, params = fetch.call_args.args
+    assert "subscription_categories" in query
+    assert billing.VOICE_MONITOR_CATEGORY in params
+
+
+def test_list_voice_monitor_products_normalises_rows():
+    rows = [
+        {"id": 10, "name": "Every 5 min", "price": "9.95", "term_days": 365, "description": None},
+        {"id": 11, "name": "Every hour", "price": "4.95", "term_days": 365, "description": "Hourly"},
+    ]
+    with patch.object(billing.db, "fetch_all", AsyncMock(return_value=rows)):
+        products = asyncio.run(billing.list_voice_monitor_products())
+    assert len(products) == 2
+    assert products[0]["id"] == 10
+    assert products[0]["price"] == Decimal("9.95")
+    assert products[0]["term_days"] == 365
+
+
+def test_provision_subscription_rejects_non_voice_monitor_product():
+    with patch.object(billing.db, "fetch_one", AsyncMock(return_value=None)):
+        with pytest.raises(ValueError, match="product is not an active Voice Monitor subscription product"):
+            asyncio.run(billing.provision_subscription(7, product_id=99, created_by=1))
+
+
+def test_provision_subscription_creates_subscription_with_product_price_and_term():
+    product_row = {
+        "id": 10, "price": "9.95", "term_days": 30, "category_id": 3,
+    }
+    created_sub = {
+        "id": "sub-new", "customer_id": 7, "product_id": 10,
+        "subscription_category_id": 3, "quantity": 1,
+        "unit_price": Decimal("9.95"), "status": "active",
+        "start_date": date.today(),
+    }
+    with patch.object(billing.db, "fetch_one", AsyncMock(return_value=product_row)), \
+         patch("app.repositories.subscriptions.create_subscription", AsyncMock(return_value=created_sub)) as mock_create:
+        result = asyncio.run(billing.provision_subscription(7, product_id=10, created_by=1))
+
+    assert result["id"] == "sub-new"
+    call_kwargs = mock_create.call_args.kwargs
+    assert call_kwargs["customer_id"] == 7
+    assert call_kwargs["product_id"] == 10
+    assert call_kwargs["subscription_category_id"] == 3
+    assert call_kwargs["quantity"] == 1
+    assert call_kwargs["unit_price"] == Decimal("9.95")
+    assert call_kwargs["status"] == "active"
+    assert call_kwargs["auto_renew"] is False
+    assert (call_kwargs["end_date"] - call_kwargs["start_date"]).days == 30
