@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
 from typing import Any
 
 from app.core.database import db
@@ -13,11 +14,13 @@ ENDPOINT_FIELDS = (
     "retry_delay_seconds", "expected_behavior", "transcription_enabled",
     "ticket_on_failure", "ticket_failure_threshold", "next_run_at",
 )
-TERMINAL_STATES = {"passed", "failed", "timed_out", "cancelled"}
-ATTEMPT_STATES = {"queued", "dialing", "answered", *TERMINAL_STATES}
+TERMINAL_STATES = {"passed", "failed", "timed_out", "cancelled", "exhausted"}
+ATTEMPT_STATES = {"queued", "retry_wait", "dialing", "answered", "interrupted", *TERMINAL_STATES}
 TRANSITIONS = {
-    "queued": {"dialing", "cancelled"},
-    "dialing": {"answered", "failed", "timed_out", "cancelled"},
+    "queued": {"dialing", "cancelled", "exhausted"},
+    "retry_wait": {"dialing", "cancelled", "exhausted"},
+    "interrupted": {"retry_wait", "failed", "exhausted"},
+    "dialing": {"answered", "failed", "timed_out", "cancelled", "retry_wait", "interrupted"},
     "answered": {"passed", "failed", "timed_out", "cancelled"},
 }
 
@@ -121,6 +124,117 @@ async def claim_due_work(
         )
         claimed.append({**dict(endpoint), "attempt_id": attempt_id, "lease_until": lease_until})
     return claimed
+
+
+def dispatch_key(endpoint_id: int, scheduled_for: datetime) -> str:
+    """Return the stable identity of one endpoint schedule occurrence."""
+    stamp = scheduled_for.replace(tzinfo=None).isoformat(timespec="microseconds")
+    return hashlib.sha256(f"voice-monitor:{endpoint_id}:{stamp}".encode()).hexdigest()
+
+
+async def enqueue_due_attempts(*, limit: int = 100, now: datetime | None = None) -> int:
+    """Lightweight dispatcher: durably enqueue each due occurrence exactly once.
+
+    The unique dispatch key closes the crash window between inserting an attempt
+    and advancing the endpoint.  A subsequent dispatcher pass can safely repeat
+    either operation without producing another attempt.
+    """
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    due = await db.fetch_all(
+        "SELECT id, company_id, next_run_at, interval_seconds, max_retries "
+        "FROM voice_monitor_endpoints WHERE enabled = 1 AND next_run_at IS NOT NULL "
+        "AND next_run_at <= %s ORDER BY next_run_at, id LIMIT %s", (now, limit),
+    )
+    enqueued = 0
+    for endpoint in due:
+        scheduled_for = endpoint["next_run_at"]
+        key = dispatch_key(int(endpoint["id"]), scheduled_for)
+        insert_verb = "INSERT OR IGNORE" if db.is_sqlite() else "INSERT IGNORE"
+        inserted = await db.execute_rowcount(
+            f"{insert_verb} INTO voice_monitor_attempts "
+            "(endpoint_id, company_id, queued_at, scheduled_for, available_at, dispatch_key, "
+            "provider_idempotency_key, max_deliveries) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+            (endpoint["id"], endpoint["company_id"], now, scheduled_for, now, key, key,
+             int(endpoint.get("max_retries") or 0) + 1),
+        )
+        enqueued += int(bool(inserted))
+        # Interval schedules are advanced here; cron schedules are recalculated by
+        # configuration scheduling code and deliberately disabled until then.
+        interval = endpoint.get("interval_seconds")
+        next_run = scheduled_for + timedelta(seconds=int(interval)) if interval else None
+        await db.execute_rowcount(
+            "UPDATE voice_monitor_endpoints SET next_run_at = %s "
+            "WHERE id = %s AND enabled = 1 AND next_run_at = %s",
+            (next_run, endpoint["id"], scheduled_for),
+        )
+    return enqueued
+
+
+async def claim_attempts(
+    *, worker_identity: str, limit: int, lease_seconds: int, per_tenant: int,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Atomically CAS-claim available or abandoned attempts, fairly by tenant."""
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    lease_until = now + timedelta(seconds=lease_seconds)
+    candidates = await db.fetch_all(
+        "SELECT a.*, e.destination_e164, e.timeout_seconds, e.expected_behavior, "
+        "e.transcription_enabled, e.retry_delay_seconds FROM voice_monitor_attempts a "
+        "LEFT JOIN voice_monitor_endpoints e ON e.id = a.endpoint_id "
+        "WHERE a.completed_at IS NULL AND a.available_at <= %s "
+        "AND a.delivery_count < a.max_deliveries AND (a.outcome_status IN ('queued','retry_wait') "
+        "OR (a.outcome_status IN ('dialing','answered','interrupted') AND a.lease_until < %s)) "
+        "ORDER BY a.available_at, a.company_id, a.id LIMIT %s", (now, now, limit * max(per_tenant, 1) * 2),
+    )
+    claimed, tenant_counts = [], {}
+    for attempt in candidates:
+        tenant = int(attempt["company_id"])
+        if tenant_counts.get(tenant, 0) >= per_tenant or len(claimed) >= limit:
+            continue
+        old_owner, old_lease, old_status = attempt.get("lease_owner"), attempt.get("lease_until"), attempt["outcome_status"]
+        changed = await db.execute_rowcount(
+            "UPDATE voice_monitor_attempts SET outcome_status = 'dialing', lease_owner = %s, "
+            "worker_identity = %s, lease_until = %s, heartbeat_at = %s, delivery_count = delivery_count + 1, "
+            "started_at = COALESCE(started_at, %s) WHERE id = %s AND outcome_status = %s "
+            "AND ((lease_owner IS NULL AND %s IS NULL) OR lease_owner = %s) "
+            "AND ((lease_until IS NULL AND %s IS NULL) OR lease_until = %s)",
+            (worker_identity, worker_identity, lease_until, now, now, attempt["id"], old_status,
+             old_owner, old_owner, old_lease, old_lease),
+        )
+        if changed:
+            attempt.update(outcome_status="dialing", lease_owner=worker_identity,
+                           lease_until=lease_until, delivery_count=int(attempt.get("delivery_count") or 0) + 1)
+            claimed.append(attempt)
+            tenant_counts[tenant] = tenant_counts.get(tenant, 0) + 1
+    return claimed
+
+
+async def heartbeat_attempt(attempt_id: int, worker_identity: str, *, lease_seconds: int,
+                            now: datetime | None = None) -> bool:
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    return bool(await db.execute_rowcount(
+        "UPDATE voice_monitor_attempts SET heartbeat_at = %s, lease_until = %s "
+        "WHERE id = %s AND lease_owner = %s AND completed_at IS NULL",
+        (now, now + timedelta(seconds=lease_seconds), attempt_id, worker_identity),
+    ))
+
+
+async def finish_delivery(attempt: dict[str, Any], worker_identity: str, *, status: str,
+                          failure_category: str | None = None, now: datetime | None = None) -> bool:
+    """Persist a result or schedule bounded exponential retry."""
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    deliveries = int(attempt["delivery_count"])
+    maximum = int(attempt["max_deliveries"])
+    retryable = status in {"failed", "timed_out", "interrupted"} and deliveries < maximum
+    final_status = "retry_wait" if retryable else ("exhausted" if status == "interrupted" else status)
+    delay = min(int(attempt.get("retry_delay_seconds") or 60) * (2 ** max(deliveries - 1, 0)), 3600)
+    return bool(await db.execute_rowcount(
+        "UPDATE voice_monitor_attempts SET outcome_status = %s, failure_category = %s, "
+        "available_at = %s, completed_at = %s, lease_owner = NULL, lease_until = NULL, heartbeat_at = NULL "
+        "WHERE id = %s AND lease_owner = %s AND completed_at IS NULL",
+        (final_status, failure_category, now + timedelta(seconds=delay) if retryable else now,
+         None if retryable else now, attempt["id"], worker_identity),
+    ))
 
 
 async def get_attempt(company_id: int, attempt_id: int) -> dict[str, Any] | None:
