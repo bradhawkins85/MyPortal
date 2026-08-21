@@ -1,7 +1,7 @@
 -- Network discovery performed by nominated MyPortal tray agents.
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS mac_address VARCHAR(17) NULL;
 ALTER TABLE tray_devices ADD COLUMN IF NOT EXISTS network_scanner_enabled TINYINT(1) NOT NULL DEFAULT 0;
-ALTER TABLE tray_devices ADD COLUMN IF NOT EXISTS network_scan_interval_minutes INT NOT NULL DEFAULT 60;
+ALTER TABLE tray_devices ADD COLUMN IF NOT EXISTS network_scan_interval_minutes INT NOT NULL DEFAULT 360;
 
 CREATE TABLE IF NOT EXISTS network_devices (
   id INT PRIMARY KEY AUTO_INCREMENT,

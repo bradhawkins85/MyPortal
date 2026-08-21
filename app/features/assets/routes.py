@@ -568,7 +568,7 @@ async def add_network_scanner(request: Request):
     form = await request.form()
     try:
         device_id = int(form.get("device_id"))
-        interval = max(5, min(10080, int(form.get("interval_minutes", 60))))
+        interval = max(5, min(10080, int(form.get("interval_minutes", 360))))
     except (TypeError, ValueError):
         raise HTTPException(
             status_code=422, detail="Select an asset and valid interval"
@@ -593,7 +593,7 @@ async def configure_network_scanner(request: Request, device_id: int):
         raise HTTPException(status_code=403, detail="Asset write access required")
     form = await request.form()
     try:
-        interval = max(5, min(10080, int(form.get("interval_minutes", 60))))
+        interval = max(5, min(10080, int(form.get("interval_minutes", 360))))
     except (TypeError, ValueError):
         raise HTTPException(status_code=422, detail="Scan interval must be a number")
     await network_devices_repo.configure_scanner(

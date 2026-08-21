@@ -33,6 +33,7 @@ def _request(path: str = "/devices", method: str = "GET") -> Request:
 
 
 def test_discovered_devices_loads_shared_column_filters():
+    assert 'name="interval_minutes" value="360"' in TEMPLATE
     assert 'data-table data-table-id="network-devices"' in TEMPLATE
     assert (
         'table_column_picker("network-devices", discovered_device_columns)' in TEMPLATE
@@ -131,6 +132,34 @@ async def test_add_scanner_enables_selected_asset(monkeypatch):
     configure.assert_awaited_once_with(20, 42, True, 45)
     assert response.status_code == 303
     assert response.headers["location"] == "/devices"
+
+
+@pytest.mark.anyio
+async def test_add_scanner_defaults_to_six_hour_interval(monkeypatch):
+    request = _request("/devices/scanners", "POST")
+    request._form = {"device_id": "20"}
+    monkeypatch.setattr(
+        assets_routes,
+        "_load_asset_context",
+        AsyncMock(
+            return_value=(
+                {"id": 7, "is_super_admin": True},
+                None,
+                {"id": 42},
+                42,
+                None,
+            )
+        ),
+    )
+    configure = AsyncMock()
+    monkeypatch.setattr(
+        assets_routes.network_devices_repo, "configure_scanner", configure
+    )
+
+    response = await assets_routes.add_network_scanner(request)
+
+    configure.assert_awaited_once_with(20, 42, True, 360)
+    assert response.status_code == 303
 
 
 @pytest.mark.anyio
