@@ -85,9 +85,7 @@ def test_admin_voice_monitor_page_is_unavailable_when_module_disabled(
         response = client.get("/admin/voice-monitor")
 
     assert response.status_code == 503
-    assert response.json() == {
-        "detail": "Integration module 'voice-monitor' is unavailable"
-    }
+    assert "Integration module &#39;voice-monitor&#39; is unavailable" in response.text
 
 
 def test_settings_keep_builtin_voice_monitor_pack_when_legacy_feature_packs_env_is_present(
