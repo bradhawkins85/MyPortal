@@ -254,6 +254,12 @@ async def update_company(company_id: int, **updates: Any) -> dict[str, Any]:
 
 async def delete_company(company_id: int) -> None:
     log_info("Deleting company", company_id=company_id)
+    # Stop future originates before destructive work begins. Private media and
+    # transcripts are erased; immutable attempt/usage rows remain only where
+    # financial/audit foreign keys require them.
+    await db.execute("UPDATE voice_monitor_endpoints SET enabled=0, consent_granted=0, consent_revoked_at=UTC_TIMESTAMP(6) WHERE company_id=%s", (company_id,))
+    await db.execute("UPDATE voice_monitor_attempts SET outcome_status='cancelled', completed_at=COALESCE(completed_at,UTC_TIMESTAMP(6)) WHERE company_id=%s AND completed_at IS NULL", (company_id,))
+    await db.execute("DELETE FROM voice_monitor_contents WHERE company_id=%s", (company_id,))
     # Nullify FK references that use SET NULL semantics so existing rows are preserved.
     await db.execute(
         "UPDATE user_sessions SET active_company_id = NULL WHERE active_company_id = %s",

@@ -16,6 +16,7 @@ from app.core.logging import log_error, log_info
 from app.repositories import voice_monitor as repository
 from app.services.redis import close_redis_client
 from app.services.voice_monitor.providers import CallState, VoiceMonitorProvider
+from app.services.voice_monitor.policy import DialDenied, authorize_attempt
 from app.services.transcription import TranscriptionUnavailable, WhisperXClient
 
 
@@ -37,6 +38,7 @@ class VoiceMonitorWorker:
 
     async def run(self) -> None:
         while not self.stopping.is_set():
+            await repository.record_worker_heartbeat(self.identity, active_calls=len(self._tasks))
             capacity = self.global_limit - len(self._tasks)
             if capacity > 0:
                 attempts = await repository.claim_attempts(
@@ -48,6 +50,7 @@ class VoiceMonitorWorker:
                     self._tasks.add(task)
                     task.add_done_callback(self._tasks.discard)
             try:
+                await authorize_attempt(attempt, global_limit=self.global_limit, tenant_limit=self.tenant_limit)
                 await asyncio.wait_for(self.stopping.wait(), timeout=self.poll_seconds)
             except asyncio.TimeoutError:
                 pass
@@ -89,7 +92,7 @@ class VoiceMonitorWorker:
                 state = await asyncio.wait_for(self._await_terminal(call_id), timeout=timeout)
                 status = "passed" if state is CallState.COMPLETED else "failed"
                 media = await self.provider.retrieve_media(call_id)
-                if media is not None:
+                if media is not None and attempt.get("recording_consent_granted"):
                     await repository.initialize_content(
                         int(attempt["id"]), int(attempt["company_id"]),
                         media_reference=media.reference[:255],
@@ -122,6 +125,9 @@ class VoiceMonitorWorker:
                         await self.provider.hangup(call_id)
                 await repository.finish_delivery(attempt, self.identity, status="timed_out",
                                                   failure_category="call_timeout")
+            except DialDenied:
+                await repository.finish_delivery(attempt, self.identity, status="cancelled",
+                                                  failure_category="policy_denied")
             except Exception as exc:
                 # Log the exception type only: provider payloads can contain secrets.
                 log_error("Voice monitor delivery failed", attempt_id=attempt["id"],

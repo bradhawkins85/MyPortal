@@ -36,6 +36,12 @@ class ProviderConfiguration(BaseModel):
     worker_concurrency: int = Field(5, ge=1, le=100)
     worker_lease_seconds: int = Field(300, ge=30, le=3600)
     test_calls_enabled: bool = False
+    allowed_country_codes: list[int] = Field(default_factory=list, max_length=50)
+    global_call_concurrency: int = Field(10, ge=1, le=1000)
+    tenant_call_concurrency: int = Field(2, ge=1, le=100)
+    daily_attempt_limit: int = Field(10, ge=1, le=10000)
+    retry_ceiling: int = Field(2, ge=0, le=20)
+    monetary_cap_minor: int = Field(1000, ge=1)
 
 
 class ManualCall(BaseModel):
@@ -61,7 +67,9 @@ async def provision_endpoint(
     user: dict = Depends(require_super_admin),
 ):
     # company_id is accepted only on this super-admin-only provisioning API.
-    endpoint = await repo.create_endpoint(company_id, payload.model_dump(mode="json"))
+    values = payload.model_dump(mode="json")
+    values["consent_actor_id"] = int(user["id"])
+    endpoint = await repo.create_endpoint(company_id, values)
     await audit_service.log_action(
         action="voice_monitor.endpoint.created",
         user_id=user["id"],
@@ -90,6 +98,7 @@ async def worker_health(user: dict = Depends(require_super_admin)):
     return {
         "healthy": path.exists(),
         "heartbeat": path.read_text()[:1000] if path.exists() else None,
+        "metrics": await repo.operational_metrics(),
     }
 
 

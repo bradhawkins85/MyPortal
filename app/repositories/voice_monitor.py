@@ -26,6 +26,17 @@ ENDPOINT_FIELDS = (
     "ticket_on_failure",
     "ticket_failure_threshold",
     "next_run_at",
+    "consent_granted",
+    "recording_consent_granted",
+    "consent_actor_id",
+    "consent_at",
+    "consent_policy_version",
+    "consent_revoked_at",
+    "quiet_hours_start",
+    "quiet_hours_end",
+    "caller_id_verified",
+    "daily_attempt_limit",
+    "monetary_cap_minor",
 )
 TERMINAL_STATES = {"passed", "failed", "timed_out", "cancelled", "exhausted"}
 ATTEMPT_STATES = {
@@ -68,6 +79,10 @@ async def _require_owned_subscription(
 async def create_endpoint(company_id: int, values: dict[str, Any]) -> dict[str, Any]:
     """Create an endpoint owned by ``company_id``."""
     await _require_owned_subscription(company_id, values.get("subscription_id"))
+    if values.get("consent_granted") and not values.get("consent_actor_id"):
+        raise ValueError("consent actor is required")
+    if values.get("consent_granted"):
+        values["consent_at"] = values.get("consent_at") or datetime.now(timezone.utc).replace(tzinfo=None)
     if values.get("enabled", True):
         if not values.get("subscription_id"):
             raise ValueError("enabled endpoints require a Voice Monitor subscription")
@@ -114,6 +129,14 @@ async def update_endpoint(
     if "subscription_id" in values:
         await _require_owned_subscription(company_id, values["subscription_id"])
     current = await get_endpoint(company_id, endpoint_id)
+    if values.get("consent_granted") and not values.get("consent_actor_id", (current or {}).get("consent_actor_id")):
+        raise ValueError("consent actor is required")
+    if values.get("consent_granted") and not (current or {}).get("consent_granted"):
+        values["consent_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
+        values["consent_revoked_at"] = None
+    if values.get("consent_granted") is False:
+        values["consent_revoked_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
+        values["enabled"] = False
     if current and values.get("enabled", current.get("enabled")):
         subscription_id = values.get("subscription_id", current.get("subscription_id"))
         if not subscription_id:
@@ -198,7 +221,8 @@ async def enqueue_due_attempts(*, limit: int = 100, now: datetime | None = None)
         "SELECT e.id, e.company_id, e.subscription_id, e.next_run_at, e.interval_seconds, e.max_retries "
         "FROM voice_monitor_endpoints e JOIN subscriptions s ON s.id=e.subscription_id "
         "JOIN subscription_categories c ON c.id=s.subscription_category_id "
-        "WHERE e.enabled=1 AND e.next_run_at IS NOT NULL AND e.next_run_at <= %s "
+        "WHERE e.enabled=1 AND e.consent_granted=1 AND e.consent_revoked_at IS NULL "
+        "AND e.caller_id_verified=1 AND e.next_run_at IS NOT NULL AND e.next_run_at <= %s "
         "AND LOWER(c.name)='voice monitor' AND LOWER(s.status)='active' "
         "AND %s BETWEEN s.start_date AND s.end_date "
         "AND NOT EXISTS (SELECT 1 FROM subscription_change_requests r WHERE r.subscription_id=s.id AND r.status='pending') "
@@ -253,12 +277,13 @@ async def claim_attempts(
     lease_until = now + timedelta(seconds=lease_seconds)
     candidates = await db.fetch_all(
         "SELECT a.*, e.destination_e164, e.timeout_seconds, e.expected_behavior, "
-        "e.transcription_enabled, e.retry_delay_seconds FROM voice_monitor_attempts a "
+        "e.transcription_enabled, e.recording_consent_granted, e.retry_delay_seconds FROM voice_monitor_attempts a "
         "JOIN voice_monitor_endpoints e ON e.id = a.endpoint_id "
         "JOIN subscriptions s ON s.id=e.subscription_id "
         "JOIN subscription_categories c ON c.id=s.subscription_category_id "
         "WHERE a.completed_at IS NULL AND a.available_at <= %s "
-        "AND e.enabled=1 AND LOWER(c.name)='voice monitor' AND LOWER(s.status)='active' "
+        "AND e.enabled=1 AND e.consent_granted=1 AND e.consent_revoked_at IS NULL "
+        "AND e.caller_id_verified=1 AND LOWER(c.name)='voice monitor' AND LOWER(s.status)='active' "
         "AND CURRENT_DATE BETWEEN s.start_date AND s.end_date "
         "AND NOT EXISTS (SELECT 1 FROM subscription_change_requests r WHERE r.subscription_id=s.id AND r.status='pending') "
         "AND a.delivery_count < a.max_deliveries AND (a.outcome_status IN ('queued','retry_wait') "
@@ -424,6 +449,31 @@ async def delete_expired_content(*, now: datetime | None = None) -> int:
         "DELETE FROM voice_monitor_contents WHERE retain_until IS NOT NULL AND retain_until <= %s",
         (now,),
     )
+
+
+async def record_worker_heartbeat(worker_identity: str, *, active_calls: int) -> None:
+    queue = await db.fetch_one(
+        "SELECT COUNT(*) count FROM voice_monitor_attempts WHERE completed_at IS NULL AND outcome_status IN ('queued','retry_wait')"
+    ) or {}
+    verb = "INSERT OR REPLACE" if db.is_sqlite() else "INSERT INTO"
+    suffix = "" if db.is_sqlite() else " ON DUPLICATE KEY UPDATE heartbeat_at=VALUES(heartbeat_at),active_calls=VALUES(active_calls),queue_depth=VALUES(queue_depth)"
+    await db.execute(
+        f"{verb} voice_monitor_worker_heartbeats (worker_identity,heartbeat_at,active_calls,queue_depth) VALUES (%s,%s,%s,%s){suffix}",
+        (worker_identity, datetime.now(timezone.utc).replace(tzinfo=None), active_calls, int(queue.get("count") or 0)),
+    )
+
+
+async def operational_metrics() -> dict[str, Any]:
+    """Bounded operational counters; excludes destinations, media and transcripts."""
+    return {
+        "workers": await db.fetch_all("SELECT worker_identity,heartbeat_at,active_calls,queue_depth,provider_latency_ms FROM voice_monitor_worker_heartbeats ORDER BY worker_identity"),
+        "outcomes": await db.fetch_all("SELECT outcome_status,COUNT(*) count FROM voice_monitor_attempts GROUP BY outcome_status"),
+        "stuck_calls": (await db.fetch_one("SELECT COUNT(*) count FROM voice_monitor_attempts WHERE completed_at IS NULL AND outcome_status IN ('dialing','answered') AND lease_until<UTC_TIMESTAMP()") or {}).get("count", 0),
+        "missing_callbacks": (await db.fetch_one("SELECT COUNT(*) count FROM voice_monitor_attempts WHERE provider_call_id IS NOT NULL AND final_callback_at IS NULL AND started_at<DATE_SUB(UTC_TIMESTAMP(),INTERVAL 10 MINUTE) AND outcome_status IN ('dialing','answered')") or {}).get("count", 0),
+        "transcription_backlog": (await db.fetch_one("SELECT COUNT(*) count FROM voice_monitor_contents WHERE transcript_status IN ('pending','processing')") or {}).get("count", 0),
+        "ticket_creation_failures": (await db.fetch_one("SELECT COUNT(*) count FROM voice_monitor_incidents WHERE ticket_claim_attempt_id IS NOT NULL AND ticket_id IS NULL") or {}).get("count", 0),
+        "billing_unreconciled": (await db.fetch_one("SELECT COUNT(*) count FROM voice_monitor_attempts a LEFT JOIN voice_monitor_usage_ledger l ON l.attempt_id=a.id WHERE a.completed_at IS NOT NULL AND a.outcome_status IN ('passed','failed','timed_out','cancelled','exhausted') AND l.id IS NULL") or {}).get("count", 0),
+    }
 
 
 async def get_attempt_by_provider_call_id(
