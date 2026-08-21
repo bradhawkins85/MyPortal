@@ -1,0 +1,7 @@
+{
+  "guid": "7c829846-1f3e-4ec0-b339-c8ba760c23be",
+  "occurred_at": "2026-08-21T00:00:00Z",
+  "change_type": "security",
+  "summary": "Added call-scoped Voice Monitor media reconstruction, private retention, and asynchronous transcription.",
+  "content_hash": "voice-monitor-private-media-v1"
+}

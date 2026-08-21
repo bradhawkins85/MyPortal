@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import hashlib
+import secrets
 from typing import Any
 
 from app.core.database import db
@@ -369,6 +370,59 @@ async def get_attempt(company_id: int, attempt_id: int) -> dict[str, Any] | None
     return await db.fetch_one(
         "SELECT * FROM voice_monitor_attempts WHERE id = %s AND company_id = %s",
         (attempt_id, company_id),
+    )
+
+
+async def set_transcription_status(attempt_id: int, status: str,
+                                   *, failure_code: str | None = None) -> None:
+    """Update content processing independently from the operational outcome."""
+    if status not in {"pending", "processing", "completed", "failed", "not_requested"}:
+        raise ValueError("invalid transcription status")
+    await db.execute_rowcount(
+        "UPDATE voice_monitor_contents SET transcript_status = %s, transcription_failure_code = %s "
+        "WHERE attempt_id = %s", (status, failure_code, attempt_id),
+    )
+
+
+async def initialize_content(attempt_id: int, company_id: int, *, media_reference: str | None,
+                             transcription_requested: bool, retention_days: int = 30) -> None:
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    verb = "INSERT OR IGNORE" if db.is_sqlite() else "INSERT IGNORE"
+    await db.execute_rowcount(
+        f"{verb} INTO voice_monitor_contents (attempt_id, company_id, media_reference, "
+        "transcript_status, retain_until) VALUES (%s,%s,%s,%s,%s)",
+        (attempt_id, company_id, media_reference,
+         "pending" if transcription_requested else "not_requested",
+         now + timedelta(days=max(0, retention_days))),
+    )
+
+
+async def store_transcript(attempt_id: int, company_id: int, transcript: str) -> str:
+    """Persist transcript content separately; never place its text in attempt metadata."""
+    reference = secrets.token_urlsafe(32)
+    await db.execute_rowcount(
+        "UPDATE voice_monitor_contents SET transcript_reference = %s, transcript_text = %s, "
+        "transcript_status = 'completed', transcription_failure_code = NULL "
+        "WHERE attempt_id = %s AND company_id = %s",
+        (reference, transcript, attempt_id, company_id),
+    )
+    return reference
+
+
+async def get_content(company_id: int, attempt_id: int) -> dict[str, Any] | None:
+    """Tenant-authorized content retrieval."""
+    return await db.fetch_one(
+        "SELECT * FROM voice_monitor_contents WHERE attempt_id = %s AND company_id = %s",
+        (attempt_id, company_id),
+    )
+
+
+async def delete_expired_content(*, now: datetime | None = None) -> int:
+    """Retention job: erase content while leaving the attempt evidence intact."""
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    return await db.execute_rowcount(
+        "DELETE FROM voice_monitor_contents WHERE retain_until IS NOT NULL AND retain_until <= %s",
+        (now,),
     )
 
 
