@@ -80,6 +80,45 @@
         </form>
       </div>
     </details>
+    <details class="card card--panel card-collapsible admin-grid__full" data-company-edit-section="company-variables">
+      <summary class="card__header card__header--collapsible card__header--stacked">
+        <div>
+          <h2 class="card__title">Company Variables</h2>
+          <p class="card__subtitle">Set company-specific values for shared variables used in canned responses and message templates.</p>
+        </div>
+        <div class="card__collapsible-meta" aria-hidden="true"><span class="card__toggle-icon"></span></div>
+      </summary>
+      <div class="card-collapsible__content card__body card__body--stacked">
+        <p class="form-help">Use a value with <code>{{ '{{ company.variables.VARIABLE_NAME }}' }}</code>. Variable names are shared by every company; values are unique to this company.</p>
+        {% if company_variables %}
+          <form action="/admin/companies/{{ company.id }}/variables" method="post" class="form">
+            {% include "partials/csrf.html" %}
+            {% for variable in company_variables %}
+              <div class="form-field">
+                <label class="form-label" for="company-variable-{{ variable.id }}"><code>{{ variable.name }}</code></label>
+                <input id="company-variable-{{ variable.id }}" name="variable_{{ variable.id }}" class="form-input" value="{{ variable.value }}" />
+              </div>
+            {% endfor %}
+            <div class="form-actions"><button type="submit" class="button">Save variable values</button></div>
+          </form>
+        {% else %}
+          <p class="text-muted">No company variables have been defined yet.</p>
+        {% endif %}
+        <form action="/admin/companies/{{ company.id }}/variables/new" method="post" class="form">
+          {% include "partials/csrf.html" %}
+          <h3>Add shared variable</h3>
+          <div class="form-field">
+            <label class="form-label" for="new-company-variable-name">Variable name</label>
+            <input id="new-company-variable-name" name="name" class="form-input" placeholder="SUPPORT_PORTAL_URL" maxlength="100" pattern="[A-Za-z][A-Za-z0-9_]*" required />
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="new-company-variable-value">Value for {{ company.name }}</label>
+            <input id="new-company-variable-value" name="value" class="form-input" placeholder="https://example.com/support" />
+          </div>
+          <div class="form-actions"><button type="submit" class="button button--secondary">Add variable</button></div>
+        </form>
+      </div>
+    </details>
     <details class="card card--panel card-collapsible admin-grid__full" data-company-edit-section="external-ids">
       <summary class="card__header card__header--collapsible card__header--stacked">
         <div>
