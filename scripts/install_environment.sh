@@ -224,6 +224,21 @@ install_dependencies() {
   fi
 }
 
+install_sip_client() {
+  if command -v baresip >/dev/null 2>&1; then
+    echo "SIP client (baresip) is already installed." >&2
+    return
+  fi
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Error: baresip is required; install it and rerun this installer." >&2
+    exit 1
+  fi
+  echo "Installing server SIP client (baresip)…" >&2
+  apt-get update -qq
+  apt-get install -y -qq baresip
+  command -v baresip >/dev/null 2>&1 || { echo "Error: baresip installation failed." >&2; exit 1; }
+}
+
 # ---------------------------------------------------------------------------
 # PowerShell Core (pwsh) – optional dependency for Exchange Online fallback
 # ---------------------------------------------------------------------------
@@ -583,6 +598,7 @@ install_exo_module
 install_dotnet
 install_wix
 install_go
+install_sip_client
 ensure_virtualenv
 install_dependencies
 build_tray_installers

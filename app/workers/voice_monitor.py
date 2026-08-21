@@ -88,7 +88,7 @@ class VoiceMonitorWorker:
                     (call_id, attempt["id"], self.identity),
                 )
                 heartbeat = asyncio.create_task(self._heartbeat(int(attempt["id"])))
-                timeout = float(attempt.get("timeout_seconds") or 30)
+                timeout = self._call_timeout(attempt)
                 state = await asyncio.wait_for(self._await_terminal(call_id), timeout=timeout)
                 status = "passed" if state is CallState.COMPLETED else "failed"
                 media = await self.provider.retrieve_media(call_id)
@@ -145,6 +145,14 @@ class VoiceMonitorWorker:
         return bool(attempt.get("transcription_enabled")) and bool(
             attempt.get("subscription_transcription_enabled", True)
         )
+
+    @staticmethod
+    def _call_timeout(attempt: dict) -> float:
+        """Apply the deployment hard limit even when a tenant requests longer."""
+        configured_max = float(os.getenv("VOICE_MONITOR_MAX_CALL_DURATION_SECONDS", "300"))
+        if configured_max < 5:
+            raise ValueError("VOICE_MONITOR_MAX_CALL_DURATION_SECONDS must be at least 5")
+        return min(float(attempt.get("timeout_seconds") or 30), configured_max)
 
     async def _transcribe_media(self, attempt: dict, media_reference: str) -> None:
         attempt_id = int(attempt["id"])
