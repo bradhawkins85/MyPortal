@@ -16,6 +16,7 @@ from app.core.logging import log_error, log_info
 from app.repositories import voice_monitor as repository
 from app.services.redis import close_redis_client
 from app.services.voice_monitor.providers import CallState, VoiceMonitorProvider
+from app.services.transcription import TranscriptionUnavailable, WhisperXClient
 
 
 class VoiceMonitorWorker:
@@ -30,6 +31,7 @@ class VoiceMonitorWorker:
         self.identity = identity or f"{socket.gethostname()}:{os.getpid()}"
         self.stopping = asyncio.Event()
         self._tasks: set[asyncio.Task[None]] = set()
+        self._post_tasks: set[asyncio.Task[None]] = set()
         self._global = asyncio.Semaphore(global_limit)
         self._tenants: dict[int, asyncio.Semaphore] = {}
 
@@ -51,6 +53,8 @@ class VoiceMonitorWorker:
                 pass
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
+        if self._post_tasks:
+            await asyncio.gather(*self._post_tasks, return_exceptions=True)
 
     async def stop(self, *, grace_seconds: float = 25) -> None:
         """Stop claiming, then reconcile every call that exceeds the grace."""
@@ -86,6 +90,12 @@ class VoiceMonitorWorker:
                 status = "passed" if state is CallState.COMPLETED else "failed"
                 media = await self.provider.retrieve_media(call_id)
                 if media is not None:
+                    await repository.initialize_content(
+                        int(attempt["id"]), int(attempt["company_id"]),
+                        media_reference=media.reference[:255],
+                        transcription_requested=self._transcription_permitted(attempt),
+                        retention_days=int(os.getenv("VOICE_MONITOR_RETENTION_DAYS", "30")),
+                    )
                     await db.execute_rowcount(
                         "UPDATE voice_monitor_attempts SET media_artifact_reference = %s "
                         "WHERE id = %s AND lease_owner = %s",
@@ -93,6 +103,12 @@ class VoiceMonitorWorker:
                     )
                 await repository.finish_delivery(attempt, self.identity, status=status,
                                                   failure_category=None if status == "passed" else state.value)
+                # Transcription is deliberately post-call and detached.  It cannot
+                # delay hangup or turn a successful phone check into a call failure.
+                if status == "passed" and media is not None and self._transcription_permitted(attempt):
+                    task = asyncio.create_task(self._transcribe_media(attempt, media.reference))
+                    self._post_tasks.add(task)
+                    task.add_done_callback(self._post_tasks.discard)
             except asyncio.CancelledError:
                 if call_id:
                     with suppress(Exception):
@@ -117,6 +133,32 @@ class VoiceMonitorWorker:
                     heartbeat.cancel()
                     with suppress(asyncio.CancelledError):
                         await heartbeat
+
+    @staticmethod
+    def _transcription_permitted(attempt: dict) -> bool:
+        return bool(attempt.get("transcription_enabled")) and bool(
+            attempt.get("subscription_transcription_enabled", True)
+        )
+
+    async def _transcribe_media(self, attempt: dict, media_reference: str) -> None:
+        attempt_id = int(attempt["id"])
+        await repository.set_transcription_status(attempt_id, "processing")
+        try:
+            result = await WhisperXClient().transcribe(media_reference)
+            await repository.store_transcript(
+                attempt_id, int(attempt["company_id"]), result.text
+            )
+        except TranscriptionUnavailable as exc:
+            # Store only a classification; exception strings may contain remote details.
+            await repository.set_transcription_status(
+                attempt_id, "failed", failure_code=type(exc).__name__
+            )
+        except Exception as exc:
+            log_error("Voice monitor transcription failed", attempt_id=attempt_id,
+                      error_type=type(exc).__name__)
+            await repository.set_transcription_status(
+                attempt_id, "failed", failure_code="transcription_error"
+            )
 
     async def _heartbeat(self, attempt_id: int) -> None:
         while True:

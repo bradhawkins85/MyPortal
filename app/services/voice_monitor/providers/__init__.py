@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping, Protocol
+from typing import Mapping, Protocol, Sequence
+
+from app.services.voice_monitor.media import CaptureScope
 
 
 class CallState(str, Enum):
@@ -25,6 +27,10 @@ class OriginatedCall:
 class MediaArtifact:
     reference: str
     content_type: str | None = None
+    # A provider may return scoped RTP instead of a hosted recording.  The
+    # scope proves collection was limited to this call's negotiated session.
+    rtp_packets: Sequence[bytes] | None = None
+    capture_scope: CaptureScope | None = None
 
 
 class VoiceMonitorProvider(Protocol):

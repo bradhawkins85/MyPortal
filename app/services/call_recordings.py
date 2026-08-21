@@ -18,6 +18,11 @@ from loguru import logger
 from app.repositories import call_recordings as call_recordings_repo
 from app.services import modules as modules_service
 from app.services import webhook_monitor
+from app.services.transcription import WhisperXSettings
+
+# Kept as a compatibility seam for deployments/tests which inject module
+# persistence independently from the higher-level module service.
+modules_repo = modules_service
 
 
 _AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg", ".flac"}
@@ -58,11 +63,10 @@ def _whisperx_env_settings() -> dict[str, Any]:
 
     if _ENV_PATH.exists():
         load_dotenv(_ENV_PATH, override=True)
+    settings = WhisperXSettings.from_environment()
     return {
-        "base_url": os.getenv("WHISPERX_BASE_URL", "").strip().rstrip("/"),
-        "api_key": os.getenv("WHISPERX_API_KEY", "").strip(),
-        "language": os.getenv("WHISPERX_LANGUAGE", "").strip(),
-        "stereo_split": _env_bool(os.getenv("WHISPERX_STEREO_SPLIT"), False),
+        "base_url": settings.base_url, "api_key": settings.api_key,
+        "language": settings.language, "stereo_split": settings.stereo_split,
     }
 
 
