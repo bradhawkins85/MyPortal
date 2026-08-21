@@ -13,7 +13,11 @@ from app.repositories import companies as company_repo
 from app.repositories import subscriptions as subscriptions_repo
 from app.schemas.voice_monitor import VoiceMonitorConfiguration
 from app.services import audit as audit_service
-from app.services.voice_monitor_billing import is_voice_monitor_subscription
+from app.services.voice_monitor_billing import (
+    is_voice_monitor_subscription,
+    list_voice_monitor_products,
+    provision_subscription,
+)
 
 router = APIRouter(
     prefix="/admin/voice-monitor",
@@ -76,6 +80,7 @@ async def _render_management_page(request: Request, *, subscriptions_page: bool)
         for subscription in subscriptions
         if is_voice_monitor_subscription(subscription)
     ]
+    voice_monitor_products = await list_voice_monitor_products()
     return await _main()._render_template(
         "admin/voice_monitor.html",
         request,
@@ -88,6 +93,7 @@ async def _render_management_page(request: Request, *, subscriptions_page: bool)
             ),
             "companies": companies,
             "voice_monitor_subscriptions": voice_monitor_subscriptions,
+            "voice_monitor_products": voice_monitor_products,
             "subscriptions_page": subscriptions_page,
         },
     )
@@ -99,10 +105,32 @@ async def provision_endpoint(
     payload: VoiceMonitorConfiguration,
     request: Request,
     user: dict = Depends(require_super_admin),
+    product_id: int | None = None,
 ):
-    # company_id is accepted only on this super-admin-only provisioning API.
+    if payload.subscription_id is None and product_id is None:
+        raise HTTPException(
+            400,
+            "Either subscription_id in the request body or product_id as a query "
+            "parameter is required to provision a monitored number.",
+        )
     values = payload.model_dump(mode="json")
     values["consent_actor_id"] = int(user["id"])
+    if payload.subscription_id is None and product_id is not None:
+        try:
+            subscription = await provision_subscription(
+                company_id, product_id, created_by=int(user["id"])
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        values["subscription_id"] = subscription["id"]
+        await audit_service.log_action(
+            action="voice_monitor.subscription.provisioned",
+            user_id=user["id"],
+            entity_type="subscription",
+            entity_id=subscription["id"],
+            new_value={"product_id": product_id, "company_id": company_id},
+            request=request,
+        )
     try:
         endpoint = await repo.create_endpoint(company_id, values)
     except ValueError as exc:

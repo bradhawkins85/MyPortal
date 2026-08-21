@@ -17,6 +17,9 @@
     <p>No active Voice Monitor subscriptions are available. Add a Voice Monitor subscription before provisioning a number.</p>
     <a class="button" href="/admin/voice-monitor/subscriptions">Manage Voice Monitor Subscriptions</a>
     {% else %}
+    {% if not voice_monitor_products %}
+    <p>No Voice Monitor subscription products are configured. Add products to the Voice Monitor subscription category in the shop before provisioning numbers.</p>
+    {% else %}
     <form id="voice-monitor-endpoint-form">
       <div class="form-grid">
         <label>Company
@@ -25,18 +28,14 @@
             {% for company in companies %}<option value="{{ company.id }}">{{ company.name }}</option>{% endfor %}
           </select>
         </label>
-        {% if voice_monitor_subscriptions %}
-        <label>Voice Monitor subscription (optional)
-          <select name="subscription_id" id="voice-monitor-subscription" disabled>
-            <option value="">Select a company first</option>
-            {% for subscription in voice_monitor_subscriptions %}
-            <option value="{{ subscription.id }}" data-company-id="{{ subscription.customer_id }}" hidden>
-              {{ subscription.product_name or subscription.category_name or 'Voice Monitor' }} ({{ subscription.quantity }} number{% if subscription.quantity != 1 %}s{% endif %})
-            </option>
+        <label>Subscription type
+          <select name="product_id" id="voice-monitor-product" required>
+            <option value="">Select a subscription type</option>
+            {% for product in voice_monitor_products %}
+            <option value="{{ product.id }}">{{ product.name }}</option>
             {% endfor %}
           </select>
         </label>
-        {% endif %}
         <label>Phone number (E.164)
           <input type="tel" name="destination_e164" placeholder="+61412345678" pattern="\+[0-9 ]+" required>
         </label>
@@ -62,44 +61,31 @@
       <button type="submit">Add monitored number</button>
     </form>
     {% endif %}
+    {% endif %}
   </section>
 </div>
 
-{% if subscriptions_page or voice_monitor_subscriptions %}
+{% if (subscriptions_page or voice_monitor_subscriptions) and voice_monitor_products %}
 <script>
 (() => {
   const form = document.getElementById('voice-monitor-endpoint-form');
-  const company = document.getElementById('voice-monitor-company');
-  const subscription = document.getElementById('voice-monitor-subscription');
   const status = document.getElementById('voice-monitor-form-status');
-
-  if (company && subscription) {
-    company.addEventListener('change', () => {
-      let available = 0;
-      subscription.value = '';
-      for (const option of subscription.querySelectorAll('option[data-company-id]')) {
-        option.hidden = option.dataset.companyId !== company.value;
-        if (!option.hidden) available += 1;
-      }
-      subscription.disabled = !company.value || available === 0;
-      subscription.options[0].textContent = available ? 'Select a subscription (optional)' : 'No active subscription for this company';
-    });
-  }
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const data = new FormData(form);
     const companyId = data.get('company_id');
-    const subscriptionId = subscription ? (data.get('subscription_id') || null) : null;
+    const productId = data.get('product_id');
     const payload = {
-      subscription_id: subscriptionId, destination_e164: data.get('destination_e164'),
+      destination_e164: data.get('destination_e164'),
       display_label: data.get('display_label'), interval_seconds: Number(data.get('interval_seconds')),
       timezone: data.get('timezone'), consent_granted: data.has('consent_granted'),
       ticket_on_failure: data.has('ticket_on_failure'), transcription_enabled: data.has('transcription_enabled')
     };
     status.textContent = 'Adding monitored number…';
     try {
-      const response = await fetch(`/admin/voice-monitor/endpoints?company_id=${encodeURIComponent(companyId)}`, {
+      const url = `/admin/voice-monitor/endpoints?company_id=${encodeURIComponent(companyId)}&product_id=${encodeURIComponent(productId)}`;
+      const response = await fetch(url, {
         method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || ''},
         body: JSON.stringify(payload)
       });
@@ -107,7 +93,6 @@
       if (!response.ok) throw new Error(result.detail || 'Unable to add the monitored number.');
       status.textContent = `Added ${result.display_label}.`;
       form.reset();
-      if (subscription) subscription.disabled = true;
     } catch (error) { status.textContent = error.message; }
   });
 })();

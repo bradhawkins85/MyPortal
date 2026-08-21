@@ -13,7 +13,7 @@ from app.features.voice_monitor import admin_routes
 from app.api.dependencies import modules as module_dependencies
 from app.core.config import Settings
 from app.core.database import db
-from app.core.features import discover_builtin_feature_pack_slugs
+from app.core.features import FeatureRegistry, discover_builtin_feature_pack_slugs
 from app.main import app, scheduler_service
 
 
@@ -39,10 +39,18 @@ def mock_startup(monkeypatch):
             return []
 
     monkeypatch.setattr(main_module, "get_plugin_loader", lambda: _FakePluginLoader())
+    # Prevent _purge_sys_modules from evicting app.features.voice_monitor.*
+    # from sys.modules on TestClient teardown.  Without this, the next
+    # TestClient startup re-imports a fresh admin_routes module that doesn't
+    # carry the monkeypatched helpers, causing "Database pool not initialised"
+    # errors on the second (and later) subscriptions-page tests.
+    monkeypatch.setattr(FeatureRegistry, "_purge_sys_modules", lambda slug: None)
 
 
 @pytest.fixture
 def super_admin_context(monkeypatch):
+    from decimal import Decimal
+
     async def fake_require_super_admin_page(request):
         return {"id": 1, "email": "admin@example.com", "is_super_admin": True}, None
 
@@ -66,6 +74,28 @@ def super_admin_context(monkeypatch):
                     "product_name": "Voice Monitor",
                     "quantity": 2,
                 }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        admin_routes,
+        "list_voice_monitor_products",
+        AsyncMock(
+            return_value=[
+                {
+                    "id": 10,
+                    "name": "Voice Monitor – Every 5 minutes",
+                    "price": Decimal("9.95"),
+                    "term_days": 365,
+                    "description": None,
+                },
+                {
+                    "id": 11,
+                    "name": "Voice Monitor – Every hour",
+                    "price": Decimal("4.95"),
+                    "term_days": 365,
+                    "description": None,
+                },
             ]
         ),
     )
@@ -106,6 +136,8 @@ def test_admin_voice_monitor_page_renders_for_super_admin_when_module_enabled(
     assert "Voice Monitor" in response.text
     assert "Add monitored number" in response.text
     assert "Example Co" in response.text
+    assert "Subscription type" in response.text
+    assert "Voice Monitor – Every 5 minutes" in response.text
     assert "/admin/voice-monitor/endpoints?company_id=" in response.text
     assert 'href="/admin/voice-monitor/subscriptions"' in response.text
     assert 'href="/admin/subscriptions"' not in response.text
@@ -120,7 +152,9 @@ def test_voice_monitor_subscriptions_page_manages_monitored_numbers(
     assert response.status_code == 200
     assert "Manage Voice Monitor Subscriptions" in response.text
     assert "Add monitored number" in response.text
+    assert "Subscription type" in response.text
     assert "Phone number (E.164)" in response.text
+    assert "Voice Monitor – Every 5 minutes" in response.text
     assert "/admin/voice-monitor/endpoints?company_id=" in response.text
 
 
@@ -128,6 +162,8 @@ def test_voice_monitor_subscriptions_page_shows_form_without_subscriptions(
     monkeypatch, module_enabled_context
 ):
     """The subscriptions page must show the add-number form even with no subscriptions."""
+    from decimal import Decimal
+
     async def fake_require_super_admin_page(request):
         return {"id": 1, "email": "admin@example.com", "is_super_admin": True}, None
 
@@ -144,6 +180,21 @@ def test_voice_monitor_subscriptions_page_shows_form_without_subscriptions(
         "list_subscriptions",
         AsyncMock(return_value=[]),
     )
+    monkeypatch.setattr(
+        admin_routes,
+        "list_voice_monitor_products",
+        AsyncMock(
+            return_value=[
+                {
+                    "id": 10,
+                    "name": "Voice Monitor – Every 5 minutes",
+                    "price": Decimal("9.95"),
+                    "term_days": 365,
+                    "description": None,
+                }
+            ]
+        ),
+    )
 
     with TestClient(app) as client:
         response = client.get("/admin/voice-monitor/subscriptions")
@@ -151,7 +202,9 @@ def test_voice_monitor_subscriptions_page_shows_form_without_subscriptions(
     assert response.status_code == 200
     assert "Manage Voice Monitor Subscriptions" in response.text
     assert "Add monitored number" in response.text
+    assert "Subscription type" in response.text
     assert "Phone number (E.164)" in response.text
+    assert "Voice Monitor – Every 5 minutes" in response.text
     assert "/admin/voice-monitor/endpoints?company_id=" in response.text
 
 
