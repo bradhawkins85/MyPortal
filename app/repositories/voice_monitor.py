@@ -609,3 +609,123 @@ async def link_ticket_once(company_id: int, attempt_id: int, ticket_id: int) -> 
             (ticket_id, attempt_id, company_id),
         )
     )
+
+
+def _mask_destination(value: Any) -> str:
+    """Mask a destination while retaining enough suffix digits for support."""
+    raw = str(value or "")
+    digits = "".join(character for character in raw if character.isdigit())
+    return f"***{digits[-4:]}" if digits else "Unavailable"
+
+
+async def get_report_summary(
+    company_id: int, *, start: datetime, end: datetime
+) -> dict[str, Any]:
+    """Return tenant-scoped operational totals for a half-open report period."""
+    row = await db.fetch_one(
+        "SELECT COUNT(*) attempts, "
+        "SUM(CASE WHEN a.outcome_status='passed' THEN 1 ELSE 0 END) successful_connections, "
+        "SUM(CASE WHEN a.outcome_status IN ('failed','timed_out','exhausted') THEN 1 ELSE 0 END) failures, "
+        "AVG(CASE WHEN a.answered_at IS NOT NULL THEN TIMESTAMPDIFF(MICROSECOND,a.started_at,a.answered_at)/1000000 END) avg_answer_seconds, "
+        "AVG(a.duration_seconds) avg_duration_seconds "
+        "FROM voice_monitor_attempts a WHERE a.company_id=%s AND a.queued_at >= %s AND a.queued_at < %s",
+        (company_id, start, end),
+    ) or {}
+    attempts = int(row.get("attempts") or 0)
+    successful = int(row.get("successful_connections") or 0)
+    categories = await db.fetch_all(
+        "SELECT COALESCE(failure_category,'unknown') category, COUNT(*) count "
+        "FROM voice_monitor_attempts WHERE company_id=%s AND queued_at >= %s AND queued_at < %s "
+        "AND outcome_status IN ('failed','timed_out','exhausted') "
+        "GROUP BY COALESCE(failure_category,'unknown') ORDER BY count DESC, category",
+        (company_id, start, end),
+    )
+    return {
+        "period_start": start.isoformat(), "period_end": end.isoformat(),
+        "attempts": attempts, "successful_connections": successful,
+        "failures": int(row.get("failures") or 0),
+        "availability_percentage": round(successful * 100 / attempts, 1) if attempts else 0.0,
+        "failure_categories": [dict(item) for item in categories or []],
+        "avg_answer_seconds": float(row["avg_answer_seconds"]) if row.get("avg_answer_seconds") is not None else None,
+        "avg_duration_seconds": float(row["avg_duration_seconds"]) if row.get("avg_duration_seconds") is not None else None,
+    }
+
+
+async def get_report_detail(
+    company_id: int, *, start: datetime, end: datetime
+) -> dict[str, Any]:
+    """Return safe detail rows; both attempt and endpoint ownership are enforced."""
+    summary = await get_report_summary(company_id, start=start, end=end)
+    rows = await db.fetch_all(
+        "SELECT a.id,a.queued_at,a.answered_at,a.completed_at,a.outcome_status,a.failure_category,"
+        "a.provider_response_code,a.provider_call_id,a.duration_seconds,a.retry_count,a.transcript_status,"
+        "e.display_label,e.destination_e164 "
+        "FROM voice_monitor_attempts a LEFT JOIN voice_monitor_endpoints e "
+        "ON e.id=a.endpoint_id AND e.company_id=a.company_id "
+        "WHERE a.company_id=%s AND a.queued_at >= %s AND a.queued_at < %s "
+        "ORDER BY a.queued_at DESC,a.id DESC LIMIT 250",
+        (company_id, start, end),
+    )
+    attempts = []
+    affected: dict[tuple[Any, str], dict[str, Any]] = {}
+    for source in rows or []:
+        item = dict(source)
+        item["masked_destination"] = _mask_destination(item.pop("destination_e164", None))
+        # Reports expose correlation identifiers, never media, diagnostics, or transcript text.
+        attempts.append(item)
+        if item.get("outcome_status") in {"failed", "timed_out", "exhausted"}:
+            key = (item.get("display_label"), item["masked_destination"])
+            affected.setdefault(key, {"label": key[0], "masked_destination": key[1], "failures": 0})["failures"] += 1
+    return {**summary, "attempt_rows": attempts, "recent_incidents": [a for a in attempts if a.get("outcome_status") in {"failed", "timed_out", "exhausted"}][:10], "affected_destinations": list(affected.values()), "packet_quality": None, "media_quality": None}
+
+
+async def record_incident_failure(
+    company_id: int, endpoint_id: int, attempt_id: int, threshold: int
+) -> dict[str, Any] | None:
+    """Increment failure state and atomically reserve threshold ticket creation."""
+    verb = "INSERT OR IGNORE" if db.is_sqlite() else "INSERT IGNORE"
+    await db.execute_rowcount(
+        f"{verb} INTO voice_monitor_incidents (company_id,endpoint_id) VALUES (%s,%s)",
+        (company_id, endpoint_id),
+    )
+    await db.execute_rowcount(
+        "UPDATE voice_monitor_incidents SET consecutive_failures=consecutive_failures+1, "
+        "ticket_claim_attempt_id=CASE WHEN ticket_id IS NULL AND ticket_claim_attempt_id IS NULL "
+        "AND consecutive_failures+1 >= %s THEN %s ELSE ticket_claim_attempt_id END, recovered_at=NULL "
+        "WHERE company_id=%s AND endpoint_id=%s",
+        (max(1, threshold), attempt_id, company_id, endpoint_id),
+    )
+    return await db.fetch_one(
+        "SELECT * FROM voice_monitor_incidents WHERE company_id=%s AND endpoint_id=%s",
+        (company_id, endpoint_id),
+    )
+
+
+async def complete_incident_ticket_claim(
+    company_id: int, endpoint_id: int, attempt_id: int, ticket_id: int
+) -> bool:
+    return bool(await db.execute_rowcount(
+        "UPDATE voice_monitor_incidents SET ticket_id=%s,ticket_claim_attempt_id=NULL,opened_at=CURRENT_TIMESTAMP "
+        "WHERE company_id=%s AND endpoint_id=%s AND ticket_id IS NULL AND ticket_claim_attempt_id=%s",
+        (ticket_id, company_id, endpoint_id, attempt_id),
+    ))
+
+
+async def release_incident_ticket_claim(company_id: int, endpoint_id: int, attempt_id: int) -> None:
+    await db.execute_rowcount(
+        "UPDATE voice_monitor_incidents SET ticket_claim_attempt_id=NULL WHERE company_id=%s AND endpoint_id=%s AND ticket_claim_attempt_id=%s",
+        (company_id, endpoint_id, attempt_id),
+    )
+
+
+async def recover_incident(company_id: int, endpoint_id: int) -> dict[str, Any] | None:
+    row = await db.fetch_one(
+        "SELECT * FROM voice_monitor_incidents WHERE company_id=%s AND endpoint_id=%s",
+        (company_id, endpoint_id),
+    )
+    await db.execute_rowcount(
+        "UPDATE voice_monitor_incidents SET consecutive_failures=0,ticket_id=NULL,ticket_claim_attempt_id=NULL,recovered_at=CURRENT_TIMESTAMP "
+        "WHERE company_id=%s AND endpoint_id=%s",
+        (company_id, endpoint_id),
+    )
+    return row

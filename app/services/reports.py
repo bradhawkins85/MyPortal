@@ -27,6 +27,7 @@ from app.repositories import report_sections as report_sections_repo
 from app.repositories import shop as shop_repo
 from app.repositories import staff as staff_repo
 from app.repositories import subscriptions as subscriptions_repo
+from app.repositories import voice_monitor as voice_monitor_repo
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +118,11 @@ REPORT_SECTIONS: tuple[ReportSection, ...] = (
             "Per-day backup status for every job configured for the company. "
             "The detailed report renders a colour-coded grid for the last 30 days."
         ),
+    ),
+    ReportSection(
+        key="voice_monitor",
+        label="Voice Monitor",
+        description="Call availability, quality, failures, and incidents during the report period.",
     ),
     ReportSection(
         key="huntress_edr",
@@ -630,6 +636,21 @@ async def _build_backup_jobs(company_id: int) -> dict[str, Any]:
     }
 
 
+def _report_period() -> tuple[datetime, datetime]:
+    end = datetime.now(timezone.utc)
+    return end - timedelta(days=30), end
+
+
+async def _build_voice_monitor(company_id: int) -> dict[str, Any]:
+    start, end = _report_period()
+    return await voice_monitor_repo.get_report_summary(company_id, start=start, end=end)
+
+
+async def _build_voice_monitor_detail(company_id: int) -> dict[str, Any]:
+    start, end = _report_period()
+    return await voice_monitor_repo.get_report_detail(company_id, start=start, end=end)
+
+
 # Maps section keys to their builder coroutine.
 _SECTION_BUILDERS = {
     "assets": _build_assets,
@@ -646,6 +667,7 @@ _SECTION_BUILDERS = {
     "asset_custom_fields": _build_asset_custom_fields,
     "issues": _build_issues,
     "backup_jobs": _build_backup_jobs,
+    "voice_monitor": _build_voice_monitor,
 }
 
 
@@ -1147,6 +1169,7 @@ _DETAIL_BUILDERS: dict[str, Any] = {
     "asset_custom_fields": _build_asset_custom_fields_detail,
     "issues": _build_issues_detail,
     "backup_jobs": _build_backup_jobs_detail,
+    "voice_monitor": _build_voice_monitor_detail,
     "huntress_edr": _build_huntress_edr_detail,
     "huntress_itdr": _build_huntress_itdr_detail,
     "huntress_sat": _build_huntress_sat_detail,
@@ -1346,6 +1369,8 @@ def _section_is_empty(key: str, data: dict[str, Any]) -> bool:
         return int(data.get("total") or 0) == 0
     if key == "backup_jobs":
         return int(data.get("total_jobs") or 0) == 0
+    if key == "voice_monitor":
+        return int(data.get("attempts") or 0) == 0
     if key == "huntress_edr":
         return not (
             int(data.get("active_incidents") or 0)
