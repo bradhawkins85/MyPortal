@@ -40,8 +40,6 @@ _DEFAULT_FEATURE_PACKS: str = ",".join(_DEFAULT_FEATURE_PACK_SLUGS)
 
 
 def _normalize_feature_packs(value: Any) -> str:
-    if value == _DEFAULT_FEATURE_PACKS:
-        return _DEFAULT_FEATURE_PACKS
     configured = [slug.strip() for slug in str(value or "").split(",") if slug.strip()]
     merged: list[str] = []
     for slug in configured + list(_DEFAULT_FEATURE_PACK_SLUGS):
