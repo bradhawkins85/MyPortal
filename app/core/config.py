@@ -201,6 +201,7 @@ class Settings(BaseSettings):
     enable_csrf: bool = Field(default=True, validation_alias="ENABLE_CSRF")
     feature_packs: str = Field(
         default=_DEFAULT_FEATURE_PACKS,
+        validation_alias="FEATURE_PACKS",
         description=(
             "Comma-separated built-in feature pack slugs discovered from "
             "``app.features`` at startup.  This internal manifest is "
