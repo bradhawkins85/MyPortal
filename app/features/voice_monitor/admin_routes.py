@@ -9,8 +9,11 @@ from pydantic import BaseModel, Field
 from app.api.dependencies.auth import require_super_admin
 from app.api.dependencies.modules import require_module_enabled
 from app.repositories import voice_monitor as repo
+from app.repositories import companies as company_repo
+from app.repositories import subscriptions as subscriptions_repo
 from app.schemas.voice_monitor import VoiceMonitorConfiguration
 from app.services import audit as audit_service
+from app.services.voice_monitor_billing import is_voice_monitor_subscription
 
 router = APIRouter(
     prefix="/admin/voice-monitor",
@@ -54,8 +57,24 @@ async def page(request: Request):
     user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
         return redirect
+    companies = await company_repo.list_companies()
+    subscriptions = await subscriptions_repo.list_subscriptions(
+        status="active", limit=500
+    )
+    voice_monitor_subscriptions = [
+        subscription
+        for subscription in subscriptions
+        if is_voice_monitor_subscription(subscription)
+    ]
     return await _main()._render_template(
-        "admin/voice_monitor.html", request, user, extra={"title": "Voice Monitor"}
+        "admin/voice_monitor.html",
+        request,
+        user,
+        extra={
+            "title": "Voice Monitor",
+            "companies": companies,
+            "voice_monitor_subscriptions": voice_monitor_subscriptions,
+        },
     )
 
 
@@ -69,7 +88,12 @@ async def provision_endpoint(
     # company_id is accepted only on this super-admin-only provisioning API.
     values = payload.model_dump(mode="json")
     values["consent_actor_id"] = int(user["id"])
-    endpoint = await repo.create_endpoint(company_id, values)
+    try:
+        endpoint = await repo.create_endpoint(company_id, values)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except OverflowError as exc:
+        raise HTTPException(409, str(exc)) from exc
     await audit_service.log_action(
         action="voice_monitor.endpoint.created",
         user_id=user["id"],
