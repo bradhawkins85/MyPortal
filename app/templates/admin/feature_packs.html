@@ -26,10 +26,9 @@
       <section class="card card--panel">
         {% if not packs %}
           <p class="empty-state">
-            No feature packs are currently loaded. Configure the
-            <code>FEATURE_PACKS</code> environment variable (see
-            <code>docs/feature_packs.md</code>) and restart the
-            application to register packs.
+            No built-in feature packs are currently loaded. Check the
+            application startup logs for import or mount failures before
+            retrying.
           </p>
         {% else %}
           <div class="table-wrapper">

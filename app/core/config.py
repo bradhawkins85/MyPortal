@@ -16,6 +16,8 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.features import discover_builtin_feature_pack_slugs
+
 # Placeholder values that must be replaced before running in production. These
 # match the defaults distributed in ``.env.example`` and other template files.
 _PLACEHOLDER_SECRETS: frozenset[str] = frozenset(
@@ -33,6 +35,17 @@ _PLACEHOLDER_SECRETS: frozenset[str] = frozenset(
 # Minimum byte length required for cryptographic secrets used in production.
 _MIN_PRODUCTION_SECRET_LENGTH: int = 32
 _MARKETING_ELEMENT_PLACEHOLDER_SAMPLE: str = "element"
+_DEFAULT_FEATURE_PACK_SLUGS: tuple[str, ...] = tuple(discover_builtin_feature_pack_slugs())
+_DEFAULT_FEATURE_PACKS: str = ",".join(_DEFAULT_FEATURE_PACK_SLUGS)
+
+
+def _normalize_feature_packs(value: Any) -> str:
+    configured = [slug.strip() for slug in str(value or "").split(",") if slug.strip()]
+    merged: list[str] = []
+    for slug in configured + list(_DEFAULT_FEATURE_PACK_SLUGS):
+        if slug not in merged:
+            merged.append(slug)
+    return ",".join(merged)
 
 
 def _is_weak_secret(value: str | None) -> tuple[bool, str]:
@@ -187,18 +200,23 @@ class Settings(BaseSettings):
     default_timezone: str = Field(default="UTC", validation_alias="CRON_TIMEZONE")
     enable_csrf: bool = Field(default=True, validation_alias="ENABLE_CSRF")
     feature_packs: str = Field(
-        default="tickets,service_status,notifications,knowledge_base,chat,assets,automations,reports,reporting,backups,issue_tracker,webhooks,shop,quotes,invoices,compliance,continuity,help,subscriptions,companies,api_keys,call_recordings,calls,cart,orders,staff,message_templates,plausible,smtp,sms_gateway,receive_sms,imap,password_pusher,solidtime,trello,huntress,hudu,m365_mail,m365_admin,reprocess_ai,xero,tacticalrmm,syncro,uptimekuma,chatgpt_mcp,ollama,ntfy,matrix_chat_assign,marketing",
+        default=_DEFAULT_FEATURE_PACKS,
         validation_alias="FEATURE_PACKS",
         description=(
-            "Comma-separated list of feature pack slugs (subpackages of "
-            "``app.features``) to load on startup.  Each pack can be "
-            "hot-reloaded via ``POST /api/features/{slug}/reload``.  "
-            "Defaults to 'tickets,service_status,notifications,knowledge_base,chat,assets,automations,reports,reporting,backups,issue_tracker,webhooks,shop,quotes,invoices,compliance,continuity,help,subscriptions,companies,api_keys,call_recordings,calls,cart,orders,staff,message_templates,plausible,smtp,sms_gateway,receive_sms,imap,password_pusher,solidtime,trello,huntress,hudu,m365_mail,m365_admin,reprocess_ai,xero,tacticalrmm,syncro,uptimekuma,chatgpt_mcp,ollama,ntfy,matrix_chat_assign,marketing' "
-            "because the ticket, service-status, notifications, knowledge-base, "
-            "chat, assets, automations, reports, reporting, backups, issue-tracker, webhooks, shop, quotes, invoices, compliance, continuity, help, subscriptions, companies, API keys, call recordings, calls, cart, orders, staff, message templates, Plausible, SMTP, SMS Gateway, Receive SMS, IMAP, Password Pusher, Solidtime, Trello, Huntress, Hudu, M365 Mail, M365 Admin, Reprocess AI, Xero, TacticalRMM, Syncro, Uptime Kuma, ChatGPT MCP, Ollama, ntfy, Matrix Chat Auto-Assign, and Marketing integrations all live in those packs; set to an empty string "
-            "to disable all packs (those routes will then 404)."
+            "Comma-separated built-in feature pack slugs discovered from "
+            "``app.features`` at startup.  This internal manifest is "
+            "auto-populated from the repository rather than configured via "
+            "environment variables. Legacy ``FEATURE_PACKS`` values are "
+            "merged with the built-in set and cannot disable bundled packs."
         ),
     )
+
+    @field_validator("feature_packs", mode="before")
+    @classmethod
+    def ensure_builtin_feature_packs_present(cls, value: Any) -> str:
+        """Merge legacy FEATURE_PACKS values with bundled feature packs."""
+        return _normalize_feature_packs(value)
+
     feature_pack_watch: bool = Field(
         default=False,
         validation_alias="FEATURE_PACK_WATCH",

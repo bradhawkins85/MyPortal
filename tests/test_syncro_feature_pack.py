@@ -94,7 +94,7 @@ def test_syncro_pack_is_enabled_by_default():
     assert "syncro" in default_feature_packs
 
     env_example = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
-    assert "syncro" in env_example
+    assert "FEATURE_PACKS=" not in env_example
 
 
 def test_app_main_no_longer_owns_syncro_routes():

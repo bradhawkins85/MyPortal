@@ -76,9 +76,9 @@ async def _scan_inbox() -> None:
 
 ## Loading and reloading
 
-Packs to load on startup are listed in the `FEATURE_PACKS`
-environment variable (comma-separated slugs). They load after the
-database is connected and migrations have run.
+Built-in packs are discovered automatically from `app/features/`
+(excluding internal example packages). They load after the database is
+connected and migrations have run.
 
 Reload a single pack at runtime:
 

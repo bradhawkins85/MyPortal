@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydantic import ValidationError
 
+from app.core.config import Settings
 from app.repositories import voice_monitor as repo
 from app.schemas.voice_monitor import DialingPolicy, VoiceMonitorConfiguration
 
@@ -21,6 +22,14 @@ def test_sidebar_links_to_enabled_voice_monitor_for_authorized_users():
     assert 'data-module-slug="voice-monitor"' in template
     assert 'href="/voice-monitor"' in template
     assert "current_path.startswith('/voice-monitor')" in template
+    assert "module_enabled.get('voice-monitor', false)" in template
+    assert 'href="/admin/voice-monitor"' in template
+    assert "current_path.startswith('/admin/voice-monitor')" in template
+
+
+def test_voice_monitor_pack_is_enabled_by_default():
+    default_feature_packs = str(Settings.model_fields["feature_packs"].default).split(",")
+    assert "voice_monitor" in default_feature_packs
 
 
 def test_migration_preserves_attempt_audit_history_and_has_workload_indexes():

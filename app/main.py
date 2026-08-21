@@ -2854,8 +2854,7 @@ async def on_startup() -> None:
         _asyncio.create_task(matrix_sync.run_sync_loop())
         _asyncio.create_task(matrix_ai_waiting_assistant.run_worker_loop())
 
-    # Load feature packs.  Empty by default; populated as areas of the
-    # app are migrated under ``app/features/`` in follow-up PRs.
+    # Load every built-in feature pack discovered under ``app/features/``.
     pack_slugs = [
         slug.strip()
         for slug in (getattr(settings, "feature_packs", "") or "").split(",")

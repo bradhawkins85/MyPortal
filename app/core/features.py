@@ -50,6 +50,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import importlib.metadata
+from pathlib import Path
 import re
 import sys
 import time
@@ -62,6 +63,19 @@ from loguru import logger
 
 
 HookCallable = Callable[[], Awaitable[None] | None]
+
+
+def discover_builtin_feature_pack_slugs() -> list[str]:
+    """Return every built-in feature-pack slug under ``app.features``."""
+
+    features_dir = Path(__file__).resolve().parents[1] / "features"
+    if not features_dir.exists():
+        return []
+    return sorted(
+        entry.name
+        for entry in features_dir.iterdir()
+        if entry.is_dir() and not entry.name.startswith("_") and (entry / "__init__.py").exists()
+    )
 
 
 def module_name_for_slug(slug: str) -> str:

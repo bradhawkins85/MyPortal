@@ -54,7 +54,7 @@ def test_admin_feature_packs_page_renders_with_no_packs(super_admin_context, mon
     assert response.status_code == 200
     body = response.text
     assert "Feature packs" in body
-    assert "No feature packs are currently loaded" in body
+    assert "No built-in feature packs are currently loaded" in body
 
 
 def test_admin_feature_packs_page_lists_loaded_packs(super_admin_context, monkeypatch):

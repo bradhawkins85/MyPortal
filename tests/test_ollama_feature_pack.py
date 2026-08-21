@@ -54,7 +54,7 @@ def test_ollama_pack_is_enabled_by_default():
     assert "ollama" in default_feature_packs
 
     env_example = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8")
-    assert "ollama" in env_example
+    assert "FEATURE_PACKS=" not in env_example
 
 
 def test_app_main_no_longer_owns_ollama_routes():
