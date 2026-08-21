@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from html import unescape
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.features.voice_monitor import admin_routes
 from app.api.dependencies import modules as module_dependencies
 from app.core.config import Settings
 from app.core.database import db
@@ -47,6 +49,26 @@ def super_admin_context(monkeypatch):
     monkeypatch.setattr(
         main_module, "_require_super_admin_page", fake_require_super_admin_page
     )
+    monkeypatch.setattr(
+        admin_routes.company_repo,
+        "list_companies",
+        AsyncMock(return_value=[{"id": 7, "name": "Example Co"}]),
+    )
+    monkeypatch.setattr(
+        admin_routes.subscriptions_repo,
+        "list_subscriptions",
+        AsyncMock(
+            return_value=[
+                {
+                    "id": "sub-1",
+                    "customer_id": 7,
+                    "category_name": "Voice Monitor",
+                    "product_name": "Voice Monitor",
+                    "quantity": 2,
+                }
+            ]
+        ),
+    )
     yield
 
 
@@ -56,7 +78,9 @@ def module_enabled_context(monkeypatch):
         assert slug == "voice-monitor"
         return {"slug": slug, "enabled": True}
 
-    monkeypatch.setattr(module_dependencies.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(
+        module_dependencies.modules_service, "get_module", fake_get_module
+    )
     yield
 
 
@@ -66,7 +90,9 @@ def module_disabled_context(monkeypatch):
         assert slug == "voice-monitor"
         return {"slug": slug, "enabled": False}
 
-    monkeypatch.setattr(module_dependencies.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(
+        module_dependencies.modules_service, "get_module", fake_get_module
+    )
     yield
 
 
@@ -78,6 +104,9 @@ def test_admin_voice_monitor_page_renders_for_super_admin_when_module_enabled(
 
     assert response.status_code == 200
     assert "Voice Monitor" in response.text
+    assert "Add monitored number" in response.text
+    assert "Example Co" in response.text
+    assert "/admin/voice-monitor/endpoints?company_id=" in response.text
 
 
 def test_admin_voice_monitor_page_is_unavailable_when_module_disabled(
@@ -87,7 +116,9 @@ def test_admin_voice_monitor_page_is_unavailable_when_module_disabled(
         response = client.get("/admin/voice-monitor")
 
     assert response.status_code == 503
-    assert "Integration module 'voice-monitor' is unavailable" in unescape(response.text)
+    assert "Integration module 'voice-monitor' is unavailable" in unescape(
+        response.text
+    )
 
 
 def test_settings_keep_builtin_voice_monitor_pack_when_legacy_feature_packs_env_is_present(

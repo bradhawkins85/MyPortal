@@ -1,2 +1,105 @@
 {% extends "base.html" %}
-{% block content %}<section class="card"><h1>Voice Monitor</h1><p>Provision endpoints, configure the provider, inspect worker health, initiate approved calls, and diagnose attempts through the administration API.</p></section>{% endblock %}
+{% block content %}
+<div class="admin-page">
+  <div class="admin-header">
+    <h1>Voice Monitor</h1>
+    <p class="subtitle">Provision monitored numbers and manage voice monitoring operations.</p>
+  </div>
+
+  <section class="card" aria-labelledby="add-number-heading">
+    <h2 id="add-number-heading">Add monitored number</h2>
+    {% if voice_monitor_subscriptions %}
+    <form id="voice-monitor-endpoint-form">
+      <div class="form-grid">
+        <label>Company
+          <select name="company_id" id="voice-monitor-company" required>
+            <option value="">Select a company</option>
+            {% for company in companies %}<option value="{{ company.id }}">{{ company.name }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Voice Monitor subscription
+          <select name="subscription_id" id="voice-monitor-subscription" required disabled>
+            <option value="">Select a company first</option>
+            {% for subscription in voice_monitor_subscriptions %}
+            <option value="{{ subscription.id }}" data-company-id="{{ subscription.customer_id }}" hidden>
+              {{ subscription.product_name or subscription.category_name or 'Voice Monitor' }} ({{ subscription.quantity }} number{% if subscription.quantity != 1 %}s{% endif %})
+            </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Phone number (E.164)
+          <input type="tel" name="destination_e164" placeholder="+61412345678" pattern="\+[0-9 ]+" required>
+        </label>
+        <label>Display label
+          <input type="text" name="display_label" maxlength="255" placeholder="Main reception line" required>
+        </label>
+        <label>Check every
+          <select name="interval_seconds">
+            <option value="300">5 minutes</option><option value="900">15 minutes</option>
+            <option value="1800">30 minutes</option><option value="3600">1 hour</option>
+          </select>
+        </label>
+        <label>Timezone
+          <input type="text" name="timezone" value="UTC" required>
+        </label>
+      </div>
+      <div class="form-checks">
+        <label><input type="checkbox" name="consent_granted" required> The customer has authorised monitoring calls to this number.</label>
+        <label><input type="checkbox" name="ticket_on_failure"> Create a ticket when monitoring fails</label>
+        <label><input type="checkbox" name="transcription_enabled"> Transcribe completed calls</label>
+      </div>
+      <p id="voice-monitor-form-status" role="status" aria-live="polite"></p>
+      <button type="submit">Add monitored number</button>
+    </form>
+    {% else %}
+    <p>No active Voice Monitor subscriptions are available. Add a Voice Monitor subscription before provisioning a number.</p>
+    <a class="button" href="/admin/subscriptions">Manage subscriptions</a>
+    {% endif %}
+  </section>
+</div>
+
+{% if voice_monitor_subscriptions %}
+<script>
+(() => {
+  const form = document.getElementById('voice-monitor-endpoint-form');
+  const company = document.getElementById('voice-monitor-company');
+  const subscription = document.getElementById('voice-monitor-subscription');
+  const status = document.getElementById('voice-monitor-form-status');
+
+  company.addEventListener('change', () => {
+    let available = 0;
+    subscription.value = '';
+    for (const option of subscription.querySelectorAll('option[data-company-id]')) {
+      option.hidden = option.dataset.companyId !== company.value;
+      if (!option.hidden) available += 1;
+    }
+    subscription.disabled = !company.value || available === 0;
+    subscription.options[0].textContent = available ? 'Select a subscription' : 'No active subscription for this company';
+  });
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const data = new FormData(form);
+    const companyId = data.get('company_id');
+    const payload = {
+      subscription_id: data.get('subscription_id'), destination_e164: data.get('destination_e164'),
+      display_label: data.get('display_label'), interval_seconds: Number(data.get('interval_seconds')),
+      timezone: data.get('timezone'), consent_granted: data.has('consent_granted'),
+      ticket_on_failure: data.has('ticket_on_failure'), transcription_enabled: data.has('transcription_enabled')
+    };
+    status.textContent = 'Adding monitored number…';
+    try {
+      const response = await fetch(`/admin/voice-monitor/endpoints?company_id=${encodeURIComponent(companyId)}`, {
+        method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || ''},
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || 'Unable to add the monitored number.');
+      status.textContent = `Added ${result.display_label}.`;
+      form.reset(); subscription.disabled = true;
+    } catch (error) { status.textContent = error.message; }
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}
