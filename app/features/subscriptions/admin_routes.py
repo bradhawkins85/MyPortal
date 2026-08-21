@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse
 from app.core.logging import log_error
 from app.repositories import subscription_categories as categories_repo
 from app.repositories import subscriptions as subscriptions_repo
+from app.services.voice_monitor_billing import contract_display, is_voice_monitor_subscription
 
 
 router = APIRouter(tags=["Subscriptions"])
@@ -61,6 +62,9 @@ async def admin_subscriptions_page(
         )
 
         categories = await categories_repo.list_categories()
+        for sub in subs:
+            if is_voice_monitor_subscription(sub):
+                sub["voice_monitor_contract"] = contract_display(sub)
         status_counts: Counter[str | None] = Counter(sub.get("status") for sub in subs)
 
     except Exception as exc:  # pragma: no cover - defensive logging
