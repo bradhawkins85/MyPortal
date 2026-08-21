@@ -1,7 +1,7 @@
 """Validation models for tenant voice monitoring."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, time
 from enum import Enum
 from typing import Annotated, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -83,6 +83,16 @@ class VoiceMonitorConfiguration(BaseModel):
     transcription_enabled: bool = False
     ticket_on_failure: bool = False
     ticket_failure_threshold: Annotated[int, Field(ge=1, le=100)] = 1
+    # Dialling is denied until the customer has explicitly authorised this
+    # particular destination. Recording requires a separate opt-in.
+    consent_granted: bool = False
+    recording_consent_granted: bool = False
+    consent_policy_version: Annotated[str, Field(min_length=1, max_length=64)] = "2026-08-21"
+    quiet_hours_start: time = time(20, 0)
+    quiet_hours_end: time = time(8, 0)
+    caller_id_verified: bool = False
+    daily_attempt_limit: Annotated[int, Field(ge=1, le=10000)] = 10
+    monetary_cap_minor: Annotated[int, Field(ge=0, le=100_000_000)] = 0
 
     @field_validator("destination_e164")
     @classmethod
@@ -103,6 +113,8 @@ class VoiceMonitorConfiguration(BaseModel):
     def exactly_one_schedule(self) -> "VoiceMonitorConfiguration":
         if (self.schedule_cron is None) == (self.interval_seconds is None):
             raise ValueError("exactly one of schedule_cron or interval_seconds is required")
+        if self.recording_consent_granted and not self.consent_granted:
+            raise ValueError("recording consent requires call consent")
         return self
 
 
