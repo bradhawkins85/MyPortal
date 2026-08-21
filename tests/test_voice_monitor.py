@@ -13,6 +13,16 @@ from app.repositories import voice_monitor as repo
 from app.schemas.voice_monitor import DialingPolicy, VoiceMonitorConfiguration
 
 
+def test_sidebar_links_to_enabled_voice_monitor_for_authorized_users():
+    template = Path("app/templates/base.html").read_text()
+
+    assert "menu_access.get('menu.voice_monitor') in ['read', 'write']" in template
+    assert "'voice-monitor' in (enabled_module_slugs | default([]))" in template
+    assert 'data-module-slug="voice-monitor"' in template
+    assert 'href="/voice-monitor"' in template
+    assert "current_path.startswith('/voice-monitor')" in template
+
+
 def test_migration_preserves_attempt_audit_history_and_has_workload_indexes():
     sql = Path("migrations/334_voice_monitor.sql").read_text()
     assert "CREATE TABLE voice_monitor_endpoints" in sql
