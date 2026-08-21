@@ -107,6 +107,21 @@ def test_admin_voice_monitor_page_renders_for_super_admin_when_module_enabled(
     assert "Add monitored number" in response.text
     assert "Example Co" in response.text
     assert "/admin/voice-monitor/endpoints?company_id=" in response.text
+    assert 'href="/admin/voice-monitor/subscriptions"' in response.text
+    assert 'href="/admin/subscriptions"' not in response.text
+
+
+def test_voice_monitor_subscriptions_page_manages_monitored_numbers(
+    super_admin_context, module_enabled_context
+):
+    with TestClient(app) as client:
+        response = client.get("/admin/voice-monitor/subscriptions")
+
+    assert response.status_code == 200
+    assert "Manage Voice Monitor Subscriptions" in response.text
+    assert "Add monitored number" in response.text
+    assert "Phone number (E.164)" in response.text
+    assert "/admin/voice-monitor/endpoints?company_id=" in response.text
 
 
 def test_admin_voice_monitor_page_is_unavailable_when_module_disabled(
