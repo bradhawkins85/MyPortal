@@ -1,0 +1,29 @@
+[Unit]
+Description=MyPortal Voice Monitor worker (%i)
+After=network-online.target mysql.service redis.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=myportal
+Group=myportal
+WorkingDirectory=/opt/myportal
+EnvironmentFile=/etc/myportal.env
+EnvironmentFile=-/etc/myportal.voice-monitor.%i.env
+RuntimeDirectory=myportal
+ExecStart=/opt/myportal/.venv/bin/python -m app.workers.voice_monitor --health-file=/run/myportal/voice-monitor-%i.health
+ExecStop=/bin/kill -s TERM $MAINPID
+TimeoutStopSec=35
+Restart=on-failure
+RestartSec=5
+MemoryMax=768M
+CPUQuota=150%
+TasksMax=256
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/myportal /run/myportal
+
+[Install]
+WantedBy=multi-user.target
