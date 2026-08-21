@@ -35,13 +35,14 @@ _PLACEHOLDER_SECRETS: frozenset[str] = frozenset(
 # Minimum byte length required for cryptographic secrets used in production.
 _MIN_PRODUCTION_SECRET_LENGTH: int = 32
 _MARKETING_ELEMENT_PLACEHOLDER_SAMPLE: str = "element"
-_DEFAULT_FEATURE_PACKS: str = ",".join(discover_builtin_feature_pack_slugs())
+_DEFAULT_FEATURE_PACK_SLUGS: tuple[str, ...] = tuple(discover_builtin_feature_pack_slugs())
+_DEFAULT_FEATURE_PACKS: str = ",".join(_DEFAULT_FEATURE_PACK_SLUGS)
 
 
 def _normalize_feature_packs(value: Any) -> str:
     configured = [slug.strip() for slug in str(value or "").split(",") if slug.strip()]
     merged: list[str] = []
-    for slug in configured + discover_builtin_feature_pack_slugs():
+    for slug in configured + list(_DEFAULT_FEATURE_PACK_SLUGS):
         if slug not in merged:
             merged.append(slug)
     return ",".join(merged)
@@ -207,6 +208,7 @@ class Settings(BaseSettings):
             "environment variables."
         ),
     )
+
     @field_validator("feature_packs", mode="before")
     @classmethod
     def ensure_builtin_feature_packs_present(cls, value: Any) -> str:
