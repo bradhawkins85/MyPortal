@@ -91,8 +91,8 @@ def test_list_voice_monitor_products_queries_by_category_name():
 
 def test_list_voice_monitor_products_normalises_rows():
     rows = [
-        {"id": 10, "name": "Every 5 min", "price": "9.95", "term_days": 365, "description": None},
-        {"id": 11, "name": "Every hour", "price": "4.95", "term_days": 365, "description": "Hourly"},
+        {"id": 10, "name": "Every 5 min", "price": "9.95", "commitment_type": "annual", "description": None},
+        {"id": 11, "name": "Every hour", "price": "4.95", "commitment_type": "monthly", "description": "Hourly"},
     ]
     with patch.object(billing.db, "fetch_all", AsyncMock(return_value=rows)):
         products = asyncio.run(billing.list_voice_monitor_products())
@@ -100,6 +100,7 @@ def test_list_voice_monitor_products_normalises_rows():
     assert products[0]["id"] == 10
     assert products[0]["price"] == Decimal("9.95")
     assert products[0]["term_days"] == 365
+    assert products[1]["term_days"] == 30
 
 
 def test_provision_subscription_rejects_non_voice_monitor_product():
@@ -110,7 +111,7 @@ def test_provision_subscription_rejects_non_voice_monitor_product():
 
 def test_provision_subscription_creates_subscription_with_product_price_and_term():
     product_row = {
-        "id": 10, "price": "9.95", "term_days": 30, "category_id": 3,
+        "id": 10, "price": "9.95", "commitment_type": "monthly", "category_id": 3,
     }
     created_sub = {
         "id": "sub-new", "customer_id": 7, "product_id": 10,

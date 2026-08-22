@@ -142,11 +142,18 @@ async def usage_invoice_lines(subscription_id: str, period_start: date, period_e
     return [{"description": description, "quantity": quantity, "unit_price": price, "amount": (price * quantity).quantize(Decimal("0.01"))} for description, quantity, price in values if quantity]
 
 
+def _term_days_from_commitment(commitment_type: str | None) -> int:
+    """Return the term length in days for a given commitment type."""
+    if str(commitment_type or "").casefold() == "monthly":
+        return 30
+    return 365
+
+
 async def list_voice_monitor_products() -> list[dict[str, Any]]:
     """Return active shop products that belong to the Voice Monitor subscription category."""
     rows = await db.fetch_all(
         """
-        SELECT p.id, p.name, p.price, p.term_days, p.description
+        SELECT p.id, p.name, p.price, p.commitment_type, p.description
         FROM shop_products p
         JOIN subscription_categories c ON c.id = p.subscription_category_id
         WHERE c.name = %s AND p.archived = 0
@@ -159,7 +166,7 @@ async def list_voice_monitor_products() -> list[dict[str, Any]]:
             "id": int(row["id"]),
             "name": row["name"],
             "price": Decimal(str(row["price"])),
-            "term_days": int(row.get("term_days") or 365),
+            "term_days": _term_days_from_commitment(row.get("commitment_type")),
             "description": row.get("description"),
         }
         for row in rows
@@ -178,7 +185,7 @@ async def provision_subscription(
     """
     row = await db.fetch_one(
         """
-        SELECT p.id, p.price, p.term_days, c.id AS category_id
+        SELECT p.id, p.price, p.commitment_type, c.id AS category_id
         FROM shop_products p
         JOIN subscription_categories c ON c.id = p.subscription_category_id
         WHERE p.id = %s AND c.name = %s AND p.archived = 0
@@ -191,7 +198,7 @@ async def provision_subscription(
     from app.repositories import subscriptions as subscriptions_repo
 
     today = date.today()
-    term_days = int(row.get("term_days") or 365)
+    term_days = _term_days_from_commitment(row.get("commitment_type"))
     end_date = today + timedelta(days=term_days)
 
     return await subscriptions_repo.create_subscription(
