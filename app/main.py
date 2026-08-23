@@ -8892,6 +8892,10 @@ async def _render_tickets_dashboard(
         "ticket_available_statuses": dashboard.available_statuses,
         "ticket_status_definitions": status_definitions_payload,
         "ticket_filter_status_definitions": filter_status_definitions_payload,
+        # Status visibility only controls ticket editing.  The configuration
+        # editor must retain every definition so saving it cannot implicitly
+        # delete statuses hidden from the current admin.
+        "ticket_status_configuration_definitions": filter_status_definitions_payload,
         "ticket_status_label_map": status_label_map,
         "ticket_public_status_map": public_status_map,
         "ticket_reply_default_status": reply_default_status,
