@@ -30,6 +30,34 @@ async def test_device_list_looks_up_vendor_when_table_is_loaded(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_device_list_exposes_matching_type_recommendations(monkeypatch):
+    fetch_all = AsyncMock(
+        return_value=[{"id": 8, "recommended_device_type_ids": "2,5"}]
+    )
+    monkeypatch.setattr(network_devices.db, "fetch_all", fetch_all)
+
+    devices = await network_devices.list_for_company(42)
+
+    assert devices[0]["recommended_device_type_ids"] == {2, 5}
+    query = fetch_all.await_args.args[0]
+    assert "network_device_type_vendors" in query
+
+
+@pytest.mark.anyio
+async def test_auto_assignment_only_updates_untyped_matching_device(monkeypatch):
+    execute = AsyncMock()
+    monkeypatch.setattr(network_devices.db, "execute", execute)
+
+    await network_devices._auto_assign_device_type(17)
+
+    query, params = execute.await_args.args
+    assert "nd.device_type_id IS NULL" in query
+    assert "dt.auto_assign=1" in query
+    assert "COALESCE(mv.vendor, nd.vendor)" in query
+    assert params == (17,)
+
+
+@pytest.mark.anyio
 async def test_scheduler_dispatches_mac_vendor_update(monkeypatch):
     scheduler = SchedulerService()
     update = AsyncMock(return_value={"imported": 123})
@@ -57,4 +85,3 @@ async def test_scheduler_dispatches_mac_vendor_update(monkeypatch):
     update.assert_awaited_once_with()
     assert record.await_args.kwargs["status"] == "succeeded"
     assert '"imported": 123' in record.await_args.kwargs["details"]
-
