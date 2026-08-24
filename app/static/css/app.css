@@ -4577,6 +4577,10 @@ dialog.modal:not([open]) {
   width: min(96vw, 80rem);
 }
 
+.modal__dialog--three-quarters {
+  width: 75vw;
+}
+
 .modal__dialog .modal__header {
   display: flex;
   align-items: flex-start;
