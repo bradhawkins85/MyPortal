@@ -4742,6 +4742,11 @@ dialog.modal:not([open]) {
   max-height: calc(100vh - 4rem);
 }
 
+.modal__content--create-ticket {
+  width: 67.5vw;
+  max-width: 67.5vw;
+}
+
 .modal .modal__header,
 .modal .modal-header {
   position: relative;

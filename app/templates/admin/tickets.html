@@ -833,28 +833,29 @@
     aria-hidden="true"
     hidden
   >
-    <div class="modal__content" role="document">
+    <div class="modal__content modal__content--create-ticket" role="document">
       <button type="button" class="modal__close" data-modal-close>
         <span class="visually-hidden">Close create ticket form</span>
         &times;
       </button>
       <h2 class="modal__title" id="create-ticket-title">Create ticket</h2>
-      <p class="modal__subtitle">Create a ticket that can be routed to automation modules or manual analysts.</p>
+      <p class="modal__subtitle">Create a ticket for a customer request or technician follow-up.</p>
       <form action="/admin/tickets" method="post" class="form" autocomplete="off">
         {% include "partials/csrf.html" %}
         <div class="form-field">
-          <label class="form-label" for="modal-ticket-subject">Subject</label>
-          <input id="modal-ticket-subject" name="subject" class="form-input" maxlength="255" required />
+          <label class="form-label" for="modal-ticket-company">Company</label>
+          <select id="modal-ticket-company" name="companyId" class="form-input" data-ticket-company-select>
+            <option value="">Not linked</option>
+            {% for company in ticket_company_options %}
+              <option value="{{ company.id }}">{{ company.name }}</option>
+            {% endfor %}
+          </select>
         </div>
         <div class="form-field">
-          <label class="form-label" for="modal-ticket-description">Description</label>
-          <textarea
-            id="modal-ticket-description"
-            name="description"
-            class="form-input form-input--textarea"
-            rows="5"
-            placeholder="Include the customer request or diagnostic notes"
-          ></textarea>
+          <label class="form-label" for="modal-ticket-requester">Requester</label>
+          <select id="modal-ticket-requester" name="requesterId" class="form-input" data-ticket-requester-select>
+            <option value="">Not specified</option>
+          </select>
         </div>
         <div class="form-grid">
           <div class="form-field">
@@ -884,57 +885,18 @@
           </div>
         </div>
         <div class="form-field">
-          <label class="form-label" for="modal-ticket-module">Module</label>
-          <select id="modal-ticket-module" name="moduleSlug" class="form-input">
-            <option value="">Unassigned</option>
-            {% for module in ticket_modules %}
-              <option value="{{ module.slug }}">{{ module.name }}</option>
-            {% endfor %}
-          </select>
+          <label class="form-label" for="modal-ticket-subject">Subject</label>
+          <input id="modal-ticket-subject" name="subject" class="form-input" maxlength="255" required />
         </div>
         <div class="form-field">
-          <label class="form-label" for="modal-ticket-company">Company</label>
-          <select id="modal-ticket-company" name="companyId" class="form-input" data-ticket-company-select>
-            <option value="">Not linked</option>
-            {% for company in ticket_company_options %}
-              <option value="{{ company.id }}">{{ company.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="modal-ticket-requester">Requester</label>
-          <select id="modal-ticket-requester" name="requesterId" class="form-input" data-ticket-requester-select>
-            <option value="">Not specified</option>
-          </select>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="modal-ticket-assigned">Assign to</label>
-          <select id="modal-ticket-assigned" name="assignedUserId" class="form-input">
-            <option value="">Unassigned</option>
-            {% for user in ticket_user_options %}
-              <option value="{{ user.id }}">{{ user.email }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="modal-ticket-category">Category</label>
-          <input
-            id="modal-ticket-category"
-            name="category"
-            class="form-input"
-            maxlength="64"
-            placeholder="Networking, onboarding, escalation…"
-          />
-        </div>
-        <div class="form-field">
-          <label class="form-label" for="modal-ticket-reference">External reference</label>
-          <input
-            id="modal-ticket-reference"
-            name="externalReference"
-            class="form-input"
-            maxlength="128"
-            placeholder="Syncro ID or external case"
-          />
+          <label class="form-label" for="modal-ticket-description">Description</label>
+          <textarea
+            id="modal-ticket-description"
+            name="description"
+            class="form-input form-input--textarea"
+            rows="5"
+            placeholder="Include the customer request or diagnostic notes"
+          ></textarea>
         </div>
         <div class="form-actions">
           <button type="submit" class="button button--primary">Create ticket</button>
