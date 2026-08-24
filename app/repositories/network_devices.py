@@ -90,6 +90,12 @@ async def _replace_device_type_vendors(
 
 
 async def _auto_assign_existing_devices(device_type_id: int) -> None:
+    """Assign the type only to devices that have never been classified.
+
+    A device's current type is authoritative regardless of whether it was selected
+    by a user or by an earlier automatic assignment.  In particular, changing a
+    vendor mapping must not reclassify devices that already have a type.
+    """
     await db.execute(
         """UPDATE network_devices nd
            LEFT JOIN mac_vendors mv ON mv.oui_prefix =
@@ -287,7 +293,7 @@ async def upsert_scan(
 
 
 async def _auto_assign_device_type(device_id: int) -> None:
-    """Classify an untyped device when its resolved vendor has one auto rule."""
+    """Classify an untyped device without replacing an existing classification."""
     await db.execute(
         """UPDATE network_devices nd
            LEFT JOIN mac_vendors mv ON mv.oui_prefix =
