@@ -19,6 +19,7 @@ from app.repositories import network_devices as network_devices_repo
 from app.repositories import tray as tray_repo
 from app.repositories import user_companies as user_company_repo
 from app.services import tray as tray_service
+from app.services import hudu as hudu_service
 
 router = APIRouter(tags=["Assets"])
 
@@ -43,6 +44,7 @@ def _scanner_scope_from_form(form: Any) -> tuple[list[str], list[str]]:
                 values.append(canonical)
         scopes.append(values)
     return scopes[0], scopes[1]
+
 
 _ASSET_TABLE_COLUMNS: list[dict[str, str]] = [
     {"key": "name", "label": "Name", "sort": "string", "priority": "essential"},
@@ -379,7 +381,50 @@ async def network_devices_page(request: Request):
             or main_module._membership_menu_can(
                 user, membership, "menu.assets", write=True
             ),
+            "can_sync_hudu": bool(company.get("hudu_id")),
         },
+    )
+
+
+@router.post("/devices/discovered/{device_id}/hudu-sync")
+async def sync_network_device_to_hudu(request: Request, device_id: int):
+    """Send a discovered device to Hudu or synchronize its managed fields."""
+    main_module = _main()
+    user, membership, company, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    if not (
+        user.get("is_super_admin")
+        or main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+    ):
+        raise HTTPException(status_code=403, detail="Asset write access required")
+    hudu_company_id = str(company.get("hudu_id") or "").strip()
+    if not hudu_company_id:
+        return main_module.flash_redirect(
+            "/devices", "Link this company to Hudu before syncing devices.", "error"
+        )
+    device = await network_devices_repo.get_for_company(device_id, company_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Discovered device not found")
+    try:
+        result = await hudu_service.sync_discovered_device(
+            company_id=hudu_company_id, device=device
+        )
+    except (
+        hudu_service.HuduConfigurationError,
+        hudu_service.HuduDeviceSyncError,
+    ) as exc:
+        return main_module.flash_redirect("/devices", str(exc), "error")
+    except Exception as exc:
+        log_info("Hudu device sync failed", device_id=device_id, error=str(exc))
+        return main_module.flash_redirect(
+            "/devices",
+            "Hudu could not sync this device. Check the integration and try again.",
+            "error",
+        )
+    verb = "Sent" if result["action"] == "created" else "Synced"
+    return main_module.flash_redirect(
+        "/devices", f"{verb} device with Hudu.", "success"
     )
 
 
@@ -661,8 +706,12 @@ async def configure_network_scanner(request: Request, device_id: int):
         raise HTTPException(status_code=422, detail="Scan interval must be a number")
     wan_cidrs, local_cidrs = _scanner_scope_from_form(form)
     await network_devices_repo.configure_scanner(
-        device_id, company_id, form.get("enabled") == "1", interval,
-        wan_cidrs, local_cidrs,
+        device_id,
+        company_id,
+        form.get("enabled") == "1",
+        interval,
+        wan_cidrs,
+        local_cidrs,
     )
     return RedirectResponse(url="/devices", status_code=status.HTTP_303_SEE_OTHER)
 
