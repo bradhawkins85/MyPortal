@@ -72,6 +72,46 @@ async def test_emit_ticket_updated_event_includes_public_reply_context(monkeypat
     assert captured["context"]["reply"]["kind"] == "message"
 
 
+@pytest.mark.anyio
+async def test_reply_backed_updated_event_exposes_triggering_body(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    async def fake_get_ticket(ticket_id: int):
+        assert ticket_id == 789
+        return {"id": 789, "description": "Original request"}
+
+    async def fake_enrich(ticket):
+        return {
+            **ticket,
+            "body": "Original request",
+            "initial_body": "Original request",
+        }
+
+    async def fake_handle_event(event_name, context):
+        captured["event_name"] = event_name
+        captured["context"] = context
+        return []
+
+    monkeypatch.setattr(tickets_service.tickets_repo, "get_ticket", fake_get_ticket)
+    monkeypatch.setattr(tickets_service, "_enrich_ticket_context", fake_enrich)
+    monkeypatch.setattr(tickets_service.automations_service, "handle_event", fake_handle_event)
+
+    await tickets_service.emit_ticket_updated_event(
+        789,
+        actor_type="system",
+        reply={
+            "id": 88,
+            "is_internal": True,
+            "body": "Your order for this ticket is currently Delivered in Full.",
+        },
+    )
+
+    assert captured["event_name"] == "tickets.updated"
+    assert captured["context"]["ticket"]["body"].startswith("Your order for this ticket")
+    assert captured["context"]["ticket"]["initial_body"] == "Original request"
+    assert captured["context"]["reply"]["body"] == captured["context"]["ticket"]["body"]
+
+
 def test_reply_message_filter_matches_updated_event_context():
     from app.services import automations as automations_service
 
