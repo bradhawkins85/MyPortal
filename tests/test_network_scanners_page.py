@@ -55,6 +55,8 @@ def test_discovered_devices_loads_shared_column_filters():
     assert "data-device-bulk-open disabled" in TEMPLATE
     assert 'action="/devices/discovered-bulk-update"' in TEMPLATE
     assert "data-device-bulk-ids" in TEMPLATE
+    assert 'action="/devices/scanners/{{ scanner.id }}/scan"' in TEMPLATE
+    assert ">Scan Now</button>" in TEMPLATE
 
 
 @pytest.mark.anyio
@@ -184,6 +186,88 @@ async def test_add_scanner_requires_asset_selection(monkeypatch):
         await assets_routes.add_network_scanner(request)
 
     assert exc_info.value.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_scan_now_sends_command_to_enabled_scanner(monkeypatch):
+    request = _request("/devices/scanners/10/scan", "POST")
+    monkeypatch.setattr(
+        assets_routes,
+        "_load_asset_context",
+        AsyncMock(
+            return_value=(
+                {"id": 7, "is_super_admin": True},
+                None,
+                {"id": 42},
+                42,
+                None,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        assets_routes.network_devices_repo,
+        "list_scanners",
+        AsyncMock(
+            return_value=[
+                {
+                    "id": 10,
+                    "device_uid": "scanner-uid",
+                    "network_scanner_enabled": 1,
+                }
+            ]
+        ),
+    )
+    send = AsyncMock(return_value=True)
+    log_command = AsyncMock()
+    monkeypatch.setattr(assets_routes.tray_service, "send_to_device", send)
+    monkeypatch.setattr(assets_routes.tray_repo, "log_command", log_command)
+    monkeypatch.setattr(
+        main_module,
+        "flash_redirect",
+        lambda url, message, category: HTMLResponse(
+            f"{url}|{message}|{category}", status_code=303
+        ),
+    )
+
+    response = await assets_routes.scan_network_now(request, 10)
+
+    send.assert_awaited_once_with("scanner-uid", {"type": "scan_network"})
+    log_command.assert_awaited_once_with(
+        device_id=10,
+        command="scan_network",
+        payload_json='{"type": "scan_network"}',
+        initiated_by_user_id=7,
+        status="delivered",
+    )
+    assert response.status_code == 303
+
+
+@pytest.mark.anyio
+async def test_scan_now_rejects_disabled_scanner(monkeypatch):
+    request = _request("/devices/scanners/10/scan", "POST")
+    monkeypatch.setattr(
+        assets_routes,
+        "_load_asset_context",
+        AsyncMock(
+            return_value=(
+                {"id": 7, "is_super_admin": True},
+                None,
+                {"id": 42},
+                42,
+                None,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        assets_routes.network_devices_repo,
+        "list_scanners",
+        AsyncMock(return_value=[{"id": 10, "network_scanner_enabled": 0}]),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await assets_routes.scan_network_now(request, 10)
+
+    assert exc_info.value.status_code == 404
 
 
 @pytest.mark.anyio

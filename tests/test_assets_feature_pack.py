@@ -14,18 +14,19 @@ from app.core.features import init_registry
 from app.features.assets import PACK
 from app.features.assets import routes as assets_routes
 
-
 EXPECTED = {
     ("GET", "/assets"),
     ("GET", "/assets/{asset_id}"),
     ("GET", "/assets/settings"),
     ("GET", "/devices"),
     ("POST", "/devices/discovered/{device_id}"),
+    ("POST", "/devices/discovered-bulk-update"),
     ("POST", "/devices/alerts"),
     ("POST", "/devices/device-types"),
     ("POST", "/devices/device-types/{device_type_id}/delete"),
     ("POST", "/devices/scanners"),
     ("POST", "/devices/scanners/{device_id}"),
+    ("POST", "/devices/scanners/{device_id}/scan"),
     ("POST", "/assets/settings/device-types"),
     ("POST", "/assets/settings/device-types/{device_type_id}/delete"),
     ("DELETE", "/assets/{asset_id}"),
@@ -123,9 +124,9 @@ def test_assets_pack_loads_and_reloads_cleanly():
                 if path:
                     counts[(method, path)] = counts.get((method, path), 0) + 1
         for key in EXPECTED:
-            assert counts.get(key, 0) == 1, (
-                f"Route {key} duplicated after reload (count={counts.get(key)})"
-            )
+            assert (
+                counts.get(key, 0) == 1
+            ), f"Route {key} duplicated after reload (count={counts.get(key)})"
 
         await registry.unload_all()
 

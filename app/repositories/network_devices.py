@@ -131,7 +131,7 @@ async def register_scanned_subnets(
 async def list_scanners(company_id: int) -> list[dict[str, Any]]:
     return list(
         await db.fetch_all(
-            """SELECT td.id, td.hostname, td.asset_id, td.network_scanner_enabled,
+            """SELECT td.id, td.device_uid, td.hostname, td.asset_id, td.network_scanner_enabled,
                   td.network_scan_interval_minutes, td.last_seen_utc, a.name AS asset_name
            FROM tray_devices td LEFT JOIN assets a ON a.id = td.asset_id
            WHERE td.company_id = %s AND td.status = 'active' AND td.asset_id IS NOT NULL
