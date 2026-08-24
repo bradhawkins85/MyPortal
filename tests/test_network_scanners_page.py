@@ -50,6 +50,10 @@ def test_discovered_devices_loads_shared_column_filters():
     assert "device.last_seen_at.strftime('%Y-%m-%d %H:%M')" in TEMPLATE
     assert 'page_header_overflow("network-device-actions", "Actions"' in TEMPLATE
     assert 'id="device-types-modal" hidden' in TEMPLATE
+    assert (
+        'data-device-types-close></div>\n  <section class="modal__dialog '
+        'modal__dialog--three-quarters">'
+    ) in TEMPLATE
     assert 'action="/devices/device-types"' in TEMPLATE
     assert "data-device-select-all" in TEMPLATE
     assert "data-device-bulk-open disabled" in TEMPLATE
