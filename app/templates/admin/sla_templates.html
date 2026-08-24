@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header"><div><h1>SLA templates</h1><p class="text-muted">Define reusable targets for any ticket priorities your administrators use, then optionally apply a template to customers.</p></div></div>
+{% if request.query_params.get('error') %}<div class="alert alert--danger">Enter a name and at least one unique priority with valid targets. Resolution must not be shorter than first response.</div>{% endif %}
+<div class="admin-grid">
+  <section class="card card--panel"><div class="card__header"><h2 class="card__title">Existing templates</h2></div><div class="card__body">
+    {% if sla_templates %}{% for template in sla_templates %}<article class="card"><div class="card__body"><h3>{{ template.name }}</h3>{% if template.description %}<p>{{ template.description }}</p>{% endif %}<table class="table"><thead><tr><th>Priority</th><th>Response</th><th>Resolution</th></tr></thead><tbody>{% for target in template.targets %}<tr><td>{{ target.priority|replace('_', ' ')|title }}</td><td>{{ target.response_minutes }} min</td><td>{{ target.resolution_minutes }} min</td></tr>{% endfor %}</tbody></table></div></article>{% endfor %}{% else %}<p class="text-muted">No SLA templates have been created.</p>{% endif %}
+  </div></section>
+  <section class="card card--panel"><div class="card__header"><h2 class="card__title">New template</h2></div><div class="card__body"><form action="/admin/sla-templates" method="post" class="form">{% include "partials/csrf.html" %}
+    <div class="form-field"><label class="form-label required" for="sla-template-name">Name</label><input class="form-input" id="sla-template-name" name="name" required maxlength="150" placeholder="IT Helpdesk & Support" /></div>
+    <div class="form-field"><label class="form-label" for="sla-template-description">Description</label><textarea class="form-input" id="sla-template-description" name="description" rows="2"></textarea></div>
+    <p class="form-help">Priority names are not limited to a built-in list. Add the exact values configured for your tickets, such as Urgent, High, Normal, Low, P1, or Scheduled.</p>
+    <div class="table-wrapper"><table class="table"><thead><tr><th>Priority</th><th>Response (minutes)</th><th>Resolution (minutes)</th><th></th></tr></thead><tbody data-sla-targets>
+    {% for priority, response, resolution in [('urgent',15,240),('high',60,240),('normal',240,1440),('low',480,7200)] %}<tr><td><input class="form-input" name="priority" value="{{ priority }}" maxlength="32" required /></td><td><input class="form-input" type="number" min="1" name="responseMinutes" value="{{ response }}" required /></td><td><input class="form-input" type="number" min="1" name="resolutionMinutes" value="{{ resolution }}" required /></td><td><button class="button button--ghost" type="button" data-remove-sla-target aria-label="Remove priority">Remove</button></td></tr>{% endfor %}
+    </tbody></table></div><button class="button button--secondary" type="button" data-add-sla-target>Add priority</button>
+    <label class="form-checkbox"><input type="checkbox" name="enabled" value="1" checked /> Enabled</label><div class="form-actions"><button class="button" type="submit">Create template</button></div>
+  </form></div></section>
+</div>
+<template id="sla-target-row"><tr><td><input class="form-input" name="priority" maxlength="32" placeholder="Priority name" required /></td><td><input class="form-input" type="number" min="1" name="responseMinutes" required /></td><td><input class="form-input" type="number" min="1" name="resolutionMinutes" required /></td><td><button class="button button--ghost" type="button" data-remove-sla-target aria-label="Remove priority">Remove</button></td></tr></template>
+<script nonce="{{ csp_nonce }}">
+document.addEventListener('click', (event) => {
+  const addButton = event.target.closest('[data-add-sla-target]');
+  if (addButton) {
+    const row = document.querySelector('#sla-target-row').content.cloneNode(true);
+    document.querySelector('[data-sla-targets]').appendChild(row);
+  }
+  const removeButton = event.target.closest('[data-remove-sla-target]');
+  if (removeButton && document.querySelectorAll('[data-sla-targets] tr').length > 1) removeButton.closest('tr').remove();
+});
+</script>
+{% endblock %}

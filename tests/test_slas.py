@@ -26,3 +26,24 @@ def test_sla_reports_response_breach():
 
 def test_ticket_without_sla_is_not_applicable():
     assert calculate_status({"sla_id": None}) == {"state": "not_applicable", "label": "No SLA"}
+
+
+def test_priority_target_changes_ticket_deadlines():
+    now, critical = _row(response_minutes=15, resolution_minutes=240)
+    _, low = _row(response_minutes=480, resolution_minutes=7200)
+
+    assert calculate_status(critical, now=now)["state"] == "breached"
+    assert calculate_status(low, now=now)["state"] == "on_track"
+
+
+def test_custom_priority_target_uses_the_same_sla_calculation():
+    now, scheduled = _row(
+        sla_name="Custom priorities",
+        response_minutes=1440,
+        resolution_minutes=10080,
+    )
+
+    result = calculate_status(scheduled, now=now)
+
+    assert result["name"] == "Custom priorities"
+    assert result["state"] == "on_track"

@@ -59,6 +59,8 @@ _add(
 )
 _add("/admin/companies/{company_id}/sla", handlers.admin_save_company_sla, ["POST"], response_class=HTMLResponse)
 _add("/admin/companies/{company_id}/sla/delete", handlers.admin_delete_company_sla, ["POST"], response_class=HTMLResponse)
+_add("/admin/sla-templates", handlers.admin_sla_templates_page, ["GET"], response_class=HTMLResponse)
+_add("/admin/sla-templates", handlers.admin_create_sla_template, ["POST"], response_class=HTMLResponse)
 
 # --- Company staff field configuration ---------------------------------------
 _add(

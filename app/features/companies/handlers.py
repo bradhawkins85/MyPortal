@@ -909,6 +909,7 @@ async def _render_company_edit_page(
         "tray_tokens": tray_tokens,
         "company_variables": company_variables,
         "company_sla": await __import__("app.repositories.slas", fromlist=["slas"]).get_for_company(company_id),
+        "sla_templates": await __import__("app.repositories.slas", fromlist=["slas"]).list_templates(),
     }
 
     response = await _main()._render_template(
@@ -924,17 +925,70 @@ async def admin_save_company_sla(company_id: int, request: Request):
     if redirect:
         return redirect
     form = await request.form()
-    name = str(form.get("name") or "").strip()
     try:
-        response_minutes = int(form.get("responseMinutes") or 0)
-        resolution_minutes = int(form.get("resolutionMinutes") or 0)
+        template_id = int(form.get("templateId") or 0)
     except (TypeError, ValueError):
-        response_minutes = resolution_minutes = 0
-    if not name or response_minutes < 1 or resolution_minutes < response_minutes:
-        return _main()._company_edit_redirect(company_id=company_id, error="Enter an SLA name and ensure resolution time is not shorter than response time.")
-    await sla_repo.upsert_for_company(company_id, name=name, response_minutes=response_minutes,
-                                      resolution_minutes=resolution_minutes, enabled=form.get("enabled") is not None)
-    return _main()._company_edit_redirect(company_id=company_id, success="Service level agreement saved.")
+        template_id = 0
+    templates = await sla_repo.list_templates()
+    if template_id not in {int(template["id"]) for template in templates}:
+        return _main()._company_edit_redirect(company_id=company_id, error="Select a valid SLA template.")
+    await sla_repo.assign_to_company(company_id, template_id)
+    return _main()._company_edit_redirect(company_id=company_id, success="SLA template applied.")
+
+
+async def admin_sla_templates_page(request: Request):
+    from app.repositories import slas as sla_repo
+    user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    return await _main()._render_template(
+        "admin/sla_templates.html", request, user,
+        extra={"title": "SLA templates", "sla_templates": await sla_repo.list_templates()},
+    )
+
+
+async def admin_create_sla_template(request: Request):
+    from app.repositories import slas as sla_repo
+    user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    name = str(form.get("name") or "").strip()
+    description = str(form.get("description") or "").strip()
+    targets = []
+    seen_priorities: set[str] = set()
+    priorities = form.getlist("priority")
+    responses = form.getlist("responseMinutes")
+    resolutions = form.getlist("resolutionMinutes")
+    if not (len(priorities) == len(responses) == len(resolutions)):
+        priorities = []
+    for priority_value, response_value, resolution_value in zip(
+        priorities, responses, resolutions
+    ):
+        priority = str(priority_value or "").strip().lower()
+        try:
+            response = int(response_value or 0)
+            resolution = int(resolution_value or 0)
+        except (TypeError, ValueError):
+            response = resolution = 0
+        if (
+            not priority
+            or len(priority) > 32
+            or priority in seen_priorities
+            or response < 1
+            or resolution < response
+        ):
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse("/admin/sla-templates?error=invalid", status_code=303)
+        seen_priorities.add(priority)
+        targets.append((priority, response, resolution))
+    if not name or not targets:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/admin/sla-templates?error=invalid", status_code=303)
+    await sla_repo.create_template(name=name, description=description,
+                                   enabled=form.get("enabled") is not None, targets=targets)
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse("/admin/sla-templates", status_code=303)
 
 
 async def admin_delete_company_sla(company_id: int, request: Request):
