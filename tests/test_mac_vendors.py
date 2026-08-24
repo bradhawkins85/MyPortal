@@ -58,6 +58,18 @@ async def test_auto_assignment_only_updates_untyped_matching_device(monkeypatch)
 
 
 @pytest.mark.anyio
+async def test_enabling_vendor_mapping_does_not_reclassify_typed_devices(monkeypatch):
+    execute = AsyncMock()
+    monkeypatch.setattr(network_devices.db, "execute", execute)
+
+    await network_devices._auto_assign_existing_devices(23)
+
+    query, params = execute.await_args.args
+    assert "SET nd.device_type_id=%s WHERE nd.device_type_id IS NULL" in query
+    assert params == (23, 23)
+
+
+@pytest.mark.anyio
 async def test_scheduler_dispatches_mac_vendor_update(monkeypatch):
     scheduler = SchedulerService()
     update = AsyncMock(return_value={"imported": 123})
