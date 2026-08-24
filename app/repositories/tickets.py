@@ -1224,6 +1224,12 @@ async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
     if not fields:
         return await get_ticket(ticket_id)
     log_info("Updating ticket", ticket_id=ticket_id, fields=list(fields.keys()))
+    previous_status = None
+    if "status" in fields:
+        previous_status = await db.fetch_one(
+            "SELECT status,COALESCE(status_changed_at,created_at) AS started_at FROM tickets WHERE id=%s",
+            (ticket_id,),
+        )
     assignments: list[str] = []
     params: list[Any] = []
     override_updated_at = None
@@ -1250,6 +1256,16 @@ async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
     query = f"UPDATE tickets SET {', '.join(assignments)} WHERE id = %s"
     params.append(ticket_id)
     await db.execute(query, tuple(params))
+    if (
+        previous_status
+        and str(previous_status.get("status") or "").casefold()
+        != str(fields.get("status") or "").casefold()
+    ):
+        await db.execute(
+            """INSERT INTO ticket_status_history (ticket_id,status,started_at,ended_at)
+               VALUES (%s,%s,%s,%s)""",
+            (ticket_id, previous_status.get("status"), previous_status.get("started_at"), datetime.now(timezone.utc)),
+        )
     if (
         str(fields.get("status") or "").casefold() == "closed"
         or fields.get("closed_at") is not None
@@ -1315,6 +1331,11 @@ async def set_tickets_status(
         return 0
 
     placeholders = ", ".join(["%s"] * len(normalised_ids))
+    previous_rows = await db.fetch_all(
+        f"""SELECT id,status,COALESCE(status_changed_at,created_at) AS started_at
+            FROM tickets WHERE id IN ({placeholders}) AND LOWER(status) <> LOWER(%s)""",
+        (*normalised_ids, status),
+    )
     params: list[Any] = [status, status]
     closed_clause = "closed_at = NULL,"
     if closed_at is not None:
@@ -1336,6 +1357,13 @@ async def set_tickets_status(
         """,
         tuple(params),
     )
+    ended_at = datetime.now(timezone.utc)
+    for previous in previous_rows:
+        await db.execute(
+            """INSERT INTO ticket_status_history (ticket_id,status,started_at,ended_at)
+               VALUES (%s,%s,%s,%s)""",
+            (previous["id"], previous["status"], previous["started_at"], ended_at),
+        )
     if status.casefold() == "closed" or closed_at is not None:
         await db.execute(
             f"UPDATE ticket_shipment_watches SET active = 0 WHERE ticket_id IN ({placeholders})",

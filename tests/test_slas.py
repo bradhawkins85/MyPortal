@@ -47,3 +47,25 @@ def test_custom_priority_target_uses_the_same_sla_calculation():
 
     assert result["name"] == "Custom priorities"
     assert result["state"] == "on_track"
+
+
+def test_paused_time_extends_response_and_resolution_deadlines():
+    now, row = _row(
+        created_at=datetime(2026, 1, 1, 10, tzinfo=timezone.utc),
+        paused_seconds=90 * 60,
+        response_paused_seconds=90 * 60,
+        sla_pause_status="waiting_on_client",
+    )
+
+    result = calculate_status(row, now=now)
+
+    assert result["paused"] is True
+    assert result["state"] == "on_track"
+    assert result["response_due_at"] == datetime(2026, 1, 1, 12, 30, tzinfo=timezone.utc)
+
+
+def test_resolved_ticket_does_not_report_active_pause():
+    now, row = _row(status="resolved", sla_pause_status="resolved")
+    row["closed_at"] = now - timedelta(minutes=5)
+
+    assert calculate_status(row, now=now)["paused"] is False

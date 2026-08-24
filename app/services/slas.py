@@ -19,8 +19,10 @@ def calculate_status(row: dict[str, Any], *, now: datetime | None = None) -> dic
     created = _utc(row.get("created_at")) or now
     first_response = _utc(row.get("first_response_at"))
     closed = _utc(row.get("closed_at"))
-    response_due = created.timestamp() + int(row["response_minutes"]) * 60
-    resolution_due = created.timestamp() + int(row["resolution_minutes"]) * 60
+    paused_seconds = max(0, float(row.get("paused_seconds") or 0))
+    response_paused_seconds = max(0, float(row.get("response_paused_seconds") or 0))
+    response_due = created.timestamp() + int(row["response_minutes"]) * 60 + response_paused_seconds
+    resolution_due = created.timestamp() + int(row["resolution_minutes"]) * 60 + paused_seconds
     response_breached = (first_response or now).timestamp() > response_due
     resolution_breached = (closed or now).timestamp() > resolution_due
     terminal = str(row.get("status") or "").lower() in {"closed", "resolved"}
@@ -38,6 +40,7 @@ def calculate_status(row: dict[str, Any], *, now: datetime | None = None) -> dic
             state, label = "on_track", "On track"
     return {
         "state": state, "label": label, "name": row.get("sla_name"),
+        "paused": bool(row.get("sla_pause_status")) and not terminal,
         "response_breached": response_breached, "resolution_breached": resolution_breached,
         "response_due_at": datetime.fromtimestamp(response_due, timezone.utc),
         "resolution_due_at": datetime.fromtimestamp(resolution_due, timezone.utc),
@@ -46,6 +49,26 @@ def calculate_status(row: dict[str, Any], *, now: datetime | None = None) -> dic
 
 async def statuses_for_tickets(ticket_ids: Sequence[int]) -> dict[int, dict[str, Any]]:
     rows = await sla_repo.list_ticket_sla_source(ticket_ids)
+    paused_by_ticket: dict[int, float] = {}
+    response_paused_by_ticket: dict[int, float] = {}
+    first_response_by_ticket = {
+        int(row["id"]): _utc(row.get("first_response_at")) for row in rows
+    }
+    now = datetime.now(timezone.utc)
+    for period in await sla_repo.list_pause_periods(ticket_ids):
+        started = _utc(period.get("started_at"))
+        ended = _utc(period.get("ended_at")) or now
+        if started and ended and ended > started:
+            ticket_id = int(period["ticket_id"])
+            paused_by_ticket[ticket_id] = paused_by_ticket.get(ticket_id, 0) + (ended - started).total_seconds()
+            response_end = first_response_by_ticket.get(ticket_id) or now
+            if started < response_end:
+                response_paused_by_ticket[ticket_id] = response_paused_by_ticket.get(ticket_id, 0) + (
+                    min(ended, response_end) - started
+                ).total_seconds()
+    for row in rows:
+        row["paused_seconds"] = paused_by_ticket.get(int(row["id"]), 0)
+        row["response_paused_seconds"] = response_paused_by_ticket.get(int(row["id"]), 0)
     return {int(row["id"]): calculate_status(row) for row in rows}
 
 

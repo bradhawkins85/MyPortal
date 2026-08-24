@@ -985,8 +985,20 @@ async def admin_create_sla_template(request: Request):
     if not name or not targets:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/admin/sla-templates?error=invalid", status_code=303)
-    await sla_repo.create_template(name=name, description=description,
-                                   enabled=form.get("enabled") is not None, targets=targets)
+    pause_statuses: list[str] = []
+    seen_statuses: set[str] = set()
+    for raw_status in form.getlist("pauseStatus"):
+        pause_status = str(raw_status or "").strip().lower()
+        if pause_status and len(pause_status) <= 64 and pause_status not in seen_statuses:
+            pause_statuses.append(pause_status)
+            seen_statuses.add(pause_status)
+    for terminal_status in ("resolved", "closed"):
+        if terminal_status not in seen_statuses:
+            pause_statuses.append(terminal_status)
+    await sla_repo.create_template(
+        name=name, description=description, enabled=form.get("enabled") is not None,
+        targets=targets, pause_statuses=pause_statuses,
+    )
     from fastapi.responses import RedirectResponse
     return RedirectResponse("/admin/sla-templates", status_code=303)
 
