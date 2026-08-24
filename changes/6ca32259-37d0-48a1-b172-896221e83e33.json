@@ -1,0 +1,7 @@
+{
+  "guid": "6ca32259-37d0-48a1-b172-896221e83e33",
+  "occurred_at": "2026-08-24T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added per-company service level agreements, ticket SLA visibility, reporting queries, and SLA automation events.",
+  "content_hash": "sla-company-ticket-reporting-automation-v1"
+}

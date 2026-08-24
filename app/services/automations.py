@@ -29,6 +29,9 @@ TRIGGER_EVENTS: list[dict[str, str]] = [
     {"value": "tickets.details_updated", "label": "Ticket Details Updated"},
     {"value": "tickets.closed", "label": "Ticket closed"},
     {"value": "tickets.assigned", "label": "Ticket assigned"},
+    {"value": "tickets.sla_at_risk", "label": "Ticket SLA at risk"},
+    {"value": "tickets.sla_response_breached", "label": "Ticket response SLA breached"},
+    {"value": "tickets.sla_resolution_breached", "label": "Ticket resolution SLA breached"},
     {"value": "webhook.delivered", "label": "Webhook delivered"},
 ]
 
@@ -1519,6 +1522,8 @@ async def _execute_automation(
 
 
 async def process_due_automations(limit: int = 20) -> None:
+    from app.services import slas as sla_service
+    await sla_service.emit_due_events()
     due = await automation_repo.list_due_automations(limit=limit)
     for automation in due:
         await _execute_automation(automation)

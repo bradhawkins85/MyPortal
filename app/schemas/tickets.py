@@ -215,6 +215,11 @@ class TicketDashboardRow(BaseModel):
     latest_reply_kind: Optional[str] = None
     latest_public_reply_email_status: Optional[str] = None
     ticket_update_actor_type: Optional[str] = None
+    sla_state: Optional[str] = None
+    sla_label: Optional[str] = None
+    sla_name: Optional[str] = None
+    sla_response_due_at: Optional[datetime] = None
+    sla_resolution_due_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

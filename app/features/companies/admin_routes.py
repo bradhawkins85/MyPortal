@@ -57,6 +57,8 @@ _add(
     ["POST"],
     response_class=HTMLResponse,
 )
+_add("/admin/companies/{company_id}/sla", handlers.admin_save_company_sla, ["POST"], response_class=HTMLResponse)
+_add("/admin/companies/{company_id}/sla/delete", handlers.admin_delete_company_sla, ["POST"], response_class=HTMLResponse)
 
 # --- Company staff field configuration ---------------------------------------
 _add(

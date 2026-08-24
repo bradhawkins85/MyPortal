@@ -390,6 +390,8 @@ async def get_ticket_dashboard(
         if ticket_ids
         else {}
     )
+    from app.services import slas as sla_service
+    sla_lookup = await sla_service.statuses_for_tickets(ticket_ids) if ticket_ids else {}
     dashboard_now = datetime.now(timezone.utc)
 
     def _display_name(record: dict | None) -> str | None:
@@ -424,6 +426,7 @@ async def get_ticket_dashboard(
         assigned_record = state.user_lookup.get(ticket.get("assigned_user_id"))
         requester_record = state.user_lookup.get(ticket.get("requester_id"))
         automation_data = automation_lookup.get(numeric_id, {})
+        sla_data = sla_lookup.get(numeric_id, {"state": "not_applicable", "label": "No SLA"})
         created_at = ticket.get("created_at")
         updated_at = ticket.get("updated_at")
         status_changed_at = ticket.get("status_changed_at") or created_at
@@ -507,6 +510,11 @@ async def get_ticket_dashboard(
                 ticket_update_actor_type=automation_data.get(
                     "ticket_update_actor_type"
                 ),
+                sla_state=sla_data.get("state"),
+                sla_label=sla_data.get("label"),
+                sla_name=sla_data.get("name"),
+                sla_response_due_at=sla_data.get("response_due_at"),
+                sla_resolution_due_at=sla_data.get("resolution_due_at"),
             )
         )
     filters = TicketSearchFilters(

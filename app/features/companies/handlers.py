@@ -908,6 +908,7 @@ async def _render_company_edit_page(
         "staff_custom_field_definitions": staff_custom_field_definitions,
         "tray_tokens": tray_tokens,
         "company_variables": company_variables,
+        "company_sla": await __import__("app.repositories.slas", fromlist=["slas"]).get_for_company(company_id),
     }
 
     response = await _main()._render_template(
@@ -915,6 +916,34 @@ async def _render_company_edit_page(
     )
     response.status_code = status_code
     return response
+
+
+async def admin_save_company_sla(company_id: int, request: Request):
+    from app.repositories import slas as sla_repo
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    name = str(form.get("name") or "").strip()
+    try:
+        response_minutes = int(form.get("responseMinutes") or 0)
+        resolution_minutes = int(form.get("resolutionMinutes") or 0)
+    except (TypeError, ValueError):
+        response_minutes = resolution_minutes = 0
+    if not name or response_minutes < 1 or resolution_minutes < response_minutes:
+        return _main()._company_edit_redirect(company_id=company_id, error="Enter an SLA name and ensure resolution time is not shorter than response time.")
+    await sla_repo.upsert_for_company(company_id, name=name, response_minutes=response_minutes,
+                                      resolution_minutes=resolution_minutes, enabled=form.get("enabled") is not None)
+    return _main()._company_edit_redirect(company_id=company_id, success="Service level agreement saved.")
+
+
+async def admin_delete_company_sla(company_id: int, request: Request):
+    from app.repositories import slas as sla_repo
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    await sla_repo.delete_for_company(company_id)
+    return _main()._company_edit_redirect(company_id=company_id, success="Service level agreement removed.")
 
 
 def _parse_custom_field_options(options_text: str) -> list[dict[str, str]]:
