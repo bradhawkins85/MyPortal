@@ -101,3 +101,16 @@ func TestNormalizeMACAddress(t *testing.T) {
 		}
 	}
 }
+
+func TestIPAllowed(t *testing.T) {
+	allowed := []string{"203.0.113.10/32", "2001:db8::/32"}
+	if !IPAllowed("203.0.113.10", allowed) || !IPAllowed("2001:db8::5", allowed) {
+		t.Fatal("IPAllowed rejected an address inside an allowed range")
+	}
+	if IPAllowed("203.0.113.11", allowed) {
+		t.Fatal("IPAllowed accepted an address outside the allowed ranges")
+	}
+	if !IPAllowed("198.51.100.2", nil) {
+		t.Fatal("IPAllowed should preserve unrestricted configuration")
+	}
+}

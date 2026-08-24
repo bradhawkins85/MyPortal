@@ -327,7 +327,7 @@ func (d *daemon) networkScannerLoop() {
 			}
 			if lastScan.IsZero() || time.Since(lastScan) >= interval {
 				lastScan = time.Now()
-				d.runNetworkScan("interval")
+				d.runNetworkScan("interval", cfg)
 			}
 		}
 
@@ -351,10 +351,10 @@ func (d *daemon) manualNetworkScan() {
 		logger.Warn("Manual network scan ignored: network scanning is not enabled for this device")
 		return
 	}
-	d.runNetworkScan("manual")
+	d.runNetworkScan("manual", cfg)
 }
 
-func (d *daemon) runNetworkScan(source string) {
+func (d *daemon) runNetworkScan(source string, cfg *api.ConfigResponse) {
 	if !d.networkScanMu.TryLock() {
 		logger.Info("Network scan (%s) ignored: another scan is already running", source)
 		return
@@ -374,13 +374,22 @@ func (d *daemon) runNetworkScan(source string) {
 		logger.Warn("Network scan (%s) WAN IP lookup: %v", source, err)
 		return
 	}
-	hosts, err := scanner.Scan()
+	if !scanner.IPAllowed(wanIP, cfg.NetworkScanWANCIDRs) {
+		logger.Warn("Network scan (%s) skipped: WAN IP %s is outside the configured ranges", source, wanIP)
+		return
+	}
+	targets := scanner.AllowedTargets(cfg.NetworkScanLocalCIDRs)
+	if len(targets) == 0 {
+		logger.Warn("Network scan (%s) skipped: no configured local CIDR is connected", source)
+		return
+	}
+	hosts, err := scanner.Scan(targets)
 	if err != nil {
 		logger.Warn("Network scan (%s): %v", source, err)
 		return
 	}
 	ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
-	err = d.client.UploadNetworkScan(ctx, wanIP, scanner.ConnectedSubnets(), hosts)
+	err = d.client.UploadNetworkScan(ctx, wanIP, targets, hosts)
 	cancel()
 	if err != nil {
 		logger.Warn("Network scan (%s) upload: %v", source, err)

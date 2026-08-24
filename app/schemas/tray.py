@@ -104,6 +104,8 @@ class TrayConfigResponse(BaseModel):
     chat_client_mode: Optional[str] = None
     network_scanner_enabled: bool = False
     network_scan_interval_minutes: int = 360
+    network_scan_wan_cidrs: list[str] = Field(default_factory=list)
+    network_scan_local_cidrs: list[str] = Field(default_factory=list)
 
 
 class NetworkScanHost(BaseModel):

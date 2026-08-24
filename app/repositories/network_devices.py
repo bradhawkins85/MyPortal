@@ -194,7 +194,8 @@ async def list_scanners(company_id: int) -> list[dict[str, Any]]:
     return list(
         await db.fetch_all(
             """SELECT td.id, td.device_uid, td.hostname, td.asset_id, td.network_scanner_enabled,
-                  td.network_scan_interval_minutes, td.last_seen_utc, a.name AS asset_name
+                  td.network_scan_interval_minutes, td.network_scan_wan_cidrs,
+                  td.network_scan_local_cidrs, td.last_seen_utc, a.name AS asset_name
            FROM tray_devices td LEFT JOIN assets a ON a.id = td.asset_id
            WHERE td.company_id = %s AND td.status = 'active' AND td.asset_id IS NOT NULL
            ORDER BY COALESCE(a.name, td.hostname)""",
@@ -205,12 +206,15 @@ async def list_scanners(company_id: int) -> list[dict[str, Any]]:
 
 
 async def configure_scanner(
-    device_id: int, company_id: int, enabled: bool, interval: int
+    device_id: int, company_id: int, enabled: bool, interval: int,
+    wan_cidrs: list[str] | None = None, local_cidrs: list[str] | None = None,
 ) -> None:
     await db.execute(
-        """UPDATE tray_devices SET network_scanner_enabled=%s, network_scan_interval_minutes=%s
+        """UPDATE tray_devices SET network_scanner_enabled=%s, network_scan_interval_minutes=%s,
+           network_scan_wan_cidrs=%s, network_scan_local_cidrs=%s
            WHERE id=%s AND company_id=%s AND status='active'""",
-        (1 if enabled else 0, interval, device_id, company_id),
+        (1 if enabled else 0, interval, "\n".join(wan_cidrs or []),
+         "\n".join(local_cidrs or []), device_id, company_id),
     )
 
 
