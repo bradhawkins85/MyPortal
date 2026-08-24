@@ -126,9 +126,11 @@ type ConfigResponse struct {
 	// "browser": always open in the default system browser (legacy behaviour).
 	// "shell": require the dedicated chat shell; log a warning if absent rather
 	// than falling back to the browser.
-	ChatClientMode             string `json:"chat_client_mode,omitempty"`
-	NetworkScannerEnabled      bool   `json:"network_scanner_enabled"`
-	NetworkScanIntervalMinutes int    `json:"network_scan_interval_minutes"`
+	ChatClientMode             string   `json:"chat_client_mode,omitempty"`
+	NetworkScannerEnabled      bool     `json:"network_scanner_enabled"`
+	NetworkScanIntervalMinutes int      `json:"network_scan_interval_minutes"`
+	NetworkScanWANCIDRs        []string `json:"network_scan_wan_cidrs"`
+	NetworkScanLocalCIDRs      []string `json:"network_scan_local_cidrs"`
 }
 
 type NetworkHost struct {

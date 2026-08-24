@@ -41,10 +41,21 @@ if ($legacyWindows) {
 if ($localAddresses.Count -eq 0) { throw 'No connected IPv4 subnet found' }
 
 $targets = New-Object 'Collections.Generic.HashSet[string]'
-foreach ($address in $localAddresses) {
-    $octets = $address.Split('.')
-    $prefix = '{0}.{1}.{2}' -f $octets[0], $octets[1], $octets[2]
-    foreach ($hostNumber in 1..254) { [void]$targets.Add("$prefix.$hostNumber") }
+foreach ($cidr in ($env:MYPORTAL_SCAN_TARGETS -split ',')) {
+    if ($cidr -notmatch '^(.+)/(\d+)$') { continue }
+    $bytes = [Net.IPAddress]::Parse($matches[1]).GetAddressBytes()
+    [Array]::Reverse($bytes)
+    $address = [BitConverter]::ToUInt32($bytes, 0)
+    $prefixLength = [int]$matches[2]
+    $mask = [uint32]::MaxValue -shl (32 - $prefixLength)
+    $first = ($address -band $mask)
+    $last = ($address -bor (-bnot $mask))
+    if ($prefixLength -lt 31) { $first++; $last-- }
+    foreach ($value in $first..$last) {
+        $hostBytes = [BitConverter]::GetBytes([uint32]$value)
+        [Array]::Reverse($hostBytes)
+        [void]$targets.Add((New-Object Net.IPAddress (,$hostBytes)).ToString())
+    }
 }
 
 $results = New-Object 'Collections.Generic.List[object]'

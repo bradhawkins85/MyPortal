@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -20,6 +21,28 @@ from app.repositories import user_companies as user_company_repo
 from app.services import tray as tray_service
 
 router = APIRouter(tags=["Assets"])
+
+
+def _scanner_scope_from_form(form: Any) -> tuple[list[str], list[str]]:
+    """Validate and canonicalise optional WAN and LAN scanner boundaries."""
+    scopes: list[list[str]] = []
+    for field, require_ipv4 in (("wan_cidrs", False), ("local_cidrs", True)):
+        values: list[str] = []
+        raw = str(form.get(field) or "").replace(",", " ")
+        for item in raw.split():
+            try:
+                network = ipaddress.ip_network(item, strict=False)
+            except ValueError:
+                raise HTTPException(status_code=422, detail=f"Invalid {field}: {item}")
+            if require_ipv4 and network.version != 4:
+                raise HTTPException(
+                    status_code=422, detail="Local scan ranges must be IPv4 CIDRs"
+                )
+            canonical = str(network)
+            if canonical not in values:
+                values.append(canonical)
+        scopes.append(values)
+    return scopes[0], scopes[1]
 
 _ASSET_TABLE_COLUMNS: list[dict[str, str]] = [
     {"key": "name", "label": "Name", "sort": "string", "priority": "essential"},
@@ -611,7 +634,10 @@ async def add_network_scanner(request: Request):
             status_code=422, detail="Select an asset and valid interval"
         )
 
-    await network_devices_repo.configure_scanner(device_id, company_id, True, interval)
+    wan_cidrs, local_cidrs = _scanner_scope_from_form(form)
+    await network_devices_repo.configure_scanner(
+        device_id, company_id, True, interval, wan_cidrs, local_cidrs
+    )
     return RedirectResponse(url="/devices", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -633,8 +659,10 @@ async def configure_network_scanner(request: Request, device_id: int):
         interval = max(5, min(10080, int(form.get("interval_minutes", 360))))
     except (TypeError, ValueError):
         raise HTTPException(status_code=422, detail="Scan interval must be a number")
+    wan_cidrs, local_cidrs = _scanner_scope_from_form(form)
     await network_devices_repo.configure_scanner(
-        device_id, company_id, form.get("enabled") == "1", interval
+        device_id, company_id, form.get("enabled") == "1", interval,
+        wan_cidrs, local_cidrs,
     )
     return RedirectResponse(url="/devices", status_code=status.HTTP_303_SEE_OTHER)
 

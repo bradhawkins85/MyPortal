@@ -57,6 +57,22 @@ def test_discovered_devices_loads_shared_column_filters():
     assert "data-device-bulk-ids" in TEMPLATE
     assert 'action="/devices/scanners/{{ scanner.id }}/scan"' in TEMPLATE
     assert ">Scan Now</button>" in TEMPLATE
+    assert 'name="wan_cidrs"' in TEMPLATE
+    assert 'name="local_cidrs"' in TEMPLATE
+
+
+def test_scanner_scope_accepts_addresses_cidrs_and_commas():
+    wan, local = assets_routes._scanner_scope_from_form(
+        {"wan_cidrs": "203.0.113.10, 198.51.100.0/24", "local_cidrs": "192.168.7.12/24"}
+    )
+    assert wan == ["203.0.113.10/32", "198.51.100.0/24"]
+    assert local == ["192.168.7.0/24"]
+
+
+def test_scanner_scope_rejects_ipv6_local_range():
+    with pytest.raises(HTTPException) as exc_info:
+        assets_routes._scanner_scope_from_form({"local_cidrs": "2001:db8::/64"})
+    assert exc_info.value.status_code == 422
 
 
 @pytest.mark.anyio
@@ -131,7 +147,7 @@ async def test_add_scanner_enables_selected_asset(monkeypatch):
 
     response = await assets_routes.add_network_scanner(request)
 
-    configure.assert_awaited_once_with(20, 42, True, 45)
+    configure.assert_awaited_once_with(20, 42, True, 45, [], [])
     assert response.status_code == 303
     assert response.headers["location"] == "/devices"
 
@@ -160,7 +176,7 @@ async def test_add_scanner_defaults_to_six_hour_interval(monkeypatch):
 
     response = await assets_routes.add_network_scanner(request)
 
-    configure.assert_awaited_once_with(20, 42, True, 360)
+    configure.assert_awaited_once_with(20, 42, True, 360, [], [])
     assert response.status_code == 303
 
 

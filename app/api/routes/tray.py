@@ -351,6 +351,12 @@ async def get_device_config(
         network_scan_interval_minutes=max(
             5, int(device.get("network_scan_interval_minutes") or 360)
         ),
+        network_scan_wan_cidrs=[
+            item for item in str(device.get("network_scan_wan_cidrs") or "").splitlines() if item
+        ],
+        network_scan_local_cidrs=[
+            item for item in str(device.get("network_scan_local_cidrs") or "").splitlines() if item
+        ],
     )
 
 
@@ -362,6 +368,18 @@ async def upload_network_scan(
         raise HTTPException(
             status_code=403, detail="Network scanning is not enabled for this device"
         )
+    configured_wan = [
+        ipaddress.ip_network(item)
+        for item in str(device.get("network_scan_wan_cidrs") or "").splitlines()
+        if item
+    ]
+    if configured_wan and not any(payload.wan_ip in network for network in configured_wan):
+        raise HTTPException(status_code=403, detail="WAN IP is outside this scanner's allowed ranges")
+    configured_local = [
+        ipaddress.ip_network(item)
+        for item in str(device.get("network_scan_local_cidrs") or "").splitlines()
+        if item
+    ]
     hosts = []
     for item in payload.hosts:
         host = item.model_dump()
@@ -371,9 +389,16 @@ async def upload_network_scan(
     subnets: list[str] = []
     for raw_subnet in payload.subnets:
         try:
-            subnet = str(ipaddress.ip_network(raw_subnet, strict=False))
+            parsed_subnet = ipaddress.ip_network(raw_subnet, strict=False)
         except ValueError:
             raise HTTPException(status_code=422, detail=f"Invalid subnet: {raw_subnet}")
+        if configured_local and not any(
+            parsed_subnet.subnet_of(network) for network in configured_local
+        ):
+            raise HTTPException(
+                status_code=403, detail=f"Subnet is outside this scanner's allowed ranges: {raw_subnet}"
+            )
+        subnet = str(parsed_subnet)
         if subnet not in subnets:
             subnets.append(subnet)
     # Older agents do not report scan targets. A /24 baseline preserves the

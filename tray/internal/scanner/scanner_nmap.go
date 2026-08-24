@@ -38,15 +38,14 @@ type nmapHost struct {
 	} `xml:"os>osmatch"`
 }
 
-func Scan() ([]api.NetworkHost, error) {
+func Scan(targets []string) ([]api.NetworkHost, error) {
 	if _, err := exec.LookPath("nmap"); err != nil {
 		if err = installNmap(); err != nil {
 			return nil, err
 		}
 	}
-	targets := connectedSubnets()
 	if len(targets) == 0 {
-		return nil, fmt.Errorf("no connected IPv4 subnet found")
+		return nil, fmt.Errorf("no allowed connected IPv4 subnet found")
 	}
 	out, err := exec.Command("nmap", append([]string{"-O", "--osscan-limit", "-oX", "-"}, targets...)...).Output()
 	if err != nil {
