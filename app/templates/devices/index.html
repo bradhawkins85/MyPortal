@@ -66,7 +66,7 @@
                 <form method="post" action="/devices/discovered/{{ device.id }}" class="discovered-device-form">
                   {% include "partials/csrf.html" %}
                   <label>State<select class="input" name="state">{% for state in ['New', 'Known', 'Unknown'] %}<option value="{{ state }}" {% if device.state == state %}selected{% endif %}>{{ state }}</option>{% endfor %}</select></label>
-                  <label>Device type<select class="input" name="device_type_id"><option value="">Not set</option>{% for device_type in device_types %}<option value="{{ device_type.id }}" {% if device.device_type_id == device_type.id %}selected{% endif %}>{{ device_type.name }}</option>{% endfor %}</select></label>
+                  <label>Device type<select class="input" name="device_type_id"><option value="">Not set</option>{% if device.recommended_device_type_ids %}<optgroup label="Recommended for {{ device.mac_vendor }}">{% for device_type in device_types %}{% if device_type.id in device.recommended_device_type_ids %}<option value="{{ device_type.id }}" {% if device.device_type_id == device_type.id %}selected{% endif %}>{{ device_type.name }}</option>{% endif %}{% endfor %}</optgroup><optgroup label="Other types">{% endif %}{% for device_type in device_types %}{% if device_type.id not in device.recommended_device_type_ids %}<option value="{{ device_type.id }}" {% if device.device_type_id == device_type.id %}selected{% endif %}>{{ device_type.name }}</option>{% endif %}{% endfor %}{% if device.recommended_device_type_ids %}</optgroup>{% endif %}</select></label>
                   <label class="discovered-device-form__description">Description<textarea class="input" name="description" maxlength="2000" rows="3" placeholder="Identify this device">{{ device.description or '' }}</textarea></label>
                   <label class="checkbox"><input type="checkbox" name="agent_not_required" value="1" {% if device.agent_not_required %}checked{% endif %}> <span>Agent not required</span></label>
                   <button class="button button--primary" type="submit">Save device</button>
@@ -105,19 +105,22 @@
   <div class="modal__backdrop" data-device-types-close></div>
   <section class="modal__dialog">
     <header class="modal__header">
-      <div><h2 id="device-types-modal-title">Edit Device Types</h2><p class="card__lede">Manage the types available when classifying discovered devices.</p></div>
+      <div><h2 id="device-types-modal-title">Edit Device Types</h2><p class="card__lede">Associate MAC vendors to recommend types. Auto assign classifies only devices that do not already have a type.</p></div>
       <button type="button" class="modal__close" data-device-types-close aria-label="Close device types">&times;</button>
     </header>
     <div class="modal__body">
       {% if device_types %}
-      <div class="table-wrapper"><table class="table"><thead><tr><th>Name</th><th class="table__actions">Actions</th></tr></thead><tbody>
-        {% for device_type in device_types %}<tr><td>{{ device_type.name }}</td><td class="table__actions"><form method="post" action="/devices/device-types/{{ device_type.id }}/delete" data-confirm="Remove this device type? Devices using it will be reset to Not set.">{% include "partials/csrf.html" %}<button class="button button--danger button--small" type="submit">Remove</button></form></td></tr>{% endfor %}
+      <div class="table-wrapper"><table class="table"><thead><tr><th>Name</th><th>MAC vendors</th><th>Auto assign</th><th class="table__actions">Actions</th></tr></thead><tbody>
+        {% for device_type in device_types %}<tr><td><form id="device-type-{{ device_type.id }}" method="post" action="/devices/device-types/{{ device_type.id }}">{% include "partials/csrf.html" %}</form><input form="device-type-{{ device_type.id }}" class="input" name="name" maxlength="100" value="{{ device_type.name }}" required></td><td><textarea form="device-type-{{ device_type.id }}" class="input" name="mac_vendors" rows="3" maxlength="4000" placeholder="One vendor per line">{{ device_type.mac_vendors or '' }}</textarea></td><td><input form="device-type-{{ device_type.id }}" type="checkbox" name="auto_assign" value="1" {% if device_type.auto_assign %}checked{% endif %} aria-label="Auto assign {{ device_type.name }}"></td><td class="table__actions"><button form="device-type-{{ device_type.id }}" class="button button--primary button--small" type="submit">Save</button><form method="post" action="/devices/device-types/{{ device_type.id }}/delete" data-confirm="Remove this device type? Devices using it will be reset to Not set.">{% include "partials/csrf.html" %}<button class="button button--danger button--small" type="submit">Remove</button></form></td></tr>{% endfor %}
       </tbody></table></div>
       {% else %}<p class="empty-state__subtitle">No device types have been added yet.</p>{% endif %}
       <form method="post" action="/devices/device-types" class="form-stack">
         {% include "partials/csrf.html" %}
         <label for="new-device-type">New device type</label>
-        <div class="inline-form"><input id="new-device-type" class="input" name="name" maxlength="100" placeholder="e.g. Firewall" required><button class="button button--primary" type="submit">Add type</button></div>
+        <input id="new-device-type" class="input" name="name" maxlength="100" placeholder="e.g. Printer" required>
+        <label>MAC vendors<textarea class="input" name="mac_vendors" rows="3" maxlength="4000" placeholder="One vendor per line, e.g. CANON INC."></textarea></label>
+        <label class="checkbox"><input type="checkbox" name="auto_assign" value="1"> <span>Auto assign this type to untyped devices from these vendors</span></label>
+        <button class="button button--primary" type="submit">Add type</button>
       </form>
     </div>
     <footer class="modal__footer"><button type="button" class="button button--ghost" data-device-types-close>Close</button></footer>

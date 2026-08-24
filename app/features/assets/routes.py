@@ -479,8 +479,43 @@ async def add_device_type_from_devices(request: Request):
     name = str(form.get("name") or "").strip()
     if not name or len(name) > 100:
         raise HTTPException(status_code=422, detail="Enter a device type name")
-    await network_devices_repo.create_device_type(name)
+    vendors = _parse_mac_vendors(str(form.get("mac_vendors") or ""))
+    await network_devices_repo.create_device_type(
+        name, vendors, form.get("auto_assign") == "1"
+    )
     return RedirectResponse(url="/devices", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/devices/device-types/{device_type_id}")
+async def update_device_type_from_devices(request: Request, device_type_id: int):
+    user, _membership, _company, _company_id, redirect = await _load_asset_context(
+        request
+    )
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    form = await request.form()
+    name = str(form.get("name") or "").strip()
+    if not name or len(name) > 100:
+        raise HTTPException(status_code=422, detail="Enter a device type name")
+    await network_devices_repo.update_device_type(
+        device_type_id,
+        name,
+        _parse_mac_vendors(str(form.get("mac_vendors") or "")),
+        form.get("auto_assign") == "1",
+    )
+    return RedirectResponse(url="/devices", status_code=status.HTTP_303_SEE_OTHER)
+
+
+def _parse_mac_vendors(value: str) -> list[str]:
+    """Accept one vendor per line or comma-separated, preserving display casing."""
+    vendors: dict[str, str] = {}
+    for item in value.replace(",", "\n").splitlines():
+        vendor = " ".join(item.split())
+        if vendor:
+            vendors.setdefault(vendor.casefold(), vendor[:255])
+    return list(vendors.values())
 
 
 @router.post("/devices/device-types/{device_type_id}/delete")

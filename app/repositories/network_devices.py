@@ -7,12 +7,16 @@ from app.core.database import db
 
 
 async def list_for_company(company_id: int) -> list[dict[str, Any]]:
-    return list(
+    devices = list(
         await db.fetch_all(
             """SELECT nd.*, COALESCE(mv.vendor, nd.vendor) AS mac_vendor,
                   a.name AS matched_asset_name, td.hostname AS scanner_hostname,
                   td.asset_id AS scanner_asset_id, scanner_asset.name AS scanner_asset_name,
-                  dt.name AS device_type_name
+                  dt.name AS device_type_name,
+                  (SELECT GROUP_CONCAT(dtv.device_type_id ORDER BY dtv.device_type_id)
+                   FROM network_device_type_vendors dtv
+                   WHERE LOWER(dtv.mac_vendor) = LOWER(COALESCE(mv.vendor, nd.vendor)))
+                    AS recommended_device_type_ids
            FROM network_devices nd
            LEFT JOIN assets a ON a.id = nd.matched_asset_id
            JOIN tray_devices td ON td.id = nd.scanner_tray_device_id
@@ -25,18 +29,76 @@ async def list_for_company(company_id: int) -> list[dict[str, Any]]:
         )
         or []
     )
+    for device in devices:
+        raw_ids = device.get("recommended_device_type_ids") or ""
+        device["recommended_device_type_ids"] = {
+            int(value) for value in str(raw_ids).split(",") if value
+        }
+    return devices
 
 
 async def list_device_types() -> list[dict[str, Any]]:
     return list(
-        await db.fetch_all("SELECT id, name FROM network_device_types ORDER BY name")
+        await db.fetch_all(
+            """SELECT dt.id, dt.name, dt.auto_assign,
+                      GROUP_CONCAT(dtv.mac_vendor ORDER BY dtv.mac_vendor SEPARATOR '\n') AS mac_vendors
+               FROM network_device_types dt
+               LEFT JOIN network_device_type_vendors dtv ON dtv.device_type_id=dt.id
+               GROUP BY dt.id, dt.name, dt.auto_assign ORDER BY dt.name"""
+        )
         or []
     )
 
 
-async def create_device_type(name: str) -> None:
+async def create_device_type(
+    name: str, mac_vendors: list[str] | None = None, auto_assign: bool = False
+) -> None:
+    device_type_id = await db.execute_returning_lastrowid(
+        """INSERT INTO network_device_types (name, auto_assign) VALUES (%s, %s)
+           ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id), auto_assign=VALUES(auto_assign)""",
+        (name, 1 if auto_assign else 0),
+    )
+    await _replace_device_type_vendors(device_type_id, mac_vendors or [])
+    if auto_assign:
+        await _auto_assign_existing_devices(device_type_id)
+
+
+async def update_device_type(
+    device_type_id: int, name: str, mac_vendors: list[str], auto_assign: bool
+) -> None:
     await db.execute(
-        "INSERT IGNORE INTO network_device_types (name) VALUES (%s)", (name,)
+        "UPDATE network_device_types SET name=%s, auto_assign=%s WHERE id=%s",
+        (name, 1 if auto_assign else 0, device_type_id),
+    )
+    await _replace_device_type_vendors(device_type_id, mac_vendors)
+    if auto_assign:
+        await _auto_assign_existing_devices(device_type_id)
+
+
+async def _replace_device_type_vendors(
+    device_type_id: int, mac_vendors: list[str]
+) -> None:
+    await db.execute(
+        "DELETE FROM network_device_type_vendors WHERE device_type_id=%s",
+        (device_type_id,),
+    )
+    for vendor in mac_vendors:
+        await db.execute(
+            "INSERT INTO network_device_type_vendors (device_type_id, mac_vendor) VALUES (%s,%s)",
+            (device_type_id, vendor),
+        )
+
+
+async def _auto_assign_existing_devices(device_type_id: int) -> None:
+    await db.execute(
+        """UPDATE network_devices nd
+           LEFT JOIN mac_vendors mv ON mv.oui_prefix =
+             SUBSTRING(UPPER(REPLACE(REPLACE(REPLACE(nd.mac_address, ':', ''), '-', ''), '.', '')), 1, 6)
+           JOIN network_device_type_vendors dtv
+             ON dtv.device_type_id=%s
+             AND LOWER(dtv.mac_vendor)=LOWER(COALESCE(mv.vendor, nd.vendor))
+           SET nd.device_type_id=%s WHERE nd.device_type_id IS NULL""",
+        (device_type_id, device_type_id),
     )
 
 
@@ -198,6 +260,7 @@ async def upsert_scan(
                    last_seen_at=CURRENT_TIMESTAMP WHERE id=%s""",
                 values + (matched, existing["id"]),
             )
+            device_id = existing["id"]
         else:
             device_id = await db.execute_returning_lastrowid(
                 """INSERT INTO network_devices (company_id, scanner_tray_device_id, wan_ip, ip_address, mac_address,
@@ -215,4 +278,28 @@ async def upsert_scan(
                     "matched_asset_id": matched,
                 }
             )
+        await _auto_assign_device_type(device_id)
     return newly_discovered
+
+
+async def _auto_assign_device_type(device_id: int) -> None:
+    """Classify an untyped device when its resolved vendor has one auto rule."""
+    await db.execute(
+        """UPDATE network_devices nd
+           LEFT JOIN mac_vendors mv ON mv.oui_prefix =
+             SUBSTRING(UPPER(REPLACE(REPLACE(REPLACE(nd.mac_address, ':', ''), '-', ''), '.', '')), 1, 6)
+           SET nd.device_type_id = (
+             SELECT dtv.device_type_id
+             FROM network_device_type_vendors dtv
+             JOIN network_device_types dt ON dt.id=dtv.device_type_id AND dt.auto_assign=1
+             WHERE LOWER(dtv.mac_vendor)=LOWER(COALESCE(mv.vendor, nd.vendor))
+             ORDER BY dtv.device_type_id LIMIT 1
+           )
+           WHERE nd.id=%s AND nd.device_type_id IS NULL
+             AND EXISTS (
+               SELECT 1 FROM network_device_type_vendors dtv
+               JOIN network_device_types dt ON dt.id=dtv.device_type_id AND dt.auto_assign=1
+               WHERE LOWER(dtv.mac_vendor)=LOWER(COALESCE(mv.vendor, nd.vendor))
+             )""",
+        (device_id,),
+    )
