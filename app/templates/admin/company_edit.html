@@ -120,15 +120,15 @@
       </div>
     </details>
     <details class="card card--panel card-collapsible admin-grid__full" data-company-edit-section="sla" open>
-      <summary class="card__header card__header--collapsible"><div><h2 class="card__title">Service level agreement</h2><p class="card__subtitle">One SLA can apply to all tickets for this company.</p></div><span class="card__toggle-icon" aria-hidden="true"></span></summary>
+      <summary class="card__header card__header--collapsible"><div><h2 class="card__title">Service level agreement</h2><p class="card__subtitle">Apply a reusable, priority-based SLA template to this company.</p></div><span class="card__toggle-icon" aria-hidden="true"></span></summary>
       <div class="card-collapsible__content">
         <form action="/admin/companies/{{ company.id }}/sla" method="post" class="form">
           {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
-          <div class="form-field"><label class="form-label required" for="sla-name">Name</label><input class="form-input" id="sla-name" name="name" maxlength="150" required value="{{ company_sla.name if company_sla else '' }}" placeholder="Standard support" /></div>
-          <div class="form-field"><label class="form-label required" for="sla-response">First response (minutes)</label><input class="form-input" id="sla-response" name="responseMinutes" type="number" min="1" required value="{{ company_sla.response_minutes if company_sla else 60 }}" /></div>
-          <div class="form-field"><label class="form-label required" for="sla-resolution">Resolution (minutes)</label><input class="form-input" id="sla-resolution" name="resolutionMinutes" type="number" min="1" required value="{{ company_sla.resolution_minutes if company_sla else 480 }}" /></div>
-          <label class="form-checkbox"><input type="checkbox" name="enabled" value="1" {% if not company_sla or company_sla.enabled %}checked{% endif %} /> Enabled</label>
-          <div class="form-actions"><button class="button" type="submit">Save SLA</button>{% if company_sla %}<button class="button button--danger" type="submit" formaction="/admin/companies/{{ company.id }}/sla/delete" data-confirm="Remove this SLA?">Remove SLA</button>{% endif %}</div>
+          <p class="form-help">SLA coverage is optional. Tickets only receive targets when this company has a template assigned and that template contains the ticket's priority.</p>
+          <div class="form-field"><label class="form-label required" for="sla-template">SLA template</label><select class="form-input" id="sla-template" name="templateId" required><option value="">Select a template</option>{% for template in sla_templates %}<option value="{{ template.id }}" {% if company_sla and company_sla.id == template.id %}selected{% endif %}>{{ template.name }}</option>{% endfor %}</select></div>
+          {% if company_sla and company_sla.targets %}<div class="table-wrapper"><table class="table"><thead><tr><th>Priority</th><th>First response</th><th>Resolution</th></tr></thead><tbody>{% for target in company_sla.targets %}<tr><td>{{ target.priority|replace('_', ' ')|title }}</td><td>{{ target.response_minutes }} minutes</td><td>{{ target.resolution_minutes }} minutes</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+          {% if company_sla and company_sla.pause_statuses %}<p class="form-help"><strong>Timer paused while:</strong> {{ company_sla.pause_statuses|map('replace', '_', ' ')|map('title')|join(', ') }}</p>{% endif %}
+          <div class="form-actions"><button class="button" type="submit">Apply template</button><a class="button button--secondary" href="/admin/sla-templates">Manage templates</a>{% if company_sla %}<button class="button button--danger" type="submit" formaction="/admin/companies/{{ company.id }}/sla/delete" data-confirm="Remove this SLA template assignment?">Remove assignment</button>{% endif %}</div>
         </form>
       </div>
     </details>

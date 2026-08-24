@@ -38,7 +38,7 @@
           {% set tag_status_value = ticket.ai_tags_status if ticket.ai_tags_status is not none else 'skipped' %}
           {% set tag_status_lower = tag_status_value | lower %}
           {% set ticket_status_label = ticket_status_label_map.get(ticket_status, ticket_status.replace('_', ' ').title()) %}
-          <p class="management__meta">SLA: <span class="status status--{{ 'danger' if ticket_sla.state == 'breached' else ('warning' if ticket_sla.state == 'at_risk' else ('success' if ticket_sla.state in ['met','on_track'] else 'neutral')) }}">{{ ticket_sla.name ~ ' · ' if ticket_sla.name else '' }}{{ ticket_sla.label }}</span>{% if ticket_sla.resolution_due_at %} &middot; Resolution due <span data-utc="{{ ticket_sla.resolution_due_at.isoformat() }}">{{ ticket_sla.resolution_due_at.isoformat() }}</span>{% endif %}</p>
+          <p class="management__meta">SLA: <span class="status status--{{ 'danger' if ticket_sla.state == 'breached' else ('warning' if ticket_sla.state == 'at_risk' else ('success' if ticket_sla.state in ['met','on_track'] else 'neutral')) }}">{{ ticket_sla.name ~ ' · ' if ticket_sla.name else '' }}{{ ticket_sla.label }}</span>{% if ticket_sla.paused %} &middot; Timer paused{% endif %}{% if ticket_sla.resolution_due_at %} &middot; Resolution due <span data-utc="{{ ticket_sla.resolution_due_at.isoformat() }}">{{ ticket_sla.resolution_due_at.isoformat() }}</span>{% endif %}</p>
         </div>
         <div class="management__header-actions">
           <a href="/admin/tickets" class="button button--ghost">Back to tickets</a>
