@@ -664,6 +664,7 @@
                 </th>
                 <th scope="col" data-sort="string" data-column="priority" class="tickets-table__column tickets-table__column--priority">Priority</th>
                 <th scope="col" data-sort="string" data-column="company" class="tickets-table__column tickets-table__column--company">Company</th>
+                <th scope="col" data-sort="string" data-column="sla" class="tickets-table__column tickets-table__column--sla">SLA</th>
                 <th scope="col" data-sort="string" data-column="assigned" class="tickets-table__column tickets-table__column--assigned">Assigned</th>
                 <th scope="col" data-sort="string" data-column="updated" class="tickets-table__column tickets-table__column--updated">Updated</th>
                 <th scope="col" data-sort="string" data-column="last-reply-status" class="tickets-table__column tickets-table__column--last-reply-status">Last Reply Status</th>
@@ -746,6 +747,7 @@
                     </td>
                     <td data-label="Priority" data-column="priority" class="tickets-table__cell tickets-table__cell--priority">{{ ticket.priority or 'normal' }}</td>
                     <td data-label="Company" data-column="company" class="tickets-table__cell tickets-table__cell--company">{{ company.name if company else (ticket.company_id or '—') }}</td>
+                    {% set sla = (ticket_sla_lookup or {}).get(ticket.id, {}) %}<td data-label="SLA" data-column="sla"><span class="status status--{{ 'danger' if sla.state == 'breached' else ('warning' if sla.state == 'at_risk' else ('success' if sla.state in ['met','on_track'] else 'neutral')) }}">{{ sla.label or 'No SLA' }}</span></td>
                     <td data-label="Assigned" data-column="assigned" class="tickets-table__cell tickets-table__cell--assigned">{{ assigned_label }}</td>
                     <td data-label="Updated" data-column="updated" class="tickets-table__cell tickets-table__cell--updated">{{ ticket.updated_at.astimezone().strftime('%Y-%m-%d %H:%M') if ticket.updated_at else '—' }}</td>
                     {% set automation_data = (ticket_automation_filter_lookup or {}).get(ticket.id, {}) %}

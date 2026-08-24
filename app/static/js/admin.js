@@ -1299,6 +1299,12 @@
         companyDisplay = String(ticket.company_id);
       }
       appendTextCell('company', 'Company', companyDisplay);
+      const slaCell = document.createElement('td');
+      slaCell.dataset.label = 'SLA'; slaCell.dataset.column = 'sla';
+      const slaBadge = document.createElement('span');
+      slaBadge.className = `status status--${ticket.sla_state === 'breached' ? 'danger' : (ticket.sla_state === 'at_risk' ? 'warning' : (['met', 'on_track'].includes(ticket.sla_state) ? 'success' : 'neutral'))}`;
+      slaBadge.textContent = ticket.sla_label || 'No SLA'; slaBadge.title = ticket.sla_name || '';
+      slaCell.appendChild(slaBadge); row.appendChild(slaCell);
       appendTextCell('assigned', 'Assigned', ticket.assigned_user_email || '—');
       appendTextCell('updated', 'Updated', formatUpdatedAt(ticket.updated_at), { value: ticket.updated_at || '' });
       row.appendChild(createLastReplyStatusCell(ticket.latest_public_reply_email_status));

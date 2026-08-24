@@ -9023,6 +9023,8 @@ async def _render_ticket_detail(
         "description_html": sanitized_description.html,
         "description_text": sanitized_description.text_content,
     }
+    from app.services import slas as sla_service
+    ticket_sla = (await sla_service.statuses_for_tickets([ticket_id])).get(ticket_id, {"state": "not_applicable", "label": "No SLA"})
 
     replies = await tickets_repo.list_replies(ticket_id)
     split_replies = await tickets_repo.list_split_replies_for_original(ticket_id)
@@ -9546,6 +9548,7 @@ async def _render_ticket_detail(
     extra = {
         "title": f"Ticket #{ticket_id}",
         "ticket": ticket,
+        "ticket_sla": ticket_sla,
         "ticket_company": company,
         "ticket_module": module_info,
         "ticket_assigned_user": user_lookup.get(ticket.get("assigned_user_id")),
