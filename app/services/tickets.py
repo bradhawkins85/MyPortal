@@ -611,7 +611,8 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
     enriched["latest_reply"] = latest_reply
     if initial_body is None and enriched.get("description") is not None:
         initial_body = str(enriched.get("description"))
-    enriched["body"] = initial_body or ""
+    enriched["initial_body"] = initial_body or ""
+    enriched["body"] = enriched["initial_body"]
 
     if isinstance(ticket_id, int):
         filter_context = await _safely_call(tickets_repo.get_automation_filter_context, ticket_id)
@@ -778,6 +779,10 @@ async def _emit_ticket_event(
         reply_context["is_internal"] = is_internal
         reply_context["kind"] = "internal_note" if is_internal else "message"
         context["reply"] = reply_context
+        # For reply-backed events, ``ticket.body`` represents the update that
+        # caused this event. The original request remains separately available.
+        if reply.get("body") is not None:
+            enriched["body"] = str(reply.get("body"))
 
     if not trigger_automations:
         return

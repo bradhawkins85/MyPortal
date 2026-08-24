@@ -1727,6 +1727,7 @@
           [
             'ticket.subject',
             'ticket.body',
+            'ticket.initial_body',
             'ticket.status',
             'ticket.priority',
             'ticket.requester_email',
@@ -1755,6 +1756,7 @@
             'ticket.in_status_age_hours',
             'ticket.last_reply_age_hours',
             'ticket_update.actor_type',
+            'reply.body',
             'reply.is_internal',
             'reply.kind',
           ].forEach((field) => {
