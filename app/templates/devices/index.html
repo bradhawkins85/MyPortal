@@ -71,6 +71,10 @@
                   <label class="checkbox"><input type="checkbox" name="agent_not_required" value="1" {% if device.agent_not_required %}checked{% endif %}> <span>Agent not required</span></label>
                   <button class="button button--primary" type="submit">Save device</button>
                 </form>
+                {% if can_sync_hudu %}<form method="post" action="/devices/discovered/{{ device.id }}/hudu-sync">
+                  {% include "partials/csrf.html" %}
+                  <button class="button button--secondary" type="submit" {% if not device.device_type_id or not device.mac_address %}disabled title="Set a device type and MAC address before sending to Hudu"{% endif %}>Send / sync with Hudu</button>
+                </form>{% endif %}
               </div>
             </details>
           </td>{% endif %}

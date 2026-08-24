@@ -37,6 +37,20 @@ async def list_for_company(company_id: int) -> list[dict[str, Any]]:
     return devices
 
 
+async def get_for_company(device_id: int, company_id: int) -> dict[str, Any] | None:
+    """Return one company-owned device with its resolved type and vendor."""
+    return await db.fetch_one(
+        """SELECT nd.*, dt.name AS device_type_name,
+                  COALESCE(mv.vendor, nd.vendor) AS mac_vendor
+           FROM network_devices nd
+           LEFT JOIN network_device_types dt ON dt.id = nd.device_type_id
+           LEFT JOIN mac_vendors mv ON mv.oui_prefix =
+             SUBSTRING(UPPER(REPLACE(REPLACE(REPLACE(nd.mac_address, ':', ''), '-', ''), '.', '')), 1, 6)
+           WHERE nd.id=%s AND nd.company_id=%s""",
+        (device_id, company_id),
+    )
+
+
 async def list_device_types() -> list[dict[str, Any]]:
     return list(
         await db.fetch_all(
@@ -212,15 +226,25 @@ async def list_scanners(company_id: int) -> list[dict[str, Any]]:
 
 
 async def configure_scanner(
-    device_id: int, company_id: int, enabled: bool, interval: int,
-    wan_cidrs: list[str] | None = None, local_cidrs: list[str] | None = None,
+    device_id: int,
+    company_id: int,
+    enabled: bool,
+    interval: int,
+    wan_cidrs: list[str] | None = None,
+    local_cidrs: list[str] | None = None,
 ) -> None:
     await db.execute(
         """UPDATE tray_devices SET network_scanner_enabled=%s, network_scan_interval_minutes=%s,
            network_scan_wan_cidrs=%s, network_scan_local_cidrs=%s
            WHERE id=%s AND company_id=%s AND status='active'""",
-        (1 if enabled else 0, interval, "\n".join(wan_cidrs or []),
-         "\n".join(local_cidrs or []), device_id, company_id),
+        (
+            1 if enabled else 0,
+            interval,
+            "\n".join(wan_cidrs or []),
+            "\n".join(local_cidrs or []),
+            device_id,
+            company_id,
+        ),
     )
 
 
