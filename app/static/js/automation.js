@@ -1749,6 +1749,8 @@
             'ticket.task_count',
             'ticket.has_open_tasks',
             'ticket.open_task_count',
+            'ticket.linked_asset_count',
+            'ticket.suggested_asset_count',
             'ticket.ai_tags',
             'ticket.labels',
             'ticket.age_days',

@@ -2717,7 +2717,7 @@ async def _invoke_suggest_assets(
     *,
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
-    """Find imported TRMM assets whose logged-in user matches the requester."""
+    """Find imported assets whose logged-in user matches the requester."""
     del settings, event_future
     ticket_id = _extract_ticket_id_from_email_payload(payload)
     if not ticket_id:
@@ -2738,8 +2738,8 @@ async def _invoke_suggest_assets(
         """,
         (ticket_id,),
     )
-    if not requester or not requester.get("tacticalrmm_client_id"):
-        return {"status": "skipped", "reason": "Ticket company has no Tactical RMM mapping"}
+    if not requester:
+        return {"status": "skipped", "reason": "Ticket requester could not be resolved"}
 
     email = str(requester.get("email") or "").strip()
     first = str(requester.get("first_name") or "").strip()
@@ -2750,31 +2750,60 @@ async def _invoke_suggest_assets(
         if normalised and normalised not in candidates:
             candidates.append(normalised)
 
-    from app.services import tacticalrmm
+    suggestions: list[tuple[int, str]] = []
+    seen_asset_ids: set[int] = set()
 
-    agents = await tacticalrmm.fetch_agents(str(requester["tacticalrmm_client_id"]))
-    matched_agents: list[tuple[Mapping[str, Any], str]] = []
+    # Imported assets already contain the last logged-in user. Search those
+    # records first so suggestions do not depend on a live integration request.
+    assets = await db.fetch_all(
+        "SELECT id, last_user FROM assets WHERE company_id = %s",
+        (requester["company_id"],),
+    )
     for candidate in candidates:
-        matched_agents = [
-            (agent, candidate)
-            for agent in agents
-            if _normalise_logged_username(tacticalrmm.extract_agent_details(agent).get("last_user"))
-            == candidate
+        matches = [
+            asset
+            for asset in (assets or [])
+            if _normalise_logged_username(asset.get("last_user")) == candidate
         ]
-        if matched_agents:
+        if matches:
+            for asset in matches:
+                asset_id = int(asset["id"])
+                if asset_id not in seen_asset_ids:
+                    suggestions.append((asset_id, candidate))
+                    seen_asset_ids.add(asset_id)
             break
 
-    suggestions: list[tuple[int, str]] = []
-    for agent, matched_username in matched_agents:
-        agent_id = str(agent.get("agent_id") or agent.get("id") or agent.get("pk") or "").strip()
-        if not agent_id:
-            continue
-        asset = await db.fetch_one(
-            "SELECT id FROM assets WHERE company_id = %s AND tactical_asset_id = %s",
-            (requester["company_id"], agent_id),
-        )
-        if asset:
-            suggestions.append((int(asset["id"]), matched_username))
+    # Merge live Tactical RMM matches with cached matches when the company has
+    # an integration mapping, catching devices whose imported user is stale.
+    tactical_client_id = requester.get("tacticalrmm_client_id")
+    if tactical_client_id:
+        from app.services import tacticalrmm
+
+        agents = await tacticalrmm.fetch_agents(str(tactical_client_id))
+        matched_agents: list[tuple[Mapping[str, Any], str]] = []
+        for candidate in candidates:
+            matched_agents = [
+                (agent, candidate)
+                for agent in agents
+                if _normalise_logged_username(tacticalrmm.extract_agent_details(agent).get("last_user"))
+                == candidate
+            ]
+            if matched_agents:
+                break
+
+        for agent, matched_username in matched_agents:
+            agent_id = str(agent.get("agent_id") or agent.get("id") or agent.get("pk") or "").strip()
+            if not agent_id:
+                continue
+            asset = await db.fetch_one(
+                "SELECT id FROM assets WHERE company_id = %s AND tactical_asset_id = %s",
+                (requester["company_id"], agent_id),
+            )
+            if asset:
+                asset_id = int(asset["id"])
+                if asset_id not in seen_asset_ids:
+                    suggestions.append((asset_id, matched_username))
+                    seen_asset_ids.add(asset_id)
     await tickets_repo.replace_ticket_suggested_assets(ticket_id, suggestions)
     return {"status": "ok", "ticket_id": ticket_id, "suggested": len(suggestions)}
 
