@@ -6,6 +6,11 @@ from typing import Any, Optional
 
 from app.core.database import db
 
+_ALLOWED_PATCH_COLUMNS = frozenset({
+    "company_id", "invoice_number", "amount", "due_date", "status",
+    "xero_invoice_id", "xero_invoice_number", "synced_to_xero_at",
+})
+
 
 def _normalise_invoice(row: dict[str, Any]) -> dict[str, Any]:
     invoice = dict(row)
@@ -133,6 +138,9 @@ async def update_invoice(
 
 
 async def patch_invoice(invoice_id: int, **updates: Any) -> dict[str, Any]:
+    unknown = set(updates) - _ALLOWED_PATCH_COLUMNS
+    if unknown:
+        raise ValueError(f"Unsupported invoice fields: {', '.join(sorted(unknown))}")
     if not updates:
         existing = await get_invoice_by_id(invoice_id)
         if not existing:

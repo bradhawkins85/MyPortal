@@ -8,6 +8,29 @@ from app.core.logging import log_info
 from app.services.company_domains import normalise_email_domains
 
 
+_ALLOWED_COMPANY_COLUMNS = frozenset({
+    "name", "address", "phone", "is_vip", "syncro_company_id", "xero_id",
+    "tacticalrmm_client_id", "hudu_id", "huntress_organization_id",
+    "huntress_sat_account_id", "invoice_due_days", "payment_method", "require_po",
+    "offboarding_email_forwarding_enabled", "default_ticket_replies_billable",
+    "onedrive_export_site_id", "onedrive_export_site_name", "onedrive_export_drive_id",
+    "trello_board_id", "trello_api_key", "trello_token", "csp_tenant_id", "archived",
+    "is_demo", "customer_chat_enabled", "tray_chat_enabled", "tray_notifications_enabled",
+    "network_device_ticket_alerts_enabled", "defender_enabled",
+    "defender_scheduled_scan_type", "defender_scheduled_scan_day",
+    "defender_scheduled_scan_time", "defender_auto_ticket_min_severity",
+    "defender_auto_ticket_antivirus_off", "defender_auto_ticket_realtime_off",
+    "defender_auto_ticket_tamper_off", "defender_auto_ticket_threat_detected",
+})
+_ALLOWED_COMPANY_INPUTS = _ALLOWED_COMPANY_COLUMNS | frozenset({"email_domains"})
+
+
+def _validate_company_fields(data: dict[str, Any]) -> None:
+    unknown = set(data) - _ALLOWED_COMPANY_INPUTS
+    if unknown:
+        raise ValueError(f"Unsupported company fields: {', '.join(sorted(unknown))}")
+
+
 def _normalise_company(row: dict[str, Any]) -> dict[str, Any]:
     normalised = dict(row)
     if "is_vip" in normalised and normalised["is_vip"] is not None:
@@ -199,6 +222,7 @@ async def list_companies(include_archived: bool = False) -> List[dict[str, Any]]
 
 
 async def create_company(**data: Any) -> dict[str, Any]:
+    _validate_company_fields(data)
     log_info("Creating company", name=data.get("name"))
     email_domains = data.pop("email_domains", None) or []
     email_domains = normalise_email_domains(email_domains)
@@ -226,6 +250,7 @@ async def create_company(**data: Any) -> dict[str, Any]:
 
 
 async def update_company(company_id: int, **updates: Any) -> dict[str, Any]:
+    _validate_company_fields(updates)
     log_info("Updating company", company_id=company_id, fields=list(updates.keys()))
     email_domains: Iterable[str] | None = updates.pop("email_domains", None)
     if not updates:
