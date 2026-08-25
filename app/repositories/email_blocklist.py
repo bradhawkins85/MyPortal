@@ -21,8 +21,13 @@ def normalize_email(address: str) -> str:
 
 
 async def list_entries(*, search: str | None = None, limit: int = 100, offset: int = 0, sort: str = "created_at", direction: str = "desc") -> list[dict[str, Any]]:
-    sort_column = sort if sort in _ALLOWED_SORTS else "created_at"
-    sort_direction = "ASC" if str(direction).lower() == "asc" else "DESC"
+    if sort not in _ALLOWED_SORTS:
+        raise ValueError("Unsupported sort column")
+    direction_key = str(direction).lower()
+    if direction_key not in {"asc", "desc"}:
+        raise ValueError("Unsupported sort direction")
+    sort_column = sort
+    sort_direction = direction_key.upper()
     params: dict[str, Any] = {"limit": max(1, min(int(limit), 500)), "offset": max(0, int(offset))}
     where = ""
     if search:
