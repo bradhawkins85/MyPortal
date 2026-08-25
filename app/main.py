@@ -9428,6 +9428,7 @@ async def _render_ticket_detail(
         priority_options.append(option_str)
 
     ticket_assets = await tickets_repo.list_ticket_assets(ticket_id)
+    ticket_suggested_assets = await tickets_repo.list_ticket_suggested_assets(ticket_id)
     asset_selection: list[int] = []
     for linked in ticket_assets:
         asset_id = linked.get("asset_id")
@@ -9593,6 +9594,7 @@ async def _render_ticket_detail(
         "ticket_priority_options": priority_options,
         "ticket_return_url": request.url.path,
         "ticket_assets": ticket_assets,
+        "ticket_suggested_assets": ticket_suggested_assets,
         "ticket_asset_options": asset_options,
         "ticket_asset_selection": asset_selection,
         "ticket_asset_linked_data": serialisable_ticket_assets,

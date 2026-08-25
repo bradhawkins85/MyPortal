@@ -1121,6 +1121,53 @@ async def list_ticket_assets(ticket_id: int) -> list[dict[str, Any]]:
     return assets
 
 
+async def list_ticket_suggested_assets(ticket_id: int) -> list[dict[str, Any]]:
+    """Return unconfirmed asset suggestions for a ticket."""
+    rows = await db.fetch_all(
+        """
+        SELECT tsa.asset_id, tsa.matched_username, tsa.created_at, a.name,
+               a.status, a.tactical_asset_id
+        FROM ticket_suggested_assets tsa
+        INNER JOIN assets a ON a.id = tsa.asset_id
+        LEFT JOIN ticket_assets ta
+          ON ta.ticket_id = tsa.ticket_id AND ta.asset_id = tsa.asset_id
+        WHERE tsa.ticket_id = %s AND ta.asset_id IS NULL
+        ORDER BY a.name, tsa.asset_id
+        """,
+        (ticket_id,),
+    )
+    return [dict(row) for row in (rows or [])]
+
+
+async def replace_ticket_suggested_assets(
+    ticket_id: int, suggestions: Iterable[tuple[int, str]]
+) -> None:
+    await db.execute("DELETE FROM ticket_suggested_assets WHERE ticket_id = %s", (ticket_id,))
+    for asset_id, username in suggestions:
+        await db.execute(
+            "INSERT INTO ticket_suggested_assets (ticket_id, asset_id, matched_username) VALUES (%s, %s, %s)",
+            (ticket_id, asset_id, username),
+        )
+
+
+async def confirm_ticket_suggested_asset(ticket_id: int, asset_id: int) -> bool:
+    row = await db.fetch_one(
+        "SELECT asset_id FROM ticket_suggested_assets WHERE ticket_id = %s AND asset_id = %s",
+        (ticket_id, asset_id),
+    )
+    if not row:
+        return False
+    await db.execute(
+        "INSERT IGNORE INTO ticket_assets (ticket_id, asset_id) VALUES (%s, %s)",
+        (ticket_id, asset_id),
+    )
+    await db.execute(
+        "DELETE FROM ticket_suggested_assets WHERE ticket_id = %s AND asset_id = %s",
+        (ticket_id, asset_id),
+    )
+    return True
+
+
 async def replace_ticket_assets(
     ticket_id: int, asset_ids: Iterable[int]
 ) -> list[dict[str, Any]]:

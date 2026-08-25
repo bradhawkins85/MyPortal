@@ -1141,6 +1141,14 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
 
 _ALWAYS_ON_TICKET_ACTION_MODULES: tuple[dict[str, Any], ...] = (
     {
+        "slug": "suggest-assets",
+        "name": "Suggest Assets",
+        "description": "Suggest Tactical RMM devices used by the ticket requester.",
+        "icon": "🖥️",
+        "settings": {},
+        "enabled": True,
+    },
+    {
         "slug": "create-ticket",
         "name": "Create Ticket",
         "description": "Create a new support ticket with customizable details.",
@@ -2694,6 +2702,83 @@ async def update_module(
     return _redact_module_settings(updated) if updated else None
 
 
+def _normalise_logged_username(value: Any) -> str:
+    username = str(value or "").strip().casefold()
+    if "\\" in username:
+        username = username.rsplit("\\", 1)[-1]
+    if "@" in username:
+        username = username.split("@", 1)[0]
+    return username
+
+
+async def _invoke_suggest_assets(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Find imported TRMM assets whose logged-in user matches the requester."""
+    del settings, event_future
+    ticket_id = _extract_ticket_id_from_email_payload(payload)
+    if not ticket_id:
+        return {"status": "skipped", "reason": "Ticket context is required"}
+    requester = await db.fetch_one(
+        """
+        SELECT t.company_id, c.tacticalrmm_client_id,
+               COALESCE(rs.email, u.email) AS email,
+               COALESCE(rs.first_name, es.first_name) AS first_name,
+               COALESCE(rs.last_name, es.last_name) AS last_name
+        FROM tickets t
+        INNER JOIN companies c ON c.id = t.company_id
+        LEFT JOIN users u ON u.id = t.requester_id
+        LEFT JOIN staff rs ON rs.id = t.requester_staff_id
+        LEFT JOIN staff es ON es.company_id = t.company_id AND es.email = u.email
+        WHERE t.id = %s
+        LIMIT 1
+        """,
+        (ticket_id,),
+    )
+    if not requester or not requester.get("tacticalrmm_client_id"):
+        return {"status": "skipped", "reason": "Ticket company has no Tactical RMM mapping"}
+
+    email = str(requester.get("email") or "").strip()
+    first = str(requester.get("first_name") or "").strip()
+    last = str(requester.get("last_name") or "").strip()
+    candidates = []
+    for candidate in (email.split("@", 1)[0], f"{first}.{last}", first):
+        normalised = _normalise_logged_username(candidate)
+        if normalised and normalised not in candidates:
+            candidates.append(normalised)
+
+    from app.services import tacticalrmm
+
+    agents = await tacticalrmm.fetch_agents(str(requester["tacticalrmm_client_id"]))
+    matched_agents: list[tuple[Mapping[str, Any], str]] = []
+    for candidate in candidates:
+        matched_agents = [
+            (agent, candidate)
+            for agent in agents
+            if _normalise_logged_username(tacticalrmm.extract_agent_details(agent).get("last_user"))
+            == candidate
+        ]
+        if matched_agents:
+            break
+
+    suggestions: list[tuple[int, str]] = []
+    for agent, matched_username in matched_agents:
+        agent_id = str(agent.get("agent_id") or agent.get("id") or agent.get("pk") or "").strip()
+        if not agent_id:
+            continue
+        asset = await db.fetch_one(
+            "SELECT id FROM assets WHERE company_id = %s AND tactical_asset_id = %s",
+            (requester["company_id"], agent_id),
+        )
+        if asset:
+            suggestions.append((int(asset["id"]), matched_username))
+    await tickets_repo.replace_ticket_suggested_assets(ticket_id, suggestions)
+    return {"status": "ok", "ticket_id": ticket_id, "suggested": len(suggestions)}
+
+
 async def trigger_module(
     slug: str,
     payload: Mapping[str, Any] | None = None,
@@ -2710,6 +2795,7 @@ async def trigger_module(
             return {"status": "skipped", "reason": "Module disabled", "module": slug}
     settings = _resolve_module_settings_for_runtime(slug, module)
     handler_map: dict[str, Callable[..., Awaitable[dict[str, Any]]]] = {
+        "suggest-assets": _invoke_suggest_assets,
         "syncro": _validate_syncro,
         "ollama": _invoke_ollama,
         "smtp": _invoke_smtp,

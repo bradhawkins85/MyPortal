@@ -2790,6 +2790,11 @@ button.header-title-menu__link,
   box-shadow: 0 16px 32px -22px rgba(14, 165, 233, 0.45);
 }
 
+.ticket-assets-linked__item--suggested {
+  border-color: var(--color-warning, #d97706);
+  background: color-mix(in srgb, var(--color-warning, #d97706) 12%, transparent);
+}
+
 .ticket-assets-linked__name {
   color: #e2e8f0;
   font-weight: 600;

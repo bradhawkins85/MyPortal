@@ -1500,6 +1500,27 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
     return flash_redirect(destination, message, "success")
 
 
+@router.post(
+    "/admin/tickets/{ticket_id:int}/assets/{asset_id:int}/confirm",
+    response_class=HTMLResponse,
+)
+async def admin_confirm_suggested_asset(ticket_id: int, asset_id: int, request: Request):
+    """Promote an automation suggestion to an explicitly linked ticket asset."""
+    main_module = _main()
+    _current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    if not await tickets_repo.get_ticket(ticket_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    confirmed = await tickets_repo.confirm_ticket_suggested_asset(ticket_id, asset_id)
+    if not confirmed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset suggestion not found")
+    await tickets_service.broadcast_ticket_event(action="updated", ticket_id=ticket_id)
+    return flash_redirect(
+        f"/admin/tickets/{ticket_id}", "Suggested asset linked to ticket.", "success"
+    )
+
+
 @router.post("/admin/tickets/{ticket_id:int}/ai/reprocess", response_class=JSONResponse)
 async def admin_reprocess_ticket_ai(ticket_id: int, request: Request):
     main_module = _main()
