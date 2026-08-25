@@ -112,11 +112,17 @@ async def get_endpoint(company_id: int, endpoint_id: int) -> dict[str, Any] | No
 async def list_endpoints(
     company_id: int, *, enabled: bool | None = None, limit: int = 100, offset: int = 0
 ) -> list[dict[str, Any]]:
+    if enabled is None:
+        return await db.fetch_all(
+            "SELECT * FROM voice_monitor_endpoints WHERE company_id = %s "
+            "ORDER BY display_label, id LIMIT %s OFFSET %s",
+            (company_id, limit, offset),
+        )
     return await db.fetch_all(
         "SELECT * FROM voice_monitor_endpoints WHERE company_id = %s "
-        "AND (%s IS NULL OR enabled = %s) "
+        "AND enabled = %s "
         "ORDER BY display_label, id LIMIT %s OFFSET %s",
-        (company_id, enabled, enabled, limit, offset),
+        (company_id, enabled, limit, offset),
     )
 
 
@@ -142,58 +148,61 @@ async def update_endpoint(
                                            enabling_endpoint_id=endpoint_id)
     if values:
         field_set = set(values.keys())
+        recognized_fields = field_set.intersection(ENDPOINT_FIELDS)
+        if not recognized_fields:
+            return await get_endpoint(company_id, endpoint_id)
         params = [
-            "subscription_id" in field_set,
+            int("subscription_id" in recognized_fields),
             values.get("subscription_id"),
-            "destination_e164" in field_set,
+            int("destination_e164" in recognized_fields),
             values.get("destination_e164"),
-            "display_label" in field_set,
+            int("display_label" in recognized_fields),
             values.get("display_label"),
-            "enabled" in field_set,
+            int("enabled" in recognized_fields),
             values.get("enabled"),
-            "timezone" in field_set,
+            int("timezone" in recognized_fields),
             values.get("timezone"),
-            "schedule_cron" in field_set,
+            int("schedule_cron" in recognized_fields),
             values.get("schedule_cron"),
-            "interval_seconds" in field_set,
+            int("interval_seconds" in recognized_fields),
             values.get("interval_seconds"),
-            "timeout_seconds" in field_set,
+            int("timeout_seconds" in recognized_fields),
             values.get("timeout_seconds"),
-            "max_retries" in field_set,
+            int("max_retries" in recognized_fields),
             values.get("max_retries"),
-            "retry_delay_seconds" in field_set,
+            int("retry_delay_seconds" in recognized_fields),
             values.get("retry_delay_seconds"),
-            "expected_behavior" in field_set,
+            int("expected_behavior" in recognized_fields),
             values.get("expected_behavior"),
-            "transcription_enabled" in field_set,
+            int("transcription_enabled" in recognized_fields),
             values.get("transcription_enabled"),
-            "ticket_on_failure" in field_set,
+            int("ticket_on_failure" in recognized_fields),
             values.get("ticket_on_failure"),
-            "ticket_failure_threshold" in field_set,
+            int("ticket_failure_threshold" in recognized_fields),
             values.get("ticket_failure_threshold"),
-            "next_run_at" in field_set,
+            int("next_run_at" in recognized_fields),
             values.get("next_run_at"),
-            "consent_granted" in field_set,
+            int("consent_granted" in recognized_fields),
             values.get("consent_granted"),
-            "recording_consent_granted" in field_set,
+            int("recording_consent_granted" in recognized_fields),
             values.get("recording_consent_granted"),
-            "consent_actor_id" in field_set,
+            int("consent_actor_id" in recognized_fields),
             values.get("consent_actor_id"),
-            "consent_at" in field_set,
+            int("consent_at" in recognized_fields),
             values.get("consent_at"),
-            "consent_policy_version" in field_set,
+            int("consent_policy_version" in recognized_fields),
             values.get("consent_policy_version"),
-            "consent_revoked_at" in field_set,
+            int("consent_revoked_at" in recognized_fields),
             values.get("consent_revoked_at"),
-            "quiet_hours_start" in field_set,
+            int("quiet_hours_start" in recognized_fields),
             values.get("quiet_hours_start"),
-            "quiet_hours_end" in field_set,
+            int("quiet_hours_end" in recognized_fields),
             values.get("quiet_hours_end"),
-            "caller_id_verified" in field_set,
+            int("caller_id_verified" in recognized_fields),
             values.get("caller_id_verified"),
-            "daily_attempt_limit" in field_set,
+            int("daily_attempt_limit" in recognized_fields),
             values.get("daily_attempt_limit"),
-            "monetary_cap_minor" in field_set,
+            int("monetary_cap_minor" in recognized_fields),
             values.get("monetary_cap_minor"),
             endpoint_id,
             company_id,
@@ -603,20 +612,45 @@ async def list_attempts(
     limit: int = 100,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
+    if endpoint_id is None and status is None:
+        return await db.fetch_all(
+            "SELECT * FROM voice_monitor_attempts WHERE company_id = %s "
+            "ORDER BY queued_at DESC, id DESC LIMIT %s OFFSET %s",
+            (company_id, limit, offset),
+        )
+    if endpoint_id is None:
+        return await db.fetch_all(
+            "SELECT * FROM voice_monitor_attempts WHERE company_id = %s "
+            "AND outcome_status = %s "
+            "ORDER BY queued_at DESC, id DESC LIMIT %s OFFSET %s",
+            (company_id, status, limit, offset),
+        )
+    if status is None:
+        return await db.fetch_all(
+            "SELECT * FROM voice_monitor_attempts WHERE company_id = %s "
+            "AND endpoint_id = %s "
+            "ORDER BY queued_at DESC, id DESC LIMIT %s OFFSET %s",
+            (company_id, endpoint_id, limit, offset),
+        )
     return await db.fetch_all(
         "SELECT * FROM voice_monitor_attempts WHERE company_id = %s "
-        "AND (%s IS NULL OR endpoint_id = %s) "
-        "AND (%s IS NULL OR outcome_status = %s) "
+        "AND endpoint_id = %s AND outcome_status = %s "
         "ORDER BY queued_at DESC, id DESC LIMIT %s OFFSET %s",
-        (company_id, endpoint_id, endpoint_id, status, status, limit, offset),
+        (company_id, endpoint_id, status, limit, offset),
     )
 
 
 async def count_attempts(company_id: int, *, endpoint_id: int | None = None) -> int:
+    if endpoint_id is None:
+        row = await db.fetch_one(
+            "SELECT COUNT(*) AS count FROM voice_monitor_attempts WHERE company_id = %s",
+            (company_id,),
+        )
+        return int(row["count"]) if row else 0
     row = await db.fetch_one(
         "SELECT COUNT(*) AS count FROM voice_monitor_attempts WHERE company_id = %s "
-        "AND (%s IS NULL OR endpoint_id = %s)",
-        (company_id, endpoint_id, endpoint_id),
+        "AND endpoint_id = %s",
+        (company_id, endpoint_id),
     )
     return int(row["count"]) if row else 0
 
@@ -747,29 +781,29 @@ async def transition_attempt(
     field_set = set(fields)
     params = [
         to_status,
-        "started_at" in field_set,
+        int("started_at" in field_set),
         result.get("started_at"),
-        "answered_at" in field_set,
+        int("answered_at" in field_set),
         result.get("answered_at"),
-        "completed_at" in field_set,
+        int("completed_at" in field_set),
         result.get("completed_at"),
-        "provider_response_code" in field_set,
+        int("provider_response_code" in field_set),
         result.get("provider_response_code"),
-        "provider_call_id" in field_set,
+        int("provider_call_id" in field_set),
         result.get("provider_call_id"),
-        "failure_category" in field_set,
+        int("failure_category" in field_set),
         result.get("failure_category"),
-        "failure_detail" in field_set,
+        int("failure_detail" in field_set),
         result.get("failure_detail"),
-        "duration_seconds" in field_set,
+        int("duration_seconds" in field_set),
         result.get("duration_seconds"),
-        "media_artifact_reference" in field_set,
+        int("media_artifact_reference" in field_set),
         result.get("media_artifact_reference"),
-        "transcript_status" in field_set,
+        int("transcript_status" in field_set),
         result.get("transcript_status"),
-        "transcript_text_reference" in field_set,
+        int("transcript_text_reference" in field_set),
         result.get("transcript_text_reference"),
-        "retry_count" in field_set,
+        int("retry_count" in field_set),
         result.get("retry_count"),
         attempt_id,
         company_id,
