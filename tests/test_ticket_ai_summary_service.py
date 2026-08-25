@@ -305,6 +305,42 @@ def test_extract_summary_fields_from_openai_chat_completion_json_string():
     assert resolution == "Likely In Progress"
 
 
+@pytest.mark.parametrize(
+    ("renderer", "final_instruction"),
+    [
+        (tickets_service._render_prompt, '"resolution": "Likely In Progress"'),
+        (tickets_service._render_tags_prompt, "Return JSON containing a 'tags' array"),
+    ],
+)
+def test_ai_ticket_prompts_limit_long_bodies(renderer, final_instruction):
+    ticket = {
+        "id": 27,
+        "subject": "vzdump backup status",
+        "description": "backup log entry 102: completed successfully\n" * 5_000,
+        "status": "new",
+        "priority": "normal",
+        "category": "Email",
+        "module_slug": "m365-mail",
+    }
+    replies = [
+        {
+            "ticket_id": 27,
+            "author_id": None,
+            "body": "Newest customer context remains available.",
+            "is_internal": False,
+            "created_at": None,
+        }
+    ]
+
+    prompt = renderer(ticket, replies, {})
+
+    assert len(prompt) <= tickets_service._MAX_AI_PROMPT_CHARS
+    assert "Ticket subject: vzdump backup status" in prompt
+    assert "Older ticket content truncated" in prompt
+    assert "Newest customer context remains available." in prompt
+    assert final_instruction in prompt
+
+
 @pytest.mark.anyio
 async def test_extract_tags_from_openai_chat_completion_json_string(monkeypatch):
     async def fake_excluded_tags():

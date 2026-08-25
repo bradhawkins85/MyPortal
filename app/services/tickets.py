@@ -94,6 +94,15 @@ _DEFAULT_TAG_FILL = [
     "knowledge-base",
 ]
 
+# Ollama installations commonly use an 8,192-token context window. Keeping ticket
+# prompts below this character limit leaves room for the model's response and is
+# deliberately conservative for log-heavy descriptions, which tokenize less
+# efficiently than ordinary prose.
+_MAX_AI_PROMPT_CHARS = 12_000
+_PROMPT_TRUNCATION_NOTICE = (
+    "\n\n[Older ticket content truncated to fit the AI context window]\n\n"
+)
+
 
 _TICKET_UPDATE_ACTOR_LABELS: dict[str, str] = {
     "system": "System",
@@ -988,6 +997,25 @@ def _prepare_prompt_text(value: Any) -> str:
     return _strip_conversation_noise(normalised)
 
 
+def _limit_ai_prompt(prompt: str) -> str:
+    """Bound a prompt while retaining both ticket context and final instructions."""
+
+    if len(prompt) <= _MAX_AI_PROMPT_CHARS:
+        return prompt
+
+    available = _MAX_AI_PROMPT_CHARS - len(_PROMPT_TRUNCATION_NOTICE)
+    # Retain more of the beginning, where the subject and initial report live,
+    # while preserving the newest conversation entries and response schema at
+    # the end of the prompt.
+    beginning_length = available * 2 // 3
+    ending_length = available - beginning_length
+    return (
+        prompt[:beginning_length].rstrip()
+        + _PROMPT_TRUNCATION_NOTICE
+        + prompt[-ending_length:].lstrip()
+    )
+
+
 async def refresh_ticket_ai_summary(ticket_id: int) -> None:
     """Refresh the Ollama-generated summary for a ticket if the module is configured."""
 
@@ -1375,7 +1403,7 @@ def _render_prompt(
     lines.append(
         "Respond with JSON like {\"summary\": \"concise summary\", \"resolution\": \"Likely In Progress\"}."
     )
-    return "\n".join(lines)
+    return _limit_ai_prompt("\n".join(lines))
 
 
 def _is_customer_tag_reply(
@@ -1460,7 +1488,9 @@ def _render_tags_prompt(
     lines.append(
         "Return JSON containing a 'tags' array of 5 to 10 unique lowercase kebab-case strings that best describe the ticket."
     )
-    return "\n".join(lines)
+    return _limit_ai_prompt("\n".join(lines))
+
+
 def _strip_wrapped_block(text: str) -> str:
     """Remove common Markdown or triple-quoted wrappers from a response."""
 
