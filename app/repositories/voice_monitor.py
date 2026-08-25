@@ -112,16 +112,17 @@ async def get_endpoint(company_id: int, endpoint_id: int) -> dict[str, Any] | No
 async def list_endpoints(
     company_id: int, *, enabled: bool | None = None, limit: int = 100, offset: int = 0
 ) -> list[dict[str, Any]]:
-    condition = " AND enabled = %s" if enabled is not None else ""
-    params: tuple[Any, ...] = (
-        (company_id, enabled, limit, offset)
-        if enabled is not None
-        else (company_id, limit, offset)
-    )
+    if enabled is None:
+        return await db.fetch_all(
+            "SELECT * FROM voice_monitor_endpoints WHERE company_id = %s "
+            "ORDER BY display_label, id LIMIT %s OFFSET %s",
+            (company_id, limit, offset),
+        )
     return await db.fetch_all(
-        f"SELECT * FROM voice_monitor_endpoints WHERE company_id = %s{condition} "
+        "SELECT * FROM voice_monitor_endpoints WHERE company_id = %s "
+        "AND enabled = %s "
         "ORDER BY display_label, id LIMIT %s OFFSET %s",
-        params,
+        (company_id, enabled, limit, offset),
     )
 
 
@@ -145,12 +146,97 @@ async def update_endpoint(
             from app.services.voice_monitor_billing import assert_endpoint_capacity
             await assert_endpoint_capacity(subscription_id, company_id=company_id,
                                            enabling_endpoint_id=endpoint_id)
-    columns = [field for field in ENDPOINT_FIELDS if field in values]
-    if columns:
+    if values:
+        field_set = set(values.keys())
+        recognized_fields = field_set.intersection(ENDPOINT_FIELDS)
+        if not recognized_fields:
+            return await get_endpoint(company_id, endpoint_id)
+        params = [
+            int("subscription_id" in recognized_fields),
+            values.get("subscription_id"),
+            int("destination_e164" in recognized_fields),
+            values.get("destination_e164"),
+            int("display_label" in recognized_fields),
+            values.get("display_label"),
+            int("enabled" in recognized_fields),
+            values.get("enabled"),
+            int("timezone" in recognized_fields),
+            values.get("timezone"),
+            int("schedule_cron" in recognized_fields),
+            values.get("schedule_cron"),
+            int("interval_seconds" in recognized_fields),
+            values.get("interval_seconds"),
+            int("timeout_seconds" in recognized_fields),
+            values.get("timeout_seconds"),
+            int("max_retries" in recognized_fields),
+            values.get("max_retries"),
+            int("retry_delay_seconds" in recognized_fields),
+            values.get("retry_delay_seconds"),
+            int("expected_behavior" in recognized_fields),
+            values.get("expected_behavior"),
+            int("transcription_enabled" in recognized_fields),
+            values.get("transcription_enabled"),
+            int("ticket_on_failure" in recognized_fields),
+            values.get("ticket_on_failure"),
+            int("ticket_failure_threshold" in recognized_fields),
+            values.get("ticket_failure_threshold"),
+            int("next_run_at" in recognized_fields),
+            values.get("next_run_at"),
+            int("consent_granted" in recognized_fields),
+            values.get("consent_granted"),
+            int("recording_consent_granted" in recognized_fields),
+            values.get("recording_consent_granted"),
+            int("consent_actor_id" in recognized_fields),
+            values.get("consent_actor_id"),
+            int("consent_at" in recognized_fields),
+            values.get("consent_at"),
+            int("consent_policy_version" in recognized_fields),
+            values.get("consent_policy_version"),
+            int("consent_revoked_at" in recognized_fields),
+            values.get("consent_revoked_at"),
+            int("quiet_hours_start" in recognized_fields),
+            values.get("quiet_hours_start"),
+            int("quiet_hours_end" in recognized_fields),
+            values.get("quiet_hours_end"),
+            int("caller_id_verified" in recognized_fields),
+            values.get("caller_id_verified"),
+            int("daily_attempt_limit" in recognized_fields),
+            values.get("daily_attempt_limit"),
+            int("monetary_cap_minor" in recognized_fields),
+            values.get("monetary_cap_minor"),
+            endpoint_id,
+            company_id,
+        ]
         await db.execute(
-            f"UPDATE voice_monitor_endpoints SET {', '.join(f'{field} = %s' for field in columns)} "
+            "UPDATE voice_monitor_endpoints SET "
+            "subscription_id = CASE WHEN %s THEN %s ELSE subscription_id END, "
+            "destination_e164 = CASE WHEN %s THEN %s ELSE destination_e164 END, "
+            "display_label = CASE WHEN %s THEN %s ELSE display_label END, "
+            "enabled = CASE WHEN %s THEN %s ELSE enabled END, "
+            "timezone = CASE WHEN %s THEN %s ELSE timezone END, "
+            "schedule_cron = CASE WHEN %s THEN %s ELSE schedule_cron END, "
+            "interval_seconds = CASE WHEN %s THEN %s ELSE interval_seconds END, "
+            "timeout_seconds = CASE WHEN %s THEN %s ELSE timeout_seconds END, "
+            "max_retries = CASE WHEN %s THEN %s ELSE max_retries END, "
+            "retry_delay_seconds = CASE WHEN %s THEN %s ELSE retry_delay_seconds END, "
+            "expected_behavior = CASE WHEN %s THEN %s ELSE expected_behavior END, "
+            "transcription_enabled = CASE WHEN %s THEN %s ELSE transcription_enabled END, "
+            "ticket_on_failure = CASE WHEN %s THEN %s ELSE ticket_on_failure END, "
+            "ticket_failure_threshold = CASE WHEN %s THEN %s ELSE ticket_failure_threshold END, "
+            "next_run_at = CASE WHEN %s THEN %s ELSE next_run_at END, "
+            "consent_granted = CASE WHEN %s THEN %s ELSE consent_granted END, "
+            "recording_consent_granted = CASE WHEN %s THEN %s ELSE recording_consent_granted END, "
+            "consent_actor_id = CASE WHEN %s THEN %s ELSE consent_actor_id END, "
+            "consent_at = CASE WHEN %s THEN %s ELSE consent_at END, "
+            "consent_policy_version = CASE WHEN %s THEN %s ELSE consent_policy_version END, "
+            "consent_revoked_at = CASE WHEN %s THEN %s ELSE consent_revoked_at END, "
+            "quiet_hours_start = CASE WHEN %s THEN %s ELSE quiet_hours_start END, "
+            "quiet_hours_end = CASE WHEN %s THEN %s ELSE quiet_hours_end END, "
+            "caller_id_verified = CASE WHEN %s THEN %s ELSE caller_id_verified END, "
+            "daily_attempt_limit = CASE WHEN %s THEN %s ELSE daily_attempt_limit END, "
+            "monetary_cap_minor = CASE WHEN %s THEN %s ELSE monetary_cap_minor END "
             "WHERE id = %s AND company_id = %s",
-            (*(values[field] for field in columns), endpoint_id, company_id),
+            tuple(params),
         )
     return await get_endpoint(company_id, endpoint_id)
 
@@ -234,22 +320,30 @@ async def enqueue_due_attempts(*, limit: int = 100, now: datetime | None = None)
     for endpoint in due:
         scheduled_for = endpoint["next_run_at"]
         key = dispatch_key(int(endpoint["id"]), scheduled_for)
-        insert_verb = "INSERT OR IGNORE" if db.is_sqlite() else "INSERT IGNORE"
-        inserted = await db.execute_rowcount(
-            f"{insert_verb} INTO voice_monitor_attempts "
-            "(endpoint_id, company_id, queued_at, scheduled_for, available_at, dispatch_key, "
-            "provider_idempotency_key, max_deliveries) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-            (
-                endpoint["id"],
-                endpoint["company_id"],
-                now,
-                scheduled_for,
-                now,
-                key,
-                key,
-                int(endpoint.get("max_retries") or 0) + 1,
-            ),
+        params = (
+            endpoint["id"],
+            endpoint["company_id"],
+            now,
+            scheduled_for,
+            now,
+            key,
+            key,
+            int(endpoint.get("max_retries") or 0) + 1,
         )
+        if db.is_sqlite():
+            inserted = await db.execute_rowcount(
+                "INSERT OR IGNORE INTO voice_monitor_attempts "
+                "(endpoint_id, company_id, queued_at, scheduled_for, available_at, dispatch_key, "
+                "provider_idempotency_key, max_deliveries) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                params,
+            )
+        else:
+            inserted = await db.execute_rowcount(
+                "INSERT IGNORE INTO voice_monitor_attempts "
+                "(endpoint_id, company_id, queued_at, scheduled_for, available_at, dispatch_key, "
+                "provider_idempotency_key, max_deliveries) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                params,
+            )
         enqueued += int(bool(inserted))
         # Interval schedules are advanced here; cron schedules are recalculated by
         # configuration scheduling code and deliberately disabled until then.
@@ -413,14 +507,25 @@ async def set_transcription_status(attempt_id: int, status: str,
 async def initialize_content(attempt_id: int, company_id: int, *, media_reference: str | None,
                              transcription_requested: bool, retention_days: int = 30) -> None:
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    verb = "INSERT OR IGNORE" if db.is_sqlite() else "INSERT IGNORE"
-    await db.execute_rowcount(
-        f"{verb} INTO voice_monitor_contents (attempt_id, company_id, media_reference, "
-        "transcript_status, retain_until) VALUES (%s,%s,%s,%s,%s)",
-        (attempt_id, company_id, media_reference,
-         "pending" if transcription_requested else "not_requested",
-         now + timedelta(days=max(0, retention_days))),
+    params = (
+        attempt_id,
+        company_id,
+        media_reference,
+        "pending" if transcription_requested else "not_requested",
+        now + timedelta(days=max(0, retention_days)),
     )
+    if db.is_sqlite():
+        await db.execute_rowcount(
+            "INSERT OR IGNORE INTO voice_monitor_contents (attempt_id, company_id, media_reference, "
+            "transcript_status, retain_until) VALUES (%s,%s,%s,%s,%s)",
+            params,
+        )
+    else:
+        await db.execute_rowcount(
+            "INSERT IGNORE INTO voice_monitor_contents (attempt_id, company_id, media_reference, "
+            "transcript_status, retain_until) VALUES (%s,%s,%s,%s,%s)",
+            params,
+        )
 
 
 async def store_transcript(attempt_id: int, company_id: int, transcript: str) -> str:
@@ -456,11 +561,24 @@ async def record_worker_heartbeat(worker_identity: str, *, active_calls: int) ->
     queue = await db.fetch_one(
         "SELECT COUNT(*) count FROM voice_monitor_attempts WHERE completed_at IS NULL AND outcome_status IN ('queued','retry_wait')"
     ) or {}
-    verb = "INSERT OR REPLACE" if db.is_sqlite() else "INSERT INTO"
-    suffix = "" if db.is_sqlite() else " ON DUPLICATE KEY UPDATE heartbeat_at=VALUES(heartbeat_at),active_calls=VALUES(active_calls),queue_depth=VALUES(queue_depth)"
+    params = (
+        worker_identity,
+        datetime.now(timezone.utc).replace(tzinfo=None),
+        active_calls,
+        int(queue.get("count") or 0),
+    )
+    if db.is_sqlite():
+        await db.execute(
+            "INSERT OR REPLACE INTO voice_monitor_worker_heartbeats "
+            "(worker_identity,heartbeat_at,active_calls,queue_depth) VALUES (%s,%s,%s,%s)",
+            params,
+        )
+        return
     await db.execute(
-        f"{verb} voice_monitor_worker_heartbeats (worker_identity,heartbeat_at,active_calls,queue_depth) VALUES (%s,%s,%s,%s){suffix}",
-        (worker_identity, datetime.now(timezone.utc).replace(tzinfo=None), active_calls, int(queue.get("count") or 0)),
+        "INSERT INTO voice_monitor_worker_heartbeats "
+        "(worker_identity,heartbeat_at,active_calls,queue_depth) VALUES (%s,%s,%s,%s) "
+        "ON DUPLICATE KEY UPDATE heartbeat_at=VALUES(heartbeat_at),active_calls=VALUES(active_calls),queue_depth=VALUES(queue_depth)",
+        params,
     )
 
 
@@ -494,27 +612,45 @@ async def list_attempts(
     limit: int = 100,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    conditions, params = ["company_id = %s"], [company_id]
-    if endpoint_id is not None:
-        conditions.append("endpoint_id = %s")
-        params.append(endpoint_id)
-    if status is not None:
-        conditions.append("outcome_status = %s")
-        params.append(status)
-    params.extend((limit, offset))
+    if endpoint_id is None and status is None:
+        return await db.fetch_all(
+            "SELECT * FROM voice_monitor_attempts WHERE company_id = %s "
+            "ORDER BY queued_at DESC, id DESC LIMIT %s OFFSET %s",
+            (company_id, limit, offset),
+        )
+    if endpoint_id is None:
+        return await db.fetch_all(
+            "SELECT * FROM voice_monitor_attempts WHERE company_id = %s "
+            "AND outcome_status = %s "
+            "ORDER BY queued_at DESC, id DESC LIMIT %s OFFSET %s",
+            (company_id, status, limit, offset),
+        )
+    if status is None:
+        return await db.fetch_all(
+            "SELECT * FROM voice_monitor_attempts WHERE company_id = %s "
+            "AND endpoint_id = %s "
+            "ORDER BY queued_at DESC, id DESC LIMIT %s OFFSET %s",
+            (company_id, endpoint_id, limit, offset),
+        )
     return await db.fetch_all(
-        f"SELECT * FROM voice_monitor_attempts WHERE {' AND '.join(conditions)} "
+        "SELECT * FROM voice_monitor_attempts WHERE company_id = %s "
+        "AND endpoint_id = %s AND outcome_status = %s "
         "ORDER BY queued_at DESC, id DESC LIMIT %s OFFSET %s",
-        tuple(params),
+        (company_id, endpoint_id, status, limit, offset),
     )
 
 
 async def count_attempts(company_id: int, *, endpoint_id: int | None = None) -> int:
-    suffix = " AND endpoint_id = %s" if endpoint_id is not None else ""
-    params = (company_id, endpoint_id) if endpoint_id is not None else (company_id,)
+    if endpoint_id is None:
+        row = await db.fetch_one(
+            "SELECT COUNT(*) AS count FROM voice_monitor_attempts WHERE company_id = %s",
+            (company_id,),
+        )
+        return int(row["count"]) if row else 0
     row = await db.fetch_one(
-        f"SELECT COUNT(*) AS count FROM voice_monitor_attempts WHERE company_id = %s{suffix}",
-        params,
+        "SELECT COUNT(*) AS count FROM voice_monitor_attempts WHERE company_id = %s "
+        "AND endpoint_id = %s",
+        (company_id, endpoint_id),
     )
     return int(row["count"]) if row else 0
 
@@ -534,22 +670,30 @@ async def get_preferences(company_id: int) -> dict[str, Any]:
 async def set_preferences(
     company_id: int, user_id: int, values: dict[str, bool]
 ) -> dict[str, Any]:
-    verb = "INSERT OR REPLACE" if db.is_sqlite() else "INSERT INTO"
-    suffix = (
-        ""
-        if db.is_sqlite()
-        else " ON DUPLICATE KEY UPDATE allow_test_calls=VALUES(allow_test_calls), recording_enabled=VALUES(recording_enabled), notify_on_failure=VALUES(notify_on_failure), updated_by=VALUES(updated_by)"
+    params = (
+        company_id,
+        values["allow_test_calls"],
+        values["recording_enabled"],
+        values["notify_on_failure"],
+        user_id,
     )
-    await db.execute(
-        f"{verb} INTO voice_monitor_preferences (company_id, allow_test_calls, recording_enabled, notify_on_failure, updated_by) VALUES (%s,%s,%s,%s,%s){suffix}",
-        (
-            company_id,
-            values["allow_test_calls"],
-            values["recording_enabled"],
-            values["notify_on_failure"],
-            user_id,
-        ),
-    )
+    if db.is_sqlite():
+        await db.execute(
+            "INSERT OR REPLACE INTO voice_monitor_preferences "
+            "(company_id, allow_test_calls, recording_enabled, notify_on_failure, updated_by) "
+            "VALUES (%s,%s,%s,%s,%s)",
+            params,
+        )
+    else:
+        await db.execute(
+            "INSERT INTO voice_monitor_preferences "
+            "(company_id, allow_test_calls, recording_enabled, notify_on_failure, updated_by) "
+            "VALUES (%s,%s,%s,%s,%s) "
+            "ON DUPLICATE KEY UPDATE allow_test_calls=VALUES(allow_test_calls), "
+            "recording_enabled=VALUES(recording_enabled), notify_on_failure=VALUES(notify_on_failure), "
+            "updated_by=VALUES(updated_by)",
+            params,
+        )
     return await get_preferences(company_id)
 
 
@@ -634,17 +778,53 @@ async def transition_attempt(
     if to_status in TERMINAL_STATES and "completed_at" not in result:
         result["completed_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
         fields.append("completed_at")
-    assignments = ["outcome_status = %s", *(f"{field} = %s" for field in fields)]
+    field_set = set(fields)
     params = [
         to_status,
-        *(result[field] for field in fields),
+        int("started_at" in field_set),
+        result.get("started_at"),
+        int("answered_at" in field_set),
+        result.get("answered_at"),
+        int("completed_at" in field_set),
+        result.get("completed_at"),
+        int("provider_response_code" in field_set),
+        result.get("provider_response_code"),
+        int("provider_call_id" in field_set),
+        result.get("provider_call_id"),
+        int("failure_category" in field_set),
+        result.get("failure_category"),
+        int("failure_detail" in field_set),
+        result.get("failure_detail"),
+        int("duration_seconds" in field_set),
+        result.get("duration_seconds"),
+        int("media_artifact_reference" in field_set),
+        result.get("media_artifact_reference"),
+        int("transcript_status" in field_set),
+        result.get("transcript_status"),
+        int("transcript_text_reference" in field_set),
+        result.get("transcript_text_reference"),
+        int("retry_count" in field_set),
+        result.get("retry_count"),
         attempt_id,
         company_id,
         from_status,
     ]
     return bool(
         await db.execute_rowcount(
-            f"UPDATE voice_monitor_attempts SET {', '.join(assignments)} "
+            "UPDATE voice_monitor_attempts SET "
+            "outcome_status = %s, "
+            "started_at = CASE WHEN %s THEN %s ELSE started_at END, "
+            "answered_at = CASE WHEN %s THEN %s ELSE answered_at END, "
+            "completed_at = CASE WHEN %s THEN %s ELSE completed_at END, "
+            "provider_response_code = CASE WHEN %s THEN %s ELSE provider_response_code END, "
+            "provider_call_id = CASE WHEN %s THEN %s ELSE provider_call_id END, "
+            "failure_category = CASE WHEN %s THEN %s ELSE failure_category END, "
+            "failure_detail = CASE WHEN %s THEN %s ELSE failure_detail END, "
+            "duration_seconds = CASE WHEN %s THEN %s ELSE duration_seconds END, "
+            "media_artifact_reference = CASE WHEN %s THEN %s ELSE media_artifact_reference END, "
+            "transcript_status = CASE WHEN %s THEN %s ELSE transcript_status END, "
+            "transcript_text_reference = CASE WHEN %s THEN %s ELSE transcript_text_reference END, "
+            "retry_count = CASE WHEN %s THEN %s ELSE retry_count END "
             "WHERE id = %s AND company_id = %s AND outcome_status = %s",
             tuple(params),
         )
@@ -734,11 +914,16 @@ async def record_incident_failure(
     company_id: int, endpoint_id: int, attempt_id: int, threshold: int
 ) -> dict[str, Any] | None:
     """Increment failure state and atomically reserve threshold ticket creation."""
-    verb = "INSERT OR IGNORE" if db.is_sqlite() else "INSERT IGNORE"
-    await db.execute_rowcount(
-        f"{verb} INTO voice_monitor_incidents (company_id,endpoint_id) VALUES (%s,%s)",
-        (company_id, endpoint_id),
-    )
+    if db.is_sqlite():
+        await db.execute_rowcount(
+            "INSERT OR IGNORE INTO voice_monitor_incidents (company_id,endpoint_id) VALUES (%s,%s)",
+            (company_id, endpoint_id),
+        )
+    else:
+        await db.execute_rowcount(
+            "INSERT IGNORE INTO voice_monitor_incidents (company_id,endpoint_id) VALUES (%s,%s)",
+            (company_id, endpoint_id),
+        )
     await db.execute_rowcount(
         "UPDATE voice_monitor_incidents SET consecutive_failures=consecutive_failures+1, "
         "ticket_claim_attempt_id=CASE WHEN ticket_id IS NULL AND ticket_claim_attempt_id IS NULL "
