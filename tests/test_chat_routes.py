@@ -77,6 +77,7 @@ async def test_chat_index_defaults_to_open_only(monkeypatch):
     assert list_rooms.await_args.kwargs["status"] == "open"
     assert captured["template"] == "chat/index.html"
     assert captured["extra"]["show_closed_filter"] is False
+    assert captured["extra"]["current_user_id"] == session.user_id
 
 
 @pytest.mark.anyio("asyncio")
@@ -124,6 +125,14 @@ def test_chat_index_template_exposes_device_company_console_user_columns():
     assert 'data-column="console-user"' in source
     assert 'data-chat-columns' in source
     assert "js/chat_columns.js" in source
+
+
+def test_chat_index_template_exposes_close_chat_row_action():
+    source = __import__('pathlib').Path('app/templates/chat/index.html').read_text()
+
+    assert 'class="button button--sm button--danger btn-close-chat"' in source
+    assert "room.created_by_user_id == current_user_id" in source
+    assert "fetch(`/api/chat/rooms/${roomId}/close`" in source
 
 
 def test_chat_room_list_query_includes_device_company_console_user_metadata():

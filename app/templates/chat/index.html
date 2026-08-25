@@ -179,6 +179,14 @@
                 {% if room.assigned_tech_user_id %}Reassign & Join{% else %}Assign & Join{% endif %}
               </button>
             {% endif %}
+            {% if room.status == 'open' and (is_staff or room.created_by_user_id == current_user_id) %}
+              <button type="button"
+                      class="button button--sm button--danger btn-close-chat"
+                      data-room-id="{{ room.id }}"
+                      data-room-subject="{{ room.subject | e }}">
+                Close Chat
+              </button>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -334,6 +342,33 @@
           return;
         }
         window.location.href = '/chat/' + roomId;
+      } catch(err) {
+        alert('Network error: ' + err.message);
+        this.disabled = false;
+      }
+    });
+  });
+
+  // Close chat buttons
+  document.querySelectorAll('.btn-close-chat').forEach(btn => {
+    btn.addEventListener('click', async function() {
+      const roomId = this.dataset.roomId;
+      const subject = this.dataset.roomSubject || `chat #${roomId}`;
+      if (!confirm(`Close “${subject}”?`)) return;
+      this.disabled = true;
+      try {
+        const resp = await fetch(`/api/chat/rooms/${roomId}/close`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+          body: '{}',
+        });
+        if (resp.ok) {
+          window.location.reload();
+        } else {
+          const err = await resp.json();
+          alert(err.detail || 'Failed to close chat');
+          this.disabled = false;
+        }
       } catch(err) {
         alert('Network error: ' + err.message);
         this.disabled = false;

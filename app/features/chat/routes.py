@@ -105,6 +105,7 @@ async def chat_index(
         "unattended_filter": unattended,
         "is_staff": is_staff,
         "is_super_admin": is_super_admin,
+        "current_user_id": user_id,
     }
     return await main_module._render_template("chat/index.html", request, current_user, extra=extra)
 
