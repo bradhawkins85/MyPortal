@@ -908,6 +908,18 @@
                   data-ticket-subject="{{ ticket.subject | e }}"
                 >
                   <ul class="ticket-assets-linked__list" data-linked-assets-list>
+                    {% for asset in ticket_suggested_assets %}
+                      {% set suggested_name = asset.name or ('Asset ' ~ asset.asset_id) %}
+                      <li class="ticket-assets-linked__item ticket-assets-linked__item--suggested">
+                        <span class="ticket-assets-linked__name">{{ suggested_name }}</span>
+                        <span class="badge badge--warning">Suggested</span>
+                        <span class="ticket-assets-linked__meta">Matched {{ asset.matched_username }}</span>
+                        <form method="post" action="/admin/tickets/{{ ticket.id }}/assets/{{ asset.asset_id }}/confirm">
+                          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                          <button type="submit" class="button button--small">Confirm asset</button>
+                        </form>
+                      </li>
+                    {% endfor %}
                     {% for asset in ticket_assets %}
                       {% set serial_value = asset.serial_number %}
                       {% set status_value = asset.status %}
