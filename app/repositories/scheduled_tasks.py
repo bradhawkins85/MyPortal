@@ -63,12 +63,10 @@ async def count_tasks_by_company_ids(company_ids: Sequence[int]) -> dict[int, in
         return {}
     placeholders = ", ".join(["%s"] * len(unique_ids))
     rows = await db.fetch_all(
-        f"""
-        SELECT company_id, COUNT(*) AS task_count
-        FROM scheduled_tasks
-        WHERE company_id IN ({placeholders})
-        GROUP BY company_id
-        """,
+        "SELECT company_id, COUNT(*) AS task_count"
+        " FROM scheduled_tasks"
+        " WHERE company_id IN (" + placeholders + ")"
+        " GROUP BY company_id",
         tuple(unique_ids),
     )
     return {
@@ -96,7 +94,7 @@ async def get_first_task_for_company_by_commands(
         return None
     placeholders = ",".join(["%s"] * len(commands))
     rows = await db.fetch_all(
-        f"SELECT * FROM scheduled_tasks WHERE company_id = %s AND command IN ({placeholders})",
+        "SELECT * FROM scheduled_tasks WHERE company_id = %s AND command IN (" + placeholders + ")",
         (company_id, *commands),
     )
     # Return the first match according to the priority order of commands
@@ -111,7 +109,7 @@ async def get_first_task_for_company_by_commands(
 async def list_tasks(include_inactive: bool = False) -> list[dict[str, Any]]:
     where = "" if include_inactive else "WHERE active = 1"
     rows = await db.fetch_all(
-        f"SELECT * FROM scheduled_tasks {where} ORDER BY name ASC",
+        "SELECT * FROM scheduled_tasks " + where + " ORDER BY name ASC",
     )
     return [_normalise_task(row) for row in rows]
 
@@ -123,15 +121,10 @@ async def list_calendar_tasks(include_inactive: bool = False) -> list[dict[str, 
         where_clauses.append("t.active = 1")
     where = "WHERE " + " AND ".join(where_clauses)
     rows = await db.fetch_all(
-        f"""
-        SELECT
-            t.*,
-            c.name AS company_name
-        FROM scheduled_tasks AS t
-        LEFT JOIN companies AS c ON c.id = t.company_id
-        {where}
-        ORDER BY t.name ASC
-        """,
+        "SELECT t.*, c.name AS company_name"
+        " FROM scheduled_tasks AS t"
+        " LEFT JOIN companies AS c ON c.id = t.company_id"
+        " " + where + " ORDER BY t.name ASC",
     )
     tasks: list[dict[str, Any]] = []
     for row in rows:
@@ -249,7 +242,7 @@ async def delete_tasks(task_ids: list[int]) -> int:
         return 0
     placeholders = ",".join(["%s"] * len(task_ids))
     result = await db.execute(
-        f"DELETE FROM scheduled_tasks WHERE id IN ({placeholders})",
+        "DELETE FROM scheduled_tasks WHERE id IN (" + placeholders + ")",
         tuple(task_ids),
     )
     return int(result or 0)
@@ -345,14 +338,12 @@ async def list_recent_runs(task_ids: Sequence[int] | None = None, limit: int = 5
     if task_ids:
         placeholders = ",".join(["%s"] * len(task_ids))
         rows = await db.fetch_all(
-            f"""
-            SELECT r.*, t.name AS task_name
-            FROM scheduled_task_runs AS r
-            JOIN scheduled_tasks AS t ON t.id = r.task_id
-            WHERE r.task_id IN ({placeholders})
-            ORDER BY r.started_at DESC
-            LIMIT %s
-            """,
+            "SELECT r.*, t.name AS task_name"
+            " FROM scheduled_task_runs AS r"
+            " JOIN scheduled_tasks AS t ON t.id = r.task_id"
+            " WHERE r.task_id IN (" + placeholders + ")"
+            " ORDER BY r.started_at DESC"
+            " LIMIT %s",
             tuple(task_ids) + (limit,),
         )
     else:
@@ -387,7 +378,8 @@ async def disable_tasks_for_commands(commands: Iterable[str], *, module_slug: st
         return 0
     placeholders = ",".join(["%s"] * len(command_list))
     result = await db.execute(
-        f"UPDATE scheduled_tasks SET active = 0, disabled_by_module = %s WHERE active = 1 AND command IN ({placeholders})",
+        "UPDATE scheduled_tasks SET active = 0, disabled_by_module = %s"
+        " WHERE active = 1 AND command IN (" + placeholders + ")",
         (module_slug, *command_list),
     )
     return int(result or 0)
