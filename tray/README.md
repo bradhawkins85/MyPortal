@@ -235,6 +235,22 @@ See [docs/tray_app.md](../docs/tray_app.md) for the full architecture document.
 .\installer\windows\install.ps1 -PortalURL 'https://portal.example.com' -EnrolToken 'TOKEN'
 ```
 
+To exclude the installed Tray binaries and runtime data from Microsoft Defender,
+run the RMM exclusion script as LocalSystem or an administrator. The script is
+idempotent and defaults to `%ProgramFiles%\MyPortalTray` and
+`%ProgramData%\MyPortal\tray`:
+
+```powershell
+.\integrations\tacticalrmm\set-tray-defender-exclusions.ps1
+```
+
+Custom paths can be supplied when an installation uses non-standard locations:
+
+```powershell
+.\integrations\tacticalrmm\set-tray-defender-exclusions.ps1 `
+    -ExclusionPath 'C:\Apps\MyPortalTray', 'D:\MyPortalData'
+```
+
 ### macOS (bash, RMM one-liner)
 
 ```bash
