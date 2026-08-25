@@ -1,0 +1,7 @@
+{
+  "guid": "1caaf34a-f525-4f18-9581-a7cca7f22415",
+  "occurred_at": "2026-08-25T03:25Z",
+  "change_type": "Feature",
+  "summary": "Added Linked Asset and Suggested Asset count conditions to ticket automation trigger filters.",
+  "content_hash": "a5c6914c891a8a27a9271712b525d8b6e9b1febb674bdcc5e3a7b8c1c354a5d5"
+}
