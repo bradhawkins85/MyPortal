@@ -189,6 +189,18 @@ class Database:
                     adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
                     await cursor.execute(adapted_sql, adapted_params)
 
+    async def execute_many(self, sql: str, params_seq: Iterable[tuple[Any, ...]]) -> None:
+        seq = list(params_seq)
+        if self._use_sqlite:
+            if not self._sqlite_conn:
+                raise RuntimeError("SQLite database not initialised")
+            await self._sqlite_conn.executemany(sql, seq)
+            await self._sqlite_conn.commit()
+        else:
+            async with self.acquire() as conn:
+                async with conn.cursor() as cursor:
+                    await cursor.executemany(sql, seq)
+
     async def execute_rowcount(self, sql: str, params: tuple | dict | None = None) -> int:
         if self._use_sqlite:
             if not self._sqlite_conn:
