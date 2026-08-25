@@ -4,6 +4,11 @@ from typing import Any, Iterable
 
 from app.core.database import db
 
+_ALLOWED_PORT_UPDATE_COLUMNS = frozenset({
+    "name", "code", "country", "region", "timezone", "description", "latitude",
+    "longitude", "is_active",
+})
+
 _VALID_ORDER_COLUMNS = {
     "name": "name",
     "country": "country",
@@ -82,6 +87,9 @@ async def create_port(**values: Any) -> dict[str, Any]:
 
 
 async def update_port(port_id: int, **values: Any) -> dict[str, Any]:
+    unknown = set(values) - _ALLOWED_PORT_UPDATE_COLUMNS
+    if unknown:
+        raise ValueError(f"Unsupported port fields: {', '.join(sorted(unknown))}")
     if not values:
         port = await get_port_by_id(port_id)
         if not port:

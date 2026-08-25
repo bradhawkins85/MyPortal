@@ -10,6 +10,10 @@ from app.repositories import user_permissions as user_permissions_repo
 from app.security.menu_permissions import compact_menu_permissions, menu_permissions_to_legacy
 
 _VALID_STATUSES = {"invited", "active", "suspended"}
+_ALLOWED_MEMBERSHIP_UPDATE_COLUMNS = frozenset({
+    "company_id", "user_id", "role_id", "status", "invited_by", "invited_at",
+    "joined_at", "last_seen_at",
+})
 
 
 async def list_company_memberships(company_id: int) -> list[dict[str, Any]]:
@@ -137,6 +141,9 @@ async def create_membership(
 
 
 async def update_membership(membership_id: int, **updates: Any) -> dict[str, Any]:
+    unknown = set(updates) - _ALLOWED_MEMBERSHIP_UPDATE_COLUMNS
+    if unknown:
+        raise ValueError(f"Unsupported membership fields: {', '.join(sorted(unknown))}")
     if not updates:
         membership = await get_membership_by_id(membership_id)
         if not membership:

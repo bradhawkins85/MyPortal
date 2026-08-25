@@ -5,6 +5,12 @@ from typing import Any
 
 from app.core.database import db
 
+_ALLOWED_PRICING_UPDATE_COLUMNS = frozenset({
+    "port_id", "version_label", "status", "currency", "base_rate", "handling_rate",
+    "storage_rate", "notes", "submitted_by", "approved_by", "submitted_at",
+    "approved_at", "rejection_reason", "effective_from", "effective_to",
+})
+
 _VALID_STATUS = {"draft", "pending_review", "approved", "rejected"}
 
 
@@ -77,6 +83,9 @@ async def create_pricing_version(**values: Any) -> dict[str, Any]:
 
 
 async def update_pricing_version(pricing_id: int, **values: Any) -> dict[str, Any]:
+    unknown = set(values) - _ALLOWED_PRICING_UPDATE_COLUMNS
+    if unknown:
+        raise ValueError(f"Unsupported pricing fields: {', '.join(sorted(unknown))}")
     if not values:
         pricing = await get_pricing_version(pricing_id)
         if not pricing:

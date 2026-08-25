@@ -14,6 +14,10 @@ _PERMISSION_SCOPES = {
     "company_admin",
     "super_admin",
 }
+_ALLOWED_ARTICLE_UPDATE_COLUMNS = frozenset({
+    "slug", "title", "summary", "content", "permission_scope", "is_published",
+    "published_at", "created_by", "ai_tags", "excluded_ai_tags", "manual_ai_tags",
+})
 
 
 def _normalise_datetime(value: Any) -> datetime | None:
@@ -265,6 +269,9 @@ async def create_article(
 
 
 async def update_article(article_id: int, **updates: Any) -> dict[str, Any]:
+    unknown = set(updates) - _ALLOWED_ARTICLE_UPDATE_COLUMNS
+    if unknown:
+        raise ValueError(f"Unsupported article fields: {', '.join(sorted(unknown))}")
     if not updates:
         article = await get_article_by_id(article_id)
         if not article:

@@ -122,6 +122,20 @@ _SELECT_COLUMNS = (
     "ai_lookup_frequency_maintenance, "
     "ai_lookup_last_checked_at, ai_lookup_last_status, ai_lookup_last_message"
 )
+_ALLOWED_SERVICE_COLUMNS = frozenset({
+    "name", "description", "status", "status_message", "display_order", "is_active",
+    "tags", "updated_by", "ai_lookup_enabled", "ai_lookup_url", "ai_lookup_prompt",
+    "ai_lookup_model_override", "ai_lookup_frequency_operational",
+    "ai_lookup_frequency_degraded", "ai_lookup_frequency_partial_outage",
+    "ai_lookup_frequency_outage", "ai_lookup_frequency_maintenance",
+    "ai_lookup_last_checked_at", "ai_lookup_last_status", "ai_lookup_last_message",
+})
+
+
+def _validate_service_fields(payload: dict[str, Any]) -> None:
+    unknown = set(payload) - _ALLOWED_SERVICE_COLUMNS
+    if unknown:
+        raise ValueError(f"Unsupported service fields: {', '.join(sorted(unknown))}")
 
 
 async def list_services(*, include_inactive: bool = False) -> list[dict[str, Any]]:
@@ -160,6 +174,7 @@ async def get_service(service_id: int) -> dict[str, Any] | None:
 
 
 async def create_service(payload: dict[str, Any], *, company_ids: Sequence[int] | None = None) -> dict[str, Any]:
+    _validate_service_fields(payload)
     if not payload:
         raise ValueError("Missing payload for service creation")
     columns = ", ".join(payload.keys())
@@ -180,6 +195,7 @@ async def update_service(
     *,
     company_ids: Sequence[int] | None = None,
 ) -> dict[str, Any]:
+    _validate_service_fields(updates)
     if updates:
         assignments: list[str] = []
         params: list[Any] = []
