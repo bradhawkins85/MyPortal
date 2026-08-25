@@ -66,6 +66,23 @@ The authoritative dependency list lives in `pyproject.toml`; update it there and
 - Validate and sanitize all user inputs
 - Do not commit secrets or credentials to the repository
 
+#### SQL Injection Prevention
+
+- **Never** interpolate user-supplied data—or any variable—directly into a SQL
+  string using f-strings, `str.format()`, or `%` formatting.
+- **Always** use parameterised queries: pass values as bound parameters to the
+  database driver (e.g. `db.execute("… WHERE id = ?", (value,))` for SQLite or
+  `db.execute("… WHERE id = %s", (value,))` for MySQL).
+- When building dynamic queries (dynamic WHERE clauses, IN-lists, SET clauses),
+  only interpolate **static string literals** such as column names you control,
+  SQL keywords, and the placeholder character (`?` / `%s`). Never interpolate
+  runtime data.
+- Avoid f-strings for SQL construction entirely; use plain string concatenation
+  (`"WHERE id = " + p`) or `str.join()` so that static analysis tools (Bandit
+  B608) can confirm no data reaches the query template.
+- Before completing any task, audit every SQL statement in files you have
+  touched and fix any potential injection vector.
+
 ### API Development
 
 - Include CRUD Swagger UI for all API endpoints
@@ -227,4 +244,4 @@ When working with external APIs, use the documentation for these systems:
 - Use regression tests where possible
 - Ensure tests cover edge cases and error conditions
 - Run full test suite before submitting changes
-- Fix Possible SQL injection vectors before completing the assigned task
+- Fix possible SQL injection vectors before completing the assigned task (see **SQL Injection Prevention** in Security Best Practices above)
