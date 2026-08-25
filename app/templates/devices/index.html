@@ -43,7 +43,7 @@
     ] %}
     <header class="card__header card__header--stacked">
       <div><h2>Discovered devices</h2><p class="card__lede">Asset matches use normalized MAC addresses. WAN IP identifies the network where each device was most recently seen.</p></div>
-      {% if devices %}<div class="card__controls"><label class="visually-hidden" for="network-device-search">Search devices</label><input id="network-device-search" class="input" type="search" placeholder="Search devices" data-table-filter="network-devices">{% if can_configure %}{{ table_column_picker("network-devices", discovered_device_columns) }}<button class="button button--secondary" type="button" data-device-bulk-open disabled>Update selected <span data-device-selected-count>(0)</span></button>{% endif %}</div>{% endif %}
+      {% if devices %}<div class="card__controls"><label class="visually-hidden" for="network-device-search">Search devices</label><input id="network-device-search" class="input" type="search" placeholder="Search devices" data-table-filter="network-devices">{% if can_configure %}{{ table_column_picker("network-devices", discovered_device_columns) }}<button class="button button--secondary" type="button" data-device-bulk-open disabled>Update selected <span data-device-selected-count>(0)</span></button><form method="post" action="/devices/discovered-purge" data-confirm="Purge every discovered device outside its scanner's configured LAN or WAN CIDRs? This cannot be undone.">{% include "partials/csrf.html" %}<button class="button button--danger" type="submit">Purge out of scope</button></form>{% endif %}</div>{% endif %}
     </header>
     {% if devices %}
       <div class="table-wrapper"><table class="table" id="network-devices-table" data-table data-table-id="network-devices">

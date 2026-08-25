@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ipaddress
 from typing import Any
+
 from app.core.database import db
 
 
@@ -186,6 +188,73 @@ async def bulk_update_devices(
         f"UPDATE network_devices SET {', '.join(assignments)} "
         f"WHERE company_id=%s AND id IN ({placeholders})",
         tuple(values + [company_id, *device_ids]),
+    )
+
+
+async def purge_out_of_scope(company_id: int) -> int:
+    """Delete discoveries outside their scanner's configured network boundaries.
+
+    An empty scope is deliberately non-destructive.  When only one kind of scope
+    is configured, only that address is checked; when both are configured, both
+    addresses must conform.
+    """
+    rows = list(
+        await db.fetch_all(
+            """SELECT nd.id, nd.wan_ip, nd.ip_address,
+                      td.network_scan_wan_cidrs, td.network_scan_local_cidrs
+               FROM network_devices nd
+               JOIN tray_devices td ON td.id = nd.scanner_tray_device_id
+               WHERE nd.company_id=%s""",
+            (company_id,),
+        )
+        or []
+    )
+    purge_ids: list[int] = []
+    for row in rows:
+        wan_networks = _parse_stored_networks(row.get("network_scan_wan_cidrs"))
+        local_networks = _parse_stored_networks(row.get("network_scan_local_cidrs"))
+        if not wan_networks and not local_networks:
+            continue
+        if not _address_conforms(row.get("wan_ip"), wan_networks):
+            purge_ids.append(int(row["id"]))
+            continue
+        if not _address_conforms(row.get("ip_address"), local_networks):
+            purge_ids.append(int(row["id"]))
+
+    if purge_ids:
+        placeholders = ",".join("%s" for _ in purge_ids)
+        await db.execute(
+            f"DELETE FROM network_devices WHERE company_id=%s AND id IN ({placeholders})",
+            (company_id, *purge_ids),
+        )
+    return len(purge_ids)
+
+
+def _parse_stored_networks(
+    value: Any,
+) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+    networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for item in str(value or "").replace(",", " ").split():
+        try:
+            networks.append(ipaddress.ip_network(item, strict=False))
+        except ValueError:
+            # Scanner settings are validated when saved.  Ignore legacy invalid
+            # values rather than allowing them to make a purge destructive.
+            continue
+    return networks
+
+
+def _address_conforms(
+    address: Any, networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network]
+) -> bool:
+    if not networks:
+        return True
+    try:
+        parsed = ipaddress.ip_address(str(address or ""))
+    except ValueError:
+        return False
+    return any(
+        parsed.version == network.version and parsed in network for network in networks
     )
 
 

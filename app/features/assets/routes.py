@@ -534,6 +534,32 @@ async def bulk_update_network_devices(request: Request):
     )
 
 
+@router.post("/devices/discovered-purge")
+async def purge_network_devices(request: Request):
+    """Remove discoveries outside the boundaries of their originating scanner."""
+    main_module = _main()
+    user, membership, _company, company_id, redirect = await _load_asset_context(
+        request
+    )
+    if redirect:
+        return redirect
+    if not (
+        user.get("is_super_admin")
+        or main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+    ):
+        raise HTTPException(status_code=403, detail="Asset write access required")
+
+    purged = await network_devices_repo.purge_out_of_scope(company_id)
+    message = (
+        f"Purged {purged} out-of-scope discovered device{'s' if purged != 1 else ''}."
+        if purged
+        else "No out-of-scope discovered devices were purged."
+    )
+    return main_module.flash_redirect(
+        "/devices", message, "success" if purged else "info"
+    )
+
+
 @router.post("/devices/device-types")
 async def add_device_type_from_devices(request: Request):
     user, _membership, _company, _company_id, redirect = await _load_asset_context(

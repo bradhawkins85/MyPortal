@@ -58,6 +58,8 @@ def test_discovered_devices_loads_shared_column_filters():
     assert "data-device-select-all" in TEMPLATE
     assert "data-device-bulk-open disabled" in TEMPLATE
     assert 'action="/devices/discovered-bulk-update"' in TEMPLATE
+    assert 'action="/devices/discovered-purge"' in TEMPLATE
+    assert "Purge out of scope" in TEMPLATE
     assert "data-device-bulk-ids" in TEMPLATE
     assert 'action="/devices/scanners/{{ scanner.id }}/scan"' in TEMPLATE
     assert ">Scan Now</button>" in TEMPLATE
@@ -394,3 +396,28 @@ async def test_bulk_update_discovered_devices_rejects_empty_selection(monkeypatc
         await assets_routes.bulk_update_network_devices(request)
 
     assert exc_info.value.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_purge_discovered_devices_uses_company_scope(monkeypatch):
+    request = _request("/devices/discovered-purge", "POST")
+    monkeypatch.setattr(
+        assets_routes,
+        "_load_asset_context",
+        AsyncMock(return_value=({"id": 7, "is_super_admin": True}, None, {}, 42, None)),
+    )
+    purge = AsyncMock(return_value=2)
+    monkeypatch.setattr(assets_routes.network_devices_repo, "purge_out_of_scope", purge)
+    monkeypatch.setattr(
+        main_module,
+        "flash_redirect",
+        lambda url, message, category: HTMLResponse(
+            f"{url}|{message}|{category}", status_code=303
+        ),
+    )
+
+    response = await assets_routes.purge_network_devices(request)
+
+    purge.assert_awaited_once_with(42)
+    assert response.status_code == 303
+    assert b"Purged 2 out-of-scope discovered devices" in response.body
