@@ -75,9 +75,9 @@ async def delete_for_company(company_id: int) -> None:
 async def list_ticket_sla_source(ticket_ids: Sequence[int]) -> list[dict[str, Any]]:
     if not ticket_ids:
         return []
-    placeholders = ",".join("%s" for _ in ticket_ids)
-    return await db.fetch_all(
-        f"""SELECT t.id, t.company_id, t.created_at, t.closed_at, t.status,
+    ticket_id_params = tuple(int(ticket_id) for ticket_id in ticket_ids)
+    placeholders = ",".join("%s" for _ in ticket_id_params)
+    query = """SELECT t.id, t.company_id, t.created_at, t.closed_at, t.status,
                    CASE WHEN target.id IS NOT NULL THEN s.id END AS sla_id,
                    s.name AS sla_name, target.response_minutes, target.resolution_minutes,
                    pause.status AS sla_pause_status,
@@ -90,9 +90,11 @@ async def list_ticket_sla_source(ticket_ids: Sequence[int]) -> list[dict[str, An
             LEFT JOIN sla_template_pause_statuses pause
               ON pause.template_id=s.id AND LOWER(pause.status)=LOWER(COALESCE(t.status,''))
             LEFT JOIN ticket_replies tr ON tr.ticket_id=t.id
-            WHERE t.id IN ({placeholders})
-            GROUP BY t.id,t.company_id,t.created_at,t.closed_at,t.status,s.id,s.name,target.response_minutes,target.resolution_minutes,pause.status""",
-        tuple(ticket_ids),
+            WHERE t.id IN (__TICKET_IDS__)
+            GROUP BY t.id,t.company_id,t.created_at,t.closed_at,t.status,s.id,s.name,target.response_minutes,target.resolution_minutes,pause.status"""
+    return await db.fetch_all(
+        query.replace("__TICKET_IDS__", placeholders),
+        ticket_id_params,
     )
 
 
@@ -119,15 +121,15 @@ async def claim_event(ticket_id: int, event_type: str) -> bool:
 async def list_pause_periods(ticket_ids: Sequence[int]) -> list[dict[str, Any]]:
     if not ticket_ids:
         return []
-    placeholders = ",".join("%s" for _ in ticket_ids)
-    return await db.fetch_all(
-        f"""SELECT h.ticket_id,h.status,h.started_at,h.ended_at
+    ticket_id_params = tuple(int(ticket_id) for ticket_id in ticket_ids)
+    placeholders = ",".join("%s" for _ in ticket_id_params)
+    query = """SELECT h.ticket_id,h.status,h.started_at,h.ended_at
             FROM ticket_status_history h
             JOIN tickets t ON t.id=h.ticket_id
             JOIN company_sla_templates cst ON cst.company_id=t.company_id
             JOIN sla_template_pause_statuses pause
               ON pause.template_id=cst.template_id AND LOWER(pause.status)=LOWER(h.status)
-            WHERE h.ticket_id IN ({placeholders})
+            WHERE h.ticket_id IN (__TICKET_IDS__)
             UNION ALL
             SELECT t.id AS ticket_id,t.status,COALESCE(t.status_changed_at,t.created_at) AS started_at,
                    t.closed_at AS ended_at
@@ -135,6 +137,8 @@ async def list_pause_periods(ticket_ids: Sequence[int]) -> list[dict[str, Any]]:
             JOIN company_sla_templates cst ON cst.company_id=t.company_id
             JOIN sla_template_pause_statuses pause
               ON pause.template_id=cst.template_id AND LOWER(pause.status)=LOWER(t.status)
-            WHERE t.id IN ({placeholders})""",
-        (*ticket_ids, *ticket_ids),
+            WHERE t.id IN (__TICKET_IDS__)"""
+    return await db.fetch_all(
+        query.replace("__TICKET_IDS__", placeholders),
+        (*ticket_id_params, *ticket_id_params),
     )
