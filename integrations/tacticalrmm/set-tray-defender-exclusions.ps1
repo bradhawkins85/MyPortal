@@ -18,10 +18,12 @@ if (-not $ExclusionPath) {
     )
 }
 
-$isAdministrator = ([Security.Principal.WindowsPrincipal]
-    [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-        [Security.Principal.WindowsBuiltInRole]::Administrator
-    )
+$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$currentPrincipal = New-Object -TypeName Security.Principal.WindowsPrincipal `
+    -ArgumentList $currentIdentity
+$isAdministrator = $currentPrincipal.IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator
+)
 if (-not $isAdministrator) {
     throw 'Administrator privileges are required to configure Microsoft Defender exclusions.'
 }
