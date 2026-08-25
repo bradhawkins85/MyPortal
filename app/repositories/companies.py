@@ -323,11 +323,7 @@ async def replace_company_email_domains(company_id: int, domains: Iterable[str])
     )
     if not normalised:
         return
-    values = ", ".join(["(%s, %s)"] * len(normalised))
-    params: list[Any] = []
-    for domain in normalised:
-        params.extend([company_id, domain])
-    await db.execute(
-        f"INSERT INTO company_email_domains (company_id, domain) VALUES {values}",
-        tuple(params),
+    await db.execute_many(
+        "INSERT INTO company_email_domains (company_id, domain) VALUES (%s, %s)",
+        [(company_id, domain) for domain in normalised],
     )
