@@ -183,11 +183,12 @@ async def bulk_update_devices(
     if not assignments:
         return
 
-    placeholders = ",".join("%s" for _ in device_ids)
+    normalized_device_ids = [int(device_id) for device_id in device_ids]
+    placeholders = ",".join("%s" for _ in normalized_device_ids)
     await db.execute(
         f"UPDATE network_devices SET {', '.join(assignments)} "
         f"WHERE company_id=%s AND id IN ({placeholders})",
-        tuple(values + [company_id, *device_ids]),
+        tuple(values + [company_id, *normalized_device_ids]),
     )
 
 
