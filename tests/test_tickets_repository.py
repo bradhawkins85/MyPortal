@@ -626,6 +626,17 @@ async def test_update_ticket_allows_updated_at_override(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_update_ticket_rejects_invalid_sql_field_name(monkeypatch):
+    dummy_db = _UpdateTicketDB({"id": 1})
+    monkeypatch.setattr(tickets, "db", dummy_db)
+
+    with pytest.raises(ValueError, match="Invalid ticket field name"):
+        await tickets.update_ticket(1, **{"status = 'closed' --": "resolved"})
+
+    assert dummy_db.execute_sql is None
+
+
+@pytest.mark.anyio
 async def test_delete_tickets_returns_deleted_count(monkeypatch):
     dummy_db = _BulkDeleteDB(count=2)
     monkeypatch.setattr(tickets, "db", dummy_db)
