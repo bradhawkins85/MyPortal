@@ -11,7 +11,7 @@ TEMPLATE_PATH = (
     / "app" / "templates" / "admin" / "tickets.html"
 )
 
-EXPECTED_COLUMNS = ["id", "status", "priority", "company", "assigned", "updated", "last-reply-status"]
+EXPECTED_COLUMNS = ["id", "status", "priority", "company", "sla", "assigned", "updated", "last-reply-status"]
 ALWAYS_VISIBLE_COLUMNS = ["subject"]
 
 
@@ -154,6 +154,18 @@ def test_all_customisable_column_toggles_present():
         assert f'class="ticket-column-toggle" data-column="{column}"' in html, (
             f"Expected toggle for column '{column}' to be present in the panel"
         )
+
+
+def test_group_expansion_state_is_persisted():
+    """Collapsed ticket groups should be restored after the page reloads."""
+    javascript = (
+        TEMPLATE_PATH.parent.parent.parent / "static" / "js" / "ticket_views.js"
+    ).read_text(encoding="utf-8")
+
+    assert "portal.tickets.collapsedGroups" in javascript
+    assert "this.collapsedGroups = this.loadCollapsedGroups()" in javascript
+    assert "this.saveCollapsedGroups()" in javascript
+    assert "this.updateGroupVisibility()" in javascript
 
 
 def test_subject_column_toggle_is_disabled():

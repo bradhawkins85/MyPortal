@@ -6,6 +6,7 @@
   'use strict';
 
   const API_BASE = '/api/tickets';
+  const COLLAPSED_GROUPS_STORAGE_KEY = 'portal.tickets.collapsedGroups';
 
   function getCookie(name) {
     const pattern = `(?:^|; )${name.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1')}=([^;]*)`;
@@ -39,10 +40,33 @@
       };
       this.groupingFields = [];
       this.groupingField = null;
+      this.collapsedGroups = this.loadCollapsedGroups();
       this.sortField = null;
       this.sortDirection = 'asc';
       
       this.init();
+    }
+
+    loadCollapsedGroups() {
+      try {
+        const stored = JSON.parse(localStorage.getItem(COLLAPSED_GROUPS_STORAGE_KEY) || '[]');
+        return new Set(Array.isArray(stored) ? stored.filter((item) => typeof item === 'string') : []);
+      } catch (error) {
+        console.warn('Failed to read collapsed ticket groups', error);
+        return new Set();
+      }
+    }
+
+    saveCollapsedGroups() {
+      try {
+        localStorage.setItem(COLLAPSED_GROUPS_STORAGE_KEY, JSON.stringify([...this.collapsedGroups]));
+      } catch (error) {
+        console.warn('Failed to persist collapsed ticket groups', error);
+      }
+    }
+
+    collapsedGroupStorageId(groupKey) {
+      return `${this.groupingFields.join('>')}::${groupKey}`;
     }
 
     async init() {
@@ -697,6 +721,32 @@
           this.toggleGroup(groupKey);
         });
       });
+
+      tbody.querySelectorAll('[data-group-key]').forEach((headerRow) => {
+        const groupKey = headerRow.getAttribute('data-group-key');
+        if (!groupKey || !this.collapsedGroups.has(this.collapsedGroupStorageId(groupKey))) return;
+        const toggle = headerRow.querySelector('[data-group-toggle]');
+        if (toggle) toggle.setAttribute('aria-expanded', 'false');
+        headerRow.classList.add('ticket-group-header--collapsed');
+      });
+      this.updateGroupVisibility();
+    }
+
+    updateGroupVisibility() {
+      const tbody = this.container.querySelector('tbody');
+      if (!tbody) return;
+      const collapsedPaths = Array.from(tbody.querySelectorAll('.ticket-group-header--collapsed[data-group-key]'))
+        .map((row) => row.getAttribute('data-group-key'))
+        .filter(Boolean);
+
+      tbody.querySelectorAll('tr[data-group-path]').forEach((row) => {
+        const path = row.getAttribute('data-group-path') || '';
+        const isHeader = row.classList.contains('ticket-group-header');
+        const hidden = collapsedPaths.some((collapsedPath) => (
+          path.startsWith(`${collapsedPath}¦`) || (!isHeader && path === collapsedPath)
+        ));
+        row.classList.toggle('ticket-group-hidden', hidden);
+      });
     }
 
     /**
@@ -712,19 +762,16 @@
       const toggle = headerRow.querySelector('[data-group-toggle]');
       if (!toggle) return;
       const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
-      const descendantRows = Array.from(tbody.querySelectorAll('tr[data-group-path]'))
-        .filter((row) => row !== headerRow && (row.getAttribute('data-group-path') || '').startsWith(groupKey));
-
-      descendantRows.forEach(row => {
-        if (isExpanded) {
-          row.classList.add('ticket-group-hidden');
-        } else {
-          row.classList.remove('ticket-group-hidden');
-        }
-      });
-
       toggle.setAttribute('aria-expanded', String(!isExpanded));
       headerRow.classList.toggle('ticket-group-header--collapsed', isExpanded);
+      const storageId = this.collapsedGroupStorageId(groupKey);
+      if (isExpanded) {
+        this.collapsedGroups.add(storageId);
+      } else {
+        this.collapsedGroups.delete(storageId);
+      }
+      this.saveCollapsedGroups();
+      this.updateGroupVisibility();
     }
 
     /**
