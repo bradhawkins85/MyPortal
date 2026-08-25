@@ -488,9 +488,7 @@
       let visibleCount = 0;
 
       rows.forEach(row => {
-        let shouldShow = true;
-
-        shouldShow = this.rowMatchesColumnFilters(row);
+        let shouldShow = this.rowMatchesColumnFilters(row);
 
         // Status filter
         if (this.filterState.statuses.length > 0) {
