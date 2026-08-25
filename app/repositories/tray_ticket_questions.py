@@ -59,17 +59,17 @@ async def list_questions(
     params: list[Any] = []
 
     if scope is not None:
-        clauses.append(f"scope = {p}")
+        clauses.append("scope = " + p)
         params.append(scope)
     if company_id is not None:
-        clauses.append(f"company_id = {p}")
+        clauses.append("company_id = " + p)
         params.append(company_id)
     if active_only:
         clauses.append("is_active = 1")
 
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     rows = await db.fetch_all(
-        f"SELECT * FROM tray_ticket_questions {where} ORDER BY sort_order ASC, id ASC",
+        "SELECT * FROM tray_ticket_questions " + where + " ORDER BY sort_order ASC, id ASC",
         tuple(params) if params else (),
     )
     return [_decode_question(dict(r)) for r in rows]
@@ -78,7 +78,7 @@ async def list_questions(
 async def get_question(question_id: int) -> dict[str, Any] | None:
     p = _ph()
     row = await db.fetch_one(
-        f"SELECT * FROM tray_ticket_questions WHERE id = {p}",
+        "SELECT * FROM tray_ticket_questions WHERE id = " + p,
         (question_id,),
     )
     return _decode_question(dict(row)) if row else None
@@ -101,10 +101,10 @@ async def create_question(
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     options_json = json.dumps(options) if options else None
     await db.execute(
-        f"INSERT INTO tray_ticket_questions "
-        f"(scope, company_id, field_type, label, placeholder, is_required, "
-        f"options_json, sort_order, is_active, created_by_user_id, created_at, updated_at) "
-        f"VALUES ({p},{p},{p},{p},{p},{p},{p},{p},{p},{p},{p},{p})",
+        "INSERT INTO tray_ticket_questions "
+        "(scope, company_id, field_type, label, placeholder, is_required, "
+        "options_json, sort_order, is_active, created_by_user_id, created_at, updated_at) "
+        "VALUES (" + ",".join([p] * 12) + ")",
         (
             scope,
             company_id,
@@ -143,36 +143,36 @@ async def update_question(
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     if field_type is not None:
-        sets.append(f"field_type = {p}")
+        sets.append("field_type = " + p)
         params.append(field_type)
     if label is not None:
-        sets.append(f"label = {p}")
+        sets.append("label = " + p)
         params.append(label)
     if placeholder is not None:
-        sets.append(f"placeholder = {p}")
+        sets.append("placeholder = " + p)
         params.append(placeholder)
     if is_required is not None:
-        sets.append(f"is_required = {p}")
+        sets.append("is_required = " + p)
         params.append(1 if is_required else 0)
     if options is not None:
-        sets.append(f"options_json = {p}")
+        sets.append("options_json = " + p)
         params.append(json.dumps(options) if options else None)
     if sort_order is not None:
-        sets.append(f"sort_order = {p}")
+        sets.append("sort_order = " + p)
         params.append(sort_order)
     if is_active is not None:
-        sets.append(f"is_active = {p}")
+        sets.append("is_active = " + p)
         params.append(1 if is_active else 0)
 
     if not sets:
         return await get_question(question_id)
 
-    sets.append(f"updated_at = {p}")
+    sets.append("updated_at = " + p)
     params.append(now)
     params.append(question_id)
 
     await db.execute(
-        f"UPDATE tray_ticket_questions SET {', '.join(sets)} WHERE id = {p}",
+        "UPDATE tray_ticket_questions SET " + ", ".join(sets) + " WHERE id = " + p,
         tuple(params),
     )
     return await get_question(question_id)
@@ -181,7 +181,7 @@ async def update_question(
 async def delete_question(question_id: int) -> None:
     p = _ph()
     await db.execute(
-        f"DELETE FROM tray_ticket_questions WHERE id = {p}",
+        "DELETE FROM tray_ticket_questions WHERE id = " + p,
         (question_id,),
     )
 
@@ -194,7 +194,7 @@ async def delete_question(question_id: int) -> None:
 async def list_conditions_for_question(question_id: int) -> list[dict[str, Any]]:
     p = _ph()
     rows = await db.fetch_all(
-        f"SELECT * FROM tray_ticket_question_conditions WHERE question_id = {p}",
+        "SELECT * FROM tray_ticket_question_conditions WHERE question_id = " + p,
         (question_id,),
     )
     return [dict(r) for r in rows]
@@ -208,8 +208,8 @@ async def list_conditions_for_questions(
         return []
     placeholders = ", ".join([_ph()] * len(question_ids))
     rows = await db.fetch_all(
-        f"SELECT * FROM tray_ticket_question_conditions "
-        f"WHERE question_id IN ({placeholders})",
+        "SELECT * FROM tray_ticket_question_conditions "
+        "WHERE question_id IN (" + placeholders + ")",
         tuple(question_ids),
     )
     return [dict(r) for r in rows]
@@ -222,14 +222,14 @@ async def replace_conditions_for_question(
     """Replace all conditions for ``question_id`` atomically."""
     p = _ph()
     await db.execute(
-        f"DELETE FROM tray_ticket_question_conditions WHERE question_id = {p}",
+        "DELETE FROM tray_ticket_question_conditions WHERE question_id = " + p,
         (question_id,),
     )
     for cond in conditions:
         await db.execute(
-            f"INSERT INTO tray_ticket_question_conditions "
-            f"(question_id, parent_question_id, operator, expected_value) "
-            f"VALUES ({p},{p},{p},{p})",
+            "INSERT INTO tray_ticket_question_conditions "
+            "(question_id, parent_question_id, operator, expected_value) "
+            "VALUES (" + ",".join([p] * 4) + ")",
             (
                 question_id,
                 int(cond["parent_question_id"]),
@@ -259,9 +259,9 @@ async def create_answers(
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     for ans in answers:
         await db.execute(
-            f"INSERT INTO tray_ticket_answers "
-            f"(ticket_id, question_id, question_label_snapshot, is_required_snapshot, answer_value, created_at) "
-            f"VALUES ({p},{p},{p},{p},{p},{p})",
+            "INSERT INTO tray_ticket_answers "
+            "(ticket_id, question_id, question_label_snapshot, is_required_snapshot, answer_value, created_at) "
+            "VALUES (" + ",".join([p] * 6) + ")",
             (
                 ticket_id,
                 ans.get("question_id"),
@@ -276,7 +276,7 @@ async def create_answers(
 async def list_answers_for_ticket(ticket_id: int) -> list[dict[str, Any]]:
     p = _ph()
     rows = await db.fetch_all(
-        f"SELECT * FROM tray_ticket_answers WHERE ticket_id = {p} ORDER BY id ASC",
+        "SELECT * FROM tray_ticket_answers WHERE ticket_id = " + p + " ORDER BY id ASC",
         (ticket_id,),
     )
     return [dict(r) for r in rows]
