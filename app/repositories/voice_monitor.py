@@ -90,11 +90,32 @@ async def create_endpoint(company_id: int, values: dict[str, Any]) -> dict[str, 
             # provisioning (billing enforcement is added in a later phase).
             from app.services.voice_monitor_billing import assert_endpoint_capacity
             await assert_endpoint_capacity(values["subscription_id"], company_id=company_id)
-    columns = [field for field in ENDPOINT_FIELDS if field in values]
     endpoint_id = await db.execute_returning_lastrowid(
-        f"INSERT INTO voice_monitor_endpoints (company_id, {', '.join(columns)}) "
-        f"VALUES (%s, {', '.join(['%s'] * len(columns))})",
-        (company_id, *(values[field] for field in columns)),
+        "INSERT INTO voice_monitor_endpoints (company_id, subscription_id, destination_e164, "
+        "display_label, enabled, timezone, schedule_cron, interval_seconds, timeout_seconds, "
+        "max_retries, retry_delay_seconds, expected_behavior, transcription_enabled, "
+        "ticket_on_failure, ticket_failure_threshold, next_run_at, consent_granted, "
+        "recording_consent_granted, consent_actor_id, consent_at, consent_policy_version, "
+        "consent_revoked_at, quiet_hours_start, quiet_hours_end, caller_id_verified, "
+        "daily_attempt_limit, monetary_cap_minor) VALUES ("
+        "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+        "%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        (
+            company_id, values.get("subscription_id"), values.get("destination_e164"),
+            values.get("display_label"), values.get("enabled", True),
+            values.get("timezone", "UTC"), values.get("schedule_cron"),
+            values.get("interval_seconds"), values.get("timeout_seconds", 30),
+            values.get("max_retries", 0), values.get("retry_delay_seconds", 60),
+            values.get("expected_behavior", "answer"),
+            values.get("transcription_enabled", False), values.get("ticket_on_failure", False),
+            values.get("ticket_failure_threshold", 1), values.get("next_run_at"),
+            values.get("consent_granted", False),
+            values.get("recording_consent_granted", False), values.get("consent_actor_id"),
+            values.get("consent_at"), values.get("consent_policy_version"),
+            values.get("consent_revoked_at"), values.get("quiet_hours_start", "20:00:00"),
+            values.get("quiet_hours_end", "08:00:00"), values.get("caller_id_verified", False),
+            values.get("daily_attempt_limit", 10), values.get("monetary_cap_minor", 0),
+        ),
     )
     endpoint = await get_endpoint(company_id, endpoint_id)
     if endpoint is None:
