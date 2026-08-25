@@ -13,6 +13,7 @@ TicketRecord = dict[str, Any]
 
 _UNSET = object()
 _FULLTEXT_MIN_SEARCH_LENGTH = 3
+_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 async def _get_default_labour_type_id() -> int | None:
@@ -1283,6 +1284,8 @@ async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
     if "updated_at" in fields:
         override_updated_at = fields.pop("updated_at")
     for key, value in fields.items():
+        if not _SQL_IDENTIFIER_RE.match(key):
+            raise ValueError(f"Invalid ticket field name: {key}")
         if key == "status" and "status_changed_at" not in fields:
             assignments.append(
                 "status_changed_at = CASE WHEN status <> %s "
@@ -1821,22 +1824,35 @@ async def get_automation_filter_context_by_ticket_ids(
         result[ticket_id]["open_task_count"] = open_task_count
         result[ticket_id]["has_open_tasks"] = open_task_count > 0
 
-    for table_name, count_name in (
-        ("ticket_assets", "linked_asset_count"),
-        ("ticket_suggested_assets", "suggested_asset_count"),
-    ):
-        asset_rows = await db.fetch_all(
-            f"""
-            SELECT ticket_id, COUNT(*) AS {count_name}
-            FROM {table_name}
-            WHERE ticket_id IN ({placeholders})
-            GROUP BY ticket_id
-            """,
-            tuple(unique_ids),
+    linked_asset_rows = await db.fetch_all(
+        f"""
+        SELECT ticket_id, COUNT(*) AS linked_asset_count
+        FROM ticket_assets
+        WHERE ticket_id IN ({placeholders})
+        GROUP BY ticket_id
+        """,
+        tuple(unique_ids),
+    )
+    for row in linked_asset_rows:
+        ticket_id = int(row["ticket_id"])
+        result[ticket_id]["linked_asset_count"] = int(
+            row.get("linked_asset_count") or 0
         )
-        for row in asset_rows:
-            ticket_id = int(row["ticket_id"])
-            result[ticket_id][count_name] = int(row.get(count_name) or 0)
+
+    suggested_asset_rows = await db.fetch_all(
+        f"""
+        SELECT ticket_id, COUNT(*) AS suggested_asset_count
+        FROM ticket_suggested_assets
+        WHERE ticket_id IN ({placeholders})
+        GROUP BY ticket_id
+        """,
+        tuple(unique_ids),
+    )
+    for row in suggested_asset_rows:
+        ticket_id = int(row["ticket_id"])
+        result[ticket_id]["suggested_asset_count"] = int(
+            row.get("suggested_asset_count") or 0
+        )
 
     latest_reply_rows = await db.fetch_all(
         f"""
