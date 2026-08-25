@@ -49,14 +49,15 @@ if ($requestedPaths.Count -eq 0) {
 $currentPaths = @()
 $getMpPreference = Get-Command -Name Get-MpPreference -ErrorAction SilentlyContinue
 if ($getMpPreference) {
-    $currentPaths = @((Get-MpPreference).ExclusionPath)
+    $currentPaths = @((Get-MpPreference).ExclusionPath | ForEach-Object {
+        if (-not [string]::IsNullOrWhiteSpace($_)) {
+            $_.TrimEnd('\')
+        }
+    })
 }
 
 $pathsToAdd = @($requestedPaths | Where-Object {
-    $requestedPath = $_
-    -not ($currentPaths | Where-Object {
-        [string]::Equals($_.TrimEnd('\'), $requestedPath, [StringComparison]::OrdinalIgnoreCase)
-    })
+    $currentPaths -notcontains $_
 })
 
 if ($pathsToAdd.Count -eq 0) {
