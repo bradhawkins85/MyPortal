@@ -17,8 +17,14 @@ _VALID_ORDER_COLUMNS = {
 
 
 def _normalise_ordering(order_by: str | None, direction: str | None) -> tuple[str, str]:
-    column = _VALID_ORDER_COLUMNS.get((order_by or "").lower(), "name")
-    order_direction = "DESC" if (direction or "").lower() == "desc" else "ASC"
+    order_key = (order_by or "name").lower()
+    direction_key = (direction or "asc").lower()
+    if order_key not in _VALID_ORDER_COLUMNS:
+        raise ValueError("Unsupported port order column")
+    if direction_key not in {"asc", "desc"}:
+        raise ValueError("Unsupported port order direction")
+    column = _VALID_ORDER_COLUMNS[order_key]
+    order_direction = direction_key.upper()
     return column, order_direction
 
 
