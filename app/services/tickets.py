@@ -626,6 +626,8 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
     enriched.setdefault("has_tasks", False)
     enriched.setdefault("open_task_count", 0)
     enriched.setdefault("has_open_tasks", False)
+    enriched.setdefault("linked_asset_count", 0)
+    enriched.setdefault("suggested_asset_count", 0)
 
     _attach_sms_context(enriched)
 

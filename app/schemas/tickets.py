@@ -206,6 +206,8 @@ class TicketDashboardRow(BaseModel):
     task_count: int = 0
     has_open_tasks: bool = False
     open_task_count: int = 0
+    linked_asset_count: int = 0
+    suggested_asset_count: int = 0
     labels: list[str] = Field(default_factory=list)
     age_days: Optional[int] = None
     updated_age_hours: Optional[int] = None

@@ -126,6 +126,16 @@ class _AutomationContextDB:
         return []
 
 
+class _AssetAutomationContextDB:
+    async def fetch_one(self, sql, params):
+        assert params == (42,)
+        if "FROM ticket_assets" in sql:
+            return {"linked_asset_count": 2}
+        if "FROM ticket_suggested_assets" in sql:
+            return {"suggested_asset_count": 3}
+        return {}
+
+
 class _ReplaceTicketAssetsDB:
     def __init__(self, existing_rows, final_rows):
         self.fetch_calls: list[tuple[str, tuple]] = []
@@ -383,6 +393,16 @@ async def test_automation_filter_context_derives_latest_reply_kind(monkeypatch):
     assert context[5]["latest_reply_id"] == 12
     assert context[5]["latest_reply_kind"] == "internal_note"
     assert context[5]["ticket_update_actor_type"] == "technician"
+
+
+@pytest.mark.anyio
+async def test_automation_filter_context_includes_asset_counts(monkeypatch):
+    monkeypatch.setattr(tickets, "db", _AssetAutomationContextDB())
+
+    context = await tickets.get_automation_filter_context(42)
+
+    assert context["linked_asset_count"] == 2
+    assert context["suggested_asset_count"] == 3
 
 
 @pytest.mark.anyio
