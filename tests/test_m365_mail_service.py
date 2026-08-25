@@ -130,6 +130,13 @@ def test_message_changed_since_rejects_old_or_unparseable_modification():
     )
 
 
+def test_message_marker_match_is_case_sensitive() -> None:
+    marker = {"message_uid": "AAMkAGraphId", "ticket_id": 123}
+
+    assert m365_mail._message_marker_matches_uid(marker, "AAMkAGraphId")
+    assert not m365_mail._message_marker_matches_uid(marker, "aAMkAGraphId")
+
+
 # ---------------------------------------------------------------------------
 # Account management
 # ---------------------------------------------------------------------------
