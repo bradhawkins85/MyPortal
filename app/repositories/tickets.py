@@ -1672,10 +1672,24 @@ async def get_automation_filter_context(ticket_id: int) -> dict[str, int | bool]
         """,
         (ticket_id,),
     )
+    linked_asset_row = await db.fetch_one(
+        "SELECT COUNT(*) AS linked_asset_count FROM ticket_assets WHERE ticket_id = %s",
+        (ticket_id,),
+    )
+    suggested_asset_row = await db.fetch_one(
+        "SELECT COUNT(*) AS suggested_asset_count FROM ticket_suggested_assets WHERE ticket_id = %s",
+        (ticket_id,),
+    )
 
     attachment_count = int((attachment_row or {}).get("attachment_count") or 0)
     task_count = int((task_row or {}).get("task_count") or 0)
     open_task_count = int((task_row or {}).get("open_task_count") or 0)
+    linked_asset_count = int(
+        (linked_asset_row or {}).get("linked_asset_count") or 0
+    )
+    suggested_asset_count = int(
+        (suggested_asset_row or {}).get("suggested_asset_count") or 0
+    )
     return {
         "billable_minutes": int((time_row or {}).get("billable_minutes") or 0),
         "non_billable_minutes": int((time_row or {}).get("non_billable_minutes") or 0),
@@ -1688,6 +1702,8 @@ async def get_automation_filter_context(ticket_id: int) -> dict[str, int | bool]
         "has_tasks": task_count > 0,
         "open_task_count": open_task_count,
         "has_open_tasks": open_task_count > 0,
+        "linked_asset_count": linked_asset_count,
+        "suggested_asset_count": suggested_asset_count,
     }
 
 
@@ -1722,6 +1738,8 @@ async def get_automation_filter_context_by_ticket_ids(
             "has_tasks": False,
             "open_task_count": 0,
             "has_open_tasks": False,
+            "linked_asset_count": 0,
+            "suggested_asset_count": 0,
             "latest_reply_id": None,
             "latest_reply_at": None,
             "latest_reply_is_internal": None,
@@ -1802,6 +1820,23 @@ async def get_automation_filter_context_by_ticket_ids(
         result[ticket_id]["has_tasks"] = task_count > 0
         result[ticket_id]["open_task_count"] = open_task_count
         result[ticket_id]["has_open_tasks"] = open_task_count > 0
+
+    for table_name, count_name in (
+        ("ticket_assets", "linked_asset_count"),
+        ("ticket_suggested_assets", "suggested_asset_count"),
+    ):
+        asset_rows = await db.fetch_all(
+            f"""
+            SELECT ticket_id, COUNT(*) AS {count_name}
+            FROM {table_name}
+            WHERE ticket_id IN ({placeholders})
+            GROUP BY ticket_id
+            """,
+            tuple(unique_ids),
+        )
+        for row in asset_rows:
+            ticket_id = int(row["ticket_id"])
+            result[ticket_id][count_name] = int(row.get(count_name) or 0)
 
     latest_reply_rows = await db.fetch_all(
         f"""

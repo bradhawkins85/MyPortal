@@ -20,9 +20,12 @@ EXPECTED = {
     ("GET", "/assets/settings"),
     ("GET", "/devices"),
     ("POST", "/devices/discovered/{device_id}"),
+    ("POST", "/devices/discovered/{device_id}/hudu-sync"),
     ("POST", "/devices/discovered-bulk-update"),
+    ("POST", "/devices/discovered-purge"),
     ("POST", "/devices/alerts"),
     ("POST", "/devices/device-types"),
+    ("POST", "/devices/device-types/{device_type_id}"),
     ("POST", "/devices/device-types/{device_type_id}/delete"),
     ("POST", "/devices/scanners"),
     ("POST", "/devices/scanners/{device_id}"),
@@ -124,9 +127,9 @@ def test_assets_pack_loads_and_reloads_cleanly():
                 if path:
                     counts[(method, path)] = counts.get((method, path), 0) + 1
         for key in EXPECTED:
-            assert (
-                counts.get(key, 0) == 1
-            ), f"Route {key} duplicated after reload (count={counts.get(key)})"
+            assert counts.get(key, 0) == 1, (
+                f"Route {key} duplicated after reload (count={counts.get(key)})"
+            )
 
         await registry.unload_all()
 

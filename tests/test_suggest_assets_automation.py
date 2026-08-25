@@ -17,6 +17,11 @@ def test_suggest_assets_prefers_upn_username(monkeypatch):
         assert params == (7, "agent-1")
         return {"id": 42}
 
+    async def fake_fetch_all(sql, params):
+        assert "FROM assets" in sql
+        assert params == (7,)
+        return []
+
     async def fake_fetch_agents(client_id):
         assert client_id == "client-7"
         return [{"agent_id": "agent-1", "logged_username": "DOMAIN\\alex.smith"}]
@@ -27,13 +32,52 @@ def test_suggest_assets_prefers_upn_username(monkeypatch):
         saved.append((ticket_id, suggestions))
 
     monkeypatch.setattr(modules.db, "fetch_one", fake_fetch_one)
+    monkeypatch.setattr(modules.db, "fetch_all", fake_fetch_all)
     monkeypatch.setattr(tacticalrmm, "fetch_agents", fake_fetch_agents)
-    monkeypatch.setattr(modules.tickets_repo, "replace_ticket_suggested_assets", fake_replace)
+    monkeypatch.setattr(
+        modules.tickets_repo, "replace_ticket_suggested_assets", fake_replace
+    )
 
     result = asyncio.run(modules._invoke_suggest_assets({}, {"ticket_id": 9}))
 
     assert result == {"status": "ok", "ticket_id": 9, "suggested": 1}
     assert saved == [(9, [(42, "alex.smith")])]
+
+
+def test_suggest_assets_uses_imported_asset_without_tactical_mapping(monkeypatch):
+    async def fake_fetch_one(sql, params):
+        assert "FROM tickets" in sql
+        return {
+            "company_id": 7,
+            "tacticalrmm_client_id": None,
+            "email": "alex.smith@example.com",
+            "first_name": "Alex",
+            "last_name": "Smith",
+        }
+
+    async def fake_fetch_all(sql, params):
+        assert "last_user" in sql
+        assert params == (7,)
+        return [
+            {"id": 41, "last_user": "DOMAIN\\alex.smith"},
+            {"id": 42, "last_user": "someone.else@example.com"},
+        ]
+
+    saved = []
+
+    async def fake_replace(ticket_id, suggestions):
+        saved.append((ticket_id, suggestions))
+
+    monkeypatch.setattr(modules.db, "fetch_one", fake_fetch_one)
+    monkeypatch.setattr(modules.db, "fetch_all", fake_fetch_all)
+    monkeypatch.setattr(
+        modules.tickets_repo, "replace_ticket_suggested_assets", fake_replace
+    )
+
+    result = asyncio.run(modules._invoke_suggest_assets({}, {"ticket_id": 9}))
+
+    assert result == {"status": "ok", "ticket_id": 9, "suggested": 1}
+    assert saved == [(9, [(41, "alex.smith")])]
 
 
 def test_logged_username_normalisation_handles_domain_and_upn():
