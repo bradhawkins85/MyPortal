@@ -42,3 +42,9 @@ async def test_list_pause_periods_uses_bound_int_params(monkeypatch):
 async def test_list_ticket_sla_source_rejects_non_integer_ticket_ids():
     with pytest.raises(TypeError, match="ticket_ids must contain integers"):
         await slas_repo.list_ticket_sla_source(["1"])
+
+
+@pytest.mark.anyio
+async def test_list_pause_periods_rejects_non_integer_ticket_ids():
+    with pytest.raises(TypeError, match="ticket_ids must contain integers"):
+        await slas_repo.list_pause_periods(["1"])
