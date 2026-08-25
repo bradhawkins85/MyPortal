@@ -740,8 +740,8 @@ async def test_sync_account_errors_when_folder_missing(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-async def test_sync_account_processes_messages(monkeypatch):
-    """sync_account correctly processes messages from Graph API."""
+async def test_sync_account_reimports_message_with_orphaned_import_marker(monkeypatch):
+    """An imported marker without a ticket must not hide a redirected message."""
     monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
 
     async def fake_get_module(slug: str, *, redact: bool = True):
@@ -802,7 +802,9 @@ async def test_sync_account_processes_messages(monkeypatch):
         assert payload["isRead"] is True
 
     async def fake_get_message(account_id: int, message_uid: str):
-        return None  # Not yet imported
+        # A failed historical import can leave this marker even though no ticket
+        # was created. This is the state reported for redirected Graph messages.
+        return {"status": "imported", "ticket_id": None}
 
     recorded_messages: list[dict] = []
 
@@ -863,6 +865,7 @@ async def test_sync_account_processes_messages(monkeypatch):
     ]
     assert len(recorded_messages) == 1
     assert recorded_messages[0]["status"] == "imported"
+    assert result["message_actions"][-1]["corrected_stale_import_marker"] is True
 
 
 async def test_sync_account_no_company_resolves_from_email(monkeypatch):
@@ -1030,7 +1033,11 @@ async def test_sync_account_skips_already_imported(monkeypatch):
         }
 
     async def fake_get_message(account_id, message_uid):
-        return {"status": "imported"}  # Already imported
+        return {"status": "imported", "ticket_id": 123}
+
+    async def fake_get_ticket(ticket_id):
+        assert ticket_id == 123
+        return {"id": 123, "ticket_number": "123", "subject": "Old Message"}
 
     async def fake_update_account(account_id, **fields):
         return None
@@ -1040,6 +1047,7 @@ async def test_sync_account_skips_already_imported(monkeypatch):
     monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
     monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
     monkeypatch.setattr(m365_mail.mail_repo, "get_message", fake_get_message)
+    monkeypatch.setattr(m365_mail.tickets_repo, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(m365_mail.mail_repo, "update_account", fake_update_account)
 
     result = await m365_mail.sync_account(1)
@@ -1718,7 +1726,11 @@ async def test_sync_account_marks_already_imported_unread_message_as_read(monkey
         }
 
     async def fake_get_message(account_id: int, message_uid: str):
-        return {"status": "imported"}
+        return {"status": "imported", "ticket_id": 321}
+
+    async def fake_get_ticket(ticket_id: int):
+        assert ticket_id == 321
+        return {"id": 321, "ticket_number": "321", "subject": "Already imported"}
 
     patched: list[tuple[str, dict[str, object]]] = []
 
@@ -1735,6 +1747,7 @@ async def test_sync_account_marks_already_imported_unread_message_as_read(monkey
     monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
     monkeypatch.setattr(m365_mail, "_graph_patch", fake_graph_patch)
     monkeypatch.setattr(m365_mail.mail_repo, "get_message", fake_get_message)
+    monkeypatch.setattr(m365_mail.tickets_repo, "get_ticket", fake_get_ticket)
     monkeypatch.setattr(m365_mail.mail_repo, "update_account", fake_update_account)
 
     result = await m365_mail.sync_account(8)

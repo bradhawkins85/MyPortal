@@ -1300,11 +1300,21 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 # Check if already processed
                 existing_message = await mail_repo.get_message(int(account_id), msg_id)
                 stale_import_ticket: Mapping[str, Any] | None = None
+                stale_import_marker = False
                 if existing_message and existing_message.get("status") == "imported":
                     existing_ticket_id = existing_message.get("ticket_id")
                     existing_ticket = None
                     if isinstance(existing_ticket_id, int):
                         existing_ticket = await tickets_repo.get_ticket(existing_ticket_id)
+
+                    # An imported marker is only authoritative while its ticket
+                    # still exists.  Older failed imports could persist an
+                    # ``imported`` row without a ticket id (and deleting a ticket
+                    # sets the foreign key to NULL).  Treat either case as an
+                    # orphaned marker so redirected messages are not suppressed
+                    # forever by a record that cannot identify an import.
+                    if not isinstance(existing_ticket, Mapping):
+                        stale_import_marker = True
 
                     subject_ticket_number = _extract_ticket_number_from_subject(
                         message_log_base["subject"]
@@ -1325,7 +1335,8 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         # the current subject, it is unsafe to suppress the email.
                         # Process it normally and replace the stale marker below.
                         stale_import_ticket = existing_ticket
-                    else:
+                        stale_import_marker = True
+                    elif not stale_import_marker:
                         # A previous run may have successfully imported the message
                         # but failed while marking it read. Avoid duplicate ticket
                         # activity, but still repair the read state on later syncs.
@@ -1548,6 +1559,10 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         ticket_id = (
                             ticket.get("id") if isinstance(ticket, Mapping) else None
                         )
+                        if not isinstance(ticket_id, int):
+                            raise RuntimeError(
+                                "Ticket creation did not return a valid ticket id."
+                            )
                         if ticket_id is not None:
                             if create_initial_reply_after_inline_persist:
                                 description = await _persist_m365_inline_images_for_ticket(
@@ -1760,7 +1775,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         "related_message_ids": (
                             related_message_ids[:10] if related_message_ids else None
                         ),
-                        "corrected_stale_import_marker": stale_import_ticket is not None,
+                        "corrected_stale_import_marker": stale_import_marker,
                         "previous_ticket_number": (
                             stale_import_ticket.get("ticket_number")
                             if isinstance(stale_import_ticket, Mapping)
