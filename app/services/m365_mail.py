@@ -116,6 +116,18 @@ def _message_changed_since(
     return modified_at is not None and modified_at >= last_synced_at
 
 
+def _message_marker_matches_uid(
+    message: Mapping[str, Any] | None, message_uid: str
+) -> bool:
+    """Return whether an import marker has the exact case-sensitive Graph id."""
+    if not message:
+        return False
+    stored_uid = message.get("message_uid")
+    # Repository rows always include message_uid.  Retain compatibility with
+    # partial mappings supplied by integrations and older tests.
+    return stored_uid is None or stored_uid == message_uid
+
+
 def enrich_account_response(account: dict[str, Any]) -> dict[str, Any]:
     """Add computed fields before returning an account to the API/template."""
     account = dict(account)
@@ -1299,6 +1311,16 @@ async def sync_account(account_id: int) -> dict[str, Any]:
 
                 # Check if already processed
                 existing_message = await mail_repo.get_message(int(account_id), msg_id)
+                if existing_message and not _message_marker_matches_uid(
+                    existing_message, msg_id
+                ):
+                    # Graph message ids are case-sensitive.  Databases created
+                    # with a case-insensitive default collation could return the
+                    # marker for a different id that varies only by case, which
+                    # can point at an unrelated company's ticket.  Never accept
+                    # such a row as an idempotency match.  Migration 346 makes
+                    # the database key case-sensitive for subsequent writes.
+                    existing_message = None
                 stale_import_ticket: Mapping[str, Any] | None = None
                 stale_import_marker = False
                 if existing_message and existing_message.get("status") == "imported":
