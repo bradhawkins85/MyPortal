@@ -1263,8 +1263,8 @@ async def test_sync_account_matches_existing_ticket(monkeypatch):
     assert replies_added[0]["ticket_id"] == 50
 
 
-async def test_sync_account_creates_ticket_for_reply_to_resolved_ticket_number(monkeypatch):
-    """A reply naming a resolved ticket is imported as a new request."""
+async def test_sync_account_creates_ticket_for_reply_to_closed_ticket_number(monkeypatch):
+    """A reply naming a closed ticket is imported as a new request."""
     monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
 
     async def fake_get_module(slug: str, *, redact: bool = True):
@@ -1334,7 +1334,7 @@ async def test_sync_account_creates_ticket_for_reply_to_resolved_ticket_number(m
                     "id": 24417,
                     "ticket_number": "24417",
                     "subject": "Onboard New Laptops",
-                    "status": "resolved",
+                    "status": "closed",
                     "requester_id": 42,
                 }
             ]

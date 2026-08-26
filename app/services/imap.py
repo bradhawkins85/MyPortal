@@ -140,10 +140,10 @@ def _normalise_bool(value: Any, *, default: bool = False) -> bool:
 
 
 def _ticket_is_closed(ticket: Mapping[str, Any]) -> bool:
-    """Return True when a ticket is in a terminal closed/resolved state."""
+    """Return True only when a ticket is explicitly closed."""
 
     status = str(ticket.get("status", "")).lower()
-    return status in {"closed", "resolved"}
+    return status == "closed"
 
 
 def _normalise_priority(value: Any, *, default: int = 100) -> int:
@@ -1376,8 +1376,8 @@ async def _find_existing_ticket_for_reply(
         related_message_ids: Message IDs from In-Reply-To/References headers
     
     Returns:
-        Open ticket record if found, None otherwise. A terminal ticket is never
-        returned, so the inbound message is handled as a new request.
+        Non-closed ticket record if found, None otherwise. A closed ticket is
+        never returned, so the inbound message is handled as a new request.
     """
     # The visible, explicit ticket number is authoritative. Reply headers can
     # legitimately point at a different ticket when a thread was forwarded or
@@ -1463,14 +1463,16 @@ async def _find_existing_ticket_for_reply(
     # Build query to find tickets with matching subject where sender is involved
     # We'll check if sender is the requester or a watcher
     try:
-        # First, find tickets with similar subjects that are not closed/resolved
+        # Resolved tickets remain eligible: a customer reply can indicate that
+        # the issue was not actually resolved. Only explicitly closed tickets
+        # must be excluded.
         # We'll use LIKE with wildcards to match normalized subjects
         query = """
             SELECT DISTINCT t.*
             FROM tickets t
             LEFT JOIN ticket_watchers tw ON t.id = tw.ticket_id
             LEFT JOIN users u ON tw.user_id = u.id
-            WHERE t.status NOT IN ('closed', 'resolved')
+            WHERE t.status <> 'closed'
         """
         params: list[Any] = []
         
