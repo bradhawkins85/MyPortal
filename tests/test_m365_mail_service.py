@@ -1263,8 +1263,8 @@ async def test_sync_account_matches_existing_ticket(monkeypatch):
     assert replies_added[0]["ticket_id"] == 50
 
 
-async def test_sync_account_attaches_m365_reply_to_resolved_ticket_number(monkeypatch):
-    """An explicit subject ticket overrides a stale import marker for another ticket."""
+async def test_sync_account_creates_ticket_for_reply_to_closed_ticket_number(monkeypatch):
+    """A reply naming a closed ticket is imported as a new request."""
     monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
 
     async def fake_get_module(slug: str, *, redact: bool = True):
@@ -1312,6 +1312,8 @@ async def test_sync_account_attaches_m365_reply_to_resolved_ticket_number(monkey
         return {"status": "imported", "ticket_id": 25224}
 
     async def fake_get_ticket(ticket_id: int):
+        if ticket_id == 999:
+            return {"id": 999, "ticket_number": "999", "subject": "New request"}
         assert ticket_id == 25224
         return {
             "id": 25224,
@@ -1332,7 +1334,7 @@ async def test_sync_account_attaches_m365_reply_to_resolved_ticket_number(monkey
                     "id": 24417,
                     "ticket_number": "24417",
                     "subject": "Onboard New Laptops",
-                    "status": "resolved",
+                    "status": "closed",
                     "requester_id": 42,
                 }
             ]
@@ -1343,6 +1345,9 @@ async def test_sync_account_attaches_m365_reply_to_resolved_ticket_number(monkey
     async def fake_create_ticket(**kwargs):
         created_tickets.append(kwargs)
         return {"id": 999}
+
+    async def fake_refresh_ticket_ai(_ticket_id: int):
+        pass
 
     replies_added: list[dict[str, Any]] = []
 
@@ -1372,6 +1377,12 @@ async def test_sync_account_attaches_m365_reply_to_resolved_ticket_number(monkey
     monkeypatch.setattr(imap.tickets_repo, "get_ticket_by_external_reference", fake_get_ticket_by_external_reference)
     monkeypatch.setattr(imap.db, "fetch_all", fake_fetch_all)
     monkeypatch.setattr(m365_mail.tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(
+        m365_mail.tickets_service, "refresh_ticket_ai_summary", fake_refresh_ticket_ai
+    )
+    monkeypatch.setattr(
+        m365_mail.tickets_service, "refresh_ticket_ai_tags", fake_refresh_ticket_ai
+    )
     monkeypatch.setattr(m365_mail.tickets_repo, "create_reply", fake_create_reply)
     monkeypatch.setattr(m365_mail.tickets_service, "emit_ticket_updated_event", fake_emit_ticket_updated_event)
 
@@ -1379,10 +1390,10 @@ async def test_sync_account_attaches_m365_reply_to_resolved_ticket_number(monkey
 
     assert result["status"] == "succeeded"
     assert result["processed"] == 1
-    assert created_tickets == []
-    assert len(replies_added) == 1
-    assert replies_added[0]["ticket_id"] == 24417
-    assert recorded_messages[-1]["ticket_id"] == 24417
+    assert len(created_tickets) == 1
+    assert created_tickets[0]["subject"].startswith("Re: Ticket #24417")
+    assert replies_added == []
+    assert recorded_messages[-1]["ticket_id"] == 999
     assert result["message_actions"][-1]["corrected_stale_import_marker"] is True
     assert result["message_actions"][-1]["previous_ticket_number"] == "25224"
 
