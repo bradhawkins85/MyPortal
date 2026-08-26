@@ -1117,7 +1117,7 @@ def test_m365_graph_recipient_extraction_normalizes_addresses():
     ) == ["cc.one@example.com", "cc.two@example.com"]
 
 
-async def test_find_existing_ticket_for_reply_matches_resolved_ticket_number(monkeypatch):
+async def test_find_existing_ticket_for_reply_rejects_resolved_ticket_number(monkeypatch):
     queries: list[tuple[str, tuple[object, ...]]] = []
 
     async def fake_get_ticket_by_external_reference(_reference: str):
@@ -1148,13 +1148,11 @@ async def test_find_existing_ticket_for_reply_matches_resolved_ticket_number(mon
         "customer@example.com",
     )
 
-    assert ticket is not None
-    assert ticket["id"] == 24417
-    assert ticket["status"] == "resolved"
+    assert ticket is None
     assert queries[0][1] == ("24417",)
 
 
-async def test_find_existing_ticket_for_reply_matches_resolved_reference(monkeypatch):
+async def test_find_existing_ticket_for_reply_rejects_resolved_reference(monkeypatch):
     async def fake_get_ticket_by_external_reference(reference: str):
         assert reference == "<original@example.com>"
         return {
@@ -1180,6 +1178,4 @@ async def test_find_existing_ticket_for_reply_matches_resolved_reference(monkeyp
         related_message_ids=["<original@example.com>"],
     )
 
-    assert ticket is not None
-    assert ticket["id"] == 24417
-    assert ticket["status"] == "resolved"
+    assert ticket is None

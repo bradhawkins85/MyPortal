@@ -1365,7 +1365,7 @@ async def _find_existing_ticket_for_reply(
     Find an existing ticket that this email is likely a reply to.
 
     Priority order:
-    1. Extract ticket number from subject, including resolved tickets
+    1. Extract ticket number from subject
     2. Match In-Reply-To/References message IDs against ticket and reply external references
     3. Fuzzy subject match for non-closed tickets where sender is requester or watcher.
 
@@ -1376,7 +1376,8 @@ async def _find_existing_ticket_for_reply(
         related_message_ids: Message IDs from In-Reply-To/References headers
     
     Returns:
-        Ticket record if found, None otherwise
+        Open ticket record if found, None otherwise. A terminal ticket is never
+        returned, so the inbound message is handled as a new request.
     """
     # The visible, explicit ticket number is authoritative. Reply headers can
     # legitimately point at a different ticket when a thread was forwarded or
@@ -1391,7 +1392,10 @@ async def _find_existing_ticket_for_reply(
             if rows:
                 from app.repositories.tickets import _normalise_ticket
 
-                return _normalise_ticket(rows[0])
+                ticket = _normalise_ticket(rows[0])
+                # An explicit reference to a closed ticket must start a new
+                # request rather than falling through to a less reliable match.
+                return None if _ticket_is_closed(ticket) else ticket
         except Exception:  # pragma: no cover - defensive
             pass
 
@@ -1403,7 +1407,8 @@ async def _find_existing_ticket_for_reply(
             if rows:
                 from app.repositories.tickets import _normalise_ticket
 
-                return _normalise_ticket(rows[0])
+                ticket = _normalise_ticket(rows[0])
+                return None if _ticket_is_closed(ticket) else ticket
         except Exception:  # pragma: no cover - defensive
             pass
 
@@ -1415,7 +1420,7 @@ async def _find_existing_ticket_for_reply(
         for message_id in related_ids:
             try:
                 ticket = await tickets_repo.get_ticket_by_external_reference(message_id)
-                if ticket:
+                if ticket and not _ticket_is_closed(ticket):
                     return ticket
             except Exception:  # pragma: no cover - defensive logging
                 pass
@@ -1433,7 +1438,8 @@ async def _find_existing_ticket_for_reply(
                 )
                 if rows:
                     ticket = _normalise_ticket(rows[0])
-                    return ticket
+                    if not _ticket_is_closed(ticket):
+                        return ticket
             except Exception:  # pragma: no cover - defensive logging
                 pass
 
@@ -1442,7 +1448,7 @@ async def _find_existing_ticket_for_reply(
     if syncro_external_id:
         try:
             ticket = await tickets_repo.get_ticket_by_external_reference(syncro_external_id)
-            if ticket:
+            if ticket and not _ticket_is_closed(ticket):
                 return ticket
         except Exception:  # pragma: no cover - defensive logging
             pass
