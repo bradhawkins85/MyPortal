@@ -23,6 +23,7 @@ func TestDecodeStatusAcceptsPowerShellUTF8BOM(t *testing.T) {
             "severity": "high",
             "status": "remediated",
             "detected_at": "2026-08-20T01:02:03Z",
+            "infected_files": ["C:\\Users\\Example\\payload.exe"],
             "details": {"action_success": true}
         }]
     }`)...)
@@ -42,6 +43,9 @@ func TestDecodeStatusAcceptsPowerShellUTF8BOM(t *testing.T) {
 	}
 	if len(status.Detections) != 1 || status.Detections[0].DetectionUID != "det-123" {
 		t.Fatalf("unexpected detections: %+v", status.Detections)
+	}
+	if len(status.Detections[0].InfectedFiles) != 1 || status.Detections[0].InfectedFiles[0] != `C:\Users\Example\payload.exe` {
+		t.Fatalf("unexpected infected files: %+v", status.Detections[0].InfectedFiles)
 	}
 }
 

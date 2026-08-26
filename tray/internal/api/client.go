@@ -268,12 +268,13 @@ type DefenderStatus struct {
 
 // DefenderDetection describes a threat recorded in Defender's protection history.
 type DefenderDetection struct {
-	DetectionUID string                 `json:"detection_uid"`
-	ThreatName   string                 `json:"threat_name"`
-	Severity     string                 `json:"severity"`
-	Status       string                 `json:"status"`
-	DetectedAt   time.Time              `json:"detected_at"`
-	Details      map[string]interface{} `json:"details"`
+	DetectionUID  string                 `json:"detection_uid"`
+	ThreatName    string                 `json:"threat_name"`
+	Severity      string                 `json:"severity"`
+	Status        string                 `json:"status"`
+	DetectedAt    time.Time              `json:"detected_at"`
+	InfectedFiles []string               `json:"infected_files"`
+	Details       map[string]interface{} `json:"details"`
 }
 
 // DefenderScan describes a recent scan reported by Microsoft Defender.

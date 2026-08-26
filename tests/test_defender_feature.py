@@ -161,10 +161,12 @@ def test_status_report_accepts_defender_protection_history():
         "severity": "high",
         "status": "remediated",
         "detected_at": "2026-08-20T01:02:03Z",
+        "infected_files": [r"C:\Users\Example\payload.exe"],
         "details": {"action_success": True},
     }])
     assert report.detections[0].threat_name == "Trojan:Win32/Example"
     assert report.detections[0].status == "remediated"
+    assert report.detections[0].infected_files == [r"C:\Users\Example\payload.exe"]
 
 
 def test_status_report_persists_embedded_protection_history(monkeypatch):
@@ -209,6 +211,7 @@ def test_defender_ui_exposes_management_workflows():
     assert 'id="exclusion-lists-modal"' in template
     assert "Apply to companies" in template
     assert 'class="card defender-detections-section"' in template
+    assert 'data-label="Infected files"' in template
     assert 'data-detection-action="quarantine"' in template
     assert "Automatic ticket creation" in template
     assert "Anti Virus is off" in template
@@ -296,6 +299,13 @@ def test_defender_reporting_catalog_supports_reports_and_dashboard_panels():
     assert sql.count("{{current.company}}") == 6
     assert sql.count(" AS X") == 2
     assert sql.count(" AS Y") == 2
+
+
+def test_defender_infected_files_are_available_in_reporting():
+    sql = Path("migrations/345_defender_infected_files.sql").read_text()
+
+    assert "infected_files_json AS infected_files" in sql
+    assert "WHERE slug = 'defender-detections'" in sql
 
 
 def test_defender_device_queries_only_include_windows_agents(monkeypatch):

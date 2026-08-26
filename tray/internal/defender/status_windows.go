@@ -39,12 +39,16 @@ $detections = @(Get-MpThreatDetection | Where-Object { $_.InitialDetectionTime -
   $threat = $threats[[string]$_.ThreatID]
   $severity = switch ([int]$threat.SeverityID) { 1 { 'low' } 2 { 'medium' } 4 { 'high' } 5 { 'critical' } default { 'unknown' } }
   $active = -not [bool]$_.ActionSuccess
+  $infectedFiles = @($_.Resources | ForEach-Object {
+    ([string]$_ -replace '^[^:]+:_', '').Trim()
+  } | Where-Object { $_ } | Sort-Object -Unique)
   [ordered]@{
     detection_uid = $uid
     threat_name = if ($threat.ThreatName) { [string]$threat.ThreatName } elseif ($_.ThreatName) { [string]$_.ThreatName } else { 'Microsoft Defender threat ' + $_.ThreatID }
     severity = $severity
     status = if ($active) { 'active' } else { 'remediated' }
     detected_at = $detectedAt.ToUniversalTime().ToString('o')
+    infected_files = $infectedFiles
     details = [ordered]@{
       threat_id = $_.ThreatID
       action_success = [bool]$_.ActionSuccess

@@ -27,6 +27,7 @@ class DefenderDetectionReport(BaseModel):
     severity: Literal["low", "medium", "high", "critical", "unknown"] = "unknown"
     status: str = Field(default="active", max_length=32)
     detected_at: datetime
+    infected_files: list[str] = Field(default_factory=list, max_length=100)
     details: dict[str, Any] = Field(default_factory=dict)
 
 class DefenderExclusionCreate(BaseModel):
