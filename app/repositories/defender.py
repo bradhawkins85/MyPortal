@@ -39,6 +39,14 @@ async def dashboard(company_id: int) -> tuple[list[dict[str, Any]], list[dict[st
     detections = await db.fetch_all("""SELECT dd.*, td.hostname FROM defender_detections dd
         JOIN tray_devices td ON td.id=dd.tray_device_id WHERE dd.company_id=%s
         ORDER BY dd.detected_at DESC LIMIT 100""", (company_id,))
+    for detection in detections or []:
+        infected_files = detection.get("infected_files_json")
+        if isinstance(infected_files, str):
+            try:
+                infected_files = json.loads(infected_files)
+            except (TypeError, ValueError):
+                infected_files = []
+        detection["infected_files"] = infected_files if isinstance(infected_files, list) else []
     return list(devices or []), list(exclusions or []), list(detections or [])
 
 async def active_detection_count(company_id: int) -> int:
@@ -144,9 +152,9 @@ async def clear_alert_ticket(device_id: int, alert_type: str) -> None:
     )
 
 async def report_detection(device_id: int, company_id: int, payload: Any) -> dict[str, Any] | None:
-    await db.execute("""INSERT INTO defender_detections (company_id,tray_device_id,detection_uid,threat_name,severity,status,detected_at,details_json)
-      VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE threat_name=VALUES(threat_name),severity=VALUES(severity),status=VALUES(status),details_json=VALUES(details_json)""",
-      (company_id,device_id,payload.detection_uid,payload.threat_name,payload.severity,payload.status,payload.detected_at,json.dumps(payload.details)))
+    await db.execute("""INSERT INTO defender_detections (company_id,tray_device_id,detection_uid,threat_name,severity,status,detected_at,infected_files_json,details_json)
+      VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE threat_name=VALUES(threat_name),severity=VALUES(severity),status=VALUES(status),infected_files_json=VALUES(infected_files_json),details_json=VALUES(details_json)""",
+      (company_id,device_id,payload.detection_uid,payload.threat_name,payload.severity,payload.status,payload.detected_at,json.dumps(payload.infected_files),json.dumps(payload.details)))
     await db.execute("UPDATE defender_device_status SET threat_count=(SELECT COUNT(*) FROM defender_detections WHERE tray_device_id=%s AND status='active') WHERE tray_device_id=%s", (device_id,device_id))
     return await db.fetch_one("SELECT * FROM defender_detections WHERE tray_device_id=%s AND detection_uid=%s", (device_id, payload.detection_uid))
 
