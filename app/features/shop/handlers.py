@@ -2056,10 +2056,15 @@ async def admin_create_shop_product(
     description_value = description.strip() if description and description.strip() else None
     product_link_value = product_link.strip() if product_link and product_link.strip() else None
 
-    try:
-        price_decimal = Decimal(price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    except (TypeError, InvalidOperation):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Price must be a valid number")
+    if subscription_category_id and (price is None or not str(price).strip()):
+        # The subscription-specific prices replace the standard product price.
+        # Keep a zero placeholder because the legacy database column is non-null.
+        price_decimal = Decimal("0.00")
+    else:
+        try:
+            price_decimal = Decimal(price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        except (TypeError, InvalidOperation):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Price must be a valid number")
     if price_decimal < 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Price must be at least zero")
 
@@ -2296,10 +2301,15 @@ async def admin_update_shop_product(
             )
         feature_payload = parsed_features
 
-    try:
-        price_decimal = Decimal(price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    except (TypeError, InvalidOperation):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Price must be a valid number")
+    if subscription_category_id and (price is None or not str(price).strip()):
+        # The subscription-specific prices replace the standard product price.
+        # Keep a zero placeholder because the legacy database column is non-null.
+        price_decimal = Decimal("0.00")
+    else:
+        try:
+            price_decimal = Decimal(price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        except (TypeError, InvalidOperation):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Price must be a valid number")
     if price_decimal < 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Price must be at least zero")
 

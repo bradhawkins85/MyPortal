@@ -9,6 +9,7 @@ from fastapi import status
 from starlette.requests import Request
 
 from app import main
+from app.features.shop import handlers as shop_handlers
 
 
 @pytest.fixture
@@ -82,6 +83,53 @@ async def test_admin_create_shop_product_with_subscription_fields(monkeypatch):
     assert call_kwargs["subscription_category_id"] == 5
     assert call_kwargs["commitment_type"] == "annual"
     assert call_kwargs["payment_frequency"] == "monthly"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_admin_create_subscription_product_without_standard_prices(monkeypatch):
+    """Subscription pricing can be used without the hidden standard prices."""
+    request = _make_request()
+    monkeypatch.setattr(
+        main,
+        "_require_super_admin_page",
+        AsyncMock(return_value=({"id": 42}, None)),
+    )
+    monkeypatch.setattr(
+        main.subscription_categories_repo,
+        "get_category",
+        AsyncMock(return_value={"id": 5, "name": "Microsoft 365"}),
+    )
+    create_mock = AsyncMock(
+        return_value={"id": 1, "sku": "SKU-1", "vendor_sku": "VENDOR-1"}
+    )
+    monkeypatch.setattr(main.shop_repo, "create_product", create_mock)
+
+    response = await shop_handlers.admin_create_shop_product(
+        request,
+        name="Microsoft 365 Business Basic",
+        sku="SKU-1",
+        vendor_sku="VENDOR-1",
+        description=None,
+        product_link=None,
+        price="",
+        stock="100",
+        vip_price="",
+        category_id="",
+        image=None,
+        cross_sell_product_ids=None,
+        upsell_product_ids=None,
+        subscription_category_id="5",
+        commitment_type="annual",
+        payment_frequency="monthly",
+        price_monthly_commitment=None,
+        price_annual_monthly_payment="19.95",
+        price_annual_annual_payment=None,
+    )
+
+    assert response.status_code == status.HTTP_303_SEE_OTHER
+    call_kwargs = create_mock.await_args.kwargs
+    assert str(call_kwargs["price"]) == "0.00"
+    assert call_kwargs["vip_price"] is None
 
 
 @pytest.mark.anyio("asyncio")
