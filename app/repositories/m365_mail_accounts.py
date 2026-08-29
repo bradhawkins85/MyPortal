@@ -22,7 +22,13 @@ def _normalise_account(row: dict[str, Any]) -> dict[str, Any]:
     for key in ("id", "company_id", "scheduled_task_id", "priority"):
         if key in account and account[key] is not None:
             account[key] = int(account[key])
-    for key in ("process_unread_only", "mark_as_read", "sync_known_only", "active"):
+    for key in (
+        "process_unread_only",
+        "mark_as_read",
+        "delete_after_import",
+        "sync_known_only",
+        "active",
+    ):
         if key in account:
             account[key] = bool(int(account[key]))
     for key in ("last_synced_at", "token_expires_at", "created_at", "updated_at"):
@@ -87,6 +93,7 @@ async def create_account(
     filter_query: str | None,
     process_unread_only: bool,
     mark_as_read: bool,
+    delete_after_import: bool,
     sync_known_only: bool,
     active: bool,
     scheduled_task_id: int | None = None,
@@ -103,6 +110,7 @@ async def create_account(
             folder,
             process_unread_only,
             mark_as_read,
+            delete_after_import,
             sync_known_only,
             schedule_cron,
             filter_query,
@@ -110,7 +118,7 @@ async def create_account(
             scheduled_task_id,
             priority,
             import_purpose
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -120,6 +128,7 @@ async def create_account(
             folder,
             1 if process_unread_only else 0,
             1 if mark_as_read else 0,
+            1 if delete_after_import else 0,
             1 if sync_known_only else 0,
             schedule_cron,
             filter_query,
@@ -150,6 +159,7 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
             "filter_query",
             "process_unread_only",
             "mark_as_read",
+            "delete_after_import",
             "sync_known_only",
             "active",
             "scheduled_task_id",
@@ -161,7 +171,13 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
             "token_expires_at",
         }:
             continue
-        if key in {"process_unread_only", "mark_as_read", "sync_known_only", "active"}:
+        if key in {
+            "process_unread_only",
+            "mark_as_read",
+            "delete_after_import",
+            "sync_known_only",
+            "active",
+        }:
             assignments.append(f"{key} = %s")
             params.append(1 if value else 0)
         elif key in ("last_synced_at", "token_expires_at"):
