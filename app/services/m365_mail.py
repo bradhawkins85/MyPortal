@@ -9,6 +9,7 @@ from urllib.parse import quote, unquote, urlencode, urlsplit
 import httpx
 
 from app.core.database import db
+from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
 from app.repositories import m365 as m365_repo
@@ -21,6 +22,7 @@ from app.services import modules as modules_service
 from app.services import system_state
 from app.services import ticket_attachments as ticket_attachments_service
 from app.services import tickets as tickets_service
+from app.services import dmarc as dmarc_service
 from app.services.m365 import M365Error
 
 # Reuse filter helpers from the IMAP module so we share the same filter DSL.
@@ -336,6 +338,13 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
     active = _normalise_bool(payload.get("active"), default=True)
     priority = _normalise_priority(payload.get("priority"), default=100)
     filter_canonical, _ = _normalise_filter(payload.get("filter_query"))
+    import_purpose = _normalise_string(payload.get("import_purpose"), default="support_ticket")
+    if import_purpose not in {"support_ticket", "dmarc"}:
+        raise ValueError("Mailbox import purpose is invalid")
+    if import_purpose == "dmarc" and await mail_repo.get_dmarc_account():
+        raise ValueError("A Microsoft 365 mailbox is already tagged for DMARC reports")
+    if import_purpose == "dmarc" and user_principal_name.partition("@")[0].lower() != "dmarc":
+        raise ValueError("The DMARC reports mailbox address must use the local part DMARC")
 
     account = await mail_repo.create_account(
         name=name,
@@ -350,6 +359,7 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
         sync_known_only=sync_known_only,
         active=active,
         priority=priority,
+        import_purpose=import_purpose,
     )
     if not account:
         raise RuntimeError("Failed to create Office 365 mail account")
@@ -421,6 +431,19 @@ async def update_account(account_id: int, payload: Mapping[str, Any]) -> dict[st
         updates["priority"] = _normalise_priority(
             payload.get("priority"), default=existing.get("priority") or 100
         )
+    if "import_purpose" in payload:
+        purpose = _normalise_string(payload.get("import_purpose"), default="support_ticket")
+        if purpose not in {"support_ticket", "dmarc"}:
+            raise ValueError("Mailbox import purpose is invalid")
+        if purpose == "dmarc" and await mail_repo.get_dmarc_account(exclude_account_id=account_id):
+            raise ValueError("A Microsoft 365 mailbox is already tagged for DMARC reports")
+        purpose_upn = _normalise_string(
+            updates.get("user_principal_name"),
+            default=existing.get("user_principal_name") or "",
+        )
+        if purpose == "dmarc" and purpose_upn.partition("@")[0].lower() != "dmarc":
+            raise ValueError("The DMARC reports mailbox address must use the local part DMARC")
+        updates["import_purpose"] = purpose
     updated = await mail_repo.update_account(account_id, **updates)
     if not updated:
         raise RuntimeError("Unable to update Office 365 mail account")
@@ -469,6 +492,7 @@ async def clone_account(account_id: int) -> dict[str, Any]:
         active=bool(original.get("active", True)),
         scheduled_task_id=None,
         priority=priority_value,
+        import_purpose="support_ticket",
     )
     if not account:
         raise RuntimeError("Failed to clone Office 365 mail account")
@@ -1456,6 +1480,51 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         reference_ids.extend(_extract_message_ids(hdr_value))
                 related_message_ids = in_reply_to_ids + reference_ids
 
+                # A mailbox explicitly tagged for DMARC is a separate ingestion
+                # mode. Persist every attachment and its stable Graph message ID
+                # before marking the delivery read; never enter ticket matching.
+                if account.get("import_purpose") == "dmarc":
+                    try:
+                        attachment_count = await _import_graph_dmarc_message(
+                            access_token=access_token,
+                            upn=upn,
+                            graph_message=msg,
+                            message_id=msg_id,
+                            internet_message_id=internet_msg_id,
+                            received_at=received_at or datetime.now(timezone.utc),
+                        )
+                        await _record_message(
+                            account_id=int(account_id), uid=msg_id,
+                            status="imported", ticket_id=None, error=None,
+                        )
+                        processed += 1
+                        _remember_message_action({
+                            **message_log_base,
+                            "outcome": "imported_dmarc_report",
+                            "attachment_count": attachment_count,
+                        })
+                        if mark_as_read and is_unread:
+                            patch_url = (
+                                f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/"
+                                f"{quote(msg_id, safe='')}"
+                            )
+                            await _graph_patch(access_token, patch_url, {"isRead": True})
+                    except Exception as exc:
+                        # Keep unread and record a retryable marker. Logs contain
+                        # identifiers/status only, never recipients or contents.
+                        await _record_message(
+                            account_id=int(account_id), uid=msg_id,
+                            status="error", ticket_id=None,
+                            error="DMARC attachment persistence failed",
+                        )
+                        errors.append({"message_id": msg_id, "error": "DMARC attachment persistence failed"})
+                        log_error(
+                            "M365 DMARC import failed",
+                            account_id=account_id, message_id=msg_id,
+                            error=type(exc).__name__,
+                        )
+                    continue
+
                 # Apply filter rules
                 filter_rule = account.get("filter_query")
                 if isinstance(filter_rule, Mapping) and filter_rule:
@@ -1978,6 +2047,82 @@ async def _embed_graph_inline_images(
         return f"data:{content_type};base64,{encoded}"
 
     return _CID_REFERENCE_PATTERN.sub(_replace_cid, html_body)
+
+
+async def _graph_file_attachments(
+    *, access_token: str, upn: str, message_id: str
+) -> list[tuple[str, bytes]]:
+    """Fetch Graph file attachments without exposing their contents to logs."""
+    encoded_message_id = quote(message_id, safe="")
+    url = f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/{encoded_message_id}/attachments"
+    data = await _graph_get(access_token, url)
+    files: list[tuple[str, bytes]] = []
+    for attachment in data.get("value") or []:
+        if attachment.get("@odata.type") != "#microsoft.graph.fileAttachment":
+            continue
+        payload: bytes | None = None
+        encoded = attachment.get("contentBytes") or ""
+        if encoded:
+            try:
+                payload = base64.b64decode(encoded, validate=True)
+            except (TypeError, ValueError):
+                payload = None
+        attachment_id = str(attachment.get("id") or "").strip()
+        if payload is None and attachment_id:
+            value_url = (
+                f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/{encoded_message_id}"
+                f"/attachments/{quote(attachment_id, safe='')}/$value"
+            )
+            payload = await _graph_get_bytes(access_token, value_url)
+        if payload is not None:
+            files.append((str(attachment.get("name") or "attachment")[:255], payload))
+    return files
+
+
+def _graph_dmarc_recipient(graph_message: Mapping[str, Any]) -> str:
+    """Return a tagged envelope/display recipient, or an empty routing hint."""
+    for field in ("toRecipients", "ccRecipients", "bccRecipients"):
+        for recipient in graph_message.get(field) or []:
+            address = str((recipient.get("emailAddress") or {}).get("address") or "").strip()
+            if dmarc_service.routing_code(address):
+                return address
+    return ""
+
+
+async def _import_graph_dmarc_message(
+    *, access_token: str, upn: str, graph_message: Mapping[str, Any],
+    message_id: str, internet_message_id: str, received_at: datetime,
+) -> int:
+    """Persist all report attachments from a dedicated M365 mailbox."""
+    settings = get_settings()
+    limits = dmarc_service.IngestionLimits(
+        compressed_bytes=settings.dmarc_max_compressed_bytes,
+        expanded_bytes=settings.dmarc_max_expanded_bytes,
+        attachments=settings.dmarc_max_attachments,
+        xml_depth=settings.dmarc_max_xml_depth,
+        records=settings.dmarc_max_records,
+    )
+    files = await _graph_file_attachments(
+        access_token=access_token, upn=upn, message_id=message_id
+    )
+    if len(files) > limits.attachments:
+        raise dmarc_service.DmarcInputError("Attachment count exceeds limit")
+    recipient = _graph_dmarc_recipient(graph_message)
+    metadata = json.dumps({"source": "m365_graph", "graph_message_id": message_id})
+    if not files:
+        # Preserve an admin-visible import for a delivery with no report file.
+        files = [("missing-attachment.xml", b"")]
+    for filename, payload in files:
+        await dmarc_service.ingest_attachment(
+            recipient=recipient,
+            message_id=internet_message_id or message_id,
+            filename=filename,
+            payload=payload,
+            received_at=received_at,
+            metadata=metadata,
+            limits=limits,
+        )
+    return len(files)
 
 
 async def _save_graph_attachments(
