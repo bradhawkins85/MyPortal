@@ -1,6 +1,7 @@
 """Super-administrator provisioning and diagnostic routes."""
 
 from __future__ import annotations
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -14,6 +15,7 @@ from app.repositories import subscriptions as subscriptions_repo
 from app.schemas.voice_monitor import VoiceMonitorConfiguration
 from app.services import audit as audit_service
 from app.services.voice_monitor_billing import (
+    get_entitlement,
     is_voice_monitor_subscription,
     list_voice_monitor_products,
     provision_subscription,
@@ -136,8 +138,6 @@ async def provision_endpoint(
             raise HTTPException(
                 400, "Voice Monitor plan calls per day must be between 1 and 24"
             )
-        values["interval_seconds"] = 86400 // calls_per_day
-        values["schedule_cron"] = None
         values["daily_attempt_limit"] = calls_per_day
         await audit_service.log_action(
             action="voice_monitor.subscription.provisioned",
@@ -147,6 +147,19 @@ async def provision_endpoint(
             new_value={"product_id": product_id, "company_id": company_id},
             request=request,
         )
+    else:
+        subscription = await get_entitlement(
+            str(payload.subscription_id), company_id=company_id
+        )
+        product = next(
+            (item for item in await list_voice_monitor_products()
+             if item["id"] == int(subscription["product_id"])),
+            None,
+        )
+        values["daily_attempt_limit"] = int((product or {}).get("calls_per_day") or 1)
+    values["next_run_at"] = repo.next_scheduled_run(
+        values, datetime.now(timezone.utc).replace(tzinfo=None)
+    )
     try:
         endpoint = await repo.create_endpoint(company_id, values)
     except ValueError as exc:
