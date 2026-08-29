@@ -13,7 +13,7 @@
     <aside class="management__sidebar">
       <h2 class="management__heading">{{ 'Update mailbox' if is_editing else 'Create mailbox' }}</h2>
       <p class="management__intro">
-        Import emails from an Office 365 mailbox into the ticketing workspace using Microsoft Graph API.
+        Import emails from an Office 365 mailbox into tickets or the DMARC reporting workspace using Microsoft Graph API.
         Use the <strong>Sign in</strong> button to authenticate as a user with access to each mailbox.
       </p>
       <form action="{{ form_action }}" method="post" class="form management__form">
@@ -31,6 +31,14 @@
             <span class="form-help">Lower numbers run first when multiple mailboxes are scheduled.</span>
           </label>
         </div>
+        <label class="form-field">
+          <span class="form-label">Import purpose</span>
+          <select name="importPurpose" class="form-input">
+            <option value="support_ticket" {% if not is_editing or editing_account.import_purpose == 'support_ticket' %}selected{% endif %}>Support tickets</option>
+            <option value="dmarc" {% if is_editing and editing_account.import_purpose == 'dmarc' %}selected{% endif %}>DMARC aggregate reports</option>
+          </select>
+          <span class="form-help">The DMARC mailbox imports supported report attachments and never creates support tickets. Only one mailbox can have this purpose.</span>
+        </label>
         <label class="form-field">
           <span class="form-label">Company</span>
           <select name="companyId" class="form-input">
@@ -260,6 +268,7 @@
                     <td data-column-key="mailbox">
                       {{ account.user_principal_name }}
                       <div class="table__meta">{{ account.mailbox_type }}</div>
+                      <div class="table__meta">{{ 'DMARC reports' if account.import_purpose == 'dmarc' else 'Support tickets' }}</div>
                     </td>
                     <td data-column-key="folder">{{ account.folder }}</td>
                     <td data-column-key="schedule"><code>{{ account.schedule_cron }}</code></td>

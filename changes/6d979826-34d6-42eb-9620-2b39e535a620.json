@@ -1,0 +1,7 @@
+{
+  "guid": "6d979826-34d6-42eb-9620-2b39e535a620",
+  "occurred_at": "2026-08-29T00:00Z",
+  "change_type": "Feature",
+  "summary": "Add tenant-isolated DMARC aggregate reporting, quarantine, reporting metrics, and company-specific rua addresses, with documented Microsoft 365 mailbox setup.",
+  "content_hash": "7c719c8a0e410531ecbd205d846dd22fcb97814e90e61bce4e2a37ea5bd96299"
+}

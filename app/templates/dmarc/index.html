@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="page-header"><div><h1>DMARC reporting</h1><p>Coverage <time data-utc="{{ range_start.isoformat() }}">{{ range_start }}</time>–<time data-utc="{{ range_end.isoformat() }}">{{ range_end }}</time></p></div></header>
+<section class="card"><h2>Overview</h2><div class="stats-grid">
+  <div><strong>{{ metrics.total_messages or 0 }}</strong><span>Total messages</span></div>
+  <div><strong>{{ metrics.dmarc_pass or 0 }}</strong><span>DMARC pass (aligned SPF or DKIM)</span></div>
+  <div><strong>{{ metrics.spf_pass or 0 }}</strong><span>Aligned SPF pass</span></div>
+  <div><strong>{{ metrics.dkim_pass or 0 }}</strong><span>Aligned DKIM pass</span></div>
+</div><p class="status-pill status-pill--info">Authentication results are distinct from DMARC alignment.</p></section>
+<section class="card"><h2>Reports and aggregate records</h2><p>Use the date, domain, reporter, source IP, disposition, and authentication filters in the report API. Table preferences persist with the shared table controls.</p></section>
+{% endblock %}

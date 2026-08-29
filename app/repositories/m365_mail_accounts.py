@@ -60,6 +60,17 @@ async def get_account(account_id: int) -> dict[str, Any] | None:
     return _normalise_account(row) if row else None
 
 
+async def get_dmarc_account(*, exclude_account_id: int | None = None) -> dict[str, Any] | None:
+    sql = "SELECT * FROM m365_mail_accounts WHERE import_purpose = 'dmarc'"
+    params: tuple[Any, ...] = ()
+    if exclude_account_id is not None:
+        sql += " AND id <> %s"
+        params = (exclude_account_id,)
+    sql += " ORDER BY active DESC, id ASC LIMIT 1"
+    row = await db.fetch_one(sql, params)
+    return _normalise_account(row) if row else None
+
+
 async def create_account(
     *,
     name: str,
@@ -75,6 +86,7 @@ async def create_account(
     active: bool,
     scheduled_task_id: int | None = None,
     priority: int = 100,
+    import_purpose: str = "support_ticket",
 ) -> dict[str, Any]:
     account_id = await db.execute_returning_lastrowid(
         """
@@ -91,8 +103,9 @@ async def create_account(
             filter_query,
             active,
             scheduled_task_id,
-            priority
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            priority,
+            import_purpose
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -108,6 +121,7 @@ async def create_account(
             1 if active else 0,
             scheduled_task_id,
             priority,
+            import_purpose,
         ),
     )
     created = await get_account(int(account_id)) if account_id else None
@@ -136,6 +150,7 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
             "scheduled_task_id",
             "last_synced_at",
             "priority",
+            "import_purpose",
             "refresh_token",
             "access_token",
             "token_expires_at",

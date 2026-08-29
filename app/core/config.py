@@ -114,6 +114,12 @@ class Settings(BaseSettings):
     smtp_from: str | None = Field(default=None, validation_alias="SMTP_FROM")
     smtp_password: str | None = Field(default=None, validation_alias="SMTP_PASS")
     smtp_use_tls: bool = Field(default=True, validation_alias="SMTP_SECURE")
+    dmarc_max_compressed_bytes: int = Field(default=5 * 1024 * 1024, validation_alias="DMARC_MAX_COMPRESSED_BYTES", ge=1024)
+    dmarc_max_expanded_bytes: int = Field(default=25 * 1024 * 1024, validation_alias="DMARC_MAX_EXPANDED_BYTES", ge=1024)
+    dmarc_max_attachments: int = Field(default=10, validation_alias="DMARC_MAX_ATTACHMENTS", ge=1, le=100)
+    dmarc_max_xml_depth: int = Field(default=32, validation_alias="DMARC_MAX_XML_DEPTH", ge=4, le=128)
+    dmarc_max_records: int = Field(default=100000, validation_alias="DMARC_MAX_RECORDS", ge=1)
+    dmarc_retention_days: int = Field(default=365, validation_alias="DMARC_RETENTION_DAYS", ge=1)
     stock_feed_url: AnyHttpUrl | None = Field(
         default=None, validation_alias="STOCK_FEED_URL"
     )

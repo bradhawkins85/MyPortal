@@ -1352,7 +1352,7 @@ async def _check_dmarc_records_published(
     return _result(check_id, check_name, STATUS_FAIL,
                    f"DMARC TXT record missing for {len(missing)} domain(s): "
                    + ", ".join(missing[:5]) + suffix
-                   + ". Publish _dmarc.<domain> TXT: v=DMARC1; p=quarantine; rua=mailto:dmarc@<domain>")
+                   + ". Publish _dmarc.<domain> TXT and use the company-specific DMARC reporting address shown in MyPortal")
 
 
 # ---------------------------------------------------------------------------
@@ -4639,7 +4639,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "remediation": (
             "At your DNS registrar publish a TXT record at _dmarc.<domain>: "
-            "v=DMARC1; p=quarantine; rua=mailto:dmarc@<domain>"
+            "v=DMARC1; p=quarantine; rua=<copy the company-specific value from DMARC Reporting>"
         ),
         "source": _check_dmarc_records_published,
         "source_type": "graph",

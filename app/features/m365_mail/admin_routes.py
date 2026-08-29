@@ -13,6 +13,7 @@ from app.security.flash import flash_redirect
 from app.repositories import companies as company_repo
 from app.services import m365 as m365_service
 from app.services import m365_mail as m365_mail_service
+from app.services import audit as audit_service
 
 __all__ = ["router"]
 
@@ -117,6 +118,7 @@ async def admin_create_m365_mail_account(request: Request):
         "mark_as_read": _form_bool(form, "markAsRead"),
         "sync_known_only": _form_bool(form, "syncKnownOnly"),
         "active": _form_bool(form, "active"),
+        "import_purpose": form.get("importPurpose", "support_ticket"),
     }
     priority_value = form.get("priority")
     if priority_value not in (None, ""):
@@ -162,6 +164,11 @@ async def admin_create_m365_mail_account(request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     message = f"Mailbox {account.get('name') or account.get('user_principal_name') or 'created'} added."
+    await audit_service.record(
+        action="m365_mail.account.configure", request=request,
+        user_id=int(current_user["id"]), entity_type="m365_mail_account",
+        entity_id=int(account["id"]), after={"import_purpose": account.get("import_purpose")},
+    )
     return flash_redirect("/admin/modules/m365-mail", message, "success")
 
 
@@ -195,6 +202,7 @@ async def admin_update_m365_mail_account(account_id: int, request: Request):
     updates["mark_as_read"] = _form_bool(form, "markAsRead")
     updates["sync_known_only"] = _form_bool(form, "syncKnownOnly")
     updates["active"] = _form_bool(form, "active")
+    updates["import_purpose"] = form.get("importPurpose", "support_ticket")
     priority_value = form.get("priority")
     if priority_value not in (None, ""):
         try:
@@ -247,6 +255,11 @@ async def admin_update_m365_mail_account(account_id: int, request: Request):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     message = f"Mailbox {account.get('name') or account.get('user_principal_name') or account_id} updated."
+    await audit_service.record(
+        action="m365_mail.account.configure", request=request,
+        user_id=int(current_user["id"]), entity_type="m365_mail_account",
+        entity_id=account_id, after={"import_purpose": account.get("import_purpose")},
+    )
     return flash_redirect("/admin/modules/m365-mail", message, "success")
 
 
