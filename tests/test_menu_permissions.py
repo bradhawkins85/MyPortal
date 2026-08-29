@@ -57,6 +57,25 @@ def test_bcp_continuity_menu_permission_expands_to_legacy_permissions():
     assert "bcp:edit" in legacy_write
 
 
+def test_dmarc_menu_permission_maps_read_and_write_access():
+    read_permissions = menu_permissions_to_legacy({"menu.dmarc": "read"})
+    write_permissions = menu_permissions_to_legacy({"menu.dmarc": "write"})
+
+    assert read_permissions == ["dmarc.view"]
+    assert write_permissions == ["dmarc.manage", "dmarc.view"]
+
+
+def test_sidebar_exposes_dmarc_reports_for_authorized_roles():
+    from pathlib import Path
+
+    template = Path("app/templates/base.html").read_text()
+
+    assert "menu_access.get('menu.dmarc') in ['read', 'write']" in template
+    assert 'href="/dmarc"' in template
+    assert "current_path.startswith('/dmarc')" in template
+    assert '<span class="menu__label">DMARC reports</span>' in template
+
+
 def test_technician_permission_is_yes_no_for_catalogue_and_normalization():
     permissions = normalize_menu_permissions({"menu.admin.technician": "Read Only"})
 
