@@ -37,7 +37,7 @@
             <option value="support_ticket" {% if not is_editing or editing_account.import_purpose == 'support_ticket' %}selected{% endif %}>Support tickets</option>
             <option value="dmarc" {% if is_editing and editing_account.import_purpose == 'dmarc' %}selected{% endif %}>DMARC aggregate and forensic reports</option>
           </select>
-          <span class="form-help">A DMARC mailbox imports RUA and RUF attachments directly into its selected company and never creates support tickets. Each company can use its own mailbox on its own domain.</span>
+          <span class="form-help">A DMARC mailbox imports RUA and RUF attachments directly into its selected company and never creates support tickets. Assign one or more mailboxes to the same company when its domains use different reporting addresses.</span>
         </label>
         <label class="form-field">
           <span class="form-label">Company</span>

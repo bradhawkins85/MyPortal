@@ -53,12 +53,24 @@ def routing_code(recipient: str) -> str | None:
 
 
 async def company_reporting_address(company_id: int) -> str | None:
-    """Return the selected company's active M365 DMARC mailbox address."""
+    """Return the first active M365 DMARC address (legacy helper)."""
+    addresses = await company_reporting_addresses(company_id)
+    return addresses[0] if addresses else None
+
+
+async def company_reporting_addresses(company_id: int) -> list[str]:
+    """Return every distinct active DMARC mailbox assigned to a company."""
     from app.repositories import m365_mail_accounts as mailbox_repo
-    mailbox = await mailbox_repo.get_dmarc_account(company_id=company_id)
-    if not mailbox or not mailbox.get("active"):
-        return None
-    return str(mailbox.get("user_principal_name") or "").strip() or None
+    mailboxes = await mailbox_repo.list_dmarc_accounts(company_id=company_id)
+    addresses: list[str] = []
+    seen: set[str] = set()
+    for mailbox in mailboxes:
+        address = str(mailbox.get("user_principal_name") or "").strip()
+        key = address.casefold()
+        if mailbox.get("active") and address and key not in seen:
+            addresses.append(address)
+            seen.add(key)
+    return addresses
 
 
 def _safe_xml(data: bytes, limits: IngestionLimits) -> bytes:

@@ -44,13 +44,14 @@ def test_dmarc_mailbox_requires_company(monkeypatch):
         }))
 
 
-def test_dmarc_mailbox_is_unique_per_company(monkeypatch):
-    existing = AsyncMock(return_value={"id": 9})
-    monkeypatch.setattr(m365_mail.mail_repo, "get_dmarc_account", existing)
-    with pytest.raises(ValueError, match="selected company already has"):
-        asyncio.run(m365_mail.create_account({
-            "name": "Reports", "company_id": 42,
-            "user_principal_name": "dmarc@customer.example",
-            "import_purpose": "dmarc",
-        }))
-    existing.assert_awaited_once_with(company_id=42)
+def test_multiple_dmarc_mailboxes_are_allowed_per_company(monkeypatch):
+    create = AsyncMock(return_value={"id": 10, "company_id": 42, "import_purpose": "dmarc"})
+    monkeypatch.setattr(m365_mail.mail_repo, "create_account", create)
+    monkeypatch.setattr(m365_mail, "_ensure_scheduled_task", AsyncMock(side_effect=lambda account: account))
+    monkeypatch.setattr(m365_mail.modules_service, "update_module", AsyncMock())
+    account = asyncio.run(m365_mail.create_account({
+        "name": "Reports", "company_id": 42,
+        "user_principal_name": "dmarc@customer.example", "import_purpose": "dmarc",
+    }))
+    assert account["id"] == 10
+    create.assert_awaited_once()

@@ -5,7 +5,6 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 
 from app.repositories import dmarc as repo
-from app.repositories import m365_mail_accounts as m365_mail_repo
 from app.repositories import user_companies as memberships
 from app.security.menu_permissions import menu_has_access
 from app.services import audit, dmarc
@@ -48,8 +47,8 @@ async def page(request: Request):
     user, company_id = await _context(request)
     start, end = _range(None, None)
     metrics = await repo.overview(company_id, start, end)
-    address = await dmarc.company_reporting_address(company_id)
-    return await _main()._render_template("dmarc/index.html", request, user, extra={"title": "DMARC reporting", "metrics": metrics, "range_start": start, "range_end": end, "reporting_address": address})
+    addresses = await dmarc.company_reporting_addresses(company_id)
+    return await _main()._render_template("dmarc/index.html", request, user, extra={"title": "DMARC reporting", "metrics": metrics, "range_start": start, "range_end": end, "reporting_addresses": addresses})
 
 @router.get("/api/dmarc/overview")
 async def overview(request: Request, start: datetime | None = None, end: datetime | None = None):
@@ -60,10 +59,11 @@ async def overview(request: Request, start: datetime | None = None, end: datetim
 @router.get("/api/dmarc/rua")
 async def rua(request: Request):
     _, company_id = await _context(request, "dmarc.manage")
-    address = await dmarc.company_reporting_address(company_id)
-    if not address:
+    addresses = await dmarc.company_reporting_addresses(company_id)
+    if not addresses:
         raise HTTPException(409, "Configure an active Microsoft 365 DMARC reports mailbox first")
-    return {"rua": f"mailto:{address}", "ruf": f"mailto:{address}"}
+    destinations = ",".join(f"mailto:{address}" for address in addresses)
+    return {"rua": destinations, "ruf": destinations, "addresses": addresses}
 
 @router.get("/api/dmarc/forensic-reports")
 async def forensic_reports(request: Request, start: datetime | None = None, end: datetime | None = None,
@@ -97,10 +97,9 @@ async def rotate(request: Request, company_id: int):
     user, _ = await _context(request, "dmarc.manage")
     if not user.get("is_super_admin"):
         raise HTTPException(403, "Super administrator required")
-    mailbox = await m365_mail_repo.get_dmarc_account(company_id=company_id)
-    if not mailbox or not mailbox.get("active"):
+    addresses = await dmarc.company_reporting_addresses(company_id)
+    if not addresses:
         raise HTTPException(409, "Configure an active Microsoft 365 DMARC reports mailbox first")
-    mailbox_address = str(mailbox.get("user_principal_name") or "")
     await audit.record(
         action="dmarc.mailbox.read",
         request=request,
@@ -108,4 +107,5 @@ async def rotate(request: Request, company_id: int):
         entity_type="company",
         entity_id=company_id,
     )
-    return {"rua": f"mailto:{mailbox_address}", "ruf": f"mailto:{mailbox_address}"}
+    destinations = ",".join(f"mailto:{address}" for address in addresses)
+    return {"rua": destinations, "ruf": destinations, "addresses": addresses}

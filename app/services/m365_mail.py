@@ -350,10 +350,6 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("Mailbox import purpose is invalid")
     if import_purpose == "dmarc" and company_id is None:
         raise ValueError("A company is required for a DMARC reports mailbox")
-    if import_purpose == "dmarc" and await mail_repo.get_dmarc_account(
-        company_id=company_id
-    ):
-        raise ValueError("The selected company already has a DMARC reports mailbox")
 
     account = await mail_repo.create_account(
         name=name,
@@ -463,10 +459,6 @@ async def update_account(account_id: int, payload: Mapping[str, Any]) -> dict[st
         purpose_company_id = updates.get("company_id", existing.get("company_id"))
         if purpose == "dmarc" and purpose_company_id is None:
             raise ValueError("A company is required for a DMARC reports mailbox")
-        if purpose == "dmarc" and await mail_repo.get_dmarc_account(
-            company_id=int(purpose_company_id), exclude_account_id=account_id
-        ):
-            raise ValueError("The selected company already has a DMARC reports mailbox")
         updates["import_purpose"] = purpose
     updated = await mail_repo.update_account(account_id, **updates)
     if not updated:
