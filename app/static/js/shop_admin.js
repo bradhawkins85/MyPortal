@@ -1050,6 +1050,10 @@
         if (priceAnnualAnnual) {
           priceAnnualAnnual.value = product.price_annual_annual_payment != null ? product.price_annual_annual_payment : '';
         }
+        const voiceMonitorCallsPerDay = editForm.querySelector('#edit-product-voice-monitor-calls-per-day');
+        if (voiceMonitorCallsPerDay) {
+          voiceMonitorCallsPerDay.value = product.voice_monitor_calls_per_day != null ? product.voice_monitor_calls_per_day : '';
+        }
         if (editCrossManager) {
           await editCrossManager.initFromIds(product.cross_sell_product_ids || [], id);
         }

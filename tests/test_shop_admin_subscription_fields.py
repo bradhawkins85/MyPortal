@@ -5,7 +5,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import status
+from fastapi import HTTPException, status
 from starlette.requests import Request
 
 from app import main
@@ -130,6 +130,64 @@ async def test_admin_create_subscription_product_without_standard_prices(monkeyp
     call_kwargs = create_mock.await_args.kwargs
     assert str(call_kwargs["price"]) == "0.00"
     assert call_kwargs["vip_price"] is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_admin_create_voice_monitor_product_saves_daily_frequency(monkeypatch):
+    request = _make_request()
+    monkeypatch.setattr(
+        main,
+        "_require_super_admin_page",
+        AsyncMock(return_value=({"id": 42}, None)),
+    )
+    monkeypatch.setattr(
+        main.subscription_categories_repo,
+        "get_category",
+        AsyncMock(return_value={"id": 9, "name": "Voice Monitor"}),
+    )
+    create_mock = AsyncMock(
+        return_value={"id": 1, "sku": "VOICE-6", "vendor_sku": "VOICE-6"}
+    )
+    monkeypatch.setattr(main.shop_repo, "create_product", create_mock)
+
+    response = await shop_handlers.admin_create_shop_product(
+        request,
+        name="Six daily checks",
+        sku="VOICE-6",
+        vendor_sku="VOICE-6",
+        description=None,
+        product_link=None,
+        price="",
+        stock="100",
+        vip_price=None,
+        category_id=None,
+        image=None,
+        cross_sell_product_ids=None,
+        upsell_product_ids=None,
+        subscription_category_id="9",
+        commitment_type="monthly",
+        payment_frequency="monthly",
+        price_monthly_commitment="25.00",
+        price_annual_monthly_payment=None,
+        price_annual_annual_payment=None,
+        voice_monitor_calls_per_day="6",
+    )
+
+    assert response.status_code == status.HTTP_303_SEE_OTHER
+    assert create_mock.await_args.kwargs["voice_monitor_calls_per_day"] == 6
+
+
+@pytest.mark.parametrize("value", ["", "0", "25", "twice"])
+def test_voice_monitor_daily_frequency_is_required_and_bounded(value):
+    with pytest.raises(HTTPException, match="Calls per day"):
+        shop_handlers._validate_voice_monitor_calls_per_day("Voice Monitor", value)
+
+
+def test_daily_frequency_is_cleared_for_other_subscription_categories():
+    assert (
+        shop_handlers._validate_voice_monitor_calls_per_day("Microsoft 365", "12")
+        is None
+    )
 
 
 @pytest.mark.anyio("asyncio")

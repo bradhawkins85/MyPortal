@@ -73,7 +73,7 @@
     const productId = data.get('product_id');
     const payload = {
       destination_e164: data.get('destination_e164'),
-      display_label: data.get('display_label'), interval_seconds: Number(data.get('interval_seconds')),
+      display_label: data.get('display_label'),
       timezone: data.get('timezone'), consent_granted: data.has('consent_granted'),
       ticket_on_failure: data.has('ticket_on_failure'), transcription_enabled: data.has('transcription_enabled')
     };
