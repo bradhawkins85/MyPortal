@@ -58,6 +58,19 @@ def test_configuration_normalizes_e164_and_enforces_configurable_policy():
         )
 
 
+def test_configuration_accepts_cron_and_rejects_invalid_expression():
+    config = VoiceMonitorConfiguration(
+        destination_e164="+61412345678", display_label="Main", schedule_cron=" */5 * * * * "
+    )
+    assert config.schedule_cron == "*/5 * * * *"
+    assert config.interval_seconds is None
+
+    with pytest.raises(ValidationError, match="valid cron expression"):
+        VoiceMonitorConfiguration(
+            destination_e164="+61412345678", display_label="Main", schedule_cron="not cron"
+        )
+
+
 def test_customer_attempt_lookup_is_tenant_scoped():
     with patch.object(repo.db, "fetch_one", new_callable=AsyncMock) as fetch:
         fetch.return_value = None

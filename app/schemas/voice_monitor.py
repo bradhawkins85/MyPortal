@@ -7,6 +7,7 @@ from typing import Annotated, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import phonenumbers
+from croniter import croniter
 from phonenumbers import PhoneNumberType
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
@@ -115,6 +116,11 @@ class VoiceMonitorConfiguration(BaseModel):
             raise ValueError("exactly one of schedule_cron or interval_seconds is required")
         if self.recording_consent_granted and not self.consent_granted:
             raise ValueError("recording consent requires call consent")
+        if self.schedule_cron is not None:
+            expression = self.schedule_cron.strip()
+            if not expression or not croniter.is_valid(expression):
+                raise ValueError("schedule_cron must be a valid cron expression")
+            self.schedule_cron = expression
         return self
 
 

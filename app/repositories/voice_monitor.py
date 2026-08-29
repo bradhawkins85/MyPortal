@@ -6,6 +6,9 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import secrets
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from croniter import CroniterBadCronError, croniter
 
 from app.core.database import db
 
@@ -317,6 +320,36 @@ def dispatch_key(endpoint_id: int, scheduled_for: datetime) -> str:
     return hashlib.sha256(f"voice-monitor:{endpoint_id}:{stamp}".encode()).hexdigest()
 
 
+def next_scheduled_run(endpoint: dict[str, Any], after: datetime) -> datetime | None:
+    """Advance an interval or cron schedule, returning a naive UTC timestamp."""
+    interval = endpoint.get("interval_seconds")
+    if interval:
+        return after + timedelta(seconds=int(interval))
+    expression = str(endpoint.get("schedule_cron") or "").strip()
+    if not expression:
+        return None
+    try:
+        schedule_timezone = ZoneInfo(str(endpoint.get("timezone") or "UTC"))
+        reference = after.replace(tzinfo=timezone.utc).astimezone(schedule_timezone)
+        return croniter(expression, reference).get_next(datetime).astimezone(
+            timezone.utc
+        ).replace(tzinfo=None)
+    except (CroniterBadCronError, ValueError, KeyError, ZoneInfoNotFoundError):
+        return None
+
+
+def _local_day_bounds(value: datetime, timezone_name: str) -> tuple[datetime, datetime]:
+    """Return the UTC bounds of the schedule's local calendar day."""
+    schedule_timezone = ZoneInfo(timezone_name)
+    aware = value.replace(tzinfo=timezone.utc).astimezone(schedule_timezone)
+    start = aware.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+    return (
+        start.astimezone(timezone.utc).replace(tzinfo=None),
+        end.astimezone(timezone.utc).replace(tzinfo=None),
+    )
+
+
 async def enqueue_due_attempts(*, limit: int = 100, now: datetime | None = None) -> int:
     """Lightweight dispatcher: durably enqueue each due occurrence exactly once.
 
@@ -326,8 +359,10 @@ async def enqueue_due_attempts(*, limit: int = 100, now: datetime | None = None)
     """
     now = now or datetime.now(timezone.utc).replace(tzinfo=None)
     due = await db.fetch_all(
-        "SELECT e.id, e.company_id, e.subscription_id, e.next_run_at, e.interval_seconds, e.max_retries "
+        "SELECT e.id, e.company_id, e.subscription_id, e.next_run_at, e.interval_seconds, "
+        "e.schedule_cron, e.timezone, e.max_retries, p.voice_monitor_calls_per_day "
         "FROM voice_monitor_endpoints e JOIN subscriptions s ON s.id=e.subscription_id "
+        "JOIN shop_products p ON p.id=s.product_id "
         "JOIN subscription_categories c ON c.id=s.subscription_category_id "
         "WHERE e.enabled=1 AND e.consent_granted=1 AND e.consent_revoked_at IS NULL "
         "AND e.caller_id_verified=1 AND e.next_run_at IS NOT NULL AND e.next_run_at <= %s "
@@ -340,6 +375,16 @@ async def enqueue_due_attempts(*, limit: int = 100, now: datetime | None = None)
     enqueued = 0
     for endpoint in due:
         scheduled_for = endpoint["next_run_at"]
+        daily_limit = max(1, int(endpoint.get("voice_monitor_calls_per_day") or 1))
+        day_start, day_end = _local_day_bounds(
+            scheduled_for, str(endpoint.get("timezone") or "UTC")
+        )
+        daily = await db.fetch_one(
+            "SELECT COUNT(*) AS count FROM voice_monitor_attempts "
+            "WHERE endpoint_id=%s AND scheduled_for >= %s AND scheduled_for < %s",
+            (endpoint["id"], day_start, day_end),
+        )
+        limit_reached = int((daily or {}).get("count") or 0) >= daily_limit
         key = dispatch_key(int(endpoint["id"]), scheduled_for)
         params = (
             endpoint["id"],
@@ -351,7 +396,9 @@ async def enqueue_due_attempts(*, limit: int = 100, now: datetime | None = None)
             key,
             int(endpoint.get("max_retries") or 0) + 1,
         )
-        if db.is_sqlite():
+        if limit_reached:
+            inserted = 0
+        elif db.is_sqlite():
             inserted = await db.execute_rowcount(
                 "INSERT OR IGNORE INTO voice_monitor_attempts "
                 "(endpoint_id, company_id, queued_at, scheduled_for, available_at, dispatch_key, "
@@ -366,12 +413,7 @@ async def enqueue_due_attempts(*, limit: int = 100, now: datetime | None = None)
                 params,
             )
         enqueued += int(bool(inserted))
-        # Interval schedules are advanced here; cron schedules are recalculated by
-        # configuration scheduling code and deliberately disabled until then.
-        interval = endpoint.get("interval_seconds")
-        next_run = (
-            scheduled_for + timedelta(seconds=int(interval)) if interval else None
-        )
+        next_run = next_scheduled_run(endpoint, scheduled_for)
         await db.execute_rowcount(
             "UPDATE voice_monitor_endpoints SET next_run_at = %s "
             "WHERE id = %s AND enabled = 1 AND next_run_at = %s",

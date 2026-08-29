@@ -42,7 +42,10 @@
         <label>Display label
           <input type="text" name="display_label" maxlength="255" placeholder="Main reception line" required>
         </label>
-        <p class="form-helper">The selected plan controls the check frequency (minimum 1 and maximum 24 calls per day).</p>
+        <label>Call schedule (cron)
+          <input type="text" name="schedule_cron" value="0 0 * * *" maxlength="100" required>
+        </label>
+        <p class="form-helper">Schedule calls with cron (for example, <code>0 * * * *</code> hourly or <code>* * * * *</code> every minute). The subscription's calls-per-day allowance is a limit, not a scheduling frequency: after the allowance is reached, matching triggers are skipped until the next local day.</p>
         <label>Timezone
           <input type="text" name="timezone" value="UTC" required>
         </label>
@@ -74,6 +77,7 @@
     const payload = {
       destination_e164: data.get('destination_e164'),
       display_label: data.get('display_label'),
+      schedule_cron: data.get('schedule_cron'),
       timezone: data.get('timezone'), consent_granted: data.has('consent_granted'),
       ticket_on_failure: data.has('ticket_on_failure'), transcription_enabled: data.has('transcription_enabled')
     };
