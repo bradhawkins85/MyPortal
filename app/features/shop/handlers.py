@@ -43,6 +43,35 @@ def _form_bool(form: Any, key: str) -> bool:
     return bool(value)
 
 
+def _validate_voice_monitor_calls_per_day(
+    subscription_category_name: str | None, raw_value: str | None
+) -> int | None:
+    """Validate the schedule attached to Voice Monitor shop products."""
+    is_voice_monitor = (
+        str(subscription_category_name or "").strip().casefold() == "voice monitor"
+    )
+    if not is_voice_monitor:
+        return None
+    if raw_value in (None, ""):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Calls per day is required for Voice Monitor subscriptions",
+        )
+    try:
+        calls_per_day = int(raw_value)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Calls per day must be a whole number between 1 and 24",
+        )
+    if not 1 <= calls_per_day <= 24:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Calls per day must be between 1 and 24",
+        )
+    return calls_per_day
+
+
 def _parse_freight_conditions(form: Any) -> list[dict[str, Any]]:
     conditions: dict[int, dict[str, str]] = {}
     for key, val in form.multi_items():
@@ -2032,6 +2061,7 @@ async def admin_create_shop_product(
     price_monthly_commitment: str | None = Form(default=None),
     price_annual_monthly_payment: str | None = Form(default=None),
     price_annual_annual_payment: str | None = Form(default=None),
+    voice_monitor_calls_per_day: str | None = Form(default=None),
 ):
     from app.repositories import shop as shop_repo
     from app.repositories import subscription_categories as subscription_categories_repo
@@ -2095,6 +2125,7 @@ async def admin_create_shop_product(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected category does not exist")
 
     subscription_category_value: int | None = None
+    subscription_category_name: str | None = None
     if subscription_category_id:
         try:
             subscription_category_value = int(subscription_category_id)
@@ -2103,6 +2134,11 @@ async def admin_create_shop_product(
         sub_category = await subscription_categories_repo.get_category(subscription_category_value)
         if not sub_category:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected subscription category does not exist")
+        subscription_category_name = str(sub_category.get("name") or "").strip()
+
+    calls_per_day_value = _validate_voice_monitor_calls_per_day(
+        subscription_category_name, voice_monitor_calls_per_day
+    )
 
     # Validate commitment type and payment frequency for subscriptions
     commitment_value, payment_freq_value = _main()._validate_subscription_commitment_and_payment(
@@ -2180,6 +2216,7 @@ async def admin_create_shop_product(
             price_monthly_commitment=price_monthly_comm,
             price_annual_monthly_payment=price_annual_monthly,
             price_annual_annual_payment=price_annual_annual,
+            voice_monitor_calls_per_day=calls_per_day_value,
         )
     except aiomysql.IntegrityError as exc:
         if stored_path:
@@ -2236,6 +2273,7 @@ async def admin_update_shop_product(
     price_monthly_commitment: str | None = Form(default=None),
     price_annual_monthly_payment: str | None = Form(default=None),
     price_annual_annual_payment: str | None = Form(default=None),
+    voice_monitor_calls_per_day: str | None = Form(default=None),
     scheduled_price: str | None = Form(default=None),
     scheduled_vip_price: str | None = Form(default=None),
     scheduled_buy_price: str | None = Form(default=None),
@@ -2340,6 +2378,7 @@ async def admin_update_shop_product(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected category does not exist")
 
     subscription_category_value: int | None = None
+    subscription_category_name: str | None = None
     if subscription_category_id:
         try:
             subscription_category_value = int(subscription_category_id)
@@ -2348,6 +2387,11 @@ async def admin_update_shop_product(
         sub_category = await subscription_categories_repo.get_category(subscription_category_value)
         if not sub_category:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected subscription category does not exist")
+        subscription_category_name = str(sub_category.get("name") or "").strip()
+
+    calls_per_day_value = _validate_voice_monitor_calls_per_day(
+        subscription_category_name, voice_monitor_calls_per_day
+    )
 
     # Validate commitment type and payment frequency for subscriptions
     commitment_value, payment_freq_value = _main()._validate_subscription_commitment_and_payment(
@@ -2476,6 +2520,7 @@ async def admin_update_shop_product(
             price_monthly_commitment=price_monthly_comm,
             price_annual_monthly_payment=price_annual_monthly,
             price_annual_annual_payment=price_annual_annual,
+            voice_monitor_calls_per_day=calls_per_day_value,
             scheduled_price=scheduled_price_decimal,
             scheduled_vip_price=scheduled_vip_price_decimal,
             scheduled_buy_price=scheduled_buy_price_decimal,

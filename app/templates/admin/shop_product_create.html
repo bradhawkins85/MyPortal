@@ -164,6 +164,11 @@
             <input class="form-input" id="product-price-annual-annual" name="price_annual_annual_payment" type="number" step="0.01" />
             <p class="form-helper">Price for annual commitment with annual payment (full year).</p>
           </div>
+          <div class="form-field" data-field-type="subscription">
+            <label class="form-label" for="product-voice-monitor-calls-per-day">Voice Monitor calls per day</label>
+            <input class="form-input" id="product-voice-monitor-calls-per-day" name="voice_monitor_calls_per_day" type="number" min="1" max="24" step="1" />
+            <p class="form-helper">Required for Voice Monitor plans. This controls the monitored number's daily check frequency.</p>
+          </div>
 
           <div class="form-actions">
             <button type="submit" class="button">Add product</button>

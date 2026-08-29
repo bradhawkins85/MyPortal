@@ -1385,6 +1385,7 @@ async def create_product(
     price_monthly_commitment: Decimal | None = None,
     price_annual_monthly_payment: Decimal | None = None,
     price_annual_annual_payment: Decimal | None = None,
+    voice_monitor_calls_per_day: int | None = None,
     product_link: str | None = None,
 ) -> dict[str, Any]:
     async with db.acquire() as conn:
@@ -1395,8 +1396,8 @@ async def create_product(
                     (name, sku, vendor_sku, description, image_url, price, vip_price, stock,
                      category_id, subscription_category_id, commitment_type, payment_frequency,
                      price_monthly_commitment, price_annual_monthly_payment, price_annual_annual_payment,
-                     product_link)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     product_link, voice_monitor_calls_per_day)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     name,
@@ -1415,6 +1416,7 @@ async def create_product(
                     price_annual_monthly_payment,
                     price_annual_annual_payment,
                     product_link,
+                    voice_monitor_calls_per_day,
                 ),
             )
             product_id = int(cursor.lastrowid)
@@ -1783,6 +1785,7 @@ async def update_product(
     price_monthly_commitment: Decimal | None = None,
     price_annual_monthly_payment: Decimal | None = None,
     price_annual_annual_payment: Decimal | None = None,
+    voice_monitor_calls_per_day: int | None = None,
     scheduled_price: Decimal | None = None,
     scheduled_vip_price: Decimal | None = None,
     scheduled_buy_price: Decimal | None = None,
@@ -1811,6 +1814,7 @@ async def update_product(
                     price_monthly_commitment = %s,
                     price_annual_monthly_payment = %s,
                     price_annual_annual_payment = %s,
+                    voice_monitor_calls_per_day = %s,
                     scheduled_price = %s,
                     scheduled_vip_price = %s,
                     scheduled_buy_price = %s,
@@ -1839,6 +1843,7 @@ async def update_product(
                     price_monthly_commitment,
                     price_annual_monthly_payment,
                     price_annual_annual_payment,
+                    voice_monitor_calls_per_day,
                     scheduled_price,
                     scheduled_vip_price,
                     scheduled_buy_price,
@@ -2397,6 +2402,9 @@ def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
     )
     normalised["commitment_type"] = row.get("commitment_type")
     normalised["payment_frequency"] = row.get("payment_frequency")
+    normalised["voice_monitor_calls_per_day"] = _coerce_optional_int(
+        row.get("voice_monitor_calls_per_day")
+    )
     normalised["price"] = _coerce_decimal(row.get("price"), default=0.0)
     normalised["vip_price"] = _coerce_optional_decimal(row.get("vip_price"))
     normalised["price_monthly_commitment"] = _coerce_optional_decimal(
