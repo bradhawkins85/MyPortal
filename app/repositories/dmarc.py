@@ -51,6 +51,27 @@ async def save_report(company_id: int, import_id: int, report: dict[str, Any], a
     return report_pk
 
 
+async def save_forensic_report(company_id: int, import_id: int, report: dict[str, Any], attachment_hash: str) -> int:
+    existing = await db.fetch_one(
+        "SELECT id FROM dmarc_forensic_reports WHERE company_id=%s AND attachment_sha256=%s AND content_sha256=%s",
+        (company_id, attachment_hash, report["content_sha256"]),
+    )
+    if existing:
+        return int(existing["id"])
+    return await db.execute_returning_lastrowid(
+        """INSERT INTO dmarc_forensic_reports
+        (company_id,import_id,feedback_type,user_agent,report_version,arrival_at,source_ip,reported_domain,
+         delivery_result,auth_failure,authentication_results,original_mail_from,original_rcpt_to,
+         dkim_domain,dkim_selector,identity_alignment,attachment_sha256,content_sha256)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+        (company_id, import_id, report["feedback_type"], report["user_agent"], report["version"],
+         report["arrival_at"], report["source_ip"], report["reported_domain"], report["delivery_result"],
+         report["auth_failure"], report["authentication_results"], report["original_mail_from"],
+         report["original_rcpt_to"], report["dkim_domain"], report["dkim_selector"],
+         report["identity_alignment"], attachment_hash, report["content_sha256"]),
+    )
+
+
 async def overview(company_id: int, start: Any, end: Any) -> dict[str, Any]:
     row = await db.fetch_one("""SELECT COALESCE(SUM(r.message_count),0) total_messages,
       COALESCE(SUM(CASE WHEN r.dkim_result='pass' OR r.spf_result='pass' THEN r.message_count ELSE 0 END),0) dmarc_pass,
@@ -58,7 +79,27 @@ async def overview(company_id: int, start: Any, end: Any) -> dict[str, Any]:
       COALESCE(SUM(CASE WHEN r.spf_result='pass' THEN r.message_count ELSE 0 END),0) spf_pass
       FROM dmarc_records r JOIN dmarc_reports p ON p.id=r.report_id
       WHERE r.company_id=%s AND p.date_begin < %s AND p.date_end >= %s""", (company_id, end, start))
-    return dict(row or {})
+    result = dict(row or {})
+    forensic = await db.fetch_one(
+        """SELECT COUNT(*) forensic_reports FROM dmarc_forensic_reports
+        WHERE company_id=%s AND COALESCE(arrival_at,created_at) >= %s AND COALESCE(arrival_at,created_at) < %s""",
+        (company_id, start, end),
+    )
+    result["forensic_reports"] = int((forensic or {}).get("forensic_reports") or 0)
+    return result
+
+
+async def list_forensic_reports(company_id: int, *, start: Any, end: Any,
+                                limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    return await db.fetch_all(
+        """SELECT id,feedback_type,user_agent,report_version,arrival_at,source_ip,reported_domain,
+        delivery_result,auth_failure,authentication_results,original_mail_from,original_rcpt_to,
+        dkim_domain,dkim_selector,identity_alignment,created_at
+        FROM dmarc_forensic_reports WHERE company_id=%s
+        AND COALESCE(arrival_at,created_at) >= %s AND COALESCE(arrival_at,created_at) < %s
+        ORDER BY COALESCE(arrival_at,created_at) DESC,id DESC LIMIT %s OFFSET %s""",
+        (company_id, start, end, min(max(limit, 1), 250), max(offset, 0)),
+    )
 
 
 async def list_records(company_id: int, *, start: Any, end: Any, limit: int = 50, offset: int = 0,

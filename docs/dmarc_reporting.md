@@ -1,11 +1,12 @@
-# DMARC aggregate reporting operations
+# DMARC aggregate and forensic reporting operations
 
 ## DNS and mailbox setup
 
 Enable the feature by creating or editing an account on **Microsoft 365 Mail** and
-setting its import purpose to **DMARC aggregate reports**. Its address must be
+setting its import purpose to **DMARC aggregate and forensic reports**. Its address must be
 `DMARC@your-reporting-domain`; only one mailbox may have this purpose. Copy each company's exact value, for example
-`rua=mailto:DMARC+<random-code>@reports.example.com`, into its `_dmarc` TXT
+`rua=mailto:DMARC+<random-code>@reports.example.com` and
+`ruf=mailto:DMARC+<random-code>@reports.example.com`, into its `_dmarc` TXT
 record. The random code is a routing capability and must not be replaced with a
 database ID.
 
@@ -31,13 +32,14 @@ limits are quarantined. Keep quarantine long enough to diagnose sender problems.
 Processed data is retained for `DMARC_RETENTION_DAYS` (365 by default); operators
 must align mailbox and database deletion jobs with their contractual obligations.
 
-DMARC source IPs may identify organisations or individuals and should be treated
+DMARC source IPs and the sender/recipient addresses present in RUF reports may
+identify organisations or individuals and should be treated
 as personal/security data. Limit access with `dmarc.view`, record exports in the
 audit log, encrypt backups, and document the lawful purpose and retention period.
 
 ## Troubleshooting
 
-1. Confirm DNS uses the exact company `rua` address and reporting domain.
+1. Confirm DNS uses the exact company `rua` and `ruf` address and reporting domain.
 2. Send a tagged delivery and verify Exchange preserves the envelope recipient.
 3. Check scheduler health, IMAP authentication, message UID, and retry state.
 4. Inspect quarantine (not application logs) for safe failure reasons.

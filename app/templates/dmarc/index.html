@@ -7,8 +7,19 @@
     {'label': 'DMARC pass (aligned SPF or DKIM)', 'value': metrics.dmarc_pass or 0, 'variant': 'success'},
     {'label': 'Aligned SPF pass', 'value': metrics.spf_pass or 0, 'variant': 'info'},
     {'label': 'Aligned DKIM pass', 'value': metrics.dkim_pass or 0, 'variant': 'warning'}
+    ,{'label': 'Forensic failures (RUF)', 'value': metrics.forensic_reports or 0, 'variant': 'danger'}
   ], total=metrics.total_messages or 0, total_label='Total messages') }}
   <p class="status-pill status-pill--info">Authentication results are distinct from DMARC alignment.</p>
 </section>
-<section class="card"><h2>Reports and aggregate records</h2><p>Use the date, domain, reporter, source IP, disposition, and authentication filters in the report API. Table preferences persist with the shared table controls.</p></section>
+<section class="card"><h2>Reporting addresses</h2>
+  {% if reporting_address %}
+  <p>Add both destinations to the domain's DMARC TXT record:</p>
+  <dl><dt>Aggregate reports (RUA)</dt><dd><code>rua=mailto:{{ reporting_address }}</code></dd>
+      <dt>Forensic failure reports (RUF)</dt><dd><code>ruf=mailto:{{ reporting_address }}</code></dd></dl>
+  <p class="status-pill status-pill--warning">RUF reports can contain sender and recipient addresses. Access is tenant-scoped and MyPortal stores report metadata, not the failed message body.</p>
+  {% else %}
+  <p>Configure an active Microsoft 365 DMARC reports mailbox to generate RUA and RUF destinations.</p>
+  {% endif %}
+</section>
+<section class="card"><h2>Reports</h2><p>Aggregate RUA records include source IP, disposition, and aligned SPF/DKIM results. Forensic RUF records include the failure type, source IP, reported domain, delivery result, authentication results, and available envelope and DKIM details.</p><p>Use <code>/api/dmarc/records</code> for aggregate data and <code>/api/dmarc/forensic-reports</code> for forensic failures in the selected date range.</p></section>
 {% endblock %}

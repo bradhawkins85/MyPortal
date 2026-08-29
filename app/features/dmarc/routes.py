@@ -48,7 +48,8 @@ async def page(request: Request):
     user, company_id = await _context(request)
     start, end = _range(None, None)
     metrics = await repo.overview(company_id, start, end)
-    return await _main()._render_template("dmarc/index.html", request, user, extra={"title": "DMARC reporting", "metrics": metrics, "range_start": start, "range_end": end})
+    address = await dmarc.company_reporting_address(company_id)
+    return await _main()._render_template("dmarc/index.html", request, user, extra={"title": "DMARC reporting", "metrics": metrics, "range_start": start, "range_end": end, "reporting_address": address})
 
 @router.get("/api/dmarc/overview")
 async def overview(request: Request, start: datetime | None = None, end: datetime | None = None):
@@ -62,7 +63,14 @@ async def rua(request: Request):
     address = await dmarc.company_reporting_address(company_id)
     if not address:
         raise HTTPException(409, "Configure an active Microsoft 365 DMARC reports mailbox first")
-    return {"rua": f"mailto:{address}"}
+    return {"rua": f"mailto:{address}", "ruf": f"mailto:{address}"}
+
+@router.get("/api/dmarc/forensic-reports")
+async def forensic_reports(request: Request, start: datetime | None = None, end: datetime | None = None,
+                           page: int = Query(1, ge=1, le=10000), per_page: int = Query(50, ge=1, le=250)):
+    _, company_id = await _context(request); start, end = _range(start, end)
+    return {"items": await repo.list_forensic_reports(company_id, start=start, end=end,
+        limit=per_page, offset=(page-1)*per_page), "page": page, "per_page": per_page}
 
 @router.get("/api/dmarc/records")
 async def records(request: Request, start: datetime | None = None, end: datetime | None = None,
@@ -96,4 +104,5 @@ async def rotate(request: Request, company_id: int, confirm: bool = False):
     reporting_domain = mailbox_address.partition("@")[2]
     code = dmarc.generate_company_code(); await repo.set_company_code(company_id, code)
     await audit.record(action="dmarc.code.rotate", request=request, user_id=int(user["id"]), entity_type="company", entity_id=company_id)
-    return {"rua": f"mailto:{dmarc.reporting_address(code, reporting_domain)}"}
+    address = dmarc.reporting_address(code, reporting_domain)
+    return {"rua": f"mailto:{address}", "ruf": f"mailto:{address}"}

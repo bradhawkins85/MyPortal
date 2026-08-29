@@ -4,7 +4,7 @@ from pathlib import Path
 import zipfile
 import pytest
 
-from app.services.dmarc import DmarcInputError, IngestionLimits, parse_aggregate_xml, reporting_address, unpack_attachment
+from app.services.dmarc import DmarcInputError, IngestionLimits, parse_aggregate_xml, parse_forensic_report, reporting_address, unpack_attachment
 
 XML = (Path(__file__).parent / "fixtures/dmarc/valid.xml").read_bytes()
 
@@ -33,3 +33,32 @@ def test_malformed_missing_and_oversized_rejected():
 
 def test_reporting_address_does_not_expose_company_id():
     assert reporting_address("abcdefghijklmnop", "Reports.Example") == "DMARC+abcdefghijklmnop@reports.example"
+
+
+def test_forensic_arf_extracts_applicable_metadata():
+    report = parse_forensic_report(b"""Feedback-Type: auth-failure
+Version: 1
+User-Agent: receiver.example
+Arrival-Date: Fri, 28 Aug 2026 12:30:00 +0000
+Source-IP: 192.0.2.10
+Reported-Domain: sender.example
+Delivery-Result: reject
+Auth-Failure: dmarc
+Authentication-Results: receiver.example; dmarc=fail
+Original-Mail-From: <sender@sender.example>
+Original-Rcpt-To: <recipient@example.net>
+DKIM-Domain: sender.example
+DKIM-Selector: mail
+Identity-Alignment: dkim, spf
+
+""")
+    assert report["feedback_type"] == "auth-failure"
+    assert report["source_ip"] == "192.0.2.10"
+    assert report["reported_domain"] == "sender.example"
+    assert report["arrival_at"].isoformat() == "2026-08-28T12:30:00+00:00"
+    assert "content_sha256" in report
+
+
+def test_forensic_report_rejects_non_authentication_feedback():
+    with pytest.raises(DmarcInputError, match="not an authentication failure"):
+        parse_forensic_report(b"Feedback-Type: abuse\nSource-IP: 192.0.2.1\n\n")
