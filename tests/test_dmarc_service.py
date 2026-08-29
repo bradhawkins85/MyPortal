@@ -1,9 +1,12 @@
+import asyncio
 import gzip
 import io
 from pathlib import Path
+from unittest.mock import AsyncMock
 import zipfile
 import pytest
 
+from app.services import dmarc
 from app.services.dmarc import DmarcInputError, IngestionLimits, parse_aggregate_xml, parse_forensic_report, reporting_address, unpack_attachment
 
 XML = (Path(__file__).parent / "fixtures/dmarc/valid.xml").read_bytes()
@@ -33,6 +36,21 @@ def test_malformed_missing_and_oversized_rejected():
 
 def test_reporting_address_does_not_expose_company_id():
     assert reporting_address("abcdefghijklmnop", "Reports.Example") == "DMARC+abcdefghijklmnop@reports.example"
+
+
+def test_company_reporting_addresses_returns_all_active_distinct_mailboxes(monkeypatch):
+    monkeypatch.setattr(
+        "app.repositories.m365_mail_accounts.list_dmarc_accounts",
+        AsyncMock(return_value=[
+            {"active": True, "user_principal_name": "reports@one.example"},
+            {"active": True, "user_principal_name": "REPORTS@one.example"},
+            {"active": False, "user_principal_name": "disabled@example.com"},
+            {"active": True, "user_principal_name": "reports@two.example"},
+        ]),
+    )
+    assert asyncio.run(dmarc.company_reporting_addresses(42)) == [
+        "reports@one.example", "reports@two.example"
+    ]
 
 
 def test_forensic_arf_extracts_applicable_metadata():

@@ -12,10 +12,10 @@
   <p class="status-pill status-pill--info">Authentication results are distinct from DMARC alignment.</p>
 </section>
 <section class="card"><h2>Reporting addresses</h2>
-  {% if reporting_address %}
-  <p>Add both destinations to the domain's DMARC TXT record:</p>
-  <dl><dt>Aggregate reports (RUA)</dt><dd><code>rua=mailto:{{ reporting_address }}</code></dd>
-      <dt>Forensic failure reports (RUF)</dt><dd><code>ruf=mailto:{{ reporting_address }}</code></dd></dl>
+  {% if reporting_addresses %}
+  <p>Use the applicable mailbox for each company domain, or add multiple destinations to a domain's DMARC TXT record:</p>
+  <dl><dt>Aggregate reports (RUA)</dt><dd><code>rua={% for address in reporting_addresses %}mailto:{{ address }}{% if not loop.last %},{% endif %}{% endfor %}</code></dd>
+      <dt>Forensic failure reports (RUF)</dt><dd><code>ruf={% for address in reporting_addresses %}mailto:{{ address }}{% if not loop.last %},{% endif %}{% endfor %}</code></dd></dl>
   <p class="status-pill status-pill--warning">RUF reports can contain sender and recipient addresses. Access is tenant-scoped and MyPortal stores report metadata, not the failed message body.</p>
   {% else %}
   <p>Configure an active Microsoft 365 DMARC reports mailbox to generate RUA and RUF destinations.</p>

@@ -4,9 +4,10 @@
 
 Enable the feature by creating or editing an account on **Microsoft 365 Mail** and
 setting its import purpose to **DMARC aggregate and forensic reports**, then select the
-company that owns the reports. A company selection is required and each company can
-have its own reporting mailbox on its own domain. Put that mailbox address directly in
-the company's `_dmarc` TXT record, for example
+company that owns the reports. A company selection is required. A company can have
+multiple reporting mailboxes, allowing each of its domains to use an address on the
+appropriate domain while all reports remain allocated to the same company. Put the
+applicable mailbox address directly in each domain's `_dmarc` TXT record, for example
 `rua=mailto:dmarc@reports.customer.example` and
 `ruf=mailto:dmarc@reports.customer.example`. MyPortal allocates every report imported
 from that mailbox to the selected company; no tagged address or unique routing ID is
@@ -37,7 +38,7 @@ audit log, encrypt backups, and document the lawful purpose and retention period
 
 ## Troubleshooting
 
-1. Confirm DNS uses the exact mailbox selected for the company's `rua` and `ruf` address.
+1. Confirm each domain's DNS uses one of the mailboxes assigned to the company for its `rua` and `ruf` address.
 2. Confirm the mailbox import purpose is DMARC and the correct company is selected.
 3. Check scheduler health, IMAP authentication, message UID, and retry state.
 4. Inspect quarantine (not application logs) for safe failure reasons.
