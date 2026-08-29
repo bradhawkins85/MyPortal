@@ -1,4 +1,4 @@
-"""Defensive DMARC aggregate report ingestion (RFC 7489)."""
+"""Defensive DMARC aggregate (RUA) and forensic (RUF) report ingestion."""
 from __future__ import annotations
 
 import gzip
@@ -10,6 +10,8 @@ import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.message import Message
+from email import policy
+from email.parser import BytesParser
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -170,6 +172,72 @@ def parse_aggregate_xml(data: bytes, limits: IngestionLimits | None = None) -> d
     return parsed
 
 
+def parse_forensic_report(data: bytes, limits: IngestionLimits | None = None) -> dict[str, Any]:
+    """Parse an RFC 6591/5965 ARF report without retaining message content."""
+    limits = limits or IngestionLimits()
+    _safe_xml(data, limits)
+    try:
+        message = BytesParser(policy=policy.default).parsebytes(data)
+    except Exception as exc:
+        raise DmarcInputError("Malformed forensic report") from exc
+
+    feedback = message
+    if message.is_multipart():
+        feedback = next(
+            (part for part in message.walk() if part.get_content_type() == "message/feedback-report"),
+            None,
+        )
+        if feedback is None:
+            raise DmarcInputError("Forensic report has no feedback section")
+        payload = feedback.get_payload()
+        if isinstance(payload, list) and payload:
+            feedback = payload[0]
+        else:
+            raw = feedback.get_payload(decode=True)
+            feedback = BytesParser(policy=policy.default).parsebytes(raw or b"")
+
+    feedback_type = str(feedback.get("Feedback-Type") or "").lower()
+    if feedback_type != "auth-failure":
+        raise DmarcInputError("Forensic report is not an authentication failure")
+
+    def field(name: str) -> str | None:
+        value = feedback.get(name)
+        return str(value).strip()[:1000] if value else None
+
+    arrival = field("Arrival-Date")
+    arrival_at: datetime | None = None
+    if arrival:
+        from email.utils import parsedate_to_datetime
+        try:
+            arrival_at = parsedate_to_datetime(arrival)
+            if arrival_at.tzinfo is None:
+                arrival_at = arrival_at.replace(tzinfo=timezone.utc)
+            arrival_at = arrival_at.astimezone(timezone.utc)
+        except (TypeError, ValueError, OverflowError):
+            arrival_at = None
+    source_ip = field("Source-IP")
+    reported_domain = field("Reported-Domain")
+    if not source_ip and not reported_domain:
+        raise DmarcInputError("Forensic report has no source IP or reported domain")
+    return {
+        "feedback_type": feedback_type,
+        "user_agent": field("User-Agent"),
+        "version": field("Version"),
+        "arrival_at": arrival_at,
+        "source_ip": source_ip,
+        "reported_domain": reported_domain,
+        "delivery_result": field("Delivery-Result"),
+        "auth_failure": field("Auth-Failure"),
+        "authentication_results": field("Authentication-Results"),
+        "original_mail_from": field("Original-Mail-From"),
+        "original_rcpt_to": field("Original-Rcpt-To"),
+        "dkim_domain": field("DKIM-Domain"),
+        "dkim_selector": field("DKIM-Selector"),
+        "identity_alignment": field("Identity-Alignment"),
+        "content_sha256": hashlib.sha256(data).hexdigest(),
+    }
+
+
 def attachments_from_message(message: Message, limits: IngestionLimits | None = None) -> list[tuple[str, bytes]]:
     limits = limits or IngestionLimits()
     parts = [part for part in message.walk() if part.get_filename()]
@@ -202,9 +270,17 @@ async def ingest_attachment(*, recipient: str, message_id: str, filename: str, p
         return []
     created: list[int] = []
     try:
-        for _, xml in unpack_attachment(filename, payload, limits):
-            report = parse_aggregate_xml(xml, limits)
-            created.append(await repo.save_report(company_id, import_id, report, attachment_hash))
+        lower = filename.lower()
+        # Graph does not reliably preserve an ARF extension, so also detect the
+        # standard feedback header in either a raw report or MIME container.
+        forensic_payload = re.search(br"(?im)^Feedback-Type:\s*auth-failure\s*$", payload[:65536])
+        if lower.endswith((".eml", ".arf")) or forensic_payload:
+            report = parse_forensic_report(payload, limits)
+            created.append(await repo.save_forensic_report(company_id, import_id, report, attachment_hash))
+        else:
+            for _, xml in unpack_attachment(filename, payload, limits):
+                report = parse_aggregate_xml(xml, limits)
+                created.append(await repo.save_report(company_id, import_id, report, attachment_hash))
         await repo.mark_import(import_id, "processed", content_hash=hashlib.sha256(payload).hexdigest())
     except DmarcInputError as exc:
         await repo.mark_import(import_id, "quarantined", str(exc)[:1000])

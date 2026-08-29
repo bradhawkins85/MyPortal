@@ -35,9 +35,9 @@
           <span class="form-label">Import purpose</span>
           <select name="importPurpose" class="form-input">
             <option value="support_ticket" {% if not is_editing or editing_account.import_purpose == 'support_ticket' %}selected{% endif %}>Support tickets</option>
-            <option value="dmarc" {% if is_editing and editing_account.import_purpose == 'dmarc' %}selected{% endif %}>DMARC aggregate reports</option>
+            <option value="dmarc" {% if is_editing and editing_account.import_purpose == 'dmarc' %}selected{% endif %}>DMARC aggregate and forensic reports</option>
           </select>
-          <span class="form-help">The DMARC mailbox imports supported report attachments and never creates support tickets. Only one mailbox can have this purpose.</span>
+          <span class="form-help">The DMARC mailbox imports RUA aggregate and RUF forensic report attachments and never creates support tickets. Only one mailbox can have this purpose.</span>
         </label>
         <label class="form-field">
           <span class="form-label">Company</span>
