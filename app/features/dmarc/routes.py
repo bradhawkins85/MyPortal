@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse
 from app.repositories import dmarc as repo
 from app.repositories import m365_mail_accounts as m365_mail_repo
 from app.repositories import user_companies as memberships
+from app.security.menu_permissions import menu_has_access
 from app.services import audit, dmarc
 
 router = APIRouter(tags=["DMARC"])
@@ -24,10 +25,11 @@ async def _context(request: Request, permission: str = "dmarc.view"):
     if company_id is None:
         raise HTTPException(400, "Select a company")
     membership = await memberships.get_user_company(int(user["id"]), int(company_id))
-    role_permissions = (membership or {}).get("menu_permissions") or []
-    if isinstance(role_permissions, dict):
-        role_permissions = [key for key, enabled in role_permissions.items() if enabled]
-    if not user.get("is_super_admin") and permission not in role_permissions:
+    menu_permissions = (membership or {}).get("menu_permissions")
+    requires_write = permission == "dmarc.manage"
+    if not user.get("is_super_admin") and not menu_has_access(
+        menu_permissions, "menu.dmarc", write=requires_write
+    ):
         raise HTTPException(403, "DMARC permission required")
     return user, int(company_id)
 

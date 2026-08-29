@@ -50,6 +50,13 @@ MENU_PERMISSIONS: tuple[MenuPermission, ...] = (
     MenuPermission("menu.compliance", "Compliance", "Compliance", "View or manage Essential 8 compliance.", ("compliance.access",), "can_view_compliance"),
     MenuPermission("menu.reports", "Reports", "Reporting", "View generated company reports."),
     MenuPermission("menu.reporting", "Reporting", "Reporting", "View or build reporting dashboards.", ("helpdesk.technician",), None),
+    MenuPermission(
+        "menu.dmarc",
+        "DMARC reports",
+        "Reporting",
+        "View DMARC aggregate reports; write access allows reporting-address management.",
+        ("dmarc.view", "dmarc.manage"),
+    ),
     MenuPermission("menu.compliance_checks", "Compliance Checks", "Compliance", "View assigned compliance checks.", ("compliance_checks.access",), "can_view_compliance_checks"),
     MenuPermission("menu.compliance_checks.library", "Compliance Checks Library", "Compliance", "Manage compliance check library items.", ("compliance_checks.manage",), "can_manage_compliance_checks", admin_only=True),
     MenuPermission("menu.continuity", "Continuity", "Compliance", "View or manage business continuity plans.", ("continuity.access", "bcp:view", "bcp:edit"), "can_view_bcp"),

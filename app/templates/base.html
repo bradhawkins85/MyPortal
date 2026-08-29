@@ -113,6 +113,7 @@
           {% set can_access_help = is_super_admin or menu_access.get('menu.help') in ['read', 'write'] %}
           {% set can_access_reports = (can_access_reports | default(false)) or is_super_admin or menu_access.get('menu.reports') in ['read', 'write'] %}
           {% set can_access_reporting = (can_access_reporting | default(false)) or is_super_admin or menu_access.get('menu.reporting') in ['read', 'write'] %}
+          {% set can_access_dmarc = is_super_admin or menu_access.get('menu.dmarc') in ['read', 'write'] %}
           {% set can_access_m365_configuration = is_super_admin or menu_access.get('menu.m365.configuration') in ['read', 'write'] %}
           {% set can_access_m365_licenses = is_super_admin or menu_access.get('menu.m365.licenses') in ['read', 'write'] %}
           {% set can_access_m365_diagnostics = is_super_admin or menu_access.get('menu.m365.diagnostics') in ['read', 'write'] %}
@@ -472,6 +473,16 @@
                 <svg viewBox="0 0 24 24" focusable="false"><path d="M4 20h16v2H4zm2-3h2v-7H6zm4 0h2V7h-2zm4 0h2v-4h-2zm4 0h2V4h-2z"/></svg>
               </span>
               <span class="menu__label">Reporting</span>
+            </a>
+          </li>
+          {% endif %}
+          {% if can_access_dmarc %}
+          <li class="menu__item">
+            <a href="/dmarc" {% if current_path.startswith('/dmarc') %}aria-current="page"{% endif %}>
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false"><path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zm2 .5V8l7 4.5L19 8V5.5l-7 4.5zm14 5-7 4.5-7-4.5V19h14z"/></svg>
+              </span>
+              <span class="menu__label">DMARC reports</span>
             </a>
           </li>
           {% endif %}
