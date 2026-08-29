@@ -116,6 +116,7 @@ async def admin_create_m365_mail_account(request: Request):
         "filter_query": form.get("filterQuery"),
         "process_unread_only": _form_bool(form, "processUnreadOnly"),
         "mark_as_read": _form_bool(form, "markAsRead"),
+        "delete_after_import": _form_bool(form, "deleteAfterImport"),
         "sync_known_only": _form_bool(form, "syncKnownOnly"),
         "active": _form_bool(form, "active"),
         "import_purpose": form.get("importPurpose", "support_ticket"),
@@ -200,6 +201,7 @@ async def admin_update_m365_mail_account(account_id: int, request: Request):
         updates["filter_query"] = form.get("filterQuery")
     updates["process_unread_only"] = _form_bool(form, "processUnreadOnly")
     updates["mark_as_read"] = _form_bool(form, "markAsRead")
+    updates["delete_after_import"] = _form_bool(form, "deleteAfterImport")
     updates["sync_known_only"] = _form_bool(form, "syncKnownOnly")
     updates["active"] = _form_bool(form, "active")
     updates["import_purpose"] = form.get("importPurpose", "support_ticket")

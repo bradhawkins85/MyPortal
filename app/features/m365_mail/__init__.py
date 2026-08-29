@@ -16,7 +16,7 @@ from .api_routes import router as m365_mail_api_router
 
 PACK = FeaturePack(
     slug="m365_mail",
-    version="1.0.0",
+    version="1.1.0",
     routers=(m365_mail_api_router, m365_mail_admin_router),
 )
 

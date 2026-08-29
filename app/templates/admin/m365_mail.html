@@ -89,9 +89,24 @@
         </div>
         <div class="form-field form-field--checkbox">
           <label class="checkbox">
-            <input type="checkbox" name="markAsRead" value="1" {% if not is_editing or editing_account.mark_as_read %}checked{% endif %} />
+            <input type="radio" name="postImportAction" value="mark_read" onchange="this.form.markAsRead.value='1'; this.form.deleteAfterImport.value='0'" {% if not is_editing or editing_account.mark_as_read %}checked{% endif %} />
             <span>Mark messages as read after processing</span>
           </label>
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="checkbox">
+            <input type="radio" name="postImportAction" value="delete" onchange="this.form.markAsRead.value='0'; this.form.deleteAfterImport.value='1'" {% if is_editing and editing_account.delete_after_import %}checked{% endif %} />
+            <span>Delete messages after processing</span>
+          </label>
+          <span class="form-help">Successfully imported messages are moved to the mailbox's Deleted Items folder. Failed imports remain available for retry.</span>
+        </div>
+        <div class="form-field form-field--checkbox">
+          <label class="checkbox">
+            <input type="radio" name="postImportAction" value="none" onchange="this.form.markAsRead.value='0'; this.form.deleteAfterImport.value='0'" {% if is_editing and not editing_account.mark_as_read and not editing_account.delete_after_import %}checked{% endif %} />
+            <span>Leave messages unchanged after processing</span>
+          </label>
+          <input type="hidden" name="markAsRead" value="{{ '1' if not is_editing or editing_account.mark_as_read else '0' }}" />
+          <input type="hidden" name="deleteAfterImport" value="{{ '1' if is_editing and editing_account.delete_after_import else '0' }}" />
         </div>
         <div class="form-field form-field--checkbox">
           <label class="checkbox">
@@ -207,6 +222,8 @@
                         <td data-column-key="matching">
                           {% if action.matched_by_related_message_ids %}
                             Related message IDs matched
+                          {% elif action.message_deleted %}
+                            Already imported; message deleted
                           {% elif action.read_state_repaired %}
                             Already imported; read state repaired
                           {% elif action.has_attachments %}

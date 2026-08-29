@@ -334,16 +334,25 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
         payload.get("process_unread_only"), default=True
     )
     mark_as_read = _normalise_bool(payload.get("mark_as_read"), default=True)
+    delete_after_import = _normalise_bool(
+        payload.get("delete_after_import"), default=False
+    )
+    if mark_as_read and delete_after_import:
+        raise ValueError("Choose either marking messages as read or deleting them")
     sync_known_only = _normalise_bool(payload.get("sync_known_only"), default=False)
     active = _normalise_bool(payload.get("active"), default=True)
     priority = _normalise_priority(payload.get("priority"), default=100)
     filter_canonical, _ = _normalise_filter(payload.get("filter_query"))
-    import_purpose = _normalise_string(payload.get("import_purpose"), default="support_ticket")
+    import_purpose = _normalise_string(
+        payload.get("import_purpose"), default="support_ticket"
+    )
     if import_purpose not in {"support_ticket", "dmarc"}:
         raise ValueError("Mailbox import purpose is invalid")
     if import_purpose == "dmarc" and company_id is None:
         raise ValueError("A company is required for a DMARC reports mailbox")
-    if import_purpose == "dmarc" and await mail_repo.get_dmarc_account(company_id=company_id):
+    if import_purpose == "dmarc" and await mail_repo.get_dmarc_account(
+        company_id=company_id
+    ):
         raise ValueError("The selected company already has a DMARC reports mailbox")
 
     account = await mail_repo.create_account(
@@ -356,6 +365,7 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
         filter_query=filter_canonical,
         process_unread_only=process_unread_only,
         mark_as_read=mark_as_read,
+        delete_after_import=delete_after_import,
         sync_known_only=sync_known_only,
         active=active,
         priority=priority,
@@ -418,6 +428,19 @@ async def update_account(account_id: int, payload: Mapping[str, Any]) -> dict[st
         updates["mark_as_read"] = _normalise_bool(
             payload.get("mark_as_read"), default=existing.get("mark_as_read", True)
         )
+    if "delete_after_import" in payload:
+        updates["delete_after_import"] = _normalise_bool(
+            payload.get("delete_after_import"),
+            default=existing.get("delete_after_import", False),
+        )
+    resulting_mark_as_read = updates.get(
+        "mark_as_read", existing.get("mark_as_read", True)
+    )
+    resulting_delete = updates.get(
+        "delete_after_import", existing.get("delete_after_import", False)
+    )
+    if resulting_mark_as_read and resulting_delete:
+        raise ValueError("Choose either marking messages as read or deleting them")
     if "sync_known_only" in payload:
         updates["sync_known_only"] = _normalise_bool(
             payload.get("sync_known_only"),
@@ -432,7 +455,9 @@ async def update_account(account_id: int, payload: Mapping[str, Any]) -> dict[st
             payload.get("priority"), default=existing.get("priority") or 100
         )
     if "import_purpose" in payload:
-        purpose = _normalise_string(payload.get("import_purpose"), default="support_ticket")
+        purpose = _normalise_string(
+            payload.get("import_purpose"), default="support_ticket"
+        )
         if purpose not in {"support_ticket", "dmarc"}:
             raise ValueError("Mailbox import purpose is invalid")
         purpose_company_id = updates.get("company_id", existing.get("company_id"))
@@ -487,6 +512,7 @@ async def clone_account(account_id: int) -> dict[str, Any]:
         filter_query=filter_canonical,
         process_unread_only=bool(original.get("process_unread_only", True)),
         mark_as_read=bool(original.get("mark_as_read", True)),
+        delete_after_import=bool(original.get("delete_after_import", False)),
         sync_known_only=bool(original.get("sync_known_only", False)),
         active=bool(original.get("active", True)),
         scheduled_task_id=None,
@@ -698,6 +724,55 @@ async def _graph_patch(access_token: str, url: str, payload: dict[str, Any]) -> 
         )
 
 
+async def _graph_delete(access_token: str, url: str) -> None:
+    """Delete a message through Microsoft Graph (moves it to Deleted Items)."""
+    parsed_url = urlsplit(url)
+    if (
+        parsed_url.scheme != _GRAPH_BASE_PARTS.scheme
+        or parsed_url.netloc != _GRAPH_BASE_PARTS.netloc
+        or not parsed_url.path.startswith(f"{_GRAPH_BASE_PATH}/")
+    ):
+        raise ValueError(f"Rejected Microsoft Graph DELETE URL: {url}")
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.delete(url, headers=headers)
+    if response.status_code != 204:
+        raise M365Error(
+            f"Microsoft Graph delete failed ({response.status_code})",
+            http_status=response.status_code,
+        )
+
+
+async def _apply_post_import_action(
+    *,
+    access_token: str,
+    upn: str,
+    message_id: str,
+    mark_as_read: bool,
+    delete_after_import: bool,
+    is_unread: bool,
+) -> str | None:
+    """Apply the configured action only after an import has succeeded."""
+    message_url = (
+        f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/"
+        f"{quote(message_id, safe='')}"
+    )
+    try:
+        if delete_after_import:
+            await _graph_delete(access_token, message_url)
+            return "deleted"
+        if mark_as_read and is_unread:
+            await _graph_patch(access_token, message_url, {"isRead": True})
+            return "marked_read"
+    except Exception:
+        log_error(
+            "Unable to apply M365 post-import message action",
+            message_id=message_id,
+            action="delete" if delete_after_import else "mark_read",
+        )
+    return None
+
+
 def _looks_like_graph_folder_id(folder: str) -> bool:
     """Heuristic check for Graph folder IDs.
 
@@ -834,6 +909,7 @@ async def _resolve_mail_folder_identifier(
         return parent_identifier
 
     return await _resolve_top_level(folder_path)
+
 
 def _extract_graph_recipient_addresses(recipients: list[dict[str, Any]]) -> list[str]:
     """Return normalized email addresses from Graph recipient objects."""
@@ -1048,6 +1124,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
     folder = _normalise_string(account.get("folder"), default="Inbox") or "Inbox"
     process_unread_only = bool(account.get("process_unread_only", True))
     mark_as_read = bool(account.get("mark_as_read", True))
+    delete_after_import = bool(account.get("delete_after_import", False))
     last_synced_at = _parse_graph_datetime(account.get("last_synced_at"))
 
     # Per-account delegated tokens take priority over company credentials.
@@ -1156,9 +1233,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 # read messages are not invisible to an unread-only sync. The
                 # local import record still provides idempotency.
                 changed_since = last_synced_at.isoformat().replace("+00:00", "Z")
-                query_params["$filter"] += (
-                    f" or lastModifiedDateTime ge {changed_since}"
-                )
+                query_params[
+                    "$filter"
+                ] += f" or lastModifiedDateTime ge {changed_since}"
         else:
             query_params["$orderby"] = "receivedDateTime asc"
         full_url = (
@@ -1350,7 +1427,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                     existing_ticket_id = existing_message.get("ticket_id")
                     existing_ticket = None
                     if isinstance(existing_ticket_id, int):
-                        existing_ticket = await tickets_repo.get_ticket(existing_ticket_id)
+                        existing_ticket = await tickets_repo.get_ticket(
+                            existing_ticket_id
+                        )
 
                     # An imported marker is only authoritative while its ticket
                     # still exists.  Older failed imports could persist an
@@ -1385,21 +1464,14 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         # A previous run may have successfully imported the message
                         # but failed while marking it read. Avoid duplicate ticket
                         # activity, but still repair the read state on later syncs.
-                        read_state_repaired = False
-                        if mark_as_read and not msg.get("isRead", False):
-                            try:
-                                patch_url = (
-                                    f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/"
-                                    f"{quote(msg_id, safe='')}"
-                                )
-                                await _graph_patch(access_token, patch_url, {"isRead": True})
-                                read_state_repaired = True
-                            except Exception:  # pragma: no cover - Graph API errors
-                                log_error(
-                                    "Unable to mark already-imported M365 message as read",
-                                    account_id=account_id,
-                                    message_id=msg_id,
-                                )
+                        post_import_action = await _apply_post_import_action(
+                            access_token=access_token,
+                            upn=upn,
+                            message_id=msg_id,
+                            mark_as_read=mark_as_read,
+                            delete_after_import=delete_after_import,
+                            is_unread=not msg.get("isRead", False),
+                        )
                         _remember_message_action(
                             {
                                 **message_log_base,
@@ -1420,7 +1492,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                     "This exact Microsoft Graph message ID was already "
                                     "recorded as imported, so no duplicate reply was added."
                                 ),
-                                "read_state_repaired": read_state_repaired,
+                                "read_state_repaired": post_import_action
+                                == "marked_read",
+                                "message_deleted": post_import_action == "deleted",
                             }
                         )
                         continue
@@ -1494,33 +1568,48 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             company_id=int(account["company_id"]),
                         )
                         await _record_message(
-                            account_id=int(account_id), uid=msg_id,
-                            status="imported", ticket_id=None, error=None,
+                            account_id=int(account_id),
+                            uid=msg_id,
+                            status="imported",
+                            ticket_id=None,
+                            error=None,
                         )
                         processed += 1
-                        _remember_message_action({
-                            **message_log_base,
-                            "outcome": "imported_dmarc_report",
-                            "attachment_count": attachment_count,
-                        })
-                        if mark_as_read and is_unread:
-                            patch_url = (
-                                f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/"
-                                f"{quote(msg_id, safe='')}"
-                            )
-                            await _graph_patch(access_token, patch_url, {"isRead": True})
+                        _remember_message_action(
+                            {
+                                **message_log_base,
+                                "outcome": "imported_dmarc_report",
+                                "attachment_count": attachment_count,
+                            }
+                        )
+                        await _apply_post_import_action(
+                            access_token=access_token,
+                            upn=upn,
+                            message_id=msg_id,
+                            mark_as_read=mark_as_read,
+                            delete_after_import=delete_after_import,
+                            is_unread=is_unread,
+                        )
                     except Exception as exc:
                         # Keep unread and record a retryable marker. Logs contain
                         # identifiers/status only, never recipients or contents.
                         await _record_message(
-                            account_id=int(account_id), uid=msg_id,
-                            status="error", ticket_id=None,
+                            account_id=int(account_id),
+                            uid=msg_id,
+                            status="error",
+                            ticket_id=None,
                             error="DMARC attachment persistence failed",
                         )
-                        errors.append({"message_id": msg_id, "error": "DMARC attachment persistence failed"})
+                        errors.append(
+                            {
+                                "message_id": msg_id,
+                                "error": "DMARC attachment persistence failed",
+                            }
+                        )
                         log_error(
                             "M365 DMARC import failed",
-                            account_id=account_id, message_id=msg_id,
+                            account_id=account_id,
+                            message_id=msg_id,
                             error=type(exc).__name__,
                         )
                     continue
@@ -1633,7 +1722,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             status=None,
                             category="email",
                             module_slug=_MODULE_SLUG,
-                            external_reference=_normalise_ticket_external_reference(internet_msg_id),
+                            external_reference=_normalise_ticket_external_reference(
+                                internet_msg_id
+                            ),
                             initial_reply_author_id=requester_id,
                             requester_email=(
                                 from_email_addr if requester_id is None else None
@@ -1642,7 +1733,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 from_email_addr if requester_id is None else None
                             ),
                             initial_reply_author_display_name=(
-                                (from_header or from_address) if requester_id is None else None
+                                (from_header or from_address)
+                                if requester_id is None
+                                else None
                             ),
                             record_initial_reply=not create_initial_reply_after_inline_persist,
                         )
@@ -1656,9 +1749,11 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             )
                         if ticket_id is not None:
                             if create_initial_reply_after_inline_persist:
-                                description = await _persist_m365_inline_images_for_ticket(
-                                    int(ticket_id),
-                                    description,
+                                description = (
+                                    await _persist_m365_inline_images_for_ticket(
+                                        int(ticket_id),
+                                        description,
+                                    )
                                 )
                                 await tickets_service.update_ticket_description(
                                     int(ticket_id),
@@ -1671,11 +1766,16 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                         body=description,
                                         is_internal=False,
                                         external_reference=(
-                                            _normalise_ticket_external_reference(internet_msg_id)
+                                            _normalise_ticket_external_reference(
+                                                internet_msg_id
+                                            )
                                         ),
-                                        created_at=received_at or datetime.now(timezone.utc),
+                                        created_at=received_at
+                                        or datetime.now(timezone.utc),
                                         author_email=(
-                                            from_email_addr if requester_id is None else None
+                                            from_email_addr
+                                            if requester_id is None
+                                            else None
                                         ),
                                         author_display_name=(
                                             (from_header or from_address)
@@ -1689,7 +1789,9 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             await _add_email_cc_watchers(
                                 int(ticket_id),
                                 cc_addresses,
-                                exclude_addresses=[from_email_addr] if from_email_addr else None,
+                                exclude_addresses=(
+                                    [from_email_addr] if from_email_addr else None
+                                ),
                             )
                             try:
                                 await tickets_service.refresh_ticket_ai_summary(
@@ -1765,11 +1867,21 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                     body=reply_body,
                                     is_internal=False,
                                     external_reference=(
-                                        _normalise_ticket_external_reference(internet_msg_id)
+                                        _normalise_ticket_external_reference(
+                                            internet_msg_id
+                                        )
                                     ),
                                     created_at=reply_created_at,
-                                    author_email=from_email_addr if reply_author_id is None else None,
-                                    author_display_name=(from_header or from_address) if reply_author_id is None else None,
+                                    author_email=(
+                                        from_email_addr
+                                        if reply_author_id is None
+                                        else None
+                                    ),
+                                    author_display_name=(
+                                        (from_header or from_address)
+                                        if reply_author_id is None
+                                        else None
+                                    ),
                                 )
                                 reply_added = True
                                 log_info(
@@ -1884,20 +1996,14 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                 )
                 processed += 1
 
-                # Mark as read if configured
-                if mark_as_read and is_unread:
-                    try:
-                        patch_url = (
-                            f"{_GRAPH_BASE}/users/{quote(upn, safe='')}/messages/"
-                            f"{quote(msg_id, safe='')}"
-                        )
-                        await _graph_patch(access_token, patch_url, {"isRead": True})
-                    except Exception:  # pragma: no cover - Graph API errors
-                        log_error(
-                            "Unable to mark M365 message as read",
-                            account_id=account_id,
-                            message_id=msg_id,
-                        )
+                await _apply_post_import_action(
+                    access_token=access_token,
+                    upn=upn,
+                    message_id=msg_id,
+                    mark_as_read=mark_as_read,
+                    delete_after_import=delete_after_import,
+                    is_unread=is_unread,
+                )
 
     except Exception as exc:  # pragma: no cover - network interaction
         log_error(
@@ -2083,15 +2189,22 @@ def _graph_dmarc_recipient(graph_message: Mapping[str, Any]) -> str:
     """Return a tagged envelope/display recipient, or an empty routing hint."""
     for field in ("toRecipients", "ccRecipients", "bccRecipients"):
         for recipient in graph_message.get(field) or []:
-            address = str((recipient.get("emailAddress") or {}).get("address") or "").strip()
+            address = str(
+                (recipient.get("emailAddress") or {}).get("address") or ""
+            ).strip()
             if dmarc_service.routing_code(address):
                 return address
     return ""
 
 
 async def _import_graph_dmarc_message(
-    *, access_token: str, upn: str, graph_message: Mapping[str, Any],
-    message_id: str, internet_message_id: str, received_at: datetime,
+    *,
+    access_token: str,
+    upn: str,
+    graph_message: Mapping[str, Any],
+    message_id: str,
+    internet_message_id: str,
+    received_at: datetime,
     company_id: int,
 ) -> int:
     """Persist all report attachments from a dedicated M365 mailbox."""
