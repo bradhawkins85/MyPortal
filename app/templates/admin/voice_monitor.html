@@ -32,7 +32,7 @@
           <select name="product_id" id="voice-monitor-product" required>
             <option value="">Select a subscription type</option>
             {% for product in voice_monitor_products %}
-            <option value="{{ product.id }}">{{ product.name }}</option>
+            <option value="{{ product.id }}" data-calls-per-day="{{ product.calls_per_day }}">{{ product.name }} — {{ product.calls_per_day }} call{% if product.calls_per_day != 1 %}s{% endif %}/day at ${{ product.price }}</option>
             {% endfor %}
           </select>
         </label>
@@ -42,12 +42,7 @@
         <label>Display label
           <input type="text" name="display_label" maxlength="255" placeholder="Main reception line" required>
         </label>
-        <label>Check every
-          <select name="interval_seconds">
-            <option value="300">5 minutes</option><option value="900">15 minutes</option>
-            <option value="1800">30 minutes</option><option value="3600">1 hour</option>
-          </select>
-        </label>
+        <p class="form-helper">The selected plan controls the check frequency (minimum 1 and maximum 24 calls per day).</p>
         <label>Timezone
           <input type="text" name="timezone" value="UTC" required>
         </label>

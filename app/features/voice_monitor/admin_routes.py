@@ -123,6 +123,22 @@ async def provision_endpoint(
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         values["subscription_id"] = subscription["id"]
+        product = next(
+            (
+                item
+                for item in await list_voice_monitor_products()
+                if item["id"] == product_id
+            ),
+            None,
+        )
+        calls_per_day = int((product or {}).get("calls_per_day") or 1)
+        if not 1 <= calls_per_day <= 24:
+            raise HTTPException(
+                400, "Voice Monitor plan calls per day must be between 1 and 24"
+            )
+        values["interval_seconds"] = 86400 // calls_per_day
+        values["schedule_cron"] = None
+        values["daily_attempt_limit"] = calls_per_day
         await audit_service.log_action(
             action="voice_monitor.subscription.provisioned",
             user_id=user["id"],
