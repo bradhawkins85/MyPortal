@@ -93,16 +93,19 @@ async def quarantine(request: Request, page: int = Query(1, ge=1)):
     return {"items": await repo.list_quarantine(limit=100, offset=(page-1)*100)}
 
 @router.post("/admin/dmarc/companies/{company_id}/rotate-code")
-async def rotate(request: Request, company_id: int, confirm: bool = False):
+async def rotate(request: Request, company_id: int):
     user, _ = await _context(request, "dmarc.manage")
-    if not user.get("is_super_admin"): raise HTTPException(403, "Super administrator required")
-    if not confirm: raise HTTPException(400, "Explicit confirmation is required")
-    mailbox = await m365_mail_repo.get_dmarc_account()
+    if not user.get("is_super_admin"):
+        raise HTTPException(403, "Super administrator required")
+    mailbox = await m365_mail_repo.get_dmarc_account(company_id=company_id)
     if not mailbox or not mailbox.get("active"):
         raise HTTPException(409, "Configure an active Microsoft 365 DMARC reports mailbox first")
     mailbox_address = str(mailbox.get("user_principal_name") or "")
-    reporting_domain = mailbox_address.partition("@")[2]
-    code = dmarc.generate_company_code(); await repo.set_company_code(company_id, code)
-    await audit.record(action="dmarc.code.rotate", request=request, user_id=int(user["id"]), entity_type="company", entity_id=company_id)
-    address = dmarc.reporting_address(code, reporting_domain)
-    return {"rua": f"mailto:{address}", "ruf": f"mailto:{address}"}
+    await audit.record(
+        action="dmarc.mailbox.read",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="company",
+        entity_id=company_id,
+    )
+    return {"rua": f"mailto:{mailbox_address}", "ruf": f"mailto:{mailbox_address}"}

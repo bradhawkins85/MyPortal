@@ -3,20 +3,18 @@
 ## DNS and mailbox setup
 
 Enable the feature by creating or editing an account on **Microsoft 365 Mail** and
-setting its import purpose to **DMARC aggregate and forensic reports**. Its address must be
-`DMARC@your-reporting-domain`; only one mailbox may have this purpose. Copy each company's exact value, for example
-`rua=mailto:DMARC+<random-code>@reports.example.com` and
-`ruf=mailto:DMARC+<random-code>@reports.example.com`, into its `_dmarc` TXT
-record. The random code is a routing capability and must not be replaced with a
-database ID.
+setting its import purpose to **DMARC aggregate and forensic reports**, then select the
+company that owns the reports. A company selection is required and each company can
+have its own reporting mailbox on its own domain. Put that mailbox address directly in
+the company's `_dmarc` TXT record, for example
+`rua=mailto:dmarc@reports.customer.example` and
+`ruf=mailto:dmarc@reports.customer.example`. MyPortal allocates every report imported
+from that mailbox to the selected company; no tagged address or unique routing ID is
+required.
 
 For Microsoft 365, license the shared mailbox where required, enable authenticated
 IMAP (or use the Graph-backed account), and restrict access to the ingestion
-identity. Microsoft Graph `Mail.ReadWrite` access is required. Exchange Online plus addressing must be enabled and a transport test
-must confirm arbitrary `DMARC+tag` recipients retain the envelope recipient. If
-the tenant disables plus addressing, create one alias per company and a transport
-rule mapping each alias to the corresponding tagged recipient before enabling
-collection.
+identity. Microsoft Graph `Mail.ReadWrite` access is required.
 
 Polling is registered through MyPortal's scheduled Microsoft Graph mailbox infrastructure. It
 uses the provider UID/message ID, persists every attachment before moving or
@@ -39,10 +37,8 @@ audit log, encrypt backups, and document the lawful purpose and retention period
 
 ## Troubleshooting
 
-1. Confirm DNS uses the exact company `rua` and `ruf` address and reporting domain.
-2. Send a tagged delivery and verify Exchange preserves the envelope recipient.
+1. Confirm DNS uses the exact mailbox selected for the company's `rua` and `ruf` address.
+2. Confirm the mailbox import purpose is DMARC and the correct company is selected.
 3. Check scheduler health, IMAP authentication, message UID, and retry state.
 4. Inspect quarantine (not application logs) for safe failure reasons.
 5. Increase a limit only after checking the archive and expected sender volume.
-6. Rotate a leaked company code with explicit confirmation, then update DNS; old
-   codes become unassigned and subsequent deliveries are quarantined.
