@@ -53,15 +53,12 @@ def routing_code(recipient: str) -> str | None:
 
 
 async def company_reporting_address(company_id: int) -> str | None:
-    """Return the address derived from the selected active M365 DMARC mailbox."""
-    from app.repositories import dmarc as repo
+    """Return the selected company's active M365 DMARC mailbox address."""
     from app.repositories import m365_mail_accounts as mailbox_repo
-    code = await repo.company_code(company_id)
-    mailbox = await mailbox_repo.get_dmarc_account()
-    if not code or not mailbox or not mailbox.get("active"):
+    mailbox = await mailbox_repo.get_dmarc_account(company_id=company_id)
+    if not mailbox or not mailbox.get("active"):
         return None
-    domain = str(mailbox.get("user_principal_name") or "").partition("@")[2]
-    return reporting_address(code, domain) if domain else None
+    return str(mailbox.get("user_principal_name") or "").strip() or None
 
 
 def _safe_xml(data: bytes, limits: IngestionLimits) -> bytes:
@@ -251,18 +248,21 @@ def attachments_from_message(message: Message, limits: IngestionLimits | None = 
 
 async def ingest_attachment(*, recipient: str, message_id: str, filename: str, payload: bytes,
                             received_at: datetime, metadata: str | None = None,
-                            limits: IngestionLimits | None = None) -> list[int]:
+                            limits: IngestionLimits | None = None,
+                            company_id: int | None = None) -> list[int]:
     """Persist then process one delivery; unresolved/malformed input is quarantined.
 
-    The recipient is only a routing hint. Once resolved, every repository call
-    carries the authoritative company primary key.
+    M365 mailbox imports supply the authoritative company primary key directly.
+    Other ingestion paths may still resolve the recipient routing hint. Once
+    resolved, every repository call carries the company primary key.
     """
     from app.repositories import dmarc as repo
     limits = limits or IngestionLimits()
     attachment_hash = hashlib.sha256(payload).hexdigest()
     code = routing_code(recipient)
-    company = await repo.company_by_code(code) if code else None
-    company_id = int(company["id"]) if company else None
+    if company_id is None:
+        company = await repo.company_by_code(code) if code else None
+        company_id = int(company["id"]) if company else None
     import_id = await repo.create_import(company_id=company_id, message_id=message_id,
         attachment_hash=attachment_hash, filename=filename, received_at=received_at.astimezone(timezone.utc), metadata=metadata)
     if company_id is None:

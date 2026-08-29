@@ -27,17 +27,30 @@ def test_graph_dmarc_import_persists_each_attachment(monkeypatch):
             access_token="secret", upn="DMARC@example.com", graph_message=message,
             message_id="stable-graph-id", internet_message_id="internet-id",
             received_at=m365_mail.datetime.now(m365_mail.timezone.utc),
+            company_id=42,
         )
     )
     assert count == 2
     assert ingest.await_count == 2
-    assert all(call.kwargs["recipient"].startswith("DMARC+") for call in ingest.await_args_list)
+    assert all(call.kwargs["company_id"] == 42 for call in ingest.await_args_list)
 
 
-def test_dmarc_mailbox_must_be_unique_and_named_dmarc(monkeypatch):
+def test_dmarc_mailbox_requires_company(monkeypatch):
     monkeypatch.setattr(m365_mail.mail_repo, "get_dmarc_account", AsyncMock(return_value=None))
-    with pytest.raises(ValueError, match="local part DMARC"):
+    with pytest.raises(ValueError, match="company is required"):
         asyncio.run(m365_mail.create_account({
                 "name": "Reports", "user_principal_name": "reports@example.com",
                 "import_purpose": "dmarc",
         }))
+
+
+def test_dmarc_mailbox_is_unique_per_company(monkeypatch):
+    existing = AsyncMock(return_value={"id": 9})
+    monkeypatch.setattr(m365_mail.mail_repo, "get_dmarc_account", existing)
+    with pytest.raises(ValueError, match="selected company already has"):
+        asyncio.run(m365_mail.create_account({
+            "name": "Reports", "company_id": 42,
+            "user_principal_name": "dmarc@customer.example",
+            "import_purpose": "dmarc",
+        }))
+    existing.assert_awaited_once_with(company_id=42)

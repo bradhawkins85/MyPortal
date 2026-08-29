@@ -19,6 +19,7 @@ class M365MailAccountBase(BaseModel):
     sync_known_only: bool = False
     active: bool = True
     priority: int = Field(100, ge=0, le=32767)
+    import_purpose: str = Field("support_ticket", pattern="^(support_ticket|dmarc)$")
 
 
 class M365MailAccountCreate(M365MailAccountBase):
@@ -38,6 +39,7 @@ class M365MailAccountUpdate(BaseModel):
     sync_known_only: bool | None = None
     active: bool | None = None
     priority: int | None = Field(default=None, ge=0, le=32767)
+    import_purpose: str | None = Field(default=None, pattern="^(support_ticket|dmarc)$")
 
 
 class M365MailAccountResponse(BaseModel):
@@ -54,6 +56,7 @@ class M365MailAccountResponse(BaseModel):
     sync_known_only: bool
     active: bool
     priority: int
+    import_purpose: str
     last_synced_at: datetime | None
     scheduled_task_id: int | None
     auth_status: str | None = None

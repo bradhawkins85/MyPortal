@@ -60,14 +60,19 @@ async def get_account(account_id: int) -> dict[str, Any] | None:
     return _normalise_account(row) if row else None
 
 
-async def get_dmarc_account(*, exclude_account_id: int | None = None) -> dict[str, Any] | None:
+async def get_dmarc_account(
+    *, company_id: int | None = None, exclude_account_id: int | None = None
+) -> dict[str, Any] | None:
     sql = "SELECT * FROM m365_mail_accounts WHERE import_purpose = 'dmarc'"
-    params: tuple[Any, ...] = ()
+    params: list[Any] = []
+    if company_id is not None:
+        sql += " AND company_id = %s"
+        params.append(company_id)
     if exclude_account_id is not None:
         sql += " AND id <> %s"
-        params = (exclude_account_id,)
+        params.append(exclude_account_id)
     sql += " ORDER BY active DESC, id ASC LIMIT 1"
-    row = await db.fetch_one(sql, params)
+    row = await db.fetch_one(sql, tuple(params))
     return _normalise_account(row) if row else None
 
 

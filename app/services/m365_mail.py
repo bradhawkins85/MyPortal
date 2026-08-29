@@ -341,10 +341,10 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
     import_purpose = _normalise_string(payload.get("import_purpose"), default="support_ticket")
     if import_purpose not in {"support_ticket", "dmarc"}:
         raise ValueError("Mailbox import purpose is invalid")
-    if import_purpose == "dmarc" and await mail_repo.get_dmarc_account():
-        raise ValueError("A Microsoft 365 mailbox is already tagged for DMARC reports")
-    if import_purpose == "dmarc" and user_principal_name.partition("@")[0].lower() != "dmarc":
-        raise ValueError("The DMARC reports mailbox address must use the local part DMARC")
+    if import_purpose == "dmarc" and company_id is None:
+        raise ValueError("A company is required for a DMARC reports mailbox")
+    if import_purpose == "dmarc" and await mail_repo.get_dmarc_account(company_id=company_id):
+        raise ValueError("The selected company already has a DMARC reports mailbox")
 
     account = await mail_repo.create_account(
         name=name,
@@ -435,14 +435,13 @@ async def update_account(account_id: int, payload: Mapping[str, Any]) -> dict[st
         purpose = _normalise_string(payload.get("import_purpose"), default="support_ticket")
         if purpose not in {"support_ticket", "dmarc"}:
             raise ValueError("Mailbox import purpose is invalid")
-        if purpose == "dmarc" and await mail_repo.get_dmarc_account(exclude_account_id=account_id):
-            raise ValueError("A Microsoft 365 mailbox is already tagged for DMARC reports")
-        purpose_upn = _normalise_string(
-            updates.get("user_principal_name"),
-            default=existing.get("user_principal_name") or "",
-        )
-        if purpose == "dmarc" and purpose_upn.partition("@")[0].lower() != "dmarc":
-            raise ValueError("The DMARC reports mailbox address must use the local part DMARC")
+        purpose_company_id = updates.get("company_id", existing.get("company_id"))
+        if purpose == "dmarc" and purpose_company_id is None:
+            raise ValueError("A company is required for a DMARC reports mailbox")
+        if purpose == "dmarc" and await mail_repo.get_dmarc_account(
+            company_id=int(purpose_company_id), exclude_account_id=account_id
+        ):
+            raise ValueError("The selected company already has a DMARC reports mailbox")
         updates["import_purpose"] = purpose
     updated = await mail_repo.update_account(account_id, **updates)
     if not updated:
@@ -1492,6 +1491,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             message_id=msg_id,
                             internet_message_id=internet_msg_id,
                             received_at=received_at or datetime.now(timezone.utc),
+                            company_id=int(account["company_id"]),
                         )
                         await _record_message(
                             account_id=int(account_id), uid=msg_id,
@@ -2092,6 +2092,7 @@ def _graph_dmarc_recipient(graph_message: Mapping[str, Any]) -> str:
 async def _import_graph_dmarc_message(
     *, access_token: str, upn: str, graph_message: Mapping[str, Any],
     message_id: str, internet_message_id: str, received_at: datetime,
+    company_id: int,
 ) -> int:
     """Persist all report attachments from a dedicated M365 mailbox."""
     settings = get_settings()
@@ -2107,14 +2108,14 @@ async def _import_graph_dmarc_message(
     )
     if len(files) > limits.attachments:
         raise dmarc_service.DmarcInputError("Attachment count exceeds limit")
-    recipient = _graph_dmarc_recipient(graph_message)
     metadata = json.dumps({"source": "m365_graph", "graph_message_id": message_id})
     if not files:
         # Preserve an admin-visible import for a delivery with no report file.
         files = [("missing-attachment.xml", b"")]
     for filename, payload in files:
         await dmarc_service.ingest_attachment(
-            recipient=recipient,
+            recipient=_graph_dmarc_recipient(graph_message),
+            company_id=company_id,
             message_id=internet_message_id or message_id,
             filename=filename,
             payload=payload,

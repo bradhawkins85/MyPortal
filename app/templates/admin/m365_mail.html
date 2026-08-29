@@ -33,21 +33,21 @@
         </div>
         <label class="form-field">
           <span class="form-label">Import purpose</span>
-          <select name="importPurpose" class="form-input">
+          <select name="importPurpose" class="form-input" data-import-purpose>
             <option value="support_ticket" {% if not is_editing or editing_account.import_purpose == 'support_ticket' %}selected{% endif %}>Support tickets</option>
             <option value="dmarc" {% if is_editing and editing_account.import_purpose == 'dmarc' %}selected{% endif %}>DMARC aggregate and forensic reports</option>
           </select>
-          <span class="form-help">The DMARC mailbox imports RUA aggregate and RUF forensic report attachments and never creates support tickets. Only one mailbox can have this purpose.</span>
+          <span class="form-help">A DMARC mailbox imports RUA and RUF attachments directly into its selected company and never creates support tickets. Each company can use its own mailbox on its own domain.</span>
         </label>
         <label class="form-field">
           <span class="form-label">Company</span>
-          <select name="companyId" class="form-input">
+          <select name="companyId" class="form-input" data-company-select>
             <option value="">— None —</option>
             {% for company in companies %}
               <option value="{{ company.id }}" {% if is_editing and company.id == editing_account.company_id %}selected{% endif %}>{{ company.name }}</option>
             {% endfor %}
           </select>
-          <span class="form-help">Optional. When not set, the ticket company and contact are resolved from the sender's email domain.</span>
+          <span class="form-help" data-company-help>Optional for support tickets. Required for DMARC so every imported report is allocated to this company.</span>
         </label>
         <label class="form-field">
           <span class="form-label">User principal name (email)</span>
@@ -581,5 +581,26 @@
       });
     </script>
   {% endif %}
+
+  <script>
+    (function () {
+      const purpose = document.querySelector('[data-import-purpose]');
+      const company = document.querySelector('[data-company-select]');
+      const help = document.querySelector('[data-company-help]');
+      if (!purpose || !company) return;
+      function updateCompanyRequirement() {
+        const dmarc = purpose.value === 'dmarc';
+        company.required = dmarc;
+        company.setAttribute('aria-required', dmarc ? 'true' : 'false');
+        if (help) {
+          help.textContent = dmarc
+            ? 'Required. Reports imported from this mailbox are allocated directly to the selected company.'
+            : "Optional. When not set, the ticket company and contact are resolved from the sender's email domain.";
+        }
+      }
+      purpose.addEventListener('change', updateCompanyRequirement);
+      updateCompanyRequirement();
+    }());
+  </script>
 
 {% endblock %}
