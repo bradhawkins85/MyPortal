@@ -19,6 +19,7 @@ from decimal import Decimal
 from typing import Any
 
 from app.core.database import db
+from app.services.shop import get_product_price
 
 
 VOICE_MONITOR_CATEGORY = "Voice Monitor"
@@ -153,7 +154,10 @@ async def list_voice_monitor_products() -> list[dict[str, Any]]:
     """Return active shop products that belong to the Voice Monitor subscription category."""
     rows = await db.fetch_all(
         """
-        SELECT p.id, p.name, p.price, p.commitment_type, p.description
+        SELECT p.id, p.name, p.price, p.commitment_type, p.payment_frequency,
+               p.price_monthly_commitment, p.price_annual_monthly_payment,
+               p.price_annual_annual_payment, p.voice_monitor_calls_per_day,
+               p.description
         FROM shop_products p
         JOIN subscription_categories c ON c.id = p.subscription_category_id
         WHERE c.name = %s AND p.archived = 0
@@ -165,7 +169,8 @@ async def list_voice_monitor_products() -> list[dict[str, Any]]:
         {
             "id": int(row["id"]),
             "name": row["name"],
-            "price": Decimal(str(row["price"])),
+            "price": get_product_price(row),
+            "calls_per_day": int(row.get("voice_monitor_calls_per_day") or 1),
             "term_days": _term_days_from_commitment(row.get("commitment_type")),
             "description": row.get("description"),
         }
@@ -185,7 +190,10 @@ async def provision_subscription(
     """
     row = await db.fetch_one(
         """
-        SELECT p.id, p.price, p.commitment_type, c.id AS category_id
+        SELECT p.id, p.price, p.commitment_type, p.payment_frequency,
+               p.price_monthly_commitment, p.price_annual_monthly_payment,
+               p.price_annual_annual_payment, p.voice_monitor_calls_per_day,
+               c.id AS category_id
         FROM shop_products p
         JOIN subscription_categories c ON c.id = p.subscription_category_id
         WHERE p.id = %s AND c.name = %s AND p.archived = 0
@@ -208,7 +216,7 @@ async def provision_subscription(
         start_date=today,
         end_date=end_date,
         quantity=1,
-        unit_price=Decimal(str(row["price"])),
+        unit_price=get_product_price(row),
         status="active",
         auto_renew=False,
         created_by=created_by,
