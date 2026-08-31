@@ -27,7 +27,9 @@
   {% for item in items %}<tr><td><strong>{{ item.description if kind == 'risk' else item.name }}</strong></td><td><form method="post" action="/bcp/library/{{ kind }}/{{ item.id }}/assign"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><select name="company_ids" multiple required>{% for company in companies %}<option value="{{ company.id }}">{{ company.name }}</option>{% endfor %}</select> <button class="btn btn-sm btn-primary">Assign selected</button></form></td><td><form method="post" action="/bcp/library/{{ kind }}/{{ item.id }}/delete"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><button class="btn btn-sm btn-danger" onclick="return confirm('Delete this global assessment? Existing customer copies will remain.')">Delete</button></form></td></tr>{% else %}<tr><td colspan="3">No global assessments yet.</td></tr>{% endfor %}
   </tbody></table></div></div></section>{% endfor %}
 </div>
+{% endblock %}
 
+{% block modals %}
 {# Create Global Risk modal #}
 <dialog id="create-risk-modal" class="modal" aria-labelledby="create-risk-modal-title">
   <div class="modal__inner">
@@ -148,11 +150,19 @@
     </div>
   </div>
 </dialog>
+{% endblock %}
 
+{% block scripts %}
 <script>
 document.addEventListener('DOMContentLoaded', () => {
   const riskModal = document.getElementById('create-risk-modal');
   const biaModal  = document.getElementById('create-bia-modal');
+
+  function resetOnClose(modal) {
+    modal?.addEventListener('close', () => modal.querySelector('form')?.reset());
+  }
+  resetOnClose(riskModal);
+  resetOnClose(biaModal);
 
   document.getElementById('open-create-risk-btn')?.addEventListener('click', () => riskModal?.showModal());
   document.getElementById('create-risk-modal-close')?.addEventListener('click', () => riskModal?.close());
