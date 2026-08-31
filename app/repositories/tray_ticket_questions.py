@@ -220,7 +220,11 @@ async def replace_conditions_for_question(
     conditions: list[dict[str, Any]],
 ) -> None:
     """Replace all conditions for ``question_id`` atomically."""
-    p = _ph()
+    delete_sql = (
+        "DELETE FROM tray_ticket_question_conditions WHERE question_id = ?"
+        if db.is_sqlite()
+        else "DELETE FROM tray_ticket_question_conditions WHERE question_id = %s"
+    )
     insert_sql = (
         "INSERT INTO tray_ticket_question_conditions "
         "(question_id, parent_question_id, operator, expected_value) "
@@ -232,7 +236,7 @@ async def replace_conditions_for_question(
         "VALUES (%s, %s, %s, %s)"
     )
     await db.execute(
-        "DELETE FROM tray_ticket_question_conditions WHERE question_id = " + p,
+        delete_sql,
         (question_id,),
     )
     for cond in conditions:
