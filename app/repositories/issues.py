@@ -95,30 +95,33 @@ async def list_issues_with_assignments(
     company_ids: Sequence[int] | None = None,
 ) -> list[IssueRecord]:
     where: list[str] = []
-    params: list[Any] = []
+    assignment_join: list[str] = ["ics.issue_id = i.id"]
+    join_params: list[Any] = []
+    where_params: list[Any] = []
 
     if search:
         like = f"%{search.lower()}%"
         where.append("(LOWER(i.name) LIKE %s OR LOWER(i.description) LIKE %s)")
-        params.extend([like, like])
+        where_params.extend([like, like])
 
     if status:
         where.append("ics.status = %s")
-        params.append(status)
+        where_params.append(status)
 
     if company_id is not None:
         where.append("ics.company_id = %s")
-        params.append(company_id)
+        where_params.append(company_id)
     elif company_ids is not None:
         allowed_company_ids = _normalise_company_ids(company_ids) or []
         if allowed_company_ids:
             placeholders = ", ".join(["%s"] * len(allowed_company_ids))
-            where.append(f"ics.company_id IN ({placeholders})")
-            params.extend(allowed_company_ids)
+            assignment_join.append(f"ics.company_id IN ({placeholders})")
+            join_params.extend(allowed_company_ids)
         else:
-            where.append("1 = 0")
+            assignment_join.append("1 = 0")
 
     where_clause = f"WHERE {' AND '.join(where)}" if where else ""
+    assignment_join_clause = " AND ".join(assignment_join)
 
     rows = await db.fetch_all(
         f"""
@@ -140,12 +143,12 @@ async def list_issues_with_assignments(
             c.id AS company_id,
             c.name AS company_name
         FROM issue_definitions AS i
-        LEFT JOIN issue_company_statuses AS ics ON ics.issue_id = i.id
+        LEFT JOIN issue_company_statuses AS ics ON {assignment_join_clause}
         LEFT JOIN companies AS c ON c.id = ics.company_id
         {where_clause}
         ORDER BY i.name ASC, c.name ASC
         """,
-        tuple(params),
+        tuple(join_params + where_params),
     )
 
     grouped: dict[int, IssueRecord] = {}
@@ -174,24 +177,6 @@ async def list_issues_with_assignments(
         )
         if assignment and assignment.get("company_id") is not None:
             assignments[issue_id].append(assignment)
-
-    if not rows and not grouped and not where:
-        # When no assignments exist at all ensure standalone issues are returned
-        standalone_rows = await db.fetch_all(
-            """
-            SELECT id AS issue_id, name, slug, description, created_by, updated_by, created_at_utc, updated_at_utc
-            FROM issue_definitions
-            ORDER BY name ASC
-            """
-        )
-        for row in standalone_rows:
-            issue = _normalise_issue(row)
-            if not issue:
-                continue
-            issue_id = issue.get("issue_id")
-            if issue_id is None:
-                continue
-            grouped.setdefault(issue_id, issue)
 
     result: list[IssueRecord] = []
     for issue_id, issue in sorted(grouped.items(), key=lambda item: (item[1].get("name") or "").lower()):
