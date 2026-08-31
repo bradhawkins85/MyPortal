@@ -57,6 +57,15 @@ def test_primary_fields_and_supporting_ui_are_present() -> None:
 
 
 def test_editor_is_responsive_sticky_and_protects_unsaved_work() -> None:
+    desktop_modal_rule = CSS[CSS.index("/* Task-oriented product/subscription editor */"):]
+    desktop_modal_rule = desktop_modal_rule[:desktop_modal_rule.index(".subscription-edit-form")]
+    mobile_modal_rule = CSS[CSS.index("@media (max-width: 760px)"):]
+    mobile_modal_rule = mobile_modal_rule[:mobile_modal_rule.index(".product-basic-grid")]
+
+    for modal_id in ("create-product-modal", "create-subscription-modal"):
+        assert f"#{modal_id} .modal__content" in desktop_modal_rule
+        assert f"#{modal_id} .modal__content" in mobile_modal_rule
+
     assert "width: min(96vw, 1360px)" in CSS
     assert "position: sticky; bottom: 0" in CSS
     assert "@media (max-width: 760px)" in CSS
