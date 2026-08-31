@@ -290,9 +290,8 @@ async def create_answers(
 
 
 async def list_answers_for_ticket(ticket_id: int) -> list[dict[str, Any]]:
-    p = _ph()
     rows = await db.fetch_all(
-        f"SELECT * FROM tray_ticket_answers WHERE ticket_id = {p} ORDER BY id ASC",
-        (ticket_id,),
+        "SELECT * FROM tray_ticket_answers WHERE ticket_id = :ticket_id ORDER BY id ASC",
+        {"ticket_id": ticket_id},
     )
     return [dict(r) for r in rows]
