@@ -312,6 +312,10 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
             continue
 
         billable_tickets_found += 1
+        # Internal notes can carry technician time in exactly the same way as
+        # public replies.  Always load both visibilities here so billable time
+        # is not silently omitted merely because the customer cannot see the
+        # underlying note.
         all_replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
         unbilled_replies = [r for r in all_replies if r.get("id") in unbilled_reply_ids]
 
