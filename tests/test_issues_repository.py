@@ -88,6 +88,49 @@ async def test_list_issues_with_assignments_groups_records(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_list_issues_keeps_unassigned_issues_when_company_scope_is_applied(monkeypatch):
+    rows = [
+        {
+            "issue_id": 6,
+            "name": "Unassigned issue",
+            "description": None,
+            "assignment_id": None,
+            "company_id": None,
+            "company_name": None,
+            "status": None,
+            "assignment_created_at_utc": None,
+            "assignment_updated_at_utc": None,
+            "assignment_updated_by": None,
+        }
+    ]
+    dummy_db = _ListIssuesDB(rows)
+    monkeypatch.setattr(issues_repo, "db", dummy_db)
+
+    result = await issues_repo.list_issues_with_assignments(company_ids=[3, 4])
+
+    assert len(result) == 1
+    assert result[0]["issue_id"] == 6
+    assert result[0]["assignments"] == []
+    sql, params = dummy_db.fetch_calls[0]
+    assert "LEFT JOIN issue_company_statuses AS ics ON ics.issue_id = i.id AND ics.company_id IN (%s, %s)" in sql
+    assert "WHERE ics.company_id" not in sql
+    assert params == (3, 4)
+
+
+@pytest.mark.anyio
+async def test_list_issues_orders_join_parameters_before_filter_parameters(monkeypatch):
+    dummy_db = _ListIssuesDB([])
+    monkeypatch.setattr(issues_repo, "db", dummy_db)
+
+    await issues_repo.list_issues_with_assignments(
+        company_ids=[3, 4], search="Outage", status="new"
+    )
+
+    _, params = dummy_db.fetch_calls[0]
+    assert params == (3, 4, "%outage%", "%outage%", "new")
+
+
+@pytest.mark.anyio
 async def test_create_issue_returns_fallback_when_fetch_missing(monkeypatch):
     dummy_db = _CreateIssueDB(row=None)
     monkeypatch.setattr(issues_repo, "db", dummy_db)
