@@ -11,6 +11,7 @@ from app.repositories import shop as shop_repo
 from app.repositories import subscriptions as subscriptions_repo
 from app.services import shop as shop_service
 from app.services import subscription_pricing
+from app.services import subscription_billing
 
 
 async def create_subscriptions_from_order(
@@ -85,11 +86,25 @@ async def create_subscriptions_from_order(
             # Fallback for legacy products without commitment_type
             term_days = 365
         
-        # Calculate subscription dates
-        start_date = today
+        # Adopt manually maintained recurring items by SKU. Their already billed
+        # quantity and schedule are retained; only the newly ordered quantity is
+        # added, so existing licences are never invoiced again.
+        existing_recurring = await subscription_billing.find_existing_item(company_id, product)
+        adopted_quantity = 0
+        if existing_recurring:
+            adopted_quantity = subscription_billing.recurring_quantity(existing_recurring)
+
+        # Calculate subscription dates, preserving an adopted item's term.
+        start_date = (
+            existing_recurring.get("start_date")
+            if existing_recurring and existing_recurring.get("start_date")
+            else today
+        )
         end_date = subscription_pricing.calculate_full_term_end_date(
             start_date, term_days
         )
+        if existing_recurring and existing_recurring.get("end_date"):
+            end_date = existing_recurring["end_date"]
         
         # Create the subscription
         try:
@@ -99,12 +114,17 @@ async def create_subscriptions_from_order(
                 subscription_category_id=subscription_category_id,
                 start_date=start_date,
                 end_date=end_date,
-                quantity=quantity,
+                quantity=adopted_quantity + quantity,
                 unit_price=unit_price,
                 prorated_price=None,  # Full term in v1
                 status="active",
                 auto_renew=True,
                 created_by=user_id,
+            )
+            await subscription_billing.sync_subscription_recurring_item(
+                subscription,
+                existing=existing_recurring,
+                preserve_existing_schedule=existing_recurring is not None,
             )
             
             created_subscriptions.append(subscription)
