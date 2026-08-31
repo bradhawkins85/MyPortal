@@ -506,6 +506,25 @@ async def list_all_products(include_archived: bool = False) -> list[dict[str, An
     return await list_products(filters)
 
 
+async def list_product_description_refresh_ids(
+    *, include_archived: bool = False
+) -> list[int]:
+    """Return every catalogue product eligible for description refreshing.
+
+    Subscription plans share the product table, but their descriptions are managed
+    separately and must not be rewritten by the catalogue bulk action.
+    """
+
+    conditions = ["subscription_category_id IS NULL"]
+    if not include_archived:
+        conditions.append("archived = 0")
+    rows = await db.fetch_all(
+        "SELECT id FROM shop_products "
+        f"WHERE {' AND '.join(conditions)} ORDER BY id ASC"
+    )
+    return [int(row["id"]) for row in rows]
+
+
 async def list_product_features(product_id: int) -> list[dict[str, Any]]:
     features = await list_features_for_products([product_id])
     return features.get(int(product_id), [])

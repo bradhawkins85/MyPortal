@@ -79,14 +79,16 @@ async def test_bulk_refresh_shop_product_descriptions_refreshes_active_products(
         app_main, "_require_super_admin_page", _fake_require_super_admin_page
     )
 
-    captured_filters = []
+    captured_include_archived = []
 
-    async def _list_products_summary(filters):
-        captured_filters.append(filters)
-        return [{"id": 1}, {"id": 2}]
+    async def _list_product_description_refresh_ids(*, include_archived):
+        captured_include_archived.append(include_archived)
+        return [1, 2]
 
     monkeypatch.setattr(
-        product_descriptions.shop_repo, "list_products_summary", _list_products_summary
+        product_descriptions.shop_repo,
+        "list_product_description_refresh_ids",
+        _list_product_description_refresh_ids,
     )
     refresh = AsyncMock(
         side_effect=[
@@ -115,7 +117,7 @@ async def test_bulk_refresh_shop_product_descriptions_refreshes_active_products(
 
     assert response.status_code == 303
     assert response.headers["location"].startswith("/admin/shop")
-    assert captured_filters[0].include_archived is False
+    assert captured_include_archived == [False]
     assert refresh.await_count == 2
     assert [call.args[0] for call in refresh.await_args_list] == [1, 2]
     audit_record.assert_awaited_once()
