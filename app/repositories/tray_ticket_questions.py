@@ -268,12 +268,16 @@ async def create_answers(
     the form).
     """
     p = _ph()
+    placeholders = f"{p},{p},{p},{p},{p},{p}"
+    sql = (
+        "INSERT INTO tray_ticket_answers "
+        "(ticket_id, question_id, question_label_snapshot, is_required_snapshot, answer_value, created_at) "
+        f"VALUES ({placeholders})"
+    )
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     for ans in answers:
         await db.execute(
-            "INSERT INTO tray_ticket_answers "
-            "(ticket_id, question_id, question_label_snapshot, is_required_snapshot, answer_value, created_at) "
-            "VALUES (" + ",".join([p] * 6) + ")",
+            sql,
             (
                 ticket_id,
                 ans.get("question_id"),
@@ -288,7 +292,7 @@ async def create_answers(
 async def list_answers_for_ticket(ticket_id: int) -> list[dict[str, Any]]:
     p = _ph()
     rows = await db.fetch_all(
-        "SELECT * FROM tray_ticket_answers WHERE ticket_id = " + p + " ORDER BY id ASC",
+        f"SELECT * FROM tray_ticket_answers WHERE ticket_id = {p} ORDER BY id ASC",
         (ticket_id,),
     )
     return [dict(r) for r in rows]
