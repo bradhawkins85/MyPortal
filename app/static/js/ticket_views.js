@@ -808,6 +808,9 @@
             this.filterState.statuses = view.filters.status || [];
             this.filterState.priorities = view.filters.priority || [];
             this.filterState.columnFilters = view.filters.column_filters || {};
+            if (Array.isArray(view.filters.visible_columns) && window.ticketColumns) {
+              window.ticketColumns.applyVisibleColumns(view.filters.visible_columns);
+            }
             // Update UI checkboxes
             this.updateFilterUI();
           }
@@ -864,7 +867,9 @@
       this.container.querySelectorAll('[data-status-filter]').forEach(checkbox => {
         checkbox.checked = this.filterState.statuses.includes(checkbox.value);
       });
-      Object.keys(this.filterState.columnFilters).forEach((column) => this.populateColumnFilterPanel(column));
+      this.container.querySelectorAll('[data-column-filter-menu]').forEach((menu) => {
+        this.populateColumnFilterPanel(menu.dataset.columnFilterMenu);
+      });
       this.updateActiveFilterHeaders();
     }
 
@@ -888,6 +893,7 @@
           status: this.filterState.statuses,
           priority: this.filterState.priorities,
           column_filters: this.filterState.columnFilters,
+          visible_columns: window.ticketColumns ? window.ticketColumns.getVisibleColumns() : null,
         },
         grouping_field: this.groupingField,
         grouping_fields: this.groupingFields,

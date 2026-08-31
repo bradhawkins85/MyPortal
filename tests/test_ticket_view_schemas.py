@@ -10,11 +10,15 @@ def test_ticket_view_filters_valid():
     filters = TicketViewFilters(
         status=["open", "in_progress"],
         priority=["high", "urgent"],
-        search="test query"
+        search="test query",
+        column_filters={"company": {"type": "text", "operator": "contains", "value": "Acme"}},
+        visible_columns=["subject", "status", "company", "sla-status", "assigned-to"],
     )
     assert filters.status == ["open", "in_progress"]
     assert filters.priority == ["high", "urgent"]
     assert filters.search == "test query"
+    assert filters.column_filters["company"]["value"] == "Acme"
+    assert filters.visible_columns == ["subject", "status", "company", "sla-status", "assigned-to"]
 
 
 def test_ticket_view_filters_optional():
