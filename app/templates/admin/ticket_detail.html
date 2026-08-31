@@ -93,6 +93,51 @@
         </div>
       </header>
 
+      {% set state = namespace(latest_customer=none, latest_technician=none, owner='Unassigned') %}
+      {% for reply in ticket_replies %}
+        {% if state.latest_customer is none and not reply.is_internal and not reply.author_id %}
+          {% set state.latest_customer = reply %}
+        {% elif state.latest_technician is none and reply.author_id %}
+          {% set state.latest_technician = reply %}
+        {% endif %}
+      {% endfor %}
+      {% for user in ticket_user_options %}
+        {% if user.id == ticket.assigned_user_id %}{% set state.owner = user.email %}{% endif %}
+      {% endfor %}
+      <section class="ticket-current-state" aria-labelledby="ticket-current-state-title">
+        <header class="ticket-current-state__header">
+          <div>
+            <p class="ticket-current-state__eyebrow">Action centre</p>
+            <h2 id="ticket-current-state-title">Current state</h2>
+          </div>
+          <span class="status status--{{ 'warning' if ticket_status in ['waiting_customer', 'pending'] else 'neutral' }}">{{ ticket_status_label }}</span>
+        </header>
+        <div class="ticket-current-state__grid">
+          <div class="ticket-current-state__item ticket-current-state__item--request">
+            <span>Latest customer request</span>
+            <div class="rich-text-viewer">
+              {{ (state.latest_customer.body if state.latest_customer else (description_html or '')) | safe }}
+            </div>
+          </div>
+          <div class="ticket-current-state__item">
+            <span>Outstanding blocker</span>
+            <strong>{{ 'Waiting for customer response' if ticket_status in ['waiting_customer', 'pending'] else 'No blocker recorded' }}</strong>
+          </div>
+          <div class="ticket-current-state__item">
+            <span>Owner</span>
+            <strong>{{ state.owner }}</strong>
+          </div>
+          <div class="ticket-current-state__item">
+            <span>Promised action</span>
+            <strong>{{ 'Follow up on the latest request' if state.latest_customer else 'Review and confirm the next action' }}</strong>
+          </div>
+          <div class="ticket-current-state__item">
+            <span>Next response due</span>
+            <strong>{% if ticket_sla.resolution_due_at %}<span data-utc="{{ ticket_sla.resolution_due_at.isoformat() }}">{{ ticket_sla.resolution_due_at.isoformat() }}</span>{% else %}Not scheduled{% endif %}</strong>
+          </div>
+        </div>
+      </section>
+
       <div class="management__body management__body--columns management__body--ticket-detail management__body--ticket-detail-admin">
         <div class="management__column management__column--details">
           <details class="card card--panel card-collapsible">
@@ -1188,7 +1233,7 @@
         </div>
 
         <div class="management__column management__column--activity">
-          <details class="card card--panel card-collapsible" open>
+          <details class="card card--panel card-collapsible ticket-reply-composer" open>
             <summary class="card__header card__header--collapsible">
               <div class="card__title-group">
                 <h2 class="card__title">Add a reply</h2>
@@ -1204,6 +1249,11 @@
               {% if csrf_token %}
                 <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
               {% endif %}
+              <div class="ticket-reply-context" aria-label="Reply delivery details">
+                <span><strong>To:</strong> {{ ticket_requester_lookup_name or 'Requester' }}</span>
+                <span><strong>Channel:</strong> Email</span>
+                <span data-reply-visibility><strong>Visibility:</strong> Public reply</span>
+              </div>
               <div class="form-field">
                 <span class="form-label" id="ticket-reply-label">Reply</span>
                 <div
@@ -1331,6 +1381,14 @@
                 />
                 <p class="form-help">You can upload multiple files. Server limit: 50MB per file.</p>
               </div>
+              <div class="form-field form-field--checkbox">
+                <label class="checkbox">
+                  <input type="checkbox" name="isInternal" value="true" />
+                  <span>Write an internal note instead</span>
+                </label>
+              </div>
+              <details class="ticket-reply-worklog">
+                <summary>Time &amp; billing <span>Optional worklog details</span></summary>
               <div class="form-field">
                 <label class="form-label" for="ticket-reply-minutes">Minutes spent</label>
                 <input
@@ -1360,12 +1418,6 @@
               <div class="form-grid form-grid--auto">
                 <div class="form-field form-field--checkbox">
                   <label class="checkbox">
-                    <input type="checkbox" name="isInternal" value="true" />
-                    <span>Mark as internal note</span>
-                  </label>
-                </div>
-                <div class="form-field form-field--checkbox">
-                  <label class="checkbox">
                     <input
                       type="checkbox"
                       name="isBillable"
@@ -1376,6 +1428,7 @@
                   </label>
                 </div>
               </div>
+              </details>
               <div class="form-actions ticket-reply-actions">
                 <div class="ticket-page-clock" data-ticket-page-clock data-ticket-id="{{ ticket.id }}" aria-live="polite">
                   <span class="ticket-page-clock__label">Time open</span>
@@ -1383,7 +1436,7 @@
                 </div>
                 <div class="ticket-reply-submit" data-ticket-reply-submit>
                   <input type="hidden" name="replyStatus" value="" data-ticket-reply-status-input />
-                  <button type="submit" class="button button--primary ticket-reply-submit__primary">Post reply</button>
+                  <button type="submit" class="button button--primary ticket-reply-submit__primary" data-reply-submit-label>Send reply</button>
                   <details class="ticket-reply-submit__status-menu">
                     <summary class="button button--primary ticket-reply-submit__toggle" aria-label="Post reply with a selected ticket status">
                       <span aria-hidden="true">▾</span>
@@ -1413,20 +1466,29 @@
             <header class="card__header ticket-split-toolbar">
               <div>
                 <h2 class="card__title">Conversation history</h2>
-                <p class="card__subtitle">Select conversation items to split them into a new ticket.</p>
+                <p class="card__subtitle">Showing the latest meaningful updates first.</p>
               </div>
               <div class="ticket-split-toolbar__actions">
+                <button type="button" class="button button--secondary button--small" data-ticket-select-mode aria-pressed="false">Select messages</button>
                 <button type="button" class="button button--secondary button--small" data-show-split-hidden hidden>Show hidden split history</button>
-                <button type="button" class="button button--primary button--small" data-split-selected disabled>Split selected</button>
+                <button type="button" class="button button--primary button--small" data-split-selected disabled hidden>Split selected</button>
               </div>
             </header>
             <div class="card__body">
+              <div class="ticket-history-filters" aria-label="Filter conversation">
+                <button type="button" class="is-active" data-history-filter="all" aria-pressed="true">All</button>
+                <button type="button" data-history-filter="customer" aria-pressed="false">Customer</button>
+                <button type="button" data-history-filter="technician" aria-pressed="false">Technician</button>
+                <button type="button" data-history-filter="internal" aria-pressed="false">Internal</button>
+                <button type="button" data-history-filter="automation" aria-pressed="false">Automation</button>
+              </div>
               {% if ticket_replies or ticket_call_recordings %}
                 <div class="timeline timeline--conversation" data-ticket-timeline data-ticket-id="{{ ticket.id }}">
                   {% for reply in ticket_replies %}
                     <article
-                      class="timeline__event{% if reply.is_split_hidden %} timeline__event--split-hidden{% endif %}"
+                      class="timeline__event timeline__event--{{ 'internal' if reply.is_internal else ('automation' if reply.external_reference and not reply.author_id else ('technician' if reply.author_id else 'customer')) }}{% if reply.is_split_hidden %} timeline__event--split-hidden{% endif %}"
                       data-ticket-reply
+                      data-message-kind="{{ 'internal' if reply.is_internal else ('automation' if reply.external_reference and not reply.author_id else ('technician' if reply.author_id else 'customer')) }}"
                       {% if reply.is_split_hidden %}data-split-hidden="true" hidden{% endif %}
                   data-reply-id="{{ reply.id }}"
                   data-reply-minutes="{{ reply.minutes_spent if reply.minutes_spent is not none else '' }}"
@@ -1445,6 +1507,7 @@
                           </span>
                           <span class="timeline__action">
                             {{ reply.author.email if reply.author else (reply.author_display_name or reply.author_email or 'System') }}
+                            <span class="timeline__direction">{{ 'Internal note' if reply.is_internal else ('Automation' if reply.external_reference and not reply.author_id else ('Technician reply' if reply.author_id else 'Customer message')) }}</span>
                             {% if reply.is_internal %}
                               <span class="badge badge--muted">Internal</span>
                             {% endif %}
@@ -1550,11 +1613,12 @@
                           hidden
                           aria-expanded="false"
                         >
-                          Show more
+                          Expand message
                         </button>
                       </div>
                     </article>
                   {% endfor %}
+                  <button type="button" class="button button--secondary ticket-history-load" data-history-load-earlier hidden>Load earlier messages</button>
                   
                   {% for recording in ticket_call_recordings %}
                     <article
