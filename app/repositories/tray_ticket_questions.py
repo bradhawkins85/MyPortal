@@ -179,9 +179,13 @@ async def update_question(
 
 
 async def delete_question(question_id: int) -> None:
-    p = _ph()
+    sql = (
+        "DELETE FROM tray_ticket_questions WHERE id = ?"
+        if db.is_sqlite()
+        else "DELETE FROM tray_ticket_questions WHERE id = %s"
+    )
     await db.execute(
-        "DELETE FROM tray_ticket_questions WHERE id = " + p,
+        sql,
         (question_id,),
     )
 
