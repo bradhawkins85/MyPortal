@@ -323,8 +323,26 @@
     title.className = 'modal__title product-details-modal__title';
     title.textContent = product.name || 'Product details';
     summary.appendChild(title);
-    summary.appendChild(createDetailRow('Price', formatPrice(product.price)));
-    summary.appendChild(createDetailRow('Availability', describeStockStatus(product.stock)));
+    const subscriptionPrices = Array.isArray(product.subscription_price_options)
+      ? product.subscription_price_options
+      : [];
+    if (subscriptionPrices.length > 0) {
+      const pricingTitle = document.createElement('strong');
+      pricingTitle.textContent = subscriptionPrices.length === 1 ? 'Price' : 'Pricing options';
+      summary.appendChild(pricingTitle);
+      const pricingList = document.createElement('ul');
+      pricingList.className = 'shop-subscription-prices';
+      subscriptionPrices.forEach((option) => {
+        const item = document.createElement('li');
+        item.textContent = `${option.label}: ${formatPrice(option.price)}${option.suffix}`;
+        pricingList.appendChild(item);
+      });
+      summary.appendChild(pricingList);
+      summary.appendChild(createDetailRow('Availability', 'Available'));
+    } else {
+      summary.appendChild(createDetailRow('Price', formatPrice(product.price)));
+      summary.appendChild(createDetailRow('Availability', describeStockStatus(product.stock)));
+    }
     const actions = document.createElement('div');
     actions.className = 'product-details-modal__actions';
     if (product.product_link) {
