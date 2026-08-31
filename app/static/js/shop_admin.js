@@ -56,15 +56,19 @@
     if (!modal) {
       return;
     }
-    modal.addEventListener('click', (event) => {
-      if (event.target === modal || event.target.hasAttribute('data-modal-close')) {
-        closeModal(modal);
+    const requestClose = () => {
+      const form = modal.querySelector('#product-edit-form');
+      if (form && form.dataset.dirty === 'true' && !window.confirm('Discard your unsaved changes?')) {
+        return;
       }
+      if (form) form.dataset.dirty = 'false';
+      closeModal(modal);
+    };
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal || event.target.closest('[data-modal-close]')) requestClose();
     });
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && !modal.hidden) {
-        closeModal(modal);
-      }
+      if (event.key === 'Escape' && !modal.hidden) requestClose();
     });
   }
 
@@ -91,8 +95,7 @@
           field.style.display = 'none';
           const input = field.querySelector('input');
           if (input) {
-            input.value = '';
-            // Remove required attribute when hidden
+            // Remove required attribute when hidden without clearing entered values.
             if (input.hasAttribute('required')) {
               input.removeAttribute('required');
               input.dataset.wasRequired = 'true';
@@ -102,7 +105,11 @@
 
         // Show subscription fields
         subscriptionFields.forEach((field) => {
-          field.style.display = '';
+          const voiceInput = field.querySelector('[name="voice_monitor_calls_per_day"]');
+          const selectedText = subscriptionCategorySelect.options[subscriptionCategorySelect.selectedIndex]?.text || '';
+          const visible = !voiceInput || /voice\s*monitor/i.test(selectedText);
+          field.style.display = visible ? '' : 'none';
+          if (voiceInput) voiceInput.disabled = !visible;
         });
       } else {
         // Show standard price fields
@@ -115,13 +122,11 @@
           }
         });
 
-        // Hide subscription fields and clear their values
+        // Hide conditional fields without clearing them, so expanding again preserves input.
         subscriptionFields.forEach((field) => {
           field.style.display = 'none';
-          const input = field.querySelector('input, select');
-          if (input) {
-            input.value = '';
-          }
+          const voiceInput = field.querySelector('[name="voice_monitor_calls_per_day"]');
+          if (voiceInput) voiceInput.disabled = true;
         });
       }
     };
@@ -701,6 +706,10 @@
     const visibilityLoadingStatus = document.getElementById('product-visibility-loading-status');
     const featuredLoadingStatus = document.getElementById('product-featured-loading-status');
     const imageFilenameDisplay = document.getElementById('edit-product-image-filename');
+    const imagePreview = document.getElementById('edit-product-image-preview');
+    const availabilitySelect = document.getElementById('edit-product-availability');
+    const removeImageOption = document.getElementById('edit-product-remove-image-option');
+    const removeImageInput = document.getElementById('edit-product-remove-image');
     const editLoadingStatus = document.getElementById('edit-product-loading-status');
     const editIdField = document.getElementById('edit-product-id');
     const featuresTable = document.getElementById('edit-product-features-table');
@@ -1095,7 +1104,7 @@
         editForm.querySelector('#edit-product-price').value = product.price != null ? product.price : '';
         editForm.querySelector('#edit-product-vip').value = product.vip_price != null ? product.vip_price : '';
         editForm.querySelector('#edit-product-stock').value = product.stock != null ? product.stock : '';
-        const stockLabel = editForm.querySelector('label[for="edit-product-stock"]');
+        const stockLabel = editForm.querySelector('#edit-product-stock-label');
         const stockHelp = editForm.querySelector('#edit-product-stock-help');
         const isSubscription = product.subscription_category_id != null;
         const activeEditModal = isSubscription ? subscriptionEditModal : editModal;
@@ -1118,10 +1127,25 @@
           invoiceDescriptionInput.disabled = !isSubscription;
           invoiceDescriptionInput.value = isSubscription ? (product.invoice_description || '') : '';
         }
-        if (stockLabel) stockLabel.textContent = isSubscription ? 'Availability' : 'Stock quantity';
-        if (stockHelp) stockHelp.textContent = isSubscription ? 'Use 1 for available or 0 for unavailable.' : 'The number of physical units available.';
+        if (stockLabel) {
+          stockLabel.textContent = isSubscription ? 'Availability' : 'Stock quantity';
+          stockLabel.htmlFor = isSubscription ? 'edit-product-availability' : 'edit-product-stock';
+        }
+        const submitButton = editForm.querySelector('#edit-product-submit');
+        if (submitButton) submitButton.textContent = isSubscription ? 'Save subscription' : 'Save product';
+        if (stockHelp) stockHelp.textContent = 'The number of physical units available.';
         const stockInput = editForm.querySelector('#edit-product-stock');
-        if (stockInput) stockInput.max = isSubscription ? '1' : '';
+        if (stockInput) {
+          stockInput.hidden = isSubscription;
+          stockInput.disabled = isSubscription;
+          stockInput.max = '';
+        }
+        if (availabilitySelect) {
+          availabilitySelect.hidden = !isSubscription;
+          availabilitySelect.disabled = !isSubscription;
+          availabilitySelect.name = isSubscription ? 'stock' : '';
+          availabilitySelect.value = Number(product.stock) > 0 ? '1' : '0';
+        }
         const categorySelect = editForm.querySelector('#edit-product-category');
         if (categorySelect) {
           categorySelect.value = product.category_id || '';
@@ -1163,15 +1187,23 @@
           await editUpsellManager.initFromIds(product.upsell_product_ids || [], id);
         }
         currentEditProductId = id;
+        if (removeImageInput) removeImageInput.checked = false;
+        if (removeImageOption) removeImageOption.hidden = !product.image_url;
         if (imageFilenameDisplay) {
           if (product.image_url) {
             const filename = product.image_url.split('/').pop();
             imageFilenameDisplay.textContent = `Current image: ${filename}`;
             imageFilenameDisplay.hidden = false;
+            if (imagePreview) {
+              imagePreview.querySelector('img').src = product.image_url;
+              imagePreview.hidden = false;
+            }
           } else {
             imageFilenameDisplay.hidden = true;
+            if (imagePreview) imagePreview.hidden = true;
           }
         }
+        editForm.dataset.dirty = 'false';
         renderFeatureRows(product.features || []);
         setLoadingStatus(editLoadingStatus, '');
         setFormLoadingState(editForm, false);
@@ -1316,8 +1348,26 @@
       });
     }
 
+    const imageInput = document.getElementById('edit-product-image');
+    if (imageInput && imagePreview) {
+      imageInput.addEventListener('change', () => {
+        const file = imageInput.files && imageInput.files[0];
+        if (!file) return;
+        if (removeImageInput) removeImageInput.checked = false;
+        imagePreview.querySelector('img').src = URL.createObjectURL(file);
+        imagePreview.hidden = false;
+        if (imageFilenameDisplay) {
+          imageFilenameDisplay.textContent = `Replacement image: ${file.name}`;
+          imageFilenameDisplay.hidden = false;
+        }
+      });
+    }
+
     if (editForm) {
+      editForm.addEventListener('input', () => { editForm.dataset.dirty = 'true'; });
+      editForm.addEventListener('change', () => { editForm.dataset.dirty = 'true'; });
       editForm.addEventListener('submit', () => {
+        editForm.dataset.dirty = 'false';
         refreshFeatureInput();
         // Append current URL params to form action so the server can redirect back to the same filtered view
         try {

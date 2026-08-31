@@ -2314,6 +2314,7 @@ async def admin_update_shop_product(
     vip_price: str | None = Form(default=None),
     category_id: str | None = Form(default=None),
     image: UploadFile | None = File(default=None),
+    remove_image: bool = Form(default=False),
     features: str | None = Form(default=None),
     cross_sell_product_ids: list[int] | None = Form(default=None),
     upsell_product_ids: list[int] | None = Form(default=None),
@@ -2520,7 +2521,7 @@ async def admin_update_shop_product(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Price change date must be in YYYY-MM-DD format")
 
     previous_image_url = product.get("image_url")
-    image_url = previous_image_url
+    image_url = None if remove_image else previous_image_url
     stored_path: Path | None = None
     if image is not None:
         if image.filename:
@@ -2632,7 +2633,7 @@ async def admin_update_shop_product(
                 detail="Unable to update product features",
             ) from exc
 
-    if stored_path and previous_image_url and previous_image_url != updated.get("image_url"):
+    if previous_image_url and previous_image_url != updated.get("image_url"):
         try:
             _main().delete_stored_file(previous_image_url, _main()._private_uploads_path)
         except HTTPException as exc:

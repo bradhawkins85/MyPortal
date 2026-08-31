@@ -395,206 +395,56 @@
     <h2 class="modal__title" id="edit-product-title">Edit product</h2>
     <p class="modal__subtitle" id="edit-product-subtitle">Update this catalogue product.</p>
     <p class="form-helper" id="edit-product-loading-status" hidden>Loading product details…</p>
-    <form id="product-edit-form" method="post" enctype="multipart/form-data" class="form-grid">
-      {% if csrf_token %}
-      <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-      {% endif %}
+    <form id="product-edit-form" method="post" enctype="multipart/form-data" class="subscription-edit-form">
+      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
       <input type="hidden" id="edit-product-id" />
 
-      <h3 class="form-section-title form-field--wide">Product details</h3>
-      <div class="form-field">
-        <label class="form-label" for="edit-product-name">Name</label>
-        <input class="form-input" id="edit-product-name" name="name" required />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-product-sku">SKU</label>
-        <input class="form-input" id="edit-product-sku" name="sku" required />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-product-vendor">Vendor SKU</label>
-        <input class="form-input" id="edit-product-vendor" name="vendor_sku" required />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-product-category">Category</label>
-        <select class="form-input" id="edit-product-category" name="category_id">
-          <option value="">No category</option>
-          {% for category in categories %}
-            <option value="{{ category.id }}">{% if category.parent_id %}└─ {% endif %}{{ category.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <!-- Core product details continue here -->
-      <div class="form-field" data-field-type="standard-price">
-        <label class="form-label" for="edit-product-price">Price</label>
-        <input class="form-input" id="edit-product-price" name="price" type="number" step="0.01" required />
-      </div>
-      <div class="form-field" data-field-type="standard-price">
-        <label class="form-label" for="edit-product-vip">VIP price</label>
-        <input class="form-input" id="edit-product-vip" name="vip_price" type="number" step="0.01" />
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-product-stock">Stock quantity</label>
-        <input class="form-input" id="edit-product-stock" name="stock" type="number" min="0" step="1" required />
-        <p class="form-helper" id="edit-product-stock-help">The number of physical units available.</p>
-      </div>
-      <div class="form-field">
-        <label class="form-label" for="edit-product-image">Image</label>
-        <input class="form-input" id="edit-product-image" name="image" type="file" accept="image/*" />
-        <p class="form-helper" id="edit-product-image-filename" hidden></p>
-      </div>
-
-      <!-- Row 3: Description -->
-      <div class="form-field form-field--wide">
-        <div class="form-label-row">
-          <label class="form-label" for="edit-product-description">Description</label>
-          <button type="button" class="button button--ghost button--small" id="edit-description-expand">Expand editor</button>
+      <section class="subscription-form-section" aria-labelledby="edit-product-details-heading">
+        <h3 id="edit-product-details-heading" class="form-section-title">Product details</h3>
+        <div class="subscription-form-grid subscription-form-grid--identity">
+          <div class="form-field form-field--name"><label class="form-label" for="edit-product-name">Name <span aria-hidden="true">*</span></label><input class="form-input" id="edit-product-name" name="name" required aria-required="true" /></div>
+          <div class="form-field"><label class="form-label" for="edit-product-category">Product category <span class="field-optional">(optional)</span></label><select class="form-input" id="edit-product-category" name="category_id"><option value="">No category</option>{% for category in categories %}<option value="{{ category.id }}">{% if category.parent_id %}└─ {% endif %}{{ category.name }}</option>{% endfor %}</select></div>
+          <div class="form-field"><label class="form-label" id="edit-product-stock-label" for="edit-product-availability">Availability</label><select class="form-input" id="edit-product-availability" disabled><option value="1">Available</option><option value="0">Unavailable</option></select><input class="form-input" id="edit-product-stock" name="stock" type="number" min="0" step="1" required aria-describedby="edit-product-stock-help" /><p class="form-helper" id="edit-product-stock-help">The number of physical units available.</p></div>
+          <div class="form-field"><label class="form-label" for="edit-product-sku">SKU <span aria-hidden="true">*</span></label><input class="form-input" id="edit-product-sku" name="sku" required aria-required="true" /></div>
+          <div class="form-field"><label class="form-label" for="edit-product-vendor">Vendor SKU <span aria-hidden="true">*</span></label><input class="form-input" id="edit-product-vendor" name="vendor_sku" required aria-required="true" /></div>
+          <div class="form-field"><label class="form-label" for="edit-product-link">Product link <span class="field-optional">(optional)</span></label><input class="form-input" id="edit-product-link" name="product_link" type="url" placeholder="https://example.com/product" aria-describedby="edit-product-link-help" /><p class="form-helper" id="edit-product-link-help">Vendor or product page URL shown on PDF quotes.</p></div>
         </div>
-        <textarea class="form-input form-input--textarea" id="edit-product-description" name="description"></textarea>
-      </div>
-      <div class="form-field form-field--wide" id="edit-product-invoice-description-field" hidden>
-        <label class="form-label" for="edit-product-invoice-description">Invoice description</label>
-        <textarea class="form-input form-input--textarea" id="edit-product-invoice-description" name="invoice_description" rows="3"></textarea>
-        <p class="form-helper">Description used when this subscription is added to an invoice. Defaults to the product name.</p>
-      </div>
+      </section>
 
-      <!-- Row 4: Cross-sell and Up-sell products -->
-      <div class="form-field form-field--wide">
-        <label class="form-label">Cross-sell products</label>
-        <div class="form-quick-add">
-          <input
-            type="text"
-            class="form-input form-input--inline"
-            id="edit-product-cross-sell-sku"
-            placeholder="Enter product SKU"
-            autocomplete="off"
-            data-sku-lookup="true"
-          />
-          <button type="button" class="button button--small button--secondary" data-sku-add="cross-sell" data-form="edit">Add</button>
+      <section class="subscription-form-section" aria-labelledby="edit-pricing-heading">
+        <h3 id="edit-pricing-heading" class="form-section-title">Pricing and subscription rules</h3>
+        <div class="subscription-form-grid">
+          <div class="form-field"><label class="form-label" for="edit-product-subscription-category">Subscription category <span class="field-optional">(optional)</span></label><select class="form-input" id="edit-product-subscription-category" name="subscription_category_id" aria-describedby="edit-sub-category-help"><option value="">No subscription category</option>{% for sub_category in subscription_categories %}<option value="{{ sub_category.id }}">{{ sub_category.name }}</option>{% endfor %}</select><p class="form-helper" id="edit-sub-category-help">Subscriptions in the same category can co-term together.</p></div>
+          <div class="form-field" data-field-type="subscription"><label class="form-label" for="edit-product-voice-monitor-calls-per-day">Voice Monitor calls per day</label><div class="input-with-unit"><input class="form-input" id="edit-product-voice-monitor-calls-per-day" name="voice_monitor_calls_per_day" type="number" min="1" max="24" step="1" aria-describedby="edit-voice-help" /><span>calls/day</span></div><p class="form-helper" id="edit-voice-help">Required only for Voice Monitor plans.</p></div>
         </div>
-        <p id="edit-cross-sell-error" class="form-help form-help--error" hidden></p>
-        <ul class="tag-list" id="edit-product-cross-sell-list" aria-label="Cross-sell products"></ul>
-        <p class="form-helper">Add SKUs for complementary products to suggest at checkout.</p>
-      </div>
-      <div class="form-field form-field--wide">
-        <label class="form-label">Up-sell products</label>
-        <div class="form-quick-add">
-          <input
-            type="text"
-            class="form-input form-input--inline"
-            id="edit-product-upsell-sku"
-            placeholder="Enter product SKU"
-            autocomplete="off"
-            data-sku-lookup="true"
-          />
-          <button type="button" class="button button--small button--secondary" data-sku-add="upsell" data-form="edit">Add</button>
+        <div class="subscription-form-grid subscription-price-grid">
+          <div class="form-field" data-field-type="standard-price"><label class="form-label" for="edit-product-price">Price</label><div class="input-with-unit"><span>$</span><input class="form-input" id="edit-product-price" name="price" type="number" step="0.01" required /></div></div>
+          <div class="form-field" data-field-type="standard-price"><label class="form-label" for="edit-product-vip">VIP price <span class="field-optional">(optional)</span></label><div class="input-with-unit"><span>$</span><input class="form-input" id="edit-product-vip" name="vip_price" type="number" step="0.01" /></div></div>
+          <div class="form-field" data-field-type="subscription"><label class="form-label" for="edit-product-price-monthly-commitment">Monthly commitment — monthly payment</label><div class="input-with-unit"><span>$</span><input class="form-input" id="edit-product-price-monthly-commitment" name="price_monthly_commitment" type="number" step="0.01" /><span>/month</span></div></div>
+          <div class="form-field" data-field-type="subscription"><label class="form-label" for="edit-product-price-annual-monthly">Annual commitment — monthly payment</label><div class="input-with-unit"><span>$</span><input class="form-input" id="edit-product-price-annual-monthly" name="price_annual_monthly_payment" type="number" step="0.01" /><span>/month</span></div></div>
+          <div class="form-field" data-field-type="subscription"><label class="form-label" for="edit-product-price-annual-annual">Annual commitment — annual payment</label><div class="input-with-unit"><span>$</span><input class="form-input" id="edit-product-price-annual-annual" name="price_annual_annual_payment" type="number" step="0.01" /><span>/year</span></div></div>
         </div>
-        <p id="edit-upsell-error" class="form-help form-help--error" hidden></p>
-        <ul class="tag-list" id="edit-product-upsell-list" aria-label="Up-sell products"></ul>
-        <p class="form-helper">Add SKUs for upgrade options to suggest at checkout.</p>
-      </div>
+        <details class="form-collapsible"><summary class="form-collapsible__summary"><span class="form-collapsible__title">Schedule a future price change</span><span class="form-collapsible__icon" aria-hidden="true"></span></summary><div class="form-collapsible__content subscription-form-grid">
+          <div class="form-field"><label class="form-label" for="edit-product-scheduled-price">New price</label><div class="input-with-unit"><span>$</span><input class="form-input" id="edit-product-scheduled-price" name="scheduled_price" type="number" step="0.01" /></div></div>
+          <div class="form-field"><label class="form-label" for="edit-product-scheduled-vip-price">New VIP price <span class="field-optional">(optional)</span></label><div class="input-with-unit"><span>$</span><input class="form-input" id="edit-product-scheduled-vip-price" name="scheduled_vip_price" type="number" step="0.01" /></div></div>
+          <div class="form-field"><label class="form-label" for="edit-product-scheduled-buy-price">New buy price</label><div class="input-with-unit"><span>$</span><input class="form-input" id="edit-product-scheduled-buy-price" name="scheduled_buy_price" type="number" step="0.01" /></div></div>
+          <div class="form-field"><label class="form-label" for="edit-product-price-change-date">Effective date</label><input class="form-input" id="edit-product-price-change-date" name="price_change_date" type="date" /></div>
+        </div></details>
+      </section>
 
-      <h3 class="form-section-title form-field--wide">Pricing and availability</h3>
-      <div class="form-field">
-        <label class="form-label" for="edit-product-subscription-category">Subscription category</label>
-        <select class="form-input" id="edit-product-subscription-category" name="subscription_category_id">
-          <option value="">No subscription category</option>
-          {% for sub_category in subscription_categories %}
-            <option value="{{ sub_category.id }}">{{ sub_category.name }}</option>
-          {% endfor %}
-        </select>
-        <p class="form-helper">Products in the same subscription category can co-term together.</p>
-      </div>
-      <div class="form-field" data-field-type="subscription">
-        <label class="form-label" for="edit-product-price-monthly-commitment">Price - Monthly commitment</label>
-        <input class="form-input" id="edit-product-price-monthly-commitment" name="price_monthly_commitment" type="number" step="0.01" />
-        <p class="form-helper">Price for monthly commitment with monthly payment.</p>
-      </div>
-      <div class="form-field" data-field-type="subscription">
-        <label class="form-label" for="edit-product-price-annual-monthly">Price - Annual commitment (monthly payment)</label>
-        <input class="form-input" id="edit-product-price-annual-monthly" name="price_annual_monthly_payment" type="number" step="0.01" />
-        <p class="form-helper">Price for annual commitment with monthly payment (per month).</p>
-      </div>
-      <div class="form-field" data-field-type="subscription">
-        <label class="form-label" for="edit-product-price-annual-annual">Price - Annual commitment (annual payment)</label>
-        <input class="form-input" id="edit-product-price-annual-annual" name="price_annual_annual_payment" type="number" step="0.01" />
-        <p class="form-helper">Price for annual commitment with annual payment (full year).</p>
-      </div>
-      <div class="form-field" data-field-type="subscription">
-        <label class="form-label" for="edit-product-voice-monitor-calls-per-day">Voice Monitor calls per day</label>
-        <input class="form-input" id="edit-product-voice-monitor-calls-per-day" name="voice_monitor_calls_per_day" type="number" min="1" max="24" step="1" />
-        <p class="form-helper">Required for Voice Monitor plans. This controls the monitored number's daily check frequency.</p>
-      </div>
-      <details class="form-field form-field--wide form-collapsible">
-        <summary class="form-collapsible__summary">
-          <span class="form-collapsible__title">Schedule price change</span>
-          <span class="form-collapsible__icon" aria-hidden="true"></span>
-        </summary>
-        <div class="form-collapsible__content">
-          <div class="form-grid">
-            <div class="form-field">
-              <label class="form-label" for="edit-product-scheduled-price">New price</label>
-              <input class="form-input" id="edit-product-scheduled-price" name="scheduled_price" type="number" step="0.01" />
-              <p class="form-helper">The new standard price to apply on the change date.</p>
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="edit-product-scheduled-vip-price">New VIP price</label>
-              <input class="form-input" id="edit-product-scheduled-vip-price" name="scheduled_vip_price" type="number" step="0.01" />
-              <p class="form-helper">The new VIP price to apply on the change date (optional).</p>
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="edit-product-scheduled-buy-price">New buy price</label>
-              <input class="form-input" id="edit-product-scheduled-buy-price" name="scheduled_buy_price" type="number" step="0.01" />
-              <p class="form-helper">The new buy price to apply on the change date.</p>
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="edit-product-price-change-date">Effective date</label>
-              <input class="form-input" id="edit-product-price-change-date" name="price_change_date" type="date" />
-              <p class="form-helper">Date when the price change will take effect. Customers will be notified beforehand.</p>
-            </div>
-          </div>
-        </div>
-      </details>
+      <section class="subscription-form-section" aria-labelledby="edit-content-heading"><h3 id="edit-content-heading" class="form-section-title">Product content</h3><div class="description-grid">
+        <div class="form-field description-field"><div class="form-label-row"><label class="form-label" for="edit-product-description">Description <span class="field-optional">(optional)</span></label><button type="button" class="button button--ghost button--small" id="edit-description-expand">Expand editor</button></div><textarea class="form-input form-input--textarea" id="edit-product-description" name="description" rows="10"></textarea></div>
+        <div class="form-field" id="edit-product-invoice-description-field" hidden><label class="form-label" for="edit-product-invoice-description">Invoice description <span class="field-optional">(optional)</span></label><textarea class="form-input form-input--textarea" id="edit-product-invoice-description" name="invoice_description" rows="5" aria-describedby="edit-invoice-help"></textarea><p class="form-helper" id="edit-invoice-help">Used on invoices. When blank, the product name is used.</p></div>
+      </div><div class="form-field image-upload-field"><label class="form-label" for="edit-product-image">Image <span class="field-optional">(optional)</span></label><div id="edit-product-image-preview" class="image-upload-preview" hidden><img alt="Current product image preview" /></div><input class="form-input" id="edit-product-image" name="image" type="file" accept="image/*" aria-describedby="edit-product-image-filename" /><p class="form-helper" id="edit-product-image-filename" hidden></p><label class="form-checkbox" id="edit-product-remove-image-option" hidden><input type="checkbox" name="remove_image" value="true" id="edit-product-remove-image" /> Remove current image</label></div></section>
 
-      <!-- Features section (keeping at the end) -->
-      <div class="form-field form-field--wide">
-        <label class="form-label" for="edit-product-features-filter">Features</label>
-        <div class="form-actions form-actions--inline">
-          <input
-            type="search"
-            class="form-input"
-            id="edit-product-features-filter"
-            placeholder="Filter features"
-            aria-label="Filter features"
-            data-table-filter="edit-product-features-table"
-          />
-          <button type="button" class="button" id="add-product-feature">Add feature</button>
-        </div>
-        <div class="table-wrapper">
-          <table class="table" id="edit-product-features-table" data-table data-table-id="edit-product-features">
-            <thead>
-              <tr>
-                <th scope="col" data-sort="string">Feature</th>
-                <th scope="col" data-sort="string">Value</th>
-                <th scope="col" class="table__actions">Actions</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-        <input type="hidden" name="features" id="edit-product-features-data" value="[]" />
-      </div>
+      <section class="subscription-form-section" aria-labelledby="edit-related-heading"><h3 id="edit-related-heading" class="form-section-title">Related products</h3><div class="related-products-grid">
+        <div class="related-product-group"><label class="form-label" for="edit-product-cross-sell-sku">Cross-sell products</label><p class="form-helper" id="edit-cross-help">Complementary products to suggest at checkout.</p><div class="form-quick-add"><input type="text" class="form-input form-input--inline" id="edit-product-cross-sell-sku" placeholder="Search by SKU" autocomplete="off" data-sku-lookup="true" aria-describedby="edit-cross-help edit-cross-sell-error" /><button type="button" class="button button--small button--secondary" data-sku-add="cross-sell" data-form="edit">Add</button></div><p id="edit-cross-sell-error" class="form-help form-help--error" hidden></p><ul class="tag-list" id="edit-product-cross-sell-list" aria-label="Added cross-sell products"></ul></div>
+        <div class="related-product-group"><label class="form-label" for="edit-product-upsell-sku">Up-sell products</label><p class="form-helper" id="edit-upsell-help">Upgrade options to suggest at checkout.</p><div class="form-quick-add"><input type="text" class="form-input form-input--inline" id="edit-product-upsell-sku" placeholder="Search by SKU" autocomplete="off" data-sku-lookup="true" aria-describedby="edit-upsell-help edit-upsell-error" /><button type="button" class="button button--small button--secondary" data-sku-add="upsell" data-form="edit">Add</button></div><p id="edit-upsell-error" class="form-help form-help--error" hidden></p><ul class="tag-list" id="edit-product-upsell-list" aria-label="Added up-sell products"></ul></div>
+      </div></section>
 
-      <div class="form-field form-field--wide">
-        <label class="form-label" for="edit-product-link">Product Link</label>
-        <input class="form-input" id="edit-product-link" name="product_link" type="url" placeholder="https://example.com/product" />
-        <p class="form-helper">Optional vendor or product page URL shown on PDF quotes.</p>
-      </div>
+      <section class="subscription-form-section" aria-labelledby="edit-features-heading"><h3 id="edit-features-heading" class="form-section-title">Features</h3><div class="features-toolbar"><label class="visually-hidden" for="edit-product-features-filter">Filter features</label><input type="search" class="form-input" id="edit-product-features-filter" placeholder="Filter features" data-table-filter="edit-product-features-table" /><button type="button" class="button" id="add-product-feature">Add feature</button></div><div class="table-wrapper"><table class="table" id="edit-product-features-table" data-table data-table-id="edit-product-features"><thead><tr><th scope="col" data-sort="string">Feature</th><th scope="col" data-sort="string">Value</th><th scope="col" class="table__actions">Actions</th></tr></thead><tbody></tbody></table></div><input type="hidden" name="features" id="edit-product-features-data" value="[]" /></section>
 
-      <div class="form-actions">
-        <button type="submit" class="button">Save product</button>
-        <button type="button" class="button button--ghost" data-modal-close>Cancel</button>
-      </div>
+      <div class="subscription-form-actions"><button type="button" class="button button--ghost" data-modal-close>Cancel</button><button type="submit" class="button" id="edit-product-submit">Save subscription</button></div>
     </form>
   </div>
 </div>
