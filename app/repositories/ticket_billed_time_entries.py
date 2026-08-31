@@ -34,7 +34,7 @@ async def create_billed_time_entry(
 
 
 async def get_unbilled_reply_ids(ticket_id: int) -> set[int]:
-    """Get reply IDs for a ticket that have not been billed yet."""
+    """Get unbilled billable reply IDs, including internal ticket notes."""
     rows = await db.fetch_all(
         """
         SELECT tr.id
