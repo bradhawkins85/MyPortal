@@ -515,13 +515,19 @@ async def list_product_description_refresh_ids(
     separately and must not be rewritten by the catalogue bulk action.
     """
 
-    conditions = ["subscription_category_id IS NULL"]
-    if not include_archived:
-        conditions.append("archived = 0")
-    rows = await db.fetch_all(
-        "SELECT id FROM shop_products "
-        f"WHERE {' AND '.join(conditions)} ORDER BY id ASC"
-    )
+    if include_archived:
+        sql = (
+            "SELECT id FROM shop_products "
+            "WHERE subscription_category_id IS NULL "
+            "ORDER BY id ASC"
+        )
+    else:
+        sql = (
+            "SELECT id FROM shop_products "
+            "WHERE subscription_category_id IS NULL AND archived = 0 "
+            "ORDER BY id ASC"
+        )
+    rows = await db.fetch_all(sql)
     return [int(row["id"]) for row in rows]
 
 
