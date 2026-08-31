@@ -21,6 +21,30 @@ def test_editor_sections_follow_completion_order() -> None:
     assert positions == sorted(positions)
 
 
+def test_add_product_form_uses_the_product_editor_layout() -> None:
+    create_form = TEMPLATE[
+        TEMPLATE.index('id="create-product-modal"'):TEMPLATE.index('id="create-subscription-modal"')
+    ]
+
+    assert 'class="subscription-edit-form"' in create_form
+    assert 'class="product-basic-grid"' in create_form
+    assert 'class="product-content-grid"' in create_form
+    assert 'class="product-pricing-grid"' in create_form
+    assert 'class="related-products-grid"' in create_form
+    assert 'class="table features-table"' in create_form
+    assert 'class="subscription-form-actions"' in create_form
+
+    headings = [
+        ">Basic details<",
+        ">Product content<",
+        ">Pricing and inventory<",
+        ">Product recommendations<",
+        ">Features<",
+    ]
+    positions = [create_form.index(heading) for heading in headings]
+    assert positions == sorted(positions)
+
+
 def test_primary_fields_and_supporting_ui_are_present() -> None:
     assert 'class="form-field form-field--full"' in TEMPLATE
     assert 'class="product-content-grid"' in TEMPLATE

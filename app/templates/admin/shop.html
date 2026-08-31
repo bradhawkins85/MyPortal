@@ -292,46 +292,51 @@
   </section>
 </div>
 
-{% macro shared_create_fields(prefix) %}
-  <div class="form-field"><label class="form-label" for="{{ prefix }}-name">Name</label><input class="form-input" id="{{ prefix }}-name" name="name" required /></div>
-  <div class="form-field"><label class="form-label" for="{{ prefix }}-sku">SKU</label><input class="form-input" id="{{ prefix }}-sku" name="sku" required /></div>
-  <div class="form-field"><label class="form-label" for="{{ prefix }}-vendor-sku">Vendor SKU</label><input class="form-input" id="{{ prefix }}-vendor-sku" name="vendor_sku" required /></div>
-  <div class="form-field"><label class="form-label" for="{{ prefix }}-image">Image</label><input class="form-input" id="{{ prefix }}-image" name="image" type="file" accept="image/*" /></div>
-  <div class="form-field form-field--wide"><label class="form-label" for="{{ prefix }}-description">Description</label><textarea class="form-input" id="{{ prefix }}-description" name="description" rows="4"></textarea></div>
-  {% if prefix == 'create-subscription' %}
-    <div class="form-field form-field--wide"><label class="form-label" for="{{ prefix }}-invoice-description">Invoice description</label><textarea class="form-input" id="{{ prefix }}-invoice-description" name="invoice_description" rows="3"></textarea><p class="form-helper">Description used when this subscription is added to an invoice. Defaults to the product name.</p></div>
-  {% endif %}
-  <div class="form-field form-field--wide"><label class="form-label" for="{{ prefix }}-product-link">Product link</label><input class="form-input" id="{{ prefix }}-product-link" name="product_link" type="url" placeholder="https://example.com/product" /><p class="form-helper">Optional vendor or product page URL shown on PDF quotes.</p></div>
-  {% for relation, label, help in [('cross-sell', 'Cross-sell products', 'complementary products'), ('upsell', 'Up-sell products', 'upgrade options')] %}
-    <div class="form-field form-field--wide">
-      <label class="form-label" for="{{ prefix }}-{{ relation }}-sku">{{ label }}</label>
-      <div class="form-quick-add"><input class="form-input form-input--inline" id="{{ prefix }}-{{ relation }}-sku" type="text" placeholder="Enter product SKU" autocomplete="off" data-sku-lookup="true" /><button type="button" class="button button--small button--secondary" data-create-relation="{{ relation }}" data-prefix="{{ prefix }}">Add</button></div>
-      <p id="{{ prefix }}-{{ relation }}-error" class="form-help form-help--error" hidden></p>
-      <ul class="tag-list" id="{{ prefix }}-{{ relation }}-list" aria-label="{{ label }}"></ul>
-      <p class="form-helper">Add SKUs for {{ help }} to suggest at checkout.</p>
-    </div>
-  {% endfor %}
-  <div class="form-field form-field--wide" data-create-features="{{ prefix }}">
-    <label class="form-label">Features</label>
-    <button type="button" class="button button--small button--secondary" data-add-create-feature>Add feature</button>
-    <div class="table-wrapper"><table class="table"><thead><tr><th>Feature</th><th>Value</th><th class="table__actions">Actions</th></tr></thead><tbody><tr data-empty-feature><td colspan="3">No features added yet.</td></tr></tbody></table></div>
-    <input type="hidden" name="features" value="[]" data-create-features-data />
-  </div>
-{% endmacro %}
-
 <div class="modal" id="create-product-modal" role="dialog" aria-modal="true" aria-labelledby="create-product-title" hidden>
   <div class="modal__content" role="document">
     <button type="button" class="modal__close" data-modal-close><span class="visually-hidden">Close product form</span>&times;</button>
     <h2 class="modal__title" id="create-product-title">Add product</h2>
     <p class="modal__subtitle">Create a stocked catalogue product.</p>
-    <form action="/shop/admin/product" method="post" enctype="multipart/form-data" class="form-grid">
+    <form action="/shop/admin/product" method="post" enctype="multipart/form-data" class="subscription-edit-form">
       {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
-      {{ shared_create_fields('create-product') }}
-      <div class="form-field"><label class="form-label" for="create-product-category">Category</label><select class="form-input" id="create-product-category" name="category_id"><option value="">No category</option>{% for category in categories %}<option value="{{ category.id }}">{{ '└─ ' if category.parent_id else '' }}{{ category.name }}</option>{% endfor %}</select></div>
-      <div class="form-field"><label class="form-label" for="create-product-price">Price</label><input class="form-input" id="create-product-price" name="price" type="number" min="0" step="0.01" required /></div>
-      <div class="form-field"><label class="form-label" for="create-product-vip">VIP price</label><input class="form-input" id="create-product-vip" name="vip_price" type="number" min="0" step="0.01" /></div>
-      <div class="form-field"><label class="form-label" for="create-product-stock">Stock quantity</label><input class="form-input" id="create-product-stock" name="stock" type="number" min="0" step="1" value="0" required /></div>
-      <div class="form-actions"><button type="submit" class="button">Add product</button><button type="button" class="button button--ghost" data-modal-close>Cancel</button></div>
+
+      <section class="subscription-form-section" aria-labelledby="create-product-details-heading">
+        <h3 id="create-product-details-heading" class="form-section-title">Basic details</h3>
+        <div class="product-basic-grid">
+          <div class="form-field form-field--full"><label class="form-label" for="create-product-name">Name <span aria-hidden="true">*</span></label><input class="form-input" id="create-product-name" name="name" required aria-required="true" /></div>
+          <div class="form-field"><label class="form-label" for="create-product-category">Category <span class="field-optional">(optional)</span></label><select class="form-input" id="create-product-category" name="category_id"><option value="">No category</option>{% for category in categories %}<option value="{{ category.id }}">{{ '└─ ' if category.parent_id else '' }}{{ category.name }}</option>{% endfor %}</select></div>
+          <div class="form-field"><label class="form-label" for="create-product-sku">SKU <span aria-hidden="true">*</span></label><input class="form-input" id="create-product-sku" name="sku" required aria-required="true" /></div>
+          <div class="form-field"><label class="form-label" for="create-product-vendor-sku">Vendor SKU <span aria-hidden="true">*</span></label><input class="form-input" id="create-product-vendor-sku" name="vendor_sku" required aria-required="true" /></div>
+          <div class="form-field form-field--link"><label class="form-label" for="create-product-product-link">Product link <span class="field-optional">(optional)</span></label><input class="form-input" id="create-product-product-link" name="product_link" type="url" placeholder="https://example.com/product" aria-describedby="create-product-link-help" /><p class="form-helper" id="create-product-link-help">Vendor or product page URL shown on PDF quotes.</p></div>
+        </div>
+      </section>
+
+      <section class="subscription-form-section" aria-labelledby="create-product-content-heading">
+        <h3 id="create-product-content-heading" class="form-section-title">Product content</h3>
+        <div class="product-content-grid">
+          <div class="product-content-copy"><div class="form-field description-field"><label class="form-label" for="create-product-description">Description <span class="field-optional">(optional)</span></label><textarea class="form-input form-input--textarea" id="create-product-description" name="description" rows="10"></textarea></div></div>
+          <div class="form-field image-upload-field"><label class="form-label" for="create-product-image">Product image <span class="field-optional">(optional)</span></label><div class="image-upload-actions"><input class="form-input" id="create-product-image" name="image" type="file" accept="image/*" /></div></div>
+        </div>
+      </section>
+
+      <section class="subscription-form-section" aria-labelledby="create-product-pricing-heading">
+        <h3 id="create-product-pricing-heading" class="form-section-title">Pricing and inventory</h3>
+        <div class="product-pricing-grid">
+          <div class="form-field"><label class="form-label" for="create-product-price">Price <span aria-hidden="true">*</span></label><div class="input-with-unit"><span aria-hidden="true">$</span><input class="form-input" id="create-product-price" name="price" type="number" min="0" step="0.01" required /></div></div>
+          <div class="form-field"><label class="form-label" for="create-product-vip">VIP price <span class="field-optional">(optional)</span></label><div class="input-with-unit"><span aria-hidden="true">$</span><input class="form-input" id="create-product-vip" name="vip_price" type="number" min="0" step="0.01" /></div></div>
+          <div class="form-field"><label class="form-label" for="create-product-stock">Stock quantity <span aria-hidden="true">*</span></label><input class="form-input" id="create-product-stock" name="stock" type="number" min="0" step="1" value="0" required aria-describedby="create-product-stock-help" /><p class="form-helper" id="create-product-stock-help">The number of physical units available.</p></div>
+        </div>
+      </section>
+
+      <details class="subscription-form-section form-section-collapsible" aria-labelledby="create-product-related-heading"><summary><h3 id="create-product-related-heading" class="form-section-title">Product recommendations</h3><span class="form-collapsible__icon" aria-hidden="true"></span></summary><div class="related-products-grid">
+        {% for relation, label, help in [('cross-sell', 'Cross-sell products', 'Complementary products suggested at checkout.'), ('upsell', 'Up-sell products', 'Upgrade options suggested at checkout.')] %}
+          <div class="related-product-group"><label class="form-label" for="create-product-{{ relation }}-sku">{{ label }}</label><div class="form-quick-add"><input class="form-input form-input--inline" id="create-product-{{ relation }}-sku" type="search" placeholder="Search products by name or SKU" autocomplete="off" data-sku-lookup="true" /><button type="button" class="button button--small button--secondary" data-create-relation="{{ relation }}" data-prefix="create-product">Add</button></div><p id="create-product-{{ relation }}-error" class="form-help form-help--error" hidden></p><ul class="tag-list" id="create-product-{{ relation }}-list" aria-label="{{ label }}"></ul><p class="form-helper">{{ help }}</p></div>
+        {% endfor %}
+      </div></details>
+
+      <details class="subscription-form-section form-section-collapsible" aria-labelledby="create-product-features-heading"><summary><h3 id="create-product-features-heading" class="form-section-title">Features</h3><span class="form-collapsible__icon" aria-hidden="true"></span></summary><div data-create-features="create-product"><div class="features-toolbar"><span></span><button type="button" class="button" data-add-create-feature>Add feature</button></div><div class="table-wrapper"><table class="table features-table"><thead><tr><th>Feature</th><th>Value</th><th class="table__actions">Actions</th></tr></thead><tbody><tr data-empty-feature><td colspan="3">No features added yet.</td></tr></tbody></table></div><input type="hidden" name="features" value="[]" data-create-features-data /></div></details>
+
+      <div class="subscription-form-actions"><button type="button" class="button button--ghost" data-modal-close>Cancel</button><button type="submit" class="button">Add product</button></div>
     </form>
   </div>
 </div>
