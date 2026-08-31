@@ -336,6 +336,8 @@ def test_column_filters_are_saved_and_active_headers_are_highlighted():
 
     assert "column_filters: this.filterState.columnFilters" in js
     assert "view.filters.column_filters || {}" in js
+    assert "visible_columns: window.ticketColumns" in js
+    assert "window.ticketColumns.applyVisibleColumns(view.filters.visible_columns)" in js
     assert "ticket-column-filter--active" in css
     assert "ticket-status-filter--active" in css
 
@@ -348,6 +350,19 @@ def test_localStorage_storage_key_in_js():
     )
     js_content = js_path.read_text(encoding="utf-8")
     assert "portal.tickets.columns" in js_content
+
+
+def test_saved_views_can_read_and_apply_ticket_column_layouts():
+    """Column controls expose their current selection to the saved-view manager."""
+    js_path = (
+        Path(__file__).resolve().parent.parent
+        / "app" / "static" / "js" / "ticket_columns.js"
+    )
+    js_content = js_path.read_text(encoding="utf-8")
+
+    assert "window.ticketColumns" in js_content
+    assert "getVisibleColumns()" in js_content
+    assert "applyVisibleColumns(columns)" in js_content
 
 
 def test_subject_column_always_visible_in_js():
