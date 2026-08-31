@@ -1380,6 +1380,7 @@ async def create_product(
     price: Decimal,
     stock: int,
     description: str | None = None,
+    invoice_description: str | None = None,
     vip_price: Decimal | None = None,
     category_id: int | None = None,
     image_url: str | None = None,
@@ -1399,17 +1400,18 @@ async def create_product(
             await cursor.execute(
                 """
                 INSERT INTO shop_products
-                    (name, sku, vendor_sku, description, image_url, price, vip_price, stock,
+                    (name, sku, vendor_sku, description, invoice_description, image_url, price, vip_price, stock,
                      category_id, subscription_category_id, commitment_type, payment_frequency,
                      price_monthly_commitment, price_annual_monthly_payment, price_annual_annual_payment,
                      product_link, voice_monitor_calls_per_day)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     name,
                     sku,
                     vendor_sku,
                     description,
+                    invoice_description,
                     image_url,
                     price,
                     vip_price,
@@ -1778,6 +1780,7 @@ async def update_product(
     sku: str,
     vendor_sku: str,
     description: str | None,
+    invoice_description: str | None = None,
     price: Decimal,
     stock: int,
     vip_price: Decimal | None,
@@ -1808,6 +1811,7 @@ async def update_product(
                     sku = %s,
                     vendor_sku = %s,
                     description = %s,
+                    invoice_description = %s,
                     image_url = %s,
                     product_link = %s,
                     price = %s,
@@ -1837,6 +1841,7 @@ async def update_product(
                     sku,
                     vendor_sku,
                     description,
+                    invoice_description,
                     image_url,
                     product_link,
                     price,

@@ -2066,12 +2066,14 @@ async def admin_create_shop_product(
     sku: str = Form(...),
     vendor_sku: str = Form(...),
     description: str | None = Form(default=None),
+    invoice_description: str | None = Form(default=None),
     product_link: str | None = Form(default=None),
     price: str = Form(...),
     stock: str = Form(...),
     vip_price: str | None = Form(default=None),
     category_id: str | None = Form(default=None),
     image: UploadFile | None = File(default=None),
+    features: str | None = Form(default=None),
     cross_sell_product_ids: list[int] | None = Form(default=None),
     upsell_product_ids: list[int] | None = Form(default=None),
     subscription_category_id: str | None = Form(default=None),
@@ -2103,7 +2105,28 @@ async def admin_create_shop_product(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Vendor SKU cannot be empty")
 
     description_value = description.strip() if description and description.strip() else None
+    invoice_description_value = (
+        invoice_description.strip()
+        if isinstance(invoice_description, str) and invoice_description.strip()
+        else None
+    )
     product_link_value = product_link.strip() if product_link and product_link.strip() else None
+
+    feature_payload: list[dict[str, Any]] = []
+    if isinstance(features, str) and features:
+        try:
+            raw_features = json.loads(features)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid feature payload") from exc
+        if not isinstance(raw_features, list):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid feature payload")
+        for index, entry in enumerate(raw_features):
+            if not isinstance(entry, Mapping):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid feature payload")
+            name_value = str(entry.get("name") or "").strip()
+            if not name_value:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Feature name cannot be empty")
+            feature_payload.append({"name": name_value, "value": str(entry.get("value") or "").strip(), "position": index})
 
     if subscription_category_id and (price is None or not str(price).strip()):
         # The subscription-specific prices replace the standard product price.
@@ -2227,6 +2250,7 @@ async def admin_create_shop_product(
             sku=cleaned_sku,
             vendor_sku=cleaned_vendor_sku,
             description=description_value,
+            invoice_description=invoice_description_value,
             product_link=product_link_value,
             price=price_decimal,
             stock=stock_int,
@@ -2243,6 +2267,8 @@ async def admin_create_shop_product(
             price_annual_annual_payment=price_annual_annual,
             voice_monitor_calls_per_day=calls_per_day_value,
         )
+        if feature_payload:
+            await shop_repo.replace_product_features(int(product["id"]), feature_payload)
     except aiomysql.IntegrityError as exc:
         if stored_path:
             stored_path.unlink(missing_ok=True)
@@ -2281,6 +2307,7 @@ async def admin_update_shop_product(
     sku: str = Form(...),
     vendor_sku: str = Form(...),
     description: str | None = Form(default=None),
+    invoice_description: str | None = Form(default=None),
     product_link: str | None = Form(default=None),
     price: str = Form(...),
     stock: str = Form(...),
@@ -2329,6 +2356,11 @@ async def admin_update_shop_product(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Vendor SKU cannot be empty")
 
     description_value = description.strip() if description and description.strip() else None
+    invoice_description_value = (
+        invoice_description.strip()
+        if isinstance(invoice_description, str) and invoice_description.strip()
+        else None
+    )
     product_link_value = product_link.strip() if product_link and product_link.strip() else None
 
     feature_payload: list[dict[str, Any]] | None = None
@@ -2537,6 +2569,7 @@ async def admin_update_shop_product(
             sku=cleaned_sku,
             vendor_sku=cleaned_vendor_sku,
             description=description_value,
+            invoice_description=invoice_description_value,
             product_link=product_link_value,
             price=price_decimal,
             stock=stock_int,

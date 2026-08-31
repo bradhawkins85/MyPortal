@@ -298,6 +298,25 @@
   <div class="form-field"><label class="form-label" for="{{ prefix }}-vendor-sku">Vendor SKU</label><input class="form-input" id="{{ prefix }}-vendor-sku" name="vendor_sku" required /></div>
   <div class="form-field"><label class="form-label" for="{{ prefix }}-image">Image</label><input class="form-input" id="{{ prefix }}-image" name="image" type="file" accept="image/*" /></div>
   <div class="form-field form-field--wide"><label class="form-label" for="{{ prefix }}-description">Description</label><textarea class="form-input" id="{{ prefix }}-description" name="description" rows="4"></textarea></div>
+  {% if prefix == 'create-subscription' %}
+    <div class="form-field form-field--wide"><label class="form-label" for="{{ prefix }}-invoice-description">Invoice description</label><textarea class="form-input" id="{{ prefix }}-invoice-description" name="invoice_description" rows="3"></textarea><p class="form-helper">Description used when this subscription is added to an invoice. Defaults to the product name.</p></div>
+  {% endif %}
+  <div class="form-field form-field--wide"><label class="form-label" for="{{ prefix }}-product-link">Product link</label><input class="form-input" id="{{ prefix }}-product-link" name="product_link" type="url" placeholder="https://example.com/product" /><p class="form-helper">Optional vendor or product page URL shown on PDF quotes.</p></div>
+  {% for relation, label, help in [('cross-sell', 'Cross-sell products', 'complementary products'), ('upsell', 'Up-sell products', 'upgrade options')] %}
+    <div class="form-field form-field--wide">
+      <label class="form-label" for="{{ prefix }}-{{ relation }}-sku">{{ label }}</label>
+      <div class="form-quick-add"><input class="form-input form-input--inline" id="{{ prefix }}-{{ relation }}-sku" type="text" placeholder="Enter product SKU" autocomplete="off" data-sku-lookup="true" /><button type="button" class="button button--small button--secondary" data-create-relation="{{ relation }}" data-prefix="{{ prefix }}">Add</button></div>
+      <p id="{{ prefix }}-{{ relation }}-error" class="form-help form-help--error" hidden></p>
+      <ul class="tag-list" id="{{ prefix }}-{{ relation }}-list" aria-label="{{ label }}"></ul>
+      <p class="form-helper">Add SKUs for {{ help }} to suggest at checkout.</p>
+    </div>
+  {% endfor %}
+  <div class="form-field form-field--wide" data-create-features="{{ prefix }}">
+    <label class="form-label">Features</label>
+    <button type="button" class="button button--small button--secondary" data-add-create-feature>Add feature</button>
+    <div class="table-wrapper"><table class="table"><thead><tr><th>Feature</th><th>Value</th><th class="table__actions">Actions</th></tr></thead><tbody><tr data-empty-feature><td colspan="3">No features added yet.</td></tr></tbody></table></div>
+    <input type="hidden" name="features" value="[]" data-create-features-data />
+  </div>
 {% endmacro %}
 
 <div class="modal" id="create-product-modal" role="dialog" aria-modal="true" aria-labelledby="create-product-title" hidden>
@@ -367,13 +386,14 @@
   </div>
 </div>
 
-<div class="modal" id="product-edit-modal" role="dialog" aria-modal="true" hidden>
+<div class="modal" id="product-edit-modal" role="dialog" aria-modal="true" aria-labelledby="edit-product-title" hidden>
   <div class="modal__content" role="document">
     <button type="button" class="modal__close" data-modal-close>
       <span class="visually-hidden">Close product editor</span>
       &times;
     </button>
-    <h2 class="modal__title">Edit product</h2>
+    <h2 class="modal__title" id="edit-product-title">Edit product</h2>
+    <p class="modal__subtitle" id="edit-product-subtitle">Update this catalogue product.</p>
     <p class="form-helper" id="edit-product-loading-status" hidden>Loading product details…</p>
     <form id="product-edit-form" method="post" enctype="multipart/form-data" class="form-grid">
       {% if csrf_token %}
@@ -431,6 +451,11 @@
           <button type="button" class="button button--ghost button--small" id="edit-description-expand">Expand editor</button>
         </div>
         <textarea class="form-input form-input--textarea" id="edit-product-description" name="description"></textarea>
+      </div>
+      <div class="form-field form-field--wide" id="edit-product-invoice-description-field" hidden>
+        <label class="form-label" for="edit-product-invoice-description">Invoice description</label>
+        <textarea class="form-input form-input--textarea" id="edit-product-invoice-description" name="invoice_description" rows="3"></textarea>
+        <p class="form-helper">Description used when this subscription is added to an invoice. Defaults to the product name.</p>
       </div>
 
       <!-- Row 4: Cross-sell and Up-sell products -->
@@ -602,6 +627,9 @@
     </form>
   </div>
 </div>
+
+{# The editor content is moved into this dedicated shell for subscriptions. #}
+<div class="modal" id="subscription-edit-modal" role="dialog" aria-modal="true" aria-labelledby="edit-product-title" hidden></div>
 
 <div class="modal" id="product-visibility-modal" role="dialog" aria-modal="true" hidden>
   <div class="modal__content" role="document">
