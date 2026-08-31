@@ -32,12 +32,12 @@ class DefenderDetectionReport(BaseModel):
 
 class DefenderExclusionCreate(BaseModel):
     scope: Literal["global", "company", "device"]
-    exclusion_type: Literal["path", "process", "extension"]
+    exclusion_type: Literal["path", "process", "extension", "registry"]
     value: str = Field(min_length=1, max_length=1000)
     tray_device_id: int | None = Field(default=None, ge=1)
 
 class DefenderExclusionListItem(BaseModel):
-    exclusion_type: Literal["path", "process", "extension"]
+    exclusion_type: Literal["path", "process", "extension", "registry"]
     value: str = Field(min_length=1, max_length=1000)
 
 class DefenderExclusionListCreate(BaseModel):

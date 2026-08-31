@@ -45,7 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!confirm('Remove this Defender exclusion?')) return;
     try { await send(`/api/defender/exclusions/${button.dataset.deleteExclusion}`, { method: 'DELETE' }); location.reload(); } catch (error) { alert(error.message); }
   }));
-  const itemMarkup = '<div class="form-grid" data-exclusion-list-item><label>Type<select name="exclusion_type"><option value="path">Path</option><option value="process">Process</option><option value="extension">Extension</option></select></label><label>Value<input name="value" required maxlength="1000"></label><button class="button button--ghost" type="button" data-remove-list-item>Remove</button></div>';
+  const itemMarkup = '<div class="form-grid" data-exclusion-list-item><label>Type<select name="exclusion_type"><option value="path">Path</option><option value="process">Process</option><option value="extension">Extension</option><option value="registry">Registry path</option></select></label><label>Value<input name="value" required maxlength="1000"></label><button class="button button--ghost" type="button" data-remove-list-item>Remove</button></div>';
   document.querySelectorAll('[data-add-list-item]').forEach((button) => button.addEventListener('click', () => {
     button.closest('form').querySelector('[data-exclusion-list-items]').insertAdjacentHTML('beforeend', itemMarkup);
   }));

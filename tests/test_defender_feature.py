@@ -122,6 +122,15 @@ def test_device_exclusion_payload_requires_supported_type():
     assert payload.tray_device_id == 42
 
 
+def test_defender_exclusion_payload_supports_registry_paths():
+    payload = DefenderExclusionCreate(
+        scope="company", exclusion_type="registry", value=r"HKLM\Software\Contoso"
+    )
+
+    assert payload.exclusion_type == "registry"
+    assert payload.value == r"HKLM\Software\Contoso"
+
+
 def test_all_defender_tables_use_shared_filtering_and_sorting():
     template = Path("app/templates/defender/index.html").read_text()
     for table_name in ("devices", "exclusions", "detections"):
@@ -228,9 +237,10 @@ def test_defender_exclusion_list_payload_supports_reusable_types_and_companies()
         {"exclusion_type": "path", "value": r"C:\Trusted"},
         {"exclusion_type": "process", "value": "agent.exe"},
         {"exclusion_type": "extension", "value": ".cache"},
+        {"exclusion_type": "registry", "value": r"HKLM\Software\Contoso"},
     ], company_ids=[42, 84, 42])
     assert payload.name == "Standard apps"
-    assert [item.exclusion_type for item in payload.exclusions] == ["path", "process", "extension"]
+    assert [item.exclusion_type for item in payload.exclusions] == ["path", "process", "extension", "registry"]
     assert payload.company_ids == [42, 84]
 
 
