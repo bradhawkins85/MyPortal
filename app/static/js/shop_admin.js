@@ -445,6 +445,61 @@
       });
     });
 
+    // The compact product and subscription modals each have independent
+    // recommendation pickers, so selections never leak between forms.
+    document.querySelectorAll('[data-create-relation]').forEach((button) => {
+      const prefix = button.dataset.prefix;
+      const relation = button.dataset.createRelation;
+      const manager = createSkuListManager(
+        `${prefix}-${relation}-list`,
+        `${prefix}-${relation}-error`,
+        relation === 'cross-sell' ? 'cross_sell_product_ids' : 'upsell_product_ids',
+      );
+      const input = document.getElementById(`${prefix}-${relation}-sku`);
+      if (!manager || !input) {
+        return;
+      }
+      const add = async () => {
+        if (await manager.addBySku(input.value, null)) {
+          input.value = '';
+        }
+      };
+      button.addEventListener('click', add);
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          add();
+        }
+      });
+    });
+
+    document.querySelectorAll('[data-create-features]').forEach((editor) => {
+      const body = editor.querySelector('tbody');
+      const dataInput = editor.querySelector('[data-create-features-data]');
+      const addButton = editor.querySelector('[data-add-create-feature]');
+      if (!body || !dataInput || !addButton) {
+        return;
+      }
+      const sync = () => {
+        dataInput.value = JSON.stringify(Array.from(body.querySelectorAll('[data-feature-row]')).map((row) => ({
+          name: row.querySelector('[data-feature-name]').value.trim(),
+          value: row.querySelector('[data-feature-value]').value.trim(),
+        })));
+      };
+      addButton.addEventListener('click', () => {
+        const empty = body.querySelector('[data-empty-feature]');
+        if (empty) empty.remove();
+        const row = document.createElement('tr');
+        row.dataset.featureRow = 'true';
+        row.innerHTML = '<td><input class="form-input" data-feature-name required /></td><td><input class="form-input" data-feature-value /></td><td class="table__actions"><button type="button" class="button button--ghost button--small">Remove</button></td>';
+        row.querySelectorAll('input').forEach((input) => input.addEventListener('input', sync));
+        row.querySelector('button').addEventListener('click', () => { row.remove(); sync(); });
+        body.appendChild(row);
+        row.querySelector('input').focus();
+        sync();
+      });
+    });
+
     initialiseSkuTypeahead();
 
     // Initialize field visibility toggle for create form
@@ -634,6 +689,8 @@
     const createProductModal = document.getElementById('create-product-modal');
     const createSubscriptionModal = document.getElementById('create-subscription-modal');
     const editModal = document.getElementById('product-edit-modal');
+    const subscriptionEditModal = document.getElementById('subscription-edit-modal');
+    const editModalContent = editModal ? editModal.querySelector('.modal__content') : null;
     const visibilityModal = document.getElementById('product-visibility-modal');
     const featuredModal = document.getElementById('product-featured-modal');
     const descriptionEditorModal = document.getElementById('description-editor-modal');
@@ -923,6 +980,7 @@
     bindModalDismissal(createProductModal);
     bindModalDismissal(createSubscriptionModal);
     bindModalDismissal(editModal);
+    bindModalDismissal(subscriptionEditModal);
     bindModalDismissal(visibilityModal);
     bindModalDismissal(featuredModal);
     bindModalDismissal(priceHistoryModal);
@@ -1013,8 +1071,6 @@
 
         setLoadingStatus(editLoadingStatus, 'Loading product details…');
         setFormLoadingState(editForm, true);
-        openModal(editModal);
-
         let product;
         try {
           product = await fetchAdminProductDetails(id);
@@ -1042,6 +1098,26 @@
         const stockLabel = editForm.querySelector('label[for="edit-product-stock"]');
         const stockHelp = editForm.querySelector('#edit-product-stock-help');
         const isSubscription = product.subscription_category_id != null;
+        const activeEditModal = isSubscription ? subscriptionEditModal : editModal;
+        if (activeEditModal && editModalContent && editModalContent.parentElement !== activeEditModal) {
+          activeEditModal.appendChild(editModalContent);
+        }
+        openModal(activeEditModal);
+        const editTitle = editModalContent.querySelector('#edit-product-title');
+        const editSubtitle = editModalContent.querySelector('#edit-product-subtitle');
+        const invoiceDescriptionField = editForm.querySelector('#edit-product-invoice-description-field');
+        const invoiceDescriptionInput = editForm.querySelector('#edit-product-invoice-description');
+        if (editTitle) editTitle.textContent = isSubscription ? 'Edit subscription' : 'Edit product';
+        if (editSubtitle) {
+          editSubtitle.textContent = isSubscription
+            ? 'Update this subscription and its billing options.'
+            : 'Update this catalogue product.';
+        }
+        if (invoiceDescriptionField) invoiceDescriptionField.hidden = !isSubscription;
+        if (invoiceDescriptionInput) {
+          invoiceDescriptionInput.disabled = !isSubscription;
+          invoiceDescriptionInput.value = isSubscription ? (product.invoice_description || '') : '';
+        }
         if (stockLabel) stockLabel.textContent = isSubscription ? 'Availability' : 'Stock quantity';
         if (stockHelp) stockHelp.textContent = isSubscription ? 'Use 1 for available or 0 for unavailable.' : 'The number of physical units available.';
         const stockInput = editForm.querySelector('#edit-product-stock');
