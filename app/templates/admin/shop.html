@@ -341,16 +341,53 @@
     <button type="button" class="modal__close" data-modal-close><span class="visually-hidden">Close subscription form</span>&times;</button>
     <h2 class="modal__title" id="create-subscription-title">Add subscription</h2>
     <p class="modal__subtitle">Create a non-stocked subscription with one or more billing options.</p>
-    <form action="/shop/admin/product" method="post" enctype="multipart/form-data" class="form-grid">
+    <form action="/shop/admin/product" method="post" enctype="multipart/form-data" class="subscription-edit-form">
       {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
       <input type="hidden" name="price" value="0" /><input type="hidden" name="stock" value="1" />
-      {{ shared_create_fields('create-subscription') }}
-      <div class="form-field"><label class="form-label" for="create-subscription-category">Subscription category</label><select class="form-input" id="create-subscription-category" name="subscription_category_id" required><option value="">Choose a subscription category</option>{% for category in subscription_categories %}<option value="{{ category.id }}">{{ category.name }}</option>{% endfor %}</select></div>
-      <div class="form-field"><label class="form-label" for="create-subscription-monthly">Monthly commitment / monthly payment</label><input class="form-input" id="create-subscription-monthly" name="price_monthly_commitment" type="number" min="0" step="0.01" /></div>
-      <div class="form-field"><label class="form-label" for="create-subscription-annual-monthly">Annual commitment / monthly payment</label><input class="form-input" id="create-subscription-annual-monthly" name="price_annual_monthly_payment" type="number" min="0" step="0.01" /></div>
-      <div class="form-field"><label class="form-label" for="create-subscription-annual">Annual commitment / annual payment</label><input class="form-input" id="create-subscription-annual" name="price_annual_annual_payment" type="number" min="0" step="0.01" /></div>
-      <div class="form-field"><label class="form-label" for="create-subscription-calls">Voice Monitor calls per day</label><input class="form-input" id="create-subscription-calls" name="voice_monitor_calls_per_day" type="number" min="1" max="24" step="1" /></div>
-      <div class="form-actions"><button type="submit" class="button">Add subscription</button><button type="button" class="button button--ghost" data-modal-close>Cancel</button></div>
+
+      <section class="subscription-form-section" aria-labelledby="create-subscription-details-heading">
+        <h3 id="create-subscription-details-heading" class="form-section-title">Basic details</h3>
+        <div class="product-basic-grid">
+          <div class="form-field form-field--full"><label class="form-label" for="create-subscription-name">Name <span aria-hidden="true">*</span></label><input class="form-input" id="create-subscription-name" name="name" required aria-required="true" /></div>
+          <div class="form-field"><label class="form-label" for="create-subscription-sku">SKU <span aria-hidden="true">*</span></label><input class="form-input" id="create-subscription-sku" name="sku" required aria-required="true" /></div>
+          <div class="form-field"><label class="form-label" for="create-subscription-vendor-sku">Vendor SKU <span aria-hidden="true">*</span></label><input class="form-input" id="create-subscription-vendor-sku" name="vendor_sku" required aria-required="true" /></div>
+          <div class="form-field form-field--link"><label class="form-label" for="create-subscription-product-link">Product link <span class="field-optional">(optional)</span></label><input class="form-input" id="create-subscription-product-link" name="product_link" type="url" placeholder="https://example.com/product" aria-describedby="create-subscription-product-link-help" /><p class="form-helper" id="create-subscription-product-link-help">Vendor or product page URL shown on PDF quotes.</p></div>
+        </div>
+      </section>
+
+      <section class="subscription-form-section" aria-labelledby="create-subscription-content-heading">
+        <h3 id="create-subscription-content-heading" class="form-section-title">Product content</h3>
+        <div class="product-content-grid">
+          <div class="product-content-copy">
+            <div class="form-field description-field"><label class="form-label" for="create-subscription-description">Description <span class="field-optional">(optional)</span></label><textarea class="form-input form-input--textarea" id="create-subscription-description" name="description" rows="10"></textarea></div>
+            <div class="form-field"><label class="form-label" for="create-subscription-invoice-description">Invoice description <span class="field-optional">(optional)</span></label><textarea class="form-input form-input--textarea" id="create-subscription-invoice-description" name="invoice_description" rows="4" aria-describedby="create-subscription-invoice-help"></textarea><p class="form-helper" id="create-subscription-invoice-help">Used on invoices. When blank, the product name is used.</p></div>
+          </div>
+          <div class="form-field image-upload-field"><label class="form-label" for="create-subscription-image">Product image <span class="field-optional">(optional)</span></label><div class="image-upload-actions"><input class="form-input" id="create-subscription-image" name="image" type="file" accept="image/*" /></div></div>
+        </div>
+      </section>
+
+      <section class="subscription-form-section subscription-settings-section" aria-labelledby="create-subscription-settings-heading">
+        <h3 id="create-subscription-settings-heading" class="form-section-title">Subscription settings</h3>
+        <div class="subscription-form-grid">
+          <div class="form-field"><label class="form-label" for="create-subscription-category">Subscription category <span aria-hidden="true">*</span></label><select class="form-input" id="create-subscription-category" name="subscription_category_id" required aria-required="true" aria-describedby="create-subscription-category-help"><option value="">Choose a subscription category</option>{% for category in subscription_categories %}<option value="{{ category.id }}">{{ category.name }}</option>{% endfor %}</select><p class="form-helper" id="create-subscription-category-help">Subscriptions in the same category can co-term together.</p></div>
+          <div class="form-field"><label class="form-label" for="create-subscription-calls">Voice Monitor calls per day</label><div class="input-with-unit"><input class="form-input" id="create-subscription-calls" name="voice_monitor_calls_per_day" type="number" min="1" max="24" step="1" aria-describedby="create-subscription-calls-help" /><span>calls/day</span></div><p class="form-helper" id="create-subscription-calls-help">Required only for Voice Monitor plans.</p></div>
+        </div>
+        <div class="subscription-form-grid subscription-price-grid">
+          <div class="form-field"><label class="form-label" for="create-subscription-monthly">Monthly commitment — monthly payment</label><div class="input-with-unit"><span>$</span><input class="form-input" id="create-subscription-monthly" name="price_monthly_commitment" type="number" min="0" step="0.01" /><span>/month</span></div></div>
+          <div class="form-field"><label class="form-label" for="create-subscription-annual-monthly">Annual commitment — monthly payment</label><div class="input-with-unit"><span>$</span><input class="form-input" id="create-subscription-annual-monthly" name="price_annual_monthly_payment" type="number" min="0" step="0.01" /><span>/month</span></div></div>
+          <div class="form-field"><label class="form-label" for="create-subscription-annual">Annual commitment — annual payment</label><div class="input-with-unit"><span>$</span><input class="form-input" id="create-subscription-annual" name="price_annual_annual_payment" type="number" min="0" step="0.01" /><span>/year</span></div></div>
+        </div>
+      </section>
+
+      <details class="subscription-form-section form-section-collapsible" aria-labelledby="create-subscription-related-heading"><summary><h3 id="create-subscription-related-heading" class="form-section-title">Product recommendations</h3><span class="form-collapsible__icon" aria-hidden="true"></span></summary><div class="related-products-grid">
+        {% for relation, label, help in [('cross-sell', 'Cross-sell products', 'Complementary products suggested at checkout.'), ('upsell', 'Up-sell products', 'Upgrade options suggested at checkout.')] %}
+          <div class="related-product-group"><label class="form-label" for="create-subscription-{{ relation }}-sku">{{ label }}</label><div class="form-quick-add"><input class="form-input form-input--inline" id="create-subscription-{{ relation }}-sku" type="text" placeholder="Enter product SKU" autocomplete="off" data-sku-lookup="true" /><button type="button" class="button button--small button--secondary" data-create-relation="{{ relation }}" data-prefix="create-subscription">Add</button></div><p id="create-subscription-{{ relation }}-error" class="form-help form-help--error" hidden></p><ul class="tag-list" id="create-subscription-{{ relation }}-list" aria-label="{{ label }}"></ul><p class="form-helper">{{ help }}</p></div>
+        {% endfor %}
+      </div></details>
+
+      <details class="subscription-form-section form-section-collapsible" aria-labelledby="create-subscription-features-heading"><summary><h3 id="create-subscription-features-heading" class="form-section-title">Features</h3><span class="form-collapsible__icon" aria-hidden="true"></span></summary><div data-create-features="create-subscription"><div class="features-toolbar"><span></span><button type="button" class="button" data-add-create-feature>Add feature</button></div><div class="table-wrapper"><table class="table features-table"><thead><tr><th>Feature</th><th>Value</th><th class="table__actions">Actions</th></tr></thead><tbody><tr data-empty-feature><td colspan="3">No features added yet.</td></tr></tbody></table></div><input type="hidden" name="features" value="[]" data-create-features-data /></div></details>
+
+      <div class="subscription-form-actions"><button type="button" class="button button--ghost" data-modal-close>Cancel</button><button type="submit" class="button">Add subscription</button></div>
     </form>
   </div>
 </div>
