@@ -522,7 +522,7 @@
               </button>
               <ul class="menu__submenu {% if current_path.startswith('/bcp') %}menu__submenu--expanded{% endif %}">
                 <li class="menu__subitem">
-                  <a href="/bcp" {% if current_path == '/bcp' %}aria-current="page"{% endif %}>Overview</a>
+                  <a href="/bcp" {% if current_path.startswith('/bcp') and not current_path.startswith('/bcp/library') %}aria-current="page"{% endif %}>Overview</a>
                 </li>
                 {% if is_super_admin %}
                 <li class="menu__subitem">
