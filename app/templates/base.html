@@ -510,13 +510,26 @@
             </li>
           {% endif %}
           {% if can_view_bcp %}
-            <li class="menu__item">
-              <a href="/bcp" {% if current_path.startswith('/bcp') %}aria-current="page"{% endif %}>
+            <li class="menu__item menu__item--expandable {% if current_path.startswith('/bcp') %}menu__item--expanded{% endif %}" data-menu-key="/bcp">
+              <button class="menu__toggle" type="button" data-menu-toggle aria-expanded="{% if current_path.startswith('/bcp') %}true{% else %}false{% endif %}">
                 <span class="menu__icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" focusable="false"><path d="M12 2L4 6v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V6l-8-4zm0 10a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg>
                 </span>
                 <span class="menu__label">Continuity</span>
-              </a>
+                <span class="menu__expand-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M6 9l6 6 6-6"/></svg>
+                </span>
+              </button>
+              <ul class="menu__submenu {% if current_path.startswith('/bcp') %}menu__submenu--expanded{% endif %}">
+                <li class="menu__subitem">
+                  <a href="/bcp" {% if current_path == '/bcp' %}aria-current="page"{% endif %}>Overview</a>
+                </li>
+                {% if is_super_admin %}
+                <li class="menu__subitem">
+                  <a href="/bcp/library" {% if current_path.startswith('/bcp/library') %}aria-current="page"{% endif %}>Assessment Library</a>
+                </li>
+                {% endif %}
+              </ul>
             </li>
           {% endif %}
           {% if has_admin_access %}
