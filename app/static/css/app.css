@@ -5638,6 +5638,39 @@ dialog.modal:not([open]) {
   gap: 1.25rem;
 }
 
+.ticket-current-state {
+  margin-bottom: 1.25rem;
+  padding: 1.15rem 1.25rem;
+  border: 1px solid rgba(96, 165, 250, 0.42);
+  border-radius: 0.9rem;
+  background: linear-gradient(135deg, rgba(30, 64, 175, 0.18), rgba(15, 23, 42, 0.94) 48%);
+  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.22);
+}
+
+.ticket-current-state__header,
+.ticket-current-state__grid {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.ticket-current-state__header { margin-bottom: 1rem; }
+.ticket-current-state__header h2 { margin: 0.1rem 0 0; font-size: 1.2rem; }
+.ticket-current-state__eyebrow { margin: 0; color: #93c5fd; font-size: 0.72rem; font-weight: 750; letter-spacing: 0.1em; text-transform: uppercase; }
+.ticket-current-state__grid { display: grid; grid-template-columns: minmax(18rem, 2.2fr) repeat(4, minmax(9rem, 1fr)); }
+.ticket-current-state__item { min-width: 0; padding-left: 1rem; border-left: 1px solid rgba(148, 163, 184, 0.28); }
+.ticket-current-state__item:first-child { padding-left: 0; border-left: 0; }
+.ticket-current-state__item > span { display: block; margin-bottom: 0.35rem; color: #bfdbfe; font-size: 0.76rem; font-weight: 700; text-transform: uppercase; }
+.ticket-current-state__item strong { color: #f8fafc; font-size: 0.9rem; line-height: 1.45; }
+.ticket-current-state__item--request .rich-text-viewer { max-height: 4.4rem; overflow: hidden; color: #f8fafc; font-size: 0.9rem; line-height: 1.45; }
+.ticket-current-state__item--request p { margin: 0; }
+
+@media (max-width: 1200px) {
+  .ticket-current-state__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ticket-current-state__item { padding: 0; border: 0; }
+}
+
 
 .profile-columns {
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -9651,6 +9684,34 @@ a.service-card__ai-icon:hover {
   max-width: 98%;
 }
 
+@media (min-width: 961px) {
+  .ticket-reply-composer {
+    position: sticky;
+    top: 1rem;
+    z-index: 4;
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+}
+
+.ticket-reply-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 0.55rem;
+  background: rgba(15, 23, 42, 0.52);
+  color: #e2e8f0;
+  font-size: 0.84rem;
+}
+
+.ticket-reply-worklog { padding: 0.65rem 0.8rem; border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 0.55rem; }
+.ticket-reply-worklog > summary { cursor: pointer; color: #e2e8f0; font-weight: 650; }
+.ticket-reply-worklog > summary span { margin-left: 0.4rem; color: #cbd5e1; font-size: 0.8rem; font-weight: 400; }
+.ticket-reply-worklog[open] > summary { margin-bottom: 0.8rem; }
+
 .form-checkbox-label {
   display: flex;
   align-items: center;
@@ -11322,6 +11383,21 @@ a.stat-strip__stat:focus-visible {
   align-items: center;
   margin-right: 0.5rem;
 }
+
+.ticket-split-select { display: none; }
+.timeline.is-selecting .ticket-split-select { display: inline-flex; }
+
+.ticket-history-filters { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1rem; }
+.ticket-history-filters button { padding: 0.4rem 0.72rem; border: 1px solid rgba(148, 163, 184, 0.32); border-radius: 999px; background: transparent; color: #cbd5e1; cursor: pointer; font: inherit; font-size: 0.82rem; }
+.ticket-history-filters button:hover,
+.ticket-history-filters button.is-active { border-color: #60a5fa; background: rgba(59, 130, 246, 0.2); color: #fff; }
+.ticket-history-load { align-self: center; }
+.timeline__direction { margin-left: 0.35rem; color: #e2e8f0; font-size: 0.78rem; font-weight: 650; }
+.timeline__event--customer { margin-right: clamp(1rem, 7%, 5rem); border-left: 3px solid #38bdf8; background: rgba(8, 47, 73, 0.38); }
+.timeline__event--technician { margin-left: clamp(1rem, 7%, 5rem); border-right: 3px solid #818cf8; background: rgba(49, 46, 129, 0.24); }
+.timeline__event--internal { margin-left: clamp(1rem, 7%, 5rem); border: 1px dashed #fbbf24; background: rgba(120, 53, 15, 0.2); }
+.timeline__event--automation { border-color: rgba(148, 163, 184, 0.32); background: rgba(30, 41, 59, 0.44); }
+.timeline__message-content { max-width: 82ch; color: #e2e8f0; line-height: 1.55; }
 
 .ticket-split-select input {
   width: 1rem;

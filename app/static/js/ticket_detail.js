@@ -2757,9 +2757,24 @@
     if (!timeline) return;
     const ticketId = timeline.getAttribute('data-ticket-id');
     const splitButton = document.querySelector('[data-split-selected]');
+    const selectModeButton = document.querySelector('[data-ticket-select-mode]');
     const showHiddenButton = document.querySelector('[data-show-split-hidden]');
     const checkboxes = Array.from(document.querySelectorAll('[data-split-reply-checkbox]'));
     const hiddenReplies = Array.from(document.querySelectorAll('[data-split-hidden="true"]'));
+
+    if (selectModeButton) {
+      selectModeButton.addEventListener('click', () => {
+        const active = selectModeButton.getAttribute('aria-pressed') !== 'true';
+        timeline.classList.toggle('is-selecting', active);
+        selectModeButton.setAttribute('aria-pressed', active ? 'true' : 'false');
+        selectModeButton.textContent = active ? 'Cancel selection' : 'Select messages';
+        if (splitButton) splitButton.hidden = !active;
+        if (!active) {
+          checkboxes.forEach((checkbox) => { checkbox.checked = false; });
+          if (splitButton) splitButton.disabled = true;
+        }
+      });
+    }
 
     if (showHiddenButton && hiddenReplies.length > 0) {
       showHiddenButton.hidden = false;
@@ -2822,6 +2837,59 @@
     });
 
     updateButton();
+  }
+
+  function initialiseTicketHistory() {
+    const timeline = document.querySelector('[data-ticket-timeline]');
+    if (!timeline) return;
+    const messages = Array.from(timeline.querySelectorAll('[data-ticket-reply]'));
+    const loadButton = timeline.querySelector('[data-history-load-earlier]');
+    const filters = Array.from(document.querySelectorAll('[data-history-filter]'));
+    let visibleLimit = 8;
+    let activeFilter = 'all';
+
+    function render() {
+      const matching = messages.filter((message) => activeFilter === 'all' || message.dataset.messageKind === activeFilter);
+      messages.forEach((message) => {
+        const matches = matching.includes(message);
+        const withinLimit = matching.indexOf(message) < visibleLimit;
+        message.hidden = !matches || !withinLimit || message.dataset.splitHidden === 'true';
+      });
+      if (loadButton) {
+        loadButton.hidden = matching.length <= visibleLimit;
+        const remaining = Math.max(0, matching.length - visibleLimit);
+        loadButton.textContent = `Load earlier messages (${remaining})`;
+      }
+    }
+
+    filters.forEach((button) => button.addEventListener('click', () => {
+      activeFilter = button.dataset.historyFilter || 'all';
+      visibleLimit = 8;
+      filters.forEach((candidate) => {
+        const active = candidate === button;
+        candidate.classList.toggle('is-active', active);
+        candidate.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+      render();
+    }));
+    loadButton?.addEventListener('click', () => {
+      visibleLimit += 8;
+      render();
+    });
+    render();
+  }
+
+  function initialiseReplyVisibility() {
+    const internal = document.querySelector('#ticket-reply-form input[name="isInternal"]');
+    const visibility = document.querySelector('[data-reply-visibility]');
+    const submit = document.querySelector('[data-reply-submit-label]');
+    if (!(internal instanceof HTMLInputElement)) return;
+    const update = () => {
+      if (visibility) visibility.innerHTML = `<strong>Visibility:</strong> ${internal.checked ? 'Internal only' : 'Public reply'}`;
+      if (submit) submit.textContent = internal.checked ? 'Add internal note' : 'Send reply';
+    };
+    internal.addEventListener('change', update);
+    update();
   }
 
 
@@ -3189,6 +3257,8 @@
 
     initialisePersistentTicketSections();
     initialiseTicketSplit();
+    initialiseTicketHistory();
+    initialiseReplyVisibility();
     initialiseReplyTimeEditing();
     initialiseCallRecordingTimeEditing();
     initialiseTicketDetailsAutosave();
