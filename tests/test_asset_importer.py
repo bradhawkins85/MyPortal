@@ -79,10 +79,15 @@ async def test_import_tactical_assets_for_company_upserts(monkeypatch):
     async def fake_upsert_asset(**kwargs):
         captured.append(kwargs)
 
+    async def fake_sync_archive(company_id, active_tactical_ids):
+        assert company_id == 7
+        assert active_tactical_ids == {"agent-101", "agent-102"}
+
     monkeypatch.setattr(asset_importer.company_repo, "get_company_by_id", fake_get_company)
     monkeypatch.setattr(asset_importer.tacticalrmm, "fetch_agents", fake_fetch_agents)
     monkeypatch.setattr(asset_importer.tacticalrmm, "extract_agent_details", fake_extract)
     monkeypatch.setattr(asset_importer.assets_repo, "upsert_asset", fake_upsert_asset)
+    monkeypatch.setattr(asset_importer, "_sync_tactical_archive_asset_fields", fake_sync_archive)
 
     processed = await asset_importer.import_tactical_assets_for_company(7)
 
@@ -128,6 +133,11 @@ async def test_import_tactical_assets_truncates_long_hdd_size(monkeypatch):
     monkeypatch.setattr(asset_importer.tacticalrmm, "fetch_agents", fake_fetch_agents)
     monkeypatch.setattr(asset_importer.tacticalrmm, "extract_agent_details", fake_extract)
     monkeypatch.setattr(asset_importer.assets_repo, "upsert_asset", fake_upsert_asset)
+    monkeypatch.setattr(
+        asset_importer,
+        "_sync_tactical_archive_asset_fields",
+        lambda company_id, active_tactical_ids: _async_none(),
+    )
 
     processed = await asset_importer.import_tactical_assets_for_company(9)
 
@@ -185,11 +195,61 @@ async def test_import_tactical_assets_links_tray_device_from_trmm_custom_field(m
     monkeypatch.setattr(asset_importer.tray_repo, "get_device_by_uid", fake_get_device_by_uid)
     monkeypatch.setattr(asset_importer.tray_repo, "link_device_to_asset", fake_link_device_to_asset)
     monkeypatch.setattr(asset_importer, "_sync_tactical_asset_custom_fields", fake_sync_fields)
+    monkeypatch.setattr(
+        asset_importer,
+        "_sync_tactical_archive_asset_fields",
+        lambda company_id, active_tactical_ids: _async_none(),
+    )
 
     processed = await asset_importer.import_tactical_assets_for_company(11)
 
     assert processed == 1
     assert linked == [(77, 42)]
+
+
+async def _async_none():
+    return None
+
+
+@pytest.mark.anyio
+async def test_sync_tactical_archive_asset_fields_flags_only_removed_assets(monkeypatch):
+    field_defs = [
+        {"id": 4, "name": "Location", "field_type": "text"},
+        {"id": 9, "name": "Archive Asset", "field_type": "checkbox"},
+    ]
+    company_assets = [
+        {"id": 21, "tactical_asset_id": "agent-active"},
+        {"id": 22, "tactical_asset_id": "agent-removed"},
+        {"id": 23, "tactical_asset_id": None},
+    ]
+    values = []
+
+    monkeypatch.setattr(
+        asset_importer.acf_repo,
+        "list_field_definitions",
+        lambda: _async_value(field_defs),
+    )
+    monkeypatch.setattr(
+        asset_importer.assets_repo,
+        "list_company_assets",
+        lambda company_id: _async_value(company_assets),
+    )
+
+    async def fake_set_value(**kwargs):
+        values.append(kwargs)
+
+    monkeypatch.setattr(asset_importer.acf_repo, "set_asset_field_value", fake_set_value)
+
+    await asset_importer._sync_tactical_archive_asset_fields(7, {"agent-active"})
+
+    assert values == [
+        {"asset_id": 21, "field_definition_id": 9, "value_boolean": False},
+        {"asset_id": 22, "field_definition_id": 9, "value_boolean": True},
+    ]
+
+
+async def _async_value(value):
+    return value
 
 
 @pytest.mark.anyio
