@@ -631,6 +631,8 @@
     }
 
     const importModal = document.getElementById('import-product-modal');
+    const createProductModal = document.getElementById('create-product-modal');
+    const createSubscriptionModal = document.getElementById('create-subscription-modal');
     const editModal = document.getElementById('product-edit-modal');
     const visibilityModal = document.getElementById('product-visibility-modal');
     const featuredModal = document.getElementById('product-featured-modal');
@@ -918,6 +920,8 @@
     }
 
     bindModalDismissal(importModal);
+    bindModalDismissal(createProductModal);
+    bindModalDismissal(createSubscriptionModal);
     bindModalDismissal(editModal);
     bindModalDismissal(visibilityModal);
     bindModalDismissal(featuredModal);
@@ -984,6 +988,21 @@
       });
     }
 
+    [
+      ['[data-create-product-modal-open]', createProductModal],
+      ['[data-create-subscription-modal-open]', createSubscriptionModal],
+    ].forEach(([selector, modal]) => {
+      document.querySelectorAll(selector).forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.preventDefault();
+          closeParentHeaderMenu(button);
+          openModal(modal);
+          const firstInput = modal ? modal.querySelector('input:not([type="hidden"])') : null;
+          if (firstInput) firstInput.focus();
+        });
+      });
+    });
+
     container.querySelectorAll('[data-product-edit]').forEach((button) => {
       button.addEventListener('click', async () => {
         const id = Number(button.getAttribute('data-product-edit'));
@@ -1020,6 +1039,13 @@
         editForm.querySelector('#edit-product-price').value = product.price != null ? product.price : '';
         editForm.querySelector('#edit-product-vip').value = product.vip_price != null ? product.vip_price : '';
         editForm.querySelector('#edit-product-stock').value = product.stock != null ? product.stock : '';
+        const stockLabel = editForm.querySelector('label[for="edit-product-stock"]');
+        const stockHelp = editForm.querySelector('#edit-product-stock-help');
+        const isSubscription = product.subscription_category_id != null;
+        if (stockLabel) stockLabel.textContent = isSubscription ? 'Availability' : 'Stock quantity';
+        if (stockHelp) stockHelp.textContent = isSubscription ? 'Use 1 for available or 0 for unavailable.' : 'The number of physical units available.';
+        const stockInput = editForm.querySelector('#edit-product-stock');
+        if (stockInput) stockInput.max = isSubscription ? '1' : '';
         const categorySelect = editForm.querySelector('#edit-product-category');
         if (categorySelect) {
           categorySelect.value = product.category_id || '';
