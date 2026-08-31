@@ -271,12 +271,14 @@ async def create_answers(
     when the question definition has been deleted between loading and submitting
     the form).
     """
-    p = _ph()
-    placeholders = f"{p},{p},{p},{p},{p},{p}"
     sql = (
         "INSERT INTO tray_ticket_answers "
         "(ticket_id, question_id, question_label_snapshot, is_required_snapshot, answer_value, created_at) "
-        f"VALUES ({placeholders})"
+        "VALUES (?,?,?,?,?,?)"
+        if db.is_sqlite()
+        else "INSERT INTO tray_ticket_answers "
+        "(ticket_id, question_id, question_label_snapshot, is_required_snapshot, answer_value, created_at) "
+        "VALUES (%s,%s,%s,%s,%s,%s)"
     )
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     for ans in answers:
