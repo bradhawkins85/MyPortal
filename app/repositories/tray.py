@@ -697,9 +697,13 @@ async def get_chat_token_by_hash(token_hash: str) -> dict[str, Any] | None:
 
 
 async def mark_chat_token_used(token_id: int) -> None:
-    p = "?" if db.is_sqlite() else "%s"
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+    query = (
+        "UPDATE tray_chat_tokens SET used_at = ? WHERE id = ?"
+        if db.is_sqlite()
+        else "UPDATE tray_chat_tokens SET used_at = %s WHERE id = %s"
+    )
     await db.execute(
-        f"UPDATE tray_chat_tokens SET used_at = {p} WHERE id = {p}",
+        query,
         (now, token_id),
     )
