@@ -13,13 +13,13 @@ document.addEventListener('DOMContentLoaded', () => {
     modal.hidden = true;
     modal.setAttribute('aria-hidden', 'true');
   };
-  const openModal = (modal) => {
+  const openModal = (modal, preferredFocus) => {
     if (!modal) return;
     modal.hidden = false;
     modal.setAttribute('aria-hidden', 'false');
-    modal.querySelector('input:not([disabled]), select:not([disabled]), button:not([disabled])')?.focus();
+    (preferredFocus || modal.querySelector('input:not([disabled]), select:not([disabled]), button:not([disabled])'))?.focus();
   };
-  const isRegistryPath = (value) => /^(HKLM|HKCU|HKCR|HKU|HKCC|HKEY_)/i.test((value || '').trim());
+  const looksLikeRegistryPath = (value) => /^(HKLM|HKCU|HKCR|HKU|HKCC|HKEY_)/i.test((value || '').trim());
   document.querySelectorAll('[data-defender-modal-open]').forEach((button) => button.addEventListener('click', () => {
     openModal(document.getElementById(button.dataset.defenderModalOpen));
   }));
@@ -87,11 +87,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const exclusionForm = document.querySelector('#defender-exclusion-form');
     if (!exclusionForm) return;
     const value = (button.dataset.detectionExcludeValue || '').trim();
-    exclusionForm.elements.scope.value = 'device';
-    exclusionForm.elements.tray_device_id.value = button.dataset.detectionDeviceId || '';
-    exclusionForm.elements.exclusion_type.value = isRegistryPath(value) ? 'registry' : 'path';
+    const detectionDeviceId = button.dataset.detectionDeviceId || '';
+    exclusionForm.elements.scope.value = detectionDeviceId ? 'device' : 'company';
+    exclusionForm.elements.tray_device_id.value = detectionDeviceId;
+    exclusionForm.elements.exclusion_type.value = looksLikeRegistryPath(value) ? 'registry' : 'path';
     exclusionForm.elements.value.value = value;
-    openModal(document.getElementById('exclusions-modal'));
-    exclusionForm.elements.value.focus();
+    openModal(document.getElementById('exclusions-modal'), exclusionForm.elements.value);
   }));
 });
