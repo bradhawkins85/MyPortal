@@ -93,51 +93,6 @@
         </div>
       </header>
 
-      {% set state = namespace(latest_customer=none, latest_technician=none, owner='Unassigned') %}
-      {% for reply in ticket_replies %}
-        {% if state.latest_customer is none and not reply.is_internal and not reply.author_id %}
-          {% set state.latest_customer = reply %}
-        {% elif state.latest_technician is none and reply.author_id %}
-          {% set state.latest_technician = reply %}
-        {% endif %}
-      {% endfor %}
-      {% for user in ticket_user_options %}
-        {% if user.id == ticket.assigned_user_id %}{% set state.owner = user.email %}{% endif %}
-      {% endfor %}
-      <section class="ticket-current-state" aria-labelledby="ticket-current-state-title">
-        <header class="ticket-current-state__header">
-          <div>
-            <p class="ticket-current-state__eyebrow">Action centre</p>
-            <h2 id="ticket-current-state-title">Current state</h2>
-          </div>
-          <span class="status status--{{ 'warning' if ticket_status in ['waiting_customer', 'pending'] else 'neutral' }}">{{ ticket_status_label }}</span>
-        </header>
-        <div class="ticket-current-state__grid">
-          <div class="ticket-current-state__item ticket-current-state__item--request">
-            <span>Latest customer request</span>
-            <div class="rich-text-viewer">
-              {{ (state.latest_customer.body if state.latest_customer else (description_html or '')) | safe }}
-            </div>
-          </div>
-          <div class="ticket-current-state__item">
-            <span>Outstanding blocker</span>
-            <strong>{{ 'Waiting for customer response' if ticket_status in ['waiting_customer', 'pending'] else 'No blocker recorded' }}</strong>
-          </div>
-          <div class="ticket-current-state__item">
-            <span>Owner</span>
-            <strong>{{ state.owner }}</strong>
-          </div>
-          <div class="ticket-current-state__item">
-            <span>Promised action</span>
-            <strong>{{ 'Follow up on the latest request' if state.latest_customer else 'Review and confirm the next action' }}</strong>
-          </div>
-          <div class="ticket-current-state__item">
-            <span>Next response due</span>
-            <strong>{% if ticket_sla.resolution_due_at %}<span data-utc="{{ ticket_sla.resolution_due_at.isoformat() }}">{{ ticket_sla.resolution_due_at.isoformat() }}</span>{% else %}Not scheduled{% endif %}</strong>
-          </div>
-        </div>
-      </section>
-
       <div class="management__body management__body--columns management__body--ticket-detail management__body--ticket-detail-admin">
         <div class="management__column management__column--details">
           <details class="card card--panel card-collapsible">
@@ -1387,8 +1342,8 @@
                   <span>Write an internal note instead</span>
                 </label>
               </div>
-              <details class="ticket-reply-worklog">
-                <summary>Time &amp; billing <span>Optional worklog details</span></summary>
+              <details class="ticket-reply-worklog" open>
+                <summary>Time &amp; billing</summary>
               <div class="form-field">
                 <label class="form-label" for="ticket-reply-minutes">Minutes spent</label>
                 <input
@@ -1485,10 +1440,11 @@
               {% if ticket_replies or ticket_call_recordings %}
                 <div class="timeline timeline--conversation" data-ticket-timeline data-ticket-id="{{ ticket.id }}">
                   {% for reply in ticket_replies %}
+                    {% set reply_is_automation = reply.external_reference and reply.external_reference.startswith('shipment-watch:') %}
                     <article
-                      class="timeline__event timeline__event--{{ 'internal' if reply.is_internal else ('automation' if reply.external_reference and not reply.author_id else ('technician' if reply.author_id else 'customer')) }}{% if reply.is_split_hidden %} timeline__event--split-hidden{% endif %}"
+                      class="timeline__event timeline__event--{{ 'internal' if reply.is_internal else ('automation' if reply_is_automation else ('technician' if reply.author_id and reply.author_id != ticket.requester_id else 'customer')) }}{% if reply.is_split_hidden %} timeline__event--split-hidden{% endif %}"
                       data-ticket-reply
-                      data-message-kind="{{ 'internal' if reply.is_internal else ('automation' if reply.external_reference and not reply.author_id else ('technician' if reply.author_id else 'customer')) }}"
+                      data-message-kind="{{ 'internal' if reply.is_internal else ('automation' if reply_is_automation else ('technician' if reply.author_id and reply.author_id != ticket.requester_id else 'customer')) }}"
                       {% if reply.is_split_hidden %}data-split-hidden="true" hidden{% endif %}
                   data-reply-id="{{ reply.id }}"
                   data-reply-minutes="{{ reply.minutes_spent if reply.minutes_spent is not none else '' }}"
@@ -1507,7 +1463,7 @@
                           </span>
                           <span class="timeline__action">
                             {{ reply.author.email if reply.author else (reply.author_display_name or reply.author_email or 'System') }}
-                            <span class="timeline__direction">{{ 'Internal note' if reply.is_internal else ('Automation' if reply.external_reference and not reply.author_id else ('Technician reply' if reply.author_id else 'Customer message')) }}</span>
+                            <span class="timeline__direction">{{ 'Internal note' if reply.is_internal else ('Automation' if reply_is_automation else ('Technician reply' if reply.author_id and reply.author_id != ticket.requester_id else 'Customer message')) }}</span>
                             {% if reply.is_internal %}
                               <span class="badge badge--muted">Internal</span>
                             {% endif %}

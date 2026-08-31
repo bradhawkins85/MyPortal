@@ -367,6 +367,8 @@
     const dialog = document.querySelector('[data-ticket-page-clock-dialog]');
     const historyContent = dialog && dialog.querySelector('[data-ticket-page-clock-history-content]');
     const closeButton = dialog && dialog.querySelector('[data-ticket-page-clock-close]');
+    const replyForm = document.querySelector('#ticket-reply-form');
+    const minutesInput = replyForm && replyForm.querySelector('[name="minutesSpent"]');
     let clockId = null;
     const openedAt = Date.now();
 
@@ -386,6 +388,13 @@
     const tick = () => { if (display) display.textContent = formatDuration((Date.now() - openedAt) / 1000); };
     tick();
     window.setInterval(tick, 1000);
+    if (replyForm && minutesInput) {
+      replyForm.addEventListener('submit', () => {
+        if (minutesInput.value.trim() === '') {
+          minutesInput.value = String(Math.round((Date.now() - openedAt) / 60000));
+        }
+      });
+    }
 
     async function send(path, keepalive) {
       return fetch(`/admin/tickets/${encodeURIComponent(ticketId)}/page-clocks${path}`, {
