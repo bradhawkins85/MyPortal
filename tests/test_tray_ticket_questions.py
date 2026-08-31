@@ -457,6 +457,34 @@ async def test_repo_create_answers_stores_required_snapshot(tq_db):
     assert by_qid[2]["answer_value"] is None
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("is_sqlite", "expected_query"),
+    [
+        (True, "DELETE FROM tray_ticket_questions WHERE id = ?"),
+        (False, "DELETE FROM tray_ticket_questions WHERE id = %s"),
+    ],
+)
+async def test_delete_question_uses_bound_id_param(
+    monkeypatch, is_sqlite, expected_query
+):
+    from app.repositories import tray_ticket_questions as tq_repo
+
+    captured: dict[str, object] = {}
+
+    async def fake_execute(query, params):
+        captured["query"] = query
+        captured["params"] = params
+
+    monkeypatch.setattr(tq_repo.db, "execute", fake_execute)
+    monkeypatch.setattr(tq_repo.db, "is_sqlite", lambda: is_sqlite)
+
+    await tq_repo.delete_question(123)
+
+    assert captured["query"] == expected_query
+    assert captured["params"] == (123,)
+
+
 # ---------------------------------------------------------------------------
 # API endpoint tests (via full app with dependency override)
 # ---------------------------------------------------------------------------
@@ -609,4 +637,3 @@ def test_submit_ticket_without_answers_still_works(tq_http_client, enrolled_devi
     # May return 200 or 422 depending on required questions in DB;
     # the important thing is that omitting 'answers' doesn't cause a 500.
     assert resp.status_code in (200, 422)
-
