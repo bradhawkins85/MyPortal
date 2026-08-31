@@ -334,6 +334,7 @@ async def bcp_risks(request: Request, severity: str = Query(None), heatmap_filte
             "active_severity_filter": severity,
             "active_heatmap_filter": heatmap_filter,
             "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "available_global_risks": [item for item in await bcp_repo.list_global_risks(company_id) if not item["assigned"]],
         },
     )
     
@@ -406,6 +407,7 @@ async def bcp_bia(request: Request, sort_by: str = Query("importance")):
             "activities": activities,
             "sort_by": sort_by,
             "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
+            "available_global_bias": [item for item in await bcp_repo.list_global_bia_assessments(company_id) if not item["assigned"]],
         },
     )
     
@@ -3872,3 +3874,101 @@ async def reseed_bcp_defaults(
         message = f"Successfully added: {', '.join(parts)}"
     
     return flash_redirect("/bcp/admin/seed-info", message, "success")
+
+# Global risk and BIA assessment library
+async def _require_bcp_library_admin(request: Request) -> dict[str, Any]:
+    user, _ = await _require_bcp_view(request)
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super administrator required")
+    return user
+
+
+@router.get("/library", response_class=HTMLResponse, include_in_schema=False)
+async def bcp_global_library(request: Request):
+    """Manage reusable risk and BIA assessments and customer assignments."""
+    user = await _require_bcp_library_admin(request)
+    from app.main import _build_base_context, templates
+    from app.repositories import companies as company_repo
+    context = await _build_base_context(request, user, extra={
+        "title": "Global BCP Assessment Library",
+        "global_risks": await bcp_repo.list_global_risks(),
+        "global_bias": await bcp_repo.list_global_bia_assessments(),
+        "companies": await company_repo.list_companies(),
+    })
+    return templates.TemplateResponse("bcp/library.html", context)
+
+
+@router.post("/library/risks", include_in_schema=False)
+async def create_global_risk_endpoint(
+    request: Request, description: str = Form(...), likelihood: int = Form(...),
+    impact: int = Form(...), preventative_actions: str = Form(None),
+    contingency_plans: str = Form(None), company_ids: list[int] = Form(default=[]),
+):
+    await _require_bcp_library_admin(request)
+    if not 1 <= likelihood <= 4 or not 1 <= impact <= 4:
+        raise HTTPException(status_code=400, detail="Likelihood and impact must be between 1 and 4")
+    assessment_id = await bcp_repo.create_global_risk(
+        description.strip(), likelihood, impact, preventative_actions or None, contingency_plans or None)
+    for company_id in set(company_ids):
+        await bcp_repo.assign_global_risk(assessment_id, company_id)
+    return flash_redirect("/bcp/library", "Global risk created and assignments applied", "success")
+
+
+@router.post("/library/bia", include_in_schema=False)
+async def create_global_bia_endpoint(
+    request: Request, name: str = Form(...), description: str = Form(None),
+    priority: str = Form(None), supplier_dependency: str = Form(None),
+    importance: int = Form(None), notes: str = Form(None), losses_financial: str = Form(None),
+    losses_staffing: str = Form(None), losses_reputation: str = Form(None),
+    rto_hours: int = Form(None), company_ids: list[int] = Form(default=[]),
+):
+    await _require_bcp_library_admin(request)
+    if importance is not None and not 1 <= importance <= 5:
+        raise HTTPException(status_code=400, detail="Importance must be between 1 and 5")
+    if rto_hours is not None and rto_hours < 0:
+        raise HTTPException(status_code=400, detail="RTO hours must be non-negative")
+    assessment_id = await bcp_repo.create_global_bia(
+        name=name.strip(), description=description or None, priority=priority or None,
+        supplier_dependency=supplier_dependency or None, importance=importance, notes=notes or None,
+        losses_financial=losses_financial or None, losses_staffing=losses_staffing or None,
+        losses_reputation=losses_reputation or None, rto_hours=rto_hours)
+    for company_id in set(company_ids):
+        await bcp_repo.assign_global_bia(assessment_id, company_id)
+    return flash_redirect("/bcp/library", "Global BIA assessment created and assignments applied", "success")
+
+
+@router.post("/library/{kind}/{assessment_id}/assign", include_in_schema=False)
+async def bulk_assign_global_assessment(
+    request: Request, kind: str, assessment_id: int, company_ids: list[int] = Form(default=[]),
+):
+    await _require_bcp_library_admin(request)
+    if kind not in {"risk", "bia"}:
+        raise HTTPException(status_code=404, detail="Assessment type not found")
+    assign = bcp_repo.assign_global_risk if kind == "risk" else bcp_repo.assign_global_bia
+    assigned = sum([await assign(assessment_id, company_id) for company_id in set(company_ids)])
+    return flash_redirect("/bcp/library", f"Assigned to {assigned} customer(s)", "success")
+
+
+@router.post("/library/{kind}/{assessment_id}/delete", include_in_schema=False)
+async def delete_global_assessment_endpoint(request: Request, kind: str, assessment_id: int):
+    await _require_bcp_library_admin(request)
+    if kind not in {"risk", "bia"}:
+        raise HTTPException(status_code=404, detail="Assessment type not found")
+    await bcp_repo.delete_global_assessment(kind, assessment_id)
+    return flash_redirect("/bcp/library", "Global assessment deleted", "success")
+
+
+@router.post("/available/{kind}/{assessment_id}/add", include_in_schema=False)
+async def add_available_global_assessment(request: Request, kind: str, assessment_id: int):
+    """Add a selected global assessment from within the active customer's BCP."""
+    _, company_id = await _require_bcp_edit(request)
+    if kind == "risk":
+        created = await bcp_repo.assign_global_risk(assessment_id, company_id)
+        destination = "/bcp/risks"
+    elif kind == "bia":
+        created = await bcp_repo.assign_global_bia(assessment_id, company_id)
+        destination = "/bcp/bia"
+    else:
+        raise HTTPException(status_code=404, detail="Assessment type not found")
+    message = "Assessment added" if created else "Assessment was already added or is unavailable"
+    return flash_redirect(destination, message, "success" if created else "warning")
