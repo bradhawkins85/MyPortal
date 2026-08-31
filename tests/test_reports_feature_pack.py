@@ -145,3 +145,14 @@ def test_company_overview_spacing_has_fallback_values():
     assert ".report-page{display:flex;flex-direction:column;gap:var(--space-4,1rem);padding:var(--space-3,.75rem)}" in template
     assert "padding:var(--space-4,1rem)" in template
     assert "gap:var(--space-3,.75rem)" in template
+
+
+def test_company_overview_pdf_tables_have_explicit_print_colours():
+    """Table text must not inherit white foregrounds from coloured report cells."""
+
+    template = Path("app/templates/reports/pdf.html").read_text()
+
+    assert "table{width:100%;border-collapse:collapse;font-size:7pt;table-layout:fixed;background:#fff;color:#1f2937}" in template
+    assert "th,td{border:1px solid #d1d5db;padding:3pt;overflow-wrap:anywhere;background:#fff;color:#1f2937}" in template
+    assert "th{background:#f3f4f6;color:#111827;font-weight:bold}" in template
+    assert ".card__header,.report-section__header{color:#111827}" in template
