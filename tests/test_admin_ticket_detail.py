@@ -579,3 +579,27 @@ async def test_admin_reply_reports_failed_attachments(monkeypatch):
     message_values.extend(response.headers.getlist("set-cookie"))
     assert any("failed" in unquote(value).lower() for value in message_values)
     assert save_mock.await_count == 1
+
+
+def test_ticket_reply_worklog_is_expanded_without_optional_caption() -> None:
+    template = Path("app/templates/admin/ticket_detail.html").read_text(encoding="utf-8")
+
+    assert '<details class="ticket-reply-worklog" open>' in template
+    assert "Optional worklog details" not in template
+    assert "Optional working details" not in template
+
+
+def test_ticket_detail_omits_action_centre() -> None:
+    template = Path("app/templates/admin/ticket_detail.html").read_text(encoding="utf-8")
+
+    assert "Action centre" not in template
+    assert "ticket-current-state" not in template
+
+
+def test_external_customer_messages_are_not_labelled_as_automation() -> None:
+    template = Path("app/templates/admin/ticket_detail.html").read_text(encoding="utf-8")
+
+    assert "reply.external_reference and not reply.author_id" not in template
+    assert "reply.external_reference.startswith('shipment-watch:')" in template
+    assert "reply.author_id != ticket.requester_id" in template
+    assert 'data-message-kind="{{ \'internal\' if reply.is_internal else (\'automation\' if reply_is_automation' in template

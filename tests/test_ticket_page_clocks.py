@@ -35,3 +35,10 @@ def test_ticket_page_clock_routes_are_registered():
 
     assert '"/admin/tickets/{ticket_id:int}/page-clocks"' in routes
     assert '"/admin/tickets/{ticket_id:int}/page-clocks/{clock_id:int}/heartbeat"' in routes
+
+
+def test_blank_reply_minutes_default_to_rounded_time_open():
+    script = Path("app/static/js/ticket_detail.js").read_text()
+
+    assert "minutesInput.value.trim() === ''" in script
+    assert "Math.round((Date.now() - openedAt) / 60000)" in script
