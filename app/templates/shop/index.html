@@ -99,6 +99,13 @@
             <span class="shop-tile__meta">Products highlighted for your company</span>
           </span>
         </a>
+        <a class="shop-tile shop-tile--special" href="{{ request.url_for('shop_page') }}?category=subscriptions">
+          <span class="shop-tile__media shop-tile__media--icon" aria-hidden="true">🔁</span>
+          <span class="shop-tile__body">
+            <strong class="shop-tile__title">Subscriptions</strong>
+            <span class="shop-tile__meta">Plans grouped by subscription type</span>
+          </span>
+        </a>
         {% for category in category_cards %}
           <a class="shop-tile" href="{{ request.url_for('shop_page') }}{{ shop_query(category.id) }}">
             <span class="shop-tile__media">
@@ -118,6 +125,14 @@
         {% endfor %}
       </div>
     {% else %}
+      {% if show_subscriptions %}
+        <nav class="shop-subscription-types" aria-label="Subscription types">
+          <a class="button{% if subscription_type is none %} button--primary{% else %} button--ghost{% endif %}" href="?category=subscriptions">All subscriptions</a>
+          {% for subscription_category in subscription_categories %}
+            <a class="button{% if subscription_type == subscription_category.id %} button--primary{% else %} button--ghost{% endif %}" href="?category=subscriptions&amp;subscriptionType={{ subscription_category.id }}">{{ subscription_category.name }}</a>
+          {% endfor %}
+        </nav>
+      {% endif %}
       <div class="shop-card-grid">
         {% if show_main_shop_card %}
           <a class="shop-product-card shop-product-card--navigation" href="{{ request.url_for('shop_page') }}">
@@ -135,6 +150,7 @@
           </a>
         {% endif %}
         {% for product in products %}
+          {% set is_subscription = product.subscription_category_id is defined and product.subscription_category_id is not none %}
           <article class="shop-product-card{% if product.is_package %} shop-product-card--package{% endif %}" {% if product.is_package %}data-package-id="{{ product.id }}"{% else %}data-product-id="{{ product.id }}"{% endif %} data-stock="{{ product.stock }}">
             <div class="shop-product-card__media">
               {% if product.is_package %}
@@ -169,14 +185,24 @@
               {% endif %}
               <div class="shop-product-card__meta">
                 <strong>${{ '%.2f'|format(product.price) }}</strong>
-                {{ stock_helpers.stock_status_badge(product.stock, low_stock_threshold, product.stock <= 0) }}
+                {% if not is_subscription %}
+                  {{ stock_helpers.stock_status_badge(product.stock, low_stock_threshold, product.stock <= 0) }}
+                {% else %}
+                  <span class="status-badge status-badge--success">Available</span>
+                {% endif %}
               </div>
+              {% if is_subscription %}
+                <ul class="shop-subscription-prices" aria-label="Pricing options">
+                  {% if product.price_monthly_commitment %}<li>Monthly commitment · monthly payment: ${{ '%.2f'|format(product.price_monthly_commitment) }}/month</li>{% endif %}
+                  {% if product.price_annual_monthly_payment %}<li>Annual commitment · monthly payment: ${{ '%.2f'|format(product.price_annual_monthly_payment) }}/month</li>{% endif %}
+                  {% if product.price_annual_annual_payment %}<li>Annual commitment · annual payment: ${{ '%.2f'|format(product.price_annual_annual_payment) }}/year</li>{% endif %}
+                </ul>
+              {% endif %}
             </div>
             <div class="shop-product-card__actions">
               {% if not product.is_package %}
                 <button type="button" class="button button--ghost" data-product-details="{{ product.id }}">Details</button>
               {% endif %}
-              {% set is_subscription = product.subscription_category_id is defined and product.subscription_category_id is not none %}
               {% set has_active_subscription = is_subscription and product.id in active_subscription_product_ids %}
               {% if has_active_subscription %}
                 <a href="/subscriptions" class="button button--primary">Manage</a>

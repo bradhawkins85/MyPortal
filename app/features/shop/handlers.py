@@ -214,6 +214,7 @@ def _strip_internal_shop_product_fields(products: Sequence[Mapping[str, Any]]) -
 async def shop_page(
     request: Request,
     category: str | None = Query(None),
+    subscription_type: int | None = Query(None, alias="subscriptionType"),
     show_out_of_stock: bool = Query(False, alias="showOutOfStock"),
     q: str | None = None,
     page: int = Query(1, ge=1),
@@ -222,6 +223,7 @@ async def shop_page(
 ):
     from app.repositories import shop as shop_repo
     from app.repositories import subscriptions as subscriptions_repo
+    from app.repositories import subscription_categories as subscription_categories_repo
     from app.services import shop as shop_service
     from app.services import shop_packages as shop_packages_service
 
@@ -244,6 +246,7 @@ async def shop_page(
     category_param = category.strip() if isinstance(category, str) and category.strip() else None
     show_packages = False
     show_featured = False
+    show_subscriptions = False
     category_id: int | None = None
     if category_param:
         category_key = category_param.lower()
@@ -251,6 +254,8 @@ async def shop_page(
             show_packages = True
         elif category_key == "featured":
             show_featured = True
+        elif category_key == "subscriptions":
+            show_subscriptions = True
         else:
             try:
                 parsed_category = int(category_param)
@@ -294,6 +299,9 @@ async def shop_page(
                 vip_price = product.get("vip_price")
                 if vip_price is not None:
                     product["price"] = vip_price
+        for product in prepared:
+            if product.get("subscription_category_id") is not None:
+                product["price"] = shop_service.get_product_price(product, is_vip=is_vip)
         return [product for product in prepared if _product_has_price(product)]
 
     if show_packages:
@@ -402,6 +410,13 @@ async def shop_page(
 
             products = _prepare_customer_products(await shop_repo.list_products_summary(filters))
 
+            if show_subscriptions:
+                products = [
+                    product for product in products
+                    if product.get("subscription_category_id") is not None
+                    and (subscription_type is None or int(product["subscription_category_id"]) == subscription_type)
+                ]
+
         total_count = len(products)
 
     products = _strip_internal_shop_product_fields(products)
@@ -465,14 +480,18 @@ async def shop_page(
 
     # Get active subscription product IDs for the customer
     active_subscription_product_ids = await subscriptions_repo.get_active_subscription_product_ids(company_id)
+    subscription_categories = await subscription_categories_repo.list_categories()
 
     extra = {
         "title": "Shop",
         "categories": categories,
         "products": products,
-        "current_category": "packages" if show_packages else "featured" if show_featured else category_id,
+        "current_category": "packages" if show_packages else "featured" if show_featured else "subscriptions" if show_subscriptions else category_id,
         "show_packages": show_packages,
         "show_featured": show_featured,
+        "show_subscriptions": show_subscriptions,
+        "subscription_type": subscription_type,
+        "subscription_categories": subscription_categories,
         "showing_category_cards": showing_category_cards,
         "category_cards": category_cards,
         "show_out_of_stock": show_out_of_stock,
@@ -2140,12 +2159,9 @@ async def admin_create_shop_product(
         subscription_category_name, voice_monitor_calls_per_day
     )
 
-    # Validate commitment type and payment frequency for subscriptions
-    commitment_value, payment_freq_value = _main()._validate_subscription_commitment_and_payment(
-        subscription_category_value,
-        commitment_type,
-        payment_frequency,
-    )
+    # Price options define their own commitment and billing frequency.  Keep
+    # legacy selector columns empty for newly edited subscription products.
+    commitment_value, payment_freq_value = None, None
 
     # Parse pricing fields
     price_monthly_comm: Decimal | None = None
@@ -2174,6 +2190,15 @@ async def admin_create_shop_product(
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Annual commitment with annual payment price must be at least zero")
         except (TypeError, InvalidOperation):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Annual commitment with annual payment price must be a valid number")
+
+    if subscription_category_value and not any(
+        option is not None and option > 0
+        for option in (price_monthly_comm, price_annual_monthly, price_annual_annual)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Add at least one subscription pricing option",
+        )
 
     cross_sell_ids = await _validate_recommendation_product_ids(
         cross_sell_product_ids,
@@ -2393,12 +2418,9 @@ async def admin_update_shop_product(
         subscription_category_name, voice_monitor_calls_per_day
     )
 
-    # Validate commitment type and payment frequency for subscriptions
-    commitment_value, payment_freq_value = _main()._validate_subscription_commitment_and_payment(
-        subscription_category_value,
-        commitment_type,
-        payment_frequency,
-    )
+    # Price options define their own commitment and billing frequency.  Keep
+    # legacy selector columns empty for newly edited subscription products.
+    commitment_value, payment_freq_value = None, None
 
     # Parse pricing fields
     price_monthly_comm: Decimal | None = None
@@ -2482,6 +2504,15 @@ async def admin_update_shop_product(
     resolved_cross_id = await _resolve_related_product_id_by_sku(cross_sell_sku)
     if resolved_cross_id:
         cross_sell_candidates.append(resolved_cross_id)
+
+    if subscription_category_value and not any(
+        option is not None and option > 0
+        for option in (price_monthly_comm, price_annual_monthly, price_annual_annual)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Add at least one subscription pricing option",
+        )
 
     cross_sell_ids = await _validate_recommendation_product_ids(
         cross_sell_candidates,

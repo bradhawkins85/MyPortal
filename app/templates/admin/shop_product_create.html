@@ -33,7 +33,7 @@
           <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
           {% endif %}
 
-          <!-- Row 1: Name, SKU, Vendor SKU, Category -->
+          <h3 class="form-section-title form-field--wide">Product details</h3>
           <div class="form-field">
             <label class="form-label" for="product-name">Name</label>
             <input class="form-input" id="product-name" name="name" required />
@@ -56,7 +56,7 @@
             </select>
           </div>
 
-          <!-- Row 2: Price, VIP Price, Stock, Image -->
+          <!-- Core product details continue here -->
           <div class="form-field" data-field-type="standard-price">
             <label class="form-label" for="product-price">Price</label>
             <input class="form-input" id="product-price" name="price" type="number" step="0.01" required />
@@ -66,8 +66,8 @@
             <input class="form-input" id="product-vip-price" name="vip_price" type="number" step="0.01" />
           </div>
           <div class="form-field">
-            <label class="form-label" for="product-stock">Stock</label>
-            <input class="form-input" id="product-stock" name="stock" type="number" required />
+            <label class="form-label" for="product-stock">Availability</label>
+            <select class="form-input" id="product-stock" name="stock" required><option value="1">Available</option><option value="0">Unavailable</option></select>
           </div>
           <div class="form-field">
             <label class="form-label" for="product-image">Image</label>
@@ -120,7 +120,7 @@
             <p class="form-helper">Add SKUs for upgrade options to suggest at checkout.</p>
           </div>
 
-          <!-- Row 5: Subscription-related fields -->
+          <h3 class="form-section-title form-field--wide">Pricing and availability</h3>
           <div class="form-field">
             <label class="form-label" for="product-subscription-category">Subscription category</label>
             <select class="form-input" id="product-subscription-category" name="subscription_category_id">
@@ -130,24 +130,6 @@
               {% endfor %}
             </select>
             <p class="form-helper">Products in the same subscription category can co-term together.</p>
-          </div>
-          <div class="form-field" data-field-type="subscription">
-            <label class="form-label" for="product-commitment-type">Commitment type</label>
-            <select class="form-input" id="product-commitment-type" name="commitment_type">
-              <option value="">Select commitment type</option>
-              <option value="monthly">Monthly</option>
-              <option value="annual">Annual</option>
-            </select>
-            <p class="form-helper">Monthly commitments renew monthly, annual commitments renew annually.</p>
-          </div>
-          <div class="form-field" data-field-type="subscription">
-            <label class="form-label" for="product-payment-frequency">Payment frequency</label>
-            <select class="form-input" id="product-payment-frequency" name="payment_frequency">
-              <option value="">Select payment frequency</option>
-              <option value="monthly">Monthly</option>
-              <option value="annual">Annual</option>
-            </select>
-            <p class="form-helper">Monthly commitments can only be paid monthly. Annual commitments can be paid monthly or annually.</p>
           </div>
           <div class="form-field" data-field-type="subscription">
             <label class="form-label" for="product-price-monthly-commitment">Price - Monthly commitment</label>
