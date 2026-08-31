@@ -57,6 +57,7 @@ _ASSET_TABLE_COLUMNS: list[dict[str, str]] = [
     {"key": "ram_gb", "label": "RAM (GB)", "sort": "number"},
     {"key": "hdd_size", "label": "Storage", "sort": "string"},
     {"key": "last_sync", "label": "Last sync", "sort": "date", "priority": "essential"},
+    {"key": "boot_time", "label": "Boot time", "sort": "date"},
     {
         "key": "tray_agent_synced",
         "label": "TrayAgentID synced",
@@ -219,6 +220,11 @@ async def assets_page(request: Request):
         record["last_sync"] = last_sync_iso
         record["last_sync_iso"] = last_sync_iso
         record["last_sync_sort"] = last_sync_iso or ""
+
+        boot_time_iso = main_module._to_iso(row.get("boot_time"))
+        record["boot_time"] = boot_time_iso
+        record["boot_time_iso"] = boot_time_iso
+        record["boot_time_sort"] = boot_time_iso or ""
 
         if last_sync_iso:
             parsed_last_sync = _parse_iso(last_sync_iso)

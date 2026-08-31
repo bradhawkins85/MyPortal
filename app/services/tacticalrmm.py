@@ -434,6 +434,12 @@ def extract_agent_details(agent: Mapping[str, Any]) -> dict[str, Any]:
             "last_sync",
             "last_agent_checkin",
         ),
+        "boot_time": _lookup(
+            agent,
+            "boot_time",
+            "last_boot_time",
+            "booted_at",
+        ),
         "motherboard_manufacturer": _clean_text(
             _lookup(hardware, "motherboard_manufacturer", "board_manufacturer")
         ),

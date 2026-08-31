@@ -294,6 +294,7 @@ async def sync_tactical_agent(
         ram_gb=details.get("ram_gb"),
         hdd_size=_clean_string(details.get("hdd_size"), max_length=255),
         last_sync=details.get("last_sync"),
+        boot_time=details.get("boot_time"),
         motherboard_manufacturer=_clean_string(details.get("motherboard_manufacturer")),
         form_factor=_clean_string(details.get("form_factor")),
         last_user=_clean_string(details.get("last_user")),
@@ -368,6 +369,7 @@ async def import_tactical_assets_for_company(
             ram_gb=details.get("ram_gb"),
             hdd_size=_clean_string(details.get("hdd_size"), max_length=255),
             last_sync=details.get("last_sync"),
+            boot_time=details.get("boot_time"),
             motherboard_manufacturer=_clean_string(
                 details.get("motherboard_manufacturer")
             ),

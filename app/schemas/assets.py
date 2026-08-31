@@ -19,6 +19,7 @@ class AssetResponse(BaseModel):
     ram_gb: Optional[float] = None
     hdd_size: Optional[str] = None
     last_sync: Optional[datetime] = None
+    boot_time: Optional[datetime] = None
     motherboard_manufacturer: Optional[str] = None
     form_factor: Optional[str] = None
     last_user: Optional[str] = None
