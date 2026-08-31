@@ -221,6 +221,8 @@ def test_defender_ui_exposes_management_workflows():
     assert "Apply to companies" in template
     assert 'class="card defender-detections-section"' in template
     assert 'data-label="Infected files"' in template
+    assert 'data-detection-exclude-value="{{ file }}"' in template
+    assert 'data-detection-device-id="{{ d.tray_device_id }}"' in template
     assert 'data-detection-action="quarantine"' in template
     assert "Automatic ticket creation" in template
     assert "Anti Virus is off" in template

@@ -220,16 +220,28 @@ async def replace_conditions_for_question(
     conditions: list[dict[str, Any]],
 ) -> None:
     """Replace all conditions for ``question_id`` atomically."""
-    p = _ph()
+    delete_sql = (
+        "DELETE FROM tray_ticket_question_conditions WHERE question_id = ?"
+        if db.is_sqlite()
+        else "DELETE FROM tray_ticket_question_conditions WHERE question_id = %s"
+    )
+    insert_sql = (
+        "INSERT INTO tray_ticket_question_conditions "
+        "(question_id, parent_question_id, operator, expected_value) "
+        "VALUES (?, ?, ?, ?)"
+        if db.is_sqlite()
+        else
+        "INSERT INTO tray_ticket_question_conditions "
+        "(question_id, parent_question_id, operator, expected_value) "
+        "VALUES (%s, %s, %s, %s)"
+    )
     await db.execute(
-        "DELETE FROM tray_ticket_question_conditions WHERE question_id = " + p,
+        delete_sql,
         (question_id,),
     )
     for cond in conditions:
         await db.execute(
-            "INSERT INTO tray_ticket_question_conditions "
-            "(question_id, parent_question_id, operator, expected_value) "
-            "VALUES (" + ",".join([p] * 4) + ")",
+            insert_sql,
             (
                 question_id,
                 int(cond["parent_question_id"]),
@@ -256,12 +268,16 @@ async def create_answers(
     the form).
     """
     p = _ph()
+    placeholders = f"{p},{p},{p},{p},{p},{p}"
+    sql = (
+        "INSERT INTO tray_ticket_answers "
+        "(ticket_id, question_id, question_label_snapshot, is_required_snapshot, answer_value, created_at) "
+        f"VALUES ({placeholders})"
+    )
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     for ans in answers:
         await db.execute(
-            "INSERT INTO tray_ticket_answers "
-            "(ticket_id, question_id, question_label_snapshot, is_required_snapshot, answer_value, created_at) "
-            "VALUES (" + ",".join([p] * 6) + ")",
+            sql,
             (
                 ticket_id,
                 ans.get("question_id"),

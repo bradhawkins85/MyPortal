@@ -13,12 +13,15 @@ document.addEventListener('DOMContentLoaded', () => {
     modal.hidden = true;
     modal.setAttribute('aria-hidden', 'true');
   };
-  document.querySelectorAll('[data-defender-modal-open]').forEach((button) => button.addEventListener('click', () => {
-    const modal = document.getElementById(button.dataset.defenderModalOpen);
+  const openModal = (modal, preferredFocus) => {
     if (!modal) return;
     modal.hidden = false;
     modal.setAttribute('aria-hidden', 'false');
-    modal.querySelector('input:not([disabled]), select:not([disabled]), button:not([disabled])')?.focus();
+    (preferredFocus || modal.querySelector('input:not([disabled]), select:not([disabled]), button:not([disabled])'))?.focus();
+  };
+  const looksLikeRegistryPath = (value) => /^(HKLM|HKCU|HKCR|HKU|HKCC|HKEY_)/i.test((value || '').trim());
+  document.querySelectorAll('[data-defender-modal-open]').forEach((button) => button.addEventListener('click', () => {
+    openModal(document.getElementById(button.dataset.defenderModalOpen));
   }));
   document.querySelectorAll('[data-defender-modal-close]').forEach((button) => button.addEventListener('click', () => closeModal(button.closest('.modal'))));
   document.addEventListener('keydown', (event) => {
@@ -79,5 +82,16 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('[data-detection-action]').forEach((button) => button.addEventListener('click', async () => {
     button.disabled = true;
     try { await send(`/api/defender/detections/${button.dataset.detectionId}/actions`, { method: 'POST', body: JSON.stringify({ action: button.dataset.detectionAction }) }); location.reload(); } catch (error) { alert(error.message); button.disabled = false; }
+  }));
+  document.querySelectorAll('[data-detection-exclude-value]').forEach((button) => button.addEventListener('click', () => {
+    const exclusionForm = document.querySelector('#defender-exclusion-form');
+    if (!exclusionForm) return;
+    const value = (button.dataset.detectionExcludeValue || '').trim();
+    const detectionDeviceId = button.dataset.detectionDeviceId || '';
+    exclusionForm.elements.scope.value = detectionDeviceId ? 'device' : 'company';
+    exclusionForm.elements.tray_device_id.value = detectionDeviceId;
+    exclusionForm.elements.exclusion_type.value = looksLikeRegistryPath(value) ? 'registry' : 'path';
+    exclusionForm.elements.value.value = value;
+    openModal(document.getElementById('exclusions-modal'), exclusionForm.elements.value);
   }));
 });

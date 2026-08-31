@@ -3534,8 +3534,12 @@ async def assign_global_bia(global_bia_id: int, company_id: int) -> bool:
 
 
 async def delete_global_assessment(kind: str, assessment_id: int) -> bool:
-    table = "bcp_global_risk" if kind == "risk" else "bcp_global_bia"
-    query = "DELETE FROM " + table + " WHERE id = %s"
+    if kind == "risk":
+        query = "DELETE FROM bcp_global_risk WHERE id = %s"
+    elif kind == "bia":
+        query = "DELETE FROM bcp_global_bia WHERE id = %s"
+    else:
+        return False
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
             await cursor.execute(query, (assessment_id,))
