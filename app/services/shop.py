@@ -7,6 +7,27 @@ from app.repositories import shop as shop_repo
 from app.services.notifications import emit_notification
 
 
+def get_subscription_price_options(product: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Return the positive, customer-facing prices configured for a subscription."""
+    options: list[dict[str, Any]] = []
+    fields = (
+        ("price_monthly_commitment", "Monthly commitment · monthly payment", "/month"),
+        ("price_annual_monthly_payment", "Annual commitment · monthly payment", "/month"),
+        ("price_annual_annual_payment", "Annual commitment · annual payment", "/year"),
+    )
+    for field, label, suffix in fields:
+        raw_price = product.get(field)
+        if raw_price is None:
+            continue
+        try:
+            price = Decimal(str(raw_price))
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+        if price > 0:
+            options.append({"label": label, "price": price, "suffix": suffix})
+    return options
+
+
 def get_product_price(product: Mapping[str, Any], *, is_vip: bool = False) -> Decimal:
     """Return the appropriate price for a product.
 
@@ -41,17 +62,10 @@ def get_product_price(product: Mapping[str, Any], *, is_vip: bool = False) -> De
     # not.  Use the lowest monthly-equivalent option for catalogue display and
     # availability checks until the customer chooses an option.
     if product.get("subscription_category_id") is not None:
-        options: list[Decimal] = []
-        for field, divisor in (
-            ("price_monthly_commitment", Decimal("1")),
-            ("price_annual_monthly_payment", Decimal("1")),
-            ("price_annual_annual_payment", Decimal("12")),
-        ):
-            raw = product.get(field)
-            if raw is not None:
-                value = Decimal(str(raw))
-                if value > 0:
-                    options.append(value / divisor)
+        options = [
+            option["price"] / (12 if option["suffix"] == "/year" else 1)
+            for option in get_subscription_price_options(product)
+        ]
         if options:
             return min(options)
 

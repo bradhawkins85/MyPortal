@@ -301,8 +301,17 @@ async def shop_page(
                     product["price"] = vip_price
         for product in prepared:
             if product.get("subscription_category_id") is not None:
-                product["price"] = shop_service.get_product_price(product, is_vip=is_vip)
-        return [product for product in prepared if _product_has_price(product)]
+                options = shop_service.get_subscription_price_options(product)
+                product["subscription_price_options"] = options
+                product["has_multiple_subscription_prices"] = len(options) > 1
+                if len(options) == 1:
+                    product["price"] = options[0]["price"]
+        return [
+            product for product in prepared
+            if (bool(product.get("subscription_price_options"))
+                if product.get("subscription_category_id") is not None
+                else _product_has_price(product))
+        ]
 
     if show_packages:
         packages = await shop_packages_service.load_company_packages(
@@ -537,6 +546,8 @@ async def shop_product_detail_api(request: Request, product_id: int):
 
 
 def _public_shop_product_payload(product: Mapping[str, Any], *, is_vip: bool) -> dict[str, Any]:
+    from app.services import shop as shop_service
+
     def public_related_items(items: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
         public_items: list[dict[str, Any]] = []
         for item in items or []:
@@ -575,6 +586,8 @@ def _public_shop_product_payload(product: Mapping[str, Any], *, is_vip: bool) ->
         "stock_sa": product.get("stock_sa"),
         "category_id": product.get("category_id"),
         "category_name": product.get("category_name"),
+        "subscription_category_id": product.get("subscription_category_id"),
+        "subscription_price_options": shop_service.get_subscription_price_options(product),
         "features": product.get("features") or [],
         "cross_sell_products": public_related_items(product.get("cross_sell_products")),
         "cross_sell_product_ids": product.get("cross_sell_product_ids") or [],

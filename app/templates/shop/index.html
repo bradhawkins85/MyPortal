@@ -184,20 +184,20 @@
                 <p class="package-meta">Includes {{ product.product_count }} {{ 'product' if product.product_count == 1 else 'products' }} ({{ item_count }} {{ 'item' if item_count == 1 else 'items' }})</p>
               {% endif %}
               <div class="shop-product-card__meta">
-                <strong>${{ '%.2f'|format(product.price) }}</strong>
+                {% if is_subscription and product.has_multiple_subscription_prices %}
+                  <button type="button" class="button button--ghost button--sm" data-product-details="{{ product.id }}">More Info</button>
+                {% elif is_subscription and product.subscription_price_options %}
+                  {% set subscription_price = product.subscription_price_options[0] %}
+                  <strong>${{ '%.2f'|format(subscription_price.price) }}{{ subscription_price.suffix }}</strong>
+                {% else %}
+                  <strong>${{ '%.2f'|format(product.price) }}</strong>
+                {% endif %}
                 {% if not is_subscription %}
                   {{ stock_helpers.stock_status_badge(product.stock, low_stock_threshold, product.stock <= 0) }}
                 {% else %}
                   <span class="status-badge status-badge--success">Available</span>
                 {% endif %}
               </div>
-              {% if is_subscription %}
-                <ul class="shop-subscription-prices" aria-label="Pricing options">
-                  {% if product.price_monthly_commitment %}<li>Monthly commitment · monthly payment: ${{ '%.2f'|format(product.price_monthly_commitment) }}/month</li>{% endif %}
-                  {% if product.price_annual_monthly_payment %}<li>Annual commitment · monthly payment: ${{ '%.2f'|format(product.price_annual_monthly_payment) }}/month</li>{% endif %}
-                  {% if product.price_annual_annual_payment %}<li>Annual commitment · annual payment: ${{ '%.2f'|format(product.price_annual_annual_payment) }}/year</li>{% endif %}
-                </ul>
-              {% endif %}
             </div>
             <div class="shop-product-card__actions">
               {% if not product.is_package %}
