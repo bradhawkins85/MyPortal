@@ -64,6 +64,25 @@ async def get_recurring_invoice_item(item_id: int) -> Optional[dict[str, Any]]:
     return row
 
 
+async def get_recurring_invoice_item_by_product_code(
+    company_id: int, product_code: str
+) -> Optional[dict[str, Any]]:
+    """Find an existing item by the shop SKU, ignoring casing and whitespace."""
+    return await db.fetch_one(
+        """
+        SELECT id, company_id, product_code, description_template, qty_expression,
+               price_override, active, billing_frequency, billing_interval,
+               start_date, end_date, last_billed_at, created_at, updated_at
+        FROM company_recurring_invoice_items
+        WHERE company_id = %s
+          AND LOWER(TRIM(product_code)) = LOWER(TRIM(%s))
+        ORDER BY active DESC, updated_at DESC, id DESC
+        LIMIT 1
+        """,
+        (company_id, product_code),
+    )
+
+
 async def create_recurring_invoice_item(
     company_id: int,
     product_code: str,

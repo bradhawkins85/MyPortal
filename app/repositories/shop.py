@@ -310,7 +310,9 @@ async def get_category_ids_with_available_products(
     if company_id is not None:
         conditions.append("e.product_id IS NULL")
     if not include_out_of_stock:
-        conditions.append("p.stock > 0")
+        # Subscriptions are not inventory-backed.  ``stock`` is retained for
+        # backwards compatibility, but must never hide an available plan.
+        conditions.append("(p.stock > 0 OR p.subscription_category_id IS NOT NULL)")
 
     query_parts.append("WHERE " + " AND ".join(conditions))
 
@@ -350,7 +352,7 @@ async def list_products(filters: ProductFilters) -> list[dict[str, Any]]:
         params.extend(filters.category_ids)
     _append_product_search_filter(conditions, params, filters.search_term)
     if filters.require_in_stock:
-        conditions.append("p.stock > 0")
+        conditions.append("(p.stock > 0 OR p.subscription_category_id IS NOT NULL)")
 
     if conditions:
         query_parts.append("WHERE " + " AND ".join(conditions))
@@ -397,6 +399,10 @@ async def list_products_summary(filters: ProductFilters) -> list[dict[str, Any]]
         "    p.stock,",
         "    p.archived,",
         "    p.category_id,",
+        "    p.subscription_category_id,",
+        "    p.price_monthly_commitment,",
+        "    p.price_annual_monthly_payment,",
+        "    p.price_annual_annual_payment,",
         "    c.name AS category_name,",
         "    sf.duplicate_sku_import,",
         "    sf.duplicate_sku_count",
@@ -427,7 +433,7 @@ async def list_products_summary(filters: ProductFilters) -> list[dict[str, Any]]
         params.extend(filters.category_ids)
     _append_product_search_filter(conditions, params, filters.search_term)
     if filters.require_in_stock:
-        conditions.append("p.stock > 0")
+        conditions.append("(p.stock > 0 OR p.subscription_category_id IS NOT NULL)")
 
     if conditions:
         query_parts.append("WHERE " + " AND ".join(conditions))

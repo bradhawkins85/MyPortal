@@ -347,6 +347,10 @@ async def apply_subscription_addition(
     
     # Get updated subscription
     updated_subscription = await subscriptions_repo.get_subscription(subscription_id)
+    if updated_subscription:
+        from app.services.subscription_billing import sync_subscription_recurring_item
+
+        await sync_subscription_recurring_item(updated_subscription)
     
     return {
         "subscription": updated_subscription,
@@ -477,6 +481,11 @@ async def process_pending_decreases_for_subscription(
         subscription_id,
         quantity=new_quantity,
     )
+    updated_subscription = await subscriptions_repo.get_subscription(subscription_id)
+    if updated_subscription:
+        from app.services.subscription_billing import sync_subscription_recurring_item
+
+        await sync_subscription_recurring_item(updated_subscription)
     
     # Mark all decreases as applied
     for change in pending_decreases:

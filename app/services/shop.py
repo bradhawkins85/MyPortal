@@ -36,6 +36,25 @@ def get_product_price(product: Mapping[str, Any], *, is_vip: bool = False) -> De
             if custom_price is not None:
                 return Decimal(str(custom_price))
 
+    # A subscription product can expose several independent price options.
+    # Legacy rows selected one option on the product; new rows deliberately do
+    # not.  Use the lowest monthly-equivalent option for catalogue display and
+    # availability checks until the customer chooses an option.
+    if product.get("subscription_category_id") is not None:
+        options: list[Decimal] = []
+        for field, divisor in (
+            ("price_monthly_commitment", Decimal("1")),
+            ("price_annual_monthly_payment", Decimal("1")),
+            ("price_annual_annual_payment", Decimal("12")),
+        ):
+            raw = product.get(field)
+            if raw is not None:
+                value = Decimal(str(raw))
+                if value > 0:
+                    options.append(value / divisor)
+        if options:
+            return min(options)
+
     if is_vip and product.get("vip_price") is not None:
         return Decimal(str(product["vip_price"]))
     return Decimal(str(product.get("price") or 0))

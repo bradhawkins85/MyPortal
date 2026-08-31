@@ -222,6 +222,12 @@ async def update_subscription(
         auto_renew=update_data.auto_renew,
         end_date=update_data.end_date,
     )
+    if update_data.status == "canceled":
+        from app.services.subscription_billing import sync_subscription_recurring_item
+
+        canceled = await subscriptions_repo.get_subscription(subscription_id)
+        if canceled:
+            await sync_subscription_recurring_item(canceled, cancellation_date=date.today())
     
     # Fetch and return the updated subscription
     updated = await subscriptions_repo.get_subscription(subscription_id)
@@ -271,6 +277,12 @@ async def delete_subscription(
             detail="Subscription not found"
         )
     
+    # End billing before removing the portal record. The recurring row is kept
+    # for audit/history and must never be deleted with the subscription.
+    from app.services.subscription_billing import sync_subscription_recurring_item
+
+    await sync_subscription_recurring_item(subscription, cancellation_date=date.today())
+
     # Delete the subscription
     await subscriptions_repo.delete_subscription(subscription_id)
 
