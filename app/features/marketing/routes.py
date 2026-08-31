@@ -94,6 +94,8 @@ async def _build_essential8_help_mapping_controls() -> list[dict[str, Any]]:
         row["selected_marketing_page_id"] = (
             mapping["marketing_page_id"] if mapping else None
         )
+        row["recommendation_name"] = mapping.get("recommendation_name", "") if mapping else ""
+        row["external_url"] = mapping.get("external_url", "") if mapping else ""
         requirements_by_control.setdefault(requirement["control_id"], []).append(row)
     return [
         {
@@ -351,28 +353,31 @@ async def admin_marketing_update_essential8_help_links(request: Request):
     pages = await marketing_repo.list_pages()
     requirements = await essential8_repo.list_essential8_requirements()
     valid_page_ids = {page["id"] for page in pages}
-    mappings: dict[int, int | None] = {}
+    mappings: dict[int, dict[str, Any]] = {}
     form = await request.form()
     for requirement in requirements:
         field_name = f"requirement_{requirement['id']}"
         raw_value = str(form.get(field_name) or "").strip()
-        if not raw_value:
-            mappings[requirement["id"]] = None
-            continue
-        try:
-            page_id = int(raw_value)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid marketing page selection for requirement {requirement['id']}",
-            ) from exc
-        if page_id not in valid_page_ids:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unknown marketing page selection for requirement {requirement['id']}",
-            )
-        mappings[requirement["id"]] = page_id
-    await essential8_repo.replace_requirement_marketing_page_links(mappings)
+        page_id = None
+        if raw_value:
+            try:
+                page_id = int(raw_value)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Invalid marketing page selection") from exc
+            if page_id not in valid_page_ids:
+                raise HTTPException(status_code=400, detail="Unknown marketing page selection")
+        name = str(form.get(f"recommendation_name_{requirement['id']}") or "").strip()[:255]
+        external_url = str(form.get(f"external_url_{requirement['id']}") or "").strip()
+        if external_url and not external_url.lower().startswith(("https://", "http://")):
+            raise HTTPException(status_code=400, detail="External recommendation links must use HTTP or HTTPS")
+        if len(external_url) > 2048:
+            raise HTTPException(status_code=400, detail="External recommendation link is too long")
+        mappings[requirement["id"]] = {
+            "marketing_page_id": page_id,
+            "recommendation_name": name,
+            "external_url": external_url,
+        }
+    await essential8_repo.replace_requirement_recommendations(mappings)
     return flash_redirect(
         "/admin/marketing/essential8-help-links",
         "Essential 8 help links updated.",

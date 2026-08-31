@@ -427,18 +427,22 @@ async def list_requirement_marketing_page_links() -> list[dict[str, Any]]:
         SELECT
             link.requirement_id,
             link.marketing_page_id,
+            link.recommendation_name,
+            link.external_url,
             page.slug AS marketing_page_slug,
             page.title AS marketing_page_title,
             page.is_published AS marketing_page_is_published
         FROM essential8_requirement_marketing_pages AS link
-        INNER JOIN marketing_pages AS page ON page.id = link.marketing_page_id
+        LEFT JOIN marketing_pages AS page ON page.id = link.marketing_page_id
         ORDER BY link.requirement_id
         """
     )
     return [
         {
             "requirement_id": int(row["requirement_id"]),
-            "marketing_page_id": int(row["marketing_page_id"]),
+            "marketing_page_id": int(row["marketing_page_id"]) if row.get("marketing_page_id") else None,
+            "recommendation_name": str(row.get("recommendation_name") or "").strip(),
+            "external_url": str(row.get("external_url") or "").strip(),
             "marketing_page_slug": str(row.get("marketing_page_slug") or "").strip(),
             "marketing_page_title": str(row.get("marketing_page_title") or "").strip(),
             "marketing_page_is_published": bool(int(row.get("marketing_page_is_published") or 0)),
@@ -468,6 +472,33 @@ async def replace_requirement_marketing_page_links(
                     "requirement_id": requirement_id,
                     "marketing_page_id": int(marketing_page_id),
                 },
+            )
+
+
+async def replace_requirement_recommendations(
+    recommendations: dict[int, dict[str, Any]],
+) -> None:
+    """Replace the global recommendation configured for each requirement."""
+    for requirement_id, recommendation in recommendations.items():
+        params = {
+            "requirement_id": int(requirement_id),
+            "marketing_page_id": recommendation.get("marketing_page_id"),
+            "recommendation_name": str(recommendation.get("recommendation_name") or "").strip() or None,
+            "external_url": str(recommendation.get("external_url") or "").strip() or None,
+        }
+        await db.execute(
+            "DELETE FROM essential8_requirement_marketing_pages WHERE requirement_id = %(requirement_id)s",
+            {"requirement_id": params["requirement_id"]},
+        )
+        if params["marketing_page_id"] or params["recommendation_name"] or params["external_url"]:
+            await db.execute(
+                """
+                INSERT INTO essential8_requirement_marketing_pages
+                    (requirement_id, marketing_page_id, recommendation_name, external_url)
+                VALUES
+                    (%(requirement_id)s, %(marketing_page_id)s, %(recommendation_name)s, %(external_url)s)
+                """,
+                params,
             )
 
 

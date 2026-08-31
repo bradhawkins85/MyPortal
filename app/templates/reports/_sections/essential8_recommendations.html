@@ -1,0 +1,19 @@
+<section class="card card--panel" data-report-section="essential8_recommendations">
+  <header class="card__header report-section__header">
+    <h2>Essential 8 compliance recommendations</h2>
+    <span class="report-section__meta">{{ section.data.total or 0 }} requirements need attention</span>
+  </header>
+  <div class="card__body">
+    {% set recommendations = section.data.recommendations or [] %}
+    {% if recommendations %}
+    <div class="table-wrapper"><table class="table">
+      <thead><tr><th>Control</th><th>Level</th><th>Non-compliant requirement</th><th>Status</th><th>Recommended product or service</th></tr></thead>
+      <tbody>{% for item in recommendations %}<tr>
+        <td>{{ item.control }}</td><td>{{ item.maturity_level }}</td><td>{{ item.requirement }}</td>
+        <td><span class="status status--warning">{{ item.status|replace('_', ' ')|title }}</span></td>
+        <td>{% if item.url %}<a href="{{ item.url }}">{{ item.recommendation }}</a>{% else %}{{ item.recommendation }}{% endif %}</td>
+      </tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}<p class="report-empty">No non-compliant requirements were found at the current maturity level.</p>{% endif %}
+  </div>
+</section>
