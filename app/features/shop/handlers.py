@@ -2706,14 +2706,13 @@ async def admin_bulk_refresh_shop_product_descriptions(request: Request):
 
     form = await request.form()
     include_archived = _form_bool(form, "include_archived")
-    products = await shop_repo.list_products_summary(
-        shop_repo.ProductFilters(include_archived=include_archived, sort="name_asc")
+    product_ids = await shop_repo.list_product_description_refresh_ids(
+        include_archived=include_archived
     )
 
     refreshed_count = 0
     failed_count = 0
-    for product in products:
-        product_id = int(product["id"])
+    for product_id in product_ids:
         try:
             result = await product_descriptions.improve_product_description(product_id)
         except Exception as exc:  # pragma: no cover - defensive per-item isolation
@@ -2735,14 +2734,14 @@ async def admin_bulk_refresh_shop_product_descriptions(request: Request):
         entity_type="shop.product",
         metadata={
             "include_archived": include_archived,
-            "requested_count": len(products),
+            "requested_count": len(product_ids),
             "refreshed_count": refreshed_count,
             "failed_count": failed_count,
         },
     )
     _main().log_info(
         "Bulk shop product descriptions refreshed",
-        requested_count=len(products),
+        requested_count=len(product_ids),
         refreshed_count=refreshed_count,
         failed_count=failed_count,
         include_archived=include_archived,
