@@ -295,7 +295,7 @@ async def test_marketing_update_help_links_replaces_mappings(monkeypatch):
     )
     monkeypatch.setattr(
         marketing_routes.essential8_repo,
-        "replace_requirement_marketing_page_links",
+        "replace_requirement_recommendations",
         fake_replace,
     )
 
@@ -304,7 +304,27 @@ async def test_marketing_update_help_links_replaces_mappings(monkeypatch):
     )
 
     assert response.status_code == 303
-    assert captured["mappings"] == {101: 7, 102: None}
+    assert captured["mappings"] == {
+        101: {"marketing_page_id": 7, "recommendation_name": "", "external_url": ""},
+        102: {"marketing_page_id": None, "recommendation_name": "", "external_url": ""},
+    }
+
+
+@pytest.mark.anyio("asyncio")
+async def test_marketing_update_accepts_external_product_link(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(marketing_routes, "_require_marketing_access", AsyncMock(return_value=({"id": 1, "is_super_admin": True}, None)))
+    monkeypatch.setattr(marketing_routes.marketing_repo, "list_pages", AsyncMock(return_value=[]))
+    monkeypatch.setattr(marketing_routes.essential8_repo, "list_essential8_requirements", AsyncMock(return_value=[{"id": 101}]))
+    monkeypatch.setattr(marketing_routes.essential8_repo, "replace_requirement_recommendations", AsyncMock(side_effect=lambda value: captured.update(value)))
+
+    await marketing_routes.admin_marketing_update_essential8_help_links(MockFormRequest({
+        "recommendation_name_101": "Managed patching",
+        "external_url_101": "https://example.com/patching",
+    }))
+
+    assert captured[101]["recommendation_name"] == "Managed patching"
+    assert captured[101]["external_url"] == "https://example.com/patching"
 
 @pytest.mark.anyio("asyncio")
 async def test_submit_requirement_ticket_creates_e8_ticket(monkeypatch):

@@ -114,12 +114,18 @@ def _apply_requirement_help_links(
         req_status = req_compliance.get("status") if req_compliance else "not_started"
         help_link = requirement_help_links.get(req_id)
         help_url = ""
-        if help_link and help_link.get("marketing_page_slug") and help_link.get("marketing_page_is_published"):
+        if help_link and help_link.get("external_url"):
+            help_url = str(help_link["external_url"])
+        elif help_link and help_link.get("marketing_page_slug") and help_link.get("marketing_page_is_published"):
             help_url = f"/marketing/{help_link['marketing_page_slug']}"
         requirement["show_compliance_help"] = bool(
             help_url and _requirement_needs_compliance_help(req_status)
         )
         requirement["compliance_help_url"] = help_url if requirement["show_compliance_help"] else ""
+        requirement["compliance_help_label"] = (
+            str((help_link or {}).get("recommendation_name") or "Recommended product or service")
+            if requirement["show_compliance_help"] else ""
+        )
 
 
 @lru_cache(maxsize=1)

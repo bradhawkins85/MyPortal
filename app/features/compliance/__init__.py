@@ -18,7 +18,7 @@ from .routes import router as compliance_router
 
 PACK = FeaturePack(
     slug="compliance",
-    version="1.0.0",
+    version="1.1.0",
     routers=(compliance_router,),
 )
 

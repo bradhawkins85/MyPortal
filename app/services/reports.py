@@ -88,8 +88,16 @@ REPORT_SECTIONS: tuple[ReportSection, ...] = (
     ),
     ReportSection(
         key="essential8",
-        label="Essential 8 compliance progress",
-        description="Per-maturity-level progress for each Essential 8 control.",
+        label="Essential 8 compliance — all maturity levels",
+        description="Compliance percentages for maturity levels 1, 2, and 3.",
+    ),
+    ReportSection(key="essential8_ml1", label="Essential 8 — maturity level 1", description="Maturity level 1 compliance percentage."),
+    ReportSection(key="essential8_ml2", label="Essential 8 — maturity level 2", description="Maturity level 2 compliance percentage."),
+    ReportSection(key="essential8_ml3", label="Essential 8 — maturity level 3", description="Maturity level 3 compliance percentage."),
+    ReportSection(
+        key="essential8_recommendations",
+        label="Essential 8 compliance recommendations",
+        description="Non-compliant requirements at the current maturity level and recommended products or services.",
     ),
     ReportSection(
         key="compliance_checks",
@@ -416,21 +424,59 @@ async def _build_essential8(company_id: int) -> dict[str, Any]:
                 in_progress += 1
         not_started = total - compliant - in_progress
         percentage = round((compliant / total * 100.0), 1) if total else 0.0
-        # ML2 and ML3 are only included when at least one control has progress.
-        has_progress = compliant > 0 or in_progress > 0
-        if level_key == "ml1" or has_progress:
-            level_rows.append(
-                {
-                    "level": level_key,
-                    "label": level_label,
-                    "total": total,
-                    "compliant": compliant,
-                    "in_progress": in_progress,
-                    "not_started": not_started,
-                    "percentage": percentage,
-                }
-            )
+        level_rows.append({"level": level_key, "label": level_label, "total": total,
+                           "compliant": compliant, "in_progress": in_progress,
+                           "not_started": not_started, "percentage": percentage})
     return {"levels": level_rows}
+
+
+async def _build_essential8_level(company_id: int, level: str) -> dict[str, Any]:
+    data = await _build_essential8(company_id)
+    return {"levels": [row for row in data["levels"] if row["level"] == level]}
+
+
+async def _build_essential8_ml1(company_id: int) -> dict[str, Any]:
+    return await _build_essential8_level(company_id, "ml1")
+
+
+async def _build_essential8_ml2(company_id: int) -> dict[str, Any]:
+    return await _build_essential8_level(company_id, "ml2")
+
+
+async def _build_essential8_ml3(company_id: int) -> dict[str, Any]:
+    return await _build_essential8_level(company_id, "ml3")
+
+
+async def _build_essential8_recommendations(company_id: int) -> dict[str, Any]:
+    controls = await essential8_repo.list_company_compliance(company_id)
+    requirements = await essential8_repo.list_essential8_requirements()
+    compliance = await essential8_repo.list_company_requirement_compliance(company_id)
+    links = await essential8_repo.list_requirement_marketing_page_links()
+    control_map = {row["control_id"]: row for row in controls}
+    status_map = {row["requirement_id"]: row.get("status", "not_started") for row in compliance}
+    link_map = {row["requirement_id"]: row for row in links}
+    rows: list[dict[str, Any]] = []
+    for requirement in requirements:
+        control = control_map.get(requirement["control_id"])
+        if not control:
+            continue
+        current_level = str(control.get("maturity_level") or "ml0")
+        current_level = current_level if current_level in {"ml1", "ml2", "ml3"} else "ml1"
+        status = status_map.get(requirement["id"], "not_started")
+        if requirement["maturity_level"] != current_level or status in {"compliant", "not_applicable"}:
+            continue
+        recommendation = link_map.get(requirement["id"], {})
+        url = recommendation.get("external_url") or (
+            f"/marketing/{recommendation['marketing_page_slug']}"
+            if recommendation.get("marketing_page_slug") and recommendation.get("marketing_page_is_published") else ""
+        )
+        rows.append({
+            "control": (control.get("control") or {}).get("name") or control.get("control_name") or "Essential 8 control",
+            "maturity_level": current_level.upper(), "requirement": requirement.get("description"),
+            "status": status, "recommendation": recommendation.get("recommendation_name") or "Contact us for assistance",
+            "url": url,
+        })
+    return {"recommendations": rows, "total": len(rows)}
 
 
 async def _build_compliance_checks(company_id: int) -> dict[str, Any]:
@@ -662,6 +708,10 @@ _SECTION_BUILDERS = {
     "licenses": _build_licenses,
     "subscriptions": _build_subscriptions,
     "essential8": _build_essential8,
+    "essential8_ml1": _build_essential8_ml1,
+    "essential8_ml2": _build_essential8_ml2,
+    "essential8_ml3": _build_essential8_ml3,
+    "essential8_recommendations": _build_essential8_recommendations,
     "compliance_checks": _build_compliance_checks,
     "tickets_last_month": _build_tickets_last_month,
     "asset_custom_fields": _build_asset_custom_fields,
@@ -1355,9 +1405,11 @@ def _section_is_empty(key: str, data: dict[str, Any]) -> bool:
         return int(data.get("total") or 0) == 0
     if key == "subscriptions":
         return int(data.get("total") or 0) == 0
-    if key == "essential8":
+    if key in {"essential8", "essential8_ml1", "essential8_ml2", "essential8_ml3"}:
         levels = data.get("levels") or []
         return len(levels) == 0 or all(int(lvl.get("total") or 0) == 0 for lvl in levels)
+    if key == "essential8_recommendations":
+        return int(data.get("total") or 0) == 0
     if key == "compliance_checks":
         return int(data.get("total") or 0) == 0
     if key == "tickets_last_month":
