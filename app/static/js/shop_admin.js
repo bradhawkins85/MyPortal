@@ -927,6 +927,12 @@
 
       const actionsCell = document.createElement('td');
       actionsCell.className = 'table__actions';
+      const editButton = document.createElement('button');
+      editButton.type = 'button';
+      editButton.className = 'button button--ghost button--small';
+      editButton.textContent = 'Edit';
+      editButton.setAttribute('aria-label', `Edit ${nameValue || 'feature'}`);
+      editButton.addEventListener('click', () => nameInput.focus());
       const removeButton = document.createElement('button');
       removeButton.type = 'button';
       removeButton.className = 'button button--ghost button--small button--danger';
@@ -939,6 +945,7 @@
         }
         refreshFeatureInput();
       });
+      actionsCell.appendChild(editButton);
       actionsCell.appendChild(removeButton);
 
       row.appendChild(nameCell);
@@ -1368,6 +1375,11 @@
       editForm.addEventListener('change', () => { editForm.dataset.dirty = 'true'; });
       editForm.addEventListener('submit', () => {
         editForm.dataset.dirty = 'false';
+        const submitButton = editForm.querySelector('#edit-product-submit');
+        if (submitButton) {
+          submitButton.disabled = true;
+          submitButton.setAttribute('aria-busy', 'true');
+        }
         refreshFeatureInput();
         // Append current URL params to form action so the server can redirect back to the same filtered view
         try {
