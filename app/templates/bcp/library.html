@@ -1,0 +1,33 @@
+{% extends "bcp/layout.html" %}
+{% block header_title %}BCP — Global Assessment Library{% endblock %}
+{% block bcp_content %}
+<div class="bcp-page page-container">
+  <div class="page-header"><div><h1 class="page-title">Global Assessment Library</h1><p class="page-description">Create reusable assessments and assign them to one or many customers.</p></div><div class="page-actions"><a class="btn btn-secondary" href="/bcp">Back to Overview</a></div></div>
+  <section class="card"><div class="card-header"><h2 class="card-title">Create Global Risk</h2></div><div class="card-body">
+    <form method="post" action="/bcp/library/risks" class="form-grid"><input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <label class="form-group">Description<textarea name="description" required></textarea></label>
+      <label class="form-group">Likelihood (1–4)<input type="number" name="likelihood" min="1" max="4" required></label>
+      <label class="form-group">Impact (1–4)<input type="number" name="impact" min="1" max="4" required></label>
+      <label class="form-group">Preventative actions<textarea name="preventative_actions"></textarea></label>
+      <label class="form-group">Contingency plans<textarea name="contingency_plans"></textarea></label>
+      <fieldset class="form-group"><legend>Optionally assign to customers</legend>{% for company in companies %}<label><input type="checkbox" name="company_ids" value="{{ company.id }}"> {{ company.name }}</label>{% endfor %}</fieldset>
+      <div><button class="btn btn-primary" type="submit">Create Global Risk</button></div>
+    </form>
+  </div></section>
+  <section class="card"><div class="card-header"><h2 class="card-title">Create Global BIA Assessment</h2></div><div class="card-body">
+    <form method="post" action="/bcp/library/bia" class="form-grid"><input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <label class="form-group">Activity name<input name="name" required></label><label class="form-group">Description<textarea name="description"></textarea></label>
+      <label class="form-group">Priority<select name="priority"><option value="">Not set</option><option>High</option><option>Medium</option><option>Low</option></select></label>
+      <label class="form-group">Supplier dependency<select name="supplier_dependency"><option value="">Not set</option><option>None</option><option>Sole</option><option>Major</option><option>Many</option></select></label>
+      <label class="form-group">Importance (1–5)<input type="number" name="importance" min="1" max="5"></label><label class="form-group">RTO hours<input type="number" name="rto_hours" min="0"></label>
+      <label class="form-group">Financial impact<textarea name="losses_financial"></textarea></label><label class="form-group">Staffing impact<textarea name="losses_staffing"></textarea></label><label class="form-group">Reputation impact<textarea name="losses_reputation"></textarea></label><label class="form-group">Notes<textarea name="notes"></textarea></label>
+      <fieldset class="form-group"><legend>Optionally assign to customers</legend>{% for company in companies %}<label><input type="checkbox" name="company_ids" value="{{ company.id }}"> {{ company.name }}</label>{% endfor %}</fieldset>
+      <div><button class="btn btn-primary" type="submit">Create Global BIA Assessment</button></div>
+    </form>
+  </div></section>
+  {% for kind, items in [('risk', global_risks), ('bia', global_bias)] %}
+  <section class="card"><div class="card-header"><h2 class="card-title">Global {{ 'Risks' if kind == 'risk' else 'BIA Assessments' }}</h2></div><div class="card-body"><div class="table-responsive"><table class="table"><thead><tr><th>Name / description</th><th>Assign customers</th><th>Actions</th></tr></thead><tbody>
+  {% for item in items %}<tr><td><strong>{{ item.description if kind == 'risk' else item.name }}</strong></td><td><form method="post" action="/bcp/library/{{ kind }}/{{ item.id }}/assign"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><select name="company_ids" multiple required>{% for company in companies %}<option value="{{ company.id }}">{{ company.name }}</option>{% endfor %}</select> <button class="btn btn-sm btn-primary">Assign selected</button></form></td><td><form method="post" action="/bcp/library/{{ kind }}/{{ item.id }}/delete"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><button class="btn btn-sm btn-danger" onclick="return confirm('Delete this global assessment? Existing customer copies will remain.')">Delete</button></form></td></tr>{% else %}<tr><td colspan="3">No global assessments yet.</td></tr>{% endfor %}
+  </tbody></table></div></div></section>{% endfor %}
+</div>
+{% endblock %}

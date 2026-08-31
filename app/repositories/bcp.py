@@ -3401,3 +3401,143 @@ async def get_upcoming_review_items(days_ahead: int = 7) -> list[dict[str, Any]]
                 }
                 for row in rows
             ]
+
+# ============================================================================
+# Global assessment library
+# ============================================================================
+
+async def list_global_risks(company_id: int | None = None) -> list[dict[str, Any]]:
+    """List reusable risks, including assignment state for an optional customer."""
+    query = """
+        SELECT g.id, g.description, g.likelihood, g.impact,
+               g.preventative_actions, g.contingency_plans,
+               CASE WHEN a.company_id IS NULL THEN 0 ELSE 1 END AS assigned
+        FROM bcp_global_risk g
+        LEFT JOIN bcp_global_risk_assignment a
+          ON a.global_risk_id = g.id AND a.company_id = %s
+        ORDER BY g.description
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (company_id,))
+            rows = await cursor.fetchall()
+    return [{"id": r[0], "description": r[1], "likelihood": r[2], "impact": r[3],
+             "preventative_actions": r[4], "contingency_plans": r[5], "assigned": bool(r[6])}
+            for r in rows]
+
+
+async def create_global_risk(description: str, likelihood: int, impact: int,
+                             preventative_actions: str | None = None,
+                             contingency_plans: str | None = None) -> int:
+    query = """INSERT INTO bcp_global_risk
+        (description, likelihood, impact, preventative_actions, contingency_plans)
+        VALUES (%s, %s, %s, %s, %s)"""
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (description, likelihood, impact, preventative_actions, contingency_plans))
+            await conn.commit()
+            return cursor.lastrowid
+
+
+async def list_global_bia_assessments(company_id: int | None = None) -> list[dict[str, Any]]:
+    """List reusable BIA assessments, including assignment state."""
+    query = """
+        SELECT g.id, g.name, g.description, g.priority, g.supplier_dependency,
+               g.importance, g.notes, g.losses_financial, g.losses_increased_costs,
+               g.losses_staffing, g.losses_product_service, g.losses_reputation,
+               g.fines, g.legal_liability, g.rto_hours, g.losses_comments,
+               CASE WHEN a.company_id IS NULL THEN 0 ELSE 1 END AS assigned
+        FROM bcp_global_bia g
+        LEFT JOIN bcp_global_bia_assignment a
+          ON a.global_bia_id = g.id AND a.company_id = %s
+        ORDER BY g.name
+    """
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (company_id,))
+            rows = await cursor.fetchall()
+    keys = ("id", "name", "description", "priority", "supplier_dependency", "importance", "notes",
+            "losses_financial", "losses_increased_costs", "losses_staffing", "losses_product_service",
+            "losses_reputation", "fines", "legal_liability", "rto_hours", "losses_comments", "assigned")
+    return [{**dict(zip(keys, row)), "assigned": bool(row[16])} for row in rows]
+
+
+async def create_global_bia(**values: Any) -> int:
+    columns = ("name", "description", "priority", "supplier_dependency", "importance", "notes",
+               "losses_financial", "losses_increased_costs", "losses_staffing", "losses_product_service",
+               "losses_reputation", "fines", "legal_liability", "rto_hours", "losses_comments")
+    query = """INSERT INTO bcp_global_bia
+        (name, description, priority, supplier_dependency, importance, notes,
+         losses_financial, losses_increased_costs, losses_staffing, losses_product_service,
+         losses_reputation, fines, legal_liability, rto_hours, losses_comments)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, tuple(values.get(column) for column in columns))
+            await conn.commit()
+            return cursor.lastrowid
+
+
+async def assign_global_risk(global_risk_id: int, company_id: int) -> bool:
+    """Copy a library risk into a customer's plan; assignment is idempotent."""
+    plan = await get_plan_by_company(company_id)
+    if not plan:
+        plan = await create_plan(company_id)
+    query = """SELECT description, likelihood, impact, preventative_actions, contingency_plans
+               FROM bcp_global_risk WHERE id = %s"""
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT 1 FROM bcp_global_risk_assignment WHERE global_risk_id = %s AND company_id = %s",
+                                 (global_risk_id, company_id))
+            if await cursor.fetchone():
+                return False
+            await cursor.execute(query, (global_risk_id,))
+            row = await cursor.fetchone()
+    if not row:
+        return False
+    from app.services.risk_calculator import calculate_risk
+    rating, severity = calculate_risk(row[1], row[2])
+    risk = await create_risk(plan["id"], row[0], row[1], row[2], rating, severity, row[3], row[4])
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""INSERT INTO bcp_global_risk_assignment
+                (global_risk_id, company_id, risk_id) VALUES (%s, %s, %s)""",
+                (global_risk_id, company_id, risk["id"]))
+            await conn.commit()
+    return True
+
+
+async def assign_global_bia(global_bia_id: int, company_id: int) -> bool:
+    """Copy a library BIA assessment and its impact details into a customer plan."""
+    existing = await list_global_bia_assessments(company_id)
+    template = next((item for item in existing if item["id"] == global_bia_id), None)
+    if not template or template["assigned"]:
+        return False
+    plan = await get_plan_by_company(company_id)
+    if not plan:
+        plan = await create_plan(company_id)
+    activity = await create_critical_activity(
+        plan["id"], template["name"], template["description"], template["priority"],
+        template["supplier_dependency"], template["importance"], template["notes"])
+    impact_keys = ("losses_financial", "losses_increased_costs", "losses_staffing",
+                   "losses_product_service", "losses_reputation", "fines", "legal_liability",
+                   "rto_hours", "losses_comments")
+    if any(template[key] is not None for key in impact_keys):
+        await create_or_update_impact(activity["id"], *(template[key] for key in impact_keys))
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""INSERT INTO bcp_global_bia_assignment
+                (global_bia_id, company_id, critical_activity_id) VALUES (%s, %s, %s)""",
+                (global_bia_id, company_id, activity["id"]))
+            await conn.commit()
+    return True
+
+
+async def delete_global_assessment(kind: str, assessment_id: int) -> bool:
+    table = "bcp_global_risk" if kind == "risk" else "bcp_global_bia"
+    query = "DELETE FROM " + table + " WHERE id = %s"
+    async with db.connection() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(query, (assessment_id,))
+            await conn.commit()
+            return cursor.rowcount > 0

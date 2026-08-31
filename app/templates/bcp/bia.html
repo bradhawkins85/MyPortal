@@ -13,6 +13,7 @@
     </div>
     <div class="page-actions">
       <a href="/bcp" class="btn btn-secondary">Back to Overview</a>
+      {% if user.is_super_admin %}<a href="/bcp/library" class="btn btn-secondary">Global Library</a>{% endif %}
       {% if can_edit %}
       <a href="/bcp/bia/new" class="btn btn-primary">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" style="margin-right: 0.5rem;">
@@ -71,6 +72,12 @@
       </div>
     </div>
   </section>
+
+  {% if can_edit %}
+  <section class="card"><div class="card-header"><h2 class="card-title">Available Global BIA Assessments</h2></div><div class="card-body"><p class="text-muted">Select a centrally managed assessment to add a customer-specific copy to this plan.</p>
+    {% if available_global_bias %}<div class="table-responsive"><table class="table"><thead><tr><th>Assessment</th><th>Action</th></tr></thead><tbody>{% for item in available_global_bias %}<tr><td><strong>{{ item.description if 'bia' == 'risk' else item.name }}</strong></td><td><form method="post" action="/bcp/available/bia/{{ item.id }}/add"><input type="hidden" name="_csrf" value="{{ csrf_token }}"><button class="btn btn-sm btn-primary">Add to this customer</button></form></td></tr>{% endfor %}</tbody></table></div>{% else %}<p>All available global assessments have already been added.</p>{% endif %}
+  </div></section>
+  {% endif %}
 
   <!-- BIA Summary Table -->
   <section class="card">
