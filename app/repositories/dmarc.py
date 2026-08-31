@@ -109,7 +109,16 @@ async def list_records(company_id: int, *, start: Any, end: Any, limit: int = 50
     if domain: clauses.append("r.header_from=%s"); params.append(domain)
     if disposition: clauses.append("r.disposition=%s"); params.append(disposition)
     params.extend([min(max(limit, 1), 250), max(offset, 0)])
-    return await db.fetch_all(f"SELECT r.*,p.report_id external_report_id,p.date_begin,p.date_end FROM dmarc_records r JOIN dmarc_reports p ON p.id=r.report_id WHERE {' AND '.join(clauses)} ORDER BY p.date_begin DESC,r.id DESC LIMIT %s OFFSET %s", tuple(params))
+    where = " AND ".join(clauses)
+    # nosec B608 – `where` is built exclusively from hardcoded literal strings;
+    # all user-supplied values are passed as parameterised placeholders (%s).
+    query = (
+        "SELECT r.*,p.report_id external_report_id,p.date_begin,p.date_end"
+        " FROM dmarc_records r JOIN dmarc_reports p ON p.id=r.report_id"
+        " WHERE " + where +  # nosec B608
+        " ORDER BY p.date_begin DESC,r.id DESC LIMIT %s OFFSET %s"
+    )
+    return await db.fetch_all(query, tuple(params))
 
 
 async def get_record(company_id: int, record_id: int) -> dict[str, Any] | None:
