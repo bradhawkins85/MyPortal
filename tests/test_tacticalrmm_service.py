@@ -53,6 +53,7 @@ def test_extract_agent_details_handles_beta_agent_payload():
         "agent_id": "OEBIMTvujlppgOaNxYerEVowqDstjsGeNKCsnSSz",
         "operating_system": "Windows 10 Pro, 64 bit v22H2 (build 19045.6456)",
         "last_seen": "2025-11-04T02:40:20.840228Z",
+        "boot_time": "2025-11-03T08:15:00Z",
         "plat": "windows",
         "services": [],
     }
@@ -63,6 +64,7 @@ def test_extract_agent_details_handles_beta_agent_payload():
     assert details["os_name"] == "Windows 10 Pro, 64 bit v22H2 (build 19045.6456)"
     assert details["tactical_asset_id"] == "OEBIMTvujlppgOaNxYerEVowqDstjsGeNKCsnSSz"
     assert details["last_sync"] == "2025-11-04T02:40:20.840228Z"
+    assert details["boot_time"] == "2025-11-03T08:15:00Z"
 
 
 def test_extract_agent_details_joins_cpu_model_list():

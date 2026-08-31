@@ -37,6 +37,7 @@ async def test_import_tactical_assets_for_company_upserts(monkeypatch):
             "ram_gb": 16.0,
             "hdd_size": "512 GB",
             "last_sync": "2024-01-01T10:00:00Z",
+            "boot_time": "2024-01-01T08:00:00Z",
             "motherboard_manufacturer": "Dell",
             "form_factor": "Tower",
             "last_user": "Alice",
@@ -93,6 +94,7 @@ async def test_import_tactical_assets_for_company_upserts(monkeypatch):
     assert machine_types == {"Physical", "Virtual"}
     assert all(entry.get("match_name") is True for entry in captured)
     assert captured[0]["mac_address"] == "00:11:22:33:44:55,AA:BB:CC:DD:EE:FF"
+    assert captured[0]["boot_time"] == "2024-01-01T08:00:00Z"
 
 
 @pytest.mark.anyio

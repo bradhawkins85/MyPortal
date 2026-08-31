@@ -134,6 +134,19 @@
                       <span class="text-muted">Never</span>
                     {% endif %}
                   </td>
+                {% elif key == 'boot_time' %}
+                  <td
+                    data-label="{{ column.label }}"
+                    data-column="{{ key }}"
+                    data-value="{{ asset.get('boot_time_sort', '') }}"
+                    {% if mobile_priority %}data-mobile-priority="{{ mobile_priority }}"{% endif %}
+                  >
+                    {% if asset.boot_time_iso %}
+                      <span data-utc="{{ asset.boot_time_iso }}">{{ asset.boot_time or asset.boot_time_iso }}</span>
+                    {% else %}
+                      <span class="text-muted">—</span>
+                    {% endif %}
+                  </td>
                 {% elif key == 'warranty_end_date' %}
                   <td
                     data-label="{{ column.label }}"

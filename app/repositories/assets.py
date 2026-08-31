@@ -22,6 +22,7 @@ async def list_company_assets(company_id: int) -> list[dict[str, Any]]:
             ram_gb,
             hdd_size,
             last_sync,
+            boot_time,
             motherboard_manufacturer,
             form_factor,
             last_user,
@@ -151,6 +152,7 @@ async def upsert_asset(
     ram_gb: Any = None,
     hdd_size: str | None = None,
     last_sync: Any = None,
+    boot_time: Any = None,
     motherboard_manufacturer: str | None = None,
     form_factor: str | None = None,
     last_user: str | None = None,
@@ -169,6 +171,7 @@ async def upsert_asset(
     approx_value = _coerce_float(approx_age)
     performance_value = _coerce_float(performance_score)
     last_sync_db = _to_mysql_datetime(last_sync)
+    boot_time_db = _to_mysql_datetime(boot_time)
     warranty_end_db = _to_mysql_date(warranty_end_date)
 
     row = None
@@ -203,6 +206,7 @@ async def upsert_asset(
         ram_value,
         hdd_size,
         last_sync_db,
+        boot_time_db,
         motherboard_manufacturer,
         form_factor,
         last_user,
@@ -229,6 +233,7 @@ async def upsert_asset(
                 ram_gb = %s,
                 hdd_size = %s,
                 last_sync = %s,
+                boot_time = COALESCE(%s, boot_time),
                 motherboard_manufacturer = %s,
                 form_factor = %s,
                 last_user = %s,
@@ -260,6 +265,7 @@ async def upsert_asset(
                 ram_gb,
                 hdd_size,
                 last_sync,
+                boot_time,
                 motherboard_manufacturer,
                 form_factor,
                 last_user,
@@ -270,7 +276,7 @@ async def upsert_asset(
                 syncro_asset_id,
                 tactical_asset_id,
                 mac_address
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 company_id,
@@ -284,6 +290,7 @@ async def upsert_asset(
                 ram_value,
                 hdd_size,
                 last_sync_db,
+                boot_time_db,
                 motherboard_manufacturer,
                 form_factor,
                 last_user,
