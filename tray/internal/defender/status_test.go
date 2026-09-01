@@ -7,6 +7,9 @@ func TestDecodeStatusAcceptsPowerShellUTF8BOM(t *testing.T) {
         "antivirus_enabled": true,
         "realtime_protection_enabled": true,
         "tamper_protection_enabled": true,
+        "firewall_domain_enabled": true,
+        "firewall_private_enabled": false,
+        "firewall_public_enabled": true,
         "signatures_updated_at": "2026-08-20T01:02:03Z",
         "scan_history": [{
             "scan_type": "quick",
@@ -34,6 +37,9 @@ func TestDecodeStatusAcceptsPowerShellUTF8BOM(t *testing.T) {
 	}
 	if !status.AntivirusEnabled || status.HealthStatus != "healthy" {
 		t.Fatalf("unexpected status: %+v", status)
+	}
+	if status.FirewallDomainEnabled == nil || !*status.FirewallDomainEnabled || status.FirewallPrivateEnabled == nil || *status.FirewallPrivateEnabled {
+		t.Fatalf("unexpected firewall status: %+v", status)
 	}
 	if status.SignaturesUpdatedAt == nil {
 		t.Fatal("expected signatures timestamp")

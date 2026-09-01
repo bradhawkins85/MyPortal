@@ -7,6 +7,9 @@ class DefenderStatusReport(BaseModel):
     antivirus_enabled: bool = False
     realtime_protection_enabled: bool = False
     tamper_protection_enabled: bool = False
+    firewall_domain_enabled: bool | None = None
+    firewall_private_enabled: bool | None = None
+    firewall_public_enabled: bool | None = None
     signatures_updated_at: datetime | None = None
     last_scan_at: datetime | None = None
     scan_history: list["DefenderScanReport"] = Field(default_factory=list, max_length=20)

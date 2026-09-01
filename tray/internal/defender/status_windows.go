@@ -16,6 +16,8 @@ import (
 const statusScript = `$ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $s = Get-MpComputerStatus
+$firewall = @{}
+Get-NetFirewallProfile -PolicyStore ActiveStore | ForEach-Object { $firewall[$_.Name] = [bool]$_.Enabled }
 $health = if (-not $s.AntivirusEnabled -or -not $s.RealTimeProtectionEnabled) { 'critical' } elseif ($s.AntivirusSignatureAge -gt 7) { 'warning' } else { 'healthy' }
 $lastScan = @($s.QuickScanEndTime, $s.FullScanEndTime) | Where-Object { $_ } | Sort-Object -Descending | Select-Object -First 1
 $scanHistory = @(
@@ -61,6 +63,9 @@ $detections = @(Get-MpThreatDetection | Where-Object { $_.InitialDetectionTime -
   antivirus_enabled = [bool]$s.AntivirusEnabled
   realtime_protection_enabled = [bool]$s.RealTimeProtectionEnabled
   tamper_protection_enabled = [bool]$s.IsTamperProtected
+  firewall_domain_enabled = $firewall['Domain']
+  firewall_private_enabled = $firewall['Private']
+  firewall_public_enabled = $firewall['Public']
   signatures_updated_at = if ($s.AntivirusSignatureLastUpdated) { $s.AntivirusSignatureLastUpdated.ToUniversalTime().ToString('o') } else { $null }
   last_scan_at = if ($lastScan) { $lastScan.ToUniversalTime().ToString('o') } else { $null }
   scan_history = @($scanHistory)

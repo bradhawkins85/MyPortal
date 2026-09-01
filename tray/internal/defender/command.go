@@ -25,6 +25,8 @@ func commandScript(commandType, detectionUID string) (string, error) {
 		return "Start-MpScan -ScanType FullScan", nil
 	case "signature_update":
 		return "Update-MpSignature", nil
+	case "enable_firewall":
+		return "Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True", nil
 	case "quarantine", "remediate":
 		if detectionUID == "" {
 			return "", fmt.Errorf("%s requires a detection identifier", commandType)

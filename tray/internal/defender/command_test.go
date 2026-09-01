@@ -10,6 +10,7 @@ func TestCommandScripts(t *testing.T) {
 		"quick_scan":       "Start-MpScan -ScanType QuickScan",
 		"full_scan":        "Start-MpScan -ScanType FullScan",
 		"signature_update": "Update-MpSignature",
+		"enable_firewall":  "Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True",
 	}
 	for command, want := range tests {
 		got, err := commandScript(command, "")

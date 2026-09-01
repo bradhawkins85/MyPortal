@@ -258,6 +258,9 @@ type DefenderStatus struct {
 	AntivirusEnabled          bool                   `json:"antivirus_enabled"`
 	RealtimeProtectionEnabled bool                   `json:"realtime_protection_enabled"`
 	TamperProtectionEnabled   bool                   `json:"tamper_protection_enabled"`
+	FirewallDomainEnabled     *bool                  `json:"firewall_domain_enabled"`
+	FirewallPrivateEnabled    *bool                  `json:"firewall_private_enabled"`
+	FirewallPublicEnabled     *bool                  `json:"firewall_public_enabled"`
 	SignaturesUpdatedAt       *time.Time             `json:"signatures_updated_at,omitempty"`
 	LastScanAt                *time.Time             `json:"last_scan_at,omitempty"`
 	ScanHistory               []DefenderScan         `json:"scan_history"`
