@@ -30,7 +30,8 @@ async def _portal_context(request: Request, *, write: bool = False):
     if company_id is None:
         raise HTTPException(400, "No active company")
     membership = None
-    can_write = bool(user.get("is_super_admin")) or bool(user.get("is_company_admin"))
+    can_write = (bool(user.get("is_super_admin")) or bool(user.get("is_company_admin"))
+                 or _main()._menu_can(user.get("menu_access"), "menu.defender", write=True))
     if write and not can_write:
         return user, membership, int(company_id), RedirectResponse("/", status_code=303)
     return user, membership, int(company_id), None
@@ -51,7 +52,8 @@ async def defender_page(request: Request):
         "defender_devices": devices,
         "defender_exclusions": exclusions,
         "defender_detections": detections,
-        "defender_can_write": bool(user.get("is_super_admin")) or bool(user.get("is_company_admin")),
+        "defender_can_write": (bool(user.get("is_super_admin")) or bool(user.get("is_company_admin"))
+                               or _main()._menu_can(user.get("menu_access"), "menu.defender", write=True)),
         "defender_settings": defender_settings,
     }
     if is_super_admin:
@@ -149,7 +151,7 @@ async def create_defender_command(device_id: int, command_type: str, request: Re
     user, _, company_id, redirect = await _portal_context(request, write=True)
     if redirect:
         raise HTTPException(403, "Read/write Defender access required")
-    if command_type not in {"quick_scan", "full_scan", "signature_update"}:
+    if command_type not in {"quick_scan", "full_scan", "signature_update", "enable_firewall"}:
         raise HTTPException(422, "Unsupported Defender command")
     if not await repo.device_belongs_to_company(device_id, company_id):
         raise HTTPException(404, "Device not found")

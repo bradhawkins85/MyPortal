@@ -61,6 +61,25 @@ def test_defender_portal_context_preserves_auth_redirect(monkeypatch):
     assert redirect is auth_redirect
 
 
+def test_defender_write_access_allows_technicians_with_write_permission(monkeypatch):
+    request = Request({"type": "http", "method": "POST", "path": "/api/defender", "headers": []})
+    technician = {"company_id": 42, "menu_access": {"menu.defender": "write"}}
+
+    async def require_authenticated_user(_request):
+        return technician, None
+
+    monkeypatch.setattr(defender, "_main", lambda: SimpleNamespace(
+        _require_authenticated_user=require_authenticated_user,
+        _menu_can=lambda permissions, key, write=False: permissions.get(key) == "write",
+    ))
+
+    user, _, company_id, redirect = asyncio.run(defender._portal_context(request, write=True))
+
+    assert user is technician
+    assert company_id == 42
+    assert redirect is None
+
+
 def test_defender_page_renders_html_template(monkeypatch):
     request = Request({"type": "http", "method": "GET", "path": "/defender", "headers": []})
     expected_user = {"company_id": 42, "is_company_admin": True}
@@ -163,6 +182,17 @@ def test_status_report_accepts_recent_scan_history():
     assert report.scan_history[0].duration_seconds == 150
 
 
+def test_status_report_accepts_each_firewall_profile():
+    report = DefenderStatusReport(
+        firewall_domain_enabled=True,
+        firewall_private_enabled=False,
+        firewall_public_enabled=True,
+    )
+    assert report.firewall_domain_enabled is True
+    assert report.firewall_private_enabled is False
+    assert report.firewall_public_enabled is True
+
+
 def test_status_report_accepts_defender_protection_history():
     report = DefenderStatusReport(detections=[{
         "detection_uid": "det-123",
@@ -213,6 +243,10 @@ def test_defender_ui_exposes_management_workflows():
     assert 'data-defender-command="quick_scan"' in template
     assert 'data-defender-command="full_scan"' in template
     assert 'data-defender-command="signature_update"' in template
+    assert 'data-defender-command="enable_firewall"' in template
+    assert "Domain:" in template
+    assert "Private:" in template
+    assert "Public:" in template
     assert 'data-defender-modal-open": "protection-policy-modal"' in template
     assert 'data-defender-modal-open": "ticket-actions-modal"' in template
     assert 'data-defender-modal-open": "exclusions-modal"' in template
