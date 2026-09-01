@@ -272,6 +272,40 @@ class TestRiskCRUD:
             result = await bcp_repo.delete_risk(risk_id=1)
             
             assert result is True
+
+    @pytest.mark.asyncio
+    async def test_delete_risk_route_records_audit_and_redirects(self):
+        """Deleting a risk completes after recording its audit event."""
+        from app.api.routes.bcp import delete_risk
+
+        request = MagicMock()
+
+        with (
+            patch(
+                "app.api.routes.bcp._require_bcp_edit",
+                new=AsyncMock(return_value=({"id": 7}, 42)),
+            ),
+            patch(
+                "app.api.routes.bcp.bcp_repo.delete_risk",
+                new=AsyncMock(return_value=True),
+            ) as mock_delete,
+            patch(
+                "app.api.routes.bcp.audit.log_action",
+                new=AsyncMock(),
+            ) as mock_audit,
+        ):
+            response = await delete_risk(request, risk_id=1)
+
+        mock_delete.assert_awaited_once_with(1)
+        mock_audit.assert_awaited_once_with(
+            action="bcp.risk.delete",
+            user_id=7,
+            entity_type="risk",
+            metadata={"company_id": 42},
+            request=request,
+        )
+        assert response.status_code == 303
+        assert response.headers["location"].startswith("/bcp/risks")
     
     @pytest.mark.asyncio
     async def test_list_risks_happy_path(self):

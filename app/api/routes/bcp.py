@@ -14,6 +14,7 @@ from app.repositories import bcp as bcp_repo
 from app.repositories import company_memberships as membership_repo
 from app.security.flash import flash_redirect
 from app.security.session import SessionData
+from app.services import audit
 from app.services.sanitization import sanitize_rich_text
 
 router = APIRouter(prefix="/bcp", tags=["Business Continuity Planning"])
