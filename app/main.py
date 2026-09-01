@@ -126,6 +126,7 @@ from app.repositories import forms as forms_repo
 from app.repositories import knowledge_base as knowledge_base_repo
 from app.repositories import m365 as m365_repo
 from app.repositories import notifications as notifications_repo
+from app.repositories import chat as chat_repo
 from app.repositories import defender as defender_repo
 from app.repositories import reporting as reporting_repo
 from app.repositories import roles as role_repo
@@ -2282,6 +2283,28 @@ async def _build_base_context(
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error("Failed to count unread notifications", error=str(exc))
         context["notification_unread_count"] = unread_count
+    if "chat_open_count" not in context:
+        open_chat_count = 0
+        user_id = user.get("id")
+        can_view_chat = (
+            is_super_admin
+            or is_helpdesk_technician
+            or permission_flags["can_access_chat"]
+        )
+        if settings.matrix_enabled and can_view_chat and user_id is not None:
+            try:
+                if is_super_admin or is_helpdesk_technician:
+                    open_chat_count = await chat_repo.count_rooms(status="open")
+                else:
+                    company_id = user.get("company_id") or active_company_id
+                    open_chat_count = await chat_repo.count_rooms(
+                        user_id=int(user_id),
+                        company_id=int(company_id) if company_id is not None else None,
+                        status="open",
+                    )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                log_error("Failed to count open chats", error=str(exc))
+        context["chat_open_count"] = open_chat_count
     if "defender_detection_count" not in context:
         detection_count = 0
         if active_company_id is not None and (is_super_admin or _menu_can(menu_access, "menu.defender")):
@@ -2333,6 +2356,7 @@ async def _build_public_context(
         "plausible_config": {"enabled": False},
         "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": Decimal("0")},
         "notification_unread_count": 0,
+        "chat_open_count": 0,
         "defender_detection_count": 0,
         "enable_auto_refresh": bool(settings.enable_auto_refresh),
         "matrix_chat_enabled": settings.matrix_enabled,
