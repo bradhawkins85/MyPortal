@@ -1368,8 +1368,13 @@
           })
           .then((data) => {
             if (data.room_id) {
-              window.location.href = `/chat?room=${encodeURIComponent(data.room_id)}`;
+              if (window.__portalToast && typeof window.__portalToast.show === 'function') {
+                window.__portalToast.show('Chat created successfully.', { variant: 'success' });
+              }
+              chatButton.disabled = false;
+              return;
             }
+            throw new Error('Chat room was not returned.');
           })
           .catch((error) => {
             console.error('Failed to open tray chat', error);
