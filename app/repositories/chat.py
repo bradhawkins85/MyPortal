@@ -97,6 +97,35 @@ async def list_rooms(
     return [dict(r) for r in rows]
 
 
+async def count_rooms(
+    *,
+    company_id: int | None = None,
+    user_id: int | None = None,
+    status: str | None = None,
+) -> int:
+    """Count chat rooms matching the visibility filters used by ``list_rooms``."""
+    clauses = ["1=1"]
+    params: list[Any] = []
+
+    if company_id is not None:
+        clauses.append("r.company_id = %s")
+        params.append(company_id)
+    if user_id is not None:
+        clauses.append(
+            "r.id IN (SELECT room_id FROM chat_room_participants WHERE user_id = %s)"
+        )
+        params.append(user_id)
+    if status:
+        clauses.append("r.status = %s")
+        params.append(status)
+
+    row = await db.fetch_one(
+        f"SELECT COUNT(*) AS count FROM chat_rooms r WHERE {' AND '.join(clauses)}",
+        tuple(params),
+    )
+    return int(row.get("count", 0)) if row else 0
+
+
 def _placeholders(count: int) -> str:
     return ", ".join(["%s"] * count)
 
