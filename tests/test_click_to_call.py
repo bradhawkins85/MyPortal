@@ -1,12 +1,50 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
+import subprocess
 
 import pytest
 from pydantic import ValidationError
 
 from app.api.routes import click_to_call
 from app.api.routes.click_to_call import ClickToCallSettingsUpdate, _public_settings
+
+
+def test_click_to_call_phone_pattern_requires_valid_leading_boundary():
+    javascript = (
+        Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "click_to_call.js"
+    ).read_text(encoding="utf-8")
+    pattern = re.search(r"const PHONE_PATTERN = (/.*?/g);", javascript)
+
+    assert pattern is not None
+    result = subprocess.run(
+        [
+            "node",
+            "-e",
+            """
+const pattern = %s;
+const values = JSON.parse(process.argv[1]);
+process.stdout.write(JSON.stringify(values.map((value) => value.match(pattern))));
+""" % pattern.group(1),
+            """[
+                "2026-08-31T21:26:07.979-04:00",
+                "reference-0412345678",
+                "reference:0412345678",
+                "Call 0412 345 678",
+                "+61 412 345 678",
+                "0412 345 678"
+            ]""",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout == (
+        '[["2026-08-31"],null,null,["0412 345 678"],'
+        '["+61 412 345 678"],["0412 345 678"]]'
+    )
 
 
 def test_click_to_call_migration_matches_user_id_type():

@@ -1,5 +1,8 @@
 (function () {
-  const PHONE_PATTERN = /(?:\+?\d[\d\s().-]{5,}\d)/g;
+  // A candidate must start at the beginning of the text or after whitespace or
+  // a plus. Without this boundary, the matcher can start partway through an
+  // invalid value (for example, at "07.979-04" inside an ISO timestamp).
+  const PHONE_PATTERN = /(?<![^\s+])(?:\+?\d[\d\s().-]{5,}\d)/g;
   const SKIPPED_TAGS = new Set(['A', 'BUTTON', 'INPUT', 'OPTION', 'SCRIPT', 'STYLE', 'TEXTAREA']);
   let enabled = false;
   let phonePrefixes = [];
