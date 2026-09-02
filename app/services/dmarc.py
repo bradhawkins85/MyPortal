@@ -154,6 +154,7 @@ def parse_aggregate_xml(data: bytes, limits: IngestionLimits | None = None) -> d
         "adkim": _text(root, "policy_published/adkim"), "aspf": _text(root, "policy_published/aspf"),
         "policy": _text(root, "policy_published/p", required=True),
         "subdomain_policy": _text(root, "policy_published/sp"),
+        "nonexistent_policy": _text(root, "policy_published/np"),
         "percentage": int(_text(root, "policy_published/pct") or 100), "records": [],
         "content_sha256": hashlib.sha256(data).hexdigest(),
     }

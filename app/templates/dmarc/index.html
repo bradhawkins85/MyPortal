@@ -6,8 +6,13 @@
   <form method="get" action="/dmarc" class="filters filters--compact">
     <div class="form-group"><label for="dmarc-start">Reports from</label><input class="form-input" id="dmarc-start" name="start" type="date" value="{{ filter_start.isoformat() if filter_start else '' }}"></div>
     <div class="form-group"><label for="dmarc-end">Reports through</label><input class="form-input" id="dmarc-end" name="end" type="date" value="{{ filter_end.isoformat() if filter_end else '' }}"></div>
+    <div class="form-group"><label for="dmarc-policy-domain">Policy domain</label><select class="form-select" id="dmarc-policy-domain" name="policy_domain"><option value="">All domains</option>{% for item in policy_domains %}<option value="{{ item.domain }}" {% if policy_domain == item.domain %}selected{% endif %}>{{ item.domain }}</option>{% endfor %}</select></div>
     <div class="filters__actions"><button class="button button--primary" type="submit">Apply date range</button><a class="button button--secondary" href="/dmarc">Reset</a></div>
   </form>
+</section>
+<section class="card"><h2>Published policies</h2>
+  <p>The most recently reported policy for each domain in this date range is shown below.</p>
+  <div class="table-wrapper"><table class="table"><thead><tr><th>Policy domain</th><th>DKIM alignment (adkim)</th><th>SPF alignment (aspf)</th><th>Domain policy (p)</th><th>Subdomain policy (sp)</th><th>Non-existent subdomain policy (np)</th><th>Applied percentage (pct)</th></tr></thead><tbody>{% for item in policy_domains %}<tr><td>{{ item.domain }}</td><td>{{ 'Strict' if item.adkim == 's' else 'Relaxed' if item.adkim == 'r' else 'Default (relaxed)' }}</td><td>{{ 'Strict' if item.aspf == 's' else 'Relaxed' if item.aspf == 'r' else 'Default (relaxed)' }}</td><td>{{ item.policy|capitalize }}</td><td>{{ item.subdomain_policy|capitalize if item.subdomain_policy else 'Inherits domain policy' }}</td><td>{{ item.nonexistent_policy|capitalize if item.nonexistent_policy else 'Inherits subdomain policy' }}</td><td>{{ item.percentage if item.percentage is not none else 100 }}%</td></tr>{% else %}<tr><td colspan="7" class="table__empty">No published policies were reported in this date range.</td></tr>{% endfor %}</tbody></table></div>
 </section>
 <section class="card"><h2>Overview</h2>
   {{ counter_strip([

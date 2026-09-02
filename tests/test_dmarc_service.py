@@ -17,6 +17,14 @@ def test_valid_xml_and_utc_normalization():
     assert report["records"][0]["message_count"] == 5
     assert report["records"][0]["dkim_result"] == "pass"
 
+
+def test_policy_published_nonexistent_domain_policy_is_parsed():
+    xml = XML.replace(b"<pct>100</pct>", b"<pct>75</pct><np>reject</np>")
+    report = parse_aggregate_xml(xml)
+
+    assert report["percentage"] == 75
+    assert report["nonexistent_policy"] == "reject"
+
 def test_gzip_and_zip():
     assert unpack_attachment("report.xml.gz", gzip.compress(XML))[0][1] == XML
     stream = io.BytesIO()

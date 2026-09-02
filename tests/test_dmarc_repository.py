@@ -63,4 +63,32 @@ def test_organization_summary_calculates_compliance_rate(monkeypatch):
     rows = asyncio.run(dmarc.organization_summary(42, start, end))
 
     assert rows[0]["compliance_rate"] == 75.0
-    assert fetch_all.await_args.args[1] == (42, end, start)
+    assert fetch_all.await_args.args[1] == (42, end, start, None, None)
+
+
+def test_organization_summary_filters_by_policy_domain(monkeypatch):
+    fetch_all = AsyncMock(return_value=[])
+    monkeypatch.setattr(dmarc.db, "fetch_all", fetch_all)
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    asyncio.run(dmarc.organization_summary(42, start, end, "mail.example"))
+
+    assert fetch_all.await_args.args[1] == (
+        42,
+        end,
+        start,
+        "mail.example",
+        "mail.example",
+    )
+
+
+def test_policy_domains_returns_latest_policy_rows(monkeypatch):
+    expected = [{"domain": "example.com", "policy": "reject"}]
+    fetch_all = AsyncMock(return_value=expected)
+    monkeypatch.setattr(dmarc.db, "fetch_all", fetch_all)
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    assert asyncio.run(dmarc.policy_domains(42, start, end)) == expected
+    assert fetch_all.await_args.args[1] == (42, end, start, end, start)

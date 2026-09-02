@@ -52,7 +52,12 @@ def _range(start: datetime | None, end: datetime | None) -> tuple[datetime, date
 
 
 @router.get("/dmarc", response_class=HTMLResponse)
-async def page(request: Request, start: date | None = None, end: date | None = None):
+async def page(
+    request: Request,
+    start: date | None = None,
+    end: date | None = None,
+    policy_domain: str | None = None,
+):
     user, company_id = await _context(request)
     now = datetime.now(timezone.utc)
     range_end = (
@@ -66,8 +71,14 @@ async def page(request: Request, start: date | None = None, end: date | None = N
         else range_end - timedelta(days=30)
     )
     range_start, range_end = _range(range_start, range_end)
-    metrics = await repo.overview(company_id, range_start, range_end)
-    organizations = await repo.organization_summary(company_id, range_start, range_end)
+    domains = await repo.policy_domains(company_id, range_start, range_end)
+    available_domains = {str(item["domain"]) for item in domains}
+    if policy_domain and policy_domain not in available_domains:
+        raise HTTPException(400, "Unknown policy domain for the selected date range")
+    metrics = await repo.overview(company_id, range_start, range_end, policy_domain)
+    organizations = await repo.organization_summary(
+        company_id, range_start, range_end, policy_domain
+    )
     addresses = await dmarc.company_reporting_addresses(company_id)
     return await _main()._render_template(
         "dmarc/index.html",
@@ -81,6 +92,8 @@ async def page(request: Request, start: date | None = None, end: date | None = N
             "range_end": range_end,
             "filter_start": start,
             "filter_end": end,
+            "policy_domain": policy_domain,
+            "policy_domains": domains,
             "reporting_addresses": addresses,
         },
     )
@@ -88,20 +101,37 @@ async def page(request: Request, start: date | None = None, end: date | None = N
 
 @router.get("/api/dmarc/overview")
 async def overview(
-    request: Request, start: datetime | None = None, end: datetime | None = None
+    request: Request,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    policy_domain: str | None = None,
 ):
     _, company_id = await _context(request)
     start, end = _range(start, end)
-    return await repo.overview(company_id, start, end)
+    return await repo.overview(company_id, start, end, policy_domain)
 
 
 @router.get("/api/dmarc/organizations")
 async def organizations(
+    request: Request,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    policy_domain: str | None = None,
+):
+    _, company_id = await _context(request)
+    start, end = _range(start, end)
+    return {
+        "items": await repo.organization_summary(company_id, start, end, policy_domain)
+    }
+
+
+@router.get("/api/dmarc/policies")
+async def policies(
     request: Request, start: datetime | None = None, end: datetime | None = None
 ):
     _, company_id = await _context(request)
     start, end = _range(start, end)
-    return {"items": await repo.organization_summary(company_id, start, end)}
+    return {"items": await repo.policy_domains(company_id, start, end)}
 
 
 @router.get("/api/dmarc/rua")

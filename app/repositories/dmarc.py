@@ -94,7 +94,7 @@ async def save_report(
             (company_id, int(existing["id"])),
         )
     report_pk = await db.execute_returning_lastrowid(
-        "INSERT INTO dmarc_reports (company_id,import_id,reporter,report_id,date_begin,date_end,domain,adkim,aspf,policy,subdomain_policy,percentage,attachment_sha256,content_sha256) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        "INSERT INTO dmarc_reports (company_id,import_id,reporter,report_id,date_begin,date_end,domain,adkim,aspf,policy,subdomain_policy,nonexistent_policy,percentage,attachment_sha256,content_sha256) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         (
             company_id,
             import_id,
@@ -107,6 +107,7 @@ async def save_report(
             report["aspf"],
             report["policy"],
             report["subdomain_policy"],
+            report.get("nonexistent_policy"),
             report["percentage"],
             attachment_hash,
             report["content_sha256"],
@@ -146,7 +147,7 @@ async def save_report(
 
 
 async def organization_summary(
-    company_id: int, start: Any, end: Any
+    company_id: int, start: Any, end: Any, policy_domain: str | None = None
 ) -> list[dict[str, Any]]:
     """Summarise aggregate message authentication by reporting organization."""
     rows = await db.fetch_all(
@@ -163,8 +164,9 @@ async def organization_summary(
           THEN r.message_count ELSE 0 END),0) unauthenticated
         FROM dmarc_reports p JOIN dmarc_records r ON r.report_id=p.id
         WHERE p.company_id=%s AND p.date_begin < %s AND p.date_end >= %s
+          AND (%s IS NULL OR p.domain=%s)
         GROUP BY p.reporter ORDER BY p.reporter""",
-        (company_id, end, start),
+        (company_id, end, start, policy_domain, policy_domain),
     )
     result = []
     for row in rows:
@@ -175,6 +177,23 @@ async def organization_summary(
         )
         result.append(item)
     return result
+
+
+async def policy_domains(company_id: int, start: Any, end: Any) -> list[dict[str, Any]]:
+    """Return the most recently reported policy for every domain in the range."""
+    return await db.fetch_all(
+        """SELECT p.domain,p.adkim,p.aspf,p.policy,p.subdomain_policy,
+        p.nonexistent_policy,p.percentage
+        FROM dmarc_reports p
+        WHERE p.company_id=%s AND p.date_begin < %s AND p.date_end >= %s
+        AND NOT EXISTS (SELECT 1 FROM dmarc_reports newer
+          WHERE newer.company_id=p.company_id AND newer.domain=p.domain
+          AND newer.date_begin < %s AND newer.date_end >= %s
+          AND (newer.date_end > p.date_end OR
+            (newer.date_end=p.date_end AND newer.id > p.id)))
+        ORDER BY p.domain""",
+        (company_id, end, start, end, start),
+    )
 
 
 async def save_forensic_report(
@@ -215,15 +234,18 @@ async def save_forensic_report(
     )
 
 
-async def overview(company_id: int, start: Any, end: Any) -> dict[str, Any]:
+async def overview(
+    company_id: int, start: Any, end: Any, policy_domain: str | None = None
+) -> dict[str, Any]:
     row = await db.fetch_one(
         """SELECT COALESCE(SUM(r.message_count),0) total_messages,
       COALESCE(SUM(CASE WHEN r.dkim_result='pass' OR r.spf_result='pass' THEN r.message_count ELSE 0 END),0) dmarc_pass,
       COALESCE(SUM(CASE WHEN r.dkim_result='pass' THEN r.message_count ELSE 0 END),0) dkim_pass,
       COALESCE(SUM(CASE WHEN r.spf_result='pass' THEN r.message_count ELSE 0 END),0) spf_pass
       FROM dmarc_records r JOIN dmarc_reports p ON p.id=r.report_id
-      WHERE r.company_id=%s AND p.date_begin < %s AND p.date_end >= %s""",
-        (company_id, end, start),
+      WHERE r.company_id=%s AND p.date_begin < %s AND p.date_end >= %s
+      AND (%s IS NULL OR p.domain=%s)""",
+        (company_id, end, start, policy_domain, policy_domain),
     )
     result = dict(row or {})
     forensic = await db.fetch_one(
