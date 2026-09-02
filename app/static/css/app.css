@@ -11137,10 +11137,21 @@ a.stat-strip__stat:focus-visible {
 .query-designer__panel[hidden] { display: none; }
 .query-designer__layout { display: grid; grid-template-columns: minmax(15rem, 27%) 1fr; min-height: 28rem; border: 1px solid rgba(148,163,184,.22); border-radius: .65rem; overflow: hidden; }
 .query-schema { padding: 1rem; border-right: 1px solid rgba(148,163,184,.22); background: rgba(2,6,23,.2); }
-.query-schema__tables { max-height: 23rem; margin-top: .75rem; overflow: auto; }
-.query-schema__table { border-bottom: 1px solid rgba(148,163,184,.14); }
-.query-schema__table summary { padding: .65rem .25rem; cursor: pointer; font-weight: 650; }
-.query-schema__column { display: flex; align-items: center; gap: .35rem; padding: .35rem .3rem .35rem 1rem; cursor: pointer; }
+.query-schema__tables { max-height: 23rem; margin-top: .75rem; overflow: auto; display: flex; flex-direction: column; gap: .4rem; }
+.query-schema__group { border: 1px solid rgba(148,163,184,.14); border-radius: .6rem; background: rgba(15,23,42,.18); }
+.query-schema__group-summary,
+.query-schema__table-summary { display: flex; align-items: center; gap: .55rem; list-style: none; cursor: pointer; padding: .65rem .7rem; font-weight: 650; }
+.query-schema__group-summary::-webkit-details-marker,
+.query-schema__table-summary::-webkit-details-marker,
+.query-schema__group-summary::marker,
+.query-schema__table-summary::marker { display: none; }
+.query-schema__group-summary small,
+.query-schema__table-summary small { margin-left: auto; color: var(--color-text-muted, #94a3b8); }
+.query-schema__table { border-top: 1px solid rgba(148,163,184,.12); }
+.query-schema__table-summary { padding-left: 1rem; font-size: .92rem; }
+.query-schema__table-toggle { margin: 0; }
+.query-schema__table-name { flex: 1; min-width: 0; }
+.query-schema__column { display: flex; align-items: center; gap: .35rem; padding: .35rem .3rem .35rem 1.8rem; cursor: pointer; }
 .query-schema__column small { margin-left: auto; color: var(--color-text-muted, #94a3b8); }
 .query-canvas { padding: 1rem; background-image: radial-gradient(rgba(148,163,184,.18) 1px, transparent 1px); background-size: 18px 18px; }
 .query-canvas__toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }

@@ -9,6 +9,15 @@ from typing import Any, Mapping
 from app.core.database import db
 
 
+def _derive_table_group(table_name: str) -> str:
+    """Best-effort grouping based on the logical feature prefix in a table name."""
+    name = str(table_name or "").strip()
+    parts = [part for part in re.split(r"[^a-zA-Z0-9]+", name) if part]
+    if not parts:
+        return "Other"
+    return parts[0].lower()
+
+
 async def describe_schema() -> dict[str, Any]:
     """Return user tables, columns, and declared foreign-key relationships."""
     if db.is_sqlite():
@@ -29,6 +38,7 @@ async def describe_schema() -> dict[str, Any]:
             result.append(
                 {
                     "name": name,
+                    "feature_group": _derive_table_group(name),
                     "columns": [
                         {"name": str(col["name"]), "type": str(col.get("type") or "")}
                         for col in columns or []
@@ -62,7 +72,10 @@ async def describe_schema() -> dict[str, Any]:
             {"name": str(col["column_name"]), "type": str(col.get("data_type") or "")}
         )
     return {
-        "tables": [{"name": name, "columns": cols} for name, cols in grouped.items()],
+        "tables": [
+            {"name": name, "feature_group": _derive_table_group(name), "columns": cols}
+            for name, cols in grouped.items()
+        ],
         "relations": [dict(row) for row in foreign_keys or []],
     }
 

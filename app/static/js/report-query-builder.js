@@ -7,29 +7,124 @@
   const selectedEl = document.getElementById('selected-tables');
   const selected = new Map();
   const manualJoins = [];
+  const expandedTables = new Set();
+  const expandedGroups = new Set();
   const quote = value => '`' + String(value).replaceAll('`', '``') + '`';
   const key = (table, column) => `${table}.${column}`;
+
+  function formatGroupName(groupName) {
+    const raw = String(groupName || 'Other').trim();
+    if (!raw) return 'Other';
+    return raw.replace(/[_-]+/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+  }
+
+  function deriveTableGroup(tableName) {
+    const raw = String(tableName || '').trim();
+    if (!raw) return 'Other';
+    const parts = raw.split(/[^a-zA-Z0-9]+/).filter(Boolean);
+    return parts[0] || raw;
+  }
+
+  function groupedTables() {
+    const groups = new Map();
+    schema.tables.forEach(table => {
+      const groupName = table.feature_group || table.group || deriveTableGroup(table.name);
+      const entries = groups.get(groupName) || [];
+      entries.push(table);
+      groups.set(groupName, entries);
+    });
+    return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right));
+  }
 
   function renderSchema(filter = '') {
     const needle = filter.toLowerCase();
     tablesEl.innerHTML = '';
-    schema.tables.filter(table => table.name.toLowerCase().includes(needle) || table.columns.some(col => col.name.toLowerCase().includes(needle))).forEach(table => {
-      const details = document.createElement('details');
-      details.className = 'query-schema__table'; details.open = Boolean(needle);
-      const summary = document.createElement('summary'); summary.textContent = table.name; details.append(summary);
-      table.columns.forEach(column => {
-        const label = document.createElement('label'); label.className = 'query-schema__column';
-        const input = document.createElement('input'); input.type = 'checkbox'; input.checked = selected.get(table.name)?.has(column.name) || false;
-        input.addEventListener('change', () => toggleColumn(table.name, column.name, input.checked));
-        label.append(input, document.createTextNode(` ${column.name}`));
-        const type = document.createElement('small'); type.textContent = column.type; label.append(type); details.append(label);
-      }); tablesEl.append(details);
+    groupedTables().forEach(([groupName, tables]) => {
+      const visibleTables = tables.filter(table => table.name.toLowerCase().includes(needle) || table.columns.some(col => col.name.toLowerCase().includes(needle)));
+      if (!visibleTables.length) return;
+      const group = document.createElement('details');
+      group.className = 'query-schema__group';
+      group.open = Boolean(needle) || expandedGroups.has(groupName) || visibleTables.some(table => selected.has(table.name) || expandedTables.has(table.name));
+      const groupSummary = document.createElement('summary');
+      groupSummary.className = 'query-schema__group-summary';
+      const groupLabel = document.createElement('span');
+      groupLabel.textContent = formatGroupName(groupName);
+      const groupCount = document.createElement('small');
+      groupCount.textContent = String(visibleTables.length);
+      groupSummary.append(groupLabel, groupCount);
+      group.append(groupSummary);
+      visibleTables.forEach(table => {
+        const tableDetails = document.createElement('details');
+        tableDetails.className = 'query-schema__table';
+        tableDetails.open = Boolean(needle) || selected.has(table.name) || expandedTables.has(table.name);
+        const summary = document.createElement('summary');
+        summary.className = 'query-schema__table-summary';
+        const tableToggle = document.createElement('input');
+        tableToggle.type = 'checkbox';
+        tableToggle.className = 'query-schema__table-toggle';
+        const tableColumns = selected.get(table.name) || new Set();
+        const totalColumns = table.columns.length || 0;
+        tableToggle.checked = totalColumns > 0 && tableColumns.size === totalColumns;
+        tableToggle.indeterminate = totalColumns > 0 && tableColumns.size > 0 && tableColumns.size < totalColumns;
+        tableToggle.addEventListener('change', () => toggleTable(table.name, tableToggle.checked));
+        const label = document.createElement('span');
+        label.className = 'query-schema__table-name';
+        label.textContent = table.name;
+        summary.append(tableToggle, label);
+        tableDetails.append(summary);
+        table.columns.forEach(column => {
+          const labelRow = document.createElement('label');
+          labelRow.className = 'query-schema__column';
+          const input = document.createElement('input');
+          input.type = 'checkbox';
+          input.checked = selected.get(table.name)?.has(column.name) || false;
+          input.addEventListener('change', () => toggleColumn(table.name, column.name, input.checked));
+          const name = document.createElement('span');
+          name.textContent = column.name;
+          const type = document.createElement('small');
+          type.textContent = column.type;
+          labelRow.append(input, name, type);
+          tableDetails.append(labelRow);
+        });
+        tableDetails.addEventListener('toggle', () => {
+          if (tableDetails.open) {
+            expandedTables.add(table.name);
+          } else {
+            expandedTables.delete(table.name);
+          }
+        });
+        group.append(tableDetails);
+      });
+      group.addEventListener('toggle', () => {
+        if (group.open) {
+          expandedGroups.add(groupName);
+        } else {
+          expandedGroups.delete(groupName);
+          tables.forEach(table => expandedTables.delete(table.name));
+        }
+      });
+      tablesEl.append(group);
     });
   }
+
+  function toggleTable(table, enabled) {
+    if (enabled) {
+      const tableMeta = schema.tables.find(item => item.name === table);
+      if (tableMeta) selected.set(table, new Set(tableMeta.columns.map(column => column.name)));
+      expandedTables.add(table);
+    } else {
+      selected.delete(table);
+      expandedTables.delete(table);
+    }
+    renderSelected();
+    buildSql();
+  }
+
   function toggleColumn(table, column, enabled) {
     if (!selected.has(table)) selected.set(table, new Set());
     enabled ? selected.get(table).add(column) : selected.get(table).delete(column);
     if (!selected.get(table).size) selected.delete(table);
+    expandedTables.add(table);
     renderSelected(); buildSql();
   }
   function fieldOptions(select) {
@@ -71,7 +166,7 @@
     document.querySelector('.query-sql-field').hidden = button.dataset.designerTab !== 'sql' && button.dataset.designerTab !== 'visual';
   }));
   document.getElementById('schema-search').addEventListener('input', event => renderSchema(event.target.value));
-  document.getElementById('clear-query').addEventListener('click', () => { selected.clear(); manualJoins.length = 0; renderSelected(); buildSql(); });
+  document.getElementById('clear-query').addEventListener('click', () => { selected.clear(); manualJoins.length = 0; expandedTables.clear(); renderSelected(); buildSql(); });
   const left = document.getElementById('join-left'), right = document.getElementById('join-right'); fieldOptions(left); fieldOptions(right);
   document.getElementById('add-join').addEventListener('click', () => { if (!left.value || !right.value || left.value === right.value) return; const [from_table, from_column] = left.value.split('.'), [to_table, to_column] = right.value.split('.'); manualJoins.push({from_table, from_column, to_table, to_column}); updateJoinList(); buildSql(); });
   const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || document.querySelector('input[name="_csrf"]')?.value || '';
