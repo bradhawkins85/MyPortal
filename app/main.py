@@ -9804,6 +9804,7 @@ async def login_page(request: Request):
         request,
         extra={
             "title": "Sign in",
+            "verification_success": request.query_params.get("verified") == "1",
         },
     )
     return templates.TemplateResponse(context["request"], "auth/login.html", context)
