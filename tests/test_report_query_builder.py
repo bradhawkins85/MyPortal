@@ -35,3 +35,4 @@ def test_ai_query_builder_js_includes_csrf_fallback_and_detail_errors():
     assert "body.set('_csrf', token)" in source
     assert "Array.isArray(detail) && detail.length" in source
     assert "typeof data?.sql !== 'string' || !data.sql.trim()" in source
+    assert "Server returned no SQL query." in source
