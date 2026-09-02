@@ -36,8 +36,8 @@
     const id = encodeURIComponent(item.id == null ? '' : item.id);
     const destinations = {
       tickets: id ? `/tickets/${id}` : '/tickets',
-      products: '/shop',
-      packages: '/shop',
+      products: id ? `/shop?product=${id}` : '/shop',
+      packages: id ? `/shop/packages?package=${id}` : '/shop/packages',
       chats: id ? `/chat/${id}` : '/chat',
       orders: '/orders',
       assets: id ? `/assets/${id}` : '/assets',

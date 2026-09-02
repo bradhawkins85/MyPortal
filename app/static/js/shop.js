@@ -516,5 +516,10 @@
       event.preventDefault();
       openProductDetails(Number(button.getAttribute('data-product-details')));
     });
+
+    const requestedProductId = Number(new URLSearchParams(window.location.search).get('product'));
+    if (Number.isFinite(requestedProductId) && requestedProductId > 0) {
+      openProductDetails(requestedProductId);
+    }
   });
 })();
