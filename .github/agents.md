@@ -29,6 +29,16 @@ The authoritative dependency list lives in `pyproject.toml`; update it there and
 - Always test code changes to prevent Internal Server Error occurrences
 - Use existing test patterns (pytest-asyncio, fixtures in conftest.py)
 - SQL Migrations should be idempotent
+- Prefer the smallest relevant test target for the changed behavior; avoid broad suite runs when a focused check is enough to validate the fix
+- Add or update regression tests for bug fixes and new features
+
+### Scope Control and Change Hygiene
+
+- Start with one targeted search and read only the exact files required to confirm the root cause
+- Keep changes surgical: do not refactor unrelated code, broaden API contracts, or clean up adjacent modules without a direct need for the task
+- If a task spans multiple concerns, split it into smaller, independently verifiable steps instead of bundling unrelated edits
+- Do not make speculative fixes based on guesswork; confirm the root cause before coding
+- Avoid editing generated, vendored, or minified files unless the task explicitly requires it
 
 ### Building and Deployment
 
@@ -47,6 +57,8 @@ The authoritative dependency list lives in `pyproject.toml`; update it there and
 - All code should be based on Python
 - Use async/await patterns consistently with FastAPI
 - Follow existing code structure in `app/` directory
+- If the requirement is ambiguous, missing, or conflicts with existing repository conventions, ask for clarification before implementing a broad or speculative fix
+- Prefer small, readable, composable functions over clever abstractions that hide state or side effects
 
 ### Database and Migrations
 
