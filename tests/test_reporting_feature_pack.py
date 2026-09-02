@@ -66,9 +66,9 @@ def test_reporting_pack_owns_handlers():
     assert reporting_routes.router.routes[4].endpoint == reporting_handlers.admin_reporting_edit
     assert reporting_routes.router.routes[5].endpoint == reporting_handlers.admin_reporting_clone
     assert reporting_routes.router.routes[6].endpoint == reporting_handlers.admin_reporting_create
-    assert reporting_routes.router.routes[7].endpoint == reporting_handlers.admin_reporting_update
-    assert reporting_routes.router.routes[8].endpoint == reporting_handlers.admin_reporting_delete
-    assert reporting_routes.router.routes[9].endpoint == reporting_handlers.admin_reporting_ai_query
+    assert reporting_routes.router.routes[7].endpoint == reporting_handlers.admin_reporting_ai_query
+    assert reporting_routes.router.routes[8].endpoint == reporting_handlers.admin_reporting_update
+    assert reporting_routes.router.routes[9].endpoint == reporting_handlers.admin_reporting_delete
 
 
 def test_reporting_pack_loads_and_reloads_cleanly():
