@@ -75,7 +75,13 @@
   const left = document.getElementById('join-left'), right = document.getElementById('join-right'); fieldOptions(left); fieldOptions(right);
   document.getElementById('add-join').addEventListener('click', () => { if (!left.value || !right.value || left.value === right.value) return; const [from_table, from_column] = left.value.split('.'), [to_table, to_column] = right.value.split('.'); manualJoins.push({from_table, from_column, to_table, to_column}); updateJoinList(); buildSql(); });
   const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || document.querySelector('input[name="_csrf"]')?.value || '';
-  const errorMessage = (data) => data?.error || (typeof data?.detail === 'string' ? data.detail : '') || 'Unable to generate query.';
+  const errorMessage = (data) => {
+    if (data?.error) return data.error;
+    const detail = data?.detail;
+    if (typeof detail === 'string' && detail.trim()) return detail;
+    if (Array.isArray(detail) && detail.length) return detail.map(item => typeof item === 'string' ? item : item?.msg || '').filter(Boolean).join('; ');
+    return 'Unable to generate query.';
+  };
   document.getElementById('ai-query-send').addEventListener('click', async () => {
     const input = document.getElementById('ai-query-instruction'), button = document.getElementById('ai-query-send'), messages = document.getElementById('ai-query-messages');
     const instruction = input.value.trim(); if (!instruction) return;

@@ -33,4 +33,4 @@ def test_ai_query_builder_js_includes_csrf_fallback_and_detail_errors():
     source = Path("app/static/js/report-query-builder.js").read_text(encoding="utf-8")
     assert 'input[name="_csrf"]' in source
     assert "body.set('_csrf', token)" in source
-    assert "data?.detail" in source
+    assert "Array.isArray(detail) && detail.length" in source
