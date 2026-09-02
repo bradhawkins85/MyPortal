@@ -316,6 +316,41 @@ html {
   gap: var(--space-gap-tight);
 }
 
+.sidebar__logout-form {
+  margin-top: auto;
+  padding-top: var(--space-gap-base);
+}
+
+.sidebar__logout-form + .sidebar__footer {
+  margin-top: 0;
+}
+
+.sidebar__logout-button {
+  width: 100%;
+  border: 0;
+  padding: var(--space-compact) var(--space-compact-inline);
+  border-radius: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: var(--space-gap-tight);
+  color: #e5e7eb;
+  background: rgba(148, 163, 184, 0.08);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.sidebar__logout-button:hover,
+.sidebar__logout-button:focus-visible {
+  background: rgba(148, 163, 184, 0.25);
+  outline: none;
+}
+
+.sidebar__logout-button:focus-visible {
+  box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.4);
+}
+
 .sidebar__footer-link,
 .sidebar__footer-button {
   display: inline-flex;

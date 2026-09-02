@@ -534,13 +534,19 @@ async def exit_impersonation(
     summary="Invalidate the current session",
 )
 async def logout(
+    request: Request,
     response: Response,
     session: SessionData = Depends(get_current_session),
 ) -> Response:
     await session_manager.revoke_session(session)
-    session_manager.clear_session_cookies(response)
-    response.status_code = status.HTTP_204_NO_CONTENT
-    return response
+    accept_header = request.headers.get("accept", "").lower()
+    if "text/html" in accept_header or "application/xhtml+xml" in accept_header:
+        logout_response = RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    else:
+        response.status_code = status.HTTP_204_NO_CONTENT
+        logout_response = response
+    session_manager.clear_session_cookies(logout_response)
+    return logout_response
 
 
 @router.get(
