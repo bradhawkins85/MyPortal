@@ -723,6 +723,21 @@
           {% endif %}
           {% endblock %}
         </ul>
+        {% if has_authenticated_user %}
+          <form action="/auth/logout" method="post" class="sidebar__logout-form">
+            {% if csrf_token %}
+              <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+            {% endif %}
+            <button type="submit" class="sidebar__logout-button">
+              <span class="menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M10 3a1 1 0 0 1 1 1v1a1 1 0 0 1-2 0H5v14h4v-1a1 1 0 0 1 2 0v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4a2 2 0 0 1 1 .27V3Zm6.3 4.3a1 1 0 0 1 1.4 0l4 4a1 1 0 0 1 0 1.4l-4 4a1 1 0 1 1-1.4-1.4l2.29-2.3H10a1 1 0 1 1 0-2h8.59L16.3 8.7a1 1 0 0 1 0-1.4Z" />
+                </svg>
+              </span>
+              <span class="menu__label">Log out</span>
+            </button>
+          </form>
+        {% endif %}
         <div class="sidebar__footer">
           {% if has_authenticated_user %}
             <button

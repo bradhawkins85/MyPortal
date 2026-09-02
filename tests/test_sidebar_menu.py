@@ -125,6 +125,9 @@ def test_company_admin_sees_authorised_menu_items(company_admin_context):
     assert 'href="/orders"' not in html
     assert 'href="/licenses"' not in html
     assert 'href="/assets"' not in html
+    assert 'action="/auth/logout"' in html
+    assert 'name="_csrf" value="csrf-token"' in html
+    assert "Log out" in html
 
 
 def test_m365_menu_item_has_data_menu_key(monkeypatch):
