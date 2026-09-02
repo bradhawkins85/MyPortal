@@ -248,7 +248,11 @@ async def overview(
         """SELECT COALESCE(SUM(r.message_count),0) total_messages,
       COALESCE(SUM(CASE WHEN r.dkim_result='pass' OR r.spf_result='pass' THEN r.message_count ELSE 0 END),0) dmarc_pass,
       COALESCE(SUM(CASE WHEN r.dkim_result='pass' THEN r.message_count ELSE 0 END),0) dkim_pass,
-      COALESCE(SUM(CASE WHEN r.spf_result='pass' THEN r.message_count ELSE 0 END),0) spf_pass
+      COALESCE(SUM(CASE WHEN r.spf_result='pass' THEN r.message_count ELSE 0 END),0) spf_pass,
+      COALESCE(SUM(CASE WHEN r.disposition='none' THEN r.message_count ELSE 0 END),0) disposition_none,
+      COALESCE(SUM(CASE WHEN r.disposition='quarantine' THEN r.message_count ELSE 0 END),0) disposition_quarantine,
+      COALESCE(SUM(CASE WHEN r.disposition='reject' THEN r.message_count ELSE 0 END),0) disposition_reject,
+      COALESCE(SUM(CASE WHEN r.disposition NOT IN ('none','quarantine','reject') THEN r.message_count ELSE 0 END),0) disposition_other
       FROM dmarc_records r JOIN dmarc_reports p ON p.id=r.report_id
       WHERE r.company_id=%s AND p.date_begin < %s AND p.date_end >= %s
       AND (%s IS NULL OR p.domain=%s)""",
@@ -256,11 +260,29 @@ async def overview(
     )
     result = dict(row or {})
     forensic = await db.fetch_one(
-        """SELECT COUNT(*) forensic_reports FROM dmarc_forensic_reports
+        """SELECT COUNT(*) forensic_reports,
+        COALESCE(SUM(CASE WHEN reported_domain IS NOT NULL AND reported_domain<>'' THEN 1 ELSE 0 END),0) forensic_with_reported_domain,
+        COALESCE(SUM(CASE WHEN source_ip IS NOT NULL AND source_ip<>'' THEN 1 ELSE 0 END),0) forensic_with_source_ip,
+        COALESCE(SUM(CASE WHEN delivery_result IS NOT NULL AND delivery_result<>'' THEN 1 ELSE 0 END),0) forensic_with_delivery_result,
+        COALESCE(SUM(CASE WHEN authentication_results IS NOT NULL AND authentication_results<>'' THEN 1 ELSE 0 END),0) forensic_with_authentication_results,
+        COALESCE(SUM(CASE WHEN original_mail_from IS NOT NULL AND original_mail_from<>'' THEN 1 ELSE 0 END),0) forensic_with_original_mail_from,
+        COALESCE(SUM(CASE WHEN original_rcpt_to IS NOT NULL AND original_rcpt_to<>'' THEN 1 ELSE 0 END),0) forensic_with_original_rcpt_to,
+        COALESCE(SUM(CASE WHEN (dkim_domain IS NOT NULL AND dkim_domain<>'') OR (dkim_selector IS NOT NULL AND dkim_selector<>'') THEN 1 ELSE 0 END),0) forensic_with_dkim_details
+        FROM dmarc_forensic_reports
         WHERE company_id=%s AND COALESCE(arrival_at,created_at) >= %s AND COALESCE(arrival_at,created_at) < %s""",
         (company_id, start, end),
     )
-    result["forensic_reports"] = int((forensic or {}).get("forensic_reports") or 0)
+    for key in (
+        "forensic_reports",
+        "forensic_with_reported_domain",
+        "forensic_with_source_ip",
+        "forensic_with_delivery_result",
+        "forensic_with_authentication_results",
+        "forensic_with_original_mail_from",
+        "forensic_with_original_rcpt_to",
+        "forensic_with_dkim_details",
+    ):
+        result[key] = int((forensic or {}).get(key) or 0)
     return result
 
 
