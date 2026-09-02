@@ -1177,7 +1177,6 @@ TOTP_ENROLLMENT_PAGE_PATH = "/security/2fa"
 TOTP_ENROLLMENT_ALLOWED_PAGE_PATHS = frozenset(
     {
         TOTP_ENROLLMENT_PAGE_PATH,
-        "/admin/profile",
     }
 )
 
