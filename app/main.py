@@ -110,6 +110,7 @@ from app.core.features import init_registry
 from app.core.plugin_loader import get_plugin_loader, init_plugin_loader
 from app.core.logging import configure_logging, log_error, log_info, log_warning
 from loguru import logger
+from app.repositories import access_activity as access_activity_repo
 from app.repositories import audit_logs as audit_repo
 from app.repositories import api_keys as api_key_repo
 from app.repositories import auth as auth_repo
@@ -5767,6 +5768,34 @@ async def admin_users_page(request: Request):
         request,
         current_user,
         extra={"title": "Users", "users": active_users},
+    )
+
+
+@app.get("/admin/sessions", response_class=HTMLResponse)
+async def admin_sessions_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    active_sessions = await access_activity_repo.list_active_user_sessions(limit=500)
+    recent_connections = await access_activity_repo.list_recent_connection_activity(limit=1000)
+
+    for session in active_sessions:
+        session["created_at_iso"] = _to_iso(session.get("created_at"))
+        session["last_seen_at_iso"] = _to_iso(session.get("last_seen_at"))
+        session["expires_at_iso"] = _to_iso(session.get("expires_at"))
+
+    for connection in recent_connections:
+        connection["activity_at_iso"] = _to_iso(connection.get("activity_at"))
+
+    return await _render_template(
+        "admin/sessions.html",
+        request,
+        current_user,
+        extra={
+            "title": "Sessions",
+            "active_sessions": active_sessions,
+            "recent_connections": recent_connections,
+        },
     )
 
 

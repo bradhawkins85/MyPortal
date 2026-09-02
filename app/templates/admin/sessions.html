@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block header_title %}<span class="header__title-text">Sessions</span>{% endblock %}
+
+{% block content %}
+  <section class="card card--panel">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Currently logged-in users</h2>
+        <p class="card__description">Live authenticated browser sessions across the MyPortal platform.</p>
+      </div>
+      <div class="card__controls">
+        <input
+          type="search"
+          class="form-input"
+          placeholder="Filter active sessions"
+          aria-label="Filter active sessions"
+          data-table-filter="active-sessions-table"
+        />
+      </div>
+    </header>
+    <div class="table-wrapper">
+      <table class="table" id="active-sessions-table" data-table data-table-id="admin-active-sessions">
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string" data-column-key="user">User</th>
+            <th scope="col" data-sort="string" data-column-key="company">Company</th>
+            <th scope="col" data-sort="string" data-column-key="ip">Source IP</th>
+            <th scope="col" data-sort="string" data-column-key="agent">User agent</th>
+            <th scope="col" data-sort="date" data-column-key="last_seen">Last seen</th>
+            <th scope="col" data-sort="date" data-column-key="expires">Expires</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for session in active_sessions %}
+            <tr>
+              <td data-label="User" data-column-key="user">{{ session.display_name }}</td>
+              <td data-label="Company" data-column-key="company">{{ session.company_name or '—' }}</td>
+              <td data-label="Source IP" data-column-key="ip">{{ session.ip_address or '—' }}</td>
+              <td data-label="User agent" data-column-key="agent">{{ session.user_agent or '—' }}</td>
+              <td data-label="Last seen" data-column-key="last_seen" data-value="{{ session.last_seen_at_iso or '' }}">
+                {% if session.last_seen_at_iso %}
+                  <span data-utc="{{ session.last_seen_at_iso }}"></span>
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td data-label="Expires" data-column-key="expires" data-value="{{ session.expires_at_iso or '' }}">
+                {% if session.expires_at_iso %}
+                  <span data-utc="{{ session.expires_at_iso }}"></span>
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="6" class="table__empty">No active user sessions were found.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card card--panel mt-lg">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Recent access activity</h2>
+        <p class="card__description">Combined activity from web sessions, API keys, incoming webhooks, calls webhooks, and tray device heartbeats.</p>
+      </div>
+      <div class="card__controls">
+        <input
+          type="search"
+          class="form-input"
+          placeholder="Filter activity"
+          aria-label="Filter recent access activity"
+          data-table-filter="recent-connections-table"
+        />
+      </div>
+    </header>
+    <div class="table-wrapper">
+      <table class="table" id="recent-connections-table" data-table data-table-id="admin-recent-connections">
+        <thead>
+          <tr>
+            <th scope="col" data-sort="string" data-column-key="method">Access method</th>
+            <th scope="col" data-sort="string" data-column-key="identity">Identity</th>
+            <th scope="col" data-sort="string" data-column-key="source">Source</th>
+            <th scope="col" data-sort="string" data-column-key="source_ip">Source IP</th>
+            <th scope="col" data-sort="date" data-column-key="activity">Last activity</th>
+            <th scope="col" data-sort="string" data-column-key="details">Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for connection in recent_connections %}
+            <tr>
+              <td data-label="Access method" data-column-key="method">{{ connection.access_method }}</td>
+              <td data-label="Identity" data-column-key="identity">{{ connection.identity or '—' }}</td>
+              <td data-label="Source" data-column-key="source">{{ connection.source or '—' }}</td>
+              <td data-label="Source IP" data-column-key="source_ip">{{ connection.source_ip or '—' }}</td>
+              <td data-label="Last activity" data-column-key="activity" data-value="{{ connection.activity_at_iso or '' }}">
+                {% if connection.activity_at_iso %}
+                  <span data-utc="{{ connection.activity_at_iso }}"></span>
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td data-label="Details" data-column-key="details">{{ connection.details or '—' }}</td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="6" class="table__empty">No recent connection activity was found.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+{% endblock %}
