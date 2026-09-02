@@ -234,12 +234,59 @@
     }
   }
 
+  function renderPackageDetails(pkg) {
+    const title = document.getElementById('package-details-title');
+    const container = document.getElementById('package-details-body');
+    if (!container) {
+      return;
+    }
+    container.innerHTML = '';
+    title.textContent = pkg && pkg.name ? pkg.name : 'Package details';
+    if (!pkg) {
+      const empty = document.createElement('p');
+      empty.className = 'text-muted';
+      empty.textContent = 'Package details are unavailable.';
+      container.appendChild(empty);
+      return;
+    }
+
+    container.appendChild(createDetailRow('SKU', pkg.sku || 'Unavailable'));
+    container.appendChild(createDetailRow('Price', formatCurrency(pkg.price_total)));
+    container.appendChild(createDetailRow('Availability', describeStock(pkg.stock_level)));
+    if (pkg.description_html || pkg.description) {
+      const description = document.createElement('div');
+      description.className = 'modal__description rich-text-viewer';
+      if (pkg.description_html) {
+        description.innerHTML = pkg.description_html;
+      } else {
+        description.textContent = pkg.description;
+      }
+      container.appendChild(description);
+    }
+    const heading = document.createElement('h3');
+    heading.className = 'modal__subtitle';
+    heading.textContent = 'Included products';
+    container.appendChild(heading);
+    const list = document.createElement('ul');
+    list.className = 'list list--bullet';
+    (pkg.items || []).forEach((item) => {
+      const resolved = item.resolved_product || {};
+      const entry = document.createElement('li');
+      entry.textContent = `${resolved.product_name || item.product_name || 'Product'} × ${item.quantity || 0}`;
+      list.appendChild(entry);
+    });
+    container.appendChild(list);
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     const container = document.body;
     bindStockLimitInputs(container);
 
     const modal = document.getElementById('package-product-details-modal');
     bindModalDismissal(modal);
+
+    const packageModal = document.getElementById('package-details-modal');
+    bindModalDismissal(packageModal);
 
     const packages = parseJson('shop-package-items-data');
     const itemsByKey = new Map();
@@ -291,6 +338,13 @@
         });
       });
     });
+
+    const requestedPackageId = new URLSearchParams(window.location.search).get('package');
+    if (requestedPackageId) {
+      const pkg = packages.find((item) => item && String(item.id) === requestedPackageId);
+      renderPackageDetails(pkg);
+      openModal(packageModal);
+    }
 
     document.querySelectorAll('[data-package-product-details]').forEach((button) => {
       button.addEventListener('click', () => {
