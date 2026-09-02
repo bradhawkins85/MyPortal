@@ -93,7 +93,7 @@ class AuthForm {
       }
 
       if (result && result.verification_required) {
-        this.showError(this.extractDetail(result) || 'Check your email to verify your account before signing in.');
+        this.showSuccess(this.extractDetail(result) || 'Check your email to verify your account before signing in.');
         this.form.reset();
         return;
       }
