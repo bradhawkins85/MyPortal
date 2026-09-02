@@ -22,7 +22,7 @@ class MenuPermission:
 
 
 MENU_PERMISSIONS: tuple[MenuPermission, ...] = (
-    MenuPermission("menu.dashboard", "Dashboard", "General", "View the company dashboard and overview."),
+    MenuPermission("menu.dashboard", "Dashboard", "General", "View the company dashboard and overview; write access allows layout customisation."),
     MenuPermission("menu.service_status", "Service status", "General", "View service status dashboards."),
     MenuPermission("menu.notifications", "Notifications", "General", "View and manage notification settings.", admin_only=True),
     MenuPermission("menu.knowledge_base", "Knowledge base", "General", "View knowledge base articles."),

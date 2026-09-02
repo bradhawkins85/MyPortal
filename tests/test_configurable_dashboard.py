@@ -3,9 +3,69 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
+from starlette.requests import Request
 
+from app.api.routes import dashboard as dashboard_routes
 from app.services import dashboard_layouts
 from app.services.dashboard_layouts import InvalidDashboardLayout, validate_layout
+
+
+def dashboard_request(permission: str) -> Request:
+    request = Request(
+        {"type": "http", "method": "GET", "path": "/api/dashboard", "headers": []}
+    )
+    request.state.active_company_id = 7
+    request.state.active_membership = {
+        "menu_permissions": {"menu.dashboard": permission}
+    }
+    return request
+
+
+def test_dashboard_editability_requires_write_access():
+    user = {"id": 42, "is_super_admin": False}
+
+    assert (
+        asyncio.run(dashboard_routes._editable(user, dashboard_request("read")))
+        is False
+    )
+    assert (
+        asyncio.run(dashboard_routes._editable(user, dashboard_request("write")))
+        is True
+    )
+
+
+def test_super_admin_can_edit_dashboard_without_active_membership():
+    request = Request(
+        {"type": "http", "method": "GET", "path": "/api/dashboard", "headers": []}
+    )
+
+    assert (
+        asyncio.run(
+            dashboard_routes._editable({"id": 1, "is_super_admin": True}, request)
+        )
+        is True
+    )
+
+
+def test_read_only_dashboard_role_cannot_save_reset_or_resolve(monkeypatch):
+    user = {"id": 42, "is_super_admin": False}
+    request = dashboard_request("read")
+    delete_personal = AsyncMock()
+    monkeypatch.setattr(
+        dashboard_routes.layouts_repo, "delete_personal", delete_personal
+    )
+
+    for operation in (
+        dashboard_routes.save_dashboard({}, request, user),
+        dashboard_routes.reset_dashboard(request, user),
+        dashboard_routes.resolve_dashboard({}, request, user),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(operation)
+        assert exc_info.value.status_code == 403
+
+    delete_personal.assert_not_awaited()
 
 
 def test_layout_accepts_all_panel_types():
