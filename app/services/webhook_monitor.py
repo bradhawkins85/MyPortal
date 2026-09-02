@@ -81,10 +81,10 @@ def _extract_source_ip(headers: Mapping[str, Any] | None) -> str | None:
     for key in (
         "cf-connecting-ip",
         "true-client-ip",
-        "x-real-ip",
-        "x-client-ip",
         "x-forwarded-for",
         "forwarded",
+        "x-real-ip",
+        "x-client-ip",
     ):
         value = next(
             (header_value for header_name, header_value in headers.items() if str(header_name).lower() == key),
