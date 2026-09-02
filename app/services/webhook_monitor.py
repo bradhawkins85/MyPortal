@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 from urllib.parse import urlsplit, urlunsplit
@@ -52,6 +53,55 @@ def _prepare_request_body(payload: Any) -> Any:
     if isinstance(payload, str):
         return _truncate(payload)
     return payload
+
+
+def _normalise_ip(value: Any) -> str | None:
+    text = str(value or "").strip().strip('"')
+    if not text:
+        return None
+    if text.startswith("[") and "]" in text:
+        text = text[1 : text.index("]")]
+    try:
+        return str(ipaddress.ip_address(text))
+    except ValueError:
+        pass
+    if text.count(":") == 1:
+        host, port = text.rsplit(":", 1)
+        if port.isdigit():
+            try:
+                return str(ipaddress.ip_address(host))
+            except ValueError:
+                return None
+    return None
+
+
+def _extract_source_ip(headers: Mapping[str, Any] | None) -> str | None:
+    if not headers:
+        return None
+    for key in (
+        "cf-connecting-ip",
+        "true-client-ip",
+        "x-real-ip",
+        "x-client-ip",
+        "x-forwarded-for",
+        "forwarded",
+    ):
+        value = next(
+            (header_value for header_name, header_value in headers.items() if str(header_name).lower() == key),
+            None,
+        )
+        if value is None:
+            continue
+        if key in {"x-forwarded-for", "forwarded"}:
+            for part in str(value).split(","):
+                candidate = _normalise_ip(part)
+                if candidate:
+                    return candidate
+            continue
+        candidate = _normalise_ip(value)
+        if candidate:
+            return candidate
+    return None
 
 
 def _normalize_source_url(url: str) -> str:
@@ -228,6 +278,7 @@ async def log_incoming_webhook(
     source_url: str,
     payload: Any = None,
     headers: dict[str, str] | None = None,
+    source_ip: str | None = None,
     response_status: int | None = None,
     response_body: str | None = None,
     error_message: str | None = None,
@@ -259,6 +310,8 @@ async def log_incoming_webhook(
 
     # Redact sensitive headers before storing anywhere
     safe_headers = _redact_headers(headers, sensitive=_SENSITIVE_HEADERS)
+    resolved_source_ip = _normalise_ip(source_ip) or _extract_source_ip(safe_headers)
+    metadata = {"source_ip": resolved_source_ip} if resolved_source_ip else None
 
     event = await webhook_repo.create_event(
         name=name,
@@ -269,6 +322,7 @@ async def log_incoming_webhook(
         backoff_seconds=0,
         direction="incoming",
         source_url=normalised_source_url,
+        metadata=metadata,
     )
     
     if not event or event.get("id") is None:

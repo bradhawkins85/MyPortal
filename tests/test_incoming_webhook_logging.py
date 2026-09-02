@@ -136,6 +136,49 @@ async def test_log_incoming_webhook_redacts_sensitive_headers():
 
 
 @pytest.mark.asyncio
+async def test_log_incoming_webhook_records_source_ip_from_forwarded_header():
+    with patch('app.repositories.webhook_events.create_event', new_callable=AsyncMock) as mock_create, \
+         patch('app.repositories.webhook_events.record_attempt', new_callable=AsyncMock), \
+         patch('app.repositories.webhook_events.mark_event_completed', new_callable=AsyncMock), \
+         patch('app.repositories.webhook_events.get_event', new_callable=AsyncMock) as mock_get:
+
+        mock_create.return_value = {'id': 790}
+        mock_get.return_value = {'id': 790, 'status': 'succeeded'}
+
+        await webhook_monitor.log_incoming_webhook(
+            name="Webhook with IP",
+            source_url="https://example.com/webhook",
+            headers={"X-Forwarded-For": "198.51.100.22, 10.0.0.1"},
+            response_status=200,
+        )
+
+        create_kwargs = mock_create.call_args.kwargs
+        assert create_kwargs["metadata"] == {"source_ip": "198.51.100.22"}
+
+
+@pytest.mark.asyncio
+async def test_log_incoming_webhook_prefers_explicit_source_ip():
+    with patch('app.repositories.webhook_events.create_event', new_callable=AsyncMock) as mock_create, \
+         patch('app.repositories.webhook_events.record_attempt', new_callable=AsyncMock), \
+         patch('app.repositories.webhook_events.mark_event_completed', new_callable=AsyncMock), \
+         patch('app.repositories.webhook_events.get_event', new_callable=AsyncMock) as mock_get:
+
+        mock_create.return_value = {'id': 791}
+        mock_get.return_value = {'id': 791, 'status': 'succeeded'}
+
+        await webhook_monitor.log_incoming_webhook(
+            name="Webhook explicit IP",
+            source_url="https://example.com/webhook",
+            headers={"X-Forwarded-For": "198.51.100.40"},
+            source_ip="203.0.113.11",
+            response_status=200,
+        )
+
+        create_kwargs = mock_create.call_args.kwargs
+        assert create_kwargs["metadata"] == {"source_ip": "203.0.113.11"}
+
+
+@pytest.mark.asyncio
 async def test_enqueue_event_sets_direction_outgoing():
     """Test that enqueue_event sets direction to outgoing."""
     with patch('app.repositories.webhook_events.create_event', new_callable=AsyncMock) as mock_create, \
