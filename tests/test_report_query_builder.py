@@ -1,4 +1,5 @@
 from app.services import report_query_builder
+from pathlib import Path
 
 
 def test_ai_prompt_is_schema_grounded_and_read_only(monkeypatch):
@@ -26,3 +27,12 @@ def test_extract_ai_sql_handles_module_json_response():
         "SELECT id FROM tickets",
         "Open tickets",
     )
+
+
+def test_ai_query_builder_js_includes_csrf_fallback_and_detail_errors():
+    source = (Path(__file__).resolve().parent.parent / "app/static/js/report-query-builder.js").read_text(encoding="utf-8")
+    assert 'input[name="_csrf"]' in source
+    assert "body.set('_csrf', token)" in source
+    assert "Array.isArray(detail) && detail.length" in source
+    assert "typeof data?.sql !== 'string' || !data.sql.trim()" in source
+    assert "Server returned no SQL query." in source
