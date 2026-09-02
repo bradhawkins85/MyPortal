@@ -351,6 +351,16 @@
                     data-table-filter="tickets-table" data-ticket-dashboard-search
                   />
                 </div>
+                <div class="ticket-filters__limit-control">
+                  <label class="form-label" for="ticket-result-limit">Results</label>
+                  <select id="ticket-result-limit" class="form-input" data-ticket-dashboard-limit>
+                    <option value="50">50 tickets</option>
+                    <option value="100">100 tickets</option>
+                    <option value="200" selected>200 tickets</option>
+                    <option value="500">500 tickets</option>
+                    <option value="all">All tickets</option>
+                  </select>
+                </div>
                 <div class="management__toolbar ticket-dashboard__dropdowns">
             {% if can_bulk_delete_tickets %}
               {% set current_query = request.url.query %}

@@ -7283,16 +7283,22 @@ dialog.modal:not([open]) {
 }
 
 .ticket-filters__group-control,
-.ticket-filters__search-control {
+.ticket-filters__search-control,
+.ticket-filters__limit-control {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
 }
 
 .ticket-filters__group-control .form-label,
-.ticket-filters__search-control .form-label {
+.ticket-filters__search-control .form-label,
+.ticket-filters__limit-control .form-label {
   font-size: 0.85rem;
   margin-bottom: 0;
+}
+
+.ticket-filters__limit-control .form-input {
+  min-width: 8.5rem;
 }
 
 /* Right Column Layout */

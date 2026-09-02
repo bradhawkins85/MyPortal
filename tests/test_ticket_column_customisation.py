@@ -31,13 +31,17 @@ def test_dashboard_controls_precede_stats_and_full_width_table():
     """The dashboard uses one control row followed by the full-width ticket list."""
     html = _template_html()
     quick_search_index = html.index('id="ticket-quick-filter"')
+    result_limit_index = html.index('id="ticket-result-limit"')
     group_by_index = html.index('data-ticket-group-by')
     columns_index = html.index('data-ticket-columns')
     stats_index = html.index('data-ticket-stats')
     table_index = html.index('id="tickets-table"')
 
-    assert quick_search_index < group_by_index < stats_index < table_index
+    assert quick_search_index < result_limit_index < group_by_index < stats_index < table_index
     assert quick_search_index < columns_index < stats_index
+    assert '<option value="200" selected>200 tickets</option>' in html
+    assert '<option value="500">500 tickets</option>' in html
+    assert '<option value="all">All tickets</option>' in html
 
     css = (TEMPLATE_PATH.parent.parent.parent / "static" / "css" / "app.css").read_text(encoding="utf-8")
     assert "grid-template-columns: minmax(260px, 320px) minmax(260px, 340px) minmax(0, 1fr);" in css
