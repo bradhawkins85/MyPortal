@@ -88,3 +88,107 @@ Identity-Alignment: dkim, spf
 def test_forensic_report_rejects_non_authentication_feedback():
     with pytest.raises(DmarcInputError, match="not an authentication failure"):
         parse_forensic_report(b"Feedback-Type: abuse\nSource-IP: 192.0.2.1\n\n")
+
+
+def test_policy_domain_candidates_include_parent_domains():
+    assert dmarc._policy_domain_candidates("mail.example.com.") == [
+        "mail.example.com",
+        "example.com",
+    ]
+
+
+def test_ingest_attachment_matches_company_by_policy_domain(monkeypatch):
+    create_import = AsyncMock(return_value=31)
+    mark_import = AsyncMock()
+    save_report = AsyncMock(return_value=44)
+    set_import_company = AsyncMock()
+    company_by_code = AsyncMock(return_value=None)
+    lookup_company = AsyncMock(side_effect=lambda domain: {"id": 77} if domain == "example.com" else None)
+    monkeypatch.setattr("app.repositories.dmarc.create_import", create_import)
+    monkeypatch.setattr("app.repositories.dmarc.mark_import", mark_import)
+    monkeypatch.setattr("app.repositories.dmarc.save_report", save_report)
+    monkeypatch.setattr("app.repositories.dmarc.set_import_company", set_import_company)
+    monkeypatch.setattr("app.repositories.dmarc.company_by_code", company_by_code)
+    monkeypatch.setattr("app.repositories.companies.get_company_by_email_domain", lookup_company)
+
+    xml = XML.replace(b"<domain>example.com</domain>", b"<domain>mail.example.com</domain>")
+    created = asyncio.run(
+        dmarc.ingest_attachment(
+            recipient="dmarc@example.com",
+            message_id="msg-1",
+            filename="report.xml",
+            payload=xml,
+            received_at=dmarc.datetime.now(dmarc.timezone.utc),
+            company_id=None,
+        )
+    )
+
+    assert created == [44]
+    assert save_report.await_args.args[0] == 77
+    assert lookup_company.await_args_list[0].args[0] == "mail.example.com"
+    assert lookup_company.await_args_list[1].args[0] == "example.com"
+    set_import_company.assert_awaited_once_with(31, 77)
+    mark_import.assert_awaited_once()
+    assert mark_import.await_args.args[1] == "processed"
+
+
+def test_ingest_attachment_falls_back_to_mailbox_company(monkeypatch):
+    create_import = AsyncMock(return_value=31)
+    mark_import = AsyncMock()
+    save_report = AsyncMock(return_value=45)
+    set_import_company = AsyncMock()
+    company_by_code = AsyncMock(return_value=None)
+    lookup_company = AsyncMock(return_value=None)
+    monkeypatch.setattr("app.repositories.dmarc.create_import", create_import)
+    monkeypatch.setattr("app.repositories.dmarc.mark_import", mark_import)
+    monkeypatch.setattr("app.repositories.dmarc.save_report", save_report)
+    monkeypatch.setattr("app.repositories.dmarc.set_import_company", set_import_company)
+    monkeypatch.setattr("app.repositories.dmarc.company_by_code", company_by_code)
+    monkeypatch.setattr("app.repositories.companies.get_company_by_email_domain", lookup_company)
+
+    created = asyncio.run(
+        dmarc.ingest_attachment(
+            recipient="dmarc@example.com",
+            message_id="msg-2",
+            filename="report.xml",
+            payload=XML,
+            received_at=dmarc.datetime.now(dmarc.timezone.utc),
+            company_id=42,
+        )
+    )
+
+    assert created == [45]
+    assert save_report.await_args.args[0] == 42
+    set_import_company.assert_awaited_once_with(31, 42)
+
+
+def test_ingest_attachment_quarantines_unassigned_policy_domain(monkeypatch):
+    create_import = AsyncMock(return_value=31)
+    mark_import = AsyncMock()
+    save_report = AsyncMock(return_value=45)
+    set_import_company = AsyncMock()
+    company_by_code = AsyncMock(return_value=None)
+    lookup_company = AsyncMock(return_value=None)
+    monkeypatch.setattr("app.repositories.dmarc.create_import", create_import)
+    monkeypatch.setattr("app.repositories.dmarc.mark_import", mark_import)
+    monkeypatch.setattr("app.repositories.dmarc.save_report", save_report)
+    monkeypatch.setattr("app.repositories.dmarc.set_import_company", set_import_company)
+    monkeypatch.setattr("app.repositories.dmarc.company_by_code", company_by_code)
+    monkeypatch.setattr("app.repositories.companies.get_company_by_email_domain", lookup_company)
+
+    created = asyncio.run(
+        dmarc.ingest_attachment(
+            recipient="dmarc@example.com",
+            message_id="msg-3",
+            filename="report.xml",
+            payload=XML,
+            received_at=dmarc.datetime.now(dmarc.timezone.utc),
+            company_id=None,
+        )
+    )
+
+    assert created == []
+    save_report.assert_not_awaited()
+    set_import_company.assert_not_awaited()
+    assert mark_import.await_args.args[1] == "quarantined"
+    assert "Policy domain could not be assigned" in (mark_import.await_args.args[2] or "")

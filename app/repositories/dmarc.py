@@ -70,6 +70,13 @@ async def mark_import(
     )
 
 
+async def set_import_company(import_id: int, company_id: int | None) -> None:
+    await db.execute(
+        "UPDATE dmarc_imports SET company_id=%s,updated_at=UTC_TIMESTAMP(6) WHERE id=%s",
+        (company_id, import_id),
+    )
+
+
 async def list_quarantine(*, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
     return await db.fetch_all(
         "SELECT id,company_id,source_filename,received_at,status,failure_reason,attempts FROM dmarc_imports WHERE status IN ('quarantined','retry') ORDER BY received_at DESC LIMIT %s OFFSET %s",

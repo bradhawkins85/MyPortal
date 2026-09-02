@@ -73,6 +73,25 @@ async def company_reporting_addresses(company_id: int) -> list[str]:
     return addresses
 
 
+def _policy_domain_candidates(domain: str | None) -> list[str]:
+    candidate = str(domain or "").strip().lower().rstrip(".")
+    if not candidate or "@" in candidate:
+        return []
+    labels = [label for label in candidate.split(".") if label]
+    if len(labels) < 2:
+        return []
+    return [".".join(labels[index:]) for index in range(0, len(labels) - 1)]
+
+
+async def _resolve_company_id_from_domain(domain: str | None) -> int | None:
+    from app.repositories import companies as company_repo
+    for candidate in _policy_domain_candidates(domain):
+        company = await company_repo.get_company_by_email_domain(candidate)
+        if company and company.get("id") is not None:
+            return int(company["id"])
+    return None
+
+
 def _safe_xml(data: bytes, limits: IngestionLimits) -> bytes:
     if len(data) > limits.expanded_bytes:
         raise DmarcInputError("Expanded attachment exceeds limit")
@@ -265,23 +284,23 @@ async def ingest_attachment(*, recipient: str, message_id: str, filename: str, p
                             company_id: int | None = None) -> list[int]:
     """Persist then process one delivery; unresolved/malformed input is quarantined.
 
-    M365 mailbox imports supply the authoritative company primary key directly.
-    Other ingestion paths may still resolve the recipient routing hint. Once
-    resolved, every repository call carries the company primary key.
+    Company assignment prefers DMARC report domains matched against configured
+    company email domains. Recipient routing hints or mailbox-level company
+    values are used only as fallback identifiers.
     """
     from app.repositories import dmarc as repo
     limits = limits or IngestionLimits()
     attachment_hash = hashlib.sha256(payload).hexdigest()
     code = routing_code(recipient)
-    if company_id is None:
-        company = await repo.company_by_code(code) if code else None
-        company_id = int(company["id"]) if company else None
-    import_id = await repo.create_import(company_id=company_id, message_id=message_id,
+    routed_company_id: int | None = None
+    company = await repo.company_by_code(code) if code else None
+    if company and company.get("id") is not None:
+        routed_company_id = int(company["id"])
+    fallback_company_id = int(company_id) if company_id is not None else routed_company_id
+    import_id = await repo.create_import(company_id=fallback_company_id, message_id=message_id,
         attachment_hash=attachment_hash, filename=filename, received_at=received_at.astimezone(timezone.utc), metadata=metadata)
-    if company_id is None:
-        await repo.mark_import(import_id, "quarantined", "Recipient could not be assigned")
-        return []
     created: list[int] = []
+    resolved_company_ids: set[int] = set()
     try:
         lower = filename.lower()
         # Graph does not reliably preserve an ARF extension, so also detect the
@@ -289,11 +308,41 @@ async def ingest_attachment(*, recipient: str, message_id: str, filename: str, p
         forensic_payload = re.search(br"(?im)^Feedback-Type:\s*auth-failure\s*$", payload[:65536])
         if lower.endswith((".eml", ".arf")) or forensic_payload:
             report = parse_forensic_report(payload, limits)
-            created.append(await repo.save_forensic_report(company_id, import_id, report, attachment_hash))
+            resolved_company_id = await _resolve_company_id_from_domain(
+                report.get("reported_domain")
+            )
+            target_company_id = (
+                resolved_company_id or routed_company_id or fallback_company_id
+            )
+            if target_company_id is None:
+                raise DmarcInputError("Forensic report could not be assigned")
+            resolved_company_ids.add(target_company_id)
+            created.append(
+                await repo.save_forensic_report(
+                    target_company_id, import_id, report, attachment_hash
+                )
+            )
         else:
             for _, xml in unpack_attachment(filename, payload, limits):
                 report = parse_aggregate_xml(xml, limits)
-                created.append(await repo.save_report(company_id, import_id, report, attachment_hash))
+                resolved_company_id = await _resolve_company_id_from_domain(
+                    report.get("domain")
+                )
+                target_company_id = (
+                    resolved_company_id or routed_company_id or fallback_company_id
+                )
+                if target_company_id is None:
+                    raise DmarcInputError("Policy domain could not be assigned")
+                resolved_company_ids.add(target_company_id)
+                created.append(
+                    await repo.save_report(
+                        target_company_id, import_id, report, attachment_hash
+                    )
+                )
+        if len(resolved_company_ids) == 1:
+            await repo.set_import_company(import_id, next(iter(resolved_company_ids)))
+        elif len(resolved_company_ids) > 1:
+            await repo.set_import_company(import_id, None)
         await repo.mark_import(import_id, "processed", content_hash=hashlib.sha256(payload).hexdigest())
     except DmarcInputError as exc:
         await repo.mark_import(import_id, "quarantined", str(exc)[:1000])
