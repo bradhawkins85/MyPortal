@@ -395,16 +395,23 @@ async def admin_reporting_ai_query(request: Request):
     _user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
         return JSONResponse({"error": "Authentication required."}, status_code=401)
-    form = await request.form()
+    try:
+        form = await request.form()
+    except (AssertionError, RuntimeError, ValueError) as exc:
+        if isinstance(exc, AssertionError) and "python-multipart" not in str(exc):
+            raise
+        return JSONResponse(
+            {"error": "Unable to read the query request payload."}, status_code=400
+        )
     instruction = str(form.get("instruction") or "").strip()
     current_sql = str(form.get("current_sql") or "").strip()
     if not instruction:
         return JSONResponse({"error": "Describe the report you want."}, status_code=400)
-    schema = await report_query_builder.describe_schema()
-    messages = report_query_builder.build_ai_messages(
-        schema, instruction[:4000], current_sql[:16000]
-    )
     try:
+        schema = await report_query_builder.describe_schema()
+        messages = report_query_builder.build_ai_messages(
+            schema, instruction[:4000], current_sql[:16000]
+        )
         response = await modules_service.trigger_module(
             "ollama",
             {
