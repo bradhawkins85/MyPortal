@@ -629,6 +629,45 @@ def test_staff_menu_no_access_overrides_staff_assignment_levels():
     assert nested_menu_access["menu.staff"] == "none"
 
 
+def test_staff_assignment_scope_overrides_role_staff_menu_access():
+    for role_access in ("read", "write"):
+        menu_access = main_module._build_menu_access_map(
+            is_super_admin=False,
+            membership_data={
+                "menu_permissions": {"menu.staff": role_access},
+                "staff_permission": 0,
+                "can_manage_staff": True,
+            },
+        )
+
+        assert menu_access["menu.staff"] == "none"
+
+
+def test_staff_link_hidden_without_department_or_all_staff_access():
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+    env = Environment(loader=FileSystemLoader("app/templates"), autoescape=select_autoescape(["html"]))
+    env.globals["static_url"] = lambda path: path
+    template = env.get_template("base.html")
+
+    for role_access in ("read", "write"):
+        html = template.render(
+            request=type("Request", (), {"url": type("Url", (), {"path": "/"})()})(),
+            current_user={"id": 2, "is_super_admin": False},
+            active_membership={"staff_permission": 0, "can_manage_staff": True},
+            staff_permission=0,
+            can_manage_staff=True,
+            menu_access={"menu.dashboard": "read", "menu.staff": role_access},
+            available_companies=[],
+            cart_summary={"item_count": 0, "total_quantity": 0, "subtotal": 0},
+            notification_unread_count=0,
+            plausible_config={"enabled": False},
+            csrf_token="csrf-token",
+        )
+
+        assert 'href="/staff"' not in html
+
+
 def test_staff_link_hidden_when_staff_menu_no_access_even_with_staff_assignment():
     from jinja2 import Environment, FileSystemLoader, select_autoescape
 

@@ -1957,6 +1957,12 @@ def _build_menu_access_map(
         promote("menu.marketing", "write")
     if int(membership_data.get("staff_permission") or 0) > 0:
         promote("menu.staff", "write")
+    else:
+        # Staff role permissions control what a member may do, but the company
+        # membership scope controls whether they may see any staff at all.
+        # Never let a role's Read/Write setting grant staff access when the
+        # member has neither Department nor All staff access.
+        menu_access["menu.staff"] = "none"
 
     return menu_access
 
