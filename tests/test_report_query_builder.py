@@ -29,6 +29,12 @@ def test_extract_ai_sql_handles_module_json_response():
     )
 
 
+def test_derive_table_group_groups_schema_by_feature_prefix():
+    assert report_query_builder._derive_table_group("tickets_messages") == "tickets"
+    assert report_query_builder._derive_table_group("company_notes") == "company"
+    assert report_query_builder._derive_table_group("users") == "users"
+
+
 def test_ai_query_builder_js_includes_csrf_fallback_and_detail_errors():
     source = (Path(__file__).resolve().parent.parent / "app/static/js/report-query-builder.js").read_text(encoding="utf-8")
     assert 'input[name="_csrf"]' in source
@@ -36,3 +42,6 @@ def test_ai_query_builder_js_includes_csrf_fallback_and_detail_errors():
     assert "Array.isArray(detail) && detail.length" in source
     assert "typeof data?.sql !== 'string' || !data.sql.trim()" in source
     assert "Server returned no SQL query." in source
+    assert "groupedTables" in source
+    assert "toggleTable" in source
+    assert "expandedTables.add(table.name)" in source
