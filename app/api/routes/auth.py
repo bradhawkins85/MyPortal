@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from html import escape
+from io import BytesIO
 from typing import Any
 
 import pyotp
+import qrcode
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from loguru import logger
@@ -57,6 +60,13 @@ LOGIN_RATE_LIMIT_WINDOW = 300  # 5 minutes
 LOGIN_RATE_LIMIT_ATTEMPTS = 5
 
 
+def _totp_qr_code_data_uri(provisioning_uri: str) -> str:
+    """Render a provisioning URI locally so it is never sent to a third party."""
+    image = qrcode.make(provisioning_uri)
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
 
 def _html_to_text(html: str) -> str:
     text = re.sub(r"<\s*br\s*/?\s*>", "\n", html, flags=re.IGNORECASE)
@@ -696,7 +706,11 @@ async def setup_totp(
     totp = pyotp.TOTP(secret)
     provisioning_uri = totp.provisioning_uri(name=current_user["email"], issuer_name=settings.app_name)
     await session_manager.store_pending_totp_secret(session, secret)
-    return TOTPSetupResponse(secret=secret, otpauth_url=provisioning_uri)
+    return TOTPSetupResponse(
+        secret=secret,
+        otpauth_url=provisioning_uri,
+        qr_code_data_uri=_totp_qr_code_data_uri(provisioning_uri),
+    )
 
 
 @router.post(

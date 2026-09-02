@@ -113,6 +113,7 @@ class PasswordChangeRequest(BaseModel):
 class TOTPSetupResponse(BaseModel):
     secret: str
     otpauth_url: str
+    qr_code_data_uri: str
 
 
 class TOTPVerifyRequest(BaseModel):

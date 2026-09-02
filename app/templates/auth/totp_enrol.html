@@ -2,6 +2,8 @@
 
 {% block header_title %}Secure your account{% endblock %}
 
+{% block sidebar_menu %}{% endblock %}
+
 {% block content %}
 <div class="management management--single" data-layout id="totp-enrol-root">
   <section class="management__content">
@@ -28,7 +30,15 @@
             </div>
 
             <div data-totp-setup>
-              <div class="form-grid">
+              <div class="totp-qr" data-totp-qr-container aria-live="polite">
+                <div class="totp-qr__placeholder" data-totp-qr-placeholder>Generating your QR code…</div>
+                <img class="totp-qr__image" data-totp-qr alt="QR code for adding this account to an authenticator app" hidden />
+                <p class="form-help">Scan this QR code with your authenticator app.</p>
+              </div>
+
+              <button type="button" class="button button--ghost" data-totp-manual-toggle aria-expanded="false" aria-controls="totp-manual-setup">Cannot scan the code?</button>
+
+              <div class="form-grid totp-manual" id="totp-manual-setup" data-totp-manual hidden>
                 <div class="form-field">
                   <label class="form-label" for="totp-secret">Secret</label>
                   <div class="inline-form inline-form--stacked">
@@ -49,7 +59,7 @@
 
               <form class="form" id="totp-enrol-form">
                 <div class="form-field">
-                  <label class="form-label" for="totp-name">Device name</label>
+                  <label class="form-label" for="totp-name">Device name <span class="form-label__optional">(optional)</span></label>
                   <input class="form-input" id="totp-name" name="totpName" maxlength="100" placeholder="e.g. Work phone" />
                 </div>
                 <div class="form-field">

@@ -5732,6 +5732,34 @@ dialog.modal:not([open]) {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.totp-qr {
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
+  padding: 1.25rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 0.75rem;
+  background: #fff;
+  text-align: center;
+}
+
+.totp-qr__image {
+  width: min(100%, 280px);
+  height: auto;
+  border-radius: 0.35rem;
+}
+
+.totp-qr__placeholder {
+  min-height: 280px;
+  display: grid;
+  place-items: center;
+  color: var(--color-text-muted, #64748b);
+}
+
+.totp-manual {
+  margin-top: 0.75rem;
+}
+
 @media (max-width: 1200px) {
   .profile-columns {
     grid-template-columns: repeat(2, minmax(0, 1fr));

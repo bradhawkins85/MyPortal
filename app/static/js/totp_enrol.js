@@ -6,6 +6,10 @@
 
   const secretInput = document.getElementById('totp-secret');
   const linkInput = document.getElementById('totp-link');
+  const qrImage = root.querySelector('[data-totp-qr]');
+  const qrPlaceholder = root.querySelector('[data-totp-qr-placeholder]');
+  const manualToggle = root.querySelector('[data-totp-manual-toggle]');
+  const manualSetup = root.querySelector('[data-totp-manual]');
   const form = document.getElementById('totp-enrol-form');
   const nameInput = document.getElementById('totp-name');
   const codeInput = document.getElementById('totp-code');
@@ -77,6 +81,13 @@
       if (linkInput) {
         linkInput.value = result.otpauth_url || '';
       }
+      if (qrImage) {
+        qrImage.src = result.qr_code_data_uri || '';
+        qrImage.hidden = !result.qr_code_data_uri;
+      }
+      if (qrPlaceholder) {
+        qrPlaceholder.hidden = Boolean(result.qr_code_data_uri);
+      }
       if (codeInput) {
         codeInput.value = '';
         codeInput.focus();
@@ -125,6 +136,15 @@
 
   if (refreshButton) {
     refreshButton.addEventListener('click', () => startSetup());
+  }
+
+  if (manualToggle && manualSetup) {
+    manualToggle.addEventListener('click', () => {
+      const showing = manualSetup.hidden;
+      manualSetup.hidden = !showing;
+      manualToggle.setAttribute('aria-expanded', String(showing));
+      manualToggle.textContent = showing ? 'Hide manual setup' : 'Cannot scan the code?';
+    });
   }
 
   if (logoutButton) {
