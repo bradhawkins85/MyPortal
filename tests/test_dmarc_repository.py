@@ -53,6 +53,10 @@ def test_organization_summary_calculates_compliance_rate(monkeypatch):
                 "dkim_pass": 4,
                 "dkim_fail": 4,
                 "unauthenticated": 2,
+                "disposition_none": 3,
+                "disposition_quarantine": 2,
+                "disposition_reject": 1,
+                "disposition_other": 2,
             }
         ]
     )
@@ -63,6 +67,10 @@ def test_organization_summary_calculates_compliance_rate(monkeypatch):
     rows = asyncio.run(dmarc.organization_summary(42, start, end))
 
     assert rows[0]["compliance_rate"] == 75.0
+    assert rows[0]["disposition_none"] == 3
+    assert rows[0]["disposition_quarantine"] == 2
+    assert rows[0]["disposition_reject"] == 1
+    assert rows[0]["disposition_other"] == 2
     assert fetch_all.await_args.args[1] == (42, end, start, None, None)
 
 
