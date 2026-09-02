@@ -3115,7 +3115,7 @@ async def ai_search_page(request: Request):
         "search.html",
         request,
         user,
-        extra={"title": "AI Search"},
+        extra={"title": "Search"},
     )
 
 

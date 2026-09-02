@@ -106,7 +106,8 @@
           {% set menu_access = menu_access | default({}) %}
           {% set is_super_admin = is_super_admin | default(current_user.get('is_super_admin') if current_user else False) %}
           {% set staff_permission = staff_permission | default(membership.get('staff_permission', 0) or 0) %}
-          {% set can_access_dashboard = is_super_admin or menu_access.get('menu.dashboard') in ['read', 'write'] %}
+          {# The dashboard is the authenticated portal landing page, so every signed-in user needs its navigation link. #}
+          {% set can_access_dashboard = has_authenticated_user %}
           {% set can_access_service_status = is_super_admin or menu_access.get('menu.service_status') in ['read', 'write'] %}
           {% set can_access_notifications = is_super_admin or menu_access.get('menu.notifications') in ['read', 'write'] %}
           {% set can_access_knowledge_base = is_super_admin or menu_access.get('menu.knowledge_base') in ['read', 'write'] %}
