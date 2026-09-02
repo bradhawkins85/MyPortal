@@ -12,7 +12,7 @@
 {% endblock %}
 {% block content %}
 <div class="admin-grid admin-grid--columns">
-  <section class="card card--panel admin-grid__full">
+  {% if can_configure %}<section class="card card--panel admin-grid__full">
     <header class="card__header card__header--stacked">
       <div><h2>Subnet scanners</h2><p class="card__lede">Restrict portable scanners to approved public WAN addresses and local IPv4 ranges. A scan runs only while both configured boundaries match.</p></div>
       {% if can_configure %}<div class="card__controls"><form method="post" action="/devices/alerts" class="inline-form">{% include "partials/csrf.html" %}<label class="checkbox"><input type="checkbox" name="network_device_ticket_alerts_enabled" value="1" {% if company.network_device_ticket_alerts_enabled %}checked{% endif %}> <span>Create a support ticket for each new unmatched device</span></label><button class="button button--primary" type="submit">Save alerts</button></form><small>The first scan of each subnet establishes a baseline and never creates tickets.</small></div>{% endif %}
@@ -23,7 +23,7 @@
       {% if can_configure %}<tr><td><select class="input" form="scanner-add" name="device_id" required><option value="" selected disabled>Select an asset…</option>{% for scanner in available_scanners %}<option value="{{ scanner.id }}">{{ scanner.asset_name or scanner.hostname }}</option>{% endfor %}</select></td><td><input type="checkbox" checked disabled aria-label="New scanners are enabled when added"><input form="scanner-add" class="input" style="max-width:8rem" type="number" min="5" max="10080" name="interval_minutes" value="360"> minutes</td><td><textarea form="scanner-add" class="input" name="wan_cidrs" rows="3" placeholder="Optional WAN IPs / CIDRs"></textarea></td><td><textarea form="scanner-add" class="input" name="local_cidrs" rows="3" placeholder="Optional local IPv4 CIDRs"></textarea></td><td><form id="scanner-add" method="post" action="/devices/scanners">{% include "partials/csrf.html" %}<button class="button button--primary" type="submit" {% if not available_scanners %}disabled{% endif %}>Add scanner</button></form></td></tr>{% endif %}
       </tbody></table></div>
     {% else %}<p class="empty-state__subtitle">No subnet scanners are enabled for this company.</p>{% endif %}
-  </section>
+  </section>{% endif %}
 
   <section class="card card--panel admin-grid__full">
     {% set discovered_device_columns = [

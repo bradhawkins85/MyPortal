@@ -658,6 +658,35 @@ def test_staff_link_hidden_when_staff_menu_no_access_even_with_staff_assignment(
     assert 'href="/staff"' not in html
 
 
+def test_staff_link_hidden_without_an_active_company_membership():
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+    env = Environment(loader=FileSystemLoader("app/templates"), autoescape=select_autoescape(["html"]))
+    env.globals["static_url"] = lambda path: path
+    html = env.get_template("base.html").render(
+        request=type("Request", (), {"url": type("Url", (), {"path": "/"})()})(),
+        current_user={"id": 2, "is_super_admin": False},
+        active_membership=None,
+        staff_permission=3,
+        can_manage_staff=True,
+        menu_access={"menu.dashboard": "read", "menu.staff": "write"},
+        available_companies=[],
+        cart_summary={"item_count": 0, "total_quantity": 0, "subtotal": 0},
+        notification_unread_count=0,
+        plausible_config={"enabled": False},
+        csrf_token="csrf-token",
+    )
+
+    assert 'href="/staff"' not in html
+
+
+def test_network_devices_link_uses_its_own_permission():
+    template = Path("app/templates/base.html").read_text(encoding="utf-8")
+
+    assert "menu_access.get('menu.network_devices') in ['read', 'write']" in template
+    assert "{% if can_access_network_devices %}" in template
+
+
 def test_tickets_menu_permission_uses_no_access_own_all_levels():
     no_access = main_module._build_menu_access_map(
         is_super_admin=False,

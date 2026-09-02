@@ -36,6 +36,7 @@ MENU_PERMISSIONS: tuple[MenuPermission, ...] = (
     MenuPermission("menu.orders", "Orders", "Commerce", "View orders; write access allows order actions.", ("orders.access",), "can_access_orders"),
     MenuPermission("menu.forms", "Forms", "Company", "View forms; write access allows submissions.", ("forms.access",), "can_access_forms"),
     MenuPermission("menu.assets", "Assets", "Company", "View assets; write access allows asset changes.", ("assets.manage",), "can_manage_assets"),
+    MenuPermission("menu.network_devices", "Network Devices", "Company", "View discovered network devices; write access allows device actions and subnet scanner management."),
     MenuPermission("menu.defender", "Windows Defender", "Company", "View endpoint protection status; write access allows Defender configuration, exclusions, and ticket creation."),
     MenuPermission("menu.m365.configuration", "Office 365 Configuration", "Office 365", "View or manage Microsoft 365 tenant configuration.", ("licenses.manage",), "can_manage_licenses"),
     MenuPermission("menu.m365.best_practices", "Office 365 Best Practices", "Office 365", "View or run Microsoft 365 best-practice checks.", ("m365_best_practices.access",), "can_view_m365_best_practices"),
