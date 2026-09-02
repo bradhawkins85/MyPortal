@@ -177,7 +177,12 @@
   {% set intune_windows_results = results | selectattr("cis_group", "equalto", "intune_windows") | list %}
   {% set intune_ios_results = results | selectattr("cis_group", "equalto", "intune_ios") | list %}
   {% set intune_macos_results = results | selectattr("cis_group", "equalto", "intune_macos") | list %}
+  {% set m365_applicable_results = m365_results | rejectattr("status", "equalto", "not_applicable") | list %}
+  {% set intune_windows_applicable_results = intune_windows_results | rejectattr("status", "equalto", "not_applicable") | list %}
+  {% set intune_ios_applicable_results = intune_ios_results | rejectattr("status", "equalto", "not_applicable") | list %}
+  {% set intune_macos_applicable_results = intune_macos_results | rejectattr("status", "equalto", "not_applicable") | list %}
 
+  {% if not m365_results or m365_applicable_results %}
   <section class="panel">
     {% if m365_results %}
       <div class="panel__body" style="padding-bottom:0">
@@ -202,11 +207,12 @@
       </div>
     {% endif %}
   </section>
+  {% endif %}
 
   {# ------------------------------------------------------------------ #}
   {# CIS Intune Windows section                                           #}
   {# ------------------------------------------------------------------ #}
-  {% if intune_windows_results or (catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_windows") | list) %}
+  {% if intune_windows_applicable_results or (not intune_windows_results and catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_windows") | list) %}
   <section class="panel">
     <header class="panel__header">
       <h3 class="panel__title">CIS Intune Benchmark – Windows</h3>
@@ -227,7 +233,7 @@
   {# ------------------------------------------------------------------ #}
   {# CIS Intune iOS/iPadOS section                                        #}
   {# ------------------------------------------------------------------ #}
-  {% if intune_ios_results or (catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_ios") | list) %}
+  {% if intune_ios_applicable_results or (not intune_ios_results and catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_ios") | list) %}
   <section class="panel">
     <header class="panel__header">
       <h3 class="panel__title">CIS Intune Benchmark – iOS / iPadOS</h3>
@@ -248,7 +254,7 @@
   {# ------------------------------------------------------------------ #}
   {# CIS Intune macOS section                                             #}
   {# ------------------------------------------------------------------ #}
-  {% if intune_macos_results or (catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_macos") | list) %}
+  {% if intune_macos_applicable_results or (not intune_macos_results and catalog | selectattr("cis_group", "defined") | selectattr("cis_group", "equalto", "intune_macos") | list) %}
   <section class="panel">
     <header class="panel__header">
       <h3 class="panel__title">CIS Intune Benchmark – macOS</h3>
