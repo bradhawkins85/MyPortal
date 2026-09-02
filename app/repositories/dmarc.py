@@ -168,7 +168,11 @@ async def organization_summary(
         COALESCE(SUM(CASE WHEN r.dkim_result='pass' THEN r.message_count ELSE 0 END),0) dkim_pass,
         COALESCE(SUM(CASE WHEN r.dkim_result<>'pass' THEN r.message_count ELSE 0 END),0) dkim_fail,
         COALESCE(SUM(CASE WHEN r.dkim_result<>'pass' AND r.spf_result<>'pass'
-          THEN r.message_count ELSE 0 END),0) unauthenticated
+          THEN r.message_count ELSE 0 END),0) unauthenticated,
+        COALESCE(SUM(CASE WHEN r.disposition='none' THEN r.message_count ELSE 0 END),0) disposition_none,
+        COALESCE(SUM(CASE WHEN r.disposition='quarantine' THEN r.message_count ELSE 0 END),0) disposition_quarantine,
+        COALESCE(SUM(CASE WHEN r.disposition='reject' THEN r.message_count ELSE 0 END),0) disposition_reject,
+        COALESCE(SUM(CASE WHEN r.disposition NOT IN ('none','quarantine','reject') THEN r.message_count ELSE 0 END),0) disposition_other
         FROM dmarc_reports p JOIN dmarc_records r ON r.report_id=p.id
         WHERE p.company_id=%s AND p.date_begin < %s AND p.date_end >= %s
           AND (%s IS NULL OR p.domain=%s)
