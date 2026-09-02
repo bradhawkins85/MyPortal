@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any, Mapping
 
@@ -96,6 +97,12 @@ def build_ai_messages(
     if current_sql.strip():
         user += f"\n\nCurrent query to refine:\n{current_sql.strip()}"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def configured_ai_model() -> str | None:
+    """Return an optional model override for reporting query generation."""
+    model = str(os.getenv("REPORT_QUERY_BUILDER_MODEL", "")).strip()
+    return model or None
 
 
 def extract_ai_sql(response: Any) -> tuple[str, str]:

@@ -35,6 +35,16 @@ def test_derive_table_group_groups_schema_by_feature_prefix():
     assert report_query_builder._derive_table_group("users") == "users"
 
 
+def test_configured_ai_model_uses_report_query_builder_env(monkeypatch):
+    monkeypatch.setenv("REPORT_QUERY_BUILDER_MODEL", "qwen2.5-coder:7b")
+    assert report_query_builder.configured_ai_model() == "qwen2.5-coder:7b"
+
+
+def test_configured_ai_model_returns_none_when_unset(monkeypatch):
+    monkeypatch.delenv("REPORT_QUERY_BUILDER_MODEL", raising=False)
+    assert report_query_builder.configured_ai_model() is None
+
+
 def test_ai_query_builder_js_includes_csrf_fallback_and_detail_errors():
     source = (Path(__file__).resolve().parent.parent / "app/static/js/report-query-builder.js").read_text(encoding="utf-8")
     assert 'input[name="_csrf"]' in source

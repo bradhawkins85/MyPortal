@@ -412,14 +412,18 @@ async def admin_reporting_ai_query(request: Request):
         messages = report_query_builder.build_ai_messages(
             schema, instruction[:4000], current_sql[:16000]
         )
+        model_override = report_query_builder.configured_ai_model()
+        module_payload: dict[str, Any] = {
+            "prompt": messages[-1]["content"],
+            "messages": messages,
+            "stage": "report_query_builder",
+            "format": "json",
+        }
+        if model_override:
+            module_payload["model"] = model_override
         response = await modules_service.trigger_module(
             "ollama",
-            {
-                "prompt": messages[-1]["content"],
-                "messages": messages,
-                "stage": "report_query_builder",
-                "format": "json",
-            },
+            module_payload,
             background=False,
         )
         sql, summary = report_query_builder.extract_ai_sql(response)
