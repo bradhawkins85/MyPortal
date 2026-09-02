@@ -189,6 +189,6 @@ def test_ingest_attachment_quarantines_unassigned_policy_domain(monkeypatch):
 
     assert created == []
     save_report.assert_not_awaited()
-    set_import_company.assert_not_awaited()
+    set_import_company.assert_awaited_once_with(31, None)
     assert mark_import.await_args.args[1] == "quarantined"
     assert "Policy domain could not be assigned" in (mark_import.await_args.args[2] or "")

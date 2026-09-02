@@ -92,6 +92,15 @@ async def _resolve_company_id_from_domain(domain: str | None) -> int | None:
     return None
 
 
+def _select_target_company_id(
+    *,
+    resolved_company_id: int | None,
+    routed_company_id: int | None,
+    mailbox_company_id: int | None,
+) -> int | None:
+    return resolved_company_id or routed_company_id or mailbox_company_id
+
+
 def _safe_xml(data: bytes, limits: IngestionLimits) -> bytes:
     if len(data) > limits.expanded_bytes:
         raise DmarcInputError("Expanded attachment exceeds limit")
@@ -296,11 +305,11 @@ async def ingest_attachment(*, recipient: str, message_id: str, filename: str, p
     company = await repo.company_by_code(code) if code else None
     if company and company.get("id") is not None:
         routed_company_id = int(company["id"])
-    fallback_company_id = int(company_id) if company_id is not None else routed_company_id
-    import_id = await repo.create_import(company_id=fallback_company_id, message_id=message_id,
+    mailbox_company_id = int(company_id) if company_id is not None else None
+    import_id = await repo.create_import(company_id=mailbox_company_id, message_id=message_id,
         attachment_hash=attachment_hash, filename=filename, received_at=received_at.astimezone(timezone.utc), metadata=metadata)
     created: list[int] = []
-    resolved_company_ids: set[int] = set()
+    assigned_company_ids: set[int] = set()
     try:
         lower = filename.lower()
         # Graph does not reliably preserve an ARF extension, so also detect the
@@ -311,12 +320,14 @@ async def ingest_attachment(*, recipient: str, message_id: str, filename: str, p
             resolved_company_id = await _resolve_company_id_from_domain(
                 report.get("reported_domain")
             )
-            target_company_id = (
-                resolved_company_id or routed_company_id or fallback_company_id
+            target_company_id = _select_target_company_id(
+                resolved_company_id=resolved_company_id,
+                routed_company_id=routed_company_id,
+                mailbox_company_id=mailbox_company_id,
             )
             if target_company_id is None:
                 raise DmarcInputError("Forensic report could not be assigned")
-            resolved_company_ids.add(target_company_id)
+            assigned_company_ids.add(target_company_id)
             created.append(
                 await repo.save_forensic_report(
                     target_company_id, import_id, report, attachment_hash
@@ -328,23 +339,26 @@ async def ingest_attachment(*, recipient: str, message_id: str, filename: str, p
                 resolved_company_id = await _resolve_company_id_from_domain(
                     report.get("domain")
                 )
-                target_company_id = (
-                    resolved_company_id or routed_company_id or fallback_company_id
+                target_company_id = _select_target_company_id(
+                    resolved_company_id=resolved_company_id,
+                    routed_company_id=routed_company_id,
+                    mailbox_company_id=mailbox_company_id,
                 )
                 if target_company_id is None:
                     raise DmarcInputError("Policy domain could not be assigned")
-                resolved_company_ids.add(target_company_id)
+                assigned_company_ids.add(target_company_id)
                 created.append(
                     await repo.save_report(
                         target_company_id, import_id, report, attachment_hash
                     )
                 )
-        if len(resolved_company_ids) == 1:
-            await repo.set_import_company(import_id, next(iter(resolved_company_ids)))
-        elif len(resolved_company_ids) > 1:
+        if len(assigned_company_ids) == 1:
+            await repo.set_import_company(import_id, next(iter(assigned_company_ids)))
+        elif len(assigned_company_ids) > 1:
             await repo.set_import_company(import_id, None)
-        await repo.mark_import(import_id, "processed", content_hash=hashlib.sha256(payload).hexdigest())
+        await repo.mark_import(import_id, "processed", content_hash=attachment_hash)
     except DmarcInputError as exc:
+        await repo.set_import_company(import_id, None)
         await repo.mark_import(import_id, "quarantined", str(exc)[:1000])
     except Exception:
         # Recoverable infrastructure failures retain the persisted import. Do
