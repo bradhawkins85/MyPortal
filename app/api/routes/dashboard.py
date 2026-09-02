@@ -59,8 +59,12 @@ async def _require_editable(user: dict, request: Request) -> None:
 @router.get("")
 async def get_dashboard(request: Request, user: dict = Depends(get_current_user)):
     user_id = int(user["id"])
-    personal = await layouts_repo.get_personal(user_id)
     company_id = _company_id(request)
+    editable = await _editable(user, request)
+    # Read-only roles must always inherit the layout assigned to their active
+    # company.  In particular, do not let an old personal layout continue to
+    # override the centrally managed layout after a role loses write access.
+    personal = await layouts_repo.get_personal(user_id) if editable else None
     company = await layouts_repo.get_company(company_id) if company_id else None
     source = "personal" if personal else "company" if company else "default"
     layout = layouts_service.validate_layout(
@@ -75,7 +79,7 @@ async def get_dashboard(request: Request, user: dict = Depends(get_current_user)
     return {
         "layout": resolved,
         "source": source,
-        "editable": await _editable(user, request),
+        "editable": editable,
         "can_assign_company": bool(user.get("is_super_admin")),
     }
 
