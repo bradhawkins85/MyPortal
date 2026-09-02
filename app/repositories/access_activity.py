@@ -65,6 +65,8 @@ def _normalise_ip(value: Any) -> str | None:
         return None
     if text.lower().startswith("for="):
         text = text[4:].strip().strip('"')
+    if ";" in text:
+        text = text.split(";", 1)[0].strip()
     if text.startswith("[") and "]" in text:
         text = text[1 : text.index("]")]
     try:
