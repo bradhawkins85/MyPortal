@@ -3,15 +3,15 @@
 ## DNS and mailbox setup
 
 Enable the feature by creating or editing an account on **Microsoft 365 Mail** and
-setting its import purpose to **DMARC aggregate and forensic reports**, then select the
-company that owns the reports. A company selection is required. A company can have
-multiple reporting mailboxes, allowing each of its domains to use an address on the
-appropriate domain while all reports remain allocated to the same company. Put the
+setting its import purpose to **DMARC aggregate and forensic reports**. DMARC mailbox
+accounts are global and do not use a selected company. MyPortal reads each aggregate
+report's `policy_published/domain` value and matches it against configured
+`company_email_domains`, then stores the report under the matching company. Put the
 applicable mailbox address directly in each domain's `_dmarc` TXT record, for example
 `rua=mailto:dmarc@reports.customer.example` and
-`ruf=mailto:dmarc@reports.customer.example`. MyPortal allocates every report imported
-from that mailbox to the selected company; no tagged address or unique routing ID is
-required.
+`ruf=mailto:dmarc@reports.customer.example`. This allows one DMARC mailbox to safely
+ingest reports for multiple companies without tagged addresses or per-company mailbox
+imports.
 
 For Microsoft 365, license the shared mailbox where required, enable authenticated
 IMAP (or use the Graph-backed account), and restrict access to the ingestion
@@ -38,8 +38,8 @@ audit log, encrypt backups, and document the lawful purpose and retention period
 
 ## Troubleshooting
 
-1. Confirm each domain's DNS uses one of the mailboxes assigned to the company for its `rua` and `ruf` address.
-2. Confirm the mailbox import purpose is DMARC and the correct company is selected.
+1. Confirm each domain's DNS uses one of the configured DMARC mailbox addresses for its `rua` and `ruf` value.
+2. Confirm the mailbox import purpose is DMARC and each reported policy domain exists in a company's email domains.
 3. Check scheduler health, IMAP authentication, message UID, and retry state.
 4. Inspect quarantine (not application logs) for safe failure reasons.
 5. Increase a limit only after checking the archive and expected sender volume.

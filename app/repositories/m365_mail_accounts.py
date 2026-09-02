@@ -82,16 +82,20 @@ async def get_dmarc_account(
     return _normalise_account(row) if row else None
 
 
-async def list_dmarc_accounts(*, company_id: int) -> list[dict[str, Any]]:
-    """Return all DMARC mailboxes assigned to a company, active first."""
-    rows = await db.fetch_all(
-        """
+async def list_dmarc_accounts(*, company_id: int | None = None) -> list[dict[str, Any]]:
+    """Return DMARC mailboxes, including global accounts when company scoped."""
+    sql = """
         SELECT * FROM m365_mail_accounts
-        WHERE import_purpose = 'dmarc' AND company_id = %s
-        ORDER BY active DESC, priority ASC, name ASC, id ASC
-        """,
-        (company_id,),
-    )
+        WHERE import_purpose = 'dmarc'
+    """
+    params: tuple[Any, ...]
+    if company_id is None:
+        params = ()
+    else:
+        sql += " AND (company_id = %s OR company_id IS NULL)"
+        params = (company_id,)
+    sql += " ORDER BY active DESC, priority ASC, name ASC, id ASC"
+    rows = await db.fetch_all(sql, params)
     return [_normalise_account(row) for row in rows]
 
 

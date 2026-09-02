@@ -348,8 +348,8 @@ async def create_account(payload: Mapping[str, Any]) -> dict[str, Any]:
     )
     if import_purpose not in {"support_ticket", "dmarc"}:
         raise ValueError("Mailbox import purpose is invalid")
-    if import_purpose == "dmarc" and company_id is None:
-        raise ValueError("A company is required for a DMARC reports mailbox")
+    if import_purpose == "dmarc":
+        company_id = None
 
     account = await mail_repo.create_account(
         name=name,
@@ -456,10 +456,12 @@ async def update_account(account_id: int, payload: Mapping[str, Any]) -> dict[st
         )
         if purpose not in {"support_ticket", "dmarc"}:
             raise ValueError("Mailbox import purpose is invalid")
-        purpose_company_id = updates.get("company_id", existing.get("company_id"))
-        if purpose == "dmarc" and purpose_company_id is None:
-            raise ValueError("A company is required for a DMARC reports mailbox")
         updates["import_purpose"] = purpose
+    resulting_purpose = updates.get(
+        "import_purpose", existing.get("import_purpose", "support_ticket")
+    )
+    if resulting_purpose == "dmarc":
+        updates["company_id"] = None
     updated = await mail_repo.update_account(account_id, **updates)
     if not updated:
         raise RuntimeError("Unable to update Office 365 mail account")
@@ -494,7 +496,7 @@ async def clone_account(account_id: int) -> dict[str, Any]:
 
     account = await mail_repo.create_account(
         name=clone_name,
-        company_id=int(original.get("company_id")),
+        company_id=_int_or_none(original.get("company_id")),
         user_principal_name=_normalise_string(original.get("user_principal_name")),
         mailbox_type=_normalise_string(original.get("mailbox_type"), default="user"),
         folder=_normalise_string(original.get("folder"), default="Inbox") or "Inbox",
@@ -1557,7 +1559,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                             message_id=msg_id,
                             internet_message_id=internet_msg_id,
                             received_at=received_at or datetime.now(timezone.utc),
-                            company_id=int(account["company_id"]),
+                            company_id=_int_or_none(account.get("company_id")),
                         )
                         await _record_message(
                             account_id=int(account_id),
@@ -2197,7 +2199,7 @@ async def _import_graph_dmarc_message(
     message_id: str,
     internet_message_id: str,
     received_at: datetime,
-    company_id: int,
+    company_id: int | None,
 ) -> int:
     """Persist all report attachments from a dedicated M365 mailbox."""
     settings = get_settings()

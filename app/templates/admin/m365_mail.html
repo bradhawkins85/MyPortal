@@ -37,7 +37,7 @@
             <option value="support_ticket" {% if not is_editing or editing_account.import_purpose == 'support_ticket' %}selected{% endif %}>Support tickets</option>
             <option value="dmarc" {% if is_editing and editing_account.import_purpose == 'dmarc' %}selected{% endif %}>DMARC aggregate and forensic reports</option>
           </select>
-          <span class="form-help">A DMARC mailbox imports RUA and RUF attachments directly into its selected company and never creates support tickets. Assign one or more mailboxes to the same company when its domains use different reporting addresses.</span>
+          <span class="form-help">A DMARC mailbox imports RUA and RUF attachments and routes each report to the matching company email domain. DMARC mailboxes never create support tickets.</span>
         </label>
         <label class="form-field">
           <span class="form-label">Company</span>
@@ -47,7 +47,7 @@
               <option value="{{ company.id }}" {% if is_editing and company.id == editing_account.company_id %}selected{% endif %}>{{ company.name }}</option>
             {% endfor %}
           </select>
-          <span class="form-help" data-company-help>Optional for support tickets. Required for DMARC so every imported report is allocated to this company.</span>
+          <span class="form-help" data-company-help>Optional for support tickets. DMARC mailboxes ignore company selection and route by DMARC policy domain.</span>
         </label>
         <label class="form-field">
           <span class="form-label">User principal name (email)</span>
@@ -607,11 +607,15 @@
       if (!purpose || !company) return;
       function updateCompanyRequirement() {
         const dmarc = purpose.value === 'dmarc';
-        company.required = dmarc;
-        company.setAttribute('aria-required', dmarc ? 'true' : 'false');
+        company.required = false;
+        company.setAttribute('aria-required', 'false');
+        company.disabled = dmarc;
+        if (dmarc) {
+          company.value = '';
+        }
         if (help) {
           help.textContent = dmarc
-            ? 'Required. Reports imported from this mailbox are allocated directly to the selected company.'
+            ? 'Disabled for DMARC. Reports are assigned automatically from policy_published/domain and company email domains.'
             : "Optional. When not set, the ticket company and contact are resolved from the sender's email domain.";
         }
       }
