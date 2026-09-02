@@ -1415,24 +1415,41 @@
     registerTableRefreshHandler('tickets-table', handler);
 
     const searchInput = document.querySelector('[data-ticket-dashboard-search]');
+    const limitSelect = document.querySelector('[data-ticket-dashboard-limit]');
     const table = document.getElementById('tickets-table');
+    const refreshWithParams = (updateParams) => {
+      if (!(table instanceof HTMLTableElement)) return;
+      const endpoint = table.getAttribute('data-table-refresh-url');
+      if (!endpoint) return;
+      const [baseUrl, queryString = ''] = endpoint.split('?');
+      const params = new URLSearchParams(queryString);
+      updateParams(params);
+      table.setAttribute('data-table-refresh-url', params.toString() ? `${baseUrl}?${params.toString()}` : baseUrl);
+      table.dispatchEvent(new CustomEvent('table:refresh-request'));
+    };
     if (searchInput instanceof HTMLInputElement && table instanceof HTMLTableElement) {
       let timer = null;
       searchInput.addEventListener('input', () => {
         if (timer) window.clearTimeout(timer);
         timer = window.setTimeout(() => {
-          const endpoint = table.getAttribute('data-table-refresh-url');
-          if (!endpoint) return;
-          const [baseUrl, queryString = ''] = endpoint.split('?');
-          const params = new URLSearchParams(queryString);
-          if (searchInput.value.trim()) {
-            params.set('search', searchInput.value.trim());
-          } else {
-            params.delete('search');
-          }
-          table.setAttribute('data-table-refresh-url', params.toString() ? `${baseUrl}?${params.toString()}` : baseUrl);
-          table.dispatchEvent(new CustomEvent('table:refresh-request'));
+          refreshWithParams((params) => {
+            if (searchInput.value.trim()) params.set('search', searchInput.value.trim());
+            else params.delete('search');
+          });
         }, 300);
+      });
+    }
+    if (limitSelect instanceof HTMLSelectElement && table instanceof HTMLTableElement) {
+      limitSelect.addEventListener('change', () => {
+        refreshWithParams((params) => {
+          if (limitSelect.value === 'all') {
+            params.set('all', 'true');
+            params.delete('limit');
+          } else {
+            params.set('limit', limitSelect.value);
+            params.delete('all');
+          }
+        });
       });
     }
   }
