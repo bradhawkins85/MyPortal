@@ -68,6 +68,69 @@ def test_read_only_dashboard_role_cannot_save_reset_or_resolve(monkeypatch):
     delete_personal.assert_not_awaited()
 
 
+def test_read_only_dashboard_role_only_receives_company_layout(monkeypatch):
+    personal_layout = {
+        "title": "Old personal layout",
+        "panels": [{"id": "personal", "type": "link", "url": "/personal"}],
+    }
+    company_layout = {
+        "title": "Assigned company layout",
+        "panels": [{"id": "company", "type": "link", "url": "/company"}],
+    }
+    get_personal = AsyncMock(return_value=personal_layout)
+    monkeypatch.setattr(dashboard_routes.layouts_repo, "get_personal", get_personal)
+    monkeypatch.setattr(
+        dashboard_routes.layouts_repo,
+        "get_company",
+        AsyncMock(return_value=company_layout),
+    )
+    monkeypatch.setattr(
+        dashboard_routes.layouts_service,
+        "resolve_layout",
+        AsyncMock(side_effect=lambda layout, **_: layout),
+    )
+
+    result = asyncio.run(
+        dashboard_routes.get_dashboard(
+            dashboard_request("read"), {"id": 42, "is_super_admin": False}
+        )
+    )
+
+    assert result["layout"]["title"] == "Assigned company layout"
+    assert result["source"] == "company"
+    assert result["editable"] is False
+    get_personal.assert_not_awaited()
+
+
+def test_write_dashboard_role_can_still_use_personal_layout(monkeypatch):
+    personal_layout = {
+        "title": "Personal layout",
+        "panels": [{"id": "personal", "type": "link", "url": "/personal"}],
+    }
+    monkeypatch.setattr(
+        dashboard_routes.layouts_repo,
+        "get_personal",
+        AsyncMock(return_value=personal_layout),
+    )
+    get_company = AsyncMock()
+    monkeypatch.setattr(dashboard_routes.layouts_repo, "get_company", get_company)
+    monkeypatch.setattr(
+        dashboard_routes.layouts_service,
+        "resolve_layout",
+        AsyncMock(side_effect=lambda layout, **_: layout),
+    )
+
+    result = asyncio.run(
+        dashboard_routes.get_dashboard(
+            dashboard_request("write"), {"id": 42, "is_super_admin": False}
+        )
+    )
+
+    assert result["layout"]["title"] == "Personal layout"
+    assert result["source"] == "personal"
+    assert result["editable"] is True
+
+
 def test_layout_accepts_all_panel_types():
     layout = validate_layout(
         {
