@@ -222,6 +222,8 @@ def test_dashboard_builder_uses_form_elements_collection():
     assert "const builderForm = dialog?.querySelector('form')" in script
     assert "builderForm?.elements.type.addEventListener" in script
     assert "dialog?.elements.type" not in script
+    assert "setToolbarVisibility" in script
+    assert "[data-dashboard-add], [data-dashboard-import], [data-dashboard-export], [data-dashboard-save]" in script
 
 
 def test_stat_colours_and_custom_panel_size_are_validated():

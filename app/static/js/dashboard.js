@@ -72,9 +72,19 @@
     return `<div class="dashboard-chart-wrap"><svg class="dashboard-chart" viewBox="0 0 100 85" role="img" aria-label="${esc(panel.title)} ${esc(panel.chart)} graph">${marks}</svg><div class="dashboard-chart__legend" aria-label="Graph legend">${legend}</div></div>`;
   }
 
+  function setToolbarVisibility() {
+    if (!toolbar) return;
+    const buttons = toolbar.querySelectorAll('[data-dashboard-add], [data-dashboard-import], [data-dashboard-export], [data-dashboard-save]');
+    toolbar.hidden = !editable;
+    buttons.forEach(button => {
+      button.hidden = !editable;
+      button.disabled = !editable || (button === saveButton && !dirty);
+    });
+  }
+
   function setDirty(value = true) {
     dirty = value;
-    if (saveButton) saveButton.disabled = !editable || !dirty;
+    setToolbarVisibility();
   }
 
   const automaticHeights = new Map();
@@ -250,7 +260,7 @@
       state = data.layout;
       editable = data.editable;
       canAssign = data.can_assign_company;
-      toolbar.hidden = !editable;
+      setToolbarVisibility();
       if (canAssign && !toolbar.querySelector('[data-dashboard-assign]')) {
         const button = document.createElement('button');
         button.type = 'button';
