@@ -17,12 +17,40 @@
 <section class="card"><h2>Overview</h2>
   {{ counter_strip([
     {'label': 'DMARC pass (aligned SPF or DKIM)', 'value': metrics.dmarc_pass or 0, 'variant': 'success'},
+    {'label': 'Disposition: reject', 'value': metrics.disposition_reject or 0, 'variant': 'danger'},
+    {'label': 'Disposition: quarantine', 'value': metrics.disposition_quarantine or 0, 'variant': 'warning'},
+    {'label': 'Disposition: none', 'value': metrics.disposition_none or 0, 'variant': 'neutral'},
     {'label': 'Aligned SPF pass', 'value': metrics.spf_pass or 0, 'variant': 'info'},
     {'label': 'Aligned DKIM pass', 'value': metrics.dkim_pass or 0, 'variant': 'warning'}
     ,{'label': 'Forensic failures (RUF)', 'value': metrics.forensic_reports or 0, 'variant': 'danger'}
   ], total=metrics.total_messages or 0, total_label='Total messages') }}
   <p class="status-pill status-pill--info">Authentication results are distinct from DMARC alignment.</p>
 </section>
+{% if (metrics.total_messages or 0) > 0 %}
+<section class="card"><h2>Disposition statistics</h2>
+  <div class="table-wrapper"><table class="table"><thead><tr><th>Disposition</th><th>Message volume</th><th>Share</th></tr></thead>
+  <tbody>
+    <tr><td>None</td><td>{{ metrics.disposition_none or 0 }}</td><td>{{ '%.2f'|format(((metrics.disposition_none or 0) / (metrics.total_messages or 1)) * 100) }}%</td></tr>
+    <tr><td>Quarantine</td><td>{{ metrics.disposition_quarantine or 0 }}</td><td>{{ '%.2f'|format(((metrics.disposition_quarantine or 0) / (metrics.total_messages or 1)) * 100) }}%</td></tr>
+    <tr><td>Reject</td><td>{{ metrics.disposition_reject or 0 }}</td><td>{{ '%.2f'|format(((metrics.disposition_reject or 0) / (metrics.total_messages or 1)) * 100) }}%</td></tr>
+    <tr><td>Other / unspecified</td><td>{{ metrics.disposition_other or 0 }}</td><td>{{ '%.2f'|format(((metrics.disposition_other or 0) / (metrics.total_messages or 1)) * 100) }}%</td></tr>
+  </tbody></table></div>
+</section>
+{% endif %}
+{% if (metrics.forensic_reports or 0) > 0 %}
+<section class="card"><h2>Forensic detail availability</h2>
+  <p>The counts below show where DMARC forensic reports included optional investigation details.</p>
+  <div class="table-wrapper"><table class="table"><thead><tr><th>Detail</th><th>Reports with detail</th></tr></thead><tbody>
+    <tr><td>Reported domain</td><td>{{ metrics.forensic_with_reported_domain or 0 }}</td></tr>
+    <tr><td>Source IP</td><td>{{ metrics.forensic_with_source_ip or 0 }}</td></tr>
+    <tr><td>Delivery result</td><td>{{ metrics.forensic_with_delivery_result or 0 }}</td></tr>
+    <tr><td>Authentication results</td><td>{{ metrics.forensic_with_authentication_results or 0 }}</td></tr>
+    <tr><td>Original mail from</td><td>{{ metrics.forensic_with_original_mail_from or 0 }}</td></tr>
+    <tr><td>Original recipient</td><td>{{ metrics.forensic_with_original_rcpt_to or 0 }}</td></tr>
+    <tr><td>DKIM domain/selector</td><td>{{ metrics.forensic_with_dkim_details or 0 }}</td></tr>
+  </tbody></table></div>
+</section>
+{% endif %}
 <section class="card"><h2>Summary by organization</h2>
   <div class="table-wrapper"><table class="table"><thead><tr><th>Organization</th><th>Volume</th><th>Compliant</th><th>Non-compliant</th><th>Compliance rate</th><th>SPF pass</th><th>SPF fail</th><th>DKIM pass</th><th>DKIM fail</th><th>Unauthenticated</th></tr></thead>
   <tbody>{% for organization in organizations %}<tr><td>{{ organization.organization }}</td><td>{{ organization.volume }}</td><td>{{ organization.compliant }}</td><td>{{ organization.non_compliant }}</td><td>{{ '%.2f'|format(organization.compliance_rate) }}%</td><td>{{ organization.spf_pass }}</td><td>{{ organization.spf_fail }}</td><td>{{ organization.dkim_pass }}</td><td>{{ organization.dkim_fail }}</td><td>{{ organization.unauthenticated }}</td></tr>{% else %}<tr><td colspan="10" class="table__empty">No DMARC reports were received in this date range.</td></tr>{% endfor %}</tbody></table></div>

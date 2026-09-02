@@ -75,6 +75,8 @@ def test_dmarc_template_hides_removed_and_empty_sections():
     template = Path("app/templates/dmarc/index.html").read_text(encoding="utf-8")
 
     assert "Reporting addresses" not in template
+    assert "Disposition statistics" in template
+    assert "Forensic detail availability" in template
     assert (
         "{% if (metrics.total_messages or 0) > 0 or "
         "(metrics.forensic_reports or 0) > 0 %}"

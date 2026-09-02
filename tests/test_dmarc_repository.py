@@ -92,3 +92,48 @@ def test_policy_domains_returns_latest_policy_rows(monkeypatch):
 
     assert asyncio.run(dmarc.policy_domains(42, start, end)) == expected
     assert fetch_all.await_args.args[1] == (42, end, start, end, start)
+
+
+def test_overview_includes_disposition_and_forensic_detail_counts(monkeypatch):
+    fetch_one = AsyncMock(
+        side_effect=[
+            {
+                "total_messages": 20,
+                "dmarc_pass": 12,
+                "dkim_pass": 10,
+                "spf_pass": 11,
+                "disposition_none": 9,
+                "disposition_quarantine": 6,
+                "disposition_reject": 4,
+                "disposition_other": 1,
+            },
+            {
+                "forensic_reports": 7,
+                "forensic_with_reported_domain": 7,
+                "forensic_with_source_ip": 6,
+                "forensic_with_delivery_result": 5,
+                "forensic_with_authentication_results": 4,
+                "forensic_with_original_mail_from": 3,
+                "forensic_with_original_rcpt_to": 2,
+                "forensic_with_dkim_details": 1,
+            },
+        ]
+    )
+    monkeypatch.setattr(dmarc.db, "fetch_one", fetch_one)
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    metrics = asyncio.run(dmarc.overview(42, start, end))
+
+    assert metrics["disposition_none"] == 9
+    assert metrics["disposition_quarantine"] == 6
+    assert metrics["disposition_reject"] == 4
+    assert metrics["disposition_other"] == 1
+    assert metrics["forensic_reports"] == 7
+    assert metrics["forensic_with_reported_domain"] == 7
+    assert metrics["forensic_with_source_ip"] == 6
+    assert metrics["forensic_with_delivery_result"] == 5
+    assert metrics["forensic_with_authentication_results"] == 4
+    assert metrics["forensic_with_original_mail_from"] == 3
+    assert metrics["forensic_with_original_rcpt_to"] == 2
+    assert metrics["forensic_with_dkim_details"] == 1
