@@ -308,7 +308,7 @@ async def register(
         await _send_signup_verification_email(created, token)
         return JSONResponse(
             content={
-                "detail": "Account created. Check your email to verify your signup before signing in.",
+                "detail": "Account created, please check your email for an account verification link before signing in",
                 "verification_required": True,
             },
             status_code=status.HTTP_202_ACCEPTED,
