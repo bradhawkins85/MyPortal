@@ -43,11 +43,11 @@ def test_dmarc_context_allows_write_role_to_manage(monkeypatch):
     assert asyncio.run(routes._context(SimpleNamespace(), "dmarc.manage")) == (user, 42)
 
 
-def test_dmarc_read_only_page_does_not_load_reporting_addresses(monkeypatch):
+def test_dmarc_page_does_not_load_reporting_addresses(monkeypatch):
     user = {"id": 7, "company_id": 42, "is_super_admin": False}
     render = AsyncMock(return_value="response")
     monkeypatch.setattr(
-        routes, "_context_with_access", AsyncMock(return_value=(user, 42, False))
+        routes, "_context_with_access", AsyncMock(return_value=(user, 42, True))
     )
     monkeypatch.setattr(routes.repo, "policy_domains", AsyncMock(return_value=[]))
     monkeypatch.setattr(
@@ -67,14 +67,14 @@ def test_dmarc_read_only_page_does_not_load_reporting_addresses(monkeypatch):
     assert asyncio.run(routes.page(SimpleNamespace())) == "response"
     reporting_addresses.assert_not_awaited()
     extra = render.await_args.kwargs["extra"]
-    assert extra["can_manage_dmarc"] is False
-    assert extra["reporting_addresses"] == []
+    assert "can_manage_dmarc" not in extra
+    assert "reporting_addresses" not in extra
 
 
-def test_dmarc_template_hides_restricted_and_empty_sections():
+def test_dmarc_template_hides_removed_and_empty_sections():
     template = Path("app/templates/dmarc/index.html").read_text(encoding="utf-8")
 
-    assert "{% if can_manage_dmarc %}" in template
+    assert "Reporting addresses" not in template
     assert (
         "{% if (metrics.total_messages or 0) > 0 or "
         "(metrics.forensic_reports or 0) > 0 %}"
