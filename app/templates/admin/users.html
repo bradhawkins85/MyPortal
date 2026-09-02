@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block header_title %}<span class="header__title-text">Users</span>{% endblock %}
+
+{% block content %}
+  <section class="card card--panel">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Active MyPortal users</h2>
+        <p class="card__description">Review active portal accounts and remove access that is no longer needed.</p>
+      </div>
+      <div class="card__controls">
+        <input type="search" class="form-input" placeholder="Filter users" aria-label="Filter users"
+               data-table-filter="users-table" />
+      </div>
+    </header>
+    <div class="table-wrapper">
+      <table class="table" id="users-table" data-table data-table-id="admin-users">
+        <thead><tr>
+          <th scope="col" data-sort="string" data-column-key="name">Name</th>
+          <th scope="col" data-sort="string" data-column-key="email">Email</th>
+          <th scope="col" data-sort="string" data-column-key="company">Company</th>
+          <th scope="col" data-sort="date" data-column-key="last_login">Last login</th>
+          <th scope="col" class="table__actions" data-column-key="actions">Actions</th>
+        </tr></thead>
+        <tbody>
+          {% for entry in users %}
+            {% set display_name = ((entry.first_name or '') ~ ' ' ~ (entry.last_name or ''))|trim %}
+            {% set is_self = entry.id == current_user.id %}
+            <tr>
+              <td data-label="Name" data-column-key="name" data-sort-value="{{ display_name or entry.email }}">
+                {{ display_name or '—' }}
+                {% if entry.is_super_admin %}<span class="tag tag--muted">Super admin</span>{% endif %}
+                {% if is_self %}<span class="tag tag--muted">You</span>{% endif %}
+              </td>
+              <td data-label="Email" data-column-key="email">{{ entry.email }}</td>
+              <td data-label="Company" data-column-key="company">{{ entry.company_name or '—' }}</td>
+              <td data-label="Last login" data-column-key="last_login"
+                  data-sort-value="{{ entry.last_login_at.isoformat() if entry.last_login_at else '' }}">
+                {{ entry.last_login_at.strftime('%d %b %Y, %H:%M') if entry.last_login_at else 'Never' }}
+              </td>
+              <td class="table__actions" data-column-key="actions">
+                <form action="/admin/users/{{ entry.id }}/deactivate" method="post" class="inline-form"
+                      onsubmit="return confirm('Deactivate {{ entry.email|e }}? They will no longer be able to sign in.');">
+                  {% include "partials/csrf.html" %}
+                  <button type="submit" class="button button--ghost" {% if is_self %}disabled{% endif %}>Deactivate</button>
+                </form>
+                <form action="/admin/users/{{ entry.id }}/delete" method="post" class="inline-form"
+                      onsubmit="return confirm('Permanently delete {{ entry.email|e }}? This cannot be undone.');">
+                  {% include "partials/csrf.html" %}
+                  <button type="submit" class="button button--danger" {% if is_self %}disabled{% endif %}>Delete</button>
+                </form>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5" class="table__empty">No active users were found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="table-pagination" data-pagination="users-table">
+      <div class="table-pagination__group">
+        <button type="button" class="button button--ghost table-pagination__button" data-page-prev disabled>Previous</button>
+        <button type="button" class="button button--ghost table-pagination__button" data-page-next>Next</button>
+      </div>
+      <p class="table-pagination__status" data-page-info aria-live="polite"></p>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+{% endblock %}
