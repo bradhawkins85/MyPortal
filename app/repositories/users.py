@@ -85,6 +85,30 @@ async def list_users() -> List[dict[str, Any]]:
     return list(rows)
 
 
+async def list_active_users_for_admin() -> List[dict[str, Any]]:
+    """Return active portal accounts with the context needed by the admin UI."""
+    rows = await db.fetch_all(
+        """
+        SELECT u.id, u.email, u.first_name, u.last_name, u.mobile_phone,
+               u.company_id, u.is_super_admin, u.last_login_at,
+               c.name AS company_name
+        FROM users AS u
+        LEFT JOIN companies AS c ON c.id = u.company_id
+        WHERE u.is_active = 1
+        ORDER BY LOWER(COALESCE(u.last_name, '')),
+                 LOWER(COALESCE(u.first_name, '')), LOWER(u.email), u.id
+        """
+    )
+    return [dict(row) for row in rows]
+
+
+async def count_active_super_admins() -> int:
+    row = await db.fetch_one(
+        "SELECT COUNT(*) AS count FROM users WHERE is_active = 1 AND is_super_admin = 1"
+    )
+    return int(row["count"]) if row else 0
+
+
 async def list_users_for_company(company_id: int) -> List[dict[str, Any]]:
     rows = await db.fetch_all(
         """

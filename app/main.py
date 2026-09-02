@@ -5756,6 +5756,79 @@ async def admin_impersonation_page(
     )
 
 
+@app.get("/admin/users", response_class=HTMLResponse)
+async def admin_users_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    active_users = await user_repo.list_active_users_for_admin()
+    return await _render_template(
+        "admin/users.html",
+        request,
+        current_user,
+        extra={"title": "Users", "users": active_users},
+    )
+
+
+@app.post("/admin/users/{user_id}/{action}", response_class=HTMLResponse)
+async def admin_users_action(request: Request, user_id: int, action: str):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    if action not in {"deactivate", "delete"}:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Unknown user action"
+        )
+    if int(current_user["id"]) == user_id:
+        return flash_redirect(
+            "/admin/users",
+            "You cannot deactivate or delete your own account.",
+            "error",
+        )
+
+    target = await user_repo.get_user_by_id(user_id)
+    if not target or not bool(target.get("is_active")):
+        return flash_redirect("/admin/users", "Active user not found.", "error")
+    if target.get("is_super_admin") and await user_repo.count_active_super_admins() <= 1:
+        return flash_redirect("/admin/users", "The last active super admin cannot be removed.", "error")
+
+    from app.services import audit as audit_service
+
+    if action == "deactivate":
+        updated = await user_repo.update_user(user_id, is_active=0)
+        await audit_service.record(
+            action="user.deactivate",
+            request=request,
+            user_id=int(current_user["id"]),
+            entity_type="user",
+            entity_id=user_id,
+            before=target,
+            after=updated,
+        )
+        message = f"Deactivated {target.get('email') or 'user account'}."
+    else:
+        try:
+            await user_repo.delete_user(user_id)
+        except Exception as exc:
+            log_error("Failed to delete user account", user_id=user_id, error=str(exc))
+            return flash_redirect(
+                "/admin/users",
+                "This user could not be deleted because related records still exist. Deactivate the account instead.",
+                "error",
+            )
+        await audit_service.record(
+            action="user.delete",
+            request=request,
+            user_id=int(current_user["id"]),
+            entity_type="user",
+            entity_id=user_id,
+            before=target,
+            after=None,
+        )
+        message = f"Deleted {target.get('email') or 'user account'}."
+    return flash_redirect("/admin/users", message, "success")
+
+
 @app.post("/admin/impersonation", response_class=HTMLResponse)
 async def admin_impersonation_start(request: Request):
     current_user, redirect = await _require_super_admin_page(request)
