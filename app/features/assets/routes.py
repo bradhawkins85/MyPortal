@@ -85,7 +85,7 @@ def _main():
     return main_module
 
 
-async def _load_asset_context(request: Request):
+async def _load_asset_context(request: Request, permission_key: str = "menu.assets"):
     main_module = _main()
     user, redirect = await main_module._require_authenticated_user(request)
     if redirect:
@@ -106,7 +106,7 @@ async def _load_asset_context(request: Request):
         ) from exc
 
     membership = await user_company_repo.get_user_company(user["id"], company_id)
-    can_view_assets = main_module._membership_menu_can(user, membership, "menu.assets")
+    can_view_assets = main_module._membership_menu_can(user, membership, permission_key)
     if not (is_super_admin or can_view_assets):
         return (
             user,
@@ -359,10 +359,11 @@ async def assets_settings_page(request: Request):
 @router.get("/devices", response_class=HTMLResponse)
 async def network_devices_page(request: Request):
     main_module = _main()
-    user, membership, company, company_id, redirect = await _load_asset_context(request)
+    user, membership, company, company_id, redirect = await _load_asset_context(request, "menu.network_devices")
     if redirect:
         return redirect
-    scanner_assets = await network_devices_repo.list_scanners(company_id)
+    can_configure = bool(user.get("is_super_admin")) or main_module._membership_menu_can(user, membership, "menu.network_devices", write=True)
+    scanner_assets = await network_devices_repo.list_scanners(company_id) if can_configure else []
     enabled_scanners = [
         scanner for scanner in scanner_assets if scanner.get("network_scanner_enabled")
     ]
@@ -383,10 +384,7 @@ async def network_devices_page(request: Request):
             "scanners": enabled_scanners,
             "available_scanners": available_scanners,
             "can_manage_device_types": bool(user.get("is_super_admin")),
-            "can_configure": bool(user.get("is_super_admin"))
-            or main_module._membership_menu_can(
-                user, membership, "menu.assets", write=True
-            ),
+            "can_configure": can_configure,
             "can_sync_hudu": bool(company.get("hudu_id")),
         },
     )
@@ -396,14 +394,14 @@ async def network_devices_page(request: Request):
 async def sync_network_device_to_hudu(request: Request, device_id: int):
     """Send a discovered device to Hudu or synchronize its managed fields."""
     main_module = _main()
-    user, membership, company, company_id, redirect = await _load_asset_context(request)
+    user, membership, company, company_id, redirect = await _load_asset_context(request, "menu.network_devices")
     if redirect:
         return redirect
     if not (
         user.get("is_super_admin")
-        or main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+        or main_module._membership_menu_can(user, membership, "menu.network_devices", write=True)
     ):
-        raise HTTPException(status_code=403, detail="Asset write access required")
+        raise HTTPException(status_code=403, detail="Network Devices write access required")
     hudu_company_id = str(company.get("hudu_id") or "").strip()
     if not hudu_company_id:
         return main_module.flash_redirect(
@@ -438,15 +436,15 @@ async def sync_network_device_to_hudu(request: Request, device_id: int):
 async def update_network_device(request: Request, device_id: int):
     main_module = _main()
     user, membership, _company, company_id, redirect = await _load_asset_context(
-        request
+        request, "menu.network_devices"
     )
     if redirect:
         return redirect
     if not (
         user.get("is_super_admin")
-        or main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+        or main_module._membership_menu_can(user, membership, "menu.network_devices", write=True)
     ):
-        raise HTTPException(status_code=403, detail="Asset write access required")
+        raise HTTPException(status_code=403, detail="Network Devices write access required")
 
     form = await request.form()
     state_value = str(form.get("state") or "").title()
@@ -481,15 +479,15 @@ async def update_network_device(request: Request, device_id: int):
 async def bulk_update_network_devices(request: Request):
     main_module = _main()
     user, membership, _company, company_id, redirect = await _load_asset_context(
-        request
+        request, "menu.network_devices"
     )
     if redirect:
         return redirect
     if not (
         user.get("is_super_admin")
-        or main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+        or main_module._membership_menu_can(user, membership, "menu.network_devices", write=True)
     ):
-        raise HTTPException(status_code=403, detail="Asset write access required")
+        raise HTTPException(status_code=403, detail="Network Devices write access required")
 
     form = await request.form()
     raw_ids = form.getlist("device_ids")
@@ -545,15 +543,15 @@ async def purge_network_devices(request: Request):
     """Remove discoveries outside the boundaries of their originating scanner."""
     main_module = _main()
     user, membership, _company, company_id, redirect = await _load_asset_context(
-        request
+        request, "menu.network_devices"
     )
     if redirect:
         return redirect
     if not (
         user.get("is_super_admin")
-        or main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+        or main_module._membership_menu_can(user, membership, "menu.network_devices", write=True)
     ):
-        raise HTTPException(status_code=403, detail="Asset write access required")
+        raise HTTPException(status_code=403, detail="Network Devices write access required")
 
     purged = await network_devices_repo.purge_out_of_scope(company_id)
     message = (
@@ -569,7 +567,7 @@ async def purge_network_devices(request: Request):
 @router.post("/devices/device-types")
 async def add_device_type_from_devices(request: Request):
     user, _membership, _company, _company_id, redirect = await _load_asset_context(
-        request
+        request, "menu.network_devices"
     )
     if redirect:
         return redirect
@@ -589,7 +587,7 @@ async def add_device_type_from_devices(request: Request):
 @router.post("/devices/device-types/{device_type_id}")
 async def update_device_type_from_devices(request: Request, device_type_id: int):
     user, _membership, _company, _company_id, redirect = await _load_asset_context(
-        request
+        request, "menu.network_devices"
     )
     if redirect:
         return redirect
@@ -621,7 +619,7 @@ def _parse_mac_vendors(value: str) -> list[str]:
 @router.post("/devices/device-types/{device_type_id}/delete")
 async def delete_device_type_from_devices(request: Request, device_type_id: int):
     user, _membership, _company, _company_id, redirect = await _load_asset_context(
-        request
+        request, "menu.network_devices"
     )
     if redirect:
         return redirect
@@ -635,15 +633,15 @@ async def delete_device_type_from_devices(request: Request, device_type_id: int)
 async def configure_network_device_alerts(request: Request):
     main_module = _main()
     user, membership, _company, company_id, redirect = await _load_asset_context(
-        request
+        request, "menu.network_devices"
     )
     if redirect:
         return redirect
     if not (
         user.get("is_super_admin")
-        or main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+        or main_module._membership_menu_can(user, membership, "menu.network_devices", write=True)
     ):
-        raise HTTPException(status_code=403, detail="Asset write access required")
+        raise HTTPException(status_code=403, detail="Network Devices write access required")
     form = await request.form()
     await company_repo.update_company(
         company_id,
@@ -692,15 +690,15 @@ async def delete_network_device_type(request: Request, device_type_id: int):
 async def add_network_scanner(request: Request):
     main_module = _main()
     user, membership, _company, company_id, redirect = await _load_asset_context(
-        request
+        request, "menu.network_devices"
     )
     if redirect:
         return redirect
     if not (
         user.get("is_super_admin")
-        or main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+        or main_module._membership_menu_can(user, membership, "menu.network_devices", write=True)
     ):
-        raise HTTPException(status_code=403, detail="Asset write access required")
+        raise HTTPException(status_code=403, detail="Network Devices write access required")
 
     form = await request.form()
     try:
@@ -722,15 +720,15 @@ async def add_network_scanner(request: Request):
 async def configure_network_scanner(request: Request, device_id: int):
     main_module = _main()
     user, membership, _company, company_id, redirect = await _load_asset_context(
-        request
+        request, "menu.network_devices"
     )
     if redirect:
         return redirect
     if not (
         user.get("is_super_admin")
-        or main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+        or main_module._membership_menu_can(user, membership, "menu.network_devices", write=True)
     ):
-        raise HTTPException(status_code=403, detail="Asset write access required")
+        raise HTTPException(status_code=403, detail="Network Devices write access required")
     form = await request.form()
     try:
         interval = max(5, min(10080, int(form.get("interval_minutes", 360))))
@@ -752,15 +750,15 @@ async def configure_network_scanner(request: Request, device_id: int):
 async def scan_network_now(request: Request, device_id: int):
     main_module = _main()
     user, membership, _company, company_id, redirect = await _load_asset_context(
-        request
+        request, "menu.network_devices"
     )
     if redirect:
         return redirect
     if not (
         user.get("is_super_admin")
-        or main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+        or main_module._membership_menu_can(user, membership, "menu.network_devices", write=True)
     ):
-        raise HTTPException(status_code=403, detail="Asset write access required")
+        raise HTTPException(status_code=403, detail="Network Devices write access required")
 
     scanner = next(
         (

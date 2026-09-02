@@ -103,6 +103,7 @@
           {% block sidebar_menu %}
           {% set current_path = request.url.path if request is defined else '' %}
           {% set membership = active_membership or {} %}
+          {% set has_company_membership = active_membership is defined and active_membership is not none %}
           {% set menu_access = menu_access | default({}) %}
           {% set is_super_admin = is_super_admin | default(current_user.get('is_super_admin') if current_user else False) %}
           {% set staff_permission = staff_permission | default(membership.get('staff_permission', 0) or 0) %}
@@ -126,6 +127,7 @@
           {% set can_access_orders = (can_access_orders | default(false)) or is_super_admin or membership.get('can_access_orders') or menu_access.get('menu.orders') in ['read', 'write'] %}
           {% set can_access_forms = (can_access_forms | default(false)) or is_super_admin or membership.get('can_access_forms') or menu_access.get('menu.forms') in ['read', 'write'] %}
           {% set can_manage_assets = (can_manage_assets | default(false)) or is_super_admin or membership.get('can_manage_assets') or menu_access.get('menu.assets') in ['read', 'write'] %}
+          {% set can_access_network_devices = is_super_admin or menu_access.get('menu.network_devices') in ['read', 'write'] %}
           {% set can_access_defender = is_super_admin or menu_access.get('menu.defender') in ['read', 'write'] %}
           {% set can_access_voice_monitor = is_super_admin or menu_access.get('menu.voice_monitor') in ['read', 'write'] %}
           {% set can_manage_licenses = (can_manage_licenses | default(false)) or is_super_admin or membership.get('can_manage_licenses') or can_access_m365_configuration or can_access_m365_licenses %}
@@ -133,7 +135,7 @@
           {% set can_manage_invoices = (can_manage_invoices | default(false)) or is_super_admin or membership.get('can_manage_invoices') or menu_access.get('menu.invoices') in ['read', 'write'] %}
           {% set has_staff_menu_access = menu_access.get('menu.staff') in ['read', 'write'] %}
           {% set staff_menu_is_explicit = 'menu.staff' in menu_access %}
-          {% set can_manage_staff = is_super_admin or (staff_permission > 0 and not staff_menu_is_explicit) or ((can_manage_staff | default(false)) and has_staff_menu_access) or (has_staff_menu_access and staff_permission > 0) %}
+          {% set can_manage_staff = is_super_admin or (has_company_membership and ((staff_permission > 0 and not staff_menu_is_explicit) or ((can_manage_staff | default(false)) and has_staff_menu_access) or (has_staff_menu_access and staff_permission > 0))) %}
           {% set can_manage_issues = has_issue_tracker_access | default(is_super_admin or (is_helpdesk_technician | default(false))) or menu_access.get('menu.issues') in ['read', 'write'] %}
           {% set can_view_compliance = (can_view_compliance | default(false)) or is_super_admin or membership.get('can_view_compliance') or menu_access.get('menu.compliance') in ['read', 'write'] %}
           {% set can_view_m365_best_practices = (can_view_m365_best_practices | default(false)) or is_super_admin or membership.get('can_view_m365_best_practices') or menu_access.get('menu.m365.best_practices') in ['read', 'write'] %}
@@ -146,7 +148,7 @@
           {% set can_access_admin_profile = is_super_admin or menu_access.get('menu.admin.profile') in ['read', 'write'] %}
           {% set can_access_admin_backup_summary = is_super_admin or menu_access.get('menu.admin.backup_summary') in ['read', 'write'] %}
           {% set can_access_admin_company = (can_access_admin_company | default(false)) or is_super_admin or menu_access.get('menu.admin.company') in ['read', 'write'] %}
-          {% set has_company_section = can_access_tickets or can_manage_issues or can_access_marketing or can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_manage_licenses or can_manage_subscriptions or can_access_voice_monitor or can_manage_invoices or can_manage_staff or can_view_compliance or can_view_bcp or can_view_m365_best_practices or can_view_compliance_checks or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes %}
+          {% set has_company_section = can_access_tickets or can_manage_issues or can_access_marketing or can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_access_network_devices or can_manage_licenses or can_manage_subscriptions or can_access_voice_monitor or can_manage_invoices or can_manage_staff or can_view_compliance or can_view_bcp or can_view_m365_best_practices or can_view_compliance_checks or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes %}
           {% set is_company_admin = can_access_admin_company %}
           {% set has_admin_access = is_super_admin or can_access_admin_company or can_access_admin_profile or can_access_admin_backup_summary %}
           {% if can_access_dashboard %}
@@ -319,6 +321,8 @@
                 <span class="menu__label">Assets</span>
               </a>
             </li>
+          {% endif %}
+          {% if can_access_network_devices %}
             <li class="menu__item">
               <a href="/devices" {% if current_path.startswith('/devices') %}aria-current="page"{% endif %}>
                 <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zm10 0h6v6h-6zM9 14h6v6H9zM7 10v2h4v2h2v-2h4v-2h-2v-1h-2v1z"/></svg></span>
