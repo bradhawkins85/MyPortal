@@ -29,7 +29,31 @@
     container.hidden = false;
   }
 
-  function createSourceList(title, items, formatter) {
+  function sourceUrl(sourceType, item) {
+    if (item.url) {
+      return String(item.url);
+    }
+    const id = encodeURIComponent(item.id == null ? '' : item.id);
+    const destinations = {
+      tickets: id ? `/tickets/${id}` : '/tickets',
+      products: '/shop',
+      packages: '/shop',
+      chats: id ? `/chat/${id}` : '/chat',
+      orders: '/orders',
+      assets: id ? `/assets/${id}` : '/assets',
+      companies: '/',
+      staff: '/staff',
+      issues: '/issues',
+      service_status: '/service-status',
+      backup_jobs: '/admin/backup-summary',
+      reports: '/reports/company-overview',
+      mailboxes: item.mailbox_type === 'shared' ? '/m365/mailboxes/shared' : '/m365/mailboxes/users',
+      best_practices: '/m365/best-practices'
+    };
+    return destinations[sourceType] || '/search';
+  }
+
+  function createSourceList(title, sourceType, items, formatter) {
     if (!items || items.length === 0) {
       return null;
     }
@@ -45,7 +69,13 @@
     items.forEach((item) => {
       const entry = document.createElement('li');
       entry.className = 'agent-sources__item';
-      entry.innerHTML = formatter(item);
+      const link = document.createElement('a');
+      link.className = 'agent-sources__link';
+      link.href = sourceUrl(sourceType, item);
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.innerHTML = formatter(item);
+      entry.appendChild(link);
       list.appendChild(entry);
     });
     section.appendChild(list);
@@ -56,10 +86,7 @@
     const title = escapeHtml(item.title || item.slug);
     const slug = escapeHtml(item.slug);
     const summary = escapeHtml(item.summary || item.excerpt || '');
-    const url = item.url ? escapeHtml(item.url) : null;
-    const linkStart = url ? `<a href="${url}">` : '';
-    const linkEnd = url ? '</a>' : '';
-    return `${linkStart}[KB:${slug}] ${title}${linkEnd}${summary ? `<div class="agent-sources__meta">${summary}</div>` : ''}`;
+    return `[KB:${slug}] ${title}${summary ? `<div class="agent-sources__meta">${summary}</div>` : ''}`;
   }
 
   function formatTicketSource(item) {
@@ -242,11 +269,8 @@
     const title = escapeHtml(item.title || 'Result');
     const summary = escapeHtml(item.summary || '');
     const type = item.source_type ? escapeHtml(item.source_type) : null;
-    const url = item.url ? escapeHtml(item.url) : null;
-    const linkStart = url ? `<a href="${url}">` : '';
-    const linkEnd = url ? '</a>' : '';
     const meta = [type ? `Type: ${type}` : null, summary].filter(Boolean).join('<br />');
-    return `${linkStart}${title}${linkEnd}${meta ? `<div class="agent-sources__meta">${meta}</div>` : ''}`;
+    return `${title}${meta ? `<div class="agent-sources__meta">${meta}</div>` : ''}`;
   }
 
   function renderSources(container, sources) {
@@ -261,55 +285,55 @@
 
     const groups = [];
     if (Array.isArray(sources.knowledge_base)) {
-      groups.push(createSourceList('Knowledge base', sources.knowledge_base, formatKnowledgeBaseSource));
+      groups.push(createSourceList('Knowledge base', 'knowledge_base', sources.knowledge_base, formatKnowledgeBaseSource));
     }
     if (Array.isArray(sources.tickets)) {
-      groups.push(createSourceList('Tickets', sources.tickets, formatTicketSource));
+      groups.push(createSourceList('Tickets', 'tickets', sources.tickets, formatTicketSource));
     }
     if (Array.isArray(sources.products)) {
-      groups.push(createSourceList('Products', sources.products, formatProductSource));
+      groups.push(createSourceList('Products', 'products', sources.products, formatProductSource));
     }
     if (Array.isArray(sources.chats)) {
-      groups.push(createSourceList('Chats', sources.chats, formatChatSource));
+      groups.push(createSourceList('Chats', 'chats', sources.chats, formatChatSource));
     }
     if (Array.isArray(sources.orders)) {
-      groups.push(createSourceList('Orders', sources.orders, formatOrderSource));
+      groups.push(createSourceList('Orders', 'orders', sources.orders, formatOrderSource));
     }
     if (Array.isArray(sources.assets)) {
-      groups.push(createSourceList('Assets', sources.assets, formatAssetSource));
+      groups.push(createSourceList('Assets', 'assets', sources.assets, formatAssetSource));
     }
     if (Array.isArray(sources.packages)) {
-      groups.push(createSourceList('Packages', sources.packages, formatPackageSource));
+      groups.push(createSourceList('Packages', 'packages', sources.packages, formatPackageSource));
     }
     if (Array.isArray(sources.companies)) {
-      groups.push(createSourceList('Companies', sources.companies, formatCompanySource));
+      groups.push(createSourceList('Companies', 'companies', sources.companies, formatCompanySource));
     }
     if (Array.isArray(sources.staff)) {
-      groups.push(createSourceList('Staff', sources.staff, formatStaffSource));
+      groups.push(createSourceList('Staff', 'staff', sources.staff, formatStaffSource));
     }
     if (Array.isArray(sources.issues)) {
-      groups.push(createSourceList('Issues', sources.issues, formatIssueSource));
+      groups.push(createSourceList('Issues', 'issues', sources.issues, formatIssueSource));
     }
     if (Array.isArray(sources.service_status)) {
-      groups.push(createSourceList('Service status', sources.service_status, formatServiceStatusSource));
+      groups.push(createSourceList('Service status', 'service_status', sources.service_status, formatServiceStatusSource));
     }
     if (Array.isArray(sources.backup_jobs)) {
-      groups.push(createSourceList('Backup summary', sources.backup_jobs, formatBackupJobSource));
+      groups.push(createSourceList('Backup summary', 'backup_jobs', sources.backup_jobs, formatBackupJobSource));
     }
     if (Array.isArray(sources.reports)) {
-      groups.push(createSourceList('Reports', sources.reports, formatReportSource));
+      groups.push(createSourceList('Reports', 'reports', sources.reports, formatReportSource));
     }
     if (Array.isArray(sources.mailboxes)) {
-      groups.push(createSourceList('Office 365 mailboxes', sources.mailboxes, formatMailboxSource));
+      groups.push(createSourceList('Office 365 mailboxes', 'mailboxes', sources.mailboxes, formatMailboxSource));
     }
     if (Array.isArray(sources.best_practices)) {
-      groups.push(createSourceList('Best practices', sources.best_practices, formatBestPracticeSource));
+      groups.push(createSourceList('Best practices', 'best_practices', sources.best_practices, formatBestPracticeSource));
     }
     if (sources.feature_packs && typeof sources.feature_packs === 'object') {
       Object.keys(sources.feature_packs).sort().forEach((slug) => {
         const items = sources.feature_packs[slug];
         if (Array.isArray(items)) {
-          groups.push(createSourceList(formatFeaturePackTitle(slug), items, formatFeaturePackSource));
+          groups.push(createSourceList(formatFeaturePackTitle(slug), slug, items, formatFeaturePackSource));
         }
       });
     }
