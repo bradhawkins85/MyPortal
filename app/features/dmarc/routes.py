@@ -68,7 +68,7 @@ async def page(
     end: date | None = None,
     policy_domain: str | None = None,
 ):
-    user, company_id, can_manage = await _context_with_access(request)
+    user, company_id, _ = await _context_with_access(request)
     now = datetime.now(timezone.utc)
     range_end = (
         datetime.combine(end + timedelta(days=1), time.min, timezone.utc)
@@ -89,9 +89,6 @@ async def page(
     organizations = await repo.organization_summary(
         company_id, range_start, range_end, policy_domain
     )
-    addresses = (
-        await dmarc.company_reporting_addresses(company_id) if can_manage else []
-    )
     return await _main()._render_template(
         "dmarc/index.html",
         request,
@@ -106,8 +103,6 @@ async def page(
             "filter_end": end,
             "policy_domain": policy_domain,
             "policy_domains": domains,
-            "reporting_addresses": addresses,
-            "can_manage_dmarc": can_manage,
         },
     )
 
