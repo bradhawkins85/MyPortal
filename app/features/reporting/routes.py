@@ -31,6 +31,7 @@ _add(
     response_class=HTMLResponse,
 )
 _add("/admin/reporting", handlers.admin_reporting_create, ["POST"], response_class=HTMLResponse)
+_add("/admin/reporting/query-assistant", handlers.admin_reporting_ai_query, ["POST"])
 _add(
     "/admin/reporting/{report_id}",
     handlers.admin_reporting_update,
@@ -43,7 +44,5 @@ _add(
     ["POST"],
     response_class=HTMLResponse,
 )
-
-_add("/admin/reporting/query-assistant", handlers.admin_reporting_ai_query, ["POST"])
 
 __all__ = ["router"]
