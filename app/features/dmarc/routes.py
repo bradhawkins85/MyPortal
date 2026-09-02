@@ -19,7 +19,9 @@ def _main():
     return main
 
 
-async def _context(request: Request, permission: str = "dmarc.view"):
+async def _context_with_access(
+    request: Request, permission: str = "dmarc.view"
+) -> tuple[dict, int, bool]:
     user, redirect = await _main()._require_authenticated_user(request)
     if redirect:
         raise HTTPException(401, "Authentication required")
@@ -29,11 +31,19 @@ async def _context(request: Request, permission: str = "dmarc.view"):
     membership = await memberships.get_user_company(int(user["id"]), int(company_id))
     menu_permissions = (membership or {}).get("menu_permissions")
     requires_write = permission == "dmarc.manage"
-    if not user.get("is_super_admin") and not menu_has_access(
-        menu_permissions, "menu.dmarc", write=requires_write
-    ):
+    is_super_admin = bool(user.get("is_super_admin"))
+    can_view = is_super_admin or menu_has_access(menu_permissions, "menu.dmarc")
+    can_manage = is_super_admin or menu_has_access(
+        menu_permissions, "menu.dmarc", write=True
+    )
+    if not can_view or (requires_write and not can_manage):
         raise HTTPException(403, "DMARC permission required")
-    return user, int(company_id)
+    return user, int(company_id), can_manage
+
+
+async def _context(request: Request, permission: str = "dmarc.view"):
+    user, company_id, _ = await _context_with_access(request, permission)
+    return user, company_id
 
 
 def _range(start: datetime | None, end: datetime | None) -> tuple[datetime, datetime]:
@@ -58,7 +68,7 @@ async def page(
     end: date | None = None,
     policy_domain: str | None = None,
 ):
-    user, company_id = await _context(request)
+    user, company_id, can_manage = await _context_with_access(request)
     now = datetime.now(timezone.utc)
     range_end = (
         datetime.combine(end + timedelta(days=1), time.min, timezone.utc)
@@ -79,7 +89,9 @@ async def page(
     organizations = await repo.organization_summary(
         company_id, range_start, range_end, policy_domain
     )
-    addresses = await dmarc.company_reporting_addresses(company_id)
+    addresses = (
+        await dmarc.company_reporting_addresses(company_id) if can_manage else []
+    )
     return await _main()._render_template(
         "dmarc/index.html",
         request,
@@ -95,6 +107,7 @@ async def page(
             "policy_domain": policy_domain,
             "policy_domains": domains,
             "reporting_addresses": addresses,
+            "can_manage_dmarc": can_manage,
         },
     )
 
