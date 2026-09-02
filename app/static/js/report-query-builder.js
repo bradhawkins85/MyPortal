@@ -86,8 +86,14 @@
     const input = document.getElementById('ai-query-instruction'), button = document.getElementById('ai-query-send'), messages = document.getElementById('ai-query-messages');
     const instruction = input.value.trim(); if (!instruction) return;
     messages.insertAdjacentHTML('beforeend', `<div class="ai-query-message ai-query-message--user"></div>`); messages.lastElementChild.textContent = instruction; input.value = ''; button.disabled = true; button.textContent = 'Thinking…';
-    const body = new FormData(), token = csrfToken(); body.set('instruction', instruction); body.set('current_sql', sql.value); if (token) body.set('_csrf', token);
-    try { const response = await fetch('/admin/reporting/query-assistant', {method: 'POST', headers: token ? {'X-CSRF-Token': token} : {}, body}); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(errorMessage(data)); if (typeof data?.sql !== 'string' || !data.sql.trim()) throw new Error('Server returned no SQL query.'); sql.value = data.sql; messages.insertAdjacentHTML('beforeend', '<div class="ai-query-message ai-query-message--assistant"></div>'); messages.lastElementChild.textContent = data.summary || 'I updated the SQL query. Ask for another change if needed.'; button.textContent = 'Refine query'; }
+    const token = csrfToken();
+    const body = new URLSearchParams();
+    body.set('instruction', instruction);
+    body.set('current_sql', sql.value);
+    if (token) body.set('_csrf', token);
+    const headers = {'Content-Type': 'application/x-www-form-urlencoded'};
+    if (token) headers['X-CSRF-Token'] = token;
+    try { const response = await fetch('/admin/reporting/query-assistant', {method: 'POST', headers, body: body.toString()}); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(errorMessage(data)); if (typeof data?.sql !== 'string' || !data.sql.trim()) throw new Error('Server returned no SQL query.'); sql.value = data.sql; messages.insertAdjacentHTML('beforeend', '<div class="ai-query-message ai-query-message--assistant"></div>'); messages.lastElementChild.textContent = data.summary || 'I updated the SQL query. Ask for another change if needed.'; button.textContent = 'Refine query'; }
     catch (error) { messages.insertAdjacentHTML('beforeend', '<div class="ai-query-message ai-query-message--error"></div>'); messages.lastElementChild.textContent = error.message; }
     finally { button.disabled = false; if (button.textContent === 'Thinking…') button.textContent = 'Try again'; messages.scrollTop = messages.scrollHeight; }
   });
