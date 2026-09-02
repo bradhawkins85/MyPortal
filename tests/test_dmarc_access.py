@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -40,6 +41,44 @@ def test_dmarc_context_allows_write_role_to_manage(monkeypatch):
     )
 
     assert asyncio.run(routes._context(SimpleNamespace(), "dmarc.manage")) == (user, 42)
+
+
+def test_dmarc_read_only_page_does_not_load_reporting_addresses(monkeypatch):
+    user = {"id": 7, "company_id": 42, "is_super_admin": False}
+    render = AsyncMock(return_value="response")
+    monkeypatch.setattr(
+        routes, "_context_with_access", AsyncMock(return_value=(user, 42, False))
+    )
+    monkeypatch.setattr(routes.repo, "policy_domains", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        routes.repo,
+        "overview",
+        AsyncMock(return_value={"total_messages": 0, "forensic_reports": 0}),
+    )
+    monkeypatch.setattr(
+        routes.repo, "organization_summary", AsyncMock(return_value=[])
+    )
+    reporting_addresses = AsyncMock(return_value=["dmarc@example.com"])
+    monkeypatch.setattr(
+        routes.dmarc, "company_reporting_addresses", reporting_addresses
+    )
+    monkeypatch.setattr(routes, "_main", lambda: SimpleNamespace(_render_template=render))
+
+    assert asyncio.run(routes.page(SimpleNamespace())) == "response"
+    reporting_addresses.assert_not_awaited()
+    extra = render.await_args.kwargs["extra"]
+    assert extra["can_manage_dmarc"] is False
+    assert extra["reporting_addresses"] == []
+
+
+def test_dmarc_template_hides_restricted_and_empty_sections():
+    template = Path("app/templates/dmarc/index.html").read_text(encoding="utf-8")
+
+    assert "{% if can_manage_dmarc %}" in template
+    assert (
+        "{% if (metrics.total_messages or 0) > 0 or "
+        "(metrics.forensic_reports or 0) > 0 %}"
+    ) in template
 
 
 def test_dmarc_range_rejects_more_than_one_year():

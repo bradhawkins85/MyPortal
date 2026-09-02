@@ -27,6 +27,7 @@
   <div class="table-wrapper"><table class="table"><thead><tr><th>Organization</th><th>Volume</th><th>Compliant</th><th>Non-compliant</th><th>Compliance rate</th><th>SPF pass</th><th>SPF fail</th><th>DKIM pass</th><th>DKIM fail</th><th>Unauthenticated</th></tr></thead>
   <tbody>{% for organization in organizations %}<tr><td>{{ organization.organization }}</td><td>{{ organization.volume }}</td><td>{{ organization.compliant }}</td><td>{{ organization.non_compliant }}</td><td>{{ '%.2f'|format(organization.compliance_rate) }}%</td><td>{{ organization.spf_pass }}</td><td>{{ organization.spf_fail }}</td><td>{{ organization.dkim_pass }}</td><td>{{ organization.dkim_fail }}</td><td>{{ organization.unauthenticated }}</td></tr>{% else %}<tr><td colspan="10" class="table__empty">No DMARC reports were received in this date range.</td></tr>{% endfor %}</tbody></table></div>
 </section>
+{% if can_manage_dmarc %}
 <section class="card"><h2>Reporting addresses</h2>
   {% if reporting_addresses %}
   <p>Use the applicable mailbox for each company domain, or add multiple destinations to a domain's DMARC TXT record:</p>
@@ -37,5 +38,8 @@
   <p>Configure an active Microsoft 365 DMARC reports mailbox to generate RUA and RUF destinations.</p>
   {% endif %}
 </section>
+{% endif %}
+{% if (metrics.total_messages or 0) > 0 or (metrics.forensic_reports or 0) > 0 %}
 <section class="card"><h2>Reports</h2><p>Aggregate RUA records include source IP, disposition, and aligned SPF/DKIM results. Forensic RUF records include the failure type, source IP, reported domain, delivery result, authentication results, and available envelope and DKIM details.</p><p>Use <code>/api/dmarc/records</code> for aggregate data and <code>/api/dmarc/forensic-reports</code> for forensic failures in the selected date range.</p></section>
+{% endif %}
 {% endblock %}
