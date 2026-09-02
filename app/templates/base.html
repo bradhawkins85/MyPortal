@@ -580,6 +580,14 @@
                 </a>
               </li>
               <li class="menu__item">
+                <a href="/admin/sessions" {% if current_path.startswith('/admin/sessions') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false"><path d="M6 2h12a2 2 0 0 1 2 2v5h-2V4H6v16h6v2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M14 8h8v2h-8zm0 4h8v2h-8zm0 4h8v2h-8z"/></svg>
+                  </span>
+                  <span class="menu__label">Sessions</span>
+                </a>
+              </li>
+              <li class="menu__item">
                 <a href="/admin/impersonation" {% if current_path.startswith('/admin/impersonation') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M5 3a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4h-2V4H7v16h10v-3h2v4a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z"/><path d="M16.59 11 14 13.59 15.41 15 21 9.41 15.41 4 14 5.41 16.59 8H9v2z"/></svg>
