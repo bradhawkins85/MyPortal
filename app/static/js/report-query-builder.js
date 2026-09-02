@@ -74,12 +74,14 @@
   document.getElementById('clear-query').addEventListener('click', () => { selected.clear(); manualJoins.length = 0; renderSelected(); buildSql(); });
   const left = document.getElementById('join-left'), right = document.getElementById('join-right'); fieldOptions(left); fieldOptions(right);
   document.getElementById('add-join').addEventListener('click', () => { if (!left.value || !right.value || left.value === right.value) return; const [from_table, from_column] = left.value.split('.'), [to_table, to_column] = right.value.split('.'); manualJoins.push({from_table, from_column, to_table, to_column}); updateJoinList(); buildSql(); });
+  const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || document.querySelector('input[name="_csrf"]')?.value || '';
+  const errorMessage = (data) => data?.error || (typeof data?.detail === 'string' ? data.detail : '') || 'Unable to generate query.';
   document.getElementById('ai-query-send').addEventListener('click', async () => {
     const input = document.getElementById('ai-query-instruction'), button = document.getElementById('ai-query-send'), messages = document.getElementById('ai-query-messages');
     const instruction = input.value.trim(); if (!instruction) return;
     messages.insertAdjacentHTML('beforeend', `<div class="ai-query-message ai-query-message--user"></div>`); messages.lastElementChild.textContent = instruction; input.value = ''; button.disabled = true; button.textContent = 'Thinking…';
-    const body = new FormData(); body.set('instruction', instruction); body.set('current_sql', sql.value);
-    try { const response = await fetch('/admin/reporting/query-assistant', {method: 'POST', headers: {'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || ''}, body}); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Unable to generate query.'); sql.value = data.sql; messages.insertAdjacentHTML('beforeend', '<div class="ai-query-message ai-query-message--assistant"></div>'); messages.lastElementChild.textContent = data.summary || 'I updated the SQL query. Ask for another change if needed.'; button.textContent = 'Refine query'; }
+    const body = new FormData(), token = csrfToken(); body.set('instruction', instruction); body.set('current_sql', sql.value); if (token) body.set('_csrf', token);
+    try { const response = await fetch('/admin/reporting/query-assistant', {method: 'POST', headers: token ? {'X-CSRF-Token': token} : {}, body}); const data = await response.json().catch(() => ({})); if (!response.ok) throw new Error(errorMessage(data)); sql.value = data.sql; messages.insertAdjacentHTML('beforeend', '<div class="ai-query-message ai-query-message--assistant"></div>'); messages.lastElementChild.textContent = data.summary || 'I updated the SQL query. Ask for another change if needed.'; button.textContent = 'Refine query'; }
     catch (error) { messages.insertAdjacentHTML('beforeend', '<div class="ai-query-message ai-query-message--error"></div>'); messages.lastElementChild.textContent = error.message; }
     finally { button.disabled = false; if (button.textContent === 'Thinking…') button.textContent = 'Try again'; messages.scrollTop = messages.scrollHeight; }
   });
