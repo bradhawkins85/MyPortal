@@ -34,9 +34,32 @@
         <label class="form-label" for="report-description">Description</label>
         <textarea class="form-input" id="report-description" name="description" rows="3" maxlength="1000">{{ report.description or '' }}</textarea>
       </div>
-      <div class="form-field">
+      {% if builder_schema is defined %}
+      <section class="query-designer" id="report-query-designer" data-schema='{{ builder_schema | tojson }}'>
+        <div class="query-designer__heading">
+          <div><h3>Query builder</h3><p class="form-hint">Choose fields visually. Declared database relationships are linked automatically, or add your own join.</p></div>
+          <div class="query-designer__tabs" role="tablist" aria-label="Query creation method">
+            <button class="button button--primary" type="button" data-designer-tab="visual">Visual builder</button>
+            <button class="button button--ghost" type="button" data-designer-tab="ai">AI assistant</button>
+            <button class="button button--ghost" type="button" data-designer-tab="sql">SQL</button>
+          </div>
+        </div>
+        <div class="query-designer__panel" data-designer-panel="visual">
+          <div class="query-designer__layout">
+            <aside class="query-schema"><label class="form-label" for="schema-search">Tables &amp; fields</label><input id="schema-search" class="form-input" type="search" placeholder="Search schema…"><div id="schema-tables" class="query-schema__tables"></div></aside>
+            <div class="query-canvas"><div class="query-canvas__toolbar"><strong>Selected data</strong><button class="button button--ghost button--small" id="clear-query" type="button">Clear</button></div><div id="selected-tables" class="query-table-cards"><p class="query-empty">Select a field from the schema to begin.</p></div></div>
+          </div>
+          <details class="query-join"><summary>Add a manual table link</summary><div class="query-join__controls"><select class="form-input" id="join-left" aria-label="Left field"></select><span>=</span><select class="form-input" id="join-right" aria-label="Right field"></select><button class="button button--ghost" id="add-join" type="button">Add link</button></div><div id="join-list" class="form-hint"></div></details>
+        </div>
+        <div class="query-designer__panel" data-designer-panel="ai" hidden>
+          <div class="ai-query-chat"><div id="ai-query-messages" class="ai-query-chat__messages" aria-live="polite"><div class="ai-query-message ai-query-message--assistant">Describe the report in plain English. I’ll use the live database schema to create a read-only query. You can then ask me to refine it.</div></div><label class="form-label" for="ai-query-instruction">What should the report show?</label><div class="ai-query-chat__composer"><textarea class="form-input" id="ai-query-instruction" rows="3" placeholder="For example: Show open tickets by company, including the assigned technician and oldest ticket first."></textarea><button class="button button--primary" id="ai-query-send" type="button">Generate query</button></div></div>
+        </div>
+        <div class="query-designer__panel" data-designer-panel="sql" hidden><p class="form-hint">Review or edit the generated SQL directly.</p></div>
+      </section>
+      {% endif %}
+      <div class="form-field query-sql-field{% if builder_schema is defined %} query-sql-field--integrated{% endif %}">
         <label class="form-label required" for="report-sql">SQL query</label>
-        <textarea class="form-input" id="report-sql" name="sql_query" rows="12" required style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;">{{ report.sql_query or '' }}</textarea>
+        <textarea class="form-input" id="report-sql" name="sql_query" rows="12" required>{{ report.sql_query or '' }}</textarea>
         <p class="form-hint">A single SELECT (or WITH … SELECT) statement. The result is automatically capped at {{ max_rows }} rows.</p>
       </div>
 
@@ -108,6 +131,7 @@
 {% endblock %}
 
 {% block scripts %}
+  {% if builder_schema is defined %}<script src="/static/js/report-query-builder.js" defer></script>{% endif %}
   {% if not report.id %}
     <script>
       (() => {

@@ -44,5 +44,6 @@ _add(
     response_class=HTMLResponse,
 )
 
+_add("/admin/reporting/query-assistant", handlers.admin_reporting_ai_query, ["POST"])
 
 __all__ = ["router"]
