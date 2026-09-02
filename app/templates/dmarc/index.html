@@ -2,6 +2,13 @@
 {% from "macros/counters.html" import counter_strip %}
 {% block content %}
 <header class="page-header"><div><h1>DMARC reporting</h1><p>Coverage <time data-utc="{{ range_start.isoformat() }}">{{ range_start }}</time>–<time data-utc="{{ range_end.isoformat() }}">{{ range_end }}</time></p></div></header>
+<section class="card">
+  <form method="get" action="/dmarc" class="filters filters--compact">
+    <div class="form-group"><label for="dmarc-start">Reports from</label><input class="form-input" id="dmarc-start" name="start" type="date" value="{{ filter_start.isoformat() if filter_start else '' }}"></div>
+    <div class="form-group"><label for="dmarc-end">Reports through</label><input class="form-input" id="dmarc-end" name="end" type="date" value="{{ filter_end.isoformat() if filter_end else '' }}"></div>
+    <div class="filters__actions"><button class="button button--primary" type="submit">Apply date range</button><a class="button button--secondary" href="/dmarc">Reset</a></div>
+  </form>
+</section>
 <section class="card"><h2>Overview</h2>
   {{ counter_strip([
     {'label': 'DMARC pass (aligned SPF or DKIM)', 'value': metrics.dmarc_pass or 0, 'variant': 'success'},
@@ -10,6 +17,10 @@
     ,{'label': 'Forensic failures (RUF)', 'value': metrics.forensic_reports or 0, 'variant': 'danger'}
   ], total=metrics.total_messages or 0, total_label='Total messages') }}
   <p class="status-pill status-pill--info">Authentication results are distinct from DMARC alignment.</p>
+</section>
+<section class="card"><h2>Summary by organization</h2>
+  <div class="table-wrapper"><table class="table"><thead><tr><th>Organization</th><th>Volume</th><th>Compliant</th><th>Non-compliant</th><th>Compliance rate</th><th>SPF pass</th><th>SPF fail</th><th>DKIM pass</th><th>DKIM fail</th><th>Unauthenticated</th></tr></thead>
+  <tbody>{% for organization in organizations %}<tr><td>{{ organization.organization }}</td><td>{{ organization.volume }}</td><td>{{ organization.compliant }}</td><td>{{ organization.non_compliant }}</td><td>{{ '%.2f'|format(organization.compliance_rate) }}%</td><td>{{ organization.spf_pass }}</td><td>{{ organization.spf_fail }}</td><td>{{ organization.dkim_pass }}</td><td>{{ organization.dkim_fail }}</td><td>{{ organization.unauthenticated }}</td></tr>{% else %}<tr><td colspan="10" class="table__empty">No DMARC reports were received in this date range.</td></tr>{% endfor %}</tbody></table></div>
 </section>
 <section class="card"><h2>Reporting addresses</h2>
   {% if reporting_addresses %}
