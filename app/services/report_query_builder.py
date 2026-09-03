@@ -107,15 +107,31 @@ def configured_ai_model() -> str | None:
 
 def extract_ai_sql(response: Any) -> tuple[str, str]:
     """Extract SQL and summary from common module response shapes."""
-    value = response.get("response") if isinstance(response, Mapping) else response
-    if isinstance(value, Mapping):
-        value = (
-            value.get("response") or value.get("message") or value.get("text") or value
+    value = response
+    # Module providers do not all return the generated text at the same depth.
+    # In particular, chat-style responses use ``message.content`` while the
+    # Ollama generate endpoint uses ``response``. Unwrap those envelopes before
+    # trying to parse the assistant's JSON.
+    for _ in range(5):
+        if not isinstance(value, Mapping):
+            break
+        if value.get("sql"):
+            return str(value["sql"]).strip(), str(
+                value.get("summary") or "Query generated."
+            )
+        message = value.get("message")
+        if isinstance(message, Mapping) and message.get("content") is not None:
+            value = message["content"]
+            continue
+        next_value = (
+            value.get("response")
+            or value.get("content")
+            or value.get("text")
+            or value.get("response_body")
         )
-    if isinstance(value, Mapping):
-        return str(value.get("sql") or "").strip(), str(
-            value.get("summary") or "Query generated."
-        )
+        if next_value is None or next_value is value:
+            break
+        value = next_value
     text = str(value or "").strip()
     fenced = re.sub(r"^```(?:json|sql)?\s*|\s*```$", "", text, flags=re.I)
     try:

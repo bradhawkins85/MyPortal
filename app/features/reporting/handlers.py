@@ -426,7 +426,14 @@ async def admin_reporting_ai_query(request: Request):
             module_payload,
             background=False,
         )
+        if response.get("status") in {"error", "failed", "skipped"}:
+            reason = response.get("last_error") or response.get("reason")
+            raise ValueError(
+                str(reason or "The configured LLM module did not generate a query.")
+            )
         sql, summary = report_query_builder.extract_ai_sql(response)
+        if not sql:
+            raise ValueError("The configured LLM returned no SQL query.")
         reporting_service.validate_select_query(sql)
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
