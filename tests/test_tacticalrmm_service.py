@@ -236,6 +236,33 @@ def test_extract_agent_details_full_table_serialiser_payload():
     assert details["client_name"] == "Acme Corp"
 
 
+@pytest.mark.parametrize("serial_number", [None, "", "To Be Filled By O.E.M."])
+def test_extract_agent_details_falls_back_to_motherboard_serial(serial_number):
+    agent = {
+        "hostname": "OEM-PC",
+        "serial_number": serial_number,
+        "wmi_detail": {
+            "motherboard": [[{"Manufacturer": "OEM", "SerialNumber": "BOARD-123"}]]
+        },
+    }
+
+    details = tacticalrmm.extract_agent_details(agent)
+
+    assert details["serial_number"] == "BOARD-123"
+
+
+def test_extract_agent_details_keeps_valid_device_serial():
+    agent = {
+        "hostname": "SERIAL-PC",
+        "serial_number": "DEVICE-456",
+        "wmi_detail": {"motherboard_serial_number": "BOARD-123"},
+    }
+
+    details = tacticalrmm.extract_agent_details(agent)
+
+    assert details["serial_number"] == "DEVICE-456"
+
+
 def test_extract_agent_details_reads_explicit_machine_type():
     agent = {
         "hostname": "VM-EXPLICIT",
