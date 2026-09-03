@@ -270,30 +270,6 @@ def _extract_motherboard_serial(hardware: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _extract_processor_id(hardware: Mapping[str, Any]) -> str | None:
-    """Extract the first CPU ProcessorID from Tactical RMM WMI details."""
-    processor_keys = {"cpu", "cpus", "processor", "processors"}
-    for key, value in hardware.items():
-        if re.sub(r"[^a-z]", "", str(key).lower()) not in processor_keys:
-            continue
-
-        pending = [value]
-        while pending:
-            candidate = pending.pop(0)
-            if isinstance(candidate, Mapping):
-                for candidate_key, candidate_value in candidate.items():
-                    normalised_key = re.sub(r"[^a-z]", "", str(candidate_key).lower())
-                    if normalised_key == "processorid":
-                        processor_id = _clean_text(candidate_value)
-                        if processor_id:
-                            return processor_id
-                    if isinstance(candidate_value, (Mapping, list, tuple)):
-                        pending.append(candidate_value)
-            elif isinstance(candidate, (list, tuple)):
-                pending.extend(candidate)
-    return None
-
-
 def _extract_physicaldrive0_serial(hardware: Mapping[str, Any]) -> str | None:
     """Extract the disk serial associated with Windows PHYSICALDRIVE0."""
     disk_keys = {"disk", "disks", "drive", "drives", "physicaldisk", "physicaldisks"}
@@ -336,7 +312,6 @@ def _device_serial(primary_serial: Any, hardware: Mapping[str, Any]) -> str | No
     if serial is None or serial.casefold() == "to be filled by o.e.m.":
         return (
             _extract_motherboard_serial(hardware)
-            or _extract_processor_id(hardware)
             or _extract_physicaldrive0_serial(hardware)
         )
     return serial

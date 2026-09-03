@@ -263,7 +263,7 @@ def test_extract_agent_details_keeps_valid_device_serial():
     assert details["serial_number"] == "DEVICE-456"
 
 
-def test_extract_agent_details_falls_back_to_processor_id_after_motherboard():
+def test_extract_agent_details_ignores_processor_id_and_uses_physicaldrive0():
     agent = {
         "hostname": "CPU-ID-PC",
         "serial_number": "",
@@ -281,16 +281,15 @@ def test_extract_agent_details_falls_back_to_processor_id_after_motherboard():
 
     details = tacticalrmm.extract_agent_details(agent)
 
-    assert details["serial_number"] == "CPU-ABC-123"
+    assert details["serial_number"] == "DISK-456"
 
 
-def test_extract_agent_details_falls_back_to_physicaldrive0_serial_last():
+def test_extract_agent_details_falls_back_to_physicaldrive0_after_motherboard():
     agent = {
         "hostname": "DISK-ID-PC",
         "serial_number": None,
         "wmi_detail": {
             "motherboard": [[{"SerialNumber": None}]],
-            "processors": [[{"ProcessorID": ""}]],
             "physical_disks": [
                 [
                     {"DeviceID": r"\\.\PHYSICALDRIVE1"},
