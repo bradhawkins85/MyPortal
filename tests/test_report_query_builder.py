@@ -29,6 +29,27 @@ def test_extract_ai_sql_handles_module_json_response():
     )
 
 
+def test_extract_ai_sql_handles_chat_message_content():
+    response = {
+        "response": {
+            "message": {
+                "role": "assistant",
+                "content": '{"sql":"SELECT id FROM tickets","summary":"All tickets"}',
+            }
+        }
+    }
+    assert report_query_builder.extract_ai_sql(response) == (
+        "SELECT id FROM tickets",
+        "All tickets",
+    )
+
+
+def test_extract_ai_sql_handles_direct_json_payload():
+    assert report_query_builder.extract_ai_sql(
+        {"sql": "SELECT id FROM tickets", "summary": "Tickets"}
+    ) == ("SELECT id FROM tickets", "Tickets")
+
+
 def test_derive_table_group_groups_schema_by_feature_prefix():
     assert report_query_builder._derive_table_group("tickets_messages") == "tickets"
     assert report_query_builder._derive_table_group("company_notes") == "company"
