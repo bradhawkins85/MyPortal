@@ -263,6 +263,52 @@ def test_extract_agent_details_keeps_valid_device_serial():
     assert details["serial_number"] == "DEVICE-456"
 
 
+def test_extract_agent_details_falls_back_to_processor_id_after_motherboard():
+    agent = {
+        "hostname": "CPU-ID-PC",
+        "serial_number": "",
+        "wmi_detail": {
+            "motherboard": [[{"SerialNumber": ""}]],
+            "cpu": [[{"Name": "Intel CPU"}, {"ProcessorId": "CPU-ABC-123"}]],
+            "disks": [
+                [
+                    {"DeviceID": r"\\.\PHYSICALDRIVE0"},
+                    {"SerialNumber": "DISK-456"},
+                ]
+            ],
+        },
+    }
+
+    details = tacticalrmm.extract_agent_details(agent)
+
+    assert details["serial_number"] == "CPU-ABC-123"
+
+
+def test_extract_agent_details_falls_back_to_physicaldrive0_serial_last():
+    agent = {
+        "hostname": "DISK-ID-PC",
+        "serial_number": None,
+        "wmi_detail": {
+            "motherboard": [[{"SerialNumber": None}]],
+            "processors": [[{"ProcessorID": ""}]],
+            "physical_disks": [
+                [
+                    {"DeviceID": r"\\.\PHYSICALDRIVE1"},
+                    {"SerialNumber": "WRONG-DISK"},
+                ],
+                [
+                    {"DeviceID": r"\\.\PHYSICALDRIVE0"},
+                    {"SerialNumber": "SYSTEM-DISK-789"},
+                ],
+            ],
+        },
+    }
+
+    details = tacticalrmm.extract_agent_details(agent)
+
+    assert details["serial_number"] == "SYSTEM-DISK-789"
+
+
 def test_extract_agent_details_reads_explicit_machine_type():
     agent = {
         "hostname": "VM-EXPLICIT",
