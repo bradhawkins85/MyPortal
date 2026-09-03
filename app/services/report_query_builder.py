@@ -9,6 +9,12 @@ from typing import Any, Mapping
 
 from app.core.database import db
 
+# Keep enough room in an 8K context window for the system instructions, the
+# user's request, and the model's answer. Schema identifiers tend to tokenize
+# less efficiently than prose, so a character limit substantially below 32K is
+# intentional.
+AI_SCHEMA_MAX_CHARS = 16_000
+
 
 def _derive_table_group(table_name: str) -> str:
     """Best-effort grouping based on the logical feature prefix in a table name."""
@@ -92,11 +98,86 @@ def build_ai_messages(
         "DDL, comments, or multiple statements. Prefer explicit JOINs using declared relationships and clear aliases. "
         "Return JSON only, with keys sql and summary. The sql value must contain the complete query."
     )
-    context = json.dumps(schema, separators=(",", ":"))
-    user = f"Database schema:\n{context}\n\nRequested report or refinement:\n{request_text.strip()}"
+    context = json.dumps(
+        _schema_for_prompt(schema, request_text, current_sql), separators=(",", ":")
+    )
+    # Put the request before the (potentially large) schema. Besides making the
+    # recorded request easy to inspect, this guarantees that a provider which
+    # defensively truncates a prompt does not discard the actual task.
+    user = f"Requested report or refinement:\n{request_text.strip()}"
     if current_sql.strip():
         user += f"\n\nCurrent query to refine:\n{current_sql.strip()}"
+    user += f"\n\nDatabase schema:\n{context}"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def _schema_for_prompt(
+    schema: Mapping[str, Any], request_text: str, current_sql: str = ""
+) -> dict[str, Any]:
+    """Return a relevant, valid schema document bounded for local LLMs.
+
+    Full MyPortal installations can expose hundreds of tables and overflow the
+    common 8K context configured by llama.cpp. Tables whose names or columns
+    occur in the request/current SQL are placed first, then remaining tables are
+    included alphabetically while the serialized document fits the budget.
+    """
+    raw_tables = schema.get("tables")
+    tables = [dict(table) for table in raw_tables or [] if isinstance(table, Mapping)]
+    terms = {
+        term.lower()
+        for term in re.findall(
+            r"[A-Za-z_][A-Za-z0-9_]*", f"{request_text} {current_sql}"
+        )
+        if len(term) > 1
+    }
+
+    def relevance(table: Mapping[str, Any]) -> tuple[int, str]:
+        name = str(table.get("name") or "").lower()
+        columns = table.get("columns") or []
+        identifiers = {
+            name,
+            *(
+                str(column.get("name") or "").lower()
+                for column in columns
+                if isinstance(column, Mapping)
+            ),
+        }
+        score = sum(4 if term == name else 1 for term in terms if term in identifiers)
+        score += sum(2 for term in terms if term and term in name)
+        return (-score, name)
+
+    tables.sort(key=relevance)
+    relations = [
+        dict(relation)
+        for relation in schema.get("relations") or []
+        if isinstance(relation, Mapping)
+    ]
+    selected: list[dict[str, Any]] = []
+    for table in tables:
+        candidate_names = {str(item.get("name") or "") for item in [*selected, table]}
+        candidate_relations = [
+            relation
+            for relation in relations
+            if str(relation.get("from_table") or "") in candidate_names
+            and str(relation.get("to_table") or "") in candidate_names
+        ]
+        candidate = {"tables": [*selected, table], "relations": candidate_relations}
+        if len(json.dumps(candidate, separators=(",", ":"))) > AI_SCHEMA_MAX_CHARS:
+            continue
+        selected.append(table)
+
+    selected_names = {str(table.get("name") or "") for table in selected}
+    selected_relations = [
+        relation
+        for relation in relations
+        if str(relation.get("from_table") or "") in selected_names
+        and str(relation.get("to_table") or "") in selected_names
+    ]
+    result: dict[str, Any] = {"tables": selected, "relations": selected_relations}
+    omitted = len(tables) - len(selected)
+    if omitted:
+        result["omitted_table_count"] = omitted
+    return result
 
 
 def configured_ai_model() -> str | None:
