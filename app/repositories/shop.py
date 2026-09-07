@@ -22,7 +22,10 @@ def _prepare_product_search_term(search: str | None) -> tuple[str | None, str | 
     if len(term) < _FULLTEXT_MIN_SEARCH_LENGTH:
         return "prefix", f"{term}%"
 
-    tokens = [segment.strip() for segment in re.split(r"\s+", term) if segment.strip()]
+    # MySQL full-text indexes split identifiers at punctuation.  Build the
+    # boolean query from the same kind of segments so SKUs such as
+    # ``NBL-14-I516512G9`` can match their indexed tokens.
+    tokens = re.findall(r"[0-9A-Za-z]+", term)
     boolean_tokens: list[str] = []
     for token in tokens:
         cleaned = re.sub(r"[^0-9A-Za-z]", "", token)
