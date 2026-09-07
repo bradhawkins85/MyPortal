@@ -1254,6 +1254,18 @@
       });
     });
 
+    const requestedEditProductId = Number(
+      new URLSearchParams(window.location.search).get('editProduct')
+    );
+    if (Number.isInteger(requestedEditProductId) && requestedEditProductId > 0) {
+      const requestedEditButton = container.querySelector(
+        `[data-product-edit="${requestedEditProductId}"]`
+      );
+      if (requestedEditButton) {
+        requestedEditButton.click();
+      }
+    }
+
     container.querySelectorAll('[data-product-visibility]').forEach((button) => {
       button.addEventListener('click', async () => {
         const id = Number(button.getAttribute('data-product-visibility'));

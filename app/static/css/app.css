@@ -12050,6 +12050,17 @@ a.shop-product-card {
   right: calc(var(--space-gap-roomy) + 3rem);
 }
 
+.product-details-edit-link {
+  position: absolute;
+  top: var(--space-gap-tight);
+  right: calc(var(--space-gap-roomy) + 6rem);
+  z-index: 2;
+}
+
+.product-details-edit-link[hidden] {
+  display: none;
+}
+
 @media (max-width: 760px) {
   .product-details-modal__hero,
   .product-details-modal__related-grid {
