@@ -70,6 +70,22 @@ def test_prepare_product_search_term_falls_back_to_prefix_like_without_fulltext_
     assert value == "a-%"
 
 
+def test_prepare_product_search_term_matches_punctuation_delimited_sku_tokens():
+    """SKU punctuation should follow MySQL full-text token boundaries."""
+    mode, value = shop_repo._prepare_product_search_term("NBL-14-I516512G9")
+
+    assert mode == "fulltext"
+    assert value == "+NBL* +I516512G9*"
+
+
+def test_shop_search_form_uses_same_origin_action():
+    """Proxy-internal HTTP schemes must not appear in the search form action."""
+    template = Path("app/templates/shop/index.html").read_text()
+
+    assert 'action="{{ request.url_for(\'shop_page\').path }}"' in template
+    assert 'action="{{ request.url_for(\'shop_page\') }}"' not in template
+
+
 def test_list_products_summary_defaults_do_not_reference_out_of_stock_flag(monkeypatch):
     """Admin product summaries should not crash or filter stock by default."""
     captured: dict[str, object] = {}

@@ -58,7 +58,9 @@
         <h2 class="card__title">{{ 'Product categories' if showing_category_cards else 'Available packages' if show_packages else 'Featured products' if show_featured else 'Available products' }}</h2>
       </div>
       <div class="card__controls shop-toolbar">
-        <form method="get" action="{{ request.url_for('shop_page') }}" class="shop-search-form" role="search">
+        {# Keep the action same-origin so an internal HTTP proxy hop cannot leak
+           into the browser-facing URL and violate the form-action CSP. #}
+        <form method="get" action="{{ request.url_for('shop_page').path }}" class="shop-search-form" role="search">
           {% if current_category is not none %}
             <input type="hidden" name="category" value="{{ 'packages' if show_packages else current_category }}" />
           {% endif %}
