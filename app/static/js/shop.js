@@ -481,10 +481,22 @@
     const refreshForm = detailsModal
       ? detailsModal.querySelector('[data-product-refresh-form]')
       : null;
+    const editLink = detailsModal
+      ? detailsModal.querySelector('[data-product-edit-link]')
+      : null;
 
     bindModalDismissal(detailsModal);
 
     async function openProductDetails(id) {
+      if (editLink) {
+        if (Number.isFinite(id) && id > 0) {
+          editLink.href = `/admin/shop?editProduct=${encodeURIComponent(String(id))}`;
+          editLink.hidden = false;
+        } else {
+          editLink.href = '/admin/shop';
+          editLink.hidden = true;
+        }
+      }
       if (refreshForm) {
         if (Number.isFinite(id) && id > 0) {
           refreshForm.action = `/shop/admin/product/${id}/refresh-description`;

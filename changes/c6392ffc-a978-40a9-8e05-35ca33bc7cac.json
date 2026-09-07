@@ -1,0 +1,7 @@
+{
+  "guid": "c6392ffc-a978-40a9-8e05-35ca33bc7cac",
+  "occurred_at": "2026-09-07T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added an authorised product edit shortcut to shop product details.",
+  "content_hash": "shop-product-details-admin-edit-shortcut"
+}

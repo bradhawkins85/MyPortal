@@ -18,3 +18,16 @@ def test_shop_product_details_refresh_form_uses_admin_refresh_endpoint() -> None
     assert "refreshForm.action = `/shop/admin/product/${id}/refresh-description`;" in script
     assert "refreshForm.hidden = false;" in script
     assert "refreshForm.hidden = true;" in script
+
+
+def test_shop_product_details_modal_links_authorised_admins_to_editor() -> None:
+    template = Path("app/templates/shop/index.html").read_text()
+    shop_script = Path("app/static/js/shop.js").read_text()
+    admin_script = Path("app/static/js/shop_admin.js").read_text()
+
+    assert "{% if can_edit_shop_items %}" in template
+    assert "data-product-edit-link" in template
+    assert 'aria-label="Edit product"' in template
+    assert "editLink.href = `/admin/shop?editProduct=${encodeURIComponent(String(id))}`;" in shop_script
+    assert ".get('editProduct')" in admin_script
+    assert "requestedEditButton.click();" in admin_script
