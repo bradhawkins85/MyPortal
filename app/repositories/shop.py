@@ -2044,6 +2044,72 @@ async def _populate_product_recommendations(products: list[dict[str, Any]]) -> N
         product["upsell_product_ids"] = [entry["id"] for entry in upsell_entries]
 
 
+async def _fetch_inbound_recommendation_map(
+    table_name: str, product_ids: Sequence[int]
+) -> dict[int, list[dict[str, Any]]]:
+    """Return source products that recommend each supplied target product."""
+    ids = sorted({int(pid) for pid in product_ids if int(pid) > 0})
+    if not ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(ids))
+    rows = await db.fetch_all(
+        f"""SELECT rel.related_product_id, p.id, p.name, p.sku, p.archived
+        FROM {table_name} AS rel
+        JOIN shop_products AS p ON p.id = rel.product_id
+        WHERE rel.related_product_id IN ({placeholders})
+        ORDER BY p.name ASC""",
+        tuple(ids),
+    )
+    mapping: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        target_id = _coerce_int(row.get("related_product_id"), default=0)
+        source_id = _coerce_int(row.get("id"), default=0)
+        if target_id > 0 and source_id > 0:
+            mapping[target_id].append(
+                {
+                    "id": source_id,
+                    "name": row.get("name") or "",
+                    "sku": row.get("sku") or "",
+                    "archived": bool(_coerce_int(row.get("archived"), default=0)),
+                }
+            )
+    return mapping
+
+
+async def populate_product_inbound_recommendations(product: dict[str, Any]) -> None:
+    """Attach reverse recommendation links for an admin product detail view."""
+    product_id = _coerce_int(product.get("id"), default=0)
+    cross_map = await _fetch_inbound_recommendation_map("shop_product_cross_sells", [product_id])
+    upsell_map = await _fetch_inbound_recommendation_map("shop_product_upsells", [product_id])
+    product["linked_from_cross_sell_products"] = cross_map.get(product_id, [])
+    product["linked_from_upsell_products"] = upsell_map.get(product_id, [])
+
+
+async def remove_inbound_product_recommendations(
+    product_id: int,
+    *,
+    cross_sell_source_ids: Iterable[int] = (),
+    upsell_source_ids: Iterable[int] = (),
+) -> None:
+    """Remove selected products that currently recommend ``product_id``."""
+    relations = (
+        ("shop_product_cross_sells", cross_sell_source_ids),
+        ("shop_product_upsells", upsell_source_ids),
+    )
+    async with db.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            for table_name, raw_ids in relations:
+                source_ids = sorted({int(value) for value in raw_ids if int(value) > 0})
+                if not source_ids:
+                    continue
+                placeholders = ", ".join(["%s"] * len(source_ids))
+                await cursor.execute(
+                    f"DELETE FROM {table_name} WHERE related_product_id = %s "
+                    f"AND product_id IN ({placeholders})",
+                    (product_id, *source_ids),
+                )
+
+
 async def _fetch_recommendation_map(
     table_name: str, product_ids: Sequence[int]
 ) -> dict[int, list[dict[str, Any]]]:
@@ -2473,6 +2539,8 @@ def _normalise_product(row: dict[str, Any]) -> dict[str, Any]:
     normalised.setdefault("cross_sell_product_ids", [])
     normalised.setdefault("upsell_products", [])
     normalised.setdefault("upsell_product_ids", [])
+    normalised.setdefault("linked_from_cross_sell_products", [])
+    normalised.setdefault("linked_from_upsell_products", [])
     return normalised
 
 

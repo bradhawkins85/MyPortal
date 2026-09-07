@@ -1014,6 +1014,40 @@
       'upsell_product_ids',
     );
 
+    function renderInboundLinks(products, relation) {
+      const list = document.getElementById(`edit-product-linked-${relation}-list`);
+      const empty = document.getElementById(`edit-linked-${relation}-empty`);
+      if (!list) return;
+      list.innerHTML = '';
+      const items = Array.isArray(products) ? products : [];
+      if (empty) empty.hidden = items.length > 0;
+      items.forEach((product) => {
+        const item = document.createElement('li');
+        item.className = 'tag';
+        const label = document.createElement('span');
+        label.textContent = `${product.name} (${product.sku})${product.archived ? ' — archived' : ''}`;
+        item.appendChild(label);
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'tag__remove';
+        removeButton.setAttribute('aria-label', `Remove link from ${product.name}`);
+        removeButton.textContent = '×';
+        removeButton.addEventListener('click', () => {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = relation === 'cross-sell'
+            ? 'remove_inbound_cross_sell_product_ids'
+            : 'remove_inbound_upsell_product_ids';
+          input.value = String(product.id);
+          editForm.appendChild(input);
+          item.remove();
+          if (empty && !list.children.length) empty.hidden = false;
+        });
+        item.appendChild(removeButton);
+        list.appendChild(item);
+      });
+    }
+
     document.querySelectorAll('[data-sku-add][data-form="edit"]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const type = btn.getAttribute('data-sku-add');
@@ -1193,6 +1227,9 @@
         if (editUpsellManager) {
           await editUpsellManager.initFromIds(product.upsell_product_ids || [], id);
         }
+        editForm.querySelectorAll('input[name^="remove_inbound_"]').forEach((input) => input.remove());
+        renderInboundLinks(product.linked_from_cross_sell_products, 'cross-sell');
+        renderInboundLinks(product.linked_from_upsell_products, 'upsell');
         currentEditProductId = id;
         if (removeImageInput) removeImageInput.checked = false;
         if (removeImageOption) removeImageOption.hidden = !product.image_url;

@@ -222,3 +222,37 @@ async def test_replace_product_recommendations_auto_linked_skips_tables_when_ids
     assert not upsell_touched, (
         "upsells table must not be touched when upsell_ids is not provided"
     )
+
+
+@pytest.mark.anyio("asyncio")
+async def test_fetch_inbound_recommendations_groups_source_products(monkeypatch):
+    async def fake_fetch_all(sql: str, params: tuple | None = None):
+        assert "rel.related_product_id IN" in sql
+        assert params == (8, 9)
+        return [
+            {"related_product_id": 8, "id": 2, "name": "Laptop", "sku": "LAP", "archived": 0},
+            {"related_product_id": 8, "id": 3, "name": "Old laptop", "sku": "OLD", "archived": 1},
+        ]
+
+    monkeypatch.setattr(shop_repo.db, "fetch_all", fake_fetch_all)
+    result = await shop_repo._fetch_inbound_recommendation_map("shop_product_upsells", [9, 8])
+    assert result[8] == [
+        {"id": 2, "name": "Laptop", "sku": "LAP", "archived": False},
+        {"id": 3, "name": "Old laptop", "sku": "OLD", "archived": True},
+    ]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remove_inbound_recommendations_is_scoped_to_target_and_sources(monkeypatch):
+    executed: list[tuple] = []
+    monkeypatch.setattr(shop_repo, "db", _make_fake_db_pool(executed))
+    await shop_repo.remove_inbound_product_recommendations(
+        42, cross_sell_source_ids=[7, 5, 7], upsell_source_ids=[11]
+    )
+    statements = [(sql, params) for op, sql, params in executed if op == "execute"]
+    assert len(statements) == 2
+    assert "shop_product_cross_sells" in statements[0][0]
+    assert "related_product_id = %s" in statements[0][0]
+    assert statements[0][1] == (42, 5, 7)
+    assert "shop_product_upsells" in statements[1][0]
+    assert statements[1][1] == (42, 11)

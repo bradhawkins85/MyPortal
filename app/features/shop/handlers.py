@@ -647,6 +647,7 @@ async def admin_shop_product_detail_api(request: Request, product_id: int):
     product = await shop_repo.get_product_by_id(product_id, include_archived=True)
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    await shop_repo.populate_product_inbound_recommendations(product)
 
     return JSONResponse(content=cast(dict[str, Any], _main()._serialise_for_json(product)))
 
@@ -2333,6 +2334,8 @@ async def admin_update_shop_product(
     upsell_product_ids: list[int] | None = Form(default=None),
     cross_sell_sku: str | None = Form(default=None),
     upsell_sku: str | None = Form(default=None),
+    remove_inbound_cross_sell_product_ids: list[int] | None = Form(default=None),
+    remove_inbound_upsell_product_ids: list[int] | None = Form(default=None),
     subscription_category_id: str | None = Form(default=None),
     commitment_type: str | None = Form(default=None),
     payment_frequency: str | None = Form(default=None),
@@ -2645,6 +2648,13 @@ async def admin_update_shop_product(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Unable to update product features",
             ) from exc
+
+    await shop_repo.remove_inbound_product_recommendations(
+        product_id,
+        cross_sell_source_ids=_normalise_related_product_inputs(remove_inbound_cross_sell_product_ids),
+        upsell_source_ids=_normalise_related_product_inputs(remove_inbound_upsell_product_ids),
+    )
+    updated = await shop_repo.get_product_by_id(product_id, include_archived=True)
 
     if previous_image_url and previous_image_url != updated.get("image_url"):
         try:
