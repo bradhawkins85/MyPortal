@@ -2,11 +2,13 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.api.dependencies import auth as auth_dependencies
 from app.api.dependencies import database as database_dependencies
+from app.api.routes import quotes as quote_routes
 from app.core.database import db
 from app.main import app, scheduler_service
 from app.repositories import companies as company_repo
@@ -105,6 +107,47 @@ def _make_item(**overrides):
     }
     base.update(overrides)
     return base
+
+
+def _request_for_host(host: str = "portal.example.test"):
+    route_app = FastAPI()
+    route_app.add_api_route(
+        "/quotes/magic/{token}", lambda: None, name="download_quote_magic_pdf"
+    )
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/api/quotes/QUO-1/magic-link",
+            "raw_path": b"/api/quotes/QUO-1/magic-link",
+            "query_string": b"",
+            "headers": [(b"host", host.encode("ascii"))],
+            "server": (host, 80),
+            "client": ("127.0.0.1", 1234),
+            "root_path": "",
+            "app": route_app,
+            "router": route_app.router,
+        }
+    )
+
+
+def test_quote_magic_url_defaults_to_https(monkeypatch):
+    monkeypatch.setattr(quote_routes.get_settings(), "public_base_url", None)
+
+    url = quote_routes._build_quote_magic_url(_request_for_host(), "secret-token")
+
+    assert url == "https://portal.example.test/quotes/magic/secret-token"
+
+
+def test_quote_magic_url_uses_https_public_base_url(monkeypatch):
+    monkeypatch.setattr(
+        quote_routes.get_settings(), "public_base_url", "http://quotes.example.test/"
+    )
+
+    url = quote_routes._build_quote_magic_url(_request_for_host(), "secret-token")
+
+    assert url == "https://quotes.example.test/quotes/magic/secret-token"
 
 
 @pytest.mark.asyncio
