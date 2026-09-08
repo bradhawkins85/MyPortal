@@ -84,6 +84,22 @@
             <span>Show Out Of Stock Items</span>
           </label>
         </form>
+        {% if not showing_category_cards %}
+          <div class="shop-view-toggle" role="group" aria-label="Product display style" data-shop-view-toggle>
+            <button type="button" class="button button--ghost button--sm shop-view-toggle__button" data-shop-view="card" aria-pressed="true" title="Card view">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path fill="currentColor" d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h6v6h-6v-6Z" />
+              </svg>
+              <span>Cards</span>
+            </button>
+            <button type="button" class="button button--ghost button--sm shop-view-toggle__button" data-shop-view="row" aria-pressed="false" title="Row view">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path fill="currentColor" d="M4 5h16v4H4V5Zm0 10h16v4H4v-4Z" />
+              </svg>
+              <span>Rows</span>
+            </button>
+          </div>
+        {% endif %}
       </div>
     </header>
     {% if showing_category_cards %}

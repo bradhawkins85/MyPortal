@@ -1,5 +1,46 @@
 (function () {
   const SHOP_SEARCH_REFOCUS_KEY = 'shop.search.refocus';
+  const SHOP_VIEW_STORAGE_KEY = 'myportal:shop:view';
+
+  function bindShopViewToggle(container) {
+    const grid = container.querySelector('.shop-card-grid:not(.shop-card-grid--categories)');
+    const toggle = container.querySelector('[data-shop-view-toggle]');
+    if (!grid || !toggle) {
+      return;
+    }
+
+    const buttons = Array.from(toggle.querySelectorAll('[data-shop-view]'));
+    const validViews = ['card', 'row'];
+
+    function applyView(view, persist) {
+      const selectedView = validViews.includes(view) ? view : 'card';
+      grid.classList.toggle('shop-card-grid--rows', selectedView === 'row');
+      buttons.forEach((button) => {
+        const active = button.getAttribute('data-shop-view') === selectedView;
+        button.setAttribute('aria-pressed', String(active));
+      });
+
+      if (persist) {
+        try {
+          localStorage.setItem(SHOP_VIEW_STORAGE_KEY, selectedView);
+        } catch (_error) {
+        }
+      }
+    }
+
+    let initialView = 'card';
+    try {
+      initialView = localStorage.getItem(SHOP_VIEW_STORAGE_KEY) || initialView;
+    } catch (_error) {
+    }
+    applyView(initialView, false);
+
+    buttons.forEach((button) => {
+      button.addEventListener('click', () => {
+        applyView(button.getAttribute('data-shop-view'), true);
+      });
+    });
+  }
 
   function submitOnChange(container) {
     container.querySelectorAll('[data-submit-on-change]').forEach((input) => {
@@ -475,6 +516,7 @@
     bindShopSearch(container);
     restoreShopSearchFocus(container);
     truncateSafeProductTitles(container);
+    bindShopViewToggle(container);
 
 
     const detailsModal = document.getElementById('product-details-modal');
