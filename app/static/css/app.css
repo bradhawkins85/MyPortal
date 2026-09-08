@@ -11700,8 +11700,8 @@ a.stat-strip__stat:focus-visible {
 .shop-card-grid--rows .shop-product-card {
   display: grid;
   grid-template-columns: 9rem minmax(0, 1fr) minmax(14rem, auto);
-  min-height: 0;
-  height: 9rem;
+  min-height: 9rem;
+  height: auto;
 }
 
 .shop-card-grid--rows .shop-product-card__media {
@@ -11720,8 +11720,14 @@ a.stat-strip__stat:focus-visible {
 
 .shop-card-grid--rows .shop-product-card__body {
   min-width: 0;
-  overflow: hidden;
   justify-content: center;
+}
+
+.shop-card-grid--rows .shop-product-card__title {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .shop-card-grid--rows .shop-product-card__actions {
@@ -11952,8 +11958,8 @@ a.shop-product-card {
 
   .shop-card-grid--rows .shop-product-card {
     grid-template-columns: 5rem minmax(0, 1fr) minmax(8rem, auto);
-    min-height: 0;
-    height: 9rem;
+    min-height: 9rem;
+    height: auto;
   }
 
   .shop-card-grid--rows .shop-product-card__media {

@@ -14,7 +14,11 @@ def test_shop_page_supports_persistent_card_and_row_views() -> None:
     assert ".shop-card-grid--rows" in stylesheet
     assert "grid-template-columns: minmax(0, 1fr)" in stylesheet
     assert "grid-template-columns: 9rem minmax(0, 1fr) minmax(14rem, auto)" in stylesheet
-    assert "height: 9rem" in stylesheet
+    assert "updateProductTitlesForView(grid, selectedView)" in script
+    assert "title.textContent = fullTitle.trim()" in script
+    assert ".shop-card-grid--rows .shop-product-card__title" in stylesheet
+    assert "white-space: normal" in stylesheet
+    assert "height: auto" in stylesheet
 
 
 def test_subscription_shop_omits_stock_controls_and_redundant_main_tile() -> None:
