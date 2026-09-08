@@ -1,0 +1,7 @@
+{
+  "guid": "aa1847dc-736e-421c-9c95-5d5cd62f18cb",
+  "occurred_at": "2026-09-08T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Show subscription products in the shop when a subscription price is configured, even without a standard product price.",
+  "content_hash": "2ee1c1ac36aa774892328926852c873ff0baa23d46bb929a6f18b7fb82426912"
+}
