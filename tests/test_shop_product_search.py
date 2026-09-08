@@ -1,6 +1,7 @@
 """Tests for shop product search query construction."""
 
 import asyncio
+from decimal import Decimal
 from pathlib import Path
 
 from app.repositories import shop as shop_repo
@@ -120,6 +121,35 @@ def test_list_products_summary_honors_in_stock_only(monkeypatch):
 
     assert products == []
     assert "p.stock > 0" in str(captured["query"])
+    assert "p.subscription_category_id IS NOT NULL" in str(captured["query"])
+
+
+def test_list_products_summary_preserves_subscription_pricing(monkeypatch):
+    """Customer summaries retain the fields used to establish plan availability."""
+
+    async def fake_fetch_all(query, params=None):
+        return [
+            {
+                "id": 7,
+                "name": "Managed plan",
+                "price": None,
+                "stock": 0,
+                "archived": 0,
+                "subscription_category_id": 4,
+                "price_monthly_commitment": "29.00",
+                "price_annual_monthly_payment": "25.00",
+                "price_annual_annual_payment": None,
+            }
+        ]
+
+    monkeypatch.setattr(shop_repo.db, "fetch_all", fake_fetch_all)
+
+    products = asyncio.run(shop_repo.list_products_summary(shop_repo.ProductFilters()))
+
+    assert products[0]["subscription_category_id"] == 4
+    assert products[0]["price_monthly_commitment"] == Decimal("29.00")
+    assert products[0]["price_annual_monthly_payment"] == Decimal("25.00")
+    assert products[0]["price_annual_annual_payment"] is None
 
 
 def test_count_products_honors_in_stock_only(monkeypatch):

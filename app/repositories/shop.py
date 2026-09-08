@@ -493,7 +493,9 @@ async def count_products(filters: ProductFilters) -> int:
         params.extend(filters.category_ids)
     _append_product_search_filter(conditions, params, filters.search_term)
     if filters.require_in_stock:
-        conditions.append("p.stock > 0")
+        # Subscription plans are available based on their configured pricing,
+        # not an inventory count.
+        conditions.append("(p.stock > 0 OR p.subscription_category_id IS NOT NULL)")
 
     if conditions:
         query_parts.append("WHERE " + " AND ".join(conditions))
@@ -1050,7 +1052,9 @@ async def list_featured_products_for_company(
     ]
     params: list[Any] = [company_id, company_id]
     if not include_out_of_stock:
-        query_parts.append("  AND p.stock > 0")
+        query_parts.append(
+            "  AND (p.stock > 0 OR p.subscription_category_id IS NOT NULL)"
+        )
     query_parts.append("ORDER BY p.name ASC")
     rows = await db.fetch_all(" ".join(query_parts), tuple(params))
     products = [_normalise_product(row) for row in rows]
@@ -2561,6 +2565,18 @@ def _normalise_product_summary(row: dict[str, Any]) -> dict[str, Any]:
         "archived": bool(row.get("archived")),
         "category_id": _coerce_optional_int(row.get("category_id")),
         "category_name": row.get("category_name") or None,
+        "subscription_category_id": _coerce_optional_int(
+            row.get("subscription_category_id")
+        ),
+        "price_monthly_commitment": _coerce_optional_decimal(
+            row.get("price_monthly_commitment")
+        ),
+        "price_annual_monthly_payment": _coerce_optional_decimal(
+            row.get("price_annual_monthly_payment")
+        ),
+        "price_annual_annual_payment": _coerce_optional_decimal(
+            row.get("price_annual_annual_payment")
+        ),
         "duplicate_sku_import": bool(
             _coerce_int(row.get("duplicate_sku_import"), default=0)
         ),
