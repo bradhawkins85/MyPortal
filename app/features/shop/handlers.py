@@ -264,6 +264,11 @@ async def shop_page(
             if parsed_category is not None and parsed_category > 0:
                 category_id = parsed_category
 
+    # Subscription products are not stock-controlled, so the physical-stock
+    # override must not be available on the legacy subscriptions view.
+    if show_subscriptions:
+        show_out_of_stock = False
+
     is_vip = bool(company and int(company.get("is_vip") or 0) == 1)
 
     categories_task = asyncio.create_task(shop_repo.list_categories())

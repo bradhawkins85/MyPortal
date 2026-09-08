@@ -73,16 +73,18 @@
             value="{{ search_term or '' }}"
             data-shop-search
           />
-          <label class="checkbox card__control shop-out-of-stock-toggle">
-            <input
-              type="checkbox"
-              name="showOutOfStock"
-              value="1"
-              {% if show_out_of_stock %}checked{% endif %}
-              data-submit-on-change
-            />
-            <span>Show Out Of Stock Items</span>
-          </label>
+          {% if not show_subscriptions %}
+            <label class="checkbox card__control shop-out-of-stock-toggle">
+              <input
+                type="checkbox"
+                name="showOutOfStock"
+                value="1"
+                {% if show_out_of_stock %}checked{% endif %}
+                data-submit-on-change
+              />
+              <span>Show Out Of Stock Items</span>
+            </label>
+          {% endif %}
         </form>
         {% if not showing_category_cards %}
           <div class="shop-view-toggle" role="group" aria-label="Product display style" data-shop-view-toggle>
@@ -116,13 +118,6 @@
           <span class="shop-tile__body">
             <strong class="shop-tile__title">Featured</strong>
             <span class="shop-tile__meta">Products highlighted for your company</span>
-          </span>
-        </a>
-        <a class="shop-tile shop-tile--special" href="{{ request.url_for('shop_page') }}?category=subscriptions">
-          <span class="shop-tile__media shop-tile__media--icon" aria-hidden="true">🔁</span>
-          <span class="shop-tile__body">
-            <strong class="shop-tile__title">Subscriptions</strong>
-            <span class="shop-tile__meta">Plans grouped by subscription type</span>
           </span>
         </a>
         {% for category in category_cards %}
@@ -213,8 +208,6 @@
                 {% endif %}
                 {% if not is_subscription %}
                   {{ stock_helpers.stock_status_badge(product.stock, low_stock_threshold, product.stock <= 0) }}
-                {% else %}
-                  <span class="status-badge status-badge--success">Available</span>
                 {% endif %}
               </div>
             </div>
