@@ -15,6 +15,7 @@
     function applyView(view, persist) {
       const selectedView = validViews.includes(view) ? view : 'card';
       grid.classList.toggle('shop-card-grid--rows', selectedView === 'row');
+      updateProductTitlesForView(grid, selectedView);
       buttons.forEach((button) => {
         const active = button.getAttribute('data-shop-view') === selectedView;
         button.setAttribute('aria-pressed', String(active));
@@ -479,6 +480,18 @@
       const fullTitle = title.getAttribute('title') || title.textContent || '';
       const minVisibleChars = Number(title.getAttribute('data-min-visible-chars'));
       title.textContent = findSafeTitleTruncation(fullTitle.trim(), 58, minVisibleChars);
+    });
+  }
+
+  function updateProductTitlesForView(container, view) {
+    if (view !== 'row') {
+      truncateSafeProductTitles(container);
+      return;
+    }
+
+    container.querySelectorAll('[data-shop-safe-title]').forEach((title) => {
+      const fullTitle = title.getAttribute('title') || title.textContent || '';
+      title.textContent = fullTitle.trim();
     });
   }
 
