@@ -267,14 +267,23 @@ ensure_pip_package() {
 }
 
 ensure_virtualenv() {
-  if [[ -d "$VENV_DIR" ]]; then
-    return
-  fi
-
   ensure_venv_package
   ensure_pip_package
 
-  "$SYSTEM_PYTHON" -m venv "$VENV_DIR"
+  if [[ -d "$VENV_DIR" ]]; then
+    # The venv already exists. Ensure pip is available inside it; an existing
+    # venv may have been created without pip (e.g. on Debian/Ubuntu before the
+    # python3-pip package was installed, or with --without-pip).
+    local python_bin
+    python_bin=$(venv_python)
+    if [[ -n "$python_bin" ]] && ! "$python_bin" -m pip --version >/dev/null 2>&1; then
+      echo "pip not found in existing virtual environment; bootstrapping via ensurepip…" >&2
+      "$python_bin" -m ensurepip --upgrade
+    fi
+    return
+  fi
+
+  "$SYSTEM_PYTHON" -m venv --upgrade-deps "$VENV_DIR"
   echo "Created virtual environment at ${VENV_DIR}." >&2
 }
 
