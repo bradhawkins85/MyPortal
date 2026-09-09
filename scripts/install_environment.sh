@@ -186,6 +186,126 @@ secure_env_file_permissions() {
   fi
 }
 
+read_env_value() {
+  local key="$1"
+  local default_value="${2:-}"
+
+  if [[ ! -f "$ENV_FILE" ]]; then
+    printf '%s' "$default_value"
+    return
+  fi
+
+  ENV_LOOKUP_KEY="$key" \
+    ENV_LOOKUP_DEFAULT="$default_value" \
+    ENV_LOOKUP_FILE="$ENV_FILE" \
+    "$SYSTEM_PYTHON" - <<'PY'
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+key = os.environ["ENV_LOOKUP_KEY"]
+default = os.environ.get("ENV_LOOKUP_DEFAULT", "")
+env_path = Path(os.environ["ENV_LOOKUP_FILE"])
+
+if not env_path.exists():
+    print(default)
+    raise SystemExit
+
+for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+    stripped = raw_line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in raw_line:
+        continue
+    name, value = raw_line.split("=", 1)
+    if name.strip() != key:
+        continue
+    value = value.strip()
+    if value and len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        value = value[1:-1]
+    print(value)
+    break
+else:
+    print(default)
+PY
+}
+
+install_and_start_systemd_service() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "systemctl not found; skipping systemd service setup." >&2
+    return
+  fi
+
+  if [[ ! -d /run/systemd/system ]]; then
+    echo "systemd is not active on this host; skipping service setup." >&2
+    return
+  fi
+
+  if [[ "${EUID:-$(id -u)}" != "0" ]]; then
+    echo "Installer is not running as root; skipping systemd service setup." >&2
+    echo "Run this installer with sudo to auto-create and start the service." >&2
+    return
+  fi
+
+  local service_name
+  service_name=$(read_env_value "SYSTEMD_SERVICE_NAME" "myportal")
+  service_name=${service_name:-myportal}
+  if [[ "$service_name" != *.service ]]; then
+    service_name="${service_name}.service"
+  fi
+
+  local service_user service_group
+  service_user=$(stat -c '%U' "$PROJECT_ROOT" 2>/dev/null || true)
+  service_group=$(stat -c '%G' "$PROJECT_ROOT" 2>/dev/null || true)
+
+  if [[ -z "$service_user" || "$service_user" == "UNKNOWN" || "$service_user" == "root" ]]; then
+    if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+      service_user="$SUDO_USER"
+    else
+      service_user=$(id -un)
+    fi
+  fi
+
+  if [[ -z "$service_group" || "$service_group" == "UNKNOWN" ]]; then
+    service_group=$(id -gn "$service_user" 2>/dev/null || id -gn)
+  fi
+
+  local unit_path="/etc/systemd/system/${service_name}"
+  cat >"$unit_path" <<UNIT
+[Unit]
+Description=MyPortal customer portal
+After=network-online.target mysql.service redis.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=${service_user}
+Group=${service_group}
+WorkingDirectory=${PROJECT_ROOT}
+EnvironmentFile=${ENV_FILE}
+ExecStart=${PROJECT_ROOT}/scripts/start_with_auto_update.sh ${VENV_DIR}/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+ExecReload=/bin/kill -s HUP \$MAINPID
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=${PROJECT_ROOT}
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+  chmod 644 "$unit_path"
+  systemctl daemon-reload
+  if systemctl enable --now "$service_name"; then
+    echo "Systemd service '${service_name}' is enabled and running." >&2
+  else
+    echo "Warning: Failed to enable/start '${service_name}' automatically." >&2
+    echo "Run: sudo systemctl status ${service_name}" >&2
+  fi
+}
+
 ensure_venv_package() {
   # If the venv module is already available, nothing to do.
   if "$SYSTEM_PYTHON" -m venv --help >/dev/null 2>&1; then
@@ -693,6 +813,7 @@ install_go
 install_sip_client
 ensure_virtualenv
 install_dependencies
+install_and_start_systemd_service
 build_tray_installers
 
 cat <<MESSAGE
@@ -701,5 +822,6 @@ MyPortal ${ENVIRONMENT} environment is ready.
 - Virtualenv: ${VENV_DIR}
 
 Remember to configure system services (e.g. systemd) and run database migrations
-on startup. The application automatically applies migrations during launch.
+if service automation was skipped on this host. The application automatically
+applies migrations during launch.
 MESSAGE

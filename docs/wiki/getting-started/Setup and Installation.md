@@ -101,7 +101,7 @@ sudo scripts/install_development.sh
 
 These scripts:
 - Check and install Python requirements
-- Create systemd services for running as a service
+- Create, enable, and start a `systemd` service (`myportal.service`) when run with `sudo` on a Linux host using `systemd`
 - Pull code from GitHub private repos using credentials from .env
 - Set up appropriate database isolation
 
