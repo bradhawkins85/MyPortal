@@ -227,12 +227,52 @@ ensure_venv_package() {
   echo "${venv_pkg} installed successfully." >&2
 }
 
+ensure_pip_package() {
+  # pip is bundled via ensurepip on most platforms, but on Debian/Ubuntu
+  # it requires the python3-pip system package.  Install it when missing so
+  # the venv gets a working pip.
+  if "$SYSTEM_PYTHON" -m ensurepip --version >/dev/null 2>&1; then
+    return
+  fi
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Error: pip (ensurepip) is not available. Install python3-pip for your distribution and rerun the installer." >&2
+    exit 1
+  fi
+
+  local py_version
+  py_version=$("$SYSTEM_PYTHON" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || true)
+  local pip_pkg="python3-pip"
+  if [[ -n "$py_version" ]]; then
+    pip_pkg="python${py_version}-pip"
+  fi
+
+  echo "pip (ensurepip) not available; installing ${pip_pkg} via apt-get…" >&2
+  if ! apt-get update -qq; then
+    echo "Warning: apt-get update failed." >&2
+  fi
+  if ! apt-get install -y -qq "$pip_pkg" 2>/dev/null; then
+    echo "Warning: Could not install ${pip_pkg}; trying python3-pip…" >&2
+    if ! apt-get install -y -qq python3-pip; then
+      echo "Error: Failed to install a python3-pip package. Install it manually and rerun the installer." >&2
+      exit 1
+    fi
+  fi
+
+  if ! "$SYSTEM_PYTHON" -m ensurepip --version >/dev/null 2>&1; then
+    echo "Error: pip still unavailable after installing ${pip_pkg}." >&2
+    exit 1
+  fi
+  echo "${pip_pkg} installed successfully." >&2
+}
+
 ensure_virtualenv() {
   if [[ -d "$VENV_DIR" ]]; then
     return
   fi
 
   ensure_venv_package
+  ensure_pip_package
 
   "$SYSTEM_PYTHON" -m venv "$VENV_DIR"
   echo "Created virtual environment at ${VENV_DIR}." >&2
