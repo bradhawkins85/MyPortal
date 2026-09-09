@@ -101,6 +101,9 @@ sudo scripts/install_development.sh
 
 These scripts:
 - Check and install Python requirements
+- Install, start, and enable a local MySQL server during production setup when
+  `DB_HOST` is `localhost`, `127.0.0.1`, or `::1`, then create the configured
+  database and least-scoped application account
 - Create systemd services for running as a service
 - Pull code from GitHub private repos using credentials from .env
 - Set up appropriate database isolation
