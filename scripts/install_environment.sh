@@ -671,6 +671,11 @@ ensure_env_secret "TOTP_ENCRYPTION_KEY" 48
 ensure_env_secret "SMTP2GO_WEBHOOK_SECRET" 32
 ensure_env_secret "PLAUSIBLE_PEPPER" 32
 ensure_env_secret "MCP_TOKEN" 32
+if [[ "$ENVIRONMENT" == "production" ]]; then
+  # The production installer owns the local database account, so do not leave
+  # the password shipped in .env.example in place on a new deployment.
+  ensure_env_secret "DB_PASSWORD" 32
+fi
 secure_env_file_permissions
 
 cat <<'REMINDER'
@@ -684,6 +689,10 @@ SECURITY REMINDER:
     whenever an operator with access to the server leaves.
 
 REMINDER
+
+if [[ "$ENVIRONMENT" == "production" ]]; then
+  "${SCRIPT_DIR}/provision_mysql.sh" "$ENV_FILE"
+fi
 
 install_pwsh
 install_exo_module
