@@ -1958,6 +1958,18 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
+    assignment_error = tickets_service.reply_assignment_error(
+        ticket, is_internal=is_internal
+    )
+    if assignment_error:
+        return await main_module._render_ticket_detail(
+            request,
+            current_user,
+            ticket_id=ticket_id,
+            error_message=assignment_error,
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
     status_definitions = await tickets_service.list_status_definitions()
     selectable_status_definitions = [
         definition
