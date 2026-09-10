@@ -101,6 +101,7 @@ sudo scripts/install_development.sh
 
 These scripts:
 - Check and install Python requirements
+- Create, enable, and start a `systemd` service (`myportal.service`) when run with `sudo` on a Linux host using `systemd`
 - Install, start, and enable a local MySQL server during production setup when
   `DB_HOST` is `localhost`, `127.0.0.1`, or `::1`, then create the configured
   database and least-scoped application account
