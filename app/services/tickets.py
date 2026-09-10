@@ -32,7 +32,12 @@ HELPDESK_PERMISSION_KEY = "helpdesk.technician"
 def reply_assignment_error(ticket: Mapping[str, Any], *, is_internal: bool) -> str | None:
     """Return the assignment validation error that prevents a ticket reply."""
     has_company = ticket.get("company_id") is not None
-    has_requester = ticket.get("requester_id") is not None
+    # Staff requesters do not necessarily have a portal user account, so their
+    # assignment is stored in requester_staff_id rather than requester_id.
+    has_requester = (
+        ticket.get("requester_id") is not None
+        or ticket.get("requester_staff_id") is not None
+    )
     if not has_company and not is_internal and not has_requester:
         return "Set a Company and Requester before sending a public reply."
     if not has_company:

@@ -2894,14 +2894,43 @@
   }
 
   function initialiseReplyVisibility() {
-    const internal = document.querySelector('#ticket-reply-form input[name="isInternal"]');
+    const form = document.querySelector('#ticket-reply-form');
+    const internal = form && form.querySelector('input[name="isInternal"]');
     const visibility = document.querySelector('[data-reply-visibility]');
     const submit = document.querySelector('[data-reply-submit-label]');
-    if (!(internal instanceof HTMLInputElement)) return;
+    const error = form && form.querySelector('[data-ticket-reply-error]');
+    if (!(form instanceof HTMLFormElement) || !(internal instanceof HTMLInputElement)) return;
+    const assignmentError = () => {
+      const hasCompany = form.dataset.hasCompany === 'true';
+      const hasRequester = form.dataset.hasRequester === 'true';
+      if (!hasCompany && !internal.checked && !hasRequester) {
+        return 'Set a Company and Requester before sending a public reply.';
+      }
+      if (!hasCompany) {
+        return `Set a Company before ${internal.checked ? 'adding an internal note' : 'sending a public reply'}.`;
+      }
+      if (!internal.checked && !hasRequester) {
+        return 'Set a Requester before sending a public reply.';
+      }
+      return '';
+    };
+    const showError = (message) => {
+      if (!(error instanceof HTMLElement)) return;
+      error.textContent = message;
+      error.hidden = !message;
+    };
     const update = () => {
       if (visibility) visibility.innerHTML = `<strong>Visibility:</strong> ${internal.checked ? 'Internal only' : 'Public reply'}`;
       if (submit) submit.textContent = internal.checked ? 'Add internal note' : 'Send reply';
+      showError(assignmentError());
     };
+    form.addEventListener('submit', (event) => {
+      const message = assignmentError();
+      if (!message) return;
+      event.preventDefault();
+      showError(message);
+      error?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
     internal.addEventListener('change', update);
     update();
   }

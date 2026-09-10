@@ -1966,7 +1966,8 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             request,
             current_user,
             ticket_id=ticket_id,
-            error_message=assignment_error,
+            reply_error=assignment_error,
+            reply_body=body_raw,
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 

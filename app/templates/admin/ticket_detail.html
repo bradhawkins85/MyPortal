@@ -1200,10 +1200,27 @@
               </div>
             </summary>
             <div class="card-collapsible__content">
-            <form id="ticket-reply-form" action="/admin/tickets/{{ ticket.id }}/replies" method="post" class="form card__form ticket-reply-form" enctype="multipart/form-data" data-ticket-reply-cache data-ticket-reply-cache-ticket-id="{{ ticket.id }}">
+            <form
+              id="ticket-reply-form"
+              action="/admin/tickets/{{ ticket.id }}/replies"
+              method="post"
+              class="form card__form ticket-reply-form"
+              enctype="multipart/form-data"
+              data-ticket-reply-cache
+              data-ticket-reply-cache-ticket-id="{{ ticket.id }}"
+              data-has-company="{{ 'true' if ticket.company_id is not none else 'false' }}"
+              data-has-requester="{{ 'true' if ticket.requester_id is not none or ticket.requester_staff_id is not none else 'false' }}"
+            >
               {% if csrf_token %}
                 <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
               {% endif %}
+              <p
+                class="form-error"
+                role="alert"
+                aria-live="assertive"
+                data-ticket-reply-error
+                {% if not reply_error %}hidden{% endif %}
+              >{{ reply_error or '' }}</p>
               <div class="ticket-reply-context" aria-label="Reply delivery details">
                 <span><strong>To:</strong> {{ ticket_requester_lookup_name or 'Requester' }}</span>
                 <span><strong>Channel:</strong> Email</span>
@@ -1321,7 +1338,7 @@
                     aria-labelledby="ticket-reply-label"
                     placeholder="Write your reply..."
                     required
-                  ></textarea>
+                  >{{ reply_body or '' }}</textarea>
                 </div>
               </div>
               <div class="form-field">
