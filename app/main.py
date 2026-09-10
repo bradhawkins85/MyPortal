@@ -9142,6 +9142,8 @@ async def _render_ticket_detail(
     ticket_id: int,
     success_message: str | None = None,
     error_message: str | None = None,
+    reply_error: str | None = None,
+    reply_body: str | None = None,
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
     ticket = await tickets_repo.get_ticket(ticket_id)
@@ -9741,6 +9743,8 @@ async def _render_ticket_detail(
         "merged_child_tickets": merged_child_tickets,
         "success_message": success_message,
         "error_message": error_message,
+        "reply_error": reply_error,
+        "reply_body": reply_body or "",
     }
     response = await _render_template("admin/ticket_detail.html", request, user, extra=extra)
     response.status_code = status_code

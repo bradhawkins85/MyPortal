@@ -38,6 +38,18 @@ def test_requester_phone_field_renders_mobile_and_company_on_separate_lines() ->
     )
 
 
+def test_reply_form_keeps_assignment_errors_and_draft_visible() -> None:
+    template = Path("app/templates/admin/ticket_detail.html").read_text(encoding="utf-8")
+    script = Path("app/static/js/ticket_detail.js").read_text(encoding="utf-8")
+
+    assert 'data-ticket-reply-error' in template
+    assert "{{ reply_body or '' }}" in template
+    assert 'data-has-company=' in template
+    assert 'data-has-requester=' in template
+    assert "event.preventDefault();" in script
+    assert "Set a Requester before sending a public reply." in script
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
