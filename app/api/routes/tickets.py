@@ -1182,6 +1182,11 @@ async def import_syncro_tickets_endpoint(
     "/{ticket_id}/replies",
     response_model=TicketReplyResponse,
     status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "description": "The ticket is billed, the reply is empty, or required Company/Requester assignments are missing."
+        }
+    },
 )
 async def add_reply(
     ticket_id: int,
@@ -1189,6 +1194,7 @@ async def add_reply(
     request: Request,
     actor: dict = Depends(_resolve_ticket_actor),
 ) -> TicketReplyResponse:
+    """Add a reply after validating its ticket assignments and visibility."""
     current_user: dict | None = actor.get("user")
     api_key_record: dict | None = actor.get("api_key")
     session: SessionData | None = getattr(request.state, "session", None)
@@ -1216,6 +1222,15 @@ async def add_reply(
     if current_user:
         has_helpdesk_access = has_helpdesk_access or await _has_helpdesk_permission(
             current_user
+        )
+
+    effective_is_internal = payload.is_internal if has_helpdesk_access else False
+    assignment_error = tickets_service.reply_assignment_error(
+        ticket, is_internal=effective_is_internal
+    )
+    if assignment_error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=assignment_error
         )
 
     author_id = session.user_id if session else None
@@ -1254,7 +1269,7 @@ async def add_reply(
         ticket_id=ticket_id,
         author_id=author_id,
         body=sanitised_body.html,
-        is_internal=payload.is_internal if has_helpdesk_access else False,
+        is_internal=effective_is_internal,
         minutes_spent=payload.minutes_spent if has_helpdesk_access else None,
         is_billable=payload.is_billable if has_helpdesk_access else False,
         labour_type_id=labour_type_id,

@@ -28,6 +28,20 @@ from app.services.realtime import RefreshNotifier, refresh_notifier
 
 HELPDESK_PERMISSION_KEY = "helpdesk.technician"
 
+
+def reply_assignment_error(ticket: Mapping[str, Any], *, is_internal: bool) -> str | None:
+    """Return the assignment validation error that prevents a ticket reply."""
+    has_company = ticket.get("company_id") is not None
+    has_requester = ticket.get("requester_id") is not None
+    if not has_company and not is_internal and not has_requester:
+        return "Set a Company and Requester before sending a public reply."
+    if not has_company:
+        action = "adding an internal note" if is_internal else "sending a public reply"
+        return f"Set a Company before {action}."
+    if not is_internal and not has_requester:
+        return "Set a Requester before sending a public reply."
+    return None
+
 _REPLY_ABOVE_PATTERN = re.compile(
     r"^-{3,}\s*reply\s+above\s+this\s+line\s+to\s+add\s+a\s+comment\s*-{0,}\s*$",
     re.IGNORECASE,
