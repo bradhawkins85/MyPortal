@@ -4,6 +4,7 @@ import secrets
 from typing import Iterable
 
 from fastapi import Request
+from starlette.datastructures import FormData
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
@@ -12,6 +13,12 @@ from app.core.logging import log_warning
 from app.security.session import SessionManager, session_manager
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+# Multipart parsers default to a 1 MiB limit for non-file fields. Rich-text
+# ticket replies can legitimately exceed that when a pasted image is encoded in
+# the ``body`` field before it is persisted as an attachment. Keep the limit
+# bounded while allowing the base64 representation of a maximum-size (50 MiB)
+# ticket attachment plus encoding and markup overhead.
+MAX_CSRF_FORM_PART_SIZE = 70 * 1024 * 1024
 DEFAULT_EXEMPT_PREFIXES = (
     "/auth/login",
     "/auth/register",
@@ -19,6 +26,14 @@ DEFAULT_EXEMPT_PREFIXES = (
     "/auth/password/reset",
     "/api/knowledge-base/search",
 )
+
+
+async def parse_csrf_form(request: Request) -> FormData:
+    """Parse a form with enough bounded capacity for base64 inline images."""
+    try:
+        return await request.form(max_part_size=MAX_CSRF_FORM_PART_SIZE)
+    except TypeError:  # pragma: no cover - compatibility with older Starlette
+        return await request.form()
 
 
 class CSRFMiddleware(BaseHTTPMiddleware):
@@ -79,7 +94,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     # BaseHTTPMiddleware consumes the request stream the first time it is read.
                     # Populate the cached body so downstream handlers still receive the payload.
                     await request.body()
-                    form = await request.form()
+                    form = await parse_csrf_form(request)
                 except Exception:  # pragma: no cover - fall back to header validation on parse errors
                     form = None
                 if form and "_csrf" in form:

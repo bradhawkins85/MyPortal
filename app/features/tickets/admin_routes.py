@@ -36,6 +36,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from app.core.database import db
 from app.core.logging import log_debug, log_error, log_info
 from app.features.tickets.form_helpers import get_last_form_value
+from app.security.csrf import parse_csrf_form
 from app.security.flash import flash_redirect
 from app.repositories import assets as assets_repo
 from app.repositories import automations as automation_repo
@@ -1881,7 +1882,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
     current_user, redirect = await main_module._require_helpdesk_page(request)
     if redirect:
         return redirect
-    form = await request.form()
+    form = await parse_csrf_form(request)
     body_value = form.get("body", "")
     body_raw = str(body_value) if isinstance(body_value, str) else ""
     is_internal = str(form.get("isInternal", "")).lower() in {"1", "true", "on", "yes"}

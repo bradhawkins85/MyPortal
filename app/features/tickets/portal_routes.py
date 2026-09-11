@@ -24,6 +24,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.core.logging import log_error
 from app.features.tickets.form_helpers import get_last_form_value
+from app.security.csrf import parse_csrf_form
 from app.security.flash import flash_redirect
 from app.repositories import ticket_views as ticket_views_repo
 from app.repositories import staff as staff_repo
@@ -324,7 +325,7 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
             status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found"
         )
 
-    form = await request.form()
+    form = await parse_csrf_form(request)
     body = str(form.get("body") or "").strip()
     try:
         body, _inline_attachments = await attachments_service.persist_inline_images_for_ticket_body(
