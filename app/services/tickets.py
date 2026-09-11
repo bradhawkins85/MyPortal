@@ -589,6 +589,7 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
             replies = [record for record in fetched_replies if isinstance(record, Mapping)]
 
     latest_reply: dict[str, Any] | None = None
+    latest_customer_reply: dict[str, Any] | None = None
     initial_body: str | None = None
     if replies:
         for reply_record in replies:
@@ -601,20 +602,45 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
             break
         requester_id = enriched.get("requester_id")
         assigned_user_id = enriched.get("assigned_user_id")
+        customer_author_ids = {
+            value
+            for value in [requester_id, *(watcher.get("user_id") for watcher in watcher_entries)]
+            if value is not None
+        }
+        customer_author_emails = {
+            str(value).strip().casefold()
+            for value in [enriched.get("requester_email"), *watcher_emails]
+            if value and str(value).strip()
+        }
         technician_reply: Mapping[str, Any] | None = None
         technician_author: Mapping[str, Any] | None = None
+        customer_reply: Mapping[str, Any] | None = None
+        customer_author: Mapping[str, Any] | None = None
         for reply_record in reversed(replies):
             if bool(reply_record.get("is_internal")):
                 continue
             author_id = reply_record.get("author_id")
-            if author_id is None or author_id == requester_id:
-                continue
             author_value = (
                 reply_record.get("author")
                 if isinstance(reply_record.get("author"), Mapping)
                 else None
             )
             author_user = await _resolve_user_snapshot(author_value, author_id)
+            author_email = (
+                author_user.get("email") if author_user else reply_record.get("author_email")
+            )
+            normalised_author_email = (
+                str(author_email).strip().casefold() if author_email else None
+            )
+            if customer_reply is None and (
+                author_id in customer_author_ids
+                or normalised_author_email in customer_author_emails
+            ):
+                customer_reply = reply_record
+                customer_author = author_user
+
+            if technician_reply is not None or author_id is None or author_id == requester_id:
+                continue
             permissions = author_user.get("permissions") if author_user else []
             if isinstance(permissions, str):
                 permissions = [permissions]
@@ -626,6 +652,7 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
             if is_technician:
                 technician_reply = reply_record
                 technician_author = author_user
+            if technician_reply is not None and customer_reply is not None:
                 break
         if technician_reply is not None:
             reply = dict(technician_reply)
@@ -636,7 +663,17 @@ async def _enrich_ticket_context(ticket: Mapping[str, Any]) -> TicketRecord:
             reply["author_email"] = snapshot_email or reply.get("author_email")
             reply["author_display_name"] = snapshot_display or reply.get("author_display_name")
             latest_reply = reply
+        if customer_reply is not None:
+            reply = dict(customer_reply)
+            author_snapshot = _build_user_snapshot(customer_author)
+            reply["author"] = author_snapshot
+            snapshot_email = author_snapshot.get("email") if author_snapshot else None
+            snapshot_display = author_snapshot.get("display_name") if author_snapshot else None
+            reply["author_email"] = snapshot_email or reply.get("author_email")
+            reply["author_display_name"] = snapshot_display or reply.get("author_display_name")
+            latest_customer_reply = reply
     enriched["latest_reply"] = latest_reply
+    enriched["latest_customer_reply"] = latest_customer_reply
     if initial_body is None and enriched.get("description") is not None:
         initial_body = str(enriched.get("description"))
     enriched["initial_body"] = initial_body or ""

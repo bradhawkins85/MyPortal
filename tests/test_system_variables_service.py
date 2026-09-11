@@ -109,6 +109,15 @@ def test_system_variables_filter_sensitive_env(monkeypatch):
                     "display_name": "Taylor Nguyen",
                 },
             },
+            "latest_customer_reply": {
+                "id": 556,
+                "ticket_id": 321,
+                "author_id": 15,
+                "body": "The printer is still offline.",
+                "is_internal": False,
+                "author_email": "watcher@example.com",
+                "author_display_name": "Casey Lee",
+            },
         }
     ],
 )
@@ -141,3 +150,5 @@ def test_system_variables_include_ticket_tokens(ticket):
     assert variables["TICKET_WATCHERS_1_EMAIL"] == "second.watcher@example.com"
     assert variables["TICKET_LATEST_REPLY_BODY"] == "We rebooted the printer."
     assert variables["TICKET_LATEST_REPLY_AUTHOR_EMAIL"] == "tech@example.com"
+    assert variables["TICKET_LATEST_CUSTOMER_REPLY_BODY"] == "The printer is still offline."
+    assert variables["TICKET_LATEST_CUSTOMER_REPLY_AUTHOR_EMAIL"] == "watcher@example.com"
