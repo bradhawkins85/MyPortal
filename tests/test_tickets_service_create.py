@@ -558,6 +558,45 @@ async def test_enrich_ticket_context_uses_latest_public_technician_reply(monkeyp
 
     assert enriched["latest_reply"]["body"] == "First technician reply"
     assert enriched["latest_reply"]["id"] == 1
+    assert enriched["latest_customer_reply"]["body"] == "Latest customer reply"
+    assert enriched["latest_customer_reply"]["id"] == 3
+
+
+@pytest.mark.anyio
+async def test_enrich_ticket_context_uses_latest_public_watcher_reply(monkeypatch):
+    ticket = {"id": 99, "requester_id": 7, "assigned_user_id": 11}
+    replies = [
+        {"id": 1, "author_id": 7, "body": "Requester reply", "is_internal": False},
+        {"id": 2, "author_id": 21, "body": "Watcher note", "is_internal": True},
+        {"id": 3, "author_id": 11, "body": "Technician reply", "is_internal": False},
+        {"id": 4, "author_id": 21, "body": "Watcher reply", "is_internal": False},
+    ]
+
+    async def fake_list_replies(ticket_id, include_internal=True):
+        return replies
+
+    async def fake_list_watchers(ticket_id):
+        return [{"id": 1, "ticket_id": ticket_id, "user_id": 21}]
+
+    users = {
+        7: {"id": 7, "email": "requester@example.com"},
+        11: {"id": 11, "email": "tech@example.com", "permissions": ["helpdesk.technician"]},
+        21: {"id": 21, "email": "watcher@example.com", "first_name": "Casey", "last_name": "Lee"},
+    }
+
+    async def fake_get_user_by_id(user_id):
+        return users.get(user_id)
+
+    monkeypatch.setattr(tickets_repo, "list_replies", fake_list_replies)
+    monkeypatch.setattr(tickets_repo, "list_watchers", fake_list_watchers)
+    monkeypatch.setattr(tickets_service.user_repo, "get_user_by_id", fake_get_user_by_id)
+
+    enriched = await tickets_service._enrich_ticket_context(ticket)
+
+    assert enriched["latest_customer_reply"]["id"] == 4
+    assert enriched["latest_customer_reply"]["body"] == "Watcher reply"
+    assert enriched["latest_customer_reply"]["author_email"] == "watcher@example.com"
+    assert enriched["latest_customer_reply"]["author_display_name"] == "Casey Lee"
 
 
 @pytest.mark.anyio
