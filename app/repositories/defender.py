@@ -3,6 +3,22 @@ import json
 from typing import Any
 from app.core.database import db
 
+
+def _antivirus_product_names(details: Any, antivirus_enabled: Any) -> list[str]:
+    if not isinstance(details, dict):
+        return ["Microsoft Defender Antivirus"] if antivirus_enabled else []
+    raw_names = details.get("antivirus_product_names")
+    if isinstance(raw_names, list):
+        names = [str(name).strip() for name in raw_names if str(name).strip()]
+    elif isinstance(raw_names, str) and raw_names.strip():
+        names = [raw_names.strip()]
+    else:
+        fallback = str(details.get("antivirus_product_name") or "").strip()
+        names = [fallback] if fallback else []
+    if not names and (antivirus_enabled or details.get("product_version") or details.get("engine_version")):
+        names = ["Microsoft Defender Antivirus"]
+    return list(dict.fromkeys(names))
+
 async def company_enabled(company_id: int) -> bool:
     row = await db.fetch_one("SELECT defender_enabled FROM companies WHERE id=%s", (company_id,))
     return bool(row and row.get("defender_enabled"))
@@ -35,6 +51,7 @@ async def dashboard(company_id: int) -> tuple[list[dict[str, Any]], list[dict[st
                 details = {}
         history = details.get("scan_history", []) if isinstance(details, dict) else []
         device["last_scan"] = history[0] if history and isinstance(history[0], dict) else None
+        device["antivirus_product_names"] = _antivirus_product_names(details, device.get("antivirus_enabled"))
     exclusions = await db.fetch_all("""SELECT de.*, td.hostname FROM defender_exclusions de
         LEFT JOIN tray_devices td ON td.id=de.tray_device_id
         WHERE de.scope='global' OR de.company_id=%s ORDER BY de.created_at DESC""", (company_id,))

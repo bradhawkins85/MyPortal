@@ -42,7 +42,7 @@
         <td data-label="Device">{{ d.hostname or ('Device #' ~ d.id) }}</td>
         <td data-label="Agent" data-value="{{ 'stale' if d.is_stale else 'online' }}"><span class="status-badge">{{ 'Stale' if d.is_stale else 'Online' }}</span></td>
         <td data-label="Health" data-value="{{ d.health_status or 'unknown' }}"><span class="status-badge">{{ d.health_status or 'Awaiting report' }}</span></td>
-        <td data-label="Antivirus" data-value="{{ 'on' if d.antivirus_enabled else 'off' }}">{{ 'On' if d.antivirus_enabled else 'Off' }}</td>
+        <td data-label="Antivirus" data-value="{{ ((d.antivirus_product_names or [])|join(', ') ~ ' ' ~ ('on' if d.antivirus_enabled else 'off'))|trim }}">{{ 'On' if d.antivirus_enabled else 'Off' }}{% if d.antivirus_product_names %}<br><small>{{ d.antivirus_product_names|join(', ') }}</small>{% endif %}</td>
         <td data-label="Real-time" data-value="{{ 'on' if d.realtime_protection_enabled else 'off' }}">{{ 'On' if d.realtime_protection_enabled else 'Off' }}</td>
         <td data-label="Tamper protection" data-value="{{ 'on' if d.tamper_protection_enabled else 'off' }}">{{ 'On' if d.tamper_protection_enabled else 'Off' }}</td>
         <td data-label="Firewall" data-value="{{ 'on' if d.firewall_domain_enabled and d.firewall_private_enabled and d.firewall_public_enabled else 'off' }}">
