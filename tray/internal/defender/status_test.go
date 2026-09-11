@@ -19,7 +19,7 @@ func TestDecodeStatusAcceptsPowerShellUTF8BOM(t *testing.T) {
             "status": "completed"
         }],
         "health_status": "healthy",
-        "details": {"signature_version": "1.2.3"},
+        "details": {"antivirus_product_names": ["Bitdefender", "Microsoft Defender Antivirus"], "signature_version": "1.2.3"},
         "detections": [{
             "detection_uid": "det-123",
             "threat_name": "Test threat",
@@ -46,6 +46,10 @@ func TestDecodeStatusAcceptsPowerShellUTF8BOM(t *testing.T) {
 	}
 	if len(status.ScanHistory) != 1 || status.ScanHistory[0].ScanType != "quick" {
 		t.Fatalf("unexpected scan history: %+v", status.ScanHistory)
+	}
+	products, ok := status.Details["antivirus_product_names"].([]interface{})
+	if !ok || len(products) != 2 || products[0] != "Bitdefender" || products[1] != "Microsoft Defender Antivirus" {
+		t.Fatalf("unexpected antivirus products: %+v", status.Details["antivirus_product_names"])
 	}
 	if len(status.Detections) != 1 || status.Detections[0].DetectionUID != "det-123" {
 		t.Fatalf("unexpected detections: %+v", status.Detections)

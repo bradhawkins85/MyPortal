@@ -16,6 +16,17 @@ import (
 const statusScript = `$ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $s = Get-MpComputerStatus
+$antivirusProducts = @()
+try {
+  $antivirusProducts = @(Get-CimInstance -Namespace 'root/SecurityCenter2' -ClassName 'AntiVirusProduct' -ErrorAction Stop | ForEach-Object {
+    [string]$_.displayName
+  } | Where-Object { $_ } | Sort-Object -Unique)
+} catch {
+  $antivirusProducts = @()
+}
+if ($antivirusProducts.Count -eq 0 -and ($s.AMProductVersion -or $s.AMEngineVersion -or $s.AntivirusEnabled -or $s.RealTimeProtectionEnabled)) {
+  $antivirusProducts = @('Microsoft Defender Antivirus')
+}
 $firewall = @{}
 Get-NetFirewallProfile -PolicyStore ActiveStore | ForEach-Object { $firewall[$_.Name] = [bool]$_.Enabled }
 $health = if (-not $s.AntivirusEnabled -or -not $s.RealTimeProtectionEnabled) { 'critical' } elseif ($s.AntivirusSignatureAge -gt 7) { 'warning' } else { 'healthy' }
@@ -70,7 +81,7 @@ $detections = @(Get-MpThreatDetection | Where-Object { $_.InitialDetectionTime -
   last_scan_at = if ($lastScan) { $lastScan.ToUniversalTime().ToString('o') } else { $null }
   scan_history = @($scanHistory)
   health_status = $health
-  details = [ordered]@{ engine_version = $s.AMEngineVersion; product_version = $s.AMProductVersion; signature_version = $s.AntivirusSignatureVersion; signature_age_days = $s.AntivirusSignatureAge }
+  details = [ordered]@{ antivirus_product_names = @($antivirusProducts); engine_version = $s.AMEngineVersion; product_version = $s.AMProductVersion; signature_version = $s.AntivirusSignatureVersion; signature_age_days = $s.AntivirusSignatureAge }
   detections = $detections
 } | ConvertTo-Json -Depth 4 -Compress`
 

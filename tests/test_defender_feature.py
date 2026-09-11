@@ -168,6 +168,12 @@ def test_defender_endpoint_table_displays_last_scan_details():
     assert "d.last_scan.duration_seconds" in template
 
 
+def test_defender_endpoint_table_displays_antivirus_product_names():
+    template = Path("app/templates/defender/index.html").read_text()
+    assert "d.antivirus_product_names" in template
+    assert "join(', ')" in template
+
+
 def test_status_report_accepts_recent_scan_history():
     report = DefenderStatusReport(
         scan_history=[{
@@ -367,6 +373,39 @@ def test_defender_device_queries_only_include_windows_agents(monkeypatch):
 
     assert (devices, exclusions, detections) == ([], [], [])
     assert "LOWER(td.os)='windows'" in queries[0]
+
+
+def test_defender_dashboard_parses_multiple_antivirus_product_names(monkeypatch):
+    async def fetch_all(sql, _params):
+        if "FROM tray_devices td LEFT JOIN defender_device_status ds" in sql:
+            return [{
+                "id": 7,
+                "asset_id": None,
+                "hostname": "PC-07",
+                "last_seen_utc": None,
+                "health_status": "critical",
+                "antivirus_enabled": False,
+                "realtime_protection_enabled": True,
+                "tamper_protection_enabled": True,
+                "firewall_domain_enabled": True,
+                "firewall_private_enabled": True,
+                "firewall_public_enabled": True,
+                "signatures_updated_at": None,
+                "last_scan_at": None,
+                "threat_count": 0,
+                "details_json": "{\"antivirus_product_names\": [\"Bitdefender\", \"Microsoft Defender Antivirus\"]}",
+                "updated_at": None,
+                "is_stale": 0,
+            }]
+        return []
+
+    monkeypatch.setattr(defender_repo.db, "fetch_all", fetch_all)
+
+    devices, exclusions, detections = asyncio.run(defender_repo.dashboard(42))
+
+    assert exclusions == []
+    assert detections == []
+    assert devices[0]["antivirus_product_names"] == ["Bitdefender", "Microsoft Defender Antivirus"]
 
 
 def test_defender_reporting_migration_excludes_non_windows_agents():
