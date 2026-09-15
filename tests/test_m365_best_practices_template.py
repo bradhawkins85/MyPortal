@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from jinja2 import ChoiceLoader, DictLoader, Environment, FileSystemLoader
@@ -144,7 +145,10 @@ def test_global_stat_strip_counts_all_benchmarks():
     assert '<span class="stat-strip__stat-label">Failed</span>' in html
     assert '<span class="stat-strip__stat-label">Unknown</span>' in html
     assert '<span class="stat-strip__stat-label">Not Applicable</span>' in html
-    assert html.count('<span class="stat-strip__stat-value">1</span>') == 4
+    assert re.search(r'Passed</span>\s*<span class="stat-strip__stat-value">1</span>', html)
+    assert re.search(r'Failed</span>\s*<span class="stat-strip__stat-value">1</span>', html)
+    assert re.search(r'Unknown</span>\s*<span class="stat-strip__stat-value">1</span>', html)
+    assert re.search(r'Not Applicable</span>\s*<span class="stat-strip__stat-value">1</span>', html)
     assert "CIS Intune Benchmark – Windows" in html
     assert "CIS Intune Benchmark – iOS / iPadOS" in html
     assert "CIS Intune Benchmark – macOS" not in html
