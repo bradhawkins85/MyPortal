@@ -6035,7 +6035,7 @@ async def test_remediate_per_user_mfa_allows_report_only_conditional_access():
     async def fake_safe_get(_token: str, url: str):
         if url == user_1_url:
             return {"perUserMfaState": "enabled"}
-        return {"perUserMfaState": "disabled"}
+        raise AssertionError(f"unexpected requirements URL: {url}")
 
     async def fake_patch(_token: str, url: str, payload: dict) -> dict:
         patched.append((url, payload))
