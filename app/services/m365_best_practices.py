@@ -5701,6 +5701,13 @@ async def set_enabled_checks(
         create_ticket_filtered = {
             cid for cid in create_ticket_on_fail_check_ids if cid in catalog
         }
+    else:
+        existing_settings = await bp_repo.get_settings_map()
+        create_ticket_filtered = {
+            cid
+            for cid, row in existing_settings.items()
+            if cid in catalog and row.get("create_ticket_on_fail")
+        }
     for bp in _BEST_PRACTICES:
         check_id = bp["id"]
         is_enabled = check_id in enabled_filtered

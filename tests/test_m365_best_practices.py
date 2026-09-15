@@ -521,6 +521,11 @@ async def test_set_enabled_checks_persists_each_check_and_clears_disabled_result
 
     with (
         patch(
+            "app.services.m365_best_practices.bp_repo.get_settings_map",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
             "app.services.m365_best_practices.bp_repo.upsert_setting",
             new_callable=AsyncMock,
         ) as mock_upsert,
@@ -544,6 +549,11 @@ async def test_set_enabled_checks_persists_each_check_and_clears_disabled_result
 async def test_set_enabled_checks_ignores_unknown_check_ids():
     """Unknown check_ids in the input are silently ignored."""
     with (
+        patch(
+            "app.services.m365_best_practices.bp_repo.get_settings_map",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
         patch(
             "app.services.m365_best_practices.bp_repo.upsert_setting",
             new_callable=AsyncMock,
@@ -1516,6 +1526,11 @@ async def test_set_enabled_checks_persists_auto_remediate_flag():
 
     with (
         patch(
+            "app.services.m365_best_practices.bp_repo.get_settings_map",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
             "app.services.m365_best_practices.bp_repo.upsert_setting",
             side_effect=lambda **kw: upserted.append(kw) or None,
         ),
@@ -1547,6 +1562,11 @@ async def test_set_enabled_checks_none_auto_remediate_defaults_to_false():
     upserted: list[dict] = []
 
     with (
+        patch(
+            "app.services.m365_best_practices.bp_repo.get_settings_map",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
         patch(
             "app.services.m365_best_practices.bp_repo.upsert_setting",
             side_effect=lambda **kw: upserted.append(kw) or None,
@@ -1622,6 +1642,40 @@ async def test_set_enabled_checks_persists_create_ticket_on_fail_flag():
     other = next((c for c in upserted if c["check_id"] != selected_id), None)
     assert other is not None
     assert other["create_ticket_on_fail"] is False
+
+
+@pytest.mark.anyio("asyncio")
+async def test_set_enabled_checks_preserves_create_ticket_on_fail_when_omitted():
+    """set_enabled_checks preserves existing create_ticket_on_fail flags when omitted."""
+    selected_id = bp_service.list_best_practices()[0]["id"]
+    upserted: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.bp_repo.get_settings_map",
+            new_callable=AsyncMock,
+            return_value={
+                selected_id: {
+                    "enabled": True,
+                    "auto_remediate": False,
+                    "create_ticket_on_fail": True,
+                }
+            },
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.upsert_setting",
+            side_effect=lambda **kw: upserted.append(kw) or None,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.delete_result_for_check",
+            new_callable=AsyncMock,
+        ),
+    ):
+        await bp_service.set_enabled_checks({selected_id})
+
+    selected_call = next((c for c in upserted if c["check_id"] == selected_id), None)
+    assert selected_call is not None
+    assert selected_call["create_ticket_on_fail"] is True
 
 
 @pytest.mark.anyio("asyncio")
