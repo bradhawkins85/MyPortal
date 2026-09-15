@@ -73,8 +73,10 @@ from app.services.cis_benchmark import (
 from app.services.m365 import (
     M365Error,
     _acquire_exo_access_token,
+    _acquire_scc_access_token,
     _coerce_exo_bool,
     _exo_invoke_command,
+    _scc_invoke_command,
     _graph_get,
     _graph_get_all,
     _graph_delete,
@@ -2210,6 +2212,157 @@ async def _check_two_emergency_access_accounts(token: str) -> dict[str, Any]:
                    "Create at least two dedicated break-glass accounts.")
 
 
+# Name used when creating (and identifying) the MyPortal-managed protection alert policy.
+_BREAK_GLASS_ALERT_POLICY_NAME = "MyPortal – Break Glass Account Sign-In Alert"
+
+
+async def _check_break_glass_alert_policy(scc_token: str, tenant_id: str) -> dict[str, Any]:
+    """Check whether a protection alert policy exists for break-glass account sign-ins.
+
+    Uses ``Get-ProtectionAlert`` via the Security & Compliance PowerShell REST API
+    to look for the MyPortal-managed alert policy.  Returns PASS if the policy is
+    present and enabled, FAIL if it is absent or disabled, and UNKNOWN if the query
+    cannot be completed.
+    """
+    check_id = "bp_break_glass_alert_policy"
+    check_name = "Break-glass account sign-in alert policy is configured"
+    try:
+        data = await _scc_invoke_command(scc_token, tenant_id, "Get-ProtectionAlert")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query protection alert policies: {exc}")
+    policies = data.get("value") or []
+    for policy in policies:
+        if not isinstance(policy, dict):
+            continue
+        if str(policy.get("Name") or "").strip() == _BREAK_GLASS_ALERT_POLICY_NAME:
+            if policy.get("Disabled") is True:
+                return _result(check_id, check_name, STATUS_FAIL,
+                               f"Protection alert policy '{_BREAK_GLASS_ALERT_POLICY_NAME}' exists "
+                               "but is disabled. Enable it to receive break-glass sign-in alerts.")
+            return _result(check_id, check_name, STATUS_PASS,
+                           f"Protection alert policy '{_BREAK_GLASS_ALERT_POLICY_NAME}' is present "
+                           "and active. Technicians will be notified by email when a break-glass "
+                           "account signs in.")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   f"No protection alert policy named '{_BREAK_GLASS_ALERT_POLICY_NAME}' was found. "
+                   "Use the automated remediation to create it, or create it manually in the "
+                   "Microsoft Defender portal (Policies & rules → Alert policy).")
+
+
+async def _remediate_break_glass_alert_policy(
+    graph_token: str, scc_token: str, tenant_id: str
+) -> tuple[bool, str]:
+    """Create a protection alert policy that emails technicians when a break-glass account signs in.
+
+    Steps:
+    1. Check whether the policy already exists; if so, ensure it is enabled.
+    2. Discover MyPortal-managed break-glass account UPNs from the Global Administrator role.
+    3. Create ``New-ProtectionAlert`` scoped to those accounts via the SCC REST API.
+
+    Returns ``(True, message)`` on success and ``(False, message)`` on failure.
+    """
+    # 1. Check whether the policy already exists.
+    try:
+        existing = await _scc_invoke_command(scc_token, tenant_id, "Get-ProtectionAlert")
+    except M365Error as exc:
+        return False, f"Unable to query existing alert policies: {exc}"
+
+    for policy in (existing.get("value") or []):
+        if not isinstance(policy, dict):
+            continue
+        if str(policy.get("Name") or "").strip() == _BREAK_GLASS_ALERT_POLICY_NAME:
+            if policy.get("Disabled") is True:
+                # Re-enable the existing policy instead of creating a duplicate.
+                try:
+                    await _scc_invoke_command(
+                        scc_token, tenant_id, "Set-ProtectionAlert",
+                        {"Identity": _BREAK_GLASS_ALERT_POLICY_NAME, "Disabled": False},
+                    )
+                    return True, (
+                        f"Protection alert policy '{_BREAK_GLASS_ALERT_POLICY_NAME}' was already "
+                        "present but disabled – it has been re-enabled."
+                    )
+                except M365Error as exc:
+                    return False, f"Unable to re-enable alert policy: {exc}"
+            return True, (
+                f"Protection alert policy '{_BREAK_GLASS_ALERT_POLICY_NAME}' already exists "
+                "and is enabled; no changes were made."
+            )
+
+    # 2. Find MyPortal-managed break-glass account UPNs via Graph.
+    try:
+        roles = await _graph_get(
+            graph_token,
+            "https://graph.microsoft.com/v1.0/directoryRoles"
+            "?$filter=displayName eq 'Global Administrator'&$select=id",
+        )
+    except M365Error as exc:
+        return False, f"Unable to enumerate directory roles: {exc}"
+
+    role_values = roles.get("value") or []
+    if not role_values:
+        return False, "The Global Administrator directory role is not activated in this tenant."
+
+    try:
+        members = await _graph_get_all(
+            graph_token,
+            f"https://graph.microsoft.com/v1.0/directoryRoles/{role_values[0]['id']}/members"
+            "?$select=id,userPrincipalName,onPremisesSyncEnabled,accountEnabled",
+        )
+    except M365Error as exc:
+        return False, f"Unable to enumerate Global Administrator members: {exc}"
+
+    break_glass_upns = [
+        str(m.get("userPrincipalName") or "")
+        for m in (members or [])
+        if isinstance(m, dict)
+        and "myportal-emergency-admin" in str(m.get("userPrincipalName") or "").lower()
+        and m.get("accountEnabled")
+        and not m.get("onPremisesSyncEnabled")
+    ]
+
+    if not break_glass_upns:
+        return False, (
+            "No MyPortal-managed break-glass accounts (UPN containing 'myportal-emergency-admin') "
+            "were found in the Global Administrator role. Run the 'Maintain 2–4 Global "
+            "Administrators' remediation first to create them, then re-run this remediation."
+        )
+
+    # 3. Build the alert filter and create the policy.
+    # The filter expression matches any of the discovered break-glass accounts.
+    filter_parts = " OR ".join(f"User:{upn}" for upn in break_glass_upns)
+
+    try:
+        await _scc_invoke_command(
+            scc_token, tenant_id, "New-ProtectionAlert",
+            {
+                "Name": _BREAK_GLASS_ALERT_POLICY_NAME,
+                "Operation": ["UserLoggedIn"],
+                "Category": "AccessGovernance",
+                "Severity": "High",
+                "Disabled": False,
+                "Filter": filter_parts,
+                "NotifyUser": ["TenantAdmins"],
+                "AggregationType": "None",
+                "Comment": (
+                    "Created by MyPortal. Sends an email to all tenant admins whenever "
+                    "a MyPortal-managed break-glass (emergency access) Global Administrator "
+                    "account signs in. Review any sign-in immediately."
+                ),
+            },
+        )
+    except M365Error as exc:
+        return False, f"Unable to create protection alert policy: {exc}"
+
+    accounts_list = ", ".join(break_glass_upns)
+    return True, (
+        f"Protection alert policy '{_BREAK_GLASS_ALERT_POLICY_NAME}' created successfully. "
+        f"Monitoring sign-ins for: {accounts_list}. "
+        "Tenant admins will receive an email alert whenever one of these accounts signs in."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Exchange Online check runners (real auto-detection)
 # ---------------------------------------------------------------------------
@@ -3809,6 +3962,28 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "graph",
         "default_enabled": True,
         "has_remediation": False,
+    },
+    {
+        "id": "bp_break_glass_alert_policy",
+        "name": "Break-glass account sign-in alert policy is configured",
+        "description": (
+            "An alert policy should be in place so that technicians are notified by email "
+            "whenever a break-glass (emergency access) Global Administrator account signs in. "
+            "Unexpected use of these accounts may indicate a security incident. "
+            "Alert policies are evaluated against the unified audit log via the Microsoft Defender portal."
+        ),
+        "remediation": (
+            "In the Microsoft Defender portal go to Policies & rules → Alert policy → New alert policy. "
+            "Set Operation to 'User logged in', Category to 'Access governance', Severity to 'High', "
+            "scope the policy to your break-glass account UPNs, and add your on-call technicians "
+            "as notification recipients. Alternatively use the automated remediation to create the "
+            "policy automatically for MyPortal-managed break-glass accounts."
+        ),
+        "source": _check_break_glass_alert_policy,
+        "source_type": "scc",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_type": "break_glass_alert_policy",
     },
     # ------------------------------------------------------------------
     # Exchange Online (real auto-detection via EXO REST)
@@ -5503,6 +5678,10 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
     exo_token: str | None = None
     exo_tenant_id: str | None = None
 
+    # SCC token/tenant – acquired lazily on first SCC (Security & Compliance) check
+    scc_token: str | None = None
+    scc_tenant_id: str | None = None
+
     # Cache for CIS batch group results: group_name → {check_id: result_dict}
     cis_group_cache: dict[str, dict[str, dict[str, Any]]] = {}
 
@@ -5582,6 +5761,14 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
                             company_id=company_id,
                             check_id=check_id,
                         )
+                elif source_type == "scc":
+                    if scc_token is None:
+                        scc_token, scc_tenant_id = await _acquire_scc_access_token(company_id)
+                    raw = await _call_check_with_retry(
+                        lambda r=runner: r(scc_token, scc_tenant_id),  # type: ignore[call-arg,misc]
+                        company_id=company_id,
+                        check_id=check_id,
+                    )
                 else:
                     if bp.get("uses_company_email_domains"):
                         email_domains = await companies_repo.get_email_domains_for_company(company_id)
@@ -5773,6 +5960,13 @@ async def run_single_check(
                         company_id=company_id,
                         check_id=check_id,
                     )
+            elif source_type == "scc":
+                scc_tok, scc_tid = await _acquire_scc_access_token(company_id)
+                raw = await _call_check_with_retry(
+                    lambda r=runner: r(scc_tok, scc_tid),  # type: ignore[call-arg,misc]
+                    company_id=company_id,
+                    check_id=check_id,
+                )
             else:
                 if bp.get("uses_company_email_domains"):
                     email_domains = await companies_repo.get_email_domains_for_company(company_id)
@@ -6119,7 +6313,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     database, and returns a result dict with ``success`` (bool) and ``message``
     (str) keys.
 
-    Supports five remediation patterns:
+    Supports six remediation patterns:
 
     * ``source_type="exo"`` – executes a single cmdlet via the Exchange Online
       REST API using the ``remediation_cmdlet`` and ``remediation_params``
@@ -6136,6 +6330,9 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     * ``source_type="graph"`` with
       ``remediation_type="create_dynamic_guest_group"`` – creates the standard
       ``Guest Users`` dynamic security group if one does not already exist.
+    * ``source_type="scc"`` with ``remediation_type="break_glass_alert_policy"`` –
+      creates (or re-enables) a Microsoft Purview protection alert policy that
+      emails tenant admins whenever a MyPortal-managed break-glass account signs in.
     """
     bp = _catalog_map().get(check_id)
     if not bp or not bp.get("has_remediation"):
@@ -6274,6 +6471,50 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                     error=str(exc),
                 )
                 success = False
+    elif source_type == "scc":
+        failure_message = ""
+        try:
+            scc_tok, scc_tid = await _acquire_scc_access_token(company_id)
+        except M365Error as exc:
+            log_error(
+                "M365 best practice remediation – SCC token acquisition failed",
+                company_id=company_id,
+                check_id=check_id,
+                error=str(exc),
+            )
+            await bp_repo.update_remediation_status(
+                company_id=company_id,
+                check_id=check_id,
+                remediation_status="failed",
+                remediated_at=remediated_at,
+            )
+            return {
+                "success": False,
+                "message": (
+                    "Unable to acquire Security & Compliance token. "
+                    "Check that the app credentials and permissions are correct."
+                ),
+            }
+        if bp.get("remediation_type") == "break_glass_alert_policy":
+            try:
+                graph_token_scc = await acquire_access_token(
+                    company_id, force_client_credentials=True
+                )
+                success, failure_message = await _remediate_break_glass_alert_policy(
+                    graph_token_scc, scc_tok, scc_tid
+                )
+            except Exception as exc:
+                log_error(
+                    "M365 break-glass alert policy remediation failed",
+                    company_id=company_id,
+                    check_id=check_id,
+                    error=str(exc),
+                )
+                success = False
+                failure_message = str(exc)
+        else:
+            success = False
+            failure_message = "Unknown SCC remediation type."
     else:
         success = False
 
