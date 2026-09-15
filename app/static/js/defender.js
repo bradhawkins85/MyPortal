@@ -28,9 +28,32 @@ document.addEventListener('DOMContentLoaded', () => {
     if (event.key === 'Escape') closeModal(document.querySelector('.modal:not([hidden])'));
   });
   document.querySelector('#defender-exclusion-form')?.addEventListener('submit', async (event) => {
-    event.preventDefault(); const data = Object.fromEntries(new FormData(event.currentTarget));
+    event.preventDefault(); const form = event.currentTarget; const data = Object.fromEntries(new FormData(form));
     data.tray_device_id = data.tray_device_id ? Number(data.tray_device_id) : null;
-    try { await send('/api/defender/exclusions', { method: 'POST', body: JSON.stringify(data) }); location.reload(); } catch (error) { alert(error.message); }
+    try {
+      const result = await send('/api/defender/exclusions', { method: 'POST', body: JSON.stringify(data) });
+      const tbody = document.querySelector('#defender-exclusions-table tbody');
+      const emptyRow = tbody?.querySelector('td[colspan="5"]')?.closest('tr');
+      emptyRow?.remove();
+      if (tbody) {
+        const row = document.createElement('tr');
+        const values = [data.scope, data.exclusion_type, data.value,
+          data.tray_device_id ? form.elements.tray_device_id.selectedOptions[0]?.textContent.trim() : 'All'];
+        values.forEach((value, index) => {
+          const cell = row.insertCell();
+          if (index === 2) { const code = document.createElement('code'); code.textContent = value; cell.append(code); }
+          else cell.textContent = value;
+        });
+        const actionCell = row.insertCell();
+        const remove = document.createElement('button');
+        remove.type = 'button'; remove.className = 'button button--danger button--small';
+        remove.dataset.deleteExclusion = result.id; remove.textContent = 'Remove';
+        actionCell.append(remove); tbody.append(row);
+      }
+      form.elements.value.value = '';
+      const status = document.querySelector('[data-defender-exclusion-status]');
+      if (status) status.textContent = 'Exclusion added.';
+    } catch (error) { alert(error.message); }
   });
   document.querySelectorAll('[data-defender-settings-form]').forEach((form) => form.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -44,10 +67,17 @@ document.addEventListener('DOMContentLoaded', () => {
       .forEach((name) => { data[name] = Boolean(document.querySelector(`[name="${name}"]`)?.checked); });
     try { await send('/api/defender/settings', { method: 'PUT', body: JSON.stringify(data) }); location.reload(); } catch (error) { alert(error.message); }
   }));
-  document.querySelectorAll('[data-delete-exclusion]').forEach((button) => button.addEventListener('click', async () => {
+  document.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-delete-exclusion]');
+    if (!button) return;
     if (!confirm('Remove this Defender exclusion?')) return;
-    try { await send(`/api/defender/exclusions/${button.dataset.deleteExclusion}`, { method: 'DELETE' }); location.reload(); } catch (error) { alert(error.message); }
-  }));
+    try {
+      await send(`/api/defender/exclusions/${button.dataset.deleteExclusion}`, { method: 'DELETE' });
+      button.closest('tr')?.remove();
+      const status = document.querySelector('[data-defender-exclusion-status]');
+      if (status) status.textContent = 'Exclusion removed.';
+    } catch (error) { alert(error.message); }
+  });
   const itemMarkup = '<div class="form-grid" data-exclusion-list-item><label>Type<select name="exclusion_type"><option value="path">Path</option><option value="process">Process</option><option value="extension">Extension</option><option value="registry">Registry path</option></select></label><label>Value<input name="value" required maxlength="1000"></label><button class="button button--ghost" type="button" data-remove-list-item>Remove</button></div>';
   document.querySelectorAll('[data-add-list-item]').forEach((button) => button.addEventListener('click', () => {
     button.closest('form').querySelector('[data-exclusion-list-items]').insertAdjacentHTML('beforeend', itemMarkup);

@@ -274,6 +274,23 @@ def test_defender_ui_exposes_management_workflows():
     assert 'counter_strip([' in template
 
 
+def test_firewall_action_is_available_even_before_profiles_are_reported():
+    template = Path("app/templates/defender/index.html").read_text()
+    action = 'data-defender-command="enable_firewall"'
+    assert action in template
+    assert "d.firewall_domain_enabled is sameas false" not in template
+
+
+def test_exclusion_changes_update_the_open_modal_without_reloading():
+    script = Path("app/static/js/defender.js").read_text()
+    assert "tbody.append(row)" in script
+    assert "button.closest('tr')?.remove()" in script
+    add_section = script[script.index("#defender-exclusion-form"):script.index("[data-defender-settings-form]")]
+    delete_section = script[script.index("[data-delete-exclusion]"):script.index("const itemMarkup")]
+    assert "location.reload()" not in add_section
+    assert "location.reload()" not in delete_section
+
+
 def test_defender_exclusion_list_payload_supports_reusable_types_and_companies():
     payload = DefenderExclusionListCreate(name="  Standard apps  ", exclusions=[
         {"exclusion_type": "path", "value": r"C:\Trusted"},

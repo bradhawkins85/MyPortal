@@ -95,8 +95,11 @@ async def update_settings(company_id: int, payload: Any) -> None:
        payload.auto_ticket_realtime_off, payload.auto_ticket_tamper_off,
        payload.auto_ticket_threat_detected, company_id))
 
-async def add_exclusion(scope: str, company_id: int, device_id: int | None, kind: str, value: str, user_id: int) -> None:
-    await db.execute("INSERT INTO defender_exclusions (scope,company_id,tray_device_id,exclusion_type,value,created_by_user_id) VALUES (%s,%s,%s,%s,%s,%s)", (scope, None if scope == 'global' else company_id, device_id if scope == 'device' else None, kind, value, user_id))
+async def add_exclusion(scope: str, company_id: int, device_id: int | None, kind: str, value: str, user_id: int) -> int:
+    return await db.execute_returning_lastrowid(
+        "INSERT INTO defender_exclusions (scope,company_id,tray_device_id,exclusion_type,value,created_by_user_id) VALUES (%s,%s,%s,%s,%s,%s)",
+        (scope, None if scope == 'global' else company_id, device_id if scope == 'device' else None, kind, value, user_id),
+    )
 
 async def delete_exclusion(exclusion_id: int, company_id: int, super_admin: bool) -> None:
     sql = ("DELETE FROM defender_exclusions WHERE id=%s AND (scope='global' OR company_id=%s)"
