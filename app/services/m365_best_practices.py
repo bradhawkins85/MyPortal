@@ -6013,12 +6013,16 @@ async def run_best_practices(
     - has ``auto_remediate`` enabled globally (and ``has_remediation: True``)
 
     will have automated remediation triggered immediately.
+    Callers that reset stored results before running checks should pass
+    ``previous_statuses`` captured before that reset so pass→fail ticket
+    detection uses the pre-run state.
 
     Graph-based checks receive the Graph access token; Exchange-Online-based
     checks (``source_type == "exo"``) receive the EXO token and tenant ID
     acquired once lazily.  CIS Intune checks (``cis_group`` set) are run via
     their batch runner once per group and results cached for the run.
     """
+    previous_statuses = dict(previous_statuses or {})
     # Best-practice Graph checks are designed around application permissions.
     # Always use an app-only token to avoid reusing a cached delegated token
     # that may not carry equivalent privileges (e.g. AuditLog.Read.All).
@@ -6071,17 +6075,6 @@ async def run_best_practices(
     enabled = await get_enabled_check_ids()
     auto_remediate_ids = await get_auto_remediate_check_ids()
     create_ticket_on_fail_ids = await get_create_ticket_on_fail_check_ids()
-    if previous_statuses is None:
-        previous_statuses = {}
-        if create_ticket_on_fail_ids:
-            previous_rows = await get_last_results(company_id)
-            previous_statuses = {
-                str(row.get("check_id")): (
-                    str(row.get("status")) if row.get("status") is not None else None
-                )
-                for row in previous_rows
-                if row.get("check_id")
-            }
     try:
         excluded = await bp_repo.get_company_exclusions(company_id)
     except Exception as exc:  # noqa: BLE001 – exclusion lookup must never break the runner
