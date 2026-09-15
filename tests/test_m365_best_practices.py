@@ -4934,8 +4934,8 @@ async def test_remediate_antiphish_domain_safety_tip_success():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_remediate_antiphish_domain_safety_tip_requires_domain_protection():
-    """Domain safety-tip remediation should fail clearly when no policy can support it."""
+async def test_remediate_antiphish_domain_safety_tip_auto_enables_domain_protection():
+    """When no policy has domain protection enabled, the default policy is auto-configured."""
     upserts: list[dict] = []
     invocations: list[dict] = []
 
@@ -4951,7 +4951,7 @@ async def test_remediate_antiphish_domain_safety_tip_requires_domain_protection(
                     }
                 ]
             }
-        raise AssertionError(f"unexpected cmdlet invocation: {cmdlet}")
+        return {}
 
     with (
         patch(
@@ -4972,14 +4972,16 @@ async def test_remediate_antiphish_domain_safety_tip_requires_domain_protection(
             company_id=10, check_id="bp_antiphish_domain_impersonation_safety_tip"
         )
 
-    assert result["success"] is False
-    assert result["message"] == (
-        "Remediation command failed: Automated remediation requires an anti-phishing policy "
-        "with domain impersonation protection enabled. Configure organization-domain or "
-        "targeted-domain protection first, then retry."
-    )
-    assert [entry["cmdlet"] for entry in invocations] == ["Get-AntiPhishPolicy"]
-    assert upserts[0]["remediation_status"] == "failed"
+    assert result["success"] is True
+    cmdlets = [entry["cmdlet"] for entry in invocations]
+    assert cmdlets == ["Get-AntiPhishPolicy", "Set-AntiPhishPolicy", "Set-AntiPhishPolicy"]
+    # Second call enables organization-domain protection on the default policy.
+    assert invocations[1]["params"]["Identity"] == "Office365 AntiPhish Default"
+    assert invocations[1]["params"]["EnableOrganizationDomainsProtection"] is True
+    # Third call sets the safety-tip on the default policy.
+    assert invocations[2]["params"]["Identity"] == "Office365 AntiPhish Default"
+    assert invocations[2]["params"]["EnableSimilarDomainsSafetyTips"] is True
+    assert upserts[0]["remediation_status"] == "success"
 
 
 @pytest.mark.anyio("asyncio")
