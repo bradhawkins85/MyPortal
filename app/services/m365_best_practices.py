@@ -6806,13 +6806,42 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             try:
                 success = await _remediate_create_dynamic_guest_group(graph_token)
             except M365Error as exc:
+                granted = False
+                if exc.http_status == 403:
+                    try:
+                        delegated_token = await acquire_delegated_token(company_id)
+                        if delegated_token:
+                            granted = await try_grant_missing_permissions(
+                                company_id, access_token=delegated_token
+                            )
+                    except Exception as grant_exc:  # noqa: BLE001 – preserve original Graph error
+                        log_error(
+                            "M365 best practice Graph remediation permission repair failed",
+                            company_id=company_id,
+                            check_id=check_id,
+                            error=str(grant_exc),
+                        )
+
+                if granted:
+                    try:
+                        graph_token = await acquire_access_token(
+                            company_id, force_client_credentials=True
+                        )
+                        success = await _remediate_create_dynamic_guest_group(graph_token)
+                    except M365Error as retry_exc:
+                        exc = retry_exc
+                        success = False
+                else:
+                    success = False
+
                 log_error(
                     "M365 best practice dynamic guest group remediation failed",
                     company_id=company_id,
                     check_id=check_id,
                     error=str(exc),
                 )
-                success = False
+                if not success:
+                    failure_message = str(exc)
         elif check_id == "bp_authenticator_mfa_fatigue":
             try:
                 success, failure_message = await _remediate_authenticator_mfa_fatigue(
