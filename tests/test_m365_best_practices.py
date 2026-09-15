@@ -523,7 +523,7 @@ async def test_remediate_weak_auth_methods_disabled_waits_for_graph_consistency(
         {"state": "disabled"},
     )
     sleep.assert_awaited_once()
-    assert graph_get.await_count == 3 * (sleep.await_count + 1)
+    assert graph_get.await_count == 6
     assert update_status.await_args.kwargs["remediation_status"] == "success"
 
 
