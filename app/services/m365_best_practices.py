@@ -3201,6 +3201,9 @@ async def _check_quarantine_notification_enabled(
         return _result(check_id, check_name, STATUS_UNKNOWN,
                        "No global quarantine policy was returned.")
     policy = _select_global_quarantine_policy(rows)
+    if not policy:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No global quarantine policy was returned.")
     if policy.get("ESNEnabled") is not True:
         return _result(check_id, check_name, STATUS_FAIL,
                        "The global quarantine policy has notifications disabled.")
@@ -3234,7 +3237,7 @@ def _select_global_quarantine_policy(rows: list[Any]) -> dict[str, Any]:
     if name_matches:
         return name_matches[0]
 
-    return policies[0]
+    return {}
 
 
 _BEST_PRACTICES: list[dict[str, Any]] = [
