@@ -319,8 +319,6 @@ async def test_remediate_internal_phishing_forms_waits_for_graph_consistency():
 
 @pytest.mark.anyio("asyncio")
 async def test_remediate_internal_phishing_forms_fails_when_graph_does_not_confirm():
-    upserts: list[dict] = []
-
     with (
         patch(
             "app.services.m365_best_practices.acquire_access_token",
@@ -343,8 +341,8 @@ async def test_remediate_internal_phishing_forms_fails_when_graph_does_not_confi
         ) as sleep,
         patch(
             "app.services.m365_best_practices.bp_repo.update_remediation_status",
-            side_effect=lambda **kw: upserts.append(kw) or None,
-        ),
+            new_callable=AsyncMock,
+        ) as update_status,
     ):
         result = await bp_service.remediate_check(
             company_id=7, check_id="bp_internal_phishing_forms"
@@ -353,7 +351,7 @@ async def test_remediate_internal_phishing_forms_fails_when_graph_does_not_confi
     assert result["success"] is False
     assert "did not confirm the updated Forms phishing protection setting" in result["message"]
     assert sleep.await_count == bp_service._FORMS_PHISHING_VERIFICATION_ATTEMPTS - 1
-    assert upserts[0]["remediation_status"] == "failed"
+    assert update_status.await_args.kwargs["remediation_status"] == "failed"
 
 
 # ---------------------------------------------------------------------------
