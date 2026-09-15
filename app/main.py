@@ -3506,7 +3506,7 @@ async def _load_m365_best_practices_context(request: Request, *, super_admin_onl
 
 
 def _is_valid_m365_best_practice_check_id(check_id: str) -> bool:
-    return bool(re.fullmatch(r"[a-z0-9_]+", str(check_id or "").strip()))
+    return bool(re.fullmatch(r"[a-z0-9_]+", check_id.strip()))
 
 
 def _can_edit_m365_best_practice_notes(user: dict[str, Any], membership: dict[str, Any] | None) -> bool:

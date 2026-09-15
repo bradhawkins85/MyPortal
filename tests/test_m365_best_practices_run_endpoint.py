@@ -15,7 +15,9 @@ from app.main import app, scheduler_service
 
 
 def _decode_flash_cookie(response) -> dict[str, str]:
-    raw_cookie = response.headers.get("set-cookie", "").split("_flash=", 1)[1].split(";", 1)[0]
+    cookie_header = response.headers.get("set-cookie", "")
+    assert "_flash=" in cookie_header
+    raw_cookie = cookie_header.split("_flash=", 1)[1].split(";", 1)[0]
     signed = base64.b64decode(raw_cookie.encode("utf-8")).decode("utf-8")
     payload = signed.rsplit("|", 1)[0]
     return json.loads(payload)
