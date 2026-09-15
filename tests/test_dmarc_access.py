@@ -46,6 +46,7 @@ def test_dmarc_context_allows_write_role_to_manage(monkeypatch):
 def test_dmarc_page_does_not_load_reporting_addresses(monkeypatch):
     user = {"id": 7, "company_id": 42, "is_super_admin": False}
     render = AsyncMock(return_value="response")
+    forensic_reports = AsyncMock(return_value=[])
     monkeypatch.setattr(
         routes, "_context_with_access", AsyncMock(return_value=(user, 42, True))
     )
@@ -58,6 +59,7 @@ def test_dmarc_page_does_not_load_reporting_addresses(monkeypatch):
     monkeypatch.setattr(
         routes.repo, "organization_summary", AsyncMock(return_value=[])
     )
+    monkeypatch.setattr(routes.repo, "list_forensic_reports", forensic_reports)
     reporting_addresses = AsyncMock(return_value=["dmarc@example.com"])
     monkeypatch.setattr(
         routes.dmarc, "company_reporting_addresses", reporting_addresses
@@ -66,9 +68,50 @@ def test_dmarc_page_does_not_load_reporting_addresses(monkeypatch):
 
     assert asyncio.run(routes.page(SimpleNamespace())) == "response"
     reporting_addresses.assert_not_awaited()
+    forensic_reports.assert_awaited_once()
     extra = render.await_args.kwargs["extra"]
     assert "can_manage_dmarc" not in extra
     assert "reporting_addresses" not in extra
+    assert extra["forensic_failures"] == []
+
+
+def test_dmarc_page_loads_rejected_or_quarantined_forensic_reports(monkeypatch):
+    user = {"id": 7, "company_id": 42, "is_super_admin": False}
+    render = AsyncMock(return_value="response")
+    monkeypatch.setattr(
+        routes, "_context_with_access", AsyncMock(return_value=(user, 42, True))
+    )
+    monkeypatch.setattr(
+        routes.repo,
+        "policy_domains",
+        AsyncMock(return_value=[{"domain": "example.com"}]),
+    )
+    monkeypatch.setattr(
+        routes.repo,
+        "overview",
+        AsyncMock(return_value={"total_messages": 0, "forensic_reports": 2}),
+    )
+    monkeypatch.setattr(
+        routes.repo, "organization_summary", AsyncMock(return_value=[])
+    )
+    forensic_reports = AsyncMock(return_value=[{"original_mail_from": "sender@example.com"}])
+    monkeypatch.setattr(routes.repo, "list_forensic_reports", forensic_reports)
+    monkeypatch.setattr(routes, "_main", lambda: SimpleNamespace(_render_template=render))
+
+    assert asyncio.run(routes.page(SimpleNamespace(), policy_domain="example.com")) == "response"
+    forensic_reports.assert_awaited_once()
+    assert forensic_reports.await_args.args == (42,)
+    assert forensic_reports.await_args.kwargs["limit"] == 25
+    assert forensic_reports.await_args.kwargs["reported_domain"] == "example.com"
+    assert forensic_reports.await_args.kwargs["rejected_or_quarantined_only"] is True
+    assert (
+        render.await_args.kwargs["extra"]["forensic_failures"][0]["original_mail_from"]
+        == "sender@example.com"
+    )
+    assert (
+        render.await_args.kwargs["extra"]["forensic_failures"][0]["occurred_at_iso"]
+        is None
+    )
 
 
 def test_dmarc_template_hides_removed_and_empty_sections():
@@ -77,6 +120,7 @@ def test_dmarc_template_hides_removed_and_empty_sections():
     assert "Reporting addresses" not in template
     assert "Disposition statistics" in template
     assert "Forensic detail availability" in template
+    assert "Recent rejected or quarantined forensic reports" in template
     assert (
         "{% if (metrics.total_messages or 0) > 0 or "
         "(metrics.forensic_reports or 0) > 0 %}"

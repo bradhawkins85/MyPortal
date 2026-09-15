@@ -291,16 +291,34 @@ async def overview(
 
 
 async def list_forensic_reports(
-    company_id: int, *, start: Any, end: Any, limit: int = 50, offset: int = 0
+    company_id: int,
+    *,
+    start: Any,
+    end: Any,
+    limit: int = 50,
+    offset: int = 0,
+    reported_domain: str | None = None,
+    rejected_or_quarantined_only: bool = False,
 ) -> list[dict[str, Any]]:
-    return await db.fetch_all(
-        """SELECT id,feedback_type,user_agent,report_version,arrival_at,source_ip,reported_domain,
+    params: list[Any] = [company_id, start, end]
+    query = """SELECT id,feedback_type,user_agent,report_version,arrival_at,source_ip,reported_domain,
         delivery_result,auth_failure,authentication_results,original_mail_from,original_rcpt_to,
         dkim_domain,dkim_selector,identity_alignment,created_at
         FROM dmarc_forensic_reports WHERE company_id=%s
-        AND COALESCE(arrival_at,created_at) >= %s AND COALESCE(arrival_at,created_at) < %s
-        ORDER BY COALESCE(arrival_at,created_at) DESC,id DESC LIMIT %s OFFSET %s""",
-        (company_id, start, end, min(max(limit, 1), 250), max(offset, 0)),
+        AND COALESCE(arrival_at,created_at) >= %s AND COALESCE(arrival_at,created_at) < %s"""
+    if reported_domain is not None:
+        query += """
+        AND reported_domain=%s"""
+        params.append(reported_domain)
+    if rejected_or_quarantined_only:
+        query += """
+        AND LOWER(COALESCE(delivery_result,'')) IN ('reject','quarantine')"""
+    query += """
+        ORDER BY COALESCE(arrival_at,created_at) DESC,id DESC LIMIT %s OFFSET %s"""
+    params.extend([min(max(limit, 1), 250), max(offset, 0)])
+    return await db.fetch_all(
+        query,
+        tuple(params),
     )
 
 

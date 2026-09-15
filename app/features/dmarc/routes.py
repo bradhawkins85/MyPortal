@@ -89,6 +89,15 @@ async def page(
     organizations = await repo.organization_summary(
         company_id, range_start, range_end, policy_domain
     )
+    forensic_failures = await repo.list_forensic_reports(
+        company_id,
+        start=range_start,
+        end=range_end,
+        limit=25,
+        reported_domain=policy_domain,
+        rejected_or_quarantined_only=True,
+    )
+    forensic_failures = [_serialize_forensic_failure(item) for item in forensic_failures]
     return await _main()._render_template(
         "dmarc/index.html",
         request,
@@ -103,8 +112,22 @@ async def page(
             "filter_end": end,
             "policy_domain": policy_domain,
             "policy_domains": domains,
+            "forensic_failures": forensic_failures,
         },
     )
+
+
+def _serialize_forensic_failure(item: dict) -> dict:
+    occurred_at = item.get("arrival_at") or item.get("created_at")
+    return {
+        **item,
+        "occurred_at": occurred_at,
+        "occurred_at_iso": (
+            occurred_at.isoformat()
+            if hasattr(occurred_at, "isoformat")
+            else str(occurred_at) if occurred_at else None
+        ),
+    }
 
 
 @router.get("/api/dmarc/overview")

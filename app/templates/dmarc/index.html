@@ -51,11 +51,29 @@
   </tbody></table></div>
 </section>
 {% endif %}
+{% if forensic_failures %}
+<section class="card"><h2>Recent rejected or quarantined forensic reports</h2>
+  <p>Sender and recipient values are only shown when the reporting provider included them in the DMARC forensic report.</p>
+  <div class="table-wrapper"><table class="table"><thead><tr><th>When</th><th>Result</th><th>Reported domain</th><th>Sender</th><th>Recipient</th><th>Source IP</th><th>Failure</th></tr></thead><tbody>
+    {% for item in forensic_failures %}
+    <tr>
+      <td>{% if item.occurred_at %}<time data-utc="{{ item.occurred_at_iso }}">{{ item.occurred_at }}</time>{% else %}Unknown{% endif %}</td>
+      <td>{{ item.delivery_result|capitalize if item.delivery_result else 'Unknown' }}</td>
+      <td>{{ item.reported_domain or 'Unknown' }}</td>
+      <td>{{ item.original_mail_from or 'Not provided' }}</td>
+      <td>{{ item.original_rcpt_to or 'Not provided' }}</td>
+      <td>{{ item.source_ip or 'Not provided' }}</td>
+      <td>{{ item.auth_failure or 'Not provided' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
 <section class="card"><h2>Summary by organization</h2>
   <div class="table-wrapper"><table class="table"><thead><tr><th>Organization</th><th>Volume</th><th>Compliant</th><th>Non-compliant</th><th>Compliance rate</th><th>SPF pass</th><th>SPF fail</th><th>DKIM pass</th><th>DKIM fail</th><th>Unauthenticated</th><th>Disposition: none</th><th>Disposition: quarantine</th><th>Disposition: reject</th><th>Disposition: other</th></tr></thead>
   <tbody>{% for organization in organizations %}<tr><td>{{ organization.organization }}</td><td>{{ organization.volume }}</td><td>{{ organization.compliant }}</td><td>{{ organization.non_compliant }}</td><td>{{ '%.2f'|format(organization.compliance_rate) }}%</td><td>{{ organization.spf_pass }}</td><td>{{ organization.spf_fail }}</td><td>{{ organization.dkim_pass }}</td><td>{{ organization.dkim_fail }}</td><td>{{ organization.unauthenticated }}</td><td>{{ organization.disposition_none }}</td><td>{{ organization.disposition_quarantine }}</td><td>{{ organization.disposition_reject }}</td><td>{{ organization.disposition_other }}</td></tr>{% else %}<tr><td colspan="14" class="table__empty">No DMARC reports were received in this date range.</td></tr>{% endfor %}</tbody></table></div>
 </section>
 {% if (metrics.total_messages or 0) > 0 or (metrics.forensic_reports or 0) > 0 %}
-<section class="card"><h2>Reports</h2><p>Aggregate RUA records include source IP, disposition, and aligned SPF/DKIM results. Forensic RUF records include the failure type, source IP, reported domain, delivery result, authentication results, and available envelope and DKIM details.</p><p>Use <code>/api/dmarc/records</code> for aggregate data and <code>/api/dmarc/forensic-reports</code> for forensic failures in the selected date range.</p></section>
+<section class="card"><h2>Reports</h2><p>Aggregate RUA records include source IP, disposition, and aligned SPF/DKIM results, but they do not reliably contain full sender or recipient addresses. Forensic RUF records can include the failure type, source IP, reported domain, delivery result, authentication results, and available sender, recipient, envelope, and DKIM details.</p><p>Use <code>/api/dmarc/records</code> for aggregate data and <code>/api/dmarc/forensic-reports</code> for forensic failures in the selected date range.</p></section>
 {% endif %}
 {% endblock %}
