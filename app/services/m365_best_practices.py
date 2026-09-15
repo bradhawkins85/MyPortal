@@ -3230,7 +3230,6 @@ async def _check_quarantine_notification_enabled(
             exo_token,
             tenant_id,
             "Get-QuarantinePolicy",
-            {"QuarantinePolicyType": "GlobalQuarantinePolicy"},
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -3239,7 +3238,10 @@ async def _check_quarantine_notification_enabled(
     if not rows:
         return _result(check_id, check_name, STATUS_UNKNOWN,
                        "No global quarantine policy was returned.")
-    policy = next((row for row in rows if isinstance(row, dict)), {})
+    policy = _select_global_quarantine_policy(rows)
+    if not policy:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No global quarantine policy was returned.")
     if policy.get("ESNEnabled") is not True:
         return _result(check_id, check_name, STATUS_FAIL,
                        "The global quarantine policy has notifications disabled.")
@@ -3250,6 +3252,30 @@ async def _check_quarantine_notification_enabled(
                        "it should be one day.")
     return _result(check_id, check_name, STATUS_PASS,
                    "The global quarantine policy has notifications enabled with a daily frequency.")
+
+
+def _select_global_quarantine_policy(rows: list[Any]) -> dict[str, Any] | None:
+    """Select the best global quarantine policy row from Get-QuarantinePolicy results."""
+    policies = [row for row in rows if isinstance(row, dict)]
+    if not policies:
+        return None
+
+    typed_matches = [
+        row for row in policies
+        if str(row.get("QuarantinePolicyType") or "").strip().lower() == "globalquarantinepolicy"
+    ]
+    if typed_matches:
+        built_in = next((row for row in typed_matches if row.get("IsBuiltInPolicy") is True), None)
+        return built_in or typed_matches[0]
+
+    name_matches = [
+        row for row in policies
+        if str(row.get("Identity") or row.get("Name") or "").strip().lower() == "globalquarantinepolicy"
+    ]
+    if name_matches:
+        return name_matches[0]
+
+    return None
 
 
 _BEST_PRACTICES: list[dict[str, Any]] = [
@@ -4732,9 +4758,9 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": True,
+        "remediation_type": "global_quarantine_policy_exo",
         "remediation_cmdlet": "Set-QuarantinePolicy",
         "remediation_params": {
-            "Identity": "GlobalQuarantinePolicy",
             "ESNEnabled": True,
             "EndUserSpamNotificationFrequency": "1.00:00:00",
         },
@@ -6563,7 +6589,43 @@ async def _remediate_matching_antiphish_policies(
     for identity in targets:
         params = dict(base_params)
         params["Identity"] = identity
+        try:
+            await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
+        except M365Error as exc:
+            return False, str(exc)
+    return True, ""
+
+
+async def _remediate_global_quarantine_policy(
+    exo_token: str,
+    tenant_id: str,
+    cmdlet: str,
+    base_params: dict[str, Any],
+) -> tuple[bool, str]:
+    """Apply remediation to the tenant's current global quarantine policy identity."""
+    try:
+        data = await _exo_invoke_command(
+            exo_token,
+            tenant_id,
+            "Get-QuarantinePolicy",
+        )
+    except M365Error as exc:
+        return False, f"Unable to query Get-QuarantinePolicy: {exc}"
+
+    rows = data.get("value") or []
+    policy = _select_global_quarantine_policy(rows)
+    if not policy:
+        return False, "Unable to determine the global quarantine policy identity."
+    identity = str(policy.get("Identity") or policy.get("Name") or "").strip()
+    if not identity:
+        return False, "Unable to determine the global quarantine policy identity."
+
+    params = dict(base_params)
+    params["Identity"] = identity
+    try:
         await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
+    except M365Error as exc:
+        return False, str(exc)
     return True, ""
 
 
@@ -6748,6 +6810,12 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                     error=str(exc),
                 )
                 success = False
+        elif bp.get("remediation_type") == "global_quarantine_policy_exo":
+            cmdlet = bp.get("remediation_cmdlet", "")
+            params = bp.get("remediation_params") or {}
+            success, failure_message = await _remediate_global_quarantine_policy(
+                exo_token, tenant_id, cmdlet, params
+            )
         else:
             cmdlet = bp.get("remediation_cmdlet", "")
             params = bp.get("remediation_params") or {}

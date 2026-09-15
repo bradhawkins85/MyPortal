@@ -3013,7 +3013,6 @@ async def test_check_quarantine_notification_enabled_pass():
         "token",
         "tenant-id",
         "Get-QuarantinePolicy",
-        {"QuarantinePolicyType": "GlobalQuarantinePolicy"},
     )
 
 
@@ -3072,8 +3071,8 @@ def test_quarantine_notification_remediation_uses_quarantine_policy():
         if bp["id"] == "bp_quarantine_notification_enabled"
     )
     assert entry["remediation_cmdlet"] == "Set-QuarantinePolicy"
+    assert entry["remediation_type"] == "global_quarantine_policy_exo"
     assert entry["remediation_params"] == {
-        "Identity": "GlobalQuarantinePolicy",
         "ESNEnabled": True,
         "EndUserSpamNotificationFrequency": "1.00:00:00",
     }
@@ -3093,6 +3092,61 @@ async def test_check_quarantine_notification_unknown_on_error():
 
     assert result["status"] == "unknown"
     assert "EXO unavailable" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_quarantine_notification_resolves_global_policy_identity():
+    """Quarantine remediation targets the resolved global policy identity from EXO."""
+    upserts: list[dict] = []
+    invocations: list[dict] = []
+
+    async def fake_exo_invoke(token, tenant_id, cmdlet, params=None):
+        invocations.append({"cmdlet": cmdlet, "params": params})
+        if cmdlet == "Get-QuarantinePolicy":
+            return {
+                "value": [
+                    {
+                        "Name": "NonGlobalPolicy",
+                        "QuarantinePolicyType": "AdminOnlyAccessPolicy",
+                    },
+                    {
+                        "Name": "GlobalQuarantinePolicy EU",
+                        "QuarantinePolicyType": "GlobalQuarantinePolicy",
+                        "ESNEnabled": False,
+                        "EndUserSpamNotificationFrequency": "3.00:00:00",
+                    }
+                ]
+            }
+        return {}
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-abc"),
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            side_effect=fake_exo_invoke,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=10, check_id="bp_quarantine_notification_enabled"
+        )
+
+    assert result["success"] is True
+    assert upserts[0]["remediation_status"] == "success"
+    assert invocations[0]["cmdlet"] == "Get-QuarantinePolicy"
+    assert invocations[1]["cmdlet"] == "Set-QuarantinePolicy"
+    assert invocations[1]["params"] == {
+        "Identity": "GlobalQuarantinePolicy EU",
+        "ESNEnabled": True,
+        "EndUserSpamNotificationFrequency": "1.00:00:00",
+    }
 
 
 def test_quarantine_notification_in_catalog():
