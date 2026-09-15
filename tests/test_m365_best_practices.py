@@ -5354,6 +5354,89 @@ async def test_remediate_dynamic_guest_group_is_idempotent():
     post.assert_not_awaited()
 
 
+@pytest.mark.anyio("asyncio")
+async def test_remediate_check_dynamic_guest_group_retries_after_permission_repair():
+    upserts: list[dict] = []
+    first_exc = M365Error("Microsoft Graph POST failed (403): denied", http_status=403)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            side_effect=["graph-token-1", "graph-token-2"],
+        ),
+        patch(
+            "app.services.m365_best_practices._remediate_create_dynamic_guest_group",
+            new_callable=AsyncMock,
+            side_effect=[first_exc, True],
+        ) as remediate_group,
+        patch(
+            "app.services.m365_best_practices.acquire_delegated_token",
+            new_callable=AsyncMock,
+            return_value="delegated-token",
+        ),
+        patch(
+            "app.services.m365_best_practices.try_grant_missing_permissions",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as grant_permissions,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=10, check_id="bp_dynamic_group_for_guests"
+        )
+
+    assert result["success"] is True
+    assert remediate_group.await_count == 2
+    assert remediate_group.await_args_list[0].args == ("graph-token-1",)
+    assert remediate_group.await_args_list[1].args == ("graph-token-2",)
+    grant_permissions.assert_awaited_once_with(10, access_token="delegated-token")
+    assert upserts[0]["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_check_dynamic_guest_group_returns_graph_error_details():
+    upserts: list[dict] = []
+    graph_exc = M365Error("Microsoft Graph POST failed (403): denied", http_status=403)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._remediate_create_dynamic_guest_group",
+            new_callable=AsyncMock,
+            side_effect=graph_exc,
+        ),
+        patch(
+            "app.services.m365_best_practices.acquire_delegated_token",
+            new_callable=AsyncMock,
+            return_value="delegated-token",
+        ),
+        patch(
+            "app.services.m365_best_practices.try_grant_missing_permissions",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=10, check_id="bp_dynamic_group_for_guests"
+        )
+
+    assert result["success"] is False
+    assert result["message"] == "Remediation command failed: Microsoft Graph POST failed (403): denied"
+    assert upserts[0]["remediation_status"] == "failed"
+
+
 def test_internal_keys_hide_remediation_type_and_mailbox_params():
     """remediation_type and remediation_mailbox_params must be stripped from public catalog."""
     public = bp_service.list_best_practices()
