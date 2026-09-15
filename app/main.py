@@ -3734,6 +3734,8 @@ async def submit_m365_best_practice_ticket(request: Request, check_id: str):
         return redirect
     if not _is_valid_m365_best_practice_check_id(check_id):
         return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
+    if not _can_submit_m365_best_practice_tickets(user, company_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     if check_id not in {bp["id"] for bp in m365_best_practices_service.list_best_practices()}:
         return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
 
@@ -3743,8 +3745,6 @@ async def submit_m365_best_practice_ticket(request: Request, check_id: str):
         return flash_redirect("/m365/best-practices", "This check has not been evaluated yet", "error")
     if result.get("status") != m365_best_practices_service.STATUS_FAIL:
         return flash_redirect("/m365/best-practices", "Support tickets can only be created for failed checks", "error")
-    if not _can_submit_m365_best_practice_tickets(user, company_id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     external_reference = m365_best_practices_service.build_failure_ticket_external_reference(
         company_id, check_id
