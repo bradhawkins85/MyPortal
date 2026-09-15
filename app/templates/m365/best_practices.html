@@ -35,6 +35,24 @@
     outline-offset: 2px;
     transform: translateY(-2px);
   }
+  .bp-history__score {
+    align-items: center;
+    display: flex;
+    gap: var(--space-2);
+    min-width: 10rem;
+  }
+  .bp-history__track {
+    background: var(--color-surface-muted);
+    border-radius: 999px;
+    height: 0.5rem;
+    min-width: 5rem;
+    overflow: hidden;
+    width: 100%;
+  }
+  .bp-history__fill {
+    background: var(--color-primary);
+    height: 100%;
+  }
 </style>
 {% endblock %}
 
@@ -216,6 +234,65 @@
     {% endif %}
   </section>
   {% endif %}
+
+  <section class="panel">
+    <header class="panel__header">
+      <div>
+        <h3 class="panel__title">Security posture history</h3>
+        <p class="text-muted" style="margin:var(--space-1) 0 0">Daily UTC snapshots are updated whenever best-practice checks run.</p>
+      </div>
+    </header>
+    {% if history %}
+      {{ table_toolbar(
+        'bp-history-table',
+        search=true,
+        search_placeholder='Filter history',
+        search_name='q-bp-history',
+        extra_class='bp-table-toolbar'
+      ) }}
+      <div class="panel__body" style="padding:0;overflow:auto">
+        <table class="table" id="bp-history-table" data-table data-table-id="m365-best-practices-history">
+          <thead>
+            <tr>
+              <th data-column-key="date" data-sort="date">Snapshot date (UTC)</th>
+              <th data-column-key="pass" data-sort="number">Pass</th>
+              <th data-column-key="fail" data-sort="number">Fail</th>
+              <th data-column-key="unknown" data-sort="number">Unknown</th>
+              <th data-column-key="not-applicable" data-sort="number">Not Applicable</th>
+              <th data-column-key="secure-score" data-sort="number">Microsoft Secure Score</th>
+              <th data-column-key="recorded" data-sort="date">Last updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for snapshot in history %}
+            <tr>
+              <td data-column-key="date" data-value="{{ snapshot.snapshot_date }}">{{ snapshot.snapshot_date }}</td>
+              <td data-column-key="pass" data-value="{{ snapshot.pass_count }}"><span class="status status--success">{{ snapshot.pass_count }}</span></td>
+              <td data-column-key="fail" data-value="{{ snapshot.fail_count }}"><span class="status status--danger">{{ snapshot.fail_count }}</span></td>
+              <td data-column-key="unknown" data-value="{{ snapshot.unknown_count }}"><span class="status status--warning">{{ snapshot.unknown_count }}</span></td>
+              <td data-column-key="not-applicable" data-value="{{ snapshot.not_applicable_count }}"><span class="status status--neutral">{{ snapshot.not_applicable_count }}</span></td>
+              <td data-column-key="secure-score" data-value="{{ snapshot.secure_score_percentage if snapshot.secure_score_percentage is not none else '' }}">
+                {% if snapshot.secure_score_percentage is not none %}
+                <div class="bp-history__score" title="{{ snapshot.secure_score }} of {{ snapshot.secure_score_max }} points">
+                  <div class="bp-history__track" aria-hidden="true"><div class="bp-history__fill" style="width:{{ [snapshot.secure_score_percentage, 100] | min }}%"></div></div>
+                  <strong>{{ snapshot.secure_score_percentage }}%</strong>
+                </div>
+                {% else %}
+                <span class="text-muted">Unavailable</span>
+                {% endif %}
+              </td>
+              <td data-column-key="recorded" data-value="{{ snapshot.recorded_at.isoformat() if snapshot.recorded_at else '' }}">
+                {% if snapshot.recorded_at %}<span data-utc="{{ snapshot.recorded_at.isoformat() }}">{{ snapshot.recorded_at.isoformat() }}</span>{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="panel__body"><p class="text-muted">No history has been recorded yet. Run an evaluation to create today's snapshot.</p></div>
+    {% endif %}
+  </section>
 
   {# ------------------------------------------------------------------ #}
   {# CIS Intune Windows section                                           #}

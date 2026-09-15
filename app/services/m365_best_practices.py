@@ -6118,6 +6118,11 @@ async def get_last_results(company_id: int) -> list[dict[str, Any]]:
     return out
 
 
+async def get_daily_history(company_id: int) -> list[dict[str, Any]]:
+    """Return the company's daily best-practice and Secure Score snapshots."""
+    return await bp_repo.list_daily_history(company_id)
+
+
 async def _remediate_foreach_mailbox(
     exo_token: str,
     tenant_id: str,
