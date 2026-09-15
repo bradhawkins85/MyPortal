@@ -152,9 +152,10 @@ _PROVISION_APP_ROLES: list[str] = [
     # - GET /v1.0/reports/authenticationMethods/userRegistrationDetails
     # - GET /beta/users/{id}/authentication/requirements
     "38d9df27-64da-44fd-b7c5-a6fbac20248f",  # UserAuthenticationMethod.Read.All
-    # Microsoft Forms tenant settings (required for bp_internal_phishing_forms check):
-    # - GET /beta/admin/forms/settings
-    "434d7c66-07c6-4b1f-ab21-417cf2cdaaca",  # OrgSettings-Forms.Read.All
+    # Microsoft Forms tenant settings (required for the
+    # bp_internal_phishing_forms check and its PATCH remediation):
+    # - GET/PATCH /beta/admin/forms/settings
+    "2cb92fee-97a3-4034-8702-24a6f5d0d1e9",  # OrgSettings-Forms.ReadWrite.All
 ]
 
 def get_required_app_role_ids() -> list[str]:
@@ -247,7 +248,7 @@ _GRAPH_ROLE_NAMES: dict[str, str] = {
     "9492366f-7969-46a4-8d15-ed1a20078fff": "Sites.ReadWrite.All",
     "62a82d76-70ea-41e2-9197-370581804d09": "Group.ReadWrite.All",
     "38d9df27-64da-44fd-b7c5-a6fbac20248f": "UserAuthenticationMethod.Read.All",
-    "434d7c66-07c6-4b1f-ab21-417cf2cdaaca": "OrgSettings-Forms.Read.All",
+    "2cb92fee-97a3-4034-8702-24a6f5d0d1e9": "OrgSettings-Forms.ReadWrite.All",
 }
 
 
