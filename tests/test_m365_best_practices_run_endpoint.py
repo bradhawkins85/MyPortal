@@ -95,6 +95,11 @@ def test_run_best_practices_resets_to_unknown_before_queueing(monkeypatch):
     monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
     monkeypatch.setattr(
         main_module.m365_best_practices_service,
+        "get_create_ticket_on_fail_check_ids",
+        AsyncMock(return_value={"bp_test"}),
+    )
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
         "get_last_results",
         fake_last_results,
     )

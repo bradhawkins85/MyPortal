@@ -3579,14 +3579,19 @@ async def run_m365_best_practices(request: Request):
         return redirect
 
     user_id = user.get("id")
-    previous_results = await m365_best_practices_service.get_last_results(company_id)
-    previous_statuses = {
-        str(result.get("check_id")): (
-            str(result.get("status")) if result.get("status") is not None else None
-        )
-        for result in previous_results
-        if result.get("check_id")
-    }
+    previous_statuses: dict[str, str | None] = {}
+    create_ticket_on_fail_ids = (
+        await m365_best_practices_service.get_create_ticket_on_fail_check_ids()
+    )
+    if create_ticket_on_fail_ids:
+        previous_results = await m365_best_practices_service.get_last_results(company_id)
+        previous_statuses = {
+            str(result.get("check_id")): (
+                str(result.get("status")) if result.get("status") is not None else None
+            )
+            for result in previous_results
+            if result.get("check_id")
+        }
     reset_count = await m365_best_practices_service.reset_enabled_results_to_unknown(company_id)
 
     def _on_complete(_results: list[dict]) -> None:
