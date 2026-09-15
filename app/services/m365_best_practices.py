@@ -7168,9 +7168,10 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
         failure_message = "Unknown remediation source type."
 
     remediation_status = "success" if success else "failed"
-    remediation_failure_reason = None
-    if remediation_status == "failed":
-        remediation_failure_reason = failure_message or generic_failure_reason
+    remediation_failure_reason = (
+        None if remediation_status == "success"
+        else failure_message or generic_failure_reason
+    )
     await bp_repo.update_remediation_status(
         company_id=company_id,
         check_id=check_id,
