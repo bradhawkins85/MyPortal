@@ -126,6 +126,112 @@
     return `${label}${metaParts.length ? `<div class="agent-sources__meta">${metaParts.join('<br />')}</div>` : ''}`;
   }
 
+  function formatPackageSource(item) {
+    const sku = item.sku ? escapeHtml(item.sku) : null;
+    const name = escapeHtml(item.name || (sku ? sku : 'Package'));
+    const description = item.description ? escapeHtml(item.description) : null;
+    const productCount = typeof item.product_count === 'number' ? item.product_count : Number.parseInt(item.product_count, 10);
+    const label = sku ? `[${sku}] ${name}` : name;
+    const metaParts = [];
+    if (!Number.isNaN(productCount) && Number.isFinite(productCount)) {
+      const count = Math.max(0, productCount);
+      metaParts.push(`Includes ${count} ${count === 1 ? 'item' : 'items'}`);
+    }
+    if (description) metaParts.push(description);
+    return `${label}${metaParts.length ? `<div class="agent-sources__meta">${metaParts.join('<br />')}</div>` : ''}`;
+  }
+
+  function formatChatSource(item) {
+    const id = escapeHtml(item.id || item.source_id);
+    const subject = escapeHtml(item.subject || item.title || `Chat #${id}`);
+    const status = escapeHtml(item.status || 'unknown');
+    const summary = escapeHtml(item.summary || item.excerpt || '');
+    const ticket = item.linked_ticket_id ? ` • Ticket #${escapeHtml(item.linked_ticket_id)}` : '';
+    return `[#${id}] ${subject}<div class="agent-sources__meta">Status: ${status}${ticket}${summary ? `<br />${summary}` : ''}</div>`;
+  }
+
+  function formatOrderSource(item) {
+    const number = escapeHtml(item.order_number || item.source_id || 'Order');
+    const status = escapeHtml(item.status || 'unknown');
+    const shipping = item.shipping_status ? ` • Shipping: ${escapeHtml(item.shipping_status)}` : '';
+    const po = item.po_number ? ` • PO: ${escapeHtml(item.po_number)}` : '';
+    const summary = escapeHtml(item.summary || item.notes || '');
+    return `[${number}]<div class="agent-sources__meta">Status: ${status}${shipping}${po}${summary ? `<br />${summary}` : ''}</div>`;
+  }
+
+  function formatAssetSource(item) {
+    const id = escapeHtml(item.id || item.source_id);
+    const name = escapeHtml(item.name || item.title || `Asset #${id}`);
+    const metaParts = [];
+    if (item.type) metaParts.push(`Type: ${escapeHtml(item.type)}`);
+    if (item.serial_number) metaParts.push(`Serial: ${escapeHtml(item.serial_number)}`);
+    if (item.status) metaParts.push(`Status: ${escapeHtml(item.status)}`);
+    if (item.os_name) metaParts.push(`OS: ${escapeHtml(item.os_name)}`);
+    if (item.last_user) metaParts.push(`Last user: ${escapeHtml(item.last_user)}`);
+    return `[#${id}] ${name}${metaParts.length ? `<div class="agent-sources__meta">${metaParts.join(' • ')}</div>` : ''}`;
+  }
+
+  function formatCompanySource(item) {
+    const id = escapeHtml(item.id || item.source_id);
+    const name = escapeHtml(item.name || item.title || `Company #${id}`);
+    const syncro = item.syncro_company_id ? `<div class="agent-sources__meta">Syncro ID: ${escapeHtml(item.syncro_company_id)}</div>` : '';
+    return `[#${id}] ${name}${syncro}`;
+  }
+
+  function formatStaffSource(item) {
+    const id = escapeHtml(item.id || item.source_id);
+    const name = escapeHtml(item.name || item.title || `Staff #${id}`);
+    const metaParts = [];
+    if (item.email) metaParts.push(`Email: ${escapeHtml(item.email)}`);
+    if (item.job_title) metaParts.push(`Title: ${escapeHtml(item.job_title)}`);
+    if (item.department) metaParts.push(`Department: ${escapeHtml(item.department)}`);
+    if (item.mobile_phone) metaParts.push(`Mobile: ${escapeHtml(item.mobile_phone)}`);
+    if (item.onboarding_status) metaParts.push(`Status: ${escapeHtml(item.onboarding_status)}`);
+    return `[#${id}] ${name}${metaParts.length ? `<div class="agent-sources__meta">${metaParts.join(' • ')}</div>` : ''}`;
+  }
+
+  function formatIssueSource(item) {
+    const id = escapeHtml(item.id || item.source_id);
+    const name = escapeHtml(item.name || item.title || `Issue #${id}`);
+    const description = item.description ? escapeHtml(item.description) : '';
+    return `[#${id}] ${name}${description ? `<div class="agent-sources__meta">${description}</div>` : ''}`;
+  }
+
+  function formatServiceStatusSource(item) {
+    const id = escapeHtml(item.id || item.source_id);
+    const name = escapeHtml(item.name || item.title || `Service #${id}`);
+    const detail = item.status_message || item.description || '';
+    return `[#${id}] ${name}${detail ? `<div class="agent-sources__meta">${escapeHtml(detail)}</div>` : ''}`;
+  }
+
+  function formatBackupJobSource(item) {
+    const id = escapeHtml(item.id || item.source_id);
+    const name = escapeHtml(item.name || item.title || `Backup job #${id}`);
+    const meta = [item.today_status ? `Today: ${escapeHtml(item.today_status)}` : null, item.latest_status ? `Latest: ${escapeHtml(item.latest_status)}` : null, item.description ? escapeHtml(item.description) : null].filter(Boolean).join(' • ');
+    return `[#${id}] ${name}${meta ? `<div class="agent-sources__meta">${meta}</div>` : ''}`;
+  }
+
+  function formatReportSource(item) {
+    const key = escapeHtml(item.key || item.source_id || 'report');
+    const title = escapeHtml(item.title || key);
+    const meta = [item.source_type ? `Type: ${escapeHtml(item.source_type)}` : null, item.description ? escapeHtml(item.description) : null].filter(Boolean).join('<br />');
+    return `[${key}] ${title}${meta ? `<div class="agent-sources__meta">${meta}</div>` : ''}`;
+  }
+
+  function formatMailboxSource(item) {
+    const upn = escapeHtml(item.user_principal_name || item.title || 'mailbox');
+    const name = escapeHtml(item.display_name || item.user_principal_name || 'Mailbox');
+    const meta = [item.mailbox_type ? `Type: ${escapeHtml(item.mailbox_type)}` : null, item.storage_used_bytes != null ? `Storage: ${escapeHtml(item.storage_used_bytes)} bytes` : null].filter(Boolean).join(' • ');
+    return `[${upn}] ${name}${meta ? `<div class="agent-sources__meta">${meta}</div>` : ''}`;
+  }
+
+  function formatBestPracticeSource(item) {
+    const id = escapeHtml(item.check_id || item.source_id || 'check');
+    const name = escapeHtml(item.check_name || item.title || id);
+    const meta = [item.status ? `Status: ${escapeHtml(item.status)}` : null, item.details ? escapeHtml(item.details) : null].filter(Boolean).join('<br />');
+    return `[${id}] ${name}${meta ? `<div class="agent-sources__meta">${meta}</div>` : ''}`;
+  }
+
   function formatGenericSource(item) {
     const label = escapeHtml(item.label || item.title || item.name || item.id || item.source_id || 'Result');
     const summary = item.summary || item.description || '';
@@ -147,18 +253,18 @@
       ['Knowledge base', 'knowledge_base', formatKnowledgeBaseSource],
       ['Tickets', 'tickets', formatTicketSource],
       ['Products', 'products', formatProductSource],
-      ['Chats', 'chats', formatGenericSource],
-      ['Orders', 'orders', formatGenericSource],
-      ['Assets', 'assets', formatGenericSource],
-      ['Packages', 'packages', formatGenericSource],
-      ['Companies', 'companies', formatGenericSource],
-      ['Staff', 'staff', formatGenericSource],
-      ['Issues', 'issues', formatGenericSource],
-      ['Service status', 'service_status', formatGenericSource],
-      ['Backup summary', 'backup_jobs', formatGenericSource],
-      ['Reports', 'reports', formatGenericSource],
-      ['Office 365 mailboxes', 'mailboxes', formatGenericSource],
-      ['Best practices', 'best_practices', formatGenericSource]
+      ['Chats', 'chats', formatChatSource],
+      ['Orders', 'orders', formatOrderSource],
+      ['Assets', 'assets', formatAssetSource],
+      ['Packages', 'packages', formatPackageSource],
+      ['Companies', 'companies', formatCompanySource],
+      ['Staff', 'staff', formatStaffSource],
+      ['Issues', 'issues', formatIssueSource],
+      ['Service status', 'service_status', formatServiceStatusSource],
+      ['Backup summary', 'backup_jobs', formatBackupJobSource],
+      ['Reports', 'reports', formatReportSource],
+      ['Office 365 mailboxes', 'mailboxes', formatMailboxSource],
+      ['Best practices', 'best_practices', formatBestPracticeSource]
     ];
     const groups = map.map(([title, sourceType, formatter]) => {
       const items = sources[sourceType];

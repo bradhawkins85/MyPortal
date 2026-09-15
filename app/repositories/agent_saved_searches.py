@@ -125,9 +125,9 @@ async def delete_for_user(*, saved_search_id: int, user_id: int, allow_shared: b
         deleted = await db.execute(
             """
             DELETE FROM agent_saved_searches
-            WHERE id = ? AND (user_id = ? OR (is_shared = 1 AND user_id = ?))
+            WHERE id = ? AND (user_id = ? OR is_shared = 1)
             """,
-            (saved_search_id, user_id, user_id),
+            (saved_search_id, user_id),
         )
     else:
         deleted = await db.execute(
