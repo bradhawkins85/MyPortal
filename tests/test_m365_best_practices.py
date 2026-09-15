@@ -467,6 +467,7 @@ async def test_remediate_internal_phishing_forms_fails_when_graph_does_not_confi
 @pytest.mark.anyio("asyncio")
 async def test_remediate_weak_auth_methods_disabled_waits_for_graph_consistency():
     assert bp_service._WEAK_AUTH_METHODS_VERIFICATION_ATTEMPTS >= 2
+    # This scenario models Graph converging on the second verification pass.
     verification_rounds = 2
     enabled = {"state": "enabled"}
     disabled = {"state": "disabled"}
