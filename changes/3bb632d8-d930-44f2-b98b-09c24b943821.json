@@ -1,0 +1,7 @@
+{
+  "guid": "3bb632d8-d930-44f2-b98b-09c24b943821",
+  "occurred_at": "2026-09-15T00:00Z",
+  "change_type": "Fix",
+  "summary": "Exclude unlicensed Microsoft 365 administrator accounts from the shared-mailbox sign-in check and remediation.",
+  "content_hash": "b96a6a576439138b7dcef75ee7643575db164695f8345970cf118f4b44a4552a"
+}

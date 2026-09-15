@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from unittest.mock import AsyncMock, call, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -5607,6 +5607,86 @@ async def test_remediate_onedrive_content_sharing_restricted_success():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_directory_role_member_ids_include_members_from_every_role():
+    graph_results = [
+        [{"id": "role-1"}, {"id": "role-2"}],
+        [{"id": "admin-1"}],
+        [{"id": "admin-2"}, {"id": "admin-1"}],
+    ]
+
+    with patch(
+        "app.services.m365_best_practices._safe_graph_get_all",
+        new_callable=AsyncMock,
+        side_effect=graph_results,
+    ) as graph_get_all:
+        result = await bp_service._get_directory_role_member_ids("token")
+
+    assert result == {"admin-1", "admin-2"}
+    member_urls = [
+        awaited_call.args[1] for awaited_call in graph_get_all.await_args_list[1:]
+    ]
+    assert all("transitiveMembers/microsoft.graph.user" in url for url in member_urls)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_shared_mailbox_check_excludes_directory_role_members():
+    users = [
+        {
+            "id": "admin-1",
+            "userPrincipalName": "breakglass@contoso.com",
+            "userType": "Member",
+            "assignedLicenses": [],
+            "accountEnabled": True,
+        },
+        {
+            "id": "mailbox-1",
+            "userPrincipalName": "shared@contoso.com",
+            "userType": "Member",
+            "assignedLicenses": [],
+            "accountEnabled": True,
+        },
+    ]
+
+    with (
+        patch(
+            "app.services.m365_best_practices._safe_graph_get_all",
+            new_callable=AsyncMock,
+            return_value=users,
+        ),
+        patch(
+            "app.services.m365_best_practices._get_directory_role_member_ids",
+            new_callable=AsyncMock,
+            return_value={"admin-1"},
+        ),
+    ):
+        result = await bp_service._check_shared_mailbox_signin_blocked("token")
+
+    assert result["status"] == "fail"
+    assert "shared@contoso.com" in result["details"]
+    assert "breakglass@contoso.com" not in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_shared_mailbox_check_fails_closed_when_admins_cannot_be_listed():
+    with (
+        patch(
+            "app.services.m365_best_practices._safe_graph_get_all",
+            new_callable=AsyncMock,
+            return_value=[{"id": "unlicensed-user"}],
+        ),
+        patch(
+            "app.services.m365_best_practices._get_directory_role_member_ids",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+    ):
+        result = await bp_service._check_shared_mailbox_signin_blocked("token")
+
+    assert result["status"] == "unknown"
+    assert "administrator role members" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
 async def test_remediate_shared_mailbox_signin_blocked_success():
     """foreach_user_graph remediation patches each unlicensed enabled member account."""
     upserts: list[dict] = []
@@ -5672,6 +5752,11 @@ async def test_remediate_shared_mailbox_signin_blocked_success():
             return_value=users,
         ),
         patch(
+            "app.services.m365_best_practices._get_directory_role_member_ids",
+            new_callable=AsyncMock,
+            return_value=set(),
+        ),
+        patch(
             "app.services.m365_best_practices._graph_patch",
             side_effect=fake_graph_patch,
         ),
@@ -5691,6 +5776,52 @@ async def test_remediate_shared_mailbox_signin_blocked_success():
     assert "user-1" in patched_urls[0]
     assert "user-2" in patched_urls[1]
     assert all(p == {"accountEnabled": False} for p in patched_payloads)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_shared_mailbox_signin_blocked_skips_admin_accounts():
+    users = [
+        {"id": "admin-1", "userType": "Member", "assignedLicenses": [], "accountEnabled": True},
+        {"id": "mailbox-1", "userType": "Member", "assignedLicenses": [], "accountEnabled": True},
+    ]
+    patched_urls: list[str] = []
+
+    async def fake_graph_patch(token, url, payload):
+        patched_urls.append(url)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._safe_graph_get_all",
+            new_callable=AsyncMock,
+            return_value=users,
+        ),
+        patch(
+            "app.services.m365_best_practices._get_directory_role_member_ids",
+            new_callable=AsyncMock,
+            return_value={"admin-1"},
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            side_effect=fake_graph_patch,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=20, check_id="bp_shared_mailbox_signin_blocked"
+        )
+
+    assert result["success"] is True
+    assert len(patched_urls) == 1
+    assert "mailbox-1" in patched_urls[0]
+    assert "admin-1" not in patched_urls[0]
 
 
 @pytest.mark.anyio("asyncio")
@@ -5716,6 +5847,11 @@ async def test_remediate_shared_mailbox_signin_blocked_no_candidates():
             "app.services.m365_best_practices._safe_graph_get_all",
             new_callable=AsyncMock,
             return_value=users,
+        ),
+        patch(
+            "app.services.m365_best_practices._get_directory_role_member_ids",
+            new_callable=AsyncMock,
+            return_value=set(),
         ),
         patch(
             "app.services.m365_best_practices._graph_patch",
@@ -5760,6 +5896,11 @@ async def test_remediate_shared_mailbox_signin_blocked_partial_failure():
             "app.services.m365_best_practices._safe_graph_get_all",
             new_callable=AsyncMock,
             return_value=users,
+        ),
+        patch(
+            "app.services.m365_best_practices._get_directory_role_member_ids",
+            new_callable=AsyncMock,
+            return_value=set(),
         ),
         patch(
             "app.services.m365_best_practices._graph_patch",
@@ -5895,6 +6036,11 @@ async def test_remediate_shared_mailbox_signin_blocked_skips_onprem_synced():
             "app.services.m365_best_practices._safe_graph_get_all",
             new_callable=AsyncMock,
             return_value=users,
+        ),
+        patch(
+            "app.services.m365_best_practices._get_directory_role_member_ids",
+            new_callable=AsyncMock,
+            return_value=set(),
         ),
         patch(
             "app.services.m365_best_practices._graph_patch",
