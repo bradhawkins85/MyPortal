@@ -6074,7 +6074,7 @@ async def test_remediate_per_user_mfa_allows_report_only_conditional_access():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_remediate_per_user_mfa_requires_configured_conditional_access():
+async def test_remediate_per_user_mfa_requires_any_conditional_access_policy():
     upserts: list[dict] = []
     safe_get_all = AsyncMock(return_value=[])
 
