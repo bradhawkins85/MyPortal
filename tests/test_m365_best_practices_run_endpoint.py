@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import json
 from datetime import datetime
 from unittest.mock import AsyncMock
 
@@ -10,6 +12,13 @@ import app.main as main_module
 import app.services.m365_best_practices as bp_service
 from app.core.database import db
 from app.main import app, scheduler_service
+
+
+def _decode_flash_cookie(response) -> dict[str, str]:
+    raw_cookie = response.headers.get("set-cookie", "").split("_flash=", 1)[1].split(";", 1)[0]
+    signed = base64.b64decode(raw_cookie.encode("utf-8")).decode("utf-8")
+    payload = signed.rsplit("|", 1)[0]
+    return json.loads(payload)
 
 
 @pytest.fixture(autouse=True)
@@ -121,6 +130,34 @@ def test_score_history_page_loads_current_company_history(monkeypatch):
     assert render_template.await_args.kwargs["extra"]["history"] == history
 
 
+def test_best_practices_page_enables_note_editing_for_technician(monkeypatch):
+    async def fake_context(request, super_admin_only=False):
+        return {"id": 7, "is_super_admin": False}, {"role_name": "Technician"}, {"id": 99}, 99, None
+
+    render_template = AsyncMock(return_value="bp-page")
+    monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
+    monkeypatch.setattr(main_module.m365_service, "get_credentials", AsyncMock(return_value={"tenant_id": "x"}))
+    monkeypatch.setattr(main_module.m365_best_practices_service, "get_last_results", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main_module.m365_best_practices_service, "get_secure_score_summary", lambda results: None)
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "list_best_practices",
+        lambda: [{"id": "bp_test", "name": "Test check"}],
+    )
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "get_enabled_check_ids",
+        AsyncMock(return_value={"bp_test"}),
+    )
+    monkeypatch.setattr(main_module, "_render_template", render_template)
+
+    with TestClient(app) as client:
+        response = client.get("/m365/best-practices")
+
+    assert response.status_code == 200
+    assert render_template.await_args.kwargs["extra"]["can_edit_notes"] is True
+
+
 def test_save_note_route_allows_non_super_admins(monkeypatch):
     async def fake_context(request, super_admin_only=False):
         return {"id": 7, "is_super_admin": False}, {}, {"id": 99}, 99, None
@@ -167,4 +204,8 @@ def test_save_note_route_rejects_overlong_notes(monkeypatch):
 
     assert response.status_code == 303
     assert response.headers["location"] == "/m365/best-practices"
+    assert _decode_flash_cookie(response) == {
+        "message": "Check note must be 4000 characters or fewer",
+        "variant": "error",
+    }
     set_notes.assert_not_awaited()

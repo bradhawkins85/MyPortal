@@ -25,7 +25,11 @@ async def upsert_result(
     affected_accounts: list[dict[str, str]] | None = None,
     run_at: datetime,
 ) -> None:
-    """Insert or update the latest result for a check for the given company."""
+    """Insert or update the latest result for a check for the given company.
+
+    Manually-entered notes are preserved across re-evaluation runs and are only
+    changed via ``update_result_notes``.
+    """
     await db.execute(
         """
         INSERT INTO m365_best_practice_results
@@ -35,7 +39,7 @@ async def upsert_result(
             check_name = VALUES(check_name),
             status = VALUES(status),
             details = VALUES(details),
-            notes = COALESCE(notes, VALUES(notes)),
+            notes = notes,
             affected_accounts = VALUES(affected_accounts),
             run_at = VALUES(run_at)
         """,

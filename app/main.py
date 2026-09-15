@@ -3516,6 +3516,7 @@ async def m365_best_practices_page(request: Request):
     catalog = m365_best_practices_service.list_best_practices()
     enabled_ids = await m365_best_practices_service.get_enabled_check_ids()
     enabled_catalog = [bp for bp in catalog if bp["id"] in enabled_ids]
+    membership_role = str((membership or {}).get("role_name") or "").strip().lower()
     extra = {
         "title": "M365 Best Practices",
         "company": company,
@@ -3524,7 +3525,10 @@ async def m365_best_practices_page(request: Request):
         "catalog": enabled_catalog,
         "has_credentials": bool(credentials),
         "is_super_admin": bool(user.get("is_super_admin")),
-        "can_edit_notes": True,
+        "can_edit_notes": bool(
+            user.get("is_super_admin")
+            or membership_role in {"owner", "administrator", "technician"}
+        ),
     }
     return await _render_template("m365/best_practices.html", request, user, extra=extra)
 
