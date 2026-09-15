@@ -3673,6 +3673,52 @@ async def remediate_m365_best_practice(request: Request, check_id: str):
     return flash_redirect("/m365/best-practices", message, "error")
 
 
+@app.post("/m365/best-practices/account-exclusion/{check_id}", response_class=RedirectResponse)
+async def set_m365_best_practice_account_exclusion(request: Request, check_id: str):
+    """Exclude or restore one account finding for one company/check pair."""
+    user, membership, _, company_id, redirect = await _load_m365_best_practices_context(
+        request, super_admin_only=True,
+    )
+    if redirect:
+        return redirect
+    if check_id not in {bp["id"] for bp in m365_best_practices_service.list_best_practices()}:
+        return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
+    form = await request.form()
+    account_id = str(form.get("account_id") or "").strip()
+    excluded = str(form.get("excluded") or "1") == "1"
+    if not account_id or len(account_id) > 255:
+        return flash_redirect("/m365/best-practices", "Invalid account identifier", "error")
+
+    stored = await m365_best_practices_service.get_last_results(company_id)
+    result = next((item for item in stored if item["check_id"] == check_id), None)
+    account = next(
+        (item for item in (result or {}).get("affected_accounts", []) if item.get("id") == account_id),
+        None,
+    )
+    if account is None:
+        return flash_redirect("/m365/best-practices", "Account is not listed by this check", "error")
+    await m365_best_practices_service.set_account_exclusion(
+        company_id=company_id,
+        check_id=check_id,
+        account_id=account_id,
+        account_name=str(account.get("name") or account_id),
+        excluded=excluded,
+    )
+    await m365_best_practices_service.run_single_check(
+        company_id=company_id, check_id=check_id, allow_auto_remediation=False
+    )
+    log_info(
+        "M365 best practice account exclusion updated",
+        company_id=company_id, check_id=check_id, account_id=account_id,
+        excluded=excluded, user_id=user.get("id"),
+    )
+    return flash_redirect(
+        "/m365/best-practices",
+        "Account excluded from this check" if excluded else "Account restored to this check",
+        "success",
+    )
+
+
 @app.get("/m365/best-practices/settings", response_class=HTMLResponse)
 async def m365_best_practices_settings_page(
     request: Request,

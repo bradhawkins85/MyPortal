@@ -106,3 +106,21 @@ def test_score_history_is_available_from_page_header():
 
     assert 'href="/m365/best-practices/history"' in html
     assert "Score history" in html
+
+
+def test_account_findings_have_per_check_exclude_and_restore_controls():
+    html = _render_best_practices([
+        {
+            "cis_group": "", "status": "fail", "check_id": "bp_test",
+            "check_name": "Account check", "details": "Review accounts",
+            "affected_accounts": [
+                {"id": "one", "name": "one@example.com", "excluded": False},
+                {"id": "two", "name": "two@example.com", "excluded": True},
+            ],
+        }
+    ])
+
+    # Non-admin users can see which findings were excluded, but cannot mutate them.
+    assert "one@example.com" in html
+    assert "two@example.com — excluded" in html
+    assert "/m365/best-practices/account-exclusion/bp_test" not in html

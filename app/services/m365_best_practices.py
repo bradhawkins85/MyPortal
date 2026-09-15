@@ -653,14 +653,55 @@ async def _get_directory_role_member_ids(token: str) -> set[str] | None:
 
 
 def _result(
-    check_id: str, check_name: str, status: str, details: str
+    check_id: str, check_name: str, status: str, details: str,
+    affected_accounts: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    return {
+    result = {
         "check_id": check_id,
         "check_name": check_name,
         "status": status,
         "details": details,
     }
+    if affected_accounts is not None:
+        result["affected_accounts"] = affected_accounts
+    return result
+
+
+def _account_finding(account: dict[str, Any], *, identity_key: str = "id") -> dict[str, str]:
+    """Build a safe, stable account reference for persistence and display."""
+    account_id = str(account.get(identity_key) or account.get("UserPrincipalName") or account.get("Identity") or "").strip()
+    label = str(
+        account.get("userPrincipalName") or account.get("UserPrincipalName")
+        or account.get("displayName") or account.get("DisplayName")
+        or account.get("Identity") or account_id
+    ).strip()
+    return {"id": account_id, "name": label}
+
+
+async def _apply_account_exclusions(
+    company_id: int, check_id: str, status: str, details: str,
+    affected_accounts: list[dict[str, str]],
+) -> tuple[str, str, list[dict[str, str]]]:
+    """Mark account findings excluded and calculate the effective check status."""
+    exclusions = await bp_repo.get_account_exclusions(company_id, check_id)
+    excluded_ids = {account_id for _, account_id in exclusions}
+    accounts = [
+        {**account, "excluded": str(account.get("id") or "") in excluded_ids}
+        for account in affected_accounts
+        if account.get("id") and account.get("name")
+    ]
+    active = [account for account in accounts if not account["excluded"]]
+    excluded_count = len(accounts) - len(active)
+    if accounts and not active:
+        return STATUS_PASS, f"All {len(accounts)} listed account finding(s) are excluded for this check.", accounts
+    if excluded_count:
+        names = ", ".join(account["name"] for account in active[:5])
+        suffix = "" if len(active) <= 5 else f" (and {len(active) - 5} more)"
+        details = (
+            f"{len(active)} account(s) require attention: {names}{suffix}. "
+            f"{excluded_count} account(s) excluded for this check."
+        )
+    return status, details, accounts
 
 
 def _manual_review_factory(
@@ -1510,7 +1551,7 @@ async def _check_per_user_mfa_disabled(token: str) -> dict[str, Any]:
             check_id, check_name, STATUS_UNKNOWN,
             "Unable to enumerate users to inspect per-user MFA state.",
         )
-    enabled_users: list[str] = []
+    enabled_users: list[dict[str, str]] = []
     inspected = 0
     # Limit to a reasonable sample to avoid O(n) Graph calls on large tenants
     for user in users[:200]:
@@ -1524,9 +1565,7 @@ async def _check_per_user_mfa_disabled(token: str) -> dict[str, Any]:
         inspected += 1
         state = str(data.get("perUserMfaState") or "").lower()
         if state and state != "disabled":
-            enabled_users.append(
-                user.get("userPrincipalName") or user.get("displayName") or user_id
-            )
+            enabled_users.append(_account_finding(user))
     if inspected == 0:
         return _result(
             check_id, check_name, STATUS_UNKNOWN,
@@ -1537,12 +1576,13 @@ async def _check_per_user_mfa_disabled(token: str) -> dict[str, Any]:
             check_id, check_name, STATUS_PASS,
             f"Per-user MFA is disabled across {inspected} sampled accounts.",
         )
-    sample = ", ".join(enabled_users[:5])
+    sample = ", ".join(account["name"] for account in enabled_users[:5])
     suffix = "" if len(enabled_users) <= 5 else f" (and {len(enabled_users) - 5} more)"
     return _result(
         check_id, check_name, STATUS_FAIL,
         f"Per-user MFA is still enabled on {len(enabled_users)} accounts: {sample}{suffix}. "
         "Migrate these users to Conditional Access-driven MFA and disable per-user MFA.",
+        enabled_users,
     )
 
 
@@ -1730,7 +1770,7 @@ async def _check_admin_accounts_cloud_only(token: str) -> dict[str, Any]:
             check_id, check_name, STATUS_UNKNOWN,
             "No privileged role members found to inspect.",
         )
-    synced: list[str] = []
+    synced: list[dict[str, str]] = []
     for uid in admin_ids:
         data = await _safe_graph_get(
             token,
@@ -1738,7 +1778,7 @@ async def _check_admin_accounts_cloud_only(token: str) -> dict[str, Any]:
             "?$select=userPrincipalName,onPremisesSyncEnabled",
         )
         if data and data.get("onPremisesSyncEnabled"):
-            synced.append(data.get("userPrincipalName") or uid)
+            synced.append({"id": uid, "name": data.get("userPrincipalName") or uid})
     if not synced:
         return _result(
             check_id, check_name, STATUS_PASS,
@@ -1746,7 +1786,8 @@ async def _check_admin_accounts_cloud_only(token: str) -> dict[str, Any]:
         )
     return _result(
         check_id, check_name, STATUS_FAIL,
-        f"{len(synced)} admin account(s) are synced from on-premises AD: " + ", ".join(synced[:5]),
+        f"{len(synced)} admin account(s) are synced from on-premises AD: "
+        + ", ".join(account["name"] for account in synced[:5]), synced,
     )
 
 
@@ -1759,7 +1800,7 @@ async def _check_admin_accounts_reduced_license(token: str) -> dict[str, Any]:
             check_id, check_name, STATUS_UNKNOWN,
             "Unable to enumerate directory role memberships.",
         )
-    overlicensed: list[str] = []
+    overlicensed: list[dict[str, str]] = []
     for uid in admin_ids:
         data = await _safe_graph_get(
             token,
@@ -1776,7 +1817,7 @@ async def _check_admin_accounts_reduced_license(token: str) -> dict[str, Any]:
         # both make clear this is an indicative finding and admins should
         # confirm before removing licenses.
         if len(skus) > 1:
-            overlicensed.append(data.get("userPrincipalName") or uid)
+            overlicensed.append({"id": uid, "name": data.get("userPrincipalName") or uid})
     if not overlicensed:
         return _result(
             check_id, check_name, STATUS_PASS,
@@ -1786,7 +1827,8 @@ async def _check_admin_accounts_reduced_license(token: str) -> dict[str, Any]:
         check_id, check_name, STATUS_FAIL,
         f"Heuristic: {len(overlicensed)} admin account(s) hold multiple license SKUs and "
         "may be candidates for license reduction (manual verification recommended – some "
-        "accounts may legitimately require multiple SKUs): " + ", ".join(overlicensed[:5]),
+        "accounts may legitimately require multiple SKUs): "
+        + ", ".join(account["name"] for account in overlicensed[:5]), overlicensed,
     )
 
 
@@ -1799,12 +1841,12 @@ async def _check_all_members_mfa_capable(token: str) -> dict[str, Any]:
             check_id, check_name, STATUS_UNKNOWN,
             "Unable to read authentication-methods user registration details report.",
         )
-    not_capable: list[str] = []
+    not_capable: list[dict[str, str]] = []
     for row in rows:
         if str(row.get("userType") or "").lower() != "member":
             continue
         if not row.get("isMfaCapable"):
-            not_capable.append(row.get("userPrincipalName") or row.get("id") or "?")
+            not_capable.append(_account_finding(row))
     if not not_capable:
         return _result(
             check_id, check_name, STATUS_PASS,
@@ -1812,7 +1854,8 @@ async def _check_all_members_mfa_capable(token: str) -> dict[str, Any]:
         )
     return _result(
         check_id, check_name, STATUS_FAIL,
-        f"{len(not_capable)} member user(s) are not MFA capable: " + ", ".join(not_capable[:5]),
+        f"{len(not_capable)} member user(s) are not MFA capable: "
+        + ", ".join(account["name"] for account in not_capable[:5]), not_capable,
     )
 
 
@@ -2841,7 +2884,8 @@ async def _check_shared_mailbox_signin_blocked(token: str) -> dict[str, Any]:
     return _result(check_id, check_name, STATUS_FAIL,
                    f"{len(candidates)} non-admin unlicensed member account(s) appear to be sign-in enabled (likely shared mailboxes). "
                    "Disable each via Update-MgUser -UserId <id> -AccountEnabled:$false. "
-                   "First sample: " + ", ".join((u.get("userPrincipalName") or u.get("id") or "?") for u in candidates[:5]))
+                   "First sample: " + ", ".join((u.get("userPrincipalName") or u.get("id") or "?") for u in candidates[:5]),
+                   [_account_finding(user) for user in candidates])
 
 
 async def _check_mailbox_audit_actions(
@@ -2858,22 +2902,22 @@ async def _check_mailbox_audit_actions(
         return _result(check_id, check_name, STATUS_UNKNOWN,
                        f"Unable to query Get-Mailbox: {exc}")
     rows = data.get("value") or []
-    bad: list[str] = []
+    bad: list[dict[str, str]] = []
     required_owner = {"MailboxLogin", "HardDelete", "SoftDelete", "Update"}
     for r in rows:
         if not isinstance(r, dict):
             continue
         if r.get("AuditEnabled") is not True:
-            bad.append(r.get("UserPrincipalName") or r.get("Identity") or "?")
+            bad.append(_account_finding(r, identity_key="UserPrincipalName"))
             continue
         owner = set(r.get("AuditOwner") or [])
         if not required_owner.issubset(owner):
-            bad.append(r.get("UserPrincipalName") or r.get("Identity") or "?")
+            bad.append(_account_finding(r, identity_key="UserPrincipalName"))
     if not bad:
         return _result(check_id, check_name, STATUS_PASS,
                        f"Audit actions properly configured on {len(rows)} sampled mailboxes.")
     return _result(check_id, check_name, STATUS_FAIL,
-                   f"{len(bad)} mailbox(es) lack the recommended audit actions: " + ", ".join(bad[:5]))
+                   f"{len(bad)} mailbox(es) lack the recommended audit actions: " + ", ".join(a["name"] for a in bad[:5]), bad)
 
 
 async def _check_antiphish_impersonated_domain_protection(
@@ -3076,7 +3120,7 @@ async def _check_mailbox_auditing_enabled_all_users(
         return _result(check_id, check_name, STATUS_UNKNOWN,
                        "No user mailboxes found to evaluate.")
     not_audited = [
-        r.get("UserPrincipalName") or r.get("Identity") or "?"
+        _account_finding(r, identity_key="UserPrincipalName")
         for r in rows
         if isinstance(r, dict) and r.get("AuditEnabled") is not True
     ]
@@ -3085,8 +3129,8 @@ async def _check_mailbox_auditing_enabled_all_users(
                        f"Mailbox auditing (AuditEnabled) is enabled on all {len(rows)} user mailbox(es).")
     return _result(check_id, check_name, STATUS_FAIL,
                    f"{len(not_audited)} user mailbox(es) do not have AuditEnabled set to True: "
-                   + ", ".join(not_audited[:5])
-                   + ("…" if len(not_audited) > 5 else ""))
+                   + ", ".join(a["name"] for a in not_audited[:5])
+                   + ("…" if len(not_audited) > 5 else ""), not_audited)
 
 
 async def _check_block_users_message_limit(
@@ -5846,6 +5890,7 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
             continue
         check_name = bp["name"]
         cis_group = bp.get("cis_group")
+        affected_accounts: list[dict[str, str]] = []
 
         # If the tenant lacks the licenses required to implement this check,
         # mark it as N/A and skip evaluation/auto-remediation entirely.
@@ -5888,6 +5933,7 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
             if raw:
                 status = raw.get("status", STATUS_UNKNOWN)
                 details = raw.get("details") or ""
+                affected_accounts = raw.get("affected_accounts") or []
             else:
                 status = STATUS_UNKNOWN
                 details = "Check result not available from batch run."
@@ -5939,6 +5985,7 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
                         )
                 status = raw.get("status", STATUS_UNKNOWN)
                 details = raw.get("details") or ""
+                affected_accounts = raw.get("affected_accounts") or []
             except M365Error as exc:
                 log_error(
                     "M365 best practice check failed",
@@ -5949,12 +5996,17 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
                 status = STATUS_UNKNOWN
                 details = f"Unable to evaluate check: {exc}"
 
+        if affected_accounts:
+            status, details, affected_accounts = await _apply_account_exclusions(
+                company_id, check_id, status, details, affected_accounts
+            )
         await bp_repo.upsert_result(
             company_id=company_id,
             check_id=check_id,
             check_name=check_name,
             status=status,
             details=details,
+            affected_accounts=affected_accounts,
             run_at=run_at,
         )
 
@@ -5986,6 +6038,7 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
             "run_at": run_at,
             "remediation": get_remediation(check_id) if status == STATUS_FAIL else None,
             "has_remediation": bool(bp.get("has_remediation")),
+            "affected_accounts": affected_accounts,
         })
 
     log_info(
@@ -6050,6 +6103,7 @@ async def run_single_check(
     tenant_capabilities = await detect_tenant_capabilities(graph_token)
     check_name = bp["name"]
     cis_group = bp.get("cis_group")
+    affected_accounts: list[dict[str, str]] = []
 
     missing = _missing_capabilities(bp.get("requires_licenses"), tenant_capabilities)
     if missing:
@@ -6076,6 +6130,7 @@ async def run_single_check(
                 if raw:
                     status = raw.get("status", STATUS_UNKNOWN)
                     details = raw.get("details") or ""
+                    affected_accounts = raw.get("affected_accounts") or []
                 else:
                     status = STATUS_UNKNOWN
                     details = "Check result not available from batch run."
@@ -6137,6 +6192,7 @@ async def run_single_check(
                     )
             status = raw.get("status", STATUS_UNKNOWN)
             details = raw.get("details") or ""
+            affected_accounts = raw.get("affected_accounts") or []
         except M365Error as exc:
             log_error(
                 "M365 best practice check failed",
@@ -6147,12 +6203,17 @@ async def run_single_check(
             status = STATUS_UNKNOWN
             details = f"Unable to evaluate check: {exc}"
 
+    if affected_accounts:
+        status, details, affected_accounts = await _apply_account_exclusions(
+            company_id, check_id, status, details, affected_accounts
+        )
     await bp_repo.upsert_result(
         company_id=company_id,
         check_id=check_id,
         check_name=check_name,
         status=status,
         details=details,
+        affected_accounts=affected_accounts,
         run_at=run_at,
     )
 
@@ -6185,6 +6246,7 @@ async def run_single_check(
         "run_at": run_at,
         "remediation": get_remediation(check_id) if status == STATUS_FAIL else None,
         "has_remediation": bool(bp.get("has_remediation")),
+        "affected_accounts": affected_accounts,
     }
 
 
@@ -6221,6 +6283,7 @@ async def get_last_results(company_id: int) -> list[dict[str, Any]]:
             "remediated_at": row.get("remediated_at"),
             "is_cis_benchmark": bool(bp_meta.get("is_cis_benchmark")),
             "cis_group": bp_meta.get("cis_group", ""),
+            "affected_accounts": row.get("affected_accounts") or [],
         })
     return out
 
@@ -6228,6 +6291,16 @@ async def get_last_results(company_id: int) -> list[dict[str, Any]]:
 async def get_daily_history(company_id: int) -> list[dict[str, Any]]:
     """Return the company's daily best-practice and Secure Score snapshots."""
     return await bp_repo.list_daily_history(company_id)
+
+
+async def set_account_exclusion(
+    *, company_id: int, check_id: str, account_id: str, account_name: str, excluded: bool
+) -> None:
+    """Persist an account exclusion after the route validates the current finding."""
+    await bp_repo.set_account_exclusion(
+        company_id=company_id, check_id=check_id, account_id=account_id,
+        account_name=account_name, excluded=excluded,
+    )
 
 
 async def _remediate_foreach_mailbox(

@@ -1,6 +1,7 @@
 """Repository for Microsoft 365 Best Practices results and global settings."""
 from __future__ import annotations
 
+import json
 import re
 from datetime import date, datetime, timezone
 from typing import Any
@@ -20,21 +21,24 @@ async def upsert_result(
     check_name: str,
     status: str,
     details: str,
+    affected_accounts: list[dict[str, str]] | None = None,
     run_at: datetime,
 ) -> None:
     """Insert or update the latest result for a check for the given company."""
     await db.execute(
         """
         INSERT INTO m365_best_practice_results
-            (company_id, check_id, check_name, status, details, run_at)
-        VALUES (%s, %s, %s, %s, %s, %s)
+            (company_id, check_id, check_name, status, details, affected_accounts, run_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             check_name = VALUES(check_name),
             status = VALUES(status),
             details = VALUES(details),
+            affected_accounts = VALUES(affected_accounts),
             run_at = VALUES(run_at)
         """,
-        (company_id, check_id, check_name, status, details, run_at),
+        (company_id, check_id, check_name, status, details,
+         json.dumps(affected_accounts or []), run_at),
     )
     await _upsert_daily_history(
         company_id=company_id,
@@ -157,7 +161,7 @@ async def list_results(company_id: int) -> list[dict[str, Any]]:
     """Return all stored best-practice results for a company."""
     rows = await db.fetch_all(
         """
-        SELECT check_id, check_name, status, details, run_at,
+        SELECT check_id, check_name, status, details, affected_accounts, run_at,
                remediation_status, remediated_at
         FROM m365_best_practice_results
         WHERE company_id = %s
@@ -165,7 +169,15 @@ async def list_results(company_id: int) -> list[dict[str, Any]]:
         """,
         (company_id,),
     )
-    return [dict(row) for row in rows]
+    results = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["affected_accounts"] = json.loads(item.get("affected_accounts") or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            item["affected_accounts"] = []
+        results.append(item)
+    return results
 
 
 async def delete_results(company_id: int) -> None:
@@ -281,4 +293,41 @@ async def set_company_exclusions(company_id: int, excluded_check_ids: set[str]) 
             ON DUPLICATE KEY UPDATE check_id = VALUES(check_id)
             """,
             (company_id, check_id),
+        )
+
+
+async def get_account_exclusions(company_id: int, check_id: str | None = None) -> set[tuple[str, str]]:
+    """Return durable ``(check_id, account_id)`` exclusions for a company."""
+    if check_id is None:
+        rows = await db.fetch_all(
+            "SELECT check_id, account_id FROM m365_best_practice_account_exclusions WHERE company_id = %s",
+            (company_id,),
+        )
+    else:
+        rows = await db.fetch_all(
+            "SELECT check_id, account_id FROM m365_best_practice_account_exclusions WHERE company_id = %s AND check_id = %s",
+            (company_id, check_id),
+        )
+    return {(str(row["check_id"]), str(row["account_id"])) for row in rows}
+
+
+async def set_account_exclusion(
+    *, company_id: int, check_id: str, account_id: str, account_name: str, excluded: bool
+) -> None:
+    """Add or remove one account exclusion without affecting other checks."""
+    if excluded:
+        await db.execute(
+            """
+            INSERT INTO m365_best_practice_account_exclusions
+                (company_id, check_id, account_id, account_name, created_at)
+            VALUES (%s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE account_name = VALUES(account_name)
+            """,
+            (company_id, check_id, account_id, account_name,
+             datetime.now(timezone.utc).replace(tzinfo=None)),
+        )
+    else:
+        await db.execute(
+            "DELETE FROM m365_best_practice_account_exclusions WHERE company_id = %s AND check_id = %s AND account_id = %s",
+            (company_id, check_id, account_id),
         )

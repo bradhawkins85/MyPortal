@@ -10,6 +10,49 @@ import pytest
 from app.services import m365_best_practices as bp_service
 from app.services.m365 import M365Error
 
+
+@pytest.mark.anyio("asyncio")
+async def test_account_exclusions_remove_only_matching_findings(monkeypatch):
+    monkeypatch.setattr(
+        bp_service.bp_repo,
+        "get_account_exclusions",
+        AsyncMock(return_value={("bp_test", "account-1")}),
+    )
+
+    status, details, accounts = await bp_service._apply_account_exclusions(
+        7,
+        "bp_test",
+        "fail",
+        "Two accounts require attention.",
+        [
+            {"id": "account-1", "name": "excluded@example.com"},
+            {"id": "account-2", "name": "active@example.com"},
+        ],
+    )
+
+    assert status == "fail"
+    assert "1 account(s) require attention" in details
+    assert accounts[0]["excluded"] is True
+    assert accounts[1]["excluded"] is False
+
+
+@pytest.mark.anyio("asyncio")
+async def test_account_exclusions_pass_check_when_all_findings_are_excluded(monkeypatch):
+    monkeypatch.setattr(
+        bp_service.bp_repo,
+        "get_account_exclusions",
+        AsyncMock(return_value={("bp_test", "account-1")}),
+    )
+
+    status, details, accounts = await bp_service._apply_account_exclusions(
+        7, "bp_test", "fail", "One account requires attention.",
+        [{"id": "account-1", "name": "excluded@example.com"}],
+    )
+
+    assert status == "pass"
+    assert "All 1 listed account finding(s) are excluded" in details
+    assert accounts[0]["excluded"] is True
+
 _GUEST_ROLE_ID_MOST_RESTRICTIVE = bp_service._GUEST_ROLE_ID_MOST_RESTRICTIVE
 
 

@@ -41,6 +41,21 @@
     outline-offset: 2px;
     transform: translateY(-2px);
   }
+  .bp-account-findings ul {
+    display: grid;
+    gap: 0.35rem;
+    margin: 0.5rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .bp-account-findings li {
+    align-items: center;
+    display: flex;
+    gap: 0.5rem;
+    justify-content: space-between;
+    overflow-wrap: anywhere;
+  }
+  .bp-account-findings form { flex: 0 0 auto; }
 </style>
 {% endblock %}
 
@@ -132,6 +147,28 @@
           </td>
           <td data-column-key="details">
             <span>{{ check.details or '' }}</span>
+            {% if check.affected_accounts %}
+            <details class="bp-account-findings" style="margin-top:0.5rem">
+              <summary>Listed accounts ({{ check.affected_accounts | length }})</summary>
+              <ul>
+                {% for account in check.affected_accounts %}
+                <li{% if account.excluded %} class="text-muted"{% endif %}>
+                  <span>{{ account.name }}{% if account.excluded %} — excluded{% endif %}</span>
+                  {% if show_actions %}
+                  <form method="post" action="/m365/best-practices/account-exclusion/{{ check.check_id }}">
+                    {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+                    <input type="hidden" name="account_id" value="{{ account.id }}" />
+                    <input type="hidden" name="excluded" value="{{ '0' if account.excluded else '1' }}" />
+                    <button type="submit" class="button button--small button--ghost">
+                      {{ 'Restore' if account.excluded else 'Exclude' }}
+                    </button>
+                  </form>
+                  {% endif %}
+                </li>
+                {% endfor %}
+              </ul>
+            </details>
+            {% endif %}
             {% if check.remediation %}
             <details style="margin-top:0.5rem">
               <summary style="cursor:pointer;color:var(--color-primary,#2563eb);font-size:0.875rem">Remediation guidance</summary>
