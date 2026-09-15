@@ -3524,6 +3524,10 @@ async def m365_best_practices_page(request: Request):
         "catalog": enabled_catalog,
         "has_credentials": bool(credentials),
         "is_super_admin": bool(user.get("is_super_admin")),
+        "can_manage_account_exclusions": bool(
+            user.get("is_super_admin")
+            or (membership and membership.get("can_view_m365_best_practices"))
+        ),
     }
     return await _render_template("m365/best_practices.html", request, user, extra=extra)
 
@@ -3679,7 +3683,7 @@ async def remediate_m365_best_practice(request: Request, check_id: str):
 async def set_m365_best_practice_account_exclusion(request: Request, check_id: str):
     """Exclude or restore one account finding for one company/check pair."""
     user, membership, _, company_id, redirect = await _load_m365_best_practices_context(
-        request, super_admin_only=True,
+        request,
     )
     if redirect:
         return redirect

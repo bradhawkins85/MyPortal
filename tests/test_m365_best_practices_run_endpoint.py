@@ -119,3 +119,71 @@ def test_score_history_page_loads_current_company_history(monkeypatch):
     get_history.assert_awaited_once_with(99)
     assert render_template.await_args.args[0] == "m365/best_practices_history.html"
     assert render_template.await_args.kwargs["extra"]["history"] == history
+
+
+def test_best_practices_page_sets_account_exclusion_permission_for_company_viewers(monkeypatch):
+    async def fake_context(request, super_admin_only=False):
+        return {"id": 7, "is_super_admin": False, "company_id": 99}, {"can_view_m365_best_practices": True}, {"id": 99}, 99, None
+
+    render_template = AsyncMock(return_value="best-practices-page")
+    monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
+    monkeypatch.setattr(main_module.m365_service, "get_credentials", AsyncMock(return_value={"tenant_id": "t"}))
+    monkeypatch.setattr(main_module.m365_best_practices_service, "get_last_results", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main_module.m365_best_practices_service, "get_secure_score_summary", lambda _results: None)
+    monkeypatch.setattr(main_module.m365_best_practices_service, "list_best_practices", lambda: [])
+    monkeypatch.setattr(main_module.m365_best_practices_service, "get_enabled_check_ids", AsyncMock(return_value=set()))
+    monkeypatch.setattr(main_module, "_render_template", render_template)
+
+    with TestClient(app) as client:
+        response = client.get("/m365/best-practices")
+
+    assert response.status_code == 200
+    assert response.text == "best-practices-page"
+    assert render_template.await_args.kwargs["extra"]["can_manage_account_exclusions"] is True
+
+
+def test_account_exclusion_endpoint_does_not_require_super_admin(monkeypatch):
+    async def fake_context(request, super_admin_only=False):
+        assert super_admin_only is False
+        return {"id": 7, "is_super_admin": False, "company_id": 99}, {"can_view_m365_best_practices": True}, {"id": 99}, 99, None
+
+    monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "list_best_practices",
+        lambda: [{"id": "bp_test", "name": "Account check"}],
+    )
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "get_last_results",
+        AsyncMock(
+            return_value=[
+                {
+                    "check_id": "bp_test",
+                    "affected_accounts": [{"id": "one", "name": "one@example.com"}],
+                }
+            ]
+        ),
+    )
+    set_exclusion = AsyncMock()
+    run_single = AsyncMock()
+    monkeypatch.setattr(main_module.m365_best_practices_service, "set_account_exclusion", set_exclusion)
+    monkeypatch.setattr(main_module.m365_best_practices_service, "run_single_check", run_single)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/m365/best-practices/account-exclusion/bp_test",
+            data={"account_id": "one", "excluded": "1"},
+        )
+
+    assert response.status_code == 303
+    set_exclusion.assert_awaited_once_with(
+        company_id=99,
+        check_id="bp_test",
+        account_id="one",
+        account_name="one@example.com",
+        excluded=True,
+    )
+    run_single.assert_awaited_once_with(
+        company_id=99, check_id="bp_test", allow_auto_remediation=False
+    )
