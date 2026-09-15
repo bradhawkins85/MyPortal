@@ -122,6 +122,7 @@
   {# Helper macro: render a results table                                #}
   {# ------------------------------------------------------------------ #}
   {% macro result_table(checks, show_actions, show_account_actions=false, can_edit_notes=false, table_id='', can_submit_tickets=false) %}
+  {% set has_ticket_actions = can_submit_tickets and (checks | selectattr("status", "equalto", "fail") | list | length > 0) %}
   {{ table_toolbar(
     table_id,
     search=true,
@@ -137,7 +138,7 @@
           <th data-column-key="check" data-sort="string">Check</th>
           <th data-column-key="details" data-sort="string">Details</th>
           <th data-column-key="evaluated" data-sort="date" style="white-space:nowrap">Last evaluated</th>
-          {% if show_actions or can_submit_tickets %}<th class="table__actions" data-column-filter-disabled style="width:14rem">Actions</th>{% endif %}
+          {% if show_actions or has_ticket_actions %}<th class="table__actions" data-column-filter-disabled style="width:14rem">Actions</th>{% endif %}
         </tr>
       </thead>
       <tbody>
@@ -239,9 +240,9 @@
             <small class="text-muted"><span data-utc="{{ check.run_at.isoformat() }}">{{ check.run_at.isoformat() }}</span></small>
             {% endif %}
           </td>
-          {% if show_actions or can_submit_tickets %}
+          {% if show_actions or has_ticket_actions %}
           <td>
-            {% if can_submit_tickets and check.status == "fail" %}
+            {% if has_ticket_actions and check.status == "fail" %}
             <form method="post" action="/m365/best-practices/ticket/{{ check.check_id }}" style="display:inline">
               {% if csrf_token %}
               <input type="hidden" name="_csrf" value="{{ csrf_token }}" />

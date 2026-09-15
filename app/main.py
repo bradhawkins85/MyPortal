@@ -3525,8 +3525,10 @@ def _can_manage_m365_account_exclusions(user: dict, membership: dict | None) -> 
 
 
 def _can_submit_m365_best_practice_tickets(user: Mapping[str, Any], company_id: Any) -> bool:
+    if user.get("id") is None or company_id is None:
+        return False
     try:
-        return int(user.get("id")) > 0 and int(company_id) > 0
+        return int(company_id) > 0
     except (TypeError, ValueError):
         return False
 
@@ -3743,7 +3745,9 @@ async def submit_m365_best_practice_ticket(request: Request, check_id: str):
     result = next((item for item in stored if item.get("check_id") == check_id), None)
     if result is None:
         return flash_redirect("/m365/best-practices", "This check has not been evaluated yet", "error")
-    if result.get("status") != m365_best_practices_service.STATUS_FAIL:
+    result_status = str(result.get("status") or "")
+    # Manual support tickets are intentionally limited to stored failed checks.
+    if result_status not in {m365_best_practices_service.STATUS_FAIL}:
         return flash_redirect("/m365/best-practices", "Support tickets can only be created for failed checks", "error")
 
     external_reference = m365_best_practices_service.build_failure_ticket_external_reference(
@@ -3761,6 +3765,8 @@ async def submit_m365_best_practice_ticket(request: Request, check_id: str):
         requester_id = int(user["id"])
     except (KeyError, TypeError, ValueError):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied") from None
+    if requester_id <= 0:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     requester_name = str(
         user.get("display_name")
         or user.get("full_name")

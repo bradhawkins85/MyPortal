@@ -317,6 +317,7 @@ def test_non_failed_checks_hide_manual_support_ticket_action():
 
     assert "/m365/best-practices/ticket/bp_test" not in html
     assert "Create ticket" not in html
+    assert ">Actions<" not in html
 
 
 def test_ticket_action_hides_without_ticket_submission_permission():
