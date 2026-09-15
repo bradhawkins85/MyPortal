@@ -158,7 +158,8 @@ def test_authenticator_mfa_fatigue_catalog_entry_has_remediation():
     assert payload["featureSettings"]["@odata.type"] == (
         "#microsoft.graph.microsoftAuthenticatorFeatureSettings"
     )
-    for setting in bp_service._MFA_FATIGUE_PROTECTION_KEYS:
+    assert "numberMatchingRequiredState" not in payload["featureSettings"]
+    for setting in bp_service._MFA_FATIGUE_PATCHABLE_KEYS:
         feature = payload["featureSettings"][setting]
         assert feature == {
             "@odata.type": "#microsoft.graph.authenticationMethodFeatureConfiguration",
@@ -172,7 +173,7 @@ def test_authenticator_mfa_fatigue_catalog_entry_has_remediation():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_remediate_authenticator_mfa_fatigue_patches_all_user_settings():
+async def test_remediate_authenticator_mfa_fatigue_patches_supported_settings():
     with (
         patch(
             "app.services.m365_best_practices.acquire_access_token",
@@ -217,7 +218,7 @@ async def test_remediate_authenticator_mfa_fatigue_patches_all_user_settings():
         bp_service._MFA_FATIGUE_REMEDIATION_PAYLOAD["featureSettings"][setting][
             "includeTarget"
         ]["id"] == "all_users"
-        for setting in bp_service._MFA_FATIGUE_PROTECTION_KEYS
+        for setting in bp_service._MFA_FATIGUE_PATCHABLE_KEYS
     )
     update_status.assert_awaited_once()
     assert update_status.await_args.kwargs["remediation_status"] == "success"
@@ -270,6 +271,56 @@ async def test_remediate_authenticator_mfa_fatigue_waits_for_graph_consistency()
     assert graph_get.await_count == 2
     sleep.assert_awaited_once()
     assert update_status.await_args.kwargs["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_authenticator_mfa_fatigue_returns_manual_number_matching_message():
+    number_matching_only_missing = {
+        "featureSettings": {
+            "numberMatchingRequiredState": {"state": "disabled"},
+            "displayAppInformationRequiredState": {"state": "enabled"},
+            "displayLocationInformationRequiredState": {"state": "enabled"},
+        }
+    }
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "app.services.m365_best_practices._safe_graph_get",
+            new_callable=AsyncMock,
+            return_value=number_matching_only_missing,
+        ) as graph_get,
+        patch(
+            "app.services.m365_best_practices.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ) as update_status,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_authenticator_mfa_fatigue"
+        )
+
+    assert result == {
+        "success": False,
+        "message": (
+            "Remediation command failed: "
+            f"{bp_service._MFA_FATIGUE_NUMBER_MATCHING_MANUAL_MESSAGE}"
+        ),
+    }
+    graph_get.assert_awaited_once()
+    sleep.assert_not_awaited()
+    assert update_status.await_args.kwargs["remediation_status"] == "failed"
 
 
 # ---------------------------------------------------------------------------

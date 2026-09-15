@@ -564,6 +564,20 @@ _MFA_FATIGUE_PROTECTION_KEYS: tuple[str, ...] = (
     "displayLocationInformationRequiredState",
 )
 
+# Graph no longer accepts numberMatchingRequiredState inside featureSettings
+# PATCH payloads for MicrosoftAuthenticator.  Automation can still enable the
+# app/location context prompts, but number matching must be turned on manually.
+_MFA_FATIGUE_PATCHABLE_KEYS: tuple[str, ...] = (
+    "displayAppInformationRequiredState",
+    "displayLocationInformationRequiredState",
+)
+_MFA_FATIGUE_MANUAL_ONLY_KEYS: tuple[str, ...] = ("numberMatchingRequiredState",)
+_MFA_FATIGUE_NUMBER_MATCHING_MANUAL_MESSAGE = (
+    "Microsoft Graph no longer supports toggling Microsoft Authenticator number "
+    "matching in featureSettings. Enable Number matching manually in Entra, "
+    "then re-evaluate the check."
+)
+
 _MFA_FATIGUE_REMEDIATION_PAYLOAD: dict[str, Any] = {
     # Graph's update contract requires the concrete configuration type.  It
     # can return 204 while silently retaining nested feature settings when the
@@ -584,7 +598,7 @@ _MFA_FATIGUE_REMEDIATION_PAYLOAD: dict[str, Any] = {
                     "id": "all_users",
                 },
             }
-            for setting in _MFA_FATIGUE_PROTECTION_KEYS
+            for setting in _MFA_FATIGUE_PATCHABLE_KEYS
         },
     }
 }
@@ -2237,15 +2251,20 @@ async def _check_authenticator_mfa_fatigue(token: str) -> dict[str, Any]:
     )
     if data is None:
         return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to read Microsoft Authenticator policy.")
-    fs = data.get("featureSettings") or {}
-    missing = [
-        k for k in _MFA_FATIGUE_PROTECTION_KEYS
-        if str(((fs.get(k) or {}).get("state")) or "").lower() != "enabled"
-    ]
+    missing = _get_authenticator_mfa_fatigue_missing_settings(data)
     if not missing:
         return _result(check_id, check_name, STATUS_PASS, "All MFA-fatigue protections are enabled.")
     return _result(check_id, check_name, STATUS_FAIL,
                    "Disabled MFA-fatigue protections: " + ", ".join(missing))
+
+
+def _get_authenticator_mfa_fatigue_missing_settings(data: dict[str, Any]) -> list[str]:
+    """Return the Authenticator MFA-fatigue protections that are not enabled."""
+    fs = data.get("featureSettings") or {}
+    return [
+        k for k in _MFA_FATIGUE_PROTECTION_KEYS
+        if str(((fs.get(k) or {}).get("state")) or "").lower() != "enabled"
+    ]
 
 
 async def _remediate_authenticator_mfa_fatigue(token: str) -> tuple[bool, str]:
@@ -2258,10 +2277,17 @@ async def _remediate_authenticator_mfa_fatigue(token: str) -> tuple[bool, str]:
 
     latest_details = "Microsoft Graph did not return the updated policy."
     for attempt in range(1, _MFA_FATIGUE_VERIFICATION_ATTEMPTS + 1):
-        result = await _check_authenticator_mfa_fatigue(token)
-        latest_details = result.get("details") or latest_details
-        if result.get("status") == STATUS_PASS:
+        data = await _safe_graph_get(token, url)
+        if data is None:
+            if attempt < _MFA_FATIGUE_VERIFICATION_ATTEMPTS:
+                await asyncio.sleep(_retry_backoff_seconds(attempt))
+            continue
+        missing = _get_authenticator_mfa_fatigue_missing_settings(data)
+        if not missing:
             return True, ""
+        latest_details = "Disabled MFA-fatigue protections: " + ", ".join(missing)
+        if set(missing).issubset(_MFA_FATIGUE_MANUAL_ONLY_KEYS):
+            return False, _MFA_FATIGUE_NUMBER_MATCHING_MANUAL_MESSAGE
         if attempt < _MFA_FATIGUE_VERIFICATION_ATTEMPTS:
             await asyncio.sleep(_retry_backoff_seconds(attempt))
 
