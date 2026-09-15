@@ -725,6 +725,11 @@ async def test_run_best_practices_creates_ticket_on_pass_to_fail_transition():
                 return_value=None,
             ),
             patch(
+                "app.services.m365_best_practices._acquire_exo_access_token",
+                new_callable=AsyncMock,
+                return_value=("exo-token", "tenant-123"),
+            ),
+            patch(
                 "app.services.m365_best_practices.get_enabled_check_ids",
                 new_callable=AsyncMock,
                 return_value={check_id},
@@ -805,6 +810,11 @@ async def test_run_best_practices_does_not_create_ticket_on_initial_fail():
                 "app.services.m365_best_practices.detect_tenant_capabilities",
                 new_callable=AsyncMock,
                 return_value=None,
+            ),
+            patch(
+                "app.services.m365_best_practices._acquire_exo_access_token",
+                new_callable=AsyncMock,
+                return_value=("exo-token", "tenant-123"),
             ),
             patch(
                 "app.services.m365_best_practices.get_enabled_check_ids",
@@ -1564,7 +1574,11 @@ async def test_list_settings_with_catalog_includes_auto_remediate():
         new_callable=AsyncMock,
     ) as mock_map:
         mock_map.return_value = {
-            remediable_id: {"enabled": True, "auto_remediate": True},
+            remediable_id: {
+                "enabled": True,
+                "auto_remediate": True,
+                "create_ticket_on_fail": False,
+            },
         }
         rows = await bp_service.list_settings_with_catalog()
 
