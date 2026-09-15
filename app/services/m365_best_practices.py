@@ -3757,7 +3757,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_per_user_mfa_disabled,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "disable_per_user_mfa",
     },
     {
         "id": "bp_dynamic_group_for_guests",
@@ -6954,6 +6955,69 @@ async def _remediate_foreach_user_graph(
     return all_ok
 
 
+async def _remediate_disable_per_user_mfa(
+    graph_token: str, company_id: int, check_id: str
+) -> tuple[bool, str]:
+    """Disable per-user MFA for enabled users when Conditional Access is available."""
+    policies = await _safe_graph_get_all(graph_token, _CA_POLICIES_URL)
+    if policies is None:
+        return False, "Unable to enumerate Conditional Access policies."
+
+    has_enabled_ca = any(
+        str(policy.get("state") or "").lower() == "enabled"
+        for policy in policies
+    )
+    if not has_enabled_ca:
+        return (
+            False,
+            "No enabled Conditional Access policy found. Configure Conditional Access before disabling per-user MFA.",
+        )
+
+    users = await _safe_graph_get_all(graph_token, _USERS_LIST_URL)
+    if users is None:
+        return False, "Unable to enumerate users for per-user MFA remediation."
+
+    all_ok = True
+    for user in users:
+        user_id = str(user.get("id") or "").strip()
+        if not user_id or not user.get("accountEnabled", True):
+            continue
+        requirement_url = _AUTHENTICATION_REQUIREMENTS_URL_TMPL.format(user_id=user_id)
+        data = await _safe_graph_get(graph_token, requirement_url)
+        if data is None:
+            log_error(
+                "M365 per-user MFA remediation – requirements lookup failed",
+                company_id=company_id,
+                check_id=check_id,
+                user_id=user_id,
+            )
+            all_ok = False
+            continue
+
+        state = str(data.get("perUserMfaState") or "").lower()
+        if not state or state == "disabled":
+            continue
+        try:
+            await _graph_patch(
+                graph_token,
+                requirement_url,
+                {"perUserMfaState": "disabled"},
+            )
+        except M365Error as exc:
+            log_error(
+                "M365 per-user MFA remediation – update failed",
+                company_id=company_id,
+                check_id=check_id,
+                user_id=user_id,
+                error=str(exc),
+            )
+            all_ok = False
+
+    if not all_ok:
+        return False, "One or more per-user MFA settings could not be disabled."
+    return True, ""
+
+
 async def _remediate_create_dynamic_guest_group(graph_token: str) -> bool:
     """Create the standard dynamic security group that contains every guest.
 
@@ -7042,7 +7106,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     database, and returns a result dict with ``success`` (bool) and ``message``
     (str) keys.
 
-    Supports eight remediation patterns:
+    Supports nine remediation patterns:
 
     * ``source_type="exo"`` – executes a single cmdlet via the Exchange Online
       REST API using the ``remediation_cmdlet`` and ``remediation_params``
@@ -7060,6 +7124,9 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     * ``source_type="graph"`` with ``remediation_type="foreach_user_graph"`` –
       fetches all users and disables sign-in for each unlicensed member account
       that currently has ``accountEnabled=True``.
+    * ``source_type="graph"`` with ``remediation_type="disable_per_user_mfa"`` –
+      disables legacy per-user MFA states after confirming at least one enabled
+      Conditional Access policy exists.
     * ``source_type="graph"`` with
       ``remediation_type="create_dynamic_guest_group"`` – creates the standard
       ``Guest Users`` dynamic security group if one does not already exist.
@@ -7239,6 +7306,10 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 success = False
                 failure_message = ("Account creation or secure Hudu synchronization failed; "
                                    "the affected new account was rolled back.")
+        elif bp.get("remediation_type") == "disable_per_user_mfa":
+            success, failure_message = await _remediate_disable_per_user_mfa(
+                graph_token, company_id, check_id
+            )
         elif bp.get("remediation_type") == "foreach_user_graph":
             success = await _remediate_foreach_user_graph(graph_token, company_id, check_id)
             if not success:
