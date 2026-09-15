@@ -5770,7 +5770,7 @@ async def _maybe_create_ticket_on_fail(
     )
     description = (
         "<p>This ticket was created automatically because an M365 best-practice "
-        "check changed from <strong>Pass</strong> to <strong>Failed</strong>.</p>"
+        "check changed from <strong>Pass</strong> to <strong>Fail</strong>.</p>"
         f"<p><strong>Company:</strong> {escape(company_name)}<br />"
         f"<strong>Check:</strong> {escape(check_name)}<br />"
         f"<strong>Check ID:</strong> {escape(check_id)}<br />"
@@ -6301,6 +6301,8 @@ async def run_single_check(
     Raises :class:`ValueError` if ``check_id`` is unknown or not currently
     enabled globally.  ``allow_auto_remediation`` is disabled by post-remediation
     verification runs to prevent an unresolved check from remediating recursively.
+    Callers that reset stored results before evaluation can pass ``previous_status``
+    explicitly so pass→fail ticket detection still uses the pre-reset state.
     """
     catalog = _catalog_map()
     bp = catalog.get(check_id)
