@@ -4776,20 +4776,39 @@ def test_antiphish_remediation_catalog_fields():
     """Anti-phish EXO checks must have the correct cmdlet and params."""
     catalog = {bp["id"]: bp for bp in bp_service._BEST_PRACTICES}
     expected = {
-        "bp_antiphish_quarantine_impersonated_domain": "TargetedDomainProtectionAction",
-        "bp_antiphish_quarantine_impersonated_user": "TargetedUserProtectionAction",
-        "bp_antiphish_domain_impersonation_safety_tip": "EnableSimilarDomainsSafetyTips",
-        "bp_antiphish_user_impersonation_safety_tip": "EnableSimilarUsersSafetyTips",
-        "bp_antiphish_unusual_characters_safety_tip": "EnableUnusualCharactersSafetyTips",
+        "bp_antiphish_quarantine_impersonated_domain": (
+            "TargetedDomainProtectionAction",
+            None,
+        ),
+        "bp_antiphish_quarantine_impersonated_user": (
+            "TargetedUserProtectionAction",
+            None,
+        ),
+        "bp_antiphish_domain_impersonation_safety_tip": (
+            "EnableSimilarDomainsSafetyTips",
+            "matching_antiphish_policy_exo",
+        ),
+        "bp_antiphish_user_impersonation_safety_tip": (
+            "EnableSimilarUsersSafetyTips",
+            "matching_antiphish_policy_exo",
+        ),
+        "bp_antiphish_unusual_characters_safety_tip": (
+            "EnableUnusualCharactersSafetyTips",
+            None,
+        ),
     }
-    for check_id, param_key in expected.items():
+    for check_id, (param_key, remediation_type) in expected.items():
         entry = catalog[check_id]
         assert entry.get("source_type") == "exo", f"source_type wrong for {check_id}"
         assert entry.get("remediation_cmdlet") == "Set-AntiPhishPolicy", f"wrong cmdlet for {check_id}"
         params = entry.get("remediation_params") or {}
-        assert params.get("Identity") == "Office365 AntiPhish Default", f"Identity missing for {check_id}"
         assert params.get("Confirm") is False, f"Confirm suppression missing for {check_id}"
         assert param_key in params, f"param {param_key} missing for {check_id}"
+        assert entry.get("remediation_type") == remediation_type, f"wrong remediation_type for {check_id}"
+        if remediation_type is None:
+            assert params.get("Identity") == "Office365 AntiPhish Default", f"Identity missing for {check_id}"
+        else:
+            assert "Identity" not in params, f"Identity should be resolved dynamically for {check_id}"
 
 
 def test_spo_remediation_catalog_fields():
@@ -4836,7 +4855,7 @@ async def test_remediate_antiphish_quarantine_domain_success():
     upserts: list[dict] = []
     invocations: list[dict] = []
 
-    async def fake_exo_invoke(token, tenant_id, cmdlet, params):
+    async def fake_exo_invoke(token, tenant_id, cmdlet, params=None):
         invocations.append({"cmdlet": cmdlet, "params": params})
         return {}
 
@@ -4873,8 +4892,18 @@ async def test_remediate_antiphish_domain_safety_tip_success():
     upserts: list[dict] = []
     invocations: list[dict] = []
 
-    async def fake_exo_invoke(token, tenant_id, cmdlet, params):
+    async def fake_exo_invoke(token, tenant_id, cmdlet, params=None):
         invocations.append({"cmdlet": cmdlet, "params": params})
+        if cmdlet == "Get-AntiPhishPolicy":
+            return {
+                "value": [
+                    {
+                        "Identity": "Custom AntiPhish Policy",
+                        "EnableTargetedDomainsProtection": True,
+                        "EnableSimilarDomainsSafetyTips": False,
+                    }
+                ]
+            }
         return {}
 
     with (
@@ -4897,8 +4926,60 @@ async def test_remediate_antiphish_domain_safety_tip_success():
         )
 
     assert result["success"] is True
-    assert invocations[0]["params"]["EnableSimilarDomainsSafetyTips"] is True
-    assert invocations[0]["params"]["Confirm"] is False
+    assert invocations[0]["cmdlet"] == "Get-AntiPhishPolicy"
+    assert invocations[1]["cmdlet"] == "Set-AntiPhishPolicy"
+    assert invocations[1]["params"]["Identity"] == "Custom AntiPhish Policy"
+    assert invocations[1]["params"]["EnableSimilarDomainsSafetyTips"] is True
+    assert invocations[1]["params"]["Confirm"] is False
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_antiphish_domain_safety_tip_requires_domain_protection():
+    """Domain safety-tip remediation should fail clearly when no policy can support it."""
+    upserts: list[dict] = []
+    invocations: list[dict] = []
+
+    async def fake_exo_invoke(token, tenant_id, cmdlet, params=None):
+        invocations.append({"cmdlet": cmdlet, "params": params})
+        if cmdlet == "Get-AntiPhishPolicy":
+            return {
+                "value": [
+                    {
+                        "Identity": "Office365 AntiPhish Default",
+                        "EnableTargetedDomainsProtection": False,
+                        "EnableOrganizationDomainsProtection": False,
+                    }
+                ]
+            }
+        raise AssertionError(f"unexpected cmdlet invocation: {cmdlet}")
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-abc"),
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            side_effect=fake_exo_invoke,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=10, check_id="bp_antiphish_domain_impersonation_safety_tip"
+        )
+
+    assert result["success"] is False
+    assert result["message"] == (
+        "Remediation command failed: Automated remediation requires an anti-phishing policy "
+        "with domain impersonation protection enabled. Configure organization-domain or "
+        "targeted-domain protection first, then retry."
+    )
+    assert [entry["cmdlet"] for entry in invocations] == ["Get-AntiPhishPolicy"]
+    assert upserts[0]["remediation_status"] == "failed"
 
 
 @pytest.mark.anyio("asyncio")
