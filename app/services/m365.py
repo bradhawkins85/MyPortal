@@ -53,6 +53,7 @@ _EXO_MANAGE_AS_APP_ROLE = "dc50a0fb-09a3-484d-be87-e023b12c6440"
 # principal is required *in addition to* the Exchange.ManageAsApp app role for
 # Exchange Online PowerShell REST API access (e.g. Get-MailboxPermission).
 _EXO_ADMIN_ROLE_TEMPLATE_ID = "29232cdf-9323-42fd-ade2-1d097af3e4de"
+_COMPLIANCE_ADMIN_ROLE_TEMPLATE_ID = "17315797-102d-40b4-93e0-432062caca18"
 
 # Skype and Teams Tenant Admin API service principal app ID.
 # Teams PowerShell cmdlets (Get-CsTeamsMeetingPolicy, Get-CsTenantFederationConfiguration,
@@ -3559,6 +3560,56 @@ async def _ensure_teams_service_admin_role(
         return False
 
 
+async def _ensure_compliance_admin_role(
+    access_token: str,
+    sp_object_id: str,
+) -> bool:
+    """Best-effort: assign the Compliance Administrator directory role to *sp_object_id*.
+
+    Customer Lockbox remediation uses ``Set-OrganizationConfig`` with the
+    ``CustomerLockBoxEnabled`` parameter, which requires the calling service
+    principal to hold the Compliance Administrator (or Global Administrator)
+    directory role in addition to ``Exchange.ManageAsApp``.
+
+    Returns ``True`` if the role was newly assigned, ``False`` otherwise.
+    Failures are logged but never raised.
+    """
+    try:
+        safe_sp_id = quote(sp_object_id, safe="")
+        existing = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments"
+            f"?$filter=principalId eq '{safe_sp_id}' "
+            f"and roleDefinitionId eq '{_COMPLIANCE_ADMIN_ROLE_TEMPLATE_ID}'",
+        )
+        if existing.get("value"):
+            return False  # already assigned
+
+        await _graph_post(
+            access_token,
+            "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments",
+            {
+                "principalId": sp_object_id,
+                "roleDefinitionId": _COMPLIANCE_ADMIN_ROLE_TEMPLATE_ID,
+                "directoryScopeId": "/",
+            },
+        )
+        log_info(
+            "Assigned Compliance Administrator directory role",
+            sp_object_id=sp_object_id,
+        )
+        return True
+    except M365Error as exc:
+        log_error(
+            "Failed to assign Compliance Administrator directory role; "
+            "Customer Lockbox remediation may return 403. Assign the role manually "
+            "via Microsoft Entra ID > Roles and administrators > Compliance Administrator.",
+            sp_object_id=sp_object_id,
+            error=str(exc),
+        )
+        return False
+
+
 async def try_grant_missing_permissions(
     company_id: int,
     access_token: str,
@@ -3799,6 +3850,12 @@ async def try_grant_missing_permissions(
         # This is required in addition to Teams.ManageAsApp.
         if await _ensure_teams_service_admin_role(access_token, sp_object_id):
             granted.append("teams-admin-role")
+
+        # Best-effort: assign the Compliance Administrator directory role so
+        # Exchange Online cmdlets such as Set-OrganizationConfig
+        # -CustomerLockBoxEnabled succeed for Customer Lockbox remediation.
+        if await _ensure_compliance_admin_role(access_token, sp_object_id):
+            granted.append("compliance-admin-role")
 
         return bool(granted)
     except Exception as exc:  # noqa: BLE001

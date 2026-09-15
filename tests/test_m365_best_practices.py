@@ -4168,9 +4168,7 @@ def test_customer_lockbox_catalog_entry():
     """bp_customer_lockbox catalog entry must have the expected fields."""
     catalog = bp_service.list_best_practices()
     entry = next(bp for bp in catalog if bp["id"] == "bp_customer_lockbox")
-    # Automated remediation is not available: Set-OrganizationConfig -CustomerLockBoxEnabled
-    # requires Compliance Administrator or Global Administrator, not Exchange Administrator.
-    assert entry.get("has_remediation") is False
+    assert entry.get("has_remediation") is True
     assert entry.get("default_enabled") is True
     assert entry.get("is_cis_benchmark") is True
     assert "CustomerLockBoxEnabled" in entry["remediation"]
@@ -4178,6 +4176,63 @@ def test_customer_lockbox_catalog_entry():
     assert "source" not in entry
     assert "remediation_cmdlet" not in entry
     assert "remediation_params" not in entry
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_customer_lockbox_success():
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-123"),
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=9, check_id="bp_customer_lockbox"
+        )
+
+    assert result["success"] is True
+    assert len(upserts) == 1
+    assert upserts[0]["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_customer_lockbox_failure():
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-123"),
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            new_callable=AsyncMock,
+            side_effect=M365Error("Set-OrganizationConfig failed"),
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=9, check_id="bp_customer_lockbox"
+        )
+
+    assert result["success"] is False
+    assert upserts[0]["remediation_status"] == "failed"
 
 
 # ---------------------------------------------------------------------------

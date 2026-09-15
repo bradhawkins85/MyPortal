@@ -12,6 +12,7 @@ import pytest
 
 from app.services import m365 as m365_service
 from app.services.m365 import (
+    _COMPLIANCE_ADMIN_ROLE_TEMPLATE_ID,
     _GRAPH_APP_ID,
     _PROVISION_APP_ROLES,
     M365Error,
@@ -681,7 +682,7 @@ async def test_ensure_exchange_admin_role_logs_on_failure():
 
 @pytest.mark.anyio("asyncio")
 async def test_try_grant_missing_permissions_assigns_exchange_admin_role():
-    """Exchange Administrator directory role is assigned during connect flow."""
+    """Required EXO/Teams/compliance directory roles are assigned during connect flow."""
     # All Graph + EXO + Teams roles already granted (with resourceIds for precise matching)
     graph_assignments = [{"appRoleId": r, "resourceId": "graph-sp-id"} for r in _PROVISION_APP_ROLES]
     exo_assignment = {"appRoleId": _EXO_MANAGE_AS_APP_ROLE, "resourceId": "exo-sp-id"}
@@ -696,7 +697,7 @@ async def test_try_grant_missing_permissions_assigns_exchange_admin_role():
         if _TEAMS_APP_ID in url:
             return _teams_sp_response()
         if "roleManagement/directory/roleAssignments" in url:
-            return {"value": []}  # both admin roles not yet assigned
+            return {"value": []}  # required directory roles not yet assigned
         return _sp_response()
 
     async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
@@ -713,12 +714,13 @@ async def test_try_grant_missing_permissions_assigns_exchange_admin_role():
             access_token="admin-token",
         )
 
-    assert result is True, "Should return True when admin roles were assigned"
+    assert result is True, "Should return True when directory roles were assigned"
     role_assignment_urls = [p["url"] for p in posted if "roleManagement/directory/roleAssignments" in p["url"]]
-    assert len(role_assignment_urls) == 2, "Both Exchange Admin and Teams Admin roles should be assigned"
+    assert len(role_assignment_urls) == 3, "Exchange, Teams, and Compliance Admin roles should be assigned"
     assigned_role_def_ids = {p["payload"]["roleDefinitionId"] for p in posted if "roleManagement" in p["url"]}
     assert _EXO_ADMIN_ROLE_TEMPLATE_ID in assigned_role_def_ids, "Exchange Admin role must be assigned"
     assert _TEAMS_ADMIN_ROLE_TEMPLATE_ID in assigned_role_def_ids, "Teams Admin role must be assigned"
+    assert _COMPLIANCE_ADMIN_ROLE_TEMPLATE_ID in assigned_role_def_ids, "Compliance Admin role must be assigned"
 
 
 # ---------------------------------------------------------------------------
@@ -822,6 +824,87 @@ async def test_ensure_teams_service_admin_role_logs_on_failure():
         patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
     ):
         result = await m365_service._ensure_teams_service_admin_role(
+            access_token="admin-token",
+            sp_object_id="sp-123",
+        )
+
+    assert result is False, "Should return False when assignment fails"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ensure_compliance_admin_role_assigns_when_missing():
+    """Compliance Administrator directory role is assigned when not present."""
+    posted: list[dict] = []
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "roleManagement/directory/roleAssignments" in url:
+            return {"value": []}
+        return {"value": []}
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        posted.append(payload)
+        return {"id": "new-role-assignment"}
+
+    with (
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+    ):
+        result = await m365_service._ensure_compliance_admin_role(
+            access_token="admin-token",
+            sp_object_id="sp-123",
+        )
+
+    assert result is True, "Should return True when role was newly assigned"
+    assert len(posted) == 1
+    assert posted[0]["principalId"] == "sp-123"
+    assert posted[0]["roleDefinitionId"] == _COMPLIANCE_ADMIN_ROLE_TEMPLATE_ID
+    assert posted[0]["directoryScopeId"] == "/"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ensure_compliance_admin_role_noop_when_already_assigned():
+    """Returns False without POST when Compliance Administrator role is already assigned."""
+    posted: list[dict] = []
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "roleManagement/directory/roleAssignments" in url:
+            return {"value": [{"id": "existing-assignment"}]}
+        return {"value": []}
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        posted.append(payload)
+        return {}
+
+    with (
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+    ):
+        result = await m365_service._ensure_compliance_admin_role(
+            access_token="admin-token",
+            sp_object_id="sp-123",
+        )
+
+    assert result is False, "Should return False when role is already assigned"
+    assert posted == [], "No POST expected when role is already assigned"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_ensure_compliance_admin_role_logs_on_failure():
+    """Returns False and logs error when Compliance Administrator assignment fails."""
+
+    async def mock_graph_get(token: str, url: str) -> dict:
+        if "roleManagement/directory/roleAssignments" in url:
+            return {"value": []}
+        return {"value": []}
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        raise M365Error("403 Forbidden – insufficient privileges", http_status=403)
+
+    with (
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+    ):
+        result = await m365_service._ensure_compliance_admin_role(
             access_token="admin-token",
             sp_object_id="sp-123",
         )
