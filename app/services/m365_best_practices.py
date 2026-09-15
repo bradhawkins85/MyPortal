@@ -6910,10 +6910,14 @@ async def _remediate_disable_per_user_mfa(
     if policies is None:
         return False, "Unable to enumerate Conditional Access policies."
 
-    if not policies:
+    has_configured_ca = any(
+        str(policy.get("state") or "").strip().lower() != "disabled"
+        for policy in policies
+    )
+    if not has_configured_ca:
         return (
             False,
-            "No Conditional Access policy found. Configure Conditional Access before disabling per-user MFA.",
+            "No active Conditional Access policy found. Configure Conditional Access before disabling per-user MFA.",
         )
 
     users = await _safe_graph_get_all(graph_token, _USERS_LIST_URL)

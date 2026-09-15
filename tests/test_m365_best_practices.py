@@ -6049,7 +6049,45 @@ async def test_remediate_per_user_mfa_requires_configured_conditional_access():
     assert result["success"] is False
     assert (
         result["message"]
-        == "Remediation command failed: No Conditional Access policy found. Configure Conditional Access before disabling per-user MFA."
+        == "Remediation command failed: No active Conditional Access policy found. Configure Conditional Access before disabling per-user MFA."
+    )
+    safe_get_all.assert_awaited_once_with("graph-token", bp_service._CA_POLICIES_URL)
+    graph_patch.assert_not_awaited()
+    assert upserts[0]["remediation_status"] == "failed"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_per_user_mfa_rejects_disabled_conditional_access_policies():
+    upserts: list[dict] = []
+    safe_get_all = AsyncMock(return_value=[{"state": "disabled"}])
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._safe_graph_get_all",
+            safe_get_all,
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+        ) as graph_patch,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=9, check_id="bp_per_user_mfa_disabled"
+        )
+
+    assert result["success"] is False
+    assert (
+        result["message"]
+        == "Remediation command failed: No active Conditional Access policy found. Configure Conditional Access before disabling per-user MFA."
     )
     safe_get_all.assert_awaited_once_with("graph-token", bp_service._CA_POLICIES_URL)
     graph_patch.assert_not_awaited()
