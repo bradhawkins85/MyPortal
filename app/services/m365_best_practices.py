@@ -508,6 +508,7 @@ _AUTHENTICATION_REQUIREMENTS_URL_TMPL = (
     "https://graph.microsoft.com/beta/users/{user_id}/authentication/requirements"
 )
 # Lowercased policy states considered actively configured for remediation gating.
+# Original Graph values: "enabled", "enabledForReportingButNotEnforced".
 _ACTIVE_CONDITIONAL_ACCESS_POLICY_STATES_LOWER = frozenset(
     {"enabled", "enabledforreportingbutnotenforced"}
 )
