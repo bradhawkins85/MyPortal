@@ -4093,6 +4093,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_params": {
             "Identity": "Office365 AntiPhish Default",
             "TargetedDomainProtectionAction": "Quarantine",
+            "Confirm": False,
         },
         "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
@@ -4116,6 +4117,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_params": {
             "Identity": "Office365 AntiPhish Default",
             "TargetedUserProtectionAction": "Quarantine",
+            "Confirm": False,
         },
         "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
@@ -4139,6 +4141,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_params": {
             "Identity": "Office365 AntiPhish Default",
             "EnableSimilarDomainsSafetyTips": True,
+            "Confirm": False,
         },
         "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
@@ -4162,6 +4165,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_params": {
             "Identity": "Office365 AntiPhish Default",
             "EnableSimilarUsersSafetyTips": True,
+            "Confirm": False,
         },
         "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
@@ -4185,6 +4189,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_params": {
             "Identity": "Office365 AntiPhish Default",
             "EnableUnusualCharactersSafetyTips": True,
+            "Confirm": False,
         },
         "requires_licenses": [CAP_DEFENDER_O365_P1],
     },

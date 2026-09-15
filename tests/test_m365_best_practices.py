@@ -4788,6 +4788,7 @@ def test_antiphish_remediation_catalog_fields():
         assert entry.get("remediation_cmdlet") == "Set-AntiPhishPolicy", f"wrong cmdlet for {check_id}"
         params = entry.get("remediation_params") or {}
         assert params.get("Identity") == "Office365 AntiPhish Default", f"Identity missing for {check_id}"
+        assert params.get("Confirm") is False, f"Confirm suppression missing for {check_id}"
         assert param_key in params, f"param {param_key} missing for {check_id}"
 
 
@@ -4897,6 +4898,7 @@ async def test_remediate_antiphish_domain_safety_tip_success():
 
     assert result["success"] is True
     assert invocations[0]["params"]["EnableSimilarDomainsSafetyTips"] is True
+    assert invocations[0]["params"]["Confirm"] is False
 
 
 @pytest.mark.anyio("asyncio")
