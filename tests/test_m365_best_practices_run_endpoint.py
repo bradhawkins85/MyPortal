@@ -160,17 +160,15 @@ def test_best_practices_page_enables_note_editing_for_technician(monkeypatch):
 
 def test_save_note_route_allows_non_super_admins(monkeypatch):
     async def fake_context(request, super_admin_only=False):
-        return {"id": 7, "is_super_admin": False}, {}, {"id": 99}, 99, None
+        return {"id": 7, "is_super_admin": False}, {"role_name": "Technician"}, {"id": 99}, 99, None
 
-    get_results = AsyncMock(return_value=[{"check_id": "bp_test"}])
-    set_notes = AsyncMock()
+    set_notes = AsyncMock(return_value=True)
     monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
     monkeypatch.setattr(
         main_module.m365_best_practices_service,
         "list_best_practices",
         lambda: [{"id": "bp_test", "name": "Test check"}],
     )
-    monkeypatch.setattr(main_module.m365_best_practices_service, "get_last_results", get_results)
     monkeypatch.setattr(main_module.m365_best_practices_service, "set_result_notes", set_notes)
 
     with TestClient(app, follow_redirects=False) as client:
@@ -186,7 +184,7 @@ def test_save_note_route_allows_non_super_admins(monkeypatch):
 
 def test_save_note_route_rejects_overlong_notes(monkeypatch):
     async def fake_context(request, super_admin_only=False):
-        return {"id": 7, "is_super_admin": False}, {}, {"id": 99}, 99, None
+        return {"id": 7, "is_super_admin": False}, {"role_name": "Technician"}, {"id": 99}, 99, None
 
     monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
     monkeypatch.setattr(
@@ -194,9 +192,7 @@ def test_save_note_route_rejects_overlong_notes(monkeypatch):
         "list_best_practices",
         lambda: [{"id": "bp_test", "name": "Test check"}],
     )
-    get_results = AsyncMock(return_value=[{"check_id": "bp_test"}])
     set_notes = AsyncMock()
-    monkeypatch.setattr(main_module.m365_best_practices_service, "get_last_results", get_results)
     monkeypatch.setattr(main_module.m365_best_practices_service, "set_result_notes", set_notes)
 
     with TestClient(app, follow_redirects=False) as client:
@@ -206,6 +202,30 @@ def test_save_note_route_rejects_overlong_notes(monkeypatch):
     assert response.headers["location"] == "/m365/best-practices"
     assert _decode_flash_cookie(response) == {
         "message": "Check note must be 4000 characters or fewer",
+        "variant": "error",
+    }
+    set_notes.assert_not_awaited()
+
+
+def test_save_note_route_rejects_member_role(monkeypatch):
+    async def fake_context(request, super_admin_only=False):
+        return {"id": 7, "is_super_admin": False}, {"role_name": "Member"}, {"id": 99}, 99, None
+
+    set_notes = AsyncMock(return_value=True)
+    monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "list_best_practices",
+        lambda: [{"id": "bp_test", "name": "Test check"}],
+    )
+    monkeypatch.setattr(main_module.m365_best_practices_service, "set_result_notes", set_notes)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post("/m365/best-practices/note/bp_test", data={"notes": "Customer exception"})
+
+    assert response.status_code == 303
+    assert _decode_flash_cookie(response) == {
+        "message": "You do not have permission to edit check notes",
         "variant": "error",
     }
     set_notes.assert_not_awaited()

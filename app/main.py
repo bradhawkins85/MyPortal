@@ -3509,6 +3509,14 @@ def _is_valid_m365_best_practice_check_id(check_id: str) -> bool:
     return bool(re.fullmatch(r"[a-z0-9_]+", str(check_id or "").strip()))
 
 
+def _can_edit_m365_best_practice_notes(user: dict[str, Any], membership: dict[str, Any] | None) -> bool:
+    membership_role = str((membership or {}).get("role_name") or "").strip().lower()
+    return bool(
+        user.get("is_super_admin")
+        or membership_role in {"owner", "administrator", "technician"}
+    )
+
+
 @app.get("/m365/best-practices", response_class=HTMLResponse)
 async def m365_best_practices_page(request: Request):
     user, membership, company, company_id, redirect = await _load_m365_best_practices_context(request)
@@ -3520,7 +3528,6 @@ async def m365_best_practices_page(request: Request):
     catalog = m365_best_practices_service.list_best_practices()
     enabled_ids = await m365_best_practices_service.get_enabled_check_ids()
     enabled_catalog = [bp for bp in catalog if bp["id"] in enabled_ids]
-    membership_role = str((membership or {}).get("role_name") or "").strip().lower()
     extra = {
         "title": "M365 Best Practices",
         "company": company,
@@ -3529,10 +3536,7 @@ async def m365_best_practices_page(request: Request):
         "catalog": enabled_catalog,
         "has_credentials": bool(credentials),
         "is_super_admin": bool(user.get("is_super_admin")),
-        "can_edit_notes": bool(
-            user.get("is_super_admin")
-            or membership_role in {"owner", "administrator", "technician"}
-        ),
+        "can_edit_notes": _can_edit_m365_best_practice_notes(user, membership),
     }
     return await _render_template("m365/best_practices.html", request, user, extra=extra)
 
@@ -3742,6 +3746,8 @@ async def save_m365_best_practice_note(request: Request, check_id: str):
     user, membership, _, company_id, redirect = await _load_m365_best_practices_context(request)
     if redirect:
         return redirect
+    if not _can_edit_m365_best_practice_notes(user, membership):
+        return flash_redirect("/m365/best-practices", "You do not have permission to edit check notes", "error")
     if not _is_valid_m365_best_practice_check_id(check_id):
         return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
     if check_id not in {bp["id"] for bp in m365_best_practices_service.list_best_practices()}:
@@ -3754,9 +3760,6 @@ async def save_m365_best_practice_note(request: Request, check_id: str):
             "Check note must be 4000 characters or fewer",
             "error",
         )
-    stored = await m365_best_practices_service.get_last_results(company_id)
-    if not any(item.get("check_id") == check_id for item in stored):
-        return flash_redirect("/m365/best-practices", "Check result is not available yet", "error")
     updated = await m365_best_practices_service.set_result_notes(
         company_id=company_id,
         check_id=check_id,
