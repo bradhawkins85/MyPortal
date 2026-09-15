@@ -3849,57 +3849,40 @@ async def test_check_zap_teams_on_unknown_on_exo_error():
 
 @pytest.mark.anyio("asyncio")
 async def test_check_spf_records_published_pass():
-    domains = [
-        {"id": "contoso.com", "isVerified": True},
-    ]
-    with (
-        patch(
-            "app.services.m365_best_practices._graph_get_all",
-            new_callable=AsyncMock,
-            return_value=domains,
-        ),
-        patch(
+    with patch(
             "app.services.m365_best_practices._dns_txt_records",
             new_callable=AsyncMock,
             return_value=["v=spf1 include:spf.protection.outlook.com -all"],
-        ),
-    ):
-        result = await bp_service._check_spf_records_published("token")
+        ):
+        result = await bp_service._check_spf_records_published("token", ["contoso.com"])
     assert result["status"] == "pass"
 
 
 @pytest.mark.anyio("asyncio")
 async def test_check_spf_records_published_fail_when_missing():
-    domains = [{"id": "contoso.com", "isVerified": True}]
-    with (
-        patch(
-            "app.services.m365_best_practices._graph_get_all",
-            new_callable=AsyncMock,
-            return_value=domains,
-        ),
-        patch(
+    with patch(
             "app.services.m365_best_practices._dns_txt_records",
             new_callable=AsyncMock,
             return_value=[],
-        ),
-    ):
-        result = await bp_service._check_spf_records_published("token")
+        ):
+        result = await bp_service._check_spf_records_published("token", ["contoso.com"])
     assert result["status"] == "fail"
     assert re.search(r"\bcontoso\.com\b", result["details"])
 
 
 @pytest.mark.anyio("asyncio")
-async def test_check_spf_records_published_skips_onmicrosoft_domains():
-    domains = [
-        {"id": "contoso.onmicrosoft.com", "isVerified": True},
-    ]
+async def test_check_spf_records_published_only_checks_company_email_domains():
     with patch(
-        "app.services.m365_best_practices._graph_get_all",
+        "app.services.m365_best_practices._dns_txt_records",
         new_callable=AsyncMock,
-        return_value=domains,
-    ):
-        result = await bp_service._check_spf_records_published("token")
+        return_value=["v=spf1 include:spf.protection.outlook.com -all"],
+    ) as dns_lookup:
+        result = await bp_service._check_spf_records_published(
+            "token", ["Company.COM", " company.com ", "mail.company.com"]
+        )
+
     assert result["status"] == "pass"
+    assert dns_lookup.await_args_list == [call("company.com"), call("mail.company.com")]
 
 
 @pytest.mark.anyio("asyncio")
@@ -3968,14 +3951,16 @@ async def test_check_dmarc_records_published_passes_without_company_email_domain
 
 
 @pytest.mark.anyio("asyncio")
-async def test_check_spf_records_published_unknown_on_graph_error():
+async def test_check_spf_records_published_passes_without_company_email_domains():
     with patch(
-        "app.services.m365_best_practices._graph_get_all",
+        "app.services.m365_best_practices._dns_txt_records",
         new_callable=AsyncMock,
-        side_effect=M365Error("Graph error"),
-    ):
-        result = await bp_service._check_spf_records_published("token")
-    assert result["status"] == "unknown"
+    ) as dns_lookup:
+        result = await bp_service._check_spf_records_published("token", [])
+
+    assert result["status"] == "pass"
+    assert "No Email domains are configured" in result["details"]
+    dns_lookup.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
