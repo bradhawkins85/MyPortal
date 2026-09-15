@@ -1,7 +1,8 @@
 """Repository for Microsoft 365 Best Practices results and global settings."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import re
+from datetime import date, datetime, timezone
 from typing import Any
 
 from app.core.database import db
@@ -35,6 +36,103 @@ async def upsert_result(
         """,
         (company_id, check_id, check_name, status, details, run_at),
     )
+    await _upsert_daily_history(
+        company_id=company_id,
+        snapshot_date=run_at.date(),
+        recorded_at=run_at,
+    )
+
+
+_SECURE_SCORE_PATTERN = re.compile(
+    r"Secure Score is\s+([0-9]+(?:\.[0-9]+)?)/([0-9]+(?:\.[0-9]+)?)\s+\(([0-9]+(?:\.[0-9]+)?)%",
+    re.IGNORECASE,
+)
+
+
+def _parse_secure_score(
+    details: str | None,
+) -> tuple[float | None, float | None, float | None]:
+    """Extract the numeric Secure Score values emitted by the Graph check."""
+    match = _SECURE_SCORE_PATTERN.search(details or "")
+    if not match:
+        return None, None, None
+    return float(match.group(1)), float(match.group(2)), float(match.group(3))
+
+
+async def _upsert_daily_history(
+    *, company_id: int, snapshot_date: date, recorded_at: datetime
+) -> None:
+    """Store the current enabled-check totals as the company's UTC daily snapshot."""
+    row = await db.fetch_one(
+        """
+        SELECT
+            SUM(CASE WHEN r.status = 'pass' THEN 1 ELSE 0 END) AS pass_count,
+            SUM(CASE WHEN r.status = 'fail' THEN 1 ELSE 0 END) AS fail_count,
+            SUM(CASE WHEN r.status = 'unknown' THEN 1 ELSE 0 END) AS unknown_count,
+            SUM(CASE WHEN r.status = 'not_applicable' THEN 1 ELSE 0 END) AS not_applicable_count,
+            MAX(CASE WHEN r.check_id = 'bp_monitor_secure_score' THEN r.details END) AS secure_score_details
+        FROM m365_best_practice_results r
+        LEFT JOIN m365_best_practice_settings s ON s.check_id = r.check_id
+        LEFT JOIN m365_best_practice_company_exclusions e
+            ON e.company_id = r.company_id AND e.check_id = r.check_id
+        WHERE r.company_id = %s
+          AND (s.enabled = 1 OR s.check_id IS NULL)
+          AND e.check_id IS NULL
+        """,
+        (company_id,),
+    )
+    values = dict(row or {})
+    current_score, max_score, percentage = _parse_secure_score(
+        values.get("secure_score_details")
+    )
+    await db.execute(
+        """
+        INSERT INTO m365_best_practice_daily_history
+            (company_id, snapshot_date, pass_count, fail_count, unknown_count,
+             not_applicable_count, secure_score, secure_score_max,
+             secure_score_percentage, recorded_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            pass_count = VALUES(pass_count),
+            fail_count = VALUES(fail_count),
+            unknown_count = VALUES(unknown_count),
+            not_applicable_count = VALUES(not_applicable_count),
+            secure_score = VALUES(secure_score),
+            secure_score_max = VALUES(secure_score_max),
+            secure_score_percentage = VALUES(secure_score_percentage),
+            recorded_at = VALUES(recorded_at)
+        """,
+        (
+            company_id,
+            snapshot_date,
+            int(values.get("pass_count") or 0),
+            int(values.get("fail_count") or 0),
+            int(values.get("unknown_count") or 0),
+            int(values.get("not_applicable_count") or 0),
+            current_score,
+            max_score,
+            percentage,
+            recorded_at,
+        ),
+    )
+
+
+async def list_daily_history(company_id: int, *, limit: int = 365) -> list[dict[str, Any]]:
+    """Return up to one year of daily snapshots, newest first."""
+    safe_limit = max(1, min(int(limit), 3650))
+    rows = await db.fetch_all(
+        """
+        SELECT snapshot_date, pass_count, fail_count, unknown_count,
+               not_applicable_count, secure_score, secure_score_max,
+               secure_score_percentage, recorded_at
+        FROM m365_best_practice_daily_history
+        WHERE company_id = %s
+        ORDER BY snapshot_date DESC
+        LIMIT %s
+        """,
+        (company_id, safe_limit),
+    )
+    return [dict(row) for row in rows]
 
 
 async def update_remediation_status(

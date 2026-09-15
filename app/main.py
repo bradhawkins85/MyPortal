@@ -3515,11 +3515,13 @@ async def m365_best_practices_page(request: Request):
     catalog = m365_best_practices_service.list_best_practices()
     enabled_ids = await m365_best_practices_service.get_enabled_check_ids()
     enabled_catalog = [bp for bp in catalog if bp["id"] in enabled_ids]
+    history = await m365_best_practices_service.get_daily_history(company_id)
     extra = {
         "title": "M365 Best Practices",
         "company": company,
         "results": results,
         "catalog": enabled_catalog,
+        "history": history,
         "has_credentials": bool(credentials),
         "is_super_admin": bool(user.get("is_super_admin")),
     }
