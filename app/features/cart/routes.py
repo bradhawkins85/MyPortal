@@ -647,7 +647,6 @@ async def view_cart(
         "low_stock_threshold": main_module.SHOP_LOW_STOCK_THRESHOLD,
         "payment_method": (company.get("payment_method") or "invoice_prepay") if company else "invoice_prepay",
         "require_po": bool(company.get("require_po")) if company else False,
-        "company_address": (company.get("address") or "").strip() if company else "",
         "company_addresses": company_addresses,
     }
     response = await main_module._render_template("shop/cart.html", request, user, extra=extra)
@@ -881,17 +880,17 @@ async def place_order(request: Request) -> RedirectResponse:
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    _valid_shipping_options = {"address_on_file", "specific_address", "local_pickup"}
+    _valid_shipping_options = {"specific_address", "local_pickup"}
     shipping_option_raw = form.get("shippingOption")
-    shipping_option = str(shipping_option_raw).strip() if shipping_option_raw else "address_on_file"
+    shipping_option = str(shipping_option_raw).strip() if shipping_option_raw else "specific_address"
     saved_address_id: int | None = None
     if shipping_option.startswith("saved_address_"):
         try:
             saved_address_id = int(shipping_option.removeprefix("saved_address_"))
         except ValueError:
-            shipping_option = "address_on_file"
+            shipping_option = "specific_address"
     elif shipping_option not in _valid_shipping_options:
-        shipping_option = "address_on_file"
+        shipping_option = "specific_address"
 
     shipping_street: str | None = None
     shipping_city: str | None = None
@@ -1112,7 +1111,6 @@ async def place_order(request: Request) -> RedirectResponse:
             )
 
         shipping_label = {
-            "address_on_file": "Address on file",
             "specific_address": "Specific address",
             "local_pickup": "Local pickup",
         }.get(shipping_option, shipping_option)

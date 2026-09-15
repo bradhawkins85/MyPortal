@@ -128,6 +128,48 @@ async def test_build_order_invoice_without_user_name():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_build_order_invoice_adds_shipping_address_line_item():
+    async def fake_fetch_summary(order_number: str, company_id: int):
+        return {
+            "order_number": order_number,
+            "status": "placed",
+            "po_number": None,
+            "shipping_option": "specific_address",
+            "shipping_street": "99 Test Lane",
+            "shipping_city": "Melbourne",
+            "shipping_state": "VIC",
+            "shipping_postcode": "3000",
+            "shipping_country": "Australia",
+        }
+
+    async def fake_fetch_items(order_number: str, company_id: int):
+        return [{"quantity": 1, "price": Decimal("10.00"), "product_name": "Widget"}]
+
+    async def fake_fetch_company(company_id: int):
+        return {"id": company_id, "name": "Acme Corp", "xero_id": "abc-123"}
+
+    invoice = await xero_service.build_order_invoice(
+        "ORD123",
+        1,
+        account_code="200",
+        tax_type="OUTPUT",
+        line_amount_type="Exclusive",
+        fetch_summary=fake_fetch_summary,
+        fetch_items=fake_fetch_items,
+        fetch_company=fake_fetch_company,
+    )
+
+    assert invoice is not None
+    assert invoice["line_items"][-1] == {
+        "Description": "Shipping address: 99 Test Lane, Melbourne, VIC, 3000, Australia",
+        "Quantity": 0,
+        "UnitAmount": 0,
+        "AccountCode": "200",
+        "TaxType": "OUTPUT",
+    }
+
+
+@pytest.mark.anyio("asyncio")
 async def test_build_order_invoice_omits_unit_amount_when_item_price_missing():
     async def fake_fetch_summary(order_number: str, company_id: int):
         return {"order_number": order_number, "status": "placed", "po_number": None}

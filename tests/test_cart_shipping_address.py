@@ -1,12 +1,10 @@
-"""Tests for cart shipping address options (address on file, specific address, local pickup)."""
+"""Tests for cart shipping address options (saved/specific address and local pickup)."""
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
-from starlette.requests import Request
 from starlette.responses import HTMLResponse
 
 from app import main
@@ -147,6 +145,9 @@ def _place_order_test(
             capture_create_order_kwargs.append(kwargs)
         return (10, 9)
 
+    async def fake_get_product(product_id, *, company_id):
+        return {"id": product_id, "name": "Widget", "stock": 10}
+
     async def fake_clear_cart(session_id):
         return None
 
@@ -173,6 +174,7 @@ def _place_order_test(
     monkeypatch.setattr(main, "_load_company_section_context", fake_ctx)
     monkeypatch.setattr(main.cart_repo, "list_items", fake_list_items)
     monkeypatch.setattr(main.shop_repo, "create_order", fake_create_order)
+    monkeypatch.setattr(main.shop_repo, "get_product_by_id", fake_get_product)
     monkeypatch.setattr(main.cart_repo, "clear_cart", fake_clear_cart)
     monkeypatch.setattr(main.user_repo, "get_user_by_id", fake_get_user)
     monkeypatch.setattr(main.xero_service, "send_order_to_xero", fake_send_order_to_xero)
@@ -198,11 +200,11 @@ def _place_order_test(
 
 
 # ---------------------------------------------------------------------------
-# Cart view: company_address passed to template context
+# Cart view: the legacy company address is not exposed as a shipping option
 # ---------------------------------------------------------------------------
 
 
-def _cart_view_test(monkeypatch, active_session, company_address: str | None) -> Any:
+def _cart_view_test(monkeypatch, active_session, company_address: str | None) -> dict[str, Any]:
     captured: dict[str, Any] = {}
 
     async def fake_ctx(request, *, permission_field):
@@ -231,30 +233,20 @@ def _cart_view_test(monkeypatch, active_session, company_address: str | None) ->
     with TestClient(main.app, follow_redirects=False) as client:
         client.get("/cart")
 
-    return captured.get("extra", {}).get("company_address")
+    return captured.get("extra", {})
 
 
-def test_cart_view_passes_company_address(monkeypatch, active_session):
+def test_cart_view_does_not_pass_legacy_company_address(monkeypatch, active_session):
     result = _cart_view_test(monkeypatch, active_session, "42 Example Street")
-    assert result == "42 Example Street"
-
-
-def test_cart_view_passes_empty_string_when_no_address(monkeypatch, active_session):
-    result = _cart_view_test(monkeypatch, active_session, None)
-    assert result == ""
-
-
-def test_cart_view_strips_whitespace_from_address(monkeypatch, active_session):
-    result = _cart_view_test(monkeypatch, active_session, "  7 Oak Avenue  ")
-    assert result == "7 Oak Avenue"
+    assert "company_address" not in result
 
 
 # ---------------------------------------------------------------------------
-# Place order: default shipping option is address_on_file
+# Place order: a shipping choice is required
 # ---------------------------------------------------------------------------
 
 
-def test_place_order_defaults_to_address_on_file(monkeypatch, active_session):
+def test_place_order_defaults_to_specific_address_and_requires_street(monkeypatch, active_session):
     captured: list = []
     location = _place_order_test(
         monkeypatch,
@@ -262,28 +254,26 @@ def test_place_order_defaults_to_address_on_file(monkeypatch, active_session):
         form_data={},
         capture_create_order_kwargs=captured,
     )
-    # Order should succeed (redirect to cart with success message, not an error)
     assert "orderMessage" in location
-    assert captured
-    assert captured[0]["shipping_option"] == "address_on_file"
-    assert captured[0]["shipping_street"] is None
+    assert "street" in location.lower()
+    assert not captured
 
 
 # ---------------------------------------------------------------------------
-# Place order: address_on_file shipping option is stored
+# Place order: removed address_on_file values cannot bypass address validation
 # ---------------------------------------------------------------------------
 
 
-def test_place_order_stores_address_on_file_option(monkeypatch, active_session):
+def test_place_order_rejects_removed_address_on_file_option(monkeypatch, active_session):
     captured: list = []
-    _place_order_test(
+    location = _place_order_test(
         monkeypatch,
         active_session,
         form_data={"shippingOption": "address_on_file"},
         capture_create_order_kwargs=captured,
     )
-    assert captured[0]["shipping_option"] == "address_on_file"
-    assert captured[0]["shipping_street"] is None
+    assert "street" in location.lower()
+    assert not captured
 
 
 # ---------------------------------------------------------------------------
@@ -366,10 +356,11 @@ def test_place_order_specific_address_allowed_with_street(monkeypatch, active_se
 
 def test_place_order_invalid_shipping_option_falls_back(monkeypatch, active_session):
     captured: list = []
-    _place_order_test(
+    location = _place_order_test(
         monkeypatch,
         active_session,
         form_data={"shippingOption": "not_a_valid_option"},
         capture_create_order_kwargs=captured,
     )
-    assert captured[0]["shipping_option"] == "address_on_file"
+    assert "street" in location.lower()
+    assert not captured
