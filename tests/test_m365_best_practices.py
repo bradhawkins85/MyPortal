@@ -272,6 +272,90 @@ async def test_remediate_authenticator_mfa_fatigue_waits_for_graph_consistency()
     assert update_status.await_args.kwargs["remediation_status"] == "success"
 
 
+@pytest.mark.anyio("asyncio")
+async def test_remediate_internal_phishing_forms_waits_for_graph_consistency():
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+            return_value={},
+        ) as graph_patch,
+        patch(
+            "app.services.m365_best_practices._safe_graph_get",
+            new_callable=AsyncMock,
+            side_effect=[
+                {"internalPhishingProtectionEnabled": False},
+                {"internalPhishingProtectionEnabled": True},
+            ],
+        ) as graph_get,
+        patch(
+            "app.services.m365_best_practices.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ) as update_status,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_internal_phishing_forms"
+        )
+
+    assert result["success"] is True
+    graph_patch.assert_awaited_once_with(
+        "graph-token",
+        bp_service._FORMS_SETTINGS_URL,
+        {"internalPhishingProtectionEnabled": True},
+    )
+    assert graph_get.await_count == 2
+    sleep.assert_awaited_once()
+    assert update_status.await_args.kwargs["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_internal_phishing_forms_fails_when_graph_does_not_confirm():
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
+            "app.services.m365_best_practices._safe_graph_get",
+            new_callable=AsyncMock,
+            return_value={"internalPhishingProtectionEnabled": False},
+        ),
+        patch(
+            "app.services.m365_best_practices.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_internal_phishing_forms"
+        )
+
+    assert result["success"] is False
+    assert "did not confirm the updated Forms phishing protection setting" in result["message"]
+    assert sleep.await_count == bp_service._FORMS_PHISHING_VERIFICATION_ATTEMPTS - 1
+    assert upserts[0]["remediation_status"] == "failed"
+
+
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
