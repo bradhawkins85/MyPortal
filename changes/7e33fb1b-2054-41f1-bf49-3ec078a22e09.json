@@ -1,0 +1,7 @@
+{
+  "guid": "7e33fb1b-2054-41f1-bf49-3ec078a22e09",
+  "occurred_at": "2026-09-15T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed Microsoft 365 anti-phishing checks to recognise Exchange Online boolean response formats after remediation.",
+  "content_hash": "ecc4c39f53753a7b5a527efbc4be68af58ab6c8d1636d58a517f1d92e1d808c2"
+}

@@ -1,0 +1,7 @@
+{
+  "guid": "ba56b9bd-039e-4df6-aa06-ad7fcd419bab",
+  "occurred_at": "2026-09-15T00:00Z",
+  "change_type": "Fix",
+  "summary": "Surfaced actionable Exchange Online command errors for failed Microsoft 365 best-practice remediations.",
+  "content_hash": "6beeada173284f1216936441a832b07f16ff083d52b50a60dcb42e83b228e3ef"
+}
