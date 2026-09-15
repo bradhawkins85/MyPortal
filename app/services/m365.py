@@ -105,6 +105,7 @@ _GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
 _PROVISION_APP_ROLES: list[str] = [
     "df021288-bdef-4463-88db-98f22de89214",  # User.Read.All
     "741f803b-c850-494e-b5df-cde7c675a1ca",  # User.ReadWrite.All (staff onboarding: create/update users, assign licenses)
+    "9e3f62cf-ca93-4989-b6ce-bf83c28f9fe8",  # RoleManagement.ReadWrite.Directory (Global Administrator remediation)
     "7ab1d382-f21e-4acd-a863-ba3e13f7da61",  # Directory.Read.All
     "18a4783c-866b-4cc7-a460-3d5e5662c884",  # Application.ReadWrite.OwnedBy (for self-renewal)
     # Additional permissions for CIS benchmark checks:

@@ -64,6 +64,11 @@ async def _load_settings() -> dict[str, Any]:
     return {"base_url": base_url, "api_key": api_key}
 
 
+async def validate_configuration() -> None:
+    """Validate that the enabled Hudu integration has usable local settings."""
+    await _load_settings()
+
+
 def _make_headers(api_key: str) -> dict[str, str]:
     return {
         "x-api-key": api_key,
