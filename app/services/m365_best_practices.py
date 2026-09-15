@@ -3307,7 +3307,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_dynamic_group_for_guests,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "create_dynamic_guest_group",
         "requires_licenses": [CAP_ENTRA_ID_P1],
     },
     {
@@ -6081,6 +6082,35 @@ async def _remediate_foreach_user_graph(
     return all_ok
 
 
+async def _remediate_create_dynamic_guest_group(graph_token: str) -> bool:
+    """Create the standard dynamic security group that contains every guest.
+
+    Re-check immediately before creating the group so repeated or concurrent
+    remediation requests do not intentionally create duplicate groups.
+    """
+    current = await _check_dynamic_group_for_guests(graph_token)
+    if current["status"] == STATUS_PASS:
+        return True
+    if current["status"] == STATUS_UNKNOWN:
+        return False
+
+    await _graph_post(
+        graph_token,
+        _GROUPS_LIST_URL,
+        {
+            "displayName": "Guest Users",
+            "description": "Dynamic security group containing all guest users.",
+            "groupTypes": ["DynamicMembership"],
+            "mailEnabled": False,
+            "mailNickname": "GuestUsers",
+            "membershipRule": '(user.userType -eq "Guest")',
+            "membershipRuleProcessingState": "On",
+            "securityEnabled": True,
+        },
+    )
+    return True
+
+
 async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     """Attempt automated remediation for a single best-practice check.
 
@@ -6089,7 +6119,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     database, and returns a result dict with ``success`` (bool) and ``message``
     (str) keys.
 
-    Supports four remediation patterns:
+    Supports five remediation patterns:
 
     * ``source_type="exo"`` – executes a single cmdlet via the Exchange Online
       REST API using the ``remediation_cmdlet`` and ``remediation_params``
@@ -6103,6 +6133,9 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     * ``source_type="graph"`` with ``remediation_type="foreach_user_graph"`` –
       fetches all users and disables sign-in for each unlicensed member account
       that currently has ``accountEnabled=True``.
+    * ``source_type="graph"`` with
+      ``remediation_type="create_dynamic_guest_group"`` – creates the standard
+      ``Guest Users`` dynamic security group if one does not already exist.
     """
     bp = _catalog_map().get(check_id)
     if not bp or not bp.get("has_remediation"):
@@ -6215,6 +6248,17 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                                    "the affected new account was rolled back.")
         elif bp.get("remediation_type") == "foreach_user_graph":
             success = await _remediate_foreach_user_graph(graph_token, company_id, check_id)
+        elif bp.get("remediation_type") == "create_dynamic_guest_group":
+            try:
+                success = await _remediate_create_dynamic_guest_group(graph_token)
+            except M365Error as exc:
+                log_error(
+                    "M365 best practice dynamic guest group remediation failed",
+                    company_id=company_id,
+                    check_id=check_id,
+                    error=str(exc),
+                )
+                success = False
         else:
             remediation_url = bp.get("remediation_url", "")
             remediation_payload = bp.get("remediation_payload") or {}

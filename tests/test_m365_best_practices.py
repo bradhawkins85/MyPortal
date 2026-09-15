@@ -4890,6 +4890,70 @@ def test_shared_mailbox_remediation_catalog_fields():
     assert entry.get("has_remediation") is True
 
 
+def test_dynamic_guest_group_catalog_entry_has_remediation():
+    entry = next(
+        bp for bp in bp_service._BEST_PRACTICES
+        if bp["id"] == "bp_dynamic_group_for_guests"
+    )
+    assert entry["source_type"] == "graph"
+    assert entry["remediation_type"] == "create_dynamic_guest_group"
+    assert entry["has_remediation"] is True
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_dynamic_guest_group_creates_security_group():
+    created: list[tuple[str, dict]] = []
+
+    async def capture_post(token: str, url: str, payload: dict) -> dict:
+        created.append((url, payload))
+        return {"id": "guest-group-id"}
+
+    with (
+        patch.object(
+            bp_service,
+            "_check_dynamic_group_for_guests",
+            new_callable=AsyncMock,
+            return_value={"status": bp_service.STATUS_FAIL},
+        ),
+        patch.object(bp_service, "_graph_post", side_effect=capture_post),
+    ):
+        success = await bp_service._remediate_create_dynamic_guest_group("token")
+
+    assert success is True
+    assert created == [
+        (
+            bp_service._GROUPS_LIST_URL,
+            {
+                "displayName": "Guest Users",
+                "description": "Dynamic security group containing all guest users.",
+                "groupTypes": ["DynamicMembership"],
+                "mailEnabled": False,
+                "mailNickname": "GuestUsers",
+                "membershipRule": '(user.userType -eq "Guest")',
+                "membershipRuleProcessingState": "On",
+                "securityEnabled": True,
+            },
+        )
+    ]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_dynamic_guest_group_is_idempotent():
+    with (
+        patch.object(
+            bp_service,
+            "_check_dynamic_group_for_guests",
+            new_callable=AsyncMock,
+            return_value={"status": bp_service.STATUS_PASS},
+        ),
+        patch.object(bp_service, "_graph_post", new_callable=AsyncMock) as post,
+    ):
+        success = await bp_service._remediate_create_dynamic_guest_group("token")
+
+    assert success is True
+    post.assert_not_awaited()
+
+
 def test_internal_keys_hide_remediation_type_and_mailbox_params():
     """remediation_type and remediation_mailbox_params must be stripped from public catalog."""
     public = bp_service.list_best_practices()
