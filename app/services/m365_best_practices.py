@@ -4331,14 +4331,18 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "remediation": (
             "Set-OrganizationConfig -CustomerLockBoxEnabled $true "
-            "(requires Compliance Administrator or Global Administrator role)"
+            "(run manually as a Global Administrator in Exchange Online PowerShell)"
         ),
         "source": _check_customer_lockbox,
         "source_type": "exo",
         "default_enabled": True,
-        "has_remediation": True,
-        "remediation_cmdlet": "Set-OrganizationConfig",
-        "remediation_params": {"CustomerLockBoxEnabled": True},
+        # CustomerLockBoxEnabled is protected by an interactive administrator
+        # authorization check.  App-only Exchange.ManageAsApp tokens receive
+        # 403 even when their service principal has Exchange or Compliance
+        # Administrator, so exposing automated remediation is misleading.  Do
+        # not grant the integration app Global Administrator to bypass this
+        # safeguard; direct an administrator to the manual command instead.
+        "has_remediation": False,
         "is_cis_benchmark": True,
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
