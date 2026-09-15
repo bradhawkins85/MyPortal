@@ -448,6 +448,12 @@ class Database:
         
         # Replace INT with INTEGER for primary key autoincrement compatibility
         sql = re.sub(r'\bINT\b(\s+AUTOINCREMENT|\s+PRIMARY\s+KEY)', r'INTEGER\1', sql, flags=re.IGNORECASE)
+        sql = re.sub(
+            r'\bINTEGER\s+AUTOINCREMENT\s+PRIMARY\s+KEY\b',
+            'INTEGER PRIMARY KEY AUTOINCREMENT',
+            sql,
+            flags=re.IGNORECASE,
+        )
         
         # Replace DATETIME with TEXT (SQLite uses TEXT for dates)
         sql = re.sub(r'\bDATETIME\b', 'TEXT', sql, flags=re.IGNORECASE)
@@ -455,8 +461,8 @@ class Database:
         # Remove ON UPDATE CURRENT_TIMESTAMP (not supported in SQLite)
         sql = re.sub(r'\s*ON\s+UPDATE\s+CURRENT_TIMESTAMP', '', sql, flags=re.IGNORECASE)
         
-        # Replace CURRENT_TIMESTAMP with datetime('now') for defaults
-        sql = re.sub(r'\bCURRENT_TIMESTAMP\b', "datetime('now')", sql, flags=re.IGNORECASE)
+        # Parenthesised expressions are required for SQLite function defaults.
+        sql = re.sub(r'\bCURRENT_TIMESTAMP\b', "(datetime('now'))", sql, flags=re.IGNORECASE)
         
         # Replace JSON column type with TEXT
         sql = re.sub(r'\bJSON\b', 'TEXT', sql, flags=re.IGNORECASE)

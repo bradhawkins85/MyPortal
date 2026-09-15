@@ -80,6 +80,55 @@
         </form>
       </div>
     </details>
+    <details class="card card--panel card-collapsible admin-grid__full" data-company-edit-section="addresses">
+      <summary class="card__header card__header--collapsible card__header--stacked">
+        <div>
+          <h2 class="card__title">Addresses</h2>
+          <p class="card__subtitle">Manage delivery addresses that customers can select when placing an order.</p>
+        </div>
+        <div class="card__collapsible-meta" aria-hidden="true"><span class="card__toggle-icon"></span></div>
+      </summary>
+      <div class="card-collapsible__content card__body card__body--stacked">
+        {% if company_addresses %}
+          <div class="form-field">
+            <label class="form-label" for="company-address-filter">Filter addresses</label>
+            <input class="form-input" id="company-address-filter" type="search" placeholder="Search labels or address details" data-table-filter="company-addresses" />
+          </div>
+          <div class="table-wrapper">
+            <table class="table" data-table data-table-id="company-addresses">
+              <thead><tr><th data-sort="string">Label</th><th data-sort="string">Address</th><th>Actions</th></tr></thead>
+              <tbody>
+                {% for address in company_addresses %}
+                  <tr>
+                    <td data-label="Label"><strong>{{ address.label }}</strong></td>
+                    <td data-label="Address">{{ [address.street, address.city, address.state, address.postcode, address.country]|select|join(', ') }}</td>
+                    <td data-label="Actions">
+                      <form action="/admin/companies/{{ company.id }}/addresses/{{ address.id }}/delete" method="post" class="inline-form">
+                        {% include "partials/csrf.html" %}
+                        <button type="submit" class="button button--danger button--small" data-confirm="Remove this address?">Remove</button>
+                      </form>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="text-muted">No saved addresses have been added.</p>
+        {% endif %}
+        <form action="/admin/companies/{{ company.id }}/addresses" method="post" class="form">
+          {% include "partials/csrf.html" %}
+          <h3>Add address</h3>
+          <div class="form-field"><label class="form-label" for="new-address-label">Label</label><input class="form-input" id="new-address-label" name="label" maxlength="100" placeholder="Head office" required /><p class="form-help">This label is shown to customers in the cart.</p></div>
+          <div class="form-field"><label class="form-label" for="new-address-street">Street address</label><input class="form-input" id="new-address-street" name="street" maxlength="255" required /></div>
+          <div class="form-field"><label class="form-label" for="new-address-city">City / suburb</label><input class="form-input" id="new-address-city" name="city" maxlength="100" /></div>
+          <div class="form-field"><label class="form-label" for="new-address-state">State</label><input class="form-input" id="new-address-state" name="state" maxlength="100" /></div>
+          <div class="form-field"><label class="form-label" for="new-address-postcode">Postcode</label><input class="form-input" id="new-address-postcode" name="postcode" maxlength="20" /></div>
+          <div class="form-field"><label class="form-label" for="new-address-country">Country</label><input class="form-input" id="new-address-country" name="country" maxlength="100" /></div>
+          <div class="form-actions"><button type="submit" class="button button--secondary">Add address</button></div>
+        </form>
+      </div>
+    </details>
     <details class="card card--panel card-collapsible admin-grid__full" data-company-edit-section="company-variables">
       <summary class="card__header card__header--collapsible card__header--stacked">
         <div>

@@ -266,6 +266,7 @@ async def _render_company_edit_page(
 ) -> HTMLResponse:
     from app.repositories import billing_contacts as billing_contacts_repo
     from app.repositories import company_variables as company_variables_repo
+    from app.repositories import company_addresses as company_addresses_repo
     from app.repositories import companies as company_repo
     from app.repositories import pending_staff_access as pending_staff_access_repo
     from app.repositories import company_recurring_invoice_items as recurring_items_repo
@@ -286,6 +287,7 @@ async def _render_company_edit_page(
         )
 
     company_variables = await company_variables_repo.list_for_company(company_id)
+    company_addresses = await company_addresses_repo.list_for_company(company_id)
 
     is_super_admin, managed_companies, _ = await _get_company_management_scope(
         request, user
@@ -908,6 +910,7 @@ async def _render_company_edit_page(
         "staff_custom_field_definitions": staff_custom_field_definitions,
         "tray_tokens": tray_tokens,
         "company_variables": company_variables,
+        "company_addresses": company_addresses,
         "company_sla": await __import__("app.repositories.slas", fromlist=["slas"]).get_for_company(company_id),
         "sla_templates": await __import__("app.repositories.slas", fromlist=["slas"]).list_templates(),
     }
@@ -1155,6 +1158,55 @@ async def admin_company_edit_page(
         company_id=company_id,
         show_inactive_tasks=show_inactive,
     )
+
+
+async def admin_create_company_address(company_id: int, request: Request):
+    from app.repositories import company_addresses as addresses_repo
+    from app.repositories import companies as company_repo
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    if not await company_repo.get_company_by_id(company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    form = await request.form()
+
+    def field(name: str, maximum: int) -> str | None:
+        value = str(form.get(name) or "").strip()
+        return value[:maximum] or None
+
+    values = {
+        "label": field("label", 100),
+        "street": field("street", 255),
+        "city": field("city", 100),
+        "state": field("state", 100),
+        "postcode": field("postcode", 20),
+        "country": field("country", 100),
+    }
+    if not values["label"] or not values["street"]:
+        return _main()._company_edit_redirect(
+            company_id=company_id, error="An address label and street address are required."
+        )
+    try:
+        await addresses_repo.create(company_id, **values)
+    except Exception as exc:
+        if isinstance(exc, aiomysql.IntegrityError) or "UNIQUE constraint" in str(exc):
+            return _main()._company_edit_redirect(
+                company_id=company_id, error="Address labels must be unique for this company."
+            )
+        raise
+    return _main()._company_edit_redirect(company_id=company_id, success="Address added.")
+
+
+async def admin_delete_company_address(company_id: int, address_id: int, request: Request):
+    from app.repositories import company_addresses as addresses_repo
+
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    if not await addresses_repo.delete(company_id, address_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Address not found")
+    return _main()._company_edit_redirect(company_id=company_id, success="Address removed.")
 
 
 async def admin_create_company_variable(company_id: int, request: Request):
