@@ -140,7 +140,11 @@ def test_global_stat_strip_counts_all_benchmarks():
     )
 
     assert html.count('class="stat-strip bp-filter-strip"') == 1
-    assert '<span class="stat-strip__stat-value">1</span>' in html
+    assert '<span class="stat-strip__stat-label">Passed</span>' in html
+    assert '<span class="stat-strip__stat-label">Failed</span>' in html
+    assert '<span class="stat-strip__stat-label">Unknown</span>' in html
+    assert '<span class="stat-strip__stat-label">Not Applicable</span>' in html
+    assert html.count('<span class="stat-strip__stat-value">1</span>') == 4
     assert "CIS Intune Benchmark – Windows" in html
     assert "CIS Intune Benchmark – iOS / iPadOS" in html
     assert "CIS Intune Benchmark – macOS" not in html
