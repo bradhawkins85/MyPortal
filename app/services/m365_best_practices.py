@@ -494,6 +494,10 @@ _AUTH_METHODS_POLICY_URL = (
 )
 _DOMAINS_URL = "https://graph.microsoft.com/v1.0/domains"
 _DIRECTORY_ROLES_URL = "https://graph.microsoft.com/v1.0/directoryRoles"
+_DIRECTORY_ROLES_WITH_MEMBERS_URL = (
+    "https://graph.microsoft.com/v1.0/directoryRoles"
+    "?$select=id,displayName&$top=999"
+)
 _AUTHENTICATION_REQUIREMENTS_URL_TMPL = (
     "https://graph.microsoft.com/beta/users/{user_id}/authentication/requirements"
 )
@@ -592,6 +596,40 @@ async def _safe_graph_get_all(token: str, url: str) -> list[dict[str, Any]] | No
         return await _graph_get_all(token, url)
     except M365Error:
         return None
+
+
+async def _get_directory_role_member_ids(token: str) -> set[str] | None:
+    """Return IDs for accounts assigned to any active directory role.
+
+    Unlicensed administrator accounts can look identical to shared mailboxes in
+    the Graph users response.  Enumerating active directory roles prevents the
+    shared-mailbox check (and, critically, its remediation) from treating those
+    privileged identities as mailboxes.  ``None`` is returned if role data is
+    incomplete so callers can fail closed rather than risk disabling an admin.
+    """
+    roles = await _safe_graph_get_all(token, _DIRECTORY_ROLES_WITH_MEMBERS_URL)
+    if roles is None:
+        return None
+
+    member_ids: set[str] = set()
+    for role in roles:
+        role_id = str(role.get("id") or "").strip()
+        if not role_id:
+            continue
+        members = await _safe_graph_get_all(
+            token,
+            f"https://graph.microsoft.com/v1.0/directoryRoles/{role_id}/"
+            "transitiveMembers/microsoft.graph.user"
+            "?$select=id&$top=999",
+        )
+        if members is None:
+            return None
+        member_ids.update(
+            str(member.get("id"))
+            for member in members
+            if member.get("id")
+        )
+    return member_ids
 
 
 def _result(
@@ -2742,17 +2780,26 @@ async def _check_shared_mailbox_signin_blocked(token: str) -> dict[str, Any]:
     users = await _safe_graph_get_all(token, _USERS_LIST_URL)
     if users is None:
         return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to enumerate users.")
+    admin_ids = await _get_directory_role_member_ids(token)
+    if admin_ids is None:
+        return _result(
+            check_id,
+            check_name,
+            STATUS_UNKNOWN,
+            "Unable to enumerate administrator role members; no accounts were evaluated.",
+        )
     candidates = [
         u for u in users
         if (u.get("userType") or "").lower() == "member"
         and not (u.get("assignedLicenses") or [])
         and u.get("accountEnabled") is True
+        and str(u.get("id") or "") not in admin_ids
     ]
     if not candidates:
         return _result(check_id, check_name, STATUS_PASS,
-                       "No unlicensed member accounts are sign-in enabled (likely no shared mailbox is sign-in enabled).")
+                       "No non-admin unlicensed member accounts are sign-in enabled (likely no shared mailbox is sign-in enabled).")
     return _result(check_id, check_name, STATUS_FAIL,
-                   f"{len(candidates)} unlicensed member account(s) appear to be sign-in enabled (likely shared mailboxes). "
+                   f"{len(candidates)} non-admin unlicensed member account(s) appear to be sign-in enabled (likely shared mailboxes). "
                    "Disable each via Update-MgUser -UserId <id> -AccountEnabled:$false. "
                    "First sample: " + ", ".join((u.get("userPrincipalName") or u.get("id") or "?") for u in candidates[:5]))
 
@@ -4373,7 +4420,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "name": "Sign-in to shared mailboxes is blocked",
         "description": (
             "Shared mailboxes should be sign-in disabled so attackers cannot "
-            "log in to them directly even if they obtain credentials."
+            "log in to them directly even if they obtain credentials. Unlicensed "
+            "accounts assigned to administrator roles are excluded."
         ),
         "remediation": (
             "For each shared mailbox: "
@@ -6320,11 +6368,21 @@ async def _remediate_foreach_user_graph(
         )
         return False
 
+    admin_ids = await _get_directory_role_member_ids(graph_token)
+    if admin_ids is None:
+        log_error(
+            "M365 foreach-user-graph remediation – unable to enumerate administrator role members",
+            company_id=company_id,
+            check_id=check_id,
+        )
+        return False
+
     candidates = [
         u for u in users
         if (u.get("userType") or "").lower() == "member"
         and not (u.get("assignedLicenses") or [])
         and u.get("accountEnabled") is True
+        and str(u.get("id") or "") not in admin_ids
         and not u.get("onPremisesSyncEnabled")  # can't disable sign-in for on-prem-synced accounts via Graph
     ]
     all_ok = True
