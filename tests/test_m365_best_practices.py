@@ -66,6 +66,69 @@ def test_provision_app_roles_include_best_practice_permissions():
     assert "434d7c66-07c6-4b1f-ab21-417cf2cdaaca" in roles, (
         "OrgSettings-Forms.Read.All must be provisioned for the Forms settings check"
     )
+    assert "29c18626-4985-4dcd-85c0-193eef327366" in roles, (
+        "Policy.ReadWrite.AuthenticationMethod must be provisioned for Authenticator remediation"
+    )
+
+
+def test_authenticator_mfa_fatigue_catalog_entry_has_remediation():
+    entry = next(
+        bp for bp in bp_service._BEST_PRACTICES
+        if bp["id"] == "bp_authenticator_mfa_fatigue"
+    )
+
+    assert entry["has_remediation"] is True
+    assert entry["remediation_url"].endswith(
+        "/authenticationMethodConfigurations/MicrosoftAuthenticator"
+    )
+    assert entry["remediation_payload"] == {
+        "featureSettings": {
+            setting: {
+                "state": "enabled",
+                "includeTarget": {"targetType": "group", "id": "all_users"},
+            }
+            for setting in bp_service._MFA_FATIGUE_PROTECTION_KEYS
+        }
+    }
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_authenticator_mfa_fatigue_patches_all_user_settings():
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+            return_value={},
+        ) as graph_patch,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ) as update_status,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_authenticator_mfa_fatigue"
+        )
+
+    assert result["success"] is True
+    graph_patch.assert_awaited_once_with(
+        "graph-token",
+        (
+            f"{bp_service._AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/"
+            "MicrosoftAuthenticator"
+        ),
+        bp_service._MFA_FATIGUE_REMEDIATION_PAYLOAD,
+    )
+    assert all(
+        setting["includeTarget"]["id"] == "all_users"
+        for setting in bp_service._MFA_FATIGUE_REMEDIATION_PAYLOAD["featureSettings"].values()
+    )
+    update_status.assert_awaited_once()
+    assert update_status.await_args.kwargs["remediation_status"] == "success"
 
 
 # ---------------------------------------------------------------------------

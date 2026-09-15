@@ -560,6 +560,16 @@ _MFA_FATIGUE_PROTECTION_KEYS: tuple[str, ...] = (
     "displayLocationInformationRequiredState",
 )
 
+_MFA_FATIGUE_REMEDIATION_PAYLOAD: dict[str, Any] = {
+    "featureSettings": {
+        setting: {
+            "state": "enabled",
+            "includeTarget": {"targetType": "group", "id": "all_users"},
+        }
+        for setting in _MFA_FATIGUE_PROTECTION_KEYS
+    }
+}
+
 
 _PHISHING_RESISTANT_AUTH_STRENGTH_ID = "00000000-0000-0000-0000-000000000004"
 
@@ -3924,7 +3934,12 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_authenticator_mfa_fatigue,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_url": (
+            f"{_AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/"
+            "MicrosoftAuthenticator"
+        ),
+        "remediation_payload": _MFA_FATIGUE_REMEDIATION_PAYLOAD,
     },
     {
         "id": "bp_weak_auth_methods_disabled",
