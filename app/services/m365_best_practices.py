@@ -6891,11 +6891,15 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             success = await _remediate_foreach_mailbox(
                 exo_token, tenant_id, company_id, check_id, mailbox_params
             )
+            if not success:
+                failure_message = "One or more mailbox remediation updates failed."
         elif bp.get("remediation_type") == "foreach_owa_mailbox_policy_exo":
             params = bp.get("remediation_params") or {}
             success = await _remediate_foreach_owa_mailbox_policy(
                 exo_token, tenant_id, company_id, check_id, params
             )
+            if not success:
+                failure_message = "One or more OWA mailbox policy remediation updates failed."
         elif bp.get("remediation_type") == "matching_antiphish_policy_exo":
             cmdlet = bp.get("remediation_cmdlet", "")
             params = bp.get("remediation_params") or {}
@@ -7016,6 +7020,8 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                                    "the affected new account was rolled back.")
         elif bp.get("remediation_type") == "foreach_user_graph":
             success = await _remediate_foreach_user_graph(graph_token, company_id, check_id)
+            if not success:
+                failure_message = "One or more user remediation updates failed."
         elif bp.get("remediation_type") == "create_dynamic_guest_group":
             try:
                 success = await _remediate_create_dynamic_guest_group(graph_token)
@@ -7060,10 +7066,14 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                         error=str(exc),
                     )
                     failure_message = str(exc)
+            if not success and not failure_message:
+                failure_message = "Unable to confirm whether the guest group remediation succeeded."
         elif bp.get("remediation_type") == "foreach_public_group_graph":
             success = await _remediate_foreach_public_group_graph(
                 graph_token, company_id, check_id
             )
+            if not success:
+                failure_message = "One or more public group remediation updates failed."
             # Remediation status is persisted by the shared epilogue below.
         elif check_id == "bp_authenticator_mfa_fatigue":
             try:
@@ -7153,6 +7163,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 failure_message = str(exc)
         else:
             success = False
+            failure_message = "Unknown remediation source type."
             failure_message = "Unknown SCC remediation type."
     else:
         success = False
