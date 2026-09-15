@@ -6152,7 +6152,6 @@ async def test_remediate_organization_customization_success():
 
 @pytest.mark.anyio("asyncio")
 async def test_remediate_only_managed_public_groups_honors_exclusions():
-    upserts: list[dict] = []
     patched_urls: list[str] = []
     groups = [
         {"id": "group-1", "visibility": "Public", "groupTypes": ["Unified"]},
@@ -6186,16 +6185,16 @@ async def test_remediate_only_managed_public_groups_honors_exclusions():
         ),
         patch(
             "app.services.m365_best_practices.bp_repo.update_remediation_status",
-            side_effect=lambda **kw: upserts.append(kw) or None,
-        ),
+            new_callable=AsyncMock,
+        ) as mock_update_status,
     ):
         result = await bp_service.remediate_check(
             company_id=31, check_id="bp_only_managed_public_groups"
         )
 
     assert result["success"] is True
-    assert len(upserts) == 1
-    assert upserts[0]["remediation_status"] == "success"
+    mock_update_status.assert_awaited_once()
+    assert mock_update_status.await_args.kwargs["remediation_status"] == "success"
     assert patched_urls == ["https://graph.microsoft.com/v1.0/groups/group-1"]
 
 
