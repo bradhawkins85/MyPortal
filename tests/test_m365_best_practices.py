@@ -522,8 +522,8 @@ async def test_remediate_weak_auth_methods_disabled_waits_for_graph_consistency(
         f"{bp_service._AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/Email",
         {"state": "disabled"},
     )
-    assert graph_get.await_count == 6
     sleep.assert_awaited_once()
+    assert graph_get.await_count == 3 * (sleep.await_count + 1)
     assert update_status.await_args.kwargs["remediation_status"] == "success"
 
 

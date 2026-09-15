@@ -2377,7 +2377,10 @@ async def _remediate_weak_auth_methods_disabled(token: str) -> tuple[bool, str]:
         if attempt < _WEAK_AUTH_METHODS_VERIFICATION_ATTEMPTS:
             await asyncio.sleep(_retry_backoff_seconds(attempt))
 
-    return False, f"Microsoft Graph did not confirm the updated weak authentication method state: {latest_details}"
+    return False, (
+        "Microsoft Graph did not confirm the updated weak authentication "
+        f"method state: {latest_details}"
+    )
 
 
 async def _check_internal_phishing_forms(token: str) -> dict[str, Any]:
