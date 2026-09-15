@@ -3747,7 +3747,7 @@ async def submit_m365_best_practice_ticket(request: Request, check_id: str):
         return flash_redirect("/m365/best-practices", "This check has not been evaluated yet", "error")
     result_status = str(result.get("status") or "")
     # Manual support tickets are intentionally limited to stored failed checks.
-    if result_status not in {m365_best_practices_service.STATUS_FAIL}:
+    if result_status != m365_best_practices_service.STATUS_FAIL:
         return flash_redirect("/m365/best-practices", "Support tickets can only be created for failed checks", "error")
 
     external_reference = m365_best_practices_service.build_failure_ticket_external_reference(
