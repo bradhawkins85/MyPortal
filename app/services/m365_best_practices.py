@@ -617,7 +617,9 @@ _MFA_FATIGUE_VERIFICATION_ATTEMPTS = 3
 
 # Microsoft Forms settings updates can also be eventually consistent. Verify
 # remediation before reporting success so stale reads do not show a false fail.
-_FORMS_PHISHING_VERIFICATION_ATTEMPTS = 3
+# Use more attempts than the default (5 × exponential back-off = up to ~15 s)
+# because the /beta/admin/forms/settings endpoint propagates slowly.
+_FORMS_PHISHING_VERIFICATION_ATTEMPTS = 5
 
 
 _PHISHING_RESISTANT_AUTH_STRENGTH_ID = "00000000-0000-0000-0000-000000000004"
