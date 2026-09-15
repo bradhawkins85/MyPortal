@@ -6910,8 +6910,9 @@ async def _remediate_disable_per_user_mfa(
     if policies is None:
         return False, "Unable to enumerate Conditional Access policies."
 
+    configured_states = {"enabled", "enabledforreportingbutnotenforced"}
     has_configured_ca = any(
-        str(policy.get("state") or "").strip().lower() != "disabled"
+        str(policy.get("state") or "").strip().lower() in configured_states
         for policy in policies
     )
     if not has_configured_ca:

@@ -6019,6 +6019,61 @@ async def test_remediate_per_user_mfa_disables_non_disabled_enabled_users():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_remediate_per_user_mfa_allows_report_only_conditional_access():
+    upserts: list[dict] = []
+    patched: list[tuple[str, dict]] = []
+    users = [{"id": "user-1", "accountEnabled": True}]
+    user_1_url = bp_service._AUTHENTICATION_REQUIREMENTS_URL_TMPL.format(user_id="user-1")
+
+    async def fake_safe_get_all(_token: str, url: str):
+        if url == bp_service._CA_POLICIES_URL:
+            return [{"state": "enabledForReportingButNotEnforced"}]
+        if url == bp_service._USERS_LIST_URL:
+            return users
+        return []
+
+    async def fake_safe_get(_token: str, url: str):
+        if url == user_1_url:
+            return {"perUserMfaState": "enabled"}
+        return {"perUserMfaState": "disabled"}
+
+    async def fake_patch(_token: str, url: str, payload: dict) -> dict:
+        patched.append((url, payload))
+        return {}
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._safe_graph_get_all",
+            side_effect=fake_safe_get_all,
+        ),
+        patch(
+            "app.services.m365_best_practices._safe_graph_get",
+            side_effect=fake_safe_get,
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            side_effect=fake_patch,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=9, check_id="bp_per_user_mfa_disabled"
+        )
+
+    assert result["success"] is True
+    assert patched == [(user_1_url, {"perUserMfaState": "disabled"})]
+    assert upserts[0]["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
 async def test_remediate_per_user_mfa_requires_configured_conditional_access():
     upserts: list[dict] = []
     safe_get_all = AsyncMock(return_value=[])
