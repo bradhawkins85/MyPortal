@@ -2252,6 +2252,25 @@ async def _check_customer_lockbox(
                    "Set-OrganizationConfig -CustomerLockBoxEnabled $true.")
 
 
+async def _check_organization_customization(
+    exo_token: str, tenant_id: str
+) -> dict[str, Any]:
+    check_id = "bp_organization_customization"
+    check_name = "Ensure organization customization is enabled"
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-OrganizationConfig")
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       f"Unable to query Get-OrganizationConfig: {exc}")
+    cfg = _exo_first_value(data)
+    if cfg.get("IsDehydrated") is False:
+        return _result(check_id, check_name, STATUS_PASS,
+                       "Organization customization is enabled (IsDehydrated is False).")
+    return _result(check_id, check_name, STATUS_FAIL,
+                   "Organization customization is not enabled (IsDehydrated is True); "
+                   "run Enable-OrganizationCustomization to enable it.")
+
+
 async def _check_smtp_auth_disabled(
     exo_token: str, tenant_id: str
 ) -> dict[str, Any]:
@@ -3877,6 +3896,26 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": False,
         "is_cis_benchmark": True,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_organization_customization",
+        "name": "Ensure organization customization is enabled",
+        "description": (
+            "Exchange Online tenants start in a dehydrated (uncustomised) state to "
+            "reduce resource usage. Many Exchange Online and Security & Compliance "
+            "cmdlets — including transport rules, journaling, data loss prevention, "
+            "and custom retention policies — require organisation customisation to be "
+            "enabled before they can be configured. Running Enable-OrganizationCustomization "
+            "is a prerequisite for applying security and compliance controls to the tenant."
+        ),
+        "remediation": "Enable-OrganizationCustomization",
+        "source": _check_organization_customization,
+        "source_type": "exo",
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_cmdlet": "Enable-OrganizationCustomization",
+        "remediation_params": {},
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {

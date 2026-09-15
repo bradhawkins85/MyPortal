@@ -5463,3 +5463,126 @@ async def test_remediate_shared_mailbox_signin_blocked_skips_onprem_synced():
     assert len(patched_urls) == 1
     assert "cloud-user" in patched_urls[0]
     assert all("onprem-user" not in url for url in patched_urls)
+
+
+# ---------------------------------------------------------------------------
+# bp_organization_customization
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_organization_customization_pass():
+    from app.services.m365_best_practices import _check_organization_customization
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [{"IsDehydrated": False}]},
+    ):
+        result = await _check_organization_customization("token", "tenant-id")
+
+    assert result["status"] == "pass"
+    assert "IsDehydrated" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_organization_customization_fail():
+    from app.services.m365_best_practices import _check_organization_customization
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={"value": [{"IsDehydrated": True}]},
+    ):
+        result = await _check_organization_customization("token", "tenant-id")
+
+    assert result["status"] == "fail"
+    assert "Enable-OrganizationCustomization" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_organization_customization_unknown_on_error():
+    from app.services.m365_best_practices import _check_organization_customization
+
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        side_effect=M365Error("EXO error"),
+    ):
+        result = await _check_organization_customization("token", "tenant-id")
+
+    assert result["status"] == "unknown"
+    assert "EXO error" in result["details"]
+
+
+def test_organization_customization_in_catalog():
+    catalog = bp_service.list_best_practices()
+    ids = {bp["id"] for bp in catalog}
+    assert "bp_organization_customization" in ids
+
+
+def test_organization_customization_catalog_entry():
+    catalog = bp_service.list_best_practices()
+    entry = next(bp for bp in catalog if bp["id"] == "bp_organization_customization")
+    assert entry.get("has_remediation") is True
+    assert "Enable-OrganizationCustomization" in entry["remediation"]
+    assert "source" not in entry
+    assert "remediation_cmdlet" not in entry
+    assert "remediation_params" not in entry
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_organization_customization_success():
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-123"),
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=9, check_id="bp_organization_customization"
+        )
+
+    assert result["success"] is True
+    assert len(upserts) == 1
+    assert upserts[0]["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_organization_customization_failure():
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-123"),
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            new_callable=AsyncMock,
+            side_effect=M365Error("Enable-OrganizationCustomization failed"),
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=9, check_id="bp_organization_customization"
+        )
+
+    assert result["success"] is False
+    assert upserts[0]["remediation_status"] == "failed"
