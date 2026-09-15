@@ -108,10 +108,10 @@ async def create_exclusion(payload: DefenderExclusionCreate, request: Request):
         raise HTTPException(422, "A device is required for device exclusions")
     if payload.tray_device_id and not await repo.device_belongs_to_company(payload.tray_device_id, company_id):
         raise HTTPException(404, "Device not found in the active company")
-    await repo.add_exclusion(payload.scope, company_id, payload.tray_device_id, payload.exclusion_type, payload.value, user["id"])
+    exclusion_id = await repo.add_exclusion(payload.scope, company_id, payload.tray_device_id, payload.exclusion_type, payload.value, user["id"])
     await audit_service.log_action(action="defender.exclusion.created", user_id=user["id"], entity_type="defender_exclusion",
         new_value=payload.model_dump(), metadata={"company_id": company_id}, request=request)
-    return {"status": "created"}
+    return {"id": exclusion_id, "status": "created"}
 
 @router.delete("/api/defender/exclusions/{exclusion_id}")
 async def remove_exclusion(exclusion_id: int, request: Request):
