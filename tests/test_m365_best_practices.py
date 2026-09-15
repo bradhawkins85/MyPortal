@@ -104,10 +104,13 @@ def test_provision_app_roles_include_best_practice_permissions():
     assert "38d9df27-64da-44fd-b7c5-a6fbac20248f" in roles, (
         "UserAuthenticationMethod.Read.All must be provisioned for MFA registration checks"
     )
-    # OrgSettings-Forms.Read.All – required for Microsoft Forms phishing protection check
-    # (bp_internal_phishing_forms) via GET /beta/admin/forms/settings
-    assert "434d7c66-07c6-4b1f-ab21-417cf2cdaaca" in roles, (
-        "OrgSettings-Forms.Read.All must be provisioned for the Forms settings check"
+    # OrgSettings-Forms.ReadWrite.All – required for both the Microsoft Forms
+    # phishing-protection GET check and its PATCH remediation.
+    assert "2cb92fee-97a3-4034-8702-24a6f5d0d1e9" in roles, (
+        "OrgSettings-Forms.ReadWrite.All must be provisioned for the Forms remediation"
+    )
+    assert "434d7c66-07c6-4b1f-ab21-417cf2cdaaca" not in roles, (
+        "The redundant read-only Forms permission should not be requested"
     )
     assert "29c18626-4985-4dcd-85c0-193eef327366" in roles, (
         "Policy.ReadWrite.AuthenticationMethod must be provisioned for Authenticator remediation"
