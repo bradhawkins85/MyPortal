@@ -104,9 +104,14 @@ def test_dmarc_page_loads_rejected_or_quarantined_forensic_reports(monkeypatch):
     assert forensic_reports.await_args.kwargs["limit"] == 25
     assert forensic_reports.await_args.kwargs["reported_domain"] == "example.com"
     assert forensic_reports.await_args.kwargs["rejected_or_quarantined_only"] is True
-    assert render.await_args.kwargs["extra"]["forensic_failures"] == [
-        {"original_mail_from": "sender@example.com"}
-    ]
+    assert (
+        render.await_args.kwargs["extra"]["forensic_failures"][0]["original_mail_from"]
+        == "sender@example.com"
+    )
+    assert (
+        render.await_args.kwargs["extra"]["forensic_failures"][0]["occurred_at_iso"]
+        is None
+    )
 
 
 def test_dmarc_template_hides_removed_and_empty_sections():
