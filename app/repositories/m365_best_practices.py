@@ -158,7 +158,10 @@ async def update_remediation_status(
     remediated_at: datetime,
     remediation_failure_reason: str | None = None,
 ) -> None:
-    """Update the remediation status for an existing result row."""
+    """Update remediation status for an existing result row.
+
+    Successful remediations clear any previously stored failure reason.
+    """
     await db.execute(
         """
         UPDATE m365_best_practice_results

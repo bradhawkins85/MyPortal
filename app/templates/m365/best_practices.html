@@ -202,7 +202,7 @@
               {% elif check.remediation_status == "failed" %}
                 <span style="color:var(--color-error,#dc2626);font-size:0.8rem">✗ Remediation failed
                   {% if check.remediated_at %}<small class="text-muted">on <span data-utc="{{ check.remediated_at.isoformat() }}">{{ check.remediated_at.isoformat() }}</span></small>{% endif %}
-                  {% if check.remediation_failure_reason %}<small class="text-muted"> — {{ check.remediation_failure_reason }}</small>{% endif %}
+                  {% if check.remediation_failure_reason %}<small class="text-muted"> — {{ check.remediation_failure_reason | e }}</small>{% endif %}
                 </span>
               {% endif %}
             </div>
