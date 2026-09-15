@@ -118,6 +118,7 @@ _PROVISION_APP_ROLES: list[str] = [
     "18a4783c-866b-4cc7-a460-3d5e5662c884",  # Application.ReadWrite.OwnedBy (for self-renewal)
     # Additional permissions for CIS benchmark checks:
     "246dd0d5-5bd0-4def-940b-0421030a5b68",  # Policy.Read.All
+    "29c18626-4985-4dcd-85c0-193eef327366",  # Policy.ReadWrite.AuthenticationMethod (Authenticator MFA-fatigue remediation)
     "fb221be6-99f2-473f-bd32-01c6a0e9ca3b",  # Policy.ReadWrite.Authorization (required to PATCH /policies/authorizationPolicy for guest access remediation)
     "498476ce-e0fe-48b0-b801-37ba7e2685c6",  # Organization.Read.All
     "dc377aa6-52d8-4e23-b271-2a7ae04cedf3",  # DeviceManagementConfiguration.Read.All
@@ -226,6 +227,7 @@ _GRAPH_ROLE_NAMES: dict[str, str] = {
     "7ab1d382-f21e-4acd-a863-ba3e13f7da61": "Directory.Read.All",
     "18a4783c-866b-4cc7-a460-3d5e5662c884": "Application.ReadWrite.OwnedBy",
     "246dd0d5-5bd0-4def-940b-0421030a5b68": "Policy.Read.All",
+    "29c18626-4985-4dcd-85c0-193eef327366": "Policy.ReadWrite.AuthenticationMethod",
     "fb221be6-99f2-473f-bd32-01c6a0e9ca3b": "Policy.ReadWrite.Authorization",
     "498476ce-e0fe-48b0-b801-37ba7e2685c6": "Organization.Read.All",
     "dc377aa6-52d8-4e23-b271-2a7ae04cedf3": "DeviceManagementConfiguration.Read.All",
