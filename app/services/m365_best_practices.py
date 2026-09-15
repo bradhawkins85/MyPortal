@@ -507,7 +507,7 @@ _DIRECTORY_ROLES_WITH_MEMBERS_URL = (
 _AUTHENTICATION_REQUIREMENTS_URL_TMPL = (
     "https://graph.microsoft.com/beta/users/{user_id}/authentication/requirements"
 )
-# Lower-cased policy states considered actively configured for remediation gating.
+# Lowercased policy states considered actively configured for remediation gating.
 _ACTIVE_CONDITIONAL_ACCESS_POLICY_STATES_LOWER = frozenset(
     {"enabled", "enabledforreportingbutnotenforced"}
 )
