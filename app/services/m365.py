@@ -1013,7 +1013,8 @@ async def _exo_invoke_command(
     must already be granted.
 
     Returns the raw JSON response body on success.  Raises :exc:`M365Error` on any
-    non-200 HTTP status.
+    non-200 HTTP status and includes Exchange Online's safe error detail so callers
+    can present an actionable remediation failure instead of a silent generic error.
     """
     safe_tenant = quote(str(tenant_id or "").strip(), safe="")
     url = f"https://outlook.office365.com/adminapi/beta/{safe_tenant}/InvokeCommand"
@@ -1044,13 +1045,16 @@ async def _exo_invoke_command(
             f"Exchange Online {cmdlet_name} network error ({type(exc).__name__})"
         ) from exc
     if response.status_code not in (200, 201, 204):
+        error_detail = _exo_error_detail(response)
         log_error(
             "Exchange Online InvokeCommand failed",
             cmdlet=cmdlet_name,
             status=response.status_code,
+            error=error_detail,
         )
+        detail_suffix = f": {error_detail}" if error_detail else ""
         raise M365Error(
-            f"Exchange Online {cmdlet_name} failed ({response.status_code})",
+            f"Exchange Online {cmdlet_name} failed ({response.status_code}){detail_suffix}",
             http_status=response.status_code,
         )
     if response.status_code == 204 or not response.text:
@@ -1061,6 +1065,37 @@ async def _exo_invoke_command(
         raise M365Error(
             f"Exchange Online {cmdlet_name} response parse error: {exc}"
         ) from exc
+
+
+def _exo_error_detail(response: httpx.Response) -> str:
+    """Extract a bounded, single-line error message from an EXO response."""
+    candidates: list[Any] = []
+    try:
+        body = response.json()
+    except (ValueError, httpx.DecodingError):
+        body = None
+
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict):
+            candidates.extend((error.get("message"), error.get("description")))
+            inner = error.get("innererror") or error.get("innerError")
+            if isinstance(inner, dict):
+                candidates.append(inner.get("message"))
+        elif isinstance(error, str):
+            candidates.append(error)
+        candidates.extend(
+            (body.get("Message"), body.get("message"), body.get("error_description"))
+        )
+    candidates.append(getattr(response, "text", ""))
+
+    for candidate in candidates:
+        if not isinstance(candidate, str) or not candidate.strip():
+            continue
+        # Control characters make logs difficult to read and can permit log
+        # injection. Keep the diagnostic useful while bounding what is exposed.
+        return " ".join(candidate.split())[:500]
+    return ""
 
 
 async def _graph_get(

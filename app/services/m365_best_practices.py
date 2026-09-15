@@ -70,6 +70,7 @@ from app.services.cis_benchmark import (
 from app.services.m365 import (
     M365Error,
     _acquire_exo_access_token,
+    _coerce_exo_bool,
     _exo_invoke_command,
     _graph_get,
     _graph_get_all,
@@ -2520,7 +2521,8 @@ async def _check_antiphish_impersonated_domain_protection(
     enabled = [
         r.get("Name") or r.get("Identity") or "?"
         for r in rows
-        if isinstance(r, dict) and r.get("EnableTargetedDomainsProtection") is True
+        if isinstance(r, dict)
+        and _coerce_exo_bool(r.get("EnableTargetedDomainsProtection"))
     ]
     if enabled:
         return _result(check_id, check_name, STATUS_PASS,
@@ -2545,7 +2547,8 @@ async def _check_antiphish_impersonated_user_protection(
     enabled = [
         r.get("Name") or r.get("Identity") or "?"
         for r in rows
-        if isinstance(r, dict) and r.get("EnableTargetedUserProtection") is True
+        if isinstance(r, dict)
+        and _coerce_exo_bool(r.get("EnableTargetedUserProtection"))
     ]
     if enabled:
         return _result(check_id, check_name, STATUS_PASS,
@@ -2622,7 +2625,8 @@ async def _check_antiphish_domain_impersonation_safety_tip(
     enabled = [
         r.get("Name") or r.get("Identity") or "?"
         for r in rows
-        if isinstance(r, dict) and r.get("EnableSimilarDomainsSafetyTips") is True
+        if isinstance(r, dict)
+        and _coerce_exo_bool(r.get("EnableSimilarDomainsSafetyTips"))
     ]
     if enabled:
         return _result(check_id, check_name, STATUS_PASS,
@@ -2647,7 +2651,8 @@ async def _check_antiphish_user_impersonation_safety_tip(
     enabled = [
         r.get("Name") or r.get("Identity") or "?"
         for r in rows
-        if isinstance(r, dict) and r.get("EnableSimilarUsersSafetyTips") is True
+        if isinstance(r, dict)
+        and _coerce_exo_bool(r.get("EnableSimilarUsersSafetyTips"))
     ]
     if enabled:
         return _result(check_id, check_name, STATUS_PASS,
@@ -2672,7 +2677,8 @@ async def _check_antiphish_unusual_characters_safety_tip(
     enabled = [
         r.get("Name") or r.get("Identity") or "?"
         for r in rows
-        if isinstance(r, dict) and r.get("EnableUnusualCharactersSafetyTips") is True
+        if isinstance(r, dict)
+        and _coerce_exo_bool(r.get("EnableUnusualCharactersSafetyTips"))
     ]
     if enabled:
         return _result(check_id, check_name, STATUS_PASS,
@@ -4087,6 +4093,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_params": {
             "Identity": "Office365 AntiPhish Default",
             "TargetedDomainProtectionAction": "Quarantine",
+            "Confirm": False,
         },
         "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
@@ -4110,6 +4117,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_params": {
             "Identity": "Office365 AntiPhish Default",
             "TargetedUserProtectionAction": "Quarantine",
+            "Confirm": False,
         },
         "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
@@ -4133,6 +4141,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_params": {
             "Identity": "Office365 AntiPhish Default",
             "EnableSimilarDomainsSafetyTips": True,
+            "Confirm": False,
         },
         "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
@@ -4156,6 +4165,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_params": {
             "Identity": "Office365 AntiPhish Default",
             "EnableSimilarUsersSafetyTips": True,
+            "Confirm": False,
         },
         "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
@@ -4179,6 +4189,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation_params": {
             "Identity": "Office365 AntiPhish Default",
             "EnableUnusualCharactersSafetyTips": True,
+            "Confirm": False,
         },
         "requires_licenses": [CAP_DEFENDER_O365_P1],
     },
@@ -5889,6 +5900,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     remediated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
     if source_type == "exo":
+        failure_message = ""
         try:
             exo_token, tenant_id = await _acquire_exo_access_token(company_id)
         except M365Error as exc:
@@ -5921,6 +5933,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
                 success = True
             except M365Error as exc:
+                failure_message = str(exc)
                 log_error(
                     "M365 best practice remediation command failed",
                     company_id=company_id,
@@ -6003,7 +6016,11 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
         }
     return {
         "success": False,
-        "message": "Remediation command failed. Check that the app has the required permissions.",
+        "message": (
+            f"Remediation command failed: {failure_message}"
+            if source_type == "exo" and failure_message
+            else "Remediation command failed. Check that the app has the required permissions."
+        ),
     }
 
 

@@ -1,0 +1,7 @@
+{
+  "guid": "c9f0de68-77a2-4cb7-b6bb-8f2a8814d728",
+  "occurred_at": "2026-09-15T00:00Z",
+  "change_type": "Fix",
+  "summary": "Suppressed interactive confirmation prompts for Microsoft 365 anti-phishing remediations executed through Exchange Online REST.",
+  "content_hash": "98cf69740b47b1463d47d59dcd5d4ff4a33f31069f0394ccad9dfebe533b9c59"
+}

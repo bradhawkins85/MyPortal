@@ -2817,6 +2817,9 @@ async def test_check_outlook_addins_disabled_pass_when_disabled():
         return_value={"value": [{"Identity": "OwaMailboxPolicy-Default", "WebPartsFrameworkEnabled": False}]},
     ):
         result = await bp_service._check_outlook_addins_disabled("exo-token", "tenant-id")
+
+
+@pytest.mark.anyio("asyncio")
 async def test_antiphish_impersonated_domain_protection_pass():
     """Pass when at least one policy has EnableTargetedDomainsProtection True."""
     with patch(
@@ -2869,6 +2872,9 @@ def test_outlook_addins_disabled_has_remediation():
     entry = next(bp for bp in catalog if bp["id"] == "bp_outlook_addins_disabled")
     assert entry.get("has_remediation") is True
     assert "source" not in entry
+
+
+@pytest.mark.anyio("asyncio")
 async def test_antiphish_impersonated_domain_protection_fail():
     """Fail when no policy has EnableTargetedDomainsProtection True."""
     with patch(
@@ -3153,6 +3159,34 @@ async def test_antiphish_domain_impersonation_safety_tip_pass():
         result = await bp_service._check_antiphish_domain_impersonation_safety_tip(
             "exo-token", "tenant-123"
         )
+    assert result["status"] == "pass"
+
+
+@pytest.mark.anyio("asyncio")
+@pytest.mark.parametrize(
+    "serialized_value",
+    ["True", {"value": True}],
+)
+async def test_antiphish_domain_impersonation_safety_tip_accepts_exo_boolean_shapes(
+    serialized_value,
+):
+    """Treat the boolean shapes returned by EXO InvokeCommand as enabled."""
+    with patch(
+        "app.services.m365_best_practices._exo_invoke_command",
+        new_callable=AsyncMock,
+        return_value={
+            "value": [
+                {
+                    "Name": "Office365 AntiPhish Default",
+                    "EnableSimilarDomainsSafetyTips": serialized_value,
+                }
+            ]
+        },
+    ):
+        result = await bp_service._check_antiphish_domain_impersonation_safety_tip(
+            "exo-token", "tenant-123"
+        )
+
     assert result["status"] == "pass"
 
 
@@ -4754,6 +4788,7 @@ def test_antiphish_remediation_catalog_fields():
         assert entry.get("remediation_cmdlet") == "Set-AntiPhishPolicy", f"wrong cmdlet for {check_id}"
         params = entry.get("remediation_params") or {}
         assert params.get("Identity") == "Office365 AntiPhish Default", f"Identity missing for {check_id}"
+        assert params.get("Confirm") is False, f"Confirm suppression missing for {check_id}"
         assert param_key in params, f"param {param_key} missing for {check_id}"
 
 
@@ -4863,6 +4898,7 @@ async def test_remediate_antiphish_domain_safety_tip_success():
 
     assert result["success"] is True
     assert invocations[0]["params"]["EnableSimilarDomainsSafetyTips"] is True
+    assert invocations[0]["params"]["Confirm"] is False
 
 
 @pytest.mark.anyio("asyncio")
@@ -4891,6 +4927,9 @@ async def test_remediate_antiphish_exo_failure():
         )
 
     assert result["success"] is False
+    assert result["message"] == (
+        "Remediation command failed: Set-AntiPhishPolicy failed"
+    )
     assert upserts[0]["remediation_status"] == "failed"
 
 
