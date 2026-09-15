@@ -3435,6 +3435,60 @@ def test_bp_mailbox_auditing_enabled_catalog_entry():
     assert "AuditEnabled" in entry["remediation"]
 
 
+def test_bp_mailbox_audit_actions_catalog_entry_has_remediation():
+    entry = {bp["id"]: bp for bp in bp_service._BEST_PRACTICES}["bp_mailbox_audit_actions"]
+
+    assert entry["has_remediation"] is True
+    assert entry["remediation_type"] == "foreach_mailbox_exo"
+    assert entry["remediation_mailbox_params"] == {
+        "AuditEnabled": True,
+        "AuditOwner": {
+            "Add": ["MailboxLogin", "HardDelete", "SoftDelete", "Update"]
+        },
+    }
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_mailbox_audit_actions_enables_and_adds_missing_actions():
+    mailboxes = [
+        {
+            "UserPrincipalName": "alice@contoso.com",
+            "AuditEnabled": False,
+            "AuditOwner": ["MailboxLogin", "HardDelete"],
+        },
+        {
+            "UserPrincipalName": "bob@contoso.com",
+            "AuditEnabled": True,
+            "AuditOwner": ["MailboxLogin", "HardDelete", "SoftDelete", "Update"],
+        },
+    ]
+    set_call = AsyncMock(return_value={})
+
+    async def fake_exo(token, tenant, cmdlet, params=None):
+        if cmdlet == "Get-Mailbox":
+            return {"value": mailboxes}
+        return await set_call(token, tenant, cmdlet, params)
+
+    params = {
+        "AuditEnabled": True,
+        "AuditOwner": {
+            "Add": ["MailboxLogin", "HardDelete", "SoftDelete", "Update"]
+        },
+    }
+    with patch("app.services.m365_best_practices._exo_invoke_command", side_effect=fake_exo):
+        result = await bp_service._remediate_foreach_mailbox(
+            "exo-token", "tenant-id", 1, "bp_mailbox_audit_actions", params
+        )
+
+    assert result is True
+    set_call.assert_awaited_once()
+    assert set_call.await_args.args[3] == {
+        "Identity": "alice@contoso.com",
+        "AuditEnabled": True,
+        "AuditOwner": {"Add": ["SoftDelete", "Update"]},
+    }
+
+
 
 # ---------------------------------------------------------------------------
 # SharePoint Online checks (Graph /admin/sharepoint/settings)

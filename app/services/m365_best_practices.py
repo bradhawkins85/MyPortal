@@ -3807,7 +3807,14 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_mailbox_audit_actions,
         "source_type": "exo",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "foreach_mailbox_exo",
+        "remediation_mailbox_params": {
+            "AuditEnabled": True,
+            "AuditOwner": {
+                "Add": ["MailboxLogin", "HardDelete", "SoftDelete", "Update"]
+            },
+        },
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
@@ -5812,6 +5819,8 @@ async def _remediate_foreach_mailbox(
 
     Fetches every user mailbox, then calls ``Set-Mailbox`` for each one that
     does not already satisfy every key/value pair in *mailbox_params*.
+    Multi-value ``{"Add": [...]}`` parameters are reduced to values missing
+    from the mailbox so remediation is safe to retry.
     Returns ``True`` if all required updates succeeded (or none were needed),
     ``False`` if at least one update failed.
     """
@@ -5837,13 +5846,22 @@ async def _remediate_foreach_mailbox(
         identity = mailbox.get("UserPrincipalName") or mailbox.get("Identity")
         if not identity:
             continue
-        # Skip mailboxes that already satisfy every required parameter value.
-        if all(mailbox.get(k) == v for k, v in mailbox_params.items()):
+        update_params: dict[str, Any] = {}
+        for key, desired in mailbox_params.items():
+            if isinstance(desired, dict) and set(desired) == {"Add"}:
+                existing = set(mailbox.get(key) or [])
+                missing = [value for value in desired["Add"] if value not in existing]
+                if missing:
+                    update_params[key] = {"Add": missing}
+            elif mailbox.get(key) != desired:
+                update_params[key] = desired
+
+        if not update_params:
             continue
         try:
             await _exo_invoke_command(
                 exo_token, tenant_id, "Set-Mailbox",
-                {"Identity": identity, **mailbox_params},
+                {"Identity": identity, **update_params},
             )
         except M365Error as exc:
             log_error(
