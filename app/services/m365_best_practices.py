@@ -6370,7 +6370,7 @@ async def get_last_results(company_id: int) -> list[dict[str, Any]]:
             "has_remediation": bool(bp_meta.get("has_remediation")),
             "remediation_status": row.get("remediation_status"),
             "remediated_at": row.get("remediated_at"),
-            "remediation_failure_reason": row.get("remediation_failure_reason") or "",
+            "remediation_failure_reason": row.get("remediation_failure_reason"),
             "is_cis_benchmark": bool(bp_meta.get("is_cis_benchmark")),
             "cis_group": bp_meta.get("cis_group", ""),
             "affected_accounts": row.get("affected_accounts") or [],
