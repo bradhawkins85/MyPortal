@@ -31,6 +31,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+import secrets
+import string
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Union
 
@@ -39,6 +41,7 @@ import httpx
 from app.core.logging import log_error, log_info
 from app.repositories import companies as companies_repo
 from app.repositories import m365_best_practices as bp_repo
+from app.services import hudu as hudu_service
 from app.services.cis_benchmark import (
     STATUS_FAIL,
     STATUS_PASS,
@@ -74,6 +77,7 @@ from app.services.m365 import (
     _exo_invoke_command,
     _graph_get,
     _graph_get_all,
+    _graph_delete,
     _graph_patch,
     _graph_post,
     acquire_access_token,
@@ -264,6 +268,69 @@ BestPracticeRunner = Union[GraphRunner, ExoRunner]
 
 # Keys that are implementation details and must not be exposed in the public catalog
 _INTERNAL_KEYS = frozenset({"source", "source_type", "remediation_cmdlet", "remediation_params", "remediation_url", "remediation_payload", "remediation_type", "remediation_mailbox_params"})
+
+_GLOBAL_ADMIN_ROLE_DEFINITION_ID = "62e90394-69f5-4237-9190-012177145e10"
+
+def _generate_emergency_admin_password(length: int = 32) -> str:
+    """Generate a CSPRNG-backed password satisfying Entra complexity rules."""
+    chars = [secrets.choice(string.ascii_uppercase), secrets.choice(string.ascii_lowercase),
+             secrets.choice(string.digits), secrets.choice("!@#$%^&*-_=+")]
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*-_=+"
+    chars.extend(secrets.choice(alphabet) for _ in range(length - len(chars)))
+    secrets.SystemRandom().shuffle(chars)
+    return "".join(chars)
+
+async def _remediate_global_admin_count(graph_token: str, company_id: int) -> tuple[bool, str]:
+    """Create and document enough emergency administrators to reach two."""
+    company = await companies_repo.get_company_by_id(company_id)
+    hudu_id = str((company or {}).get("hudu_id") or "").strip()
+    if not hudu_id:
+        return False, "Configure the company's Hudu ID before creating privileged accounts."
+    try:
+        await hudu_service.validate_configuration()
+    except hudu_service.HuduConfigurationError as exc:
+        return False, f"Hudu is not ready for password storage: {exc}"
+    roles = await _graph_get(graph_token, "https://graph.microsoft.com/v1.0/directoryRoles?$filter=displayName eq 'Global Administrator'&$select=id")
+    if not (role_values := roles.get("value") or []):
+        return False, "The Global Administrator directory role is not activated."
+    members = await _graph_get_all(graph_token, f"https://graph.microsoft.com/v1.0/directoryRoles/{role_values[0]['id']}/members?$select=id")
+    count = len(members)
+    if 2 <= count <= 4:
+        return True, "The tenant already has between two and four Global Administrators."
+    if count > 4:
+        return False, "The tenant has more than four Global Administrators; remove excess assignments manually."
+    domains = await _graph_get(graph_token, "https://graph.microsoft.com/v1.0/domains?$select=id,isDefault,isVerified")
+    verified = [d for d in domains.get("value", []) if d.get("isVerified") and d.get("id")]
+    domain = next((d["id"] for d in verified if d.get("isDefault")), None) or (verified[0]["id"] if verified else None)
+    if not domain:
+        return False, "No verified Microsoft 365 domain is available for the new accounts."
+    created = 0
+    for slot in range(1, 3 - count):
+        suffix = secrets.token_hex(3)
+        alias, password = f"myportal-emergency-admin-{slot}-{suffix}", _generate_emergency_admin_password()
+        upn, user, assignment = f"{alias}@{domain}", None, None
+        try:
+            user = await _graph_post(graph_token, "https://graph.microsoft.com/v1.0/users", {
+                "accountEnabled": True, "displayName": f"MyPortal Emergency Administrator {slot}",
+                "mailNickname": alias, "userPrincipalName": upn,
+                "passwordProfile": {"forceChangePasswordNextSignIn": True, "password": password}})
+            assignment = await _graph_post(graph_token, "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments", {
+                "principalId": user["id"], "roleDefinitionId": _GLOBAL_ADMIN_ROLE_DEFINITION_ID, "directoryScopeId": "/"})
+            await hudu_service.create_asset_password(company_id=hudu_id, name=f"M365 Global Administrator – {upn}",
+                username=upn, password=password, url="https://admin.microsoft.com/",
+                description="Created automatically by MyPortal. Password change is required at first sign-in.")
+            created += 1
+        except Exception:
+            # Compensating cleanup prevents an undocumented privileged identity.
+            for resource in ([f"roleManagement/directory/roleAssignments/{assignment['id']}" if assignment and assignment.get("id") else None,
+                              f"users/{user['id']}" if user and user.get("id") else None]):
+                if resource:
+                    try:
+                        await _graph_delete(graph_token, f"https://graph.microsoft.com/v1.0/{resource}")
+                    except Exception:
+                        pass
+            raise
+    return True, f"Created {created} Global Administrator account(s) and stored each password separately in Hudu."
 
 
 # ---------------------------------------------------------------------------
@@ -2906,12 +2973,13 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "to balance availability and minimise blast radius."
         ),
         "remediation": (
-            "Adjust Global Administrator role assignments via Azure AD → "
-            "Roles and administrators → Global Administrator."
+            "Create enough emergency Global Administrator accounts to reach two "
+            "and store each generated credential as a separate Hudu password."
         ),
         "source": _check_global_admin_count,
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "global_admin_accounts",
         "is_cis_benchmark": True,
     },
     {
@@ -6135,7 +6203,17 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 "success": False,
                 "message": "Unable to acquire Microsoft Graph token. Check that the app credentials are correct.",
             }
-        if bp.get("remediation_type") == "foreach_user_graph":
+        failure_message = ""
+        if bp.get("remediation_type") == "global_admin_accounts":
+            try:
+                success, failure_message = await _remediate_global_admin_count(graph_token, company_id)
+            except Exception as exc:
+                log_error("M365 Global Administrator remediation failed", company_id=company_id,
+                          check_id=check_id, error=str(exc))
+                success = False
+                failure_message = ("Account creation or secure Hudu synchronization failed; "
+                                   "the affected new account was rolled back.")
+        elif bp.get("remediation_type") == "foreach_user_graph":
             success = await _remediate_foreach_user_graph(graph_token, company_id, check_id)
         else:
             remediation_url = bp.get("remediation_url", "")
@@ -6182,7 +6260,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
         "success": False,
         "message": (
             f"Remediation command failed: {failure_message}"
-            if source_type == "exo" and failure_message
+            if failure_message
             else "Remediation command failed. Check that the app has the required permissions."
         ),
     }
