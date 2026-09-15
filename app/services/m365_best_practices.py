@@ -6910,8 +6910,7 @@ async def _remediate_disable_per_user_mfa(
     if policies is None:
         return False, "Unable to enumerate Conditional Access policies."
 
-    has_configured_ca = bool(policies)
-    if not has_configured_ca:
+    if not policies:
         return (
             False,
             "No Conditional Access policy found. Configure Conditional Access before disabling per-user MFA.",
