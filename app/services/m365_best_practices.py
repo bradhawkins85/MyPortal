@@ -6370,6 +6370,7 @@ async def get_last_results(company_id: int) -> list[dict[str, Any]]:
             "has_remediation": bool(bp_meta.get("has_remediation")),
             "remediation_status": row.get("remediation_status"),
             "remediated_at": row.get("remediated_at"),
+            "remediation_failure_reason": row.get("remediation_failure_reason") or "",
             "is_cis_benchmark": bool(bp_meta.get("is_cis_benchmark")),
             "cis_group": bp_meta.get("cis_group", ""),
             "affected_accounts": row.get("affected_accounts") or [],
@@ -6856,9 +6857,14 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
 
     source_type = bp.get("source_type", "graph")
     remediated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    generic_failure_reason = "Check that the app has the required permissions."
+    failure_message = ""
 
     if source_type == "exo":
-        failure_message = ""
+        token_error_message = (
+            "Unable to acquire Exchange Online token. "
+            "Check that the app credentials are correct."
+        )
         try:
             exo_token, tenant_id = await _acquire_exo_access_token(company_id)
         except M365Error as exc:
@@ -6873,10 +6879,11 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 check_id=check_id,
                 remediation_status="failed",
                 remediated_at=remediated_at,
+                remediation_failure_reason=token_error_message,
             )
             return {
                 "success": False,
-                "message": "Unable to acquire Exchange Online token. Check that the app credentials are correct.",
+                "message": token_error_message,
             }
 
         if bp.get("remediation_type") == "foreach_mailbox_exo":
@@ -6964,6 +6971,10 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                         error=str(exc),
                     )
     elif source_type == "graph":
+        graph_token_error_message = (
+            "Unable to acquire Microsoft Graph token. "
+            "Check that the app credentials are correct."
+        )
         try:
             # Use an app-only (client credentials) token so that application
             # permissions such as SharePointTenantSettings.ReadWrite.All are
@@ -6987,10 +6998,11 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 check_id=check_id,
                 remediation_status="failed",
                 remediated_at=remediated_at,
+                remediation_failure_reason=graph_token_error_message,
             )
             return {
                 "success": False,
-                "message": "Unable to acquire Microsoft Graph token. Check that the app credentials are correct.",
+                "message": graph_token_error_message,
             }
         failure_message = ""
         if bp.get("remediation_type") == "global_admin_accounts":
@@ -7096,8 +7108,12 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                     error=str(exc),
                 )
                 success = False
+                failure_message = str(exc)
     elif source_type == "scc":
-        failure_message = ""
+        scc_token_error_message = (
+            "Unable to acquire Security & Compliance token. "
+            "Check that the app credentials and permissions are correct."
+        )
         try:
             scc_tok, scc_tid = await _acquire_scc_access_token(company_id)
         except M365Error as exc:
@@ -7112,13 +7128,11 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 check_id=check_id,
                 remediation_status="failed",
                 remediated_at=remediated_at,
+                remediation_failure_reason=scc_token_error_message,
             )
             return {
                 "success": False,
-                "message": (
-                    "Unable to acquire Security & Compliance token. "
-                    "Check that the app credentials and permissions are correct."
-                ),
+                "message": scc_token_error_message,
             }
         if bp.get("remediation_type") == "break_glass_alert_policy":
             try:
@@ -7144,11 +7158,15 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
         success = False
 
     remediation_status = "success" if success else "failed"
+    remediation_failure_reason = None
+    if remediation_status == "failed":
+        remediation_failure_reason = failure_message or generic_failure_reason
     await bp_repo.update_remediation_status(
         company_id=company_id,
         check_id=check_id,
         remediation_status=remediation_status,
         remediated_at=remediated_at,
+        remediation_failure_reason=remediation_failure_reason,
     )
 
     log_info(
@@ -7171,7 +7189,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
         "message": (
             f"Remediation command failed: {failure_message}"
             if failure_message
-            else "Remediation command failed. Check that the app has the required permissions."
+            else f"Remediation command failed. {generic_failure_reason}"
         ),
     }
 

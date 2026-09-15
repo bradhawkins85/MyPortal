@@ -156,15 +156,23 @@ async def update_remediation_status(
     check_id: str,
     remediation_status: str,
     remediated_at: datetime,
+    remediation_failure_reason: str | None = None,
 ) -> None:
     """Update the remediation status for an existing result row."""
     await db.execute(
         """
         UPDATE m365_best_practice_results
-        SET remediation_status = %s, remediated_at = %s
+        SET remediation_status = %s, remediated_at = %s,
+            remediation_failure_reason = %s
         WHERE company_id = %s AND check_id = %s
         """,
-        (remediation_status, remediated_at, company_id, check_id),
+        (
+            remediation_status,
+            remediated_at,
+            remediation_failure_reason,
+            company_id,
+            check_id,
+        ),
     )
 
 
@@ -173,7 +181,7 @@ async def list_results(company_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """
         SELECT check_id, check_name, status, details, notes, affected_accounts, run_at,
-               remediation_status, remediated_at
+               remediation_status, remediated_at, remediation_failure_reason
         FROM m365_best_practice_results
         WHERE company_id = %s
         ORDER BY check_id

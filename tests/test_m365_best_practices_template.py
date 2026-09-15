@@ -213,3 +213,23 @@ def test_notes_are_shown_and_editable_for_techs():
     assert "Customer approved temporary exception." in html
     assert 'action="/m365/best-practices/note/bp_test"' in html
     assert "Save note" in html
+
+
+def test_failed_remediation_shows_failure_reason():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+                "remediation_status": "failed",
+                "remediated_at": None,
+                "remediation_failure_reason": "Microsoft Graph denied the update.",
+            }
+        ]
+    )
+
+    assert "✗ Remediation failed" in html
+    assert "Microsoft Graph denied the update." in html
