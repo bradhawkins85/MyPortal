@@ -33,19 +33,47 @@
           Search
         </button>
       </div>
+      <fieldset class="agent-panel__filters" aria-label="Source filters">
+        <legend class="agent-panel__label">Search sources</legend>
+        <label><input type="checkbox" value="tickets" data-agent-filter checked /> Tickets</label>
+        <label><input type="checkbox" value="knowledge_base" data-agent-filter checked /> Knowledge Base</label>
+        <label><input type="checkbox" value="orders" data-agent-filter checked /> Orders</label>
+        <label><input type="checkbox" value="assets" data-agent-filter checked /> Assets</label>
+        <label><input type="checkbox" value="issues" data-agent-filter checked /> Issues</label>
+        <label><input type="checkbox" value="chats" data-agent-filter checked /> Chats</label>
+        <label><input type="checkbox" value="products" data-agent-filter checked /> Products</label>
+      </fieldset>
+      <div class="agent-panel__saved-actions">
+        <input
+          type="text"
+          class="agent-panel__input"
+          name="saved_name"
+          maxlength="120"
+          placeholder="Save this search as…"
+          data-agent-save-name
+        />
+        <button class="button button--ghost" type="button" data-agent-save-search>Save Search</button>
+      </div>
+      <div class="agent-panel__saved-library" data-agent-saved-library></div>
     </form>
 
     <div class="agent-panel__status" role="status" aria-live="polite" data-agent-status></div>
+    <section class="agent-panel__stages" hidden data-agent-stages></section>
 
     <section class="agent-panel__results" hidden data-agent-results>
       <article class="agent-answer" hidden data-agent-answer>
         <h3 class="agent-answer__heading">Answer</h3>
+        <div class="agent-answer__meta" hidden data-agent-answer-meta></div>
         <div class="agent-answer__body" data-agent-answer-body></div>
       </article>
 
       <article class="agent-sources" hidden data-agent-sources>
         <h3 class="agent-sources__heading">Possibly Useful Results</h3>
         <div class="agent-sources__lists" data-agent-source-lists></div>
+      </article>
+      <article class="agent-sources" hidden data-agent-evidence>
+        <h3 class="agent-sources__heading">Curated Evidence</h3>
+        <div class="agent-sources__lists" data-agent-evidence-lists></div>
       </article>
 
       <div class="agent-panel__actions">

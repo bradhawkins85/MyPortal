@@ -57,6 +57,29 @@ _MAX_TICKET_ID_QUERY_LENGTH = 1000
 _TICKET_MARKER_KEYWORD = "ticket"
 _MIN_MARKED_TICKET_ID_DIGITS = 3
 _MIN_STANDALONE_TICKET_ID_DIGITS = 4
+_SUPPORTED_SOURCE_FILTERS = {
+    "knowledge_base",
+    "tickets",
+    "ticket_comments",
+    "products",
+    "packages",
+    "chats",
+    "orders",
+    "assets",
+    "issues",
+    "best_practices",
+}
+_SOURCE_TYPE_CAPS = {
+    "tickets": 4,
+    "ticket_comments": 6,
+    "knowledge_base": 4,
+    "chats": 4,
+    "products": 4,
+    "assets": 3,
+    "orders": 3,
+    "issues": 3,
+    "best_practices": 2,
+}
 
 
 class AgentContextMode(str, Enum):
@@ -368,6 +391,81 @@ def _filter_rag_candidates(
         item["was_selected_by_rag"] = True
         filtered.append(item)
     return filtered
+
+
+def _normalise_source_filters(source_filters: Sequence[str] | None) -> set[str]:
+    if not source_filters:
+        return set()
+    cleaned: set[str] = set()
+    for item in source_filters:
+        value = str(item or "").strip().casefold()
+        if value in _SUPPORTED_SOURCE_FILTERS:
+            cleaned.add(value)
+    return cleaned
+
+
+def _is_source_enabled(enabled_filters: set[str], source_type: str) -> bool:
+    if not enabled_filters:
+        return True
+    if source_type in enabled_filters:
+        return True
+    if source_type == "tickets":
+        return "ticket_comments" in enabled_filters
+    return False
+
+
+def _apply_source_caps(
+    candidates: Sequence[Mapping[str, Any]], *, caps: Mapping[str, int]
+) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    seen_per_source: dict[str, int] = {}
+    overflow_penalty: dict[str, int] = {}
+    for candidate in candidates:
+        source_type = str(candidate.get("source_type") or "")
+        cap = int(caps.get(source_type, 9999))
+        used = seen_per_source.get(source_type, 0)
+        if used >= cap:
+            overflow_penalty[source_type] = overflow_penalty.get(source_type, 0) + 1
+            continue
+        item = dict(candidate)
+        item["overflow_candidates"] = overflow_penalty.get(source_type, 0)
+        selected.append(item)
+        seen_per_source[source_type] = used + 1
+    return selected
+
+
+def _calculate_answer_confidence(
+    rag_candidates: Sequence[Mapping[str, Any]],
+    *,
+    preferred_sources: Sequence[str],
+) -> tuple[float, str, list[str]]:
+    if not rag_candidates:
+        return 0.0, "low", list(preferred_sources)
+    scores: list[float] = []
+    found_sources = set()
+    for candidate in rag_candidates:
+        source_type = str(candidate.get("source_type") or "").casefold()
+        if source_type:
+            found_sources.add(source_type)
+        try:
+            scores.append(float(candidate.get("score") or 0))
+        except (TypeError, ValueError):
+            continue
+    average_score = sum(scores) / len(scores) if scores else 0.0
+    source_coverage = len(found_sources & set(preferred_sources)) / max(
+        1, len(set(preferred_sources))
+    )
+    confidence = max(0.0, min(1.0, (average_score * 0.65) + (source_coverage * 0.35)))
+    if confidence >= 0.75:
+        label = "high"
+    elif confidence >= 0.45:
+        label = "medium"
+    else:
+        label = "low"
+    missing = [
+        source for source in preferred_sources if source not in found_sources
+    ]
+    return round(confidence, 3), label, missing
 
 
 def _stage(
@@ -1416,6 +1514,7 @@ async def execute_agent_query(
     context_mode: AgentContextMode = AgentContextMode.RAG_ONLY,
     rag_index_job_id: int | None = None,
     cleanup_rag_index: bool = False,
+    source_filters: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Execute an agent query using the configured Ollama module."""
 
@@ -1465,6 +1564,12 @@ async def execute_agent_query(
     is_super_admin = bool(user.get("is_super_admin"))
     explicit_ticket_ids = _extract_explicit_ticket_ids(query_text)
     allowed_rag_sources = _infer_allowed_rag_sources(query_text)
+    requested_source_filters = _normalise_source_filters(source_filters)
+    if requested_source_filters:
+        allowed_rag_sources &= requested_source_filters
+        if not allowed_rag_sources:
+            allowed_rag_sources = requested_source_filters
+    source_filters_sorted = sorted(requested_source_filters)
     stages: list[dict[str, Any]] = [
         _stage(
             "query_understanding",
@@ -1472,6 +1577,7 @@ async def execute_agent_query(
                 "intent": "mixed",
                 "ticket_ids": explicit_ticket_ids,
                 "preferred_sources": sorted(allowed_rag_sources),
+                "applied_source_filters": source_filters_sorted,
             },
         )
     ]
@@ -1484,21 +1590,24 @@ async def execute_agent_query(
     )
 
     kb_context = await knowledge_base_service.build_access_context(user)
-    try:
-        if allow_empty_query and not query_text:
-            kb_results = await knowledge_base_service.list_accessible_search_articles(
-                kb_context
-            )
-        else:
-            kb_search = await knowledge_base_service.search_articles(
-                query_text,
-                kb_context,
-                limit=_KB_RESULT_LIMIT,
-                use_ollama=False,
-            )
-            kb_results = list(kb_search.get("results") or [])
-    except Exception as exc:  # pragma: no cover - defensive guard
-        log_error("Agent knowledge base search failed", error=str(exc))
+    if _is_source_enabled(requested_source_filters, "knowledge_base"):
+        try:
+            if allow_empty_query and not query_text:
+                kb_results = await knowledge_base_service.list_accessible_search_articles(
+                    kb_context
+                )
+            else:
+                kb_search = await knowledge_base_service.search_articles(
+                    query_text,
+                    kb_context,
+                    limit=_KB_RESULT_LIMIT,
+                    use_ollama=False,
+                )
+                kb_results = list(kb_search.get("results") or [])
+        except Exception as exc:  # pragma: no cover - defensive guard
+            log_error("Agent knowledge base search failed", error=str(exc))
+            kb_results = []
+    else:
         kb_results = []
 
     knowledge_base_sources: list[dict[str, Any]] = []
@@ -1528,7 +1637,7 @@ async def execute_agent_query(
     except (TypeError, ValueError):
         user_id = 0
     direct_ticket_evidence: list[dict[str, Any]] = []
-    if user_id > 0:
+    if user_id > 0 and _is_source_enabled(requested_source_filters, "tickets"):
         for explicit_ticket_id in explicit_ticket_ids[:3]:
             try:
                 ticket = await tickets_repo.get_ticket(explicit_ticket_id)
@@ -1629,6 +1738,9 @@ async def execute_agent_query(
     feature_pack_sources: dict[str, list[dict[str, Any]]] = {}
     include_products = _can_access_shop(
         resolved_memberships, is_super_admin=is_super_admin
+    ) and (
+        _is_source_enabled(requested_source_filters, "products")
+        or _is_source_enabled(requested_source_filters, "packages")
     )
     if include_products:
         company_scope: int | None = None
@@ -1706,7 +1818,7 @@ async def execute_agent_query(
 
     can_access_chat = _has_membership_flag(
         resolved_memberships, "can_access_chat", is_super_admin=is_super_admin
-    )
+    ) and _is_source_enabled(requested_source_filters, "chats")
     try:
         raw_chats = await _search_chat_sources(
             query_text,
@@ -1734,7 +1846,7 @@ async def execute_agent_query(
 
     can_access_orders = _has_membership_flag(
         resolved_memberships, "can_access_orders", is_super_admin=is_super_admin
-    )
+    ) and _is_source_enabled(requested_source_filters, "orders")
     if can_access_orders:
         try:
             raw_orders = await _search_order_sources(
@@ -1760,7 +1872,7 @@ async def execute_agent_query(
 
     can_manage_assets = _has_membership_flag(
         resolved_memberships, "can_manage_assets", is_super_admin=is_super_admin
-    )
+    ) and _is_source_enabled(requested_source_filters, "assets")
     if can_manage_assets:
         try:
             raw_assets = await _search_asset_sources(
@@ -1793,16 +1905,17 @@ async def execute_agent_query(
         log_error("Agent staff lookup failed", error=str(exc))
         staff_sources = []
 
-    try:
-        issue_sources = await _search_issue_sources(
-            query_text,
-            memberships=resolved_memberships,
-            company_ids=accessible_company_ids,
-            is_super_admin=is_super_admin,
-        )
-    except Exception as exc:  # pragma: no cover - defensive guard
-        log_error("Agent issue lookup failed", error=str(exc))
-        issue_sources = []
+    if _is_source_enabled(requested_source_filters, "issues"):
+        try:
+            issue_sources = await _search_issue_sources(
+                query_text,
+                memberships=resolved_memberships,
+                company_ids=accessible_company_ids,
+                is_super_admin=is_super_admin,
+            )
+        except Exception as exc:  # pragma: no cover - defensive guard
+            log_error("Agent issue lookup failed", error=str(exc))
+            issue_sources = []
 
     for label, lookup in (
         (
@@ -1938,6 +2051,7 @@ async def execute_agent_query(
     rag_candidates = direct_ticket_evidence + _filter_rag_candidates(
         raw_rag_candidates, allowed_sources=allowed_rag_sources
     )
+    rag_candidates = _apply_source_caps(rag_candidates, caps=_SOURCE_TYPE_CAPS)
     curated_evidence, evidence_counts = _summarise_rag_by_source(rag_candidates)
     stages.append(
         _stage(
@@ -2015,6 +2129,10 @@ async def execute_agent_query(
 
     # Check if we have any relevant RAG evidence for the prompt.
     has_relevant_sources = bool(rag_candidates)
+    confidence_value, confidence_label, missing_sources = _calculate_answer_confidence(
+        rag_candidates,
+        preferred_sources=sorted(allowed_rag_sources),
+    )
 
     if context_mode is AgentContextMode.RAG_ONLY:
         prompt = _build_llm_context(
@@ -2064,6 +2182,9 @@ async def execute_agent_query(
         "message": message,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "has_relevant_sources": has_relevant_sources,
+        "answer_confidence": confidence_value,
+        "answer_confidence_label": confidence_label,
+        "missing_sources": missing_sources,
         "stages": stages,
         "evidence": curated_evidence,
         "sources": {

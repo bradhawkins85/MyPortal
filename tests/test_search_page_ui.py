@@ -14,6 +14,10 @@ def test_search_page_uses_friendly_copy_without_header_actions():
     assert "How can we assist you" in template
     assert "The assistant searches everything including knowledge base articles" in template
     assert "Possibly Useful Results" in template
+    assert "data-agent-filter" in template
+    assert "data-agent-stages" in template
+    assert "data-agent-save-search" in template
+    assert "Curated Evidence" in template
     assert "AI Search" not in template
     assert "Search permitted portal content using natural language." not in template
     assert "Results are generated through the configured Ollama" not in template
@@ -27,6 +31,7 @@ def test_search_results_open_linked_records_in_new_tabs():
     assert "link.target = '_blank';" in script
     assert "link.rel = 'noopener noreferrer';" in script
     assert "entry.appendChild(link);" in script
+    assert "source_filters: selectedSourceFilters()" in script
 
 
 def test_dashboard_link_is_available_to_every_authenticated_user():

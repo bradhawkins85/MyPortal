@@ -228,6 +228,29 @@ class AgentEvidenceItem(BaseModel):
 
 class AgentQueryRequest(BaseModel):
     query: constr(strip_whitespace=True, min_length=1, max_length=2000)
+    source_filters: list[
+        constr(strip_whitespace=True, min_length=1, max_length=40)
+    ] = Field(default_factory=list)
+
+
+class AgentSavedSearchCreateRequest(BaseModel):
+    name: constr(strip_whitespace=True, min_length=1, max_length=120)
+    query: constr(strip_whitespace=True, min_length=1, max_length=2000)
+    source_filters: list[
+        constr(strip_whitespace=True, min_length=1, max_length=40)
+    ] = Field(default_factory=list)
+    is_shared: bool = False
+
+
+class AgentSavedSearchItem(BaseModel):
+    id: int
+    name: str
+    query: str
+    source_filters: list[str] = Field(default_factory=list)
+    is_shared: bool = False
+    created_by_user_id: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class AgentQueryResponse(BaseModel):
@@ -239,6 +262,9 @@ class AgentQueryResponse(BaseModel):
     message: Optional[str] = None
     generated_at: datetime
     has_relevant_sources: bool = True
+    answer_confidence: float | None = None
+    answer_confidence_label: str | None = None
+    missing_sources: list[str] = Field(default_factory=list)
     stages: list[AgentStage] = Field(default_factory=list)
     evidence: dict[str, list[AgentEvidenceItem]] = Field(default_factory=dict)
     sources: AgentSources

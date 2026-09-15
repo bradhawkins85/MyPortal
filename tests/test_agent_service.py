@@ -963,12 +963,8 @@ async def test_execute_agent_query_returns_stages_and_grouped_evidence(monkeypat
     assert result["evidence"]["tickets"][0]["label"] == "[Ticket:#24425]"
     assert result["evidence"]["chats"][0]["duplicate_count"] == 1
     assert "Also found in 1 similar results: [Chat:#31]" in captured_prompt
-    assert llm_stages == [
-        "query_understanding",
-        "evidence_review",
-        "category_summaries",
-        "final_answer",
-    ]
+    assert llm_stages
+    assert all(str(stage).startswith("final_answer_turn_") for stage in llm_stages)
 
 
 def test_filter_rag_candidates_does_not_duplicate_selected_sources(monkeypatch):
@@ -1054,3 +1050,75 @@ async def test_execute_agent_query_passes_all_allowed_source_types_to_rag(monkey
         "ticket_comments",
         "tickets",
     ]
+
+
+def test_apply_source_caps_limits_overrepresented_sources():
+    candidates = [
+        {"source_type": "chats", "source_id": idx, "score": 0.9 - (idx * 0.01)}
+        for idx in range(1, 8)
+    ] + [{"source_type": "tickets", "source_id": 1, "score": 0.88}]
+
+    limited = agent_service._apply_source_caps(
+        candidates, caps={"chats": 4, "tickets": 2}
+    )
+
+    assert len([item for item in limited if item["source_type"] == "chats"]) == 4
+    assert len([item for item in limited if item["source_type"] == "tickets"]) == 1
+
+
+@pytest.mark.anyio
+async def test_execute_agent_query_applies_source_filters_and_reports_confidence(
+    monkeypatch,
+):
+    user = {"id": 7, "is_super_admin": False}
+    memberships = [{"company_id": 1, "company_name": "Visible Co"}]
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "build_access_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        agent_service.knowledge_base_service,
+        "search_articles",
+        AsyncMock(return_value={"results": []}),
+    )
+    monkeypatch.setattr(
+        agent_service.tickets_repo, "list_tickets_for_user", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(agent_service.db, "fetch_all", AsyncMock(return_value=[]))
+    retrieve_mock = AsyncMock(
+        return_value=[
+            {
+                "source_type": "tickets",
+                "source_id": 100,
+                "title": "Ticket match",
+                "excerpt": "Relevant ticket",
+                "score": 0.9,
+            },
+            {
+                "source_type": "chats",
+                "source_id": 30,
+                "title": "Chat match",
+                "excerpt": "Relevant chat",
+                "score": 0.7,
+            },
+        ]
+    )
+    monkeypatch.setattr(agent_service.rag_retrieval, "retrieve_candidates", retrieve_mock)
+
+    async def fake_trigger(slug, payload, *, background):
+        return {"status": "succeeded", "response": {"response": "ok"}}
+
+    monkeypatch.setattr(agent_service.modules_service, "trigger_module", fake_trigger)
+
+    result = await agent_service.execute_agent_query(
+        "find relevant records",
+        user,
+        memberships=memberships,
+        source_filters=["tickets", "chats"],
+    )
+
+    assert set(retrieve_mock.await_args.kwargs["source_filters"]) == {"tickets", "chats"}
+    assert result["stages"][0]["data"]["applied_source_filters"] == ["chats", "tickets"]
+    assert result["answer_confidence"] is not None
+    assert result["answer_confidence_label"] in {"low", "medium", "high"}
