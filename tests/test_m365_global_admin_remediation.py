@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 from app.services import m365_best_practices as service
 
 
-def test_global_admin_remediation_creates_two_separate_hudu_passwords():
+def test_global_admin_remediation_creates_three_separate_hudu_passwords():
     async def run():
         posts = []
 
@@ -40,18 +40,78 @@ def test_global_admin_remediation_creates_two_separate_hudu_passwords():
             patch.object(service, "_graph_get", side_effect=graph_get),
             patch.object(service, "_graph_get_all", new=AsyncMock(return_value=[])),
             patch.object(service, "_graph_post", side_effect=graph_post),
+            patch.object(
+                service,
+                "_post_app_role_assignment_with_retry",
+                side_effect=graph_post,
+            ),
         ):
             success, message = await service._remediate_global_admin_count("token", 7)
 
         assert success is True
-        assert "Created 2" in message
-        assert hudu_create.await_count == 2
+        assert "Created 3" in message
+        assert hudu_create.await_count == 3
         credentials = [call.kwargs for call in hudu_create.await_args_list]
         assert credentials[0]["username"] != credentials[1]["username"]
         assert credentials[0]["password"] != credentials[1]["password"]
         assert all(len(item["password"]) == 32 for item in credentials)
-        assert len([url for url, _ in posts if url.endswith("/users")]) == 2
-        assert len([url for url, _ in posts if url.endswith("/roleAssignments")]) == 2
+        assert len([url for url, _ in posts if url.endswith("/users")]) == 3
+        assert len([url for url, _ in posts if url.endswith("/roleAssignments")]) == 3
+
+    asyncio.run(run())
+
+
+def test_global_admin_remediation_adds_one_when_two_exist():
+    async def run():
+        graph_post = AsyncMock(return_value={"id": "created-id"})
+        hudu_create = AsyncMock(return_value={"id": "password-1"})
+        with (
+            patch.object(
+                service.companies_repo,
+                "get_company_by_id",
+                new=AsyncMock(return_value={"hudu_id": "42"}),
+            ),
+            patch.object(
+                service.hudu_service, "validate_configuration", new=AsyncMock()
+            ),
+            patch.object(
+                service.hudu_service, "create_asset_password", new=hudu_create
+            ),
+            patch.object(
+                service,
+                "_graph_get",
+                side_effect=[
+                    {"value": [{"id": "role-1"}]},
+                    {
+                        "value": [
+                            {
+                                "id": "example.com",
+                                "isDefault": True,
+                                "isVerified": True,
+                            }
+                        ]
+                    },
+                ],
+            ),
+            patch.object(
+                service,
+                "_graph_get_all",
+                new=AsyncMock(
+                    return_value=[{"id": "admin-1"}, {"id": "admin-2"}]
+                ),
+            ),
+            patch.object(service, "_graph_post", new=graph_post),
+            patch.object(
+                service,
+                "_post_app_role_assignment_with_retry",
+                new=AsyncMock(return_value={"id": "assignment-1"}),
+            ),
+        ):
+            success, message = await service._remediate_global_admin_count("token", 7)
+
+        assert success is True
+        assert "Created 1" in message
+        assert hudu_create.await_count == 1
 
     asyncio.run(run())
 

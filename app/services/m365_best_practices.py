@@ -286,7 +286,7 @@ def _generate_emergency_admin_password(length: int = 32) -> str:
     return "".join(chars)
 
 async def _remediate_global_admin_count(graph_token: str, company_id: int) -> tuple[bool, str]:
-    """Create and document enough emergency administrators to reach two."""
+    """Create and document enough emergency administrators to reach the target of three."""
     company = await companies_repo.get_company_by_id(company_id)
     hudu_id = str((company or {}).get("hudu_id") or "").strip()
     if not hudu_id:
@@ -300,8 +300,8 @@ async def _remediate_global_admin_count(graph_token: str, company_id: int) -> tu
         return False, "The Global Administrator directory role is not activated."
     members = await _graph_get_all(graph_token, f"https://graph.microsoft.com/v1.0/directoryRoles/{role_values[0]['id']}/members?$select=id")
     count = len(members)
-    if 2 <= count <= 4:
-        return True, "The tenant already has between two and four Global Administrators."
+    if 3 <= count <= 4:
+        return True, "The tenant already meets the target of three Global Administrators."
     if count > 4:
         return False, "The tenant has more than four Global Administrators; remove excess assignments manually."
     domains = await _graph_get(graph_token, "https://graph.microsoft.com/v1.0/domains?$select=id,isDefault,isVerified")
@@ -310,7 +310,7 @@ async def _remediate_global_admin_count(graph_token: str, company_id: int) -> tu
     if not domain:
         return False, "No verified Microsoft 365 domain is available for the new accounts."
     created = 0
-    for slot in range(1, 3 - count):
+    for slot in range(1, 4 - count):
         suffix = secrets.token_hex(3)
         alias, password = f"myportal-emergency-admin-{slot}-{suffix}", _generate_emergency_admin_password()
         upn, user, assignment = f"{alias}@{domain}", None, None
@@ -3155,11 +3155,11 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "id": "bp_global_admin_count",
         "name": "Maintain 2–4 Global Administrators",
         "description": (
-            "Microsoft recommends between two and four Global Administrators "
+            "Maintain between two and four Global Administrators, aiming for three, "
             "to balance availability and minimise blast radius."
         ),
         "remediation": (
-            "Create enough emergency Global Administrator accounts to reach two "
+            "Create enough emergency Global Administrator accounts to reach the target of three "
             "and store each generated credential as a separate Hudu password."
         ),
         "source": _check_global_admin_count,
