@@ -10,6 +10,7 @@ def _render_best_practices(
     secure_score=None,
     can_manage_account_exclusions=False,
     can_edit_notes=False,
+    can_submit_tickets=True,
 ):
     templates = Path(__file__).parents[1] / "app" / "templates"
     loader = ChoiceLoader(
@@ -40,6 +41,7 @@ def _render_best_practices(
         can_manage_account_exclusions=can_manage_account_exclusions,
         secure_score=secure_score,
         can_edit_notes=can_edit_notes,
+        can_submit_tickets=can_submit_tickets,
     )
 
 
@@ -200,6 +202,23 @@ def test_account_findings_show_exclusion_state_without_mutation_controls():
     assert "/m365/best-practices/account-exclusion/bp_test" not in html
 
 
+def test_failed_checks_show_manual_support_ticket_action():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+            }
+        ]
+    )
+
+    assert 'action="/m365/best-practices/ticket/bp_test"' in html
+    assert "Create ticket" in html
+
+
 def test_account_findings_show_per_account_exclude_and_restore_controls_when_permitted():
     html = _render_best_practices(
         [
@@ -281,6 +300,42 @@ def test_failed_remediation_hides_empty_failure_reason():
 
     assert "✗ Remediation failed" in html
     assert " — " not in html
+
+
+def test_non_failed_checks_hide_manual_support_ticket_action():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "pass",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+            }
+        ]
+    )
+
+    assert "/m365/best-practices/ticket/bp_test" not in html
+    assert "Create ticket" not in html
+    assert ">Actions<" not in html
+
+
+def test_ticket_action_hides_without_ticket_submission_permission():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+            }
+        ],
+        can_submit_tickets=False,
+    )
+
+    assert "/m365/best-practices/ticket/bp_test" not in html
+    assert "Create ticket" not in html
 
 
 def test_settings_table_includes_create_ticket_on_fail_option():

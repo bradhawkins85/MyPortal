@@ -3524,6 +3524,23 @@ def _can_manage_m365_account_exclusions(user: dict, membership: dict | None) -> 
     )
 
 
+def _can_submit_m365_best_practice_tickets(user: Mapping[str, Any], company_id: Any) -> bool:
+    """Return whether the current M365 best-practices viewer can request help.
+
+    ``_load_m365_best_practices_context`` already restricts page access to the
+    active company's super admins and members with M365 best-practices view
+    access. Any user who can view a failed check may open a support ticket for
+    that company, so this helper only verifies the identifiers required to
+    submit the ticket.
+    """
+    if user.get("id") is None or company_id is None:
+        return False
+    try:
+        return int(company_id) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 @app.get("/m365/best-practices", response_class=HTMLResponse)
 async def m365_best_practices_page(request: Request):
     user, membership, company, company_id, redirect = await _load_m365_best_practices_context(request)
@@ -3545,6 +3562,7 @@ async def m365_best_practices_page(request: Request):
         "is_super_admin": bool(user.get("is_super_admin")),
         "can_edit_notes": _can_edit_m365_best_practice_notes(user, membership),
         "can_manage_account_exclusions": _can_manage_m365_account_exclusions(user, membership),
+        "can_submit_tickets": _can_submit_m365_best_practice_tickets(user, company_id),
     }
     return await _render_template("m365/best_practices.html", request, user, extra=extra)
 
@@ -3714,6 +3732,100 @@ async def remediate_m365_best_practice(request: Request, check_id: str):
     if result.get("success"):
         return flash_redirect("/m365/best-practices", message, "success")
     return flash_redirect("/m365/best-practices", message, "error")
+
+
+@app.post("/m365/best-practices/ticket/{check_id}", response_class=RedirectResponse)
+async def submit_m365_best_practice_ticket(request: Request, check_id: str):
+    """Create a support ticket for one failed best-practice check."""
+    user, _membership, company, company_id, redirect = await _load_m365_best_practices_context(
+        request
+    )
+    if redirect:
+        return redirect
+    if not _is_valid_m365_best_practice_check_id(check_id):
+        return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
+    if not _can_submit_m365_best_practice_tickets(user, company_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    if check_id not in {bp["id"] for bp in m365_best_practices_service.list_best_practices()}:
+        return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
+
+    stored = await m365_best_practices_service.get_last_results(company_id)
+    result = next((item for item in stored if item.get("check_id") == check_id), None)
+    if result is None:
+        return flash_redirect("/m365/best-practices", "This check has not been evaluated yet", "error")
+    result_status = str(result.get("status") or "")
+    # Manual support tickets are intentionally limited to stored failed checks.
+    if result_status != m365_best_practices_service.STATUS_FAIL:
+        return flash_redirect("/m365/best-practices", "Support tickets can only be created for failed checks", "error")
+
+    external_reference = m365_best_practices_service.build_failure_ticket_external_reference(
+        company_id, check_id
+    )
+    existing_ticket = await tickets_repo.find_open_ticket_by_external_reference(external_reference)
+    if existing_ticket:
+        ticket_id = existing_ticket.get("id")
+        message = "An open support ticket already exists for this failed check."
+        if ticket_id:
+            message = f"An open support ticket already exists for this failed check (ticket #{ticket_id})."
+        return flash_redirect("/m365/best-practices", message, "info")
+
+    try:
+        requester_id = int(user["id"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied") from None
+    if requester_id <= 0:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    requester_name = str(
+        user.get("display_name")
+        or user.get("full_name")
+        or user.get("name")
+        or user.get("username")
+        or user.get("email")
+        or "Portal user"
+    ).strip()
+    requester_email = str(user.get("email") or "").strip() or None
+    company_name = str((company or {}).get("name") or f"Company {company_id}").strip()
+    ticket = await tickets_service.create_ticket(
+        subject=m365_best_practices_service.build_failure_ticket_subject(
+            str(result.get("check_name") or check_id)
+        ),
+        description=m365_best_practices_service.build_failure_ticket_description(
+            company_name=company_name,
+            check_id=check_id,
+            check_name=str(result.get("check_name") or check_id),
+            details=str(result.get("details") or ""),
+            run_at=result.get("run_at"),
+            created_automatically=False,
+            requester_name=requester_name,
+            requester_email=requester_email,
+        ),
+        requester_id=requester_id,
+        company_id=company_id,
+        assigned_user_id=None,
+        priority="normal",
+        status=await tickets_service.resolve_status_or_default(None),
+        category="Microsoft 365",
+        module_slug="m365_admin",
+        external_reference=external_reference,
+        trigger_automations=True,
+        initial_reply_author_id=requester_id,
+        requester_email=requester_email,
+    )
+    ticket_id = ticket.get("id")
+    message = "Support ticket submitted. A technician will review this failed M365 best-practice check."
+    if ticket_id:
+        message = (
+            f"Support ticket #{ticket_id} submitted. A technician will review this failed "
+            "M365 best-practice check."
+        )
+    log_info(
+        "M365 best practice support ticket created manually",
+        company_id=company_id,
+        check_id=check_id,
+        ticket_id=ticket_id,
+        user_id=user.get("id"),
+    )
+    return flash_redirect("/m365/best-practices", message, "success")
 
 
 @app.post("/m365/best-practices/account-exclusion/{check_id}", response_class=RedirectResponse)

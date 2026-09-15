@@ -5736,12 +5736,56 @@ async def set_enabled_checks(
     )
 
 
-def _build_failure_ticket_external_reference(company_id: int, check_id: str) -> str:
+def build_failure_ticket_external_reference(company_id: int, check_id: str) -> str:
     return f"m365-best-practice:{company_id}:{check_id}"
+
+
+def build_failure_ticket_subject(check_name: str) -> str:
+    return f"M365 best practice failed: {check_name}"[:255]
 
 
 def _format_run_timestamp(run_at: datetime) -> str:
     return run_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def build_failure_ticket_description(
+    *,
+    company_name: str,
+    check_id: str,
+    check_name: str,
+    details: str,
+    run_at: datetime | None,
+    created_automatically: bool,
+    requester_name: str | None = None,
+    requester_email: str | None = None,
+) -> str:
+    intro = (
+        "This ticket was created automatically because an M365 best-practice "
+        "check changed from <strong>Pass</strong> to <strong>Fail</strong>."
+        if created_automatically
+        else "A portal user requested technician assistance for a failed "
+        "M365 best-practice check."
+    )
+    metadata_lines = [f"<strong>Company:</strong> {escape(company_name)}"]
+    if requester_name:
+        metadata_lines.append(f"<strong>Requester:</strong> {escape(requester_name)}")
+    if requester_email:
+        metadata_lines.append(f"<strong>Requester email:</strong> {escape(requester_email)}")
+    metadata_lines.extend(
+        [
+            f"<strong>Check:</strong> {escape(check_name)}",
+            f"<strong>Check ID:</strong> {escape(check_id)}",
+        ]
+    )
+    if run_at is not None:
+        metadata_lines.append(
+            f"<strong>Evaluated at:</strong> {escape(_format_run_timestamp(run_at))}"
+        )
+    return (
+        f"<p>{intro}</p>"
+        f"<p>{'<br />'.join(metadata_lines)}</p>"
+        f"<h3>Failure details</h3><p>{escape(details or 'No details provided.')}</p>"
+    )
 
 
 async def _maybe_create_ticket_on_fail(
@@ -5762,7 +5806,7 @@ async def _maybe_create_ticket_on_fail(
     ):
         return
 
-    external_reference = _build_failure_ticket_external_reference(company_id, check_id)
+    external_reference = build_failure_ticket_external_reference(company_id, check_id)
     existing_ticket = await tickets_repo.find_open_ticket_by_external_reference(
         external_reference
     )
@@ -5781,18 +5825,17 @@ async def _maybe_create_ticket_on_fail(
         if company
         else f"Company {company_id}"
     )
-    description = (
-        "<p>This ticket was created automatically because an M365 best-practice "
-        "check changed from <strong>Pass</strong> to <strong>Fail</strong>.</p>"
-        f"<p><strong>Company:</strong> {escape(company_name)}<br />"
-        f"<strong>Check:</strong> {escape(check_name)}<br />"
-        f"<strong>Check ID:</strong> {escape(check_id)}<br />"
-        f"<strong>Evaluated at:</strong> {escape(_format_run_timestamp(run_at))}</p>"
-        f"<h3>Failure details</h3><p>{escape(details or 'No details provided.')}</p>"
+    description = build_failure_ticket_description(
+        company_name=company_name,
+        check_id=check_id,
+        check_name=check_name,
+        details=details,
+        run_at=run_at,
+        created_automatically=True,
     )
     try:
         ticket = await tickets_service.create_ticket(
-            subject=f"M365 best practice failed: {check_name}",
+            subject=build_failure_ticket_subject(check_name),
             description=description,
             requester_id=None,
             company_id=company_id,
