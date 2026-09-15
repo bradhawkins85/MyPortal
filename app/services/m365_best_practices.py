@@ -6980,7 +6980,7 @@ async def _remediate_disable_per_user_mfa(
     all_ok = True
     for user in users:
         user_id = str(user.get("id") or "").strip()
-        if not user_id or not user.get("accountEnabled", True):
+        if not user_id or not user.get("accountEnabled", False):
             continue
         requirement_url = _AUTHENTICATION_REQUIREMENTS_URL_TMPL.format(user_id=user_id)
         data = await _safe_graph_get(graph_token, requirement_url)
