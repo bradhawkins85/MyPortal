@@ -7163,10 +7163,10 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 failure_message = str(exc)
         else:
             success = False
-            failure_message = "Unknown remediation source type."
             failure_message = "Unknown SCC remediation type."
     else:
         success = False
+        failure_message = "Unknown remediation source type."
 
     remediation_status = "success" if success else "failed"
     remediation_failure_reason = None
