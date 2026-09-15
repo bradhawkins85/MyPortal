@@ -1069,7 +1069,7 @@ async def run_intune_windows_benchmarks(token: str) -> list[dict[str, Any]]:
         "intune_windows_firewall",
         "Windows Firewall required",
         windows_policies,
-        ["firewallEnabled"],
+        ["activeFirewallRequired"],
         True,
         "true",
         "All Windows policies require Firewall",

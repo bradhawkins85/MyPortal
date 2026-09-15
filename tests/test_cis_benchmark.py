@@ -367,7 +367,7 @@ def _make_windows_policy(name: str = "Windows Policy", **overrides) -> dict[str,
         "id": "win-policy-1",
         "displayName": name,
         "bitLockerEnabled": True,
-        "firewallEnabled": True,
+        "activeFirewallRequired": True,
         "antivirusRequired": True,
         "secureBootEnabled": True,
         "osMinimumVersion": "10.0.19041",
@@ -385,6 +385,24 @@ async def test_intune_windows_all_pass():
     for r in results:
         assert r["status"] in (STATUS_PASS, STATUS_NOT_APPLICABLE), \
             f"Expected pass for {r['check_id']}, got {r['status']}: {r['details']}"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_intune_windows_security_requirements_use_graph_property_names():
+    """Firewall and antivirus checks read the fields returned by Microsoft Graph."""
+    policy = _make_windows_policy(
+        activeFirewallRequired=True,
+        antivirusRequired=True,
+        # This similarly named macOS property must not determine Windows status.
+        firewallEnabled=False,
+    )
+    with patch("app.services.cis_benchmark._graph_get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = {"value": [policy]}
+        results = await cis_service.run_intune_windows_benchmarks("fake-token")
+
+    by_id = {result["check_id"]: result for result in results}
+    assert by_id["intune_windows_firewall"]["status"] == STATUS_PASS
+    assert by_id["intune_windows_antivirus"]["status"] == STATUS_PASS
 
 
 @pytest.mark.anyio("asyncio")
