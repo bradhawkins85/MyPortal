@@ -3181,48 +3181,37 @@ async def _check_quarantine_notification_enabled(
 ) -> dict[str, Any]:
     """Check that end-user spam/quarantine notifications are enabled with a daily frequency.
 
-    Calls ``Get-HostedContentFilterPolicy`` and inspects every policy for the
-    ``EnableEndUserSpamNotifications`` and ``EndUserSpamNotificationFrequency``
-    properties.  Exchange Online supports notification frequencies of 1, 2, or
-    3 days; the CIS recommendation (and the intent of a ≤ 4-hour notification
-    window) is to set the shortest available interval of 1 day so users are
-    alerted to quarantined mail as promptly as possible.
+    Quarantine notifications are now controlled by the global quarantine
+    policy.  The similarly named hosted content filter policy properties are
+    deprecated and Exchange Online rejects attempts to update them.
     """
     check_id = "bp_quarantine_notification_enabled"
     check_name = "End-user spam quarantine notifications are enabled with a daily frequency"
     try:
-        data = await _exo_invoke_command(exo_token, tenant_id, "Get-HostedContentFilterPolicy")
+        data = await _exo_invoke_command(
+            exo_token,
+            tenant_id,
+            "Get-QuarantinePolicy",
+            {"QuarantinePolicyType": "GlobalQuarantinePolicy"},
+        )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       f"Unable to query Get-HostedContentFilterPolicy: {exc}")
+                       f"Unable to query the global quarantine policy: {exc}")
     rows = data.get("value") or []
     if not rows:
         return _result(check_id, check_name, STATUS_UNKNOWN,
-                       "No hosted content filter policies returned.")
-    failing: list[str] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        enabled = row.get("EnableEndUserSpamNotifications")
-        frequency = row.get("EndUserSpamNotificationFrequency")
-        name = row.get("Name") or row.get("Identity") or "Default"
-        if enabled is not True:
-            failing.append(f"{name} (notifications disabled)")
-        elif frequency is not None:
-            try:
-                if int(frequency) > 1:
-                    failing.append(f"{name} (frequency={frequency} days; should be 1)")
-            except (ValueError, TypeError):
-                failing.append(f"{name} (frequency={frequency!r} is not a recognised value)")
-    if not failing:
-        return _result(check_id, check_name, STATUS_PASS,
-                       f"All {len(rows)} hosted content filter "
-                       f"{'policy' if len(rows) == 1 else 'policies'} have end-user "
-                       "quarantine notifications enabled with a daily frequency.")
-    return _result(check_id, check_name, STATUS_FAIL,
-                   f"{len(failing)} {'policy does' if len(failing) == 1 else 'policies do'} "
-                   "not meet the quarantine notification requirement: "
-                   + "; ".join(failing[:5]))
+                       "No global quarantine policy was returned.")
+    policy = next((row for row in rows if isinstance(row, dict)), {})
+    if policy.get("ESNEnabled") is not True:
+        return _result(check_id, check_name, STATUS_FAIL,
+                       "The global quarantine policy has notifications disabled.")
+    frequency = str(policy.get("EndUserSpamNotificationFrequency") or "").strip()
+    if frequency not in {"1", "1.00:00:00", "24:00:00"}:
+        return _result(check_id, check_name, STATUS_FAIL,
+                       f"The global quarantine notification frequency is {frequency!r}; "
+                       "it should be one day.")
+    return _result(check_id, check_name, STATUS_PASS,
+                   "The global quarantine policy has notifications enabled with a daily frequency.")
 
 
 _BEST_PRACTICES: list[dict[str, Any]] = [
@@ -4694,19 +4683,18 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "notification window."
         ),
         "remediation": (
-            "For each hosted content filter policy:\n"
-            "Set-HostedContentFilterPolicy -Identity <name> "
-            "-EnableEndUserSpamNotifications $true "
-            "-EndUserSpamNotificationFrequency 1"
+            "Set-QuarantinePolicy -Identity GlobalQuarantinePolicy "
+            "-ESNEnabled $true -EndUserSpamNotificationFrequency 1.00:00:00"
         ),
         "source": _check_quarantine_notification_enabled,
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": True,
-        "remediation_cmdlet": "Set-HostedContentFilterPolicy",
+        "remediation_cmdlet": "Set-QuarantinePolicy",
         "remediation_params": {
-            "EnableEndUserSpamNotifications": True,
-            "EndUserSpamNotificationFrequency": 1,
+            "Identity": "GlobalQuarantinePolicy",
+            "ESNEnabled": True,
+            "EndUserSpamNotificationFrequency": "1.00:00:00",
         },
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
