@@ -58,7 +58,9 @@ func newStubServer(t *testing.T) *httptest.Server {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(api.DefenderPolicy{Enabled: true})
+		_ = json.NewEncoder(w).Encode(api.DefenderPolicy{Enabled: true, Exclusions: []api.DefenderExclusion{
+			{Type: "path", Value: `C:\Trusted`},
+		}})
 	})
 
 	mux.HandleFunc("/api/tray/defender/status", func(w http.ResponseWriter, r *http.Request) {
@@ -129,6 +131,9 @@ func TestDefenderStatusReporting(t *testing.T) {
 	}
 	if !policy.Enabled {
 		t.Fatal("expected Defender policy to be enabled")
+	}
+	if len(policy.Exclusions) != 1 || policy.Exclusions[0].Value != `C:\Trusted` {
+		t.Fatalf("unexpected Defender exclusions: %#v", policy.Exclusions)
 	}
 	if err := client.ReportDefenderStatus(context.Background(), api.DefenderStatus{
 		AntivirusEnabled: true,

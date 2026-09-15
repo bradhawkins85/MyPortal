@@ -1,0 +1,7 @@
+{
+  "guid": "5b57e32b-72e5-4929-b38b-82b804b0a399",
+  "occurred_at": "2026-09-15T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Apply configured Microsoft Defender exclusions on Windows tray endpoints.",
+  "content_hash": "0a50730f14c9281640cfa447090a8476460cc046c9c1f7b63ef1b4f2c838ca25"
+}

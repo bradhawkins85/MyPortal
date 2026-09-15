@@ -295,6 +295,11 @@ func (d *daemon) reportDefenderStatus() {
 	if !policy.Enabled {
 		return
 	}
+	if err := defender.ApplyExclusions(policy.Exclusions); err != nil {
+		// Reporting remains useful when a local policy (for example tamper
+		// protection or Group Policy) prevents an exclusion from being applied.
+		logger.Warn("Defender exclusion policy: %v", err)
+	}
 	status, err := defender.Collect()
 	if err != nil {
 		logger.Warn("Defender status collection: %v", err)

@@ -250,7 +250,15 @@ type HeartbeatRequest struct {
 // DefenderPolicy is the effective Defender configuration for this device.
 // A disabled policy is also returned when the company has not opted in.
 type DefenderPolicy struct {
-	Enabled bool `json:"enabled"`
+	Enabled    bool                `json:"enabled"`
+	Exclusions []DefenderExclusion `json:"exclusions"`
+}
+
+// DefenderExclusion is an exclusion selected by an administrator for this
+// endpoint, its company, or all managed endpoints.
+type DefenderExclusion struct {
+	Type  string `json:"exclusion_type"`
+	Value string `json:"value"`
 }
 
 // DefenderStatus is the protection state collected by the Windows service.
