@@ -186,7 +186,23 @@
     if (item.job_title) metaParts.push(`Title: ${escapeHtml(item.job_title)}`);
     if (item.department) metaParts.push(`Department: ${escapeHtml(item.department)}`);
     if (item.mobile_phone) metaParts.push(`Mobile: ${escapeHtml(item.mobile_phone)}`);
+    if (item.org_company) metaParts.push(`Organisation: ${escapeHtml(item.org_company)}`);
+    if (item.manager_name) metaParts.push(`Manager: ${escapeHtml(item.manager_name)}`);
+    if (item.account_action) metaParts.push(`Account action: ${escapeHtml(item.account_action)}`);
+    if (item.custom_fields && typeof item.custom_fields === 'object') {
+      const customValues = Object.keys(item.custom_fields)
+        .sort()
+        .filter((key) => {
+          const value = item.custom_fields[key];
+          return value != null && value !== '' && !(Array.isArray(value) && value.length === 0);
+        })
+        .slice(0, 5)
+        .map((key) => `${escapeHtml(key)}: ${escapeHtml(item.custom_fields[key])}`);
+      if (customValues.length) metaParts.push(`Custom fields: ${customValues.join(', ')}`);
+    }
     if (item.onboarding_status) metaParts.push(`Status: ${escapeHtml(item.onboarding_status)}`);
+    if (item.is_ex_staff) metaParts.push('Ex-staff');
+    else if (item.enabled === false) metaParts.push('Disabled');
     return `[#${id}] ${name}${metaParts.length ? `<div class="agent-sources__meta">${metaParts.join(' • ')}</div>` : ''}`;
   }
 
@@ -194,14 +210,22 @@
     const id = escapeHtml(item.id || item.source_id);
     const name = escapeHtml(item.name || item.title || `Issue #${id}`);
     const description = item.description ? escapeHtml(item.description) : '';
-    return `[#${id}] ${name}${description ? `<div class="agent-sources__meta">${description}</div>` : ''}`;
+    const assignments = Array.isArray(item.assignments) && item.assignments.length
+      ? item.assignments.map((assignment) => {
+        const company = assignment.company_name || assignment.company_id || 'Company';
+        const status = assignment.status_label || assignment.status || 'unknown';
+        return `${escapeHtml(company)}: ${escapeHtml(status)}`;
+      }).join(', ')
+      : '';
+    const meta = [description, assignments ? `Assignments: ${assignments}` : null].filter(Boolean).join('<br />');
+    return `[#${id}] ${name}${meta ? `<div class="agent-sources__meta">${meta}</div>` : ''}`;
   }
 
   function formatServiceStatusSource(item) {
     const id = escapeHtml(item.id || item.source_id);
     const name = escapeHtml(item.name || item.title || `Service #${id}`);
-    const detail = item.status_message || item.description || '';
-    return `[#${id}] ${name}${detail ? `<div class="agent-sources__meta">${escapeHtml(detail)}</div>` : ''}`;
+    const meta = [item.status ? `Status: ${escapeHtml(item.status)}` : null, item.status_message || item.description ? escapeHtml(item.status_message || item.description) : null].filter(Boolean).join('<br />');
+    return `[#${id}] ${name}${meta ? `<div class="agent-sources__meta">${meta}</div>` : ''}`;
   }
 
   function formatBackupJobSource(item) {
