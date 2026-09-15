@@ -118,6 +118,7 @@ CAP_ENTRA_ID_P1 = "entra_id_p1"
 CAP_ENTRA_ID_P2 = "entra_id_p2"
 CAP_INTUNE = "intune"
 CAP_EXCHANGE_ONLINE = "exchange_online"
+CAP_EXCHANGE_ONLINE_P2 = "exchange_online_p2"
 CAP_SHAREPOINT_ONLINE = "sharepoint_online"
 CAP_TEAMS = "teams"
 CAP_TEAMS_AUDIO_CONF = "teams_audio_conferencing"
@@ -132,6 +133,7 @@ _CAPABILITY_FRIENDLY_NAMES: dict[str, str] = {
     CAP_ENTRA_ID_P2: "Microsoft Entra ID P2",
     CAP_INTUNE: "Microsoft Intune",
     CAP_EXCHANGE_ONLINE: "Exchange Online",
+    CAP_EXCHANGE_ONLINE_P2: "Exchange Online Plan 2",
     CAP_SHAREPOINT_ONLINE: "SharePoint Online",
     CAP_TEAMS: "Microsoft Teams",
     CAP_TEAMS_AUDIO_CONF: "Microsoft Teams Audio Conferencing",
@@ -154,8 +156,8 @@ _SERVICE_PLAN_TO_CAPABILITIES: dict[str, set[str]] = {
     "c1ec4a95-1f05-45b3-a911-aa3fa01094f5": {CAP_INTUNE, CAP_INTUNE_LAPS},
     # EXCHANGE_S_STANDARD (Exchange Online Plan 1)
     "9aaf7827-d63c-4b61-89c3-182f06f82e5c": {CAP_EXCHANGE_ONLINE},
-    # EXCHANGE_S_ENTERPRISE (Exchange Online Plan 2)
-    "efb87545-963c-4e0d-99df-69c6916d9eb0": {CAP_EXCHANGE_ONLINE},
+    # EXCHANGE_S_ENTERPRISE (Exchange Online Plan 2 – includes Plan 1 features)
+    "efb87545-963c-4e0d-99df-69c6916d9eb0": {CAP_EXCHANGE_ONLINE, CAP_EXCHANGE_ONLINE_P2},
     # EXCHANGE_S_FOUNDATION (bundled in many plans – also enables EXO)
     "113feb6c-3fe4-4440-bddc-54d774bf0318": {CAP_EXCHANGE_ONLINE},
     # SHAREPOINTSTANDARD (SharePoint Online Plan 1)
@@ -2224,14 +2226,11 @@ async def _check_break_glass_alert_policy(scc_token: str, tenant_id: str) -> dic
     present and enabled, FAIL if it is absent or disabled, and UNKNOWN if the query
     cannot be completed.
 
-    **Licensing requirement:** This check requires Exchange Online (any plan) to access
-    the Security & Compliance PowerShell endpoint.  However, the *remediation*
-    (creating a ``New-ProtectionAlert`` with ``Operation: UserLoggedIn``) additionally
-    requires **Exchange Online Plan 2** or higher (included in Microsoft 365 E3, E5, and
-    Business Premium).  Tenants on Exchange Online Plan 1 (Microsoft 365 Business
-    Basic/Standard) or developer/trial tenants may see a "not available" error from
-    the Defender portal or from the automated remediation because the ``UserLoggedIn``
-    audit event is only captured under Exchange Online Plan 2 mailbox audit logging.
+    **Licensing requirement:** The ``UserLoggedIn`` alert operation requires
+    **Exchange Online Plan 2** (included in Microsoft 365 E3 and E5).
+    Microsoft 365 Business Premium and lower plans include only Exchange Online Plan 1
+    and do not support the ``UserLoggedIn`` audit event.  This check is automatically
+    marked *Not applicable* for tenants without Exchange Online Plan 2.
     """
     check_id = "bp_break_glass_alert_policy"
     check_name = "Break-glass account sign-in alert policy is configured"
@@ -2272,12 +2271,11 @@ async def _remediate_break_glass_alert_policy(
     Returns ``(True, message)`` on success and ``(False, message)`` on failure.
 
     **Licensing requirement:** ``New-ProtectionAlert`` with ``Operation: UserLoggedIn`` requires
-    **Exchange Online Plan 2** or higher (included in Microsoft 365 E3, E5, and Business Premium).
-    Tenants on Exchange Online Plan 1 (Microsoft 365 Business Basic/Standard) or developer/trial
-    tenants will receive an error from the Security & Compliance endpoint because the
-    ``UserLoggedIn`` audit event is only captured under Exchange Online Plan 2 mailbox audit logging.
-    If the error indicates the operation is unavailable, upgrade the affected mailboxes to
-    Exchange Online Plan 2 and retry.
+    **Exchange Online Plan 2** (included in Microsoft 365 E3 and E5).
+    Microsoft 365 Business Premium and lower plans include only Exchange Online Plan 1
+    and do not support the ``UserLoggedIn`` audit event.  This remediation will only be
+    called when the tenant has been detected as holding Exchange Online Plan 2 (the catalog
+    entry carries ``requires_licenses: [CAP_EXCHANGE_ONLINE_P2]``).
     """
     # 1. Check whether the policy already exists.
     try:
@@ -2373,9 +2371,8 @@ async def _remediate_break_glass_alert_policy(
         error_str = str(exc)
         # Provide a specific, actionable message when the operation is unavailable due to
         # licensing.  The UserLoggedIn alert operation requires Exchange Online Plan 2
-        # (included in Microsoft 365 E3, E5, and Business Premium).  Exchange Online Plan 1
-        # (Microsoft 365 Business Basic/Standard) and developer/trial tenants do not support
-        # this operation.
+        # (included in Microsoft 365 E3 and E5).  Microsoft 365 Business Premium and lower
+        # plans include only Exchange Online Plan 1 and do not support this operation.
         if any(
             phrase in error_str.lower()
             for phrase in ("not available", "invalid operation", "unsupported", "not supported")
@@ -2383,13 +2380,10 @@ async def _remediate_break_glass_alert_policy(
             return False, (
                 f"Unable to create protection alert policy: {exc} – "
                 "The 'UserLoggedIn' (User logged in) operation is not available on this tenant. "
-                "This operation requires Exchange Online Plan 2 or higher (included in "
-                "Microsoft 365 E3, E5, and Business Premium). "
-                "Tenants on Exchange Online Plan 1 (Microsoft 365 Business Basic/Standard) "
-                "or developer/trial tenants with limited licensing do not support this alert "
-                "operation. Upgrade the affected mailboxes to Exchange Online Plan 2 and retry, "
-                "or create the alert policy manually in the Microsoft Defender portal if a "
-                "suitable operation is available for your plan."
+                "This operation requires Exchange Online Plan 2 (included in Microsoft 365 E3 and E5). "
+                "Microsoft 365 Business Premium and lower plans include only Exchange Online Plan 1 "
+                "and do not support this alert operation. "
+                "An upgrade to Microsoft 365 E3 or E5 is required to use this alert type."
             )
         return False, f"Unable to create protection alert policy: {exc}"
 
@@ -4011,30 +4005,29 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "Alert policies are evaluated against the unified audit log via the Microsoft Defender portal "
             "and require Exchange Online with the unified audit log enabled "
             "(see 'Enable unified audit log' and 'UnifiedAuditLogIngestionEnabled' checks). "
-            "Note: The 'User logged in' (UserLoggedIn) operation used by this policy relies on "
-            "Exchange Online mailbox audit logging, which is only available on "
-            "Exchange Online Plan 2 or higher (included in Microsoft 365 E3, E5, and Business Premium). "
-            "Tenants on Exchange Online Plan 1 (Microsoft 365 Business Basic/Standard) or "
-            "developer/trial tenants with limited licensing do not support this operation and "
-            "will receive a 'not available' error when attempting to create the alert policy."
+            "The 'User logged in' (UserLoggedIn) operation used by this policy relies on "
+            "Exchange Online mailbox audit logging, which requires Exchange Online Plan 2 "
+            "(included in Microsoft 365 E3 and E5). "
+            "Microsoft 365 Business Premium and lower plans include only Exchange Online Plan 1 "
+            "and do not support this alert operation."
         ),
         "remediation": (
             "In the Microsoft Defender portal go to Policies & rules → Alert policy → New alert policy. "
-            "Set Operation to 'User logged in' (requires Exchange Online Plan 2 or higher), "
+            "Set Operation to 'User logged in' (requires Exchange Online Plan 2, included in Microsoft 365 E3/E5), "
             "Category to 'Access governance', Severity to 'High', "
             "scope the policy to your break-glass account UPNs, and add your on-call technicians "
             "as notification recipients. Alternatively use the automated remediation to create the "
             "policy automatically for MyPortal-managed break-glass accounts. "
-            "If 'User logged in' is not listed as an available operation, upgrade the affected "
-            "mailboxes to Exchange Online Plan 2 (included in Microsoft 365 E3, E5, or Business Premium) "
-            "and ensure the unified audit log is enabled."
+            "Note: Microsoft 365 Business Premium and lower plans include only Exchange Online Plan 1 "
+            "and do not support the 'User logged in' operation; an upgrade to Microsoft 365 E3 or E5 "
+            "is required to use this alert type."
         ),
         "source": _check_break_glass_alert_policy,
         "source_type": "scc",
         "default_enabled": True,
         "has_remediation": True,
         "remediation_type": "break_glass_alert_policy",
-        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+        "requires_licenses": [CAP_EXCHANGE_ONLINE_P2],
     },
     # ------------------------------------------------------------------
     # Exchange Online (real auto-detection via EXO REST)
