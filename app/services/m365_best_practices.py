@@ -2273,6 +2273,11 @@ async def _remediate_authenticator_mfa_fatigue(token: str) -> tuple[bool, str]:
         f"{_AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/"
         "MicrosoftAuthenticator"
     )
+    current = await _safe_graph_get(token, url)
+    if current is not None:
+        missing = _get_authenticator_mfa_fatigue_missing_settings(current)
+        if missing and set(missing).issubset(_MFA_FATIGUE_MANUAL_ONLY_KEYS):
+            return False, _MFA_FATIGUE_NUMBER_MATCHING_MANUAL_MESSAGE
     await _graph_patch(token, url, _MFA_FATIGUE_REMEDIATION_PAYLOAD)
 
     latest_details = "Microsoft Graph did not return the updated policy."

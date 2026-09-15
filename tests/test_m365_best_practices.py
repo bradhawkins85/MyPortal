@@ -213,7 +213,7 @@ async def test_remediate_authenticator_mfa_fatigue_patches_supported_settings():
         ),
         bp_service._MFA_FATIGUE_REMEDIATION_PAYLOAD,
     )
-    graph_get.assert_awaited_once()
+    assert graph_get.await_count == 2
     assert all(
         bp_service._MFA_FATIGUE_REMEDIATION_PAYLOAD["featureSettings"][setting][
             "includeTarget"
@@ -252,7 +252,7 @@ async def test_remediate_authenticator_mfa_fatigue_waits_for_graph_consistency()
         patch(
             "app.services.m365_best_practices._safe_graph_get",
             new_callable=AsyncMock,
-            side_effect=[disabled, enabled],
+            side_effect=[disabled, disabled, enabled],
         ) as graph_get,
         patch(
             "app.services.m365_best_practices.asyncio.sleep",
@@ -268,7 +268,7 @@ async def test_remediate_authenticator_mfa_fatigue_waits_for_graph_consistency()
         )
 
     assert result["success"] is True
-    assert graph_get.await_count == 2
+    assert graph_get.await_count == 3
     sleep.assert_awaited_once()
     assert update_status.await_args.kwargs["remediation_status"] == "success"
 
@@ -292,7 +292,7 @@ async def test_remediate_authenticator_mfa_fatigue_returns_manual_number_matchin
         patch(
             "app.services.m365_best_practices._graph_patch",
             new_callable=AsyncMock,
-        ),
+        ) as graph_patch,
         patch(
             "app.services.m365_best_practices._safe_graph_get",
             new_callable=AsyncMock,
@@ -319,6 +319,7 @@ async def test_remediate_authenticator_mfa_fatigue_returns_manual_number_matchin
         ),
     }
     graph_get.assert_awaited_once()
+    graph_patch.assert_not_awaited()
     sleep.assert_not_awaited()
     update_status.assert_awaited_once()
     assert update_status.await_args.kwargs["remediation_status"] == "failed"
