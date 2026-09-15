@@ -1632,6 +1632,7 @@ async def test_set_enabled_checks_persists_create_ticket_on_fail_flag():
     ):
         await bp_service.set_enabled_checks(
             {selected_id},
+            auto_remediate_check_ids=set(),
             create_ticket_on_fail_check_ids={selected_id},
         )
 

@@ -5662,9 +5662,11 @@ async def list_settings_with_catalog(company_id: int | None = None) -> list[dict
     for bp in _BEST_PRACTICES:
         entry = _enrich_catalog_entry(bp)
         row = settings.get(bp["id"])
-        entry["enabled"] = row["enabled"] if row else bool(bp.get("default_enabled", True))
-        entry["auto_remediate"] = row["auto_remediate"] if row else False
-        entry["create_ticket_on_fail"] = row["create_ticket_on_fail"] if row else False
+        entry["enabled"] = row.get("enabled") if row else bool(bp.get("default_enabled", True))
+        entry["auto_remediate"] = row.get("auto_remediate", False) if row else False
+        entry["create_ticket_on_fail"] = (
+            row.get("create_ticket_on_fail", False) if row else False
+        )
         entry["excluded"] = bp["id"] in excluded_ids
         out.append(entry)
     return out
