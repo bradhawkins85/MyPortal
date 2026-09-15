@@ -5895,6 +5895,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     remediated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
     if source_type == "exo":
+        failure_message = ""
         try:
             exo_token, tenant_id = await _acquire_exo_access_token(company_id)
         except M365Error as exc:
@@ -5927,6 +5928,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
                 success = True
             except M365Error as exc:
+                failure_message = str(exc)
                 log_error(
                     "M365 best practice remediation command failed",
                     company_id=company_id,
@@ -6009,7 +6011,11 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
         }
     return {
         "success": False,
-        "message": "Remediation command failed. Check that the app has the required permissions.",
+        "message": (
+            f"Remediation command failed: {failure_message}"
+            if source_type == "exo" and failure_message
+            else "Remediation command failed. Check that the app has the required permissions."
+        ),
     }
 
 

@@ -4925,6 +4925,9 @@ async def test_remediate_antiphish_exo_failure():
         )
 
     assert result["success"] is False
+    assert result["message"] == (
+        "Remediation command failed: Set-AntiPhishPolicy failed"
+    )
     assert upserts[0]["remediation_status"] == "failed"
 
 
