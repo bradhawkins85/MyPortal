@@ -94,3 +94,28 @@ def test_run_best_practices_resets_to_unknown_before_queueing(monkeypatch):
     assert "success" in flash_cookie
     assert "Best practice evaluation started" in flash_cookie
     assert events == ["reset", "queue"]
+
+
+def test_score_history_page_loads_current_company_history(monkeypatch):
+    async def fake_context(request, super_admin_only=False):
+        return {"id": 7, "is_super_admin": False}, {}, {"id": 99}, 99, None
+
+    history = [{"snapshot_date": "2026-09-15"}]
+    get_history = AsyncMock(return_value=history)
+    render_template = AsyncMock(return_value="history-page")
+    monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "get_daily_history",
+        get_history,
+    )
+    monkeypatch.setattr(main_module, "_render_template", render_template)
+
+    with TestClient(app) as client:
+        response = client.get("/m365/best-practices/history")
+
+    assert response.status_code == 200
+    assert response.text == "history-page"
+    get_history.assert_awaited_once_with(99)
+    assert render_template.await_args.args[0] == "m365/best_practices_history.html"
+    assert render_template.await_args.kwargs["extra"]["history"] == history

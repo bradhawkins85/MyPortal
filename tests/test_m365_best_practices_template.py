@@ -99,3 +99,10 @@ def test_stat_filter_script_persists_each_checks_table_separately():
     assert "myportal.m365BestPractices.statusFilters." in script
     assert "window.localStorage.setItem(storageKey(tableId)" in script
     assert "loadStatuses(tableId, availableStatuses)" in script
+
+
+def test_score_history_is_available_from_page_header():
+    html = _render_best_practices([])
+
+    assert 'href="/m365/best-practices/history"' in html
+    assert "Score history" in html
