@@ -621,6 +621,11 @@ _MFA_FATIGUE_REMEDIATION_PAYLOAD: dict[str, Any] = {
 # not persist the stale pre-remediation state returned immediately after PATCH.
 _MFA_FATIGUE_VERIFICATION_ATTEMPTS = 3
 
+# SMS / Voice / Email authentication-method updates are also eventually
+# consistent. Verify that all weak methods are disabled before reporting
+# success so the UI does not immediately re-show a stale failure.
+_WEAK_AUTH_METHODS_VERIFICATION_ATTEMPTS = 3
+
 # Microsoft Forms settings updates can also be eventually consistent. Verify
 # remediation before reporting success so stale reads do not show a false fail.
 # Use more attempts than the default (5 × exponential back-off = up to ~15 s)
@@ -2338,6 +2343,50 @@ async def _check_weak_auth_methods_disabled(token: str) -> dict[str, Any]:
                        "SMS, Voice, and Email authentication methods are disabled.")
     return _result(check_id, check_name, STATUS_FAIL,
                    "Weak methods still enabled: " + ", ".join(issues))
+
+
+async def _remediate_weak_auth_methods_disabled(token: str) -> tuple[bool, str]:
+    weak_methods = ("Sms", "Voice", "Email")
+    for method in weak_methods:
+        await _graph_patch(
+            token,
+            f"{_AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/{method}",
+            {"state": "disabled"},
+        )
+
+    latest_details = "Microsoft Graph did not return the updated authentication method policy."
+    for attempt in range(1, _WEAK_AUTH_METHODS_VERIFICATION_ATTEMPTS + 1):
+        remaining: list[str] = []
+        unreadable: list[str] = []
+        for method in weak_methods:
+            data = await _safe_graph_get(
+                token,
+                f"{_AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/{method}",
+            )
+            if data is None:
+                unreadable.append(method)
+                continue
+            if str(data.get("state") or "").lower() != "disabled":
+                remaining.append(method)
+
+        if not remaining and not unreadable:
+            return True, ""
+
+        if remaining:
+            latest_details = "Weak methods still enabled: " + ", ".join(remaining)
+        else:
+            latest_details = (
+                "Unable to confirm weak authentication method state for: "
+                + ", ".join(unreadable)
+            )
+
+        if attempt < _WEAK_AUTH_METHODS_VERIFICATION_ATTEMPTS:
+            await asyncio.sleep(_retry_backoff_seconds(attempt))
+
+    return False, (
+        "Microsoft Graph did not confirm the updated weak authentication "
+        f"method state: {latest_details}"
+    )
 
 
 async def _check_internal_phishing_forms(token: str) -> dict[str, Any]:
@@ -4179,7 +4228,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_weak_auth_methods_disabled,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
     },
     {
         "id": "bp_internal_phishing_forms",
@@ -7248,6 +7297,20 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             except M365Error as exc:
                 log_error(
                     "M365 internal phishing Forms remediation failed",
+                    company_id=company_id,
+                    check_id=check_id,
+                    error=str(exc),
+                )
+                success = False
+                failure_message = str(exc)
+        elif check_id == "bp_weak_auth_methods_disabled":
+            try:
+                success, failure_message = await _remediate_weak_auth_methods_disabled(
+                    graph_token
+                )
+            except M365Error as exc:
+                log_error(
+                    "M365 weak authentication methods remediation failed",
                     company_id=company_id,
                     check_id=check_id,
                     error=str(exc),
