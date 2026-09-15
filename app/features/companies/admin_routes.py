@@ -57,6 +57,12 @@ _add(
     ["POST"],
     response_class=HTMLResponse,
 )
+_add("/admin/companies/{company_id}/addresses", handlers.admin_create_company_address, ["POST"])
+_add(
+    "/admin/companies/{company_id}/addresses/{address_id}/delete",
+    handlers.admin_delete_company_address,
+    ["POST"],
+)
 _add("/admin/companies/{company_id}/sla", handlers.admin_save_company_sla, ["POST"], response_class=HTMLResponse)
 _add("/admin/companies/{company_id}/sla/delete", handlers.admin_delete_company_sla, ["POST"], response_class=HTMLResponse)
 _add("/admin/sla-templates", handlers.admin_sla_templates_page, ["GET"], response_class=HTMLResponse)

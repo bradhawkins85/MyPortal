@@ -624,6 +624,14 @@ async def view_cart(
     normalised_cart_message = " ".join(filter(None, cart_message_parts)) or None
     normalised_cart_error = " ".join(filter(None, cart_error_parts)) or None
 
+    try:
+        from app.repositories import company_addresses as company_addresses_repo
+        company_addresses = await company_addresses_repo.list_for_company(company_id) if company_id else []
+    except RuntimeError as exc:  # Supports route tests without an initialised database pool.
+        if "not initialised" not in str(exc):
+            raise
+        company_addresses = []
+
     extra = {
         "title": "Cart",
         "cart_items": cart_items,
@@ -640,6 +648,7 @@ async def view_cart(
         "payment_method": (company.get("payment_method") or "invoice_prepay") if company else "invoice_prepay",
         "require_po": bool(company.get("require_po")) if company else False,
         "company_address": (company.get("address") or "").strip() if company else "",
+        "company_addresses": company_addresses,
     }
     response = await main_module._render_template("shop/cart.html", request, user, extra=extra)
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
@@ -875,7 +884,13 @@ async def place_order(request: Request) -> RedirectResponse:
     _valid_shipping_options = {"address_on_file", "specific_address", "local_pickup"}
     shipping_option_raw = form.get("shippingOption")
     shipping_option = str(shipping_option_raw).strip() if shipping_option_raw else "address_on_file"
-    if shipping_option not in _valid_shipping_options:
+    saved_address_id: int | None = None
+    if shipping_option.startswith("saved_address_"):
+        try:
+            saved_address_id = int(shipping_option.removeprefix("saved_address_"))
+        except ValueError:
+            shipping_option = "address_on_file"
+    elif shipping_option not in _valid_shipping_options:
         shipping_option = "address_on_file"
 
     shipping_street: str | None = None
@@ -884,7 +899,22 @@ async def place_order(request: Request) -> RedirectResponse:
     shipping_postcode: str | None = None
     shipping_country: str | None = None
 
-    if shipping_option == "specific_address":
+    if saved_address_id is not None:
+        from app.repositories import company_addresses as company_addresses_repo
+        saved_address = await company_addresses_repo.get_for_company(company_id, saved_address_id)
+        if not saved_address:
+            message = quote("The selected shipping address is no longer available.")
+            return RedirectResponse(
+                url=f"{request.url_for('cart_page')}?orderMessage={message}",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        shipping_option = "specific_address"
+        shipping_street = saved_address.get("street")
+        shipping_city = saved_address.get("city")
+        shipping_state = saved_address.get("state")
+        shipping_postcode = saved_address.get("postcode")
+        shipping_country = saved_address.get("country")
+    elif shipping_option == "specific_address":
         def _get_field(name: str, max_len: int) -> str | None:
             raw = form.get(name)
             value = str(raw).strip() if raw is not None else ""

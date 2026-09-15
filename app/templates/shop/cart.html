@@ -141,13 +141,21 @@
         </div>
         <fieldset class="form__fieldset" id="shipping-option-fieldset">
           <legend class="form-label">Shipping</legend>
+          {% for address in company_addresses %}
+          <div class="form-field form-field--radio">
+            <label class="radio-label">
+              <input type="radio" name="shippingOption" value="saved_address_{{ address.id }}" data-shipping-option {% if loop.first %}checked{% endif %} />
+              Ship to {{ address.label }}: <span class="text-muted">{{ [address.street, address.city, address.state, address.postcode, address.country]|select|join(', ') }}</span>
+            </label>
+          </div>
+          {% endfor %}
           <div class="form-field form-field--radio">
             <label class="radio-label">
               <input
                 type="radio"
                 name="shippingOption"
                 value="address_on_file"
-                checked
+                {% if not company_addresses %}checked{% endif %}
                 data-shipping-option
               />
               Ship to address on file{% if company_address %}: <span class="text-muted">{{ company_address }}</span>{% else %} <span class="text-muted">(no address on file)</span>{% endif %}

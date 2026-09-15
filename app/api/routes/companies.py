@@ -9,12 +9,14 @@ from app.api.dependencies.auth import get_current_user, require_helpdesk_technic
 from app.api.dependencies.database import require_database
 from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
+from app.repositories import company_addresses as company_addresses_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.repositories import staff as staff_repo
 from app.repositories import tray as tray_repo
 from app.schemas.assets import AssetResponse
 from app.schemas.companies import CompanyCreate, CompanyResponse, CompanyUpdate
+from app.schemas.company_addresses import CompanyAddressInput, CompanyAddressResponse
 from app.schemas.company_recurring_invoice_items import (
     RecurringInvoiceItemCreate,
     RecurringInvoiceItemResponse,
@@ -83,6 +85,71 @@ async def get_company(
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     return company
+
+
+async def _require_company(company_id: int) -> None:
+    if not await company_repo.get_company_by_id(company_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+
+@router.get("/{company_id}/addresses", response_model=list[CompanyAddressResponse])
+async def list_company_addresses(
+    company_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """List the delivery addresses available to a company's cart users."""
+    await _require_company(company_id)
+    return await company_addresses_repo.list_for_company(company_id)
+
+
+@router.post(
+    "/{company_id}/addresses",
+    response_model=CompanyAddressResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_company_address(
+    company_id: int,
+    payload: CompanyAddressInput,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Add a selectable delivery address to a company."""
+    await _require_company(company_id)
+    try:
+        return await company_addresses_repo.create(company_id, **payload.model_dump())
+    except Exception as exc:
+        if "Duplicate" in str(exc) or "UNIQUE constraint" in str(exc):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Address label already exists") from exc
+        raise
+
+
+@router.put("/{company_id}/addresses/{address_id}", response_model=CompanyAddressResponse)
+async def update_company_address(
+    company_id: int,
+    address_id: int,
+    payload: CompanyAddressInput,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Replace one of a company's delivery addresses."""
+    updated = await company_addresses_repo.update(company_id, address_id, **payload.model_dump())
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Address not found")
+    return updated
+
+
+@router.delete("/{company_id}/addresses/{address_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_company_address(
+    company_id: int,
+    address_id: int,
+    _: None = Depends(require_database),
+    __: dict = Depends(require_super_admin),
+):
+    """Delete one of a company's delivery addresses."""
+    if not await company_addresses_repo.delete(company_id, address_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Address not found")
+    return None
 
 
 @router.patch("/{company_id}", response_model=CompanyResponse)

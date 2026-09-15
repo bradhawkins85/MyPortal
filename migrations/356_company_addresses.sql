@@ -1,0 +1,14 @@
+CREATE TABLE IF NOT EXISTS company_addresses (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  company_id INT NOT NULL,
+  label VARCHAR(100) NOT NULL,
+  street VARCHAR(255) NOT NULL,
+  city VARCHAR(100) NULL,
+  state VARCHAR(100) NULL,
+  postcode VARCHAR(20) NULL,
+  country VARCHAR(100) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_company_addresses_company FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
+  CONSTRAINT uq_company_addresses_label UNIQUE (company_id, label)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
