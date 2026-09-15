@@ -55,7 +55,18 @@
 <section class="card"><h2>Recent rejected or quarantined forensic reports</h2>
   <p>Sender and recipient values are only shown when the reporting provider included them in the DMARC forensic report.</p>
   <div class="table-wrapper"><table class="table"><thead><tr><th>When</th><th>Result</th><th>Reported domain</th><th>Sender</th><th>Recipient</th><th>Source IP</th><th>Failure</th></tr></thead><tbody>
-    {% for item in forensic_failures %}{% set occurred_at = item.arrival_at or item.created_at %}<tr><td>{% if occurred_at %}<time data-utc="{{ occurred_at.isoformat() }}">{{ occurred_at }}</time>{% else %}Unknown{% endif %}</td><td>{{ item.delivery_result|capitalize if item.delivery_result else 'Unknown' }}</td><td>{{ item.reported_domain or 'Unknown' }}</td><td>{{ item.original_mail_from or 'Not provided' }}</td><td>{{ item.original_rcpt_to or 'Not provided' }}</td><td>{{ item.source_ip or 'Not provided' }}</td><td>{{ item.auth_failure or 'Not provided' }}</td></tr>{% endfor %}
+    {% for item in forensic_failures %}
+    {% set occurred_at = item.arrival_at or item.created_at %}
+    <tr>
+      <td>{% if occurred_at %}<time data-utc="{{ occurred_at.isoformat() }}">{{ occurred_at }}</time>{% else %}Unknown{% endif %}</td>
+      <td>{{ item.delivery_result|capitalize if item.delivery_result else 'Unknown' }}</td>
+      <td>{{ item.reported_domain or 'Unknown' }}</td>
+      <td>{{ item.original_mail_from or 'Not provided' }}</td>
+      <td>{{ item.original_rcpt_to or 'Not provided' }}</td>
+      <td>{{ item.source_ip or 'Not provided' }}</td>
+      <td>{{ item.auth_failure or 'Not provided' }}</td>
+    </tr>
+    {% endfor %}
   </tbody></table></div>
 </section>
 {% endif %}
