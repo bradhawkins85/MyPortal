@@ -512,6 +512,7 @@ _GROUPS_LIST_URL = (
     "?$select=id,displayName,visibility,groupTypes,membershipRule"
     "&$top=999"
 )
+_GROUP_URL_TMPL = "https://graph.microsoft.com/v1.0/groups/{group_id}"
 _CA_POLICIES_URL = (
     "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies"
 )
@@ -6646,18 +6647,21 @@ async def _remediate_foreach_public_group_graph(
         return False
     excluded_ids = {group_id for _, group_id in exclusions}
 
-    public_groups = [
-        group for group in groups
-        if str(group.get("visibility") or "").lower() == "public"
-        and "Unified" in (group.get("groupTypes") or [])
-        and str(group.get("id") or "").strip()
-    ]
-    all_ok = True
-    for group in public_groups:
+    public_groups: list[tuple[dict[str, Any], str]] = []
+    for group in groups:
         group_id = str(group.get("id") or "").strip()
+        if not group_id:
+            continue
+        if str(group.get("visibility") or "").lower() != "public":
+            continue
+        if "Unified" not in (group.get("groupTypes") or []):
+            continue
+        public_groups.append((group, group_id))
+    all_ok = True
+    for _group, group_id in public_groups:
         if group_id in excluded_ids:
             continue
-        group_url = f"https://graph.microsoft.com/v1.0/groups/{group_id}"
+        group_url = _GROUP_URL_TMPL.format(group_id=group_id)
         try:
             await _graph_patch(graph_token, group_url, {"visibility": "Private"})
         except M365Error as exc:
