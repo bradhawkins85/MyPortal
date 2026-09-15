@@ -3216,11 +3216,11 @@ async def _check_quarantine_notification_enabled(
                    "The global quarantine policy has notifications enabled with a daily frequency.")
 
 
-def _select_global_quarantine_policy(rows: list[Any]) -> dict[str, Any]:
+def _select_global_quarantine_policy(rows: list[Any]) -> dict[str, Any] | None:
     """Select the best global quarantine policy row from Get-QuarantinePolicy results."""
     policies = [row for row in rows if isinstance(row, dict)]
     if not policies:
-        return {}
+        return None
 
     typed_matches = [
         row for row in policies
@@ -3237,7 +3237,7 @@ def _select_global_quarantine_policy(rows: list[Any]) -> dict[str, Any]:
     if name_matches:
         return name_matches[0]
 
-    return {}
+    return None
 
 
 _BEST_PRACTICES: list[dict[str, Any]] = [
@@ -6576,6 +6576,8 @@ async def _remediate_global_quarantine_policy(
 
     rows = data.get("value") or []
     policy = _select_global_quarantine_policy(rows)
+    if not policy:
+        return False, "Unable to determine the global quarantine policy identity."
     identity = str(policy.get("Identity") or policy.get("Name") or "").strip()
     if not identity:
         return False, "Unable to determine the global quarantine policy identity."
@@ -6773,20 +6775,9 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
         elif bp.get("remediation_type") == "global_quarantine_policy_exo":
             cmdlet = bp.get("remediation_cmdlet", "")
             params = bp.get("remediation_params") or {}
-            try:
-                success, failure_message = await _remediate_global_quarantine_policy(
-                    exo_token, tenant_id, cmdlet, params
-                )
-            except M365Error as exc:
-                failure_message = str(exc)
-                log_error(
-                    "M365 best practice remediation command failed",
-                    company_id=company_id,
-                    check_id=check_id,
-                    cmdlet=cmdlet,
-                    error=str(exc),
-                )
-                success = False
+            success, failure_message = await _remediate_global_quarantine_policy(
+                exo_token, tenant_id, cmdlet, params
+            )
         else:
             cmdlet = bp.get("remediation_cmdlet", "")
             params = bp.get("remediation_params") or {}
