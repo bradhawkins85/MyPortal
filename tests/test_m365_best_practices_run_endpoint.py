@@ -142,6 +142,18 @@ def test_best_practices_page_sets_account_exclusion_permission_for_company_viewe
     assert render_template.await_args.kwargs["extra"]["can_manage_account_exclusions"] is True
 
 
+def test_can_manage_m365_account_exclusions_helper_covers_all_permission_branches():
+    assert main_module._can_manage_m365_account_exclusions(
+        {"is_super_admin": True}, {"can_view_m365_best_practices": False}
+    ) is True
+    assert main_module._can_manage_m365_account_exclusions(
+        {"is_super_admin": False}, {"can_view_m365_best_practices": True}
+    ) is True
+    assert main_module._can_manage_m365_account_exclusions(
+        {"is_super_admin": False}, {"can_view_m365_best_practices": False}
+    ) is False
+
+
 def test_account_exclusion_endpoint_does_not_require_super_admin(monkeypatch):
     async def fake_context(request, super_admin_only=False):
         assert super_admin_only is False
@@ -187,3 +199,18 @@ def test_account_exclusion_endpoint_does_not_require_super_admin(monkeypatch):
     run_single.assert_awaited_once_with(
         company_id=99, check_id="bp_test", allow_auto_remediation=False
     )
+
+
+def test_account_exclusion_endpoint_forbids_users_without_permission(monkeypatch):
+    async def fake_context(request, super_admin_only=False):
+        return {"id": 7, "is_super_admin": False, "company_id": 99}, {"can_view_m365_best_practices": False}, {"id": 99}, 99, None
+
+    monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/m365/best-practices/account-exclusion/bp_test",
+            data={"account_id": "one", "excluded": "1"},
+        )
+
+    assert response.status_code == 403
