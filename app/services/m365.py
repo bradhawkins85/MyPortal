@@ -54,6 +54,13 @@ _EXO_MANAGE_AS_APP_ROLE = "dc50a0fb-09a3-484d-be87-e023b12c6440"
 # Exchange Online PowerShell REST API access (e.g. Get-MailboxPermission).
 _EXO_ADMIN_ROLE_TEMPLATE_ID = "29232cdf-9323-42fd-ade2-1d097af3e4de"
 
+# Security & Compliance (Microsoft Purview) PowerShell REST API.
+# Protection alert policies (Get-ProtectionAlert / New-ProtectionAlert) require a
+# token scoped to the compliance endpoint rather than the Exchange Online endpoint.
+# The app must have the ``ComplianceManager.ReadWrite.All`` (or equivalent) application
+# permission and be assigned a Compliance Administrator (or global admin) role in the tenant.
+_SCC_SCOPE = "https://ps.compliance.protection.outlook.com/.default"
+
 # Skype and Teams Tenant Admin API service principal app ID.
 # Teams PowerShell cmdlets (Get-CsTeamsMeetingPolicy, Get-CsTenantFederationConfiguration,
 # Get-CsTeamsClientConfiguration) invoked via the Exchange Online InvokeCommand REST
@@ -1097,6 +1104,102 @@ def _exo_error_detail(response: httpx.Response) -> str:
         # injection. Keep the diagnostic useful while bounding what is exposed.
         return " ".join(candidate.split())[:500]
     return ""
+
+
+async def _acquire_scc_access_token(company_id: int) -> tuple[str, str]:
+    """Acquire an app-only access token for the Security & Compliance PowerShell REST API.
+
+    Uses the ``client_credentials`` grant with the Microsoft Purview/Compliance
+    scope (``https://ps.compliance.protection.outlook.com/.default``).  The
+    provisioned app must have application permissions that allow reading and
+    writing protection alert policies (e.g. Compliance Administrator role or
+    ``ComplianceManager.ReadWrite.All``).
+
+    :returns: A tuple of ``(access_token, tenant_id)``.
+    """
+    creds = await get_credentials(company_id)
+    if not creds:
+        raise M365Error("Microsoft 365 credentials have not been configured")
+
+    tenant_id = str(creds.get("tenant_id") or "").strip()
+    client_id = str(creds.get("client_id") or "").strip()
+
+    access_token, _, _ = await _exchange_token(
+        tenant_id=tenant_id,
+        client_id=client_id,
+        client_secret=creds.get("client_secret") or "",
+        refresh_token=None,
+        scope=_SCC_SCOPE,
+    )
+    return access_token, tenant_id
+
+
+async def _scc_invoke_command(
+    scc_token: str,
+    tenant_id: str,
+    cmdlet_name: str,
+    parameters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Call a Security & Compliance PowerShell cmdlet via the Purview REST InvokeCommand API.
+
+    POSTs to
+    ``https://ps.compliance.protection.outlook.com/adminapi/beta/{tenant_id}/InvokeCommand``
+    using an app-only Security & Compliance access token.  The app must have a
+    Compliance Administrator (or Global Administrator) role assigned so that
+    cmdlets such as ``Get-ProtectionAlert`` and ``New-ProtectionAlert`` succeed.
+
+    Returns the raw JSON response body on success.  Raises :exc:`M365Error` on any
+    non-200 HTTP status.
+    """
+    safe_tenant = quote(str(tenant_id or "").strip(), safe="")
+    url = f"https://ps.compliance.protection.outlook.com/adminapi/beta/{safe_tenant}/InvokeCommand"
+    payload: dict[str, Any] = {
+        "CmdletInput": {
+            "CmdletName": cmdlet_name,
+            "Parameters": parameters or {},
+        }
+    }
+    headers = {
+        "Authorization": f"******",
+        "Accept-Encoding": "identity",
+        "Content-Type": "application/json; charset=utf-8",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(url, headers=headers, json=payload)
+    except httpx.DecodingError as exc:
+        raise M365Error(
+            f"Security & Compliance {cmdlet_name} request decode error: {exc}"
+        ) from exc
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Security & Compliance {cmdlet_name} request timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Security & Compliance {cmdlet_name} network error ({type(exc).__name__})"
+        ) from exc
+    if response.status_code not in (200, 201, 204):
+        error_detail = _exo_error_detail(response)
+        log_error(
+            "Security & Compliance InvokeCommand failed",
+            cmdlet=cmdlet_name,
+            status=response.status_code,
+            error=error_detail,
+        )
+        detail_suffix = f": {error_detail}" if error_detail else ""
+        raise M365Error(
+            f"Security & Compliance {cmdlet_name} failed ({response.status_code}){detail_suffix}",
+            http_status=response.status_code,
+        )
+    if response.status_code == 204 or not response.text:
+        return {}
+    try:
+        return response.json()
+    except (ValueError, httpx.DecodingError) as exc:
+        raise M365Error(
+            f"Security & Compliance {cmdlet_name} response parse error: {exc}"
+        ) from exc
 
 
 async def _graph_get(
