@@ -10,6 +10,7 @@ def _render_best_practices(
     secure_score=None,
     can_manage_account_exclusions=False,
     can_edit_notes=False,
+    can_submit_tickets=True,
 ):
     templates = Path(__file__).parents[1] / "app" / "templates"
     loader = ChoiceLoader(
@@ -40,6 +41,7 @@ def _render_best_practices(
         can_manage_account_exclusions=can_manage_account_exclusions,
         secure_score=secure_score,
         can_edit_notes=can_edit_notes,
+        can_submit_tickets=can_submit_tickets,
     )
 
 
@@ -311,6 +313,24 @@ def test_non_failed_checks_hide_manual_support_ticket_action():
                 "details": "Review accounts",
             }
         ]
+    )
+
+    assert "/m365/best-practices/ticket/bp_test" not in html
+    assert "Create ticket" not in html
+
+
+def test_ticket_action_hides_without_ticket_submission_permission():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+            }
+        ],
+        can_submit_tickets=False,
     )
 
     assert "/m365/best-practices/ticket/bp_test" not in html

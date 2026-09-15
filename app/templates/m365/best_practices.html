@@ -300,7 +300,7 @@
   {% if not m365_results or m365_applicable_results %}
   <section class="panel">
     {% if m365_results %}
-      {{ result_table(m365_results, is_super_admin, can_manage_account_exclusions, can_edit_notes, 'bp-table-m365', true) }}
+      {{ result_table(m365_results, is_super_admin, can_manage_account_exclusions, can_edit_notes, 'bp-table-m365', can_submit_tickets) }}
     {% else %}
       <div class="panel__body">
         {% if not catalog %}
@@ -330,7 +330,7 @@
       <h3 class="panel__title">CIS Intune Benchmark – Windows</h3>
     </header>
     {% if intune_windows_results %}
-      {{ result_table(intune_windows_results, is_super_admin, can_manage_account_exclusions, can_edit_notes, 'bp-table-intune-windows', true) }}
+      {{ result_table(intune_windows_results, is_super_admin, can_manage_account_exclusions, can_edit_notes, 'bp-table-intune-windows', can_submit_tickets) }}
     {% else %}
       <div class="panel__body">
         <p class="text-muted">No Intune Windows results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to run checks.{% endif %}</p>
@@ -348,7 +348,7 @@
       <h3 class="panel__title">CIS Intune Benchmark – iOS / iPadOS</h3>
     </header>
     {% if intune_ios_results %}
-      {{ result_table(intune_ios_results, is_super_admin, can_manage_account_exclusions, can_edit_notes, 'bp-table-intune-ios', true) }}
+      {{ result_table(intune_ios_results, is_super_admin, can_manage_account_exclusions, can_edit_notes, 'bp-table-intune-ios', can_submit_tickets) }}
     {% else %}
       <div class="panel__body">
         <p class="text-muted">No Intune iOS/iPadOS results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to run checks.{% endif %}</p>
@@ -366,7 +366,7 @@
       <h3 class="panel__title">CIS Intune Benchmark – macOS</h3>
     </header>
     {% if intune_macos_results %}
-      {{ result_table(intune_macos_results, is_super_admin, can_manage_account_exclusions, can_edit_notes, 'bp-table-intune-macos', true) }}
+      {{ result_table(intune_macos_results, is_super_admin, can_manage_account_exclusions, can_edit_notes, 'bp-table-intune-macos', can_submit_tickets) }}
     {% else %}
       <div class="panel__body">
         <p class="text-muted">No Intune macOS results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to run checks.{% endif %}</p>

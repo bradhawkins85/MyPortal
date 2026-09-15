@@ -3524,6 +3524,13 @@ def _can_manage_m365_account_exclusions(user: dict, membership: dict | None) -> 
     )
 
 
+def _can_submit_m365_best_practice_tickets(user: Mapping[str, Any], company_id: Any) -> bool:
+    try:
+        return int(user.get("id")) > 0 and int(company_id) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 @app.get("/m365/best-practices", response_class=HTMLResponse)
 async def m365_best_practices_page(request: Request):
     user, membership, company, company_id, redirect = await _load_m365_best_practices_context(request)
@@ -3545,6 +3552,7 @@ async def m365_best_practices_page(request: Request):
         "is_super_admin": bool(user.get("is_super_admin")),
         "can_edit_notes": _can_edit_m365_best_practice_notes(user, membership),
         "can_manage_account_exclusions": _can_manage_m365_account_exclusions(user, membership),
+        "can_submit_tickets": _can_submit_m365_best_practice_tickets(user, company_id),
     }
     return await _render_template("m365/best_practices.html", request, user, extra=extra)
 
@@ -3735,8 +3743,12 @@ async def submit_m365_best_practice_ticket(request: Request, check_id: str):
         return flash_redirect("/m365/best-practices", "This check has not been evaluated yet", "error")
     if result.get("status") != m365_best_practices_service.STATUS_FAIL:
         return flash_redirect("/m365/best-practices", "Support tickets can only be created for failed checks", "error")
+    if not _can_submit_m365_best_practice_tickets(user, company_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
-    external_reference = f"m365-best-practice:{company_id}:{check_id}"
+    external_reference = m365_best_practices_service.build_failure_ticket_external_reference(
+        company_id, check_id
+    )
     existing_ticket = await tickets_repo.find_open_ticket_by_external_reference(external_reference)
     if existing_ticket:
         ticket_id = existing_ticket.get("id")
@@ -3789,7 +3801,7 @@ async def submit_m365_best_practice_ticket(request: Request, check_id: str):
     message = "Support ticket submitted. A technician will review this failed M365 best-practice check."
     if ticket_id:
         message = (
-            f"Ticket #{ticket_id} submitted. A technician will review this failed "
+            f"Support ticket #{ticket_id} submitted. A technician will review this failed "
             "M365 best-practice check."
         )
     log_info(

@@ -5731,7 +5731,7 @@ async def set_enabled_checks(
     )
 
 
-def _build_failure_ticket_external_reference(company_id: int, check_id: str) -> str:
+def build_failure_ticket_external_reference(company_id: int, check_id: str) -> str:
     return f"m365-best-practice:{company_id}:{check_id}"
 
 
@@ -5801,7 +5801,7 @@ async def _maybe_create_ticket_on_fail(
     ):
         return
 
-    external_reference = _build_failure_ticket_external_reference(company_id, check_id)
+    external_reference = build_failure_ticket_external_reference(company_id, check_id)
     existing_ticket = await tickets_repo.find_open_ticket_by_external_reference(
         external_reference
     )

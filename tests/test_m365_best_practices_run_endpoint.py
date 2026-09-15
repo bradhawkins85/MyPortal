@@ -408,7 +408,7 @@ def test_submit_failed_best_practice_ticket_creates_support_ticket(monkeypatch):
     assert response.status_code == 303
     assert response.headers["location"] == "/m365/best-practices"
     assert _decode_flash_cookie(response) == {
-        "message": "Ticket #321 submitted. A technician will review this failed M365 best-practice check.",
+        "message": "Support ticket #321 submitted. A technician will review this failed M365 best-practice check.",
         "variant": "success",
     }
     create_ticket.assert_awaited_once()
@@ -465,6 +465,54 @@ def test_submit_failed_best_practice_ticket_reuses_existing_open_ticket(monkeypa
         "variant": "info",
     }
     create_ticket.assert_not_awaited()
+
+
+def test_submit_failed_best_practice_ticket_without_created_id_uses_fallback_message(monkeypatch):
+    async def fake_context(request, super_admin_only=False):
+        return {"id": 7, "is_super_admin": False}, {}, {"id": 99, "name": "Acme"}, 99, None
+
+    create_ticket = AsyncMock(return_value={})
+    monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "list_best_practices",
+        lambda: [{"id": "bp_test", "name": "Test check"}],
+    )
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "get_last_results",
+        AsyncMock(
+            return_value=[
+                {
+                    "check_id": "bp_test",
+                    "check_name": "Test check",
+                    "status": "fail",
+                    "details": "MFA is disabled",
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        main_module.tickets_repo,
+        "find_open_ticket_by_external_reference",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        main_module.tickets_service,
+        "resolve_status_or_default",
+        AsyncMock(return_value="open"),
+    )
+    monkeypatch.setattr(main_module.tickets_service, "create_ticket", create_ticket)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post("/m365/best-practices/ticket/bp_test")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/m365/best-practices"
+    assert _decode_flash_cookie(response) == {
+        "message": "Support ticket submitted. A technician will review this failed M365 best-practice check.",
+        "variant": "success",
+    }
 
 
 def test_save_note_route_rejects_overlong_notes(monkeypatch):
