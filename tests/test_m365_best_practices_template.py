@@ -233,3 +233,23 @@ def test_failed_remediation_shows_failure_reason():
 
     assert "✗ Remediation failed" in html
     assert "Microsoft Graph denied the update." in html
+
+
+def test_failed_remediation_hides_empty_failure_reason():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+                "remediation_status": "failed",
+                "remediated_at": None,
+                "remediation_failure_reason": None,
+            }
+        ]
+    )
+
+    assert "✗ Remediation failed" in html
+    assert " — " not in html
