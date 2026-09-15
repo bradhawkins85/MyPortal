@@ -3617,6 +3617,28 @@ async def remediate_m365_best_practice(request: Request, check_id: str):
         company_id=company_id,
         check_id=check_id,
     )
+    # Re-evaluate even when remediation reports a failure: an operation may
+    # have partially changed the tenant, and the stored check status should
+    # always reflect the state observed after the attempt.
+    try:
+        await m365_best_practices_service.run_single_check(
+            company_id=company_id,
+            check_id=check_id,
+            allow_auto_remediation=False,
+        )
+    except (ValueError, m365_service.M365Error) as exc:
+        log_error(
+            "M365 best practice post-remediation check failed",
+            company_id=company_id,
+            check_id=check_id,
+            user_id=user.get("id"),
+            error=str(exc),
+        )
+        return flash_redirect(
+            "/m365/best-practices",
+            f"{result.get('message', 'Remediation attempted')}; unable to refresh check: {exc}",
+            "error",
+        )
     log_info(
         "M365 best practice remediation triggered",
         company_id=company_id,

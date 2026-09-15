@@ -5497,6 +5497,17 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
                 check_id=check_id,
             )
             await remediate_check(company_id=company_id, check_id=check_id)
+            # Persist the tenant's post-remediation state immediately.  Disable
+            # auto-remediation for this verification run so a remediation that
+            # does not fully resolve the issue cannot recurse indefinitely.
+            refreshed = await run_single_check(
+                company_id=company_id,
+                check_id=check_id,
+                allow_auto_remediation=False,
+            )
+            status = refreshed["status"]
+            details = refreshed["details"]
+            run_at = refreshed["run_at"]
 
         results.append({
             "check_id": check_id,
@@ -5516,7 +5527,12 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
     return results
 
 
-async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
+async def run_single_check(
+    company_id: int,
+    check_id: str,
+    *,
+    allow_auto_remediation: bool = True,
+) -> dict[str, Any]:
     """Run a single best-practice check by ``check_id`` for ``company_id``.
 
     Acquires the necessary access tokens, runs only the named check (including
@@ -5525,7 +5541,8 @@ async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
     returned by :func:`run_best_practices`.
 
     Raises :class:`ValueError` if ``check_id`` is unknown or not currently
-    enabled globally.
+    enabled globally.  ``allow_auto_remediation`` is disabled by post-remediation
+    verification runs to prevent an unresolved check from remediating recursively.
     """
     catalog = _catalog_map()
     bp = catalog.get(check_id)
@@ -5663,7 +5680,9 @@ async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
         run_at=run_at,
     )
 
-    auto_remediate_ids = await get_auto_remediate_check_ids()
+    auto_remediate_ids = (
+        await get_auto_remediate_check_ids() if allow_auto_remediation else set()
+    )
     if status == STATUS_FAIL and check_id in auto_remediate_ids:
         log_info(
             "M365 best practice auto-remediation triggered",
@@ -5671,6 +5690,11 @@ async def run_single_check(company_id: int, check_id: str) -> dict[str, Any]:
             check_id=check_id,
         )
         await remediate_check(company_id=company_id, check_id=check_id)
+        return await run_single_check(
+            company_id=company_id,
+            check_id=check_id,
+            allow_auto_remediation=False,
+        )
 
     log_info(
         "M365 single best practice check run",

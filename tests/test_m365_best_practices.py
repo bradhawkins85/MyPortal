@@ -999,6 +999,115 @@ async def test_run_best_practices_triggers_auto_remediation_on_fail():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_run_single_check_rechecks_after_auto_remediation():
+    """Auto-remediation persists and returns the subsequent check state."""
+    check_id = "bp_disable_direct_send"
+    bp_entry = next(bp for bp in bp_service._BEST_PRACTICES if bp["id"] == check_id)
+    real_source = bp_entry["source"]
+    bp_entry["source"] = AsyncMock(
+        side_effect=[
+            {"status": "fail", "details": "Direct Send enabled"},
+            {"status": "pass", "details": "Direct Send disabled"},
+        ]
+    )
+    upserts: list[dict] = []
+
+    try:
+        with (
+            patch(
+                "app.services.m365_best_practices.acquire_access_token",
+                new_callable=AsyncMock,
+                return_value="graph-token",
+            ),
+            patch(
+                "app.services.m365_best_practices.acquire_delegated_token",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.services.m365_best_practices.detect_tenant_capabilities",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.services.m365_best_practices._acquire_exo_access_token",
+                new_callable=AsyncMock,
+                return_value=("exo-token", "tenant-123"),
+            ),
+            patch(
+                "app.services.m365_best_practices.get_enabled_check_ids",
+                new_callable=AsyncMock,
+                return_value={check_id},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value={check_id},
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                side_effect=lambda **kwargs: upserts.append(kwargs),
+            ),
+            patch(
+                "app.services.m365_best_practices.remediate_check",
+                new_callable=AsyncMock,
+                return_value={"success": True, "message": "fixed"},
+            ) as mock_remediate,
+        ):
+            result = await bp_service.run_single_check(company_id=5, check_id=check_id)
+    finally:
+        bp_entry["source"] = real_source
+
+    assert result["status"] == "pass"
+    assert [row["status"] for row in upserts] == ["fail", "pass"]
+    mock_remediate.assert_awaited_once_with(company_id=5, check_id=check_id)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_manual_remediation_rechecks_issue_status():
+    """The manual remediation endpoint refreshes the remediated check before redirecting."""
+    from app import main
+
+    user = {"id": 17, "is_super_admin": True}
+    remediation = {"success": True, "message": "Remediation completed"}
+    with (
+        patch.object(
+            main,
+            "_load_m365_best_practices_context",
+            new_callable=AsyncMock,
+            return_value=(user, {}, {}, 42, None),
+        ),
+        patch.object(
+            main.m365_best_practices_service,
+            "list_best_practices",
+            return_value=[{"id": "bp_disable_direct_send"}],
+        ),
+        patch.object(
+            main.m365_best_practices_service,
+            "remediate_check",
+            new_callable=AsyncMock,
+            return_value=remediation,
+        ),
+        patch.object(
+            main.m365_best_practices_service,
+            "run_single_check",
+            new_callable=AsyncMock,
+        ) as mock_check,
+    ):
+        response = await main.remediate_m365_best_practice(
+            request=None,  # type: ignore[arg-type]
+            check_id="bp_disable_direct_send",
+        )
+
+    mock_check.assert_awaited_once_with(
+        company_id=42,
+        check_id="bp_disable_direct_send",
+        allow_auto_remediation=False,
+    )
+    assert response.status_code == 303
+
+
+@pytest.mark.anyio("asyncio")
 async def test_run_best_practices_does_not_auto_remediate_on_pass():
     """Passing checks must not trigger auto-remediation even if it is enabled."""
     bp_entry = next(bp for bp in bp_service._BEST_PRACTICES if bp["id"] == "bp_disable_direct_send")
