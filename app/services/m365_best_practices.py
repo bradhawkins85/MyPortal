@@ -512,6 +512,7 @@ _GROUPS_LIST_URL = (
     "?$select=id,displayName,visibility,groupTypes,membershipRule"
     "&$top=999"
 )
+_GROUP_URL_TMPL = "https://graph.microsoft.com/v1.0/groups/{group_id}"
 _CA_POLICIES_URL = (
     "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies"
 )
@@ -2107,9 +2108,11 @@ async def _check_only_managed_public_groups(token: str) -> dict[str, Any]:
         return _result(check_id, check_name, STATUS_PASS, "No public Microsoft 365 groups exist.")
     names = ", ".join(g.get("displayName") or "?" for g in public[:5])
     suffix = "" if len(public) <= 5 else f" (and {len(public) - 5} more)"
+    affected_accounts = [_account_finding(group) for group in public]
     return _result(
         check_id, check_name, STATUS_FAIL,
         f"{len(public)} public Microsoft 365 group(s) exist – review and convert unapproved ones to Private: {names}{suffix}.",
+        affected_accounts=affected_accounts,
     )
 
 
@@ -4022,7 +4025,8 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_only_managed_public_groups,
         "source_type": "graph",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "foreach_public_group_graph",
     },
     {
         "id": "bp_pim_used_to_manage_roles",
@@ -6746,6 +6750,57 @@ async def _remediate_create_dynamic_guest_group(graph_token: str) -> bool:
     return True
 
 
+async def _remediate_foreach_public_group_graph(
+    graph_token: str, company_id: int, check_id: str
+) -> bool:
+    """Convert every non-excluded public Microsoft 365 group to Private."""
+    groups = await _safe_graph_get_all(graph_token, _GROUPS_LIST_URL)
+    if groups is None:
+        log_error(
+            "M365 foreach-public-group remediation – list groups failed",
+            company_id=company_id,
+            check_id=check_id,
+        )
+        return False
+
+    try:
+        exclusions = await bp_repo.get_account_exclusions(company_id, check_id)
+    except Exception as exc:  # noqa: BLE001 - exclusion lookup should fail closed
+        log_error(
+            "M365 foreach-public-group remediation – exclusion lookup failed",
+            company_id=company_id,
+            check_id=check_id,
+            error=str(exc),
+        )
+        return False
+    excluded_ids = {group_id for _, group_id in exclusions}
+
+    all_ok = True
+    for group in groups:
+        group_id = str(group.get("id") or "").strip()
+        if not group_id:
+            continue
+        if str(group.get("visibility") or "").lower() != "public":
+            continue
+        if "Unified" not in (group.get("groupTypes") or []):
+            continue
+        if group_id in excluded_ids:
+            continue
+        group_url = _GROUP_URL_TMPL.format(group_id=group_id)
+        try:
+            await _graph_patch(graph_token, group_url, {"visibility": "Private"})
+        except M365Error as exc:
+            log_error(
+                "M365 foreach-public-group remediation – PATCH group failed",
+                company_id=company_id,
+                check_id=check_id,
+                group_id=group_id,
+                error=str(exc),
+            )
+            all_ok = False
+    return all_ok
+
+
 async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     """Attempt automated remediation for a single best-practice check.
 
@@ -6754,7 +6809,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     database, and returns a result dict with ``success`` (bool) and ``message``
     (str) keys.
 
-    Supports seven remediation patterns:
+    Supports eight remediation patterns:
 
     * ``source_type="exo"`` – executes a single cmdlet via the Exchange Online
       REST API using the ``remediation_cmdlet`` and ``remediation_params``
@@ -6775,6 +6830,9 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     * ``source_type="graph"`` with
       ``remediation_type="create_dynamic_guest_group"`` – creates the standard
       ``Guest Users`` dynamic security group if one does not already exist.
+    * ``source_type="graph"`` with
+      ``remediation_type="foreach_public_group_graph"`` – converts each
+      non-excluded public Microsoft 365 group to ``visibility=Private``.
     * ``source_type="scc"`` with ``remediation_type="break_glass_alert_policy"`` –
       creates (or re-enables) a Microsoft Purview protection alert policy that
       emails tenant admins whenever a MyPortal-managed break-glass account signs in.
@@ -6980,6 +7038,11 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                         error=str(exc),
                     )
                     failure_message = str(exc)
+        elif bp.get("remediation_type") == "foreach_public_group_graph":
+            success = await _remediate_foreach_public_group_graph(
+                graph_token, company_id, check_id
+            )
+            # Remediation status is persisted by the shared epilogue below.
         elif check_id == "bp_authenticator_mfa_fatigue":
             try:
                 success, failure_message = await _remediate_authenticator_mfa_fatigue(
