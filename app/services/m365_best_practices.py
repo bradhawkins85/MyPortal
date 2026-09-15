@@ -7008,7 +7008,6 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 "success": False,
                 "message": graph_token_error_message,
             }
-        failure_message = ""
         if bp.get("remediation_type") == "global_admin_accounts":
             try:
                 success, failure_message = await _remediate_global_admin_count(graph_token, company_id)
