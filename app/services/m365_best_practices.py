@@ -6578,8 +6578,6 @@ async def _remediate_global_quarantine_policy(
     policy = _select_global_quarantine_policy(rows)
     identity = str(policy.get("Identity") or policy.get("Name") or "").strip()
     if not identity:
-        identity = str(base_params.get("Identity") or "").strip()
-    if not identity:
         return False, "Unable to determine the global quarantine policy identity."
 
     params = dict(base_params)
