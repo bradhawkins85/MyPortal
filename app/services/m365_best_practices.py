@@ -564,6 +564,26 @@ _MFA_FATIGUE_PROTECTION_KEYS: tuple[str, ...] = (
     "displayLocationInformationRequiredState",
 )
 
+# Graph no longer accepts numberMatchingRequiredState inside featureSettings
+# PATCH payloads for MicrosoftAuthenticator.  Automation can still enable the
+# app/location context prompts, but number matching must be turned on manually.
+_MFA_FATIGUE_PATCHABLE_KEYS: tuple[str, ...] = (
+    "displayAppInformationRequiredState",
+    "displayLocationInformationRequiredState",
+)
+_MFA_FATIGUE_MANUAL_ONLY_KEYS: tuple[str, ...] = ("numberMatchingRequiredState",)
+_MFA_FATIGUE_NUMBER_MATCHING_MANUAL_MESSAGE = (
+    "Microsoft Graph no longer supports toggling Microsoft Authenticator number "
+    "matching in featureSettings. Enable Number matching manually in Entra, "
+    "then re-evaluate the check."
+)
+_MFA_FATIGUE_NUMBER_MATCHING_PARTIAL_MESSAGE = (
+    "Supported Microsoft Authenticator app/location prompts were updated "
+    "automatically, but Microsoft Graph no longer supports toggling number "
+    "matching in featureSettings. Enable Number matching manually in Entra, "
+    "then re-evaluate the check."
+)
+
 _MFA_FATIGUE_REMEDIATION_PAYLOAD: dict[str, Any] = {
     # Graph's update contract requires the concrete configuration type.  It
     # can return 204 while silently retaining nested feature settings when the
@@ -584,7 +604,7 @@ _MFA_FATIGUE_REMEDIATION_PAYLOAD: dict[str, Any] = {
                     "id": "all_users",
                 },
             }
-            for setting in _MFA_FATIGUE_PROTECTION_KEYS
+            for setting in _MFA_FATIGUE_PATCHABLE_KEYS
         },
     }
 }
@@ -2241,15 +2261,20 @@ async def _check_authenticator_mfa_fatigue(token: str) -> dict[str, Any]:
     )
     if data is None:
         return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to read Microsoft Authenticator policy.")
-    fs = data.get("featureSettings") or {}
-    missing = [
-        k for k in _MFA_FATIGUE_PROTECTION_KEYS
-        if str(((fs.get(k) or {}).get("state")) or "").lower() != "enabled"
-    ]
+    missing = _get_authenticator_mfa_fatigue_missing_settings(data)
     if not missing:
         return _result(check_id, check_name, STATUS_PASS, "All MFA-fatigue protections are enabled.")
     return _result(check_id, check_name, STATUS_FAIL,
                    "Disabled MFA-fatigue protections: " + ", ".join(missing))
+
+
+def _get_authenticator_mfa_fatigue_missing_settings(data: dict[str, Any]) -> list[str]:
+    """Return the Authenticator MFA-fatigue protections that are not enabled."""
+    fs = data.get("featureSettings") or {}
+    return [
+        k for k in _MFA_FATIGUE_PROTECTION_KEYS
+        if str(((fs.get(k) or {}).get("state")) or "").lower() != "enabled"
+    ]
 
 
 async def _remediate_authenticator_mfa_fatigue(token: str) -> tuple[bool, str]:
@@ -2258,14 +2283,27 @@ async def _remediate_authenticator_mfa_fatigue(token: str) -> tuple[bool, str]:
         f"{_AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/"
         "MicrosoftAuthenticator"
     )
+    current = await _safe_graph_get(token, url)
+    if current is None:
+        return False, "Unable to read Microsoft Authenticator policy."
+    missing = _get_authenticator_mfa_fatigue_missing_settings(current)
+    if missing and set(missing).issubset(_MFA_FATIGUE_MANUAL_ONLY_KEYS):
+        return False, _MFA_FATIGUE_NUMBER_MATCHING_MANUAL_MESSAGE
     await _graph_patch(token, url, _MFA_FATIGUE_REMEDIATION_PAYLOAD)
 
     latest_details = "Microsoft Graph did not return the updated policy."
     for attempt in range(1, _MFA_FATIGUE_VERIFICATION_ATTEMPTS + 1):
-        result = await _check_authenticator_mfa_fatigue(token)
-        latest_details = result.get("details") or latest_details
-        if result.get("status") == STATUS_PASS:
+        data = await _safe_graph_get(token, url)
+        if data is None:
+            if attempt < _MFA_FATIGUE_VERIFICATION_ATTEMPTS:
+                await asyncio.sleep(_retry_backoff_seconds(attempt))
+            continue
+        missing = _get_authenticator_mfa_fatigue_missing_settings(data)
+        if not missing:
             return True, ""
+        latest_details = "Disabled MFA-fatigue protections: " + ", ".join(missing)
+        if set(missing).issubset(_MFA_FATIGUE_MANUAL_ONLY_KEYS):
+            return False, _MFA_FATIGUE_NUMBER_MATCHING_PARTIAL_MESSAGE
         if attempt < _MFA_FATIGUE_VERIFICATION_ATTEMPTS:
             await asyncio.sleep(_retry_backoff_seconds(attempt))
 
@@ -3220,7 +3258,6 @@ async def _check_quarantine_notification_enabled(
             exo_token,
             tenant_id,
             "Get-QuarantinePolicy",
-            {"QuarantinePolicyType": "GlobalQuarantinePolicy"},
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -3229,7 +3266,10 @@ async def _check_quarantine_notification_enabled(
     if not rows:
         return _result(check_id, check_name, STATUS_UNKNOWN,
                        "No global quarantine policy was returned.")
-    policy = next((row for row in rows if isinstance(row, dict)), {})
+    policy = _select_global_quarantine_policy(rows)
+    if not policy:
+        return _result(check_id, check_name, STATUS_UNKNOWN,
+                       "No global quarantine policy was returned.")
     if policy.get("ESNEnabled") is not True:
         return _result(check_id, check_name, STATUS_FAIL,
                        "The global quarantine policy has notifications disabled.")
@@ -3240,6 +3280,30 @@ async def _check_quarantine_notification_enabled(
                        "it should be one day.")
     return _result(check_id, check_name, STATUS_PASS,
                    "The global quarantine policy has notifications enabled with a daily frequency.")
+
+
+def _select_global_quarantine_policy(rows: list[Any]) -> dict[str, Any] | None:
+    """Select the best global quarantine policy row from Get-QuarantinePolicy results."""
+    policies = [row for row in rows if isinstance(row, dict)]
+    if not policies:
+        return None
+
+    typed_matches = [
+        row for row in policies
+        if str(row.get("QuarantinePolicyType") or "").strip().lower() == "globalquarantinepolicy"
+    ]
+    if typed_matches:
+        built_in = next((row for row in typed_matches if row.get("IsBuiltInPolicy") is True), None)
+        return built_in or typed_matches[0]
+
+    name_matches = [
+        row for row in policies
+        if str(row.get("Identity") or row.get("Name") or "").strip().lower() == "globalquarantinepolicy"
+    ]
+    if name_matches:
+        return name_matches[0]
+
+    return None
 
 
 _BEST_PRACTICES: list[dict[str, Any]] = [
@@ -4722,9 +4786,9 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": True,
+        "remediation_type": "global_quarantine_policy_exo",
         "remediation_cmdlet": "Set-QuarantinePolicy",
         "remediation_params": {
-            "Identity": "GlobalQuarantinePolicy",
             "ESNEnabled": True,
             "EndUserSpamNotificationFrequency": "1.00:00:00",
         },
@@ -6553,7 +6617,43 @@ async def _remediate_matching_antiphish_policies(
     for identity in targets:
         params = dict(base_params)
         params["Identity"] = identity
+        try:
+            await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
+        except M365Error as exc:
+            return False, str(exc)
+    return True, ""
+
+
+async def _remediate_global_quarantine_policy(
+    exo_token: str,
+    tenant_id: str,
+    cmdlet: str,
+    base_params: dict[str, Any],
+) -> tuple[bool, str]:
+    """Apply remediation to the tenant's current global quarantine policy identity."""
+    try:
+        data = await _exo_invoke_command(
+            exo_token,
+            tenant_id,
+            "Get-QuarantinePolicy",
+        )
+    except M365Error as exc:
+        return False, f"Unable to query Get-QuarantinePolicy: {exc}"
+
+    rows = data.get("value") or []
+    policy = _select_global_quarantine_policy(rows)
+    if not policy:
+        return False, "Unable to determine the global quarantine policy identity."
+    identity = str(policy.get("Identity") or policy.get("Name") or "").strip()
+    if not identity:
+        return False, "Unable to determine the global quarantine policy identity."
+
+    params = dict(base_params)
+    params["Identity"] = identity
+    try:
         await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
+    except M365Error as exc:
+        return False, str(exc)
     return True, ""
 
 
@@ -6738,6 +6838,12 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                     error=str(exc),
                 )
                 success = False
+        elif bp.get("remediation_type") == "global_quarantine_policy_exo":
+            cmdlet = bp.get("remediation_cmdlet", "")
+            params = bp.get("remediation_params") or {}
+            success, failure_message = await _remediate_global_quarantine_policy(
+                exo_token, tenant_id, cmdlet, params
+            )
         else:
             cmdlet = bp.get("remediation_cmdlet", "")
             params = bp.get("remediation_params") or {}
@@ -6834,13 +6940,46 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             try:
                 success = await _remediate_create_dynamic_guest_group(graph_token)
             except M365Error as exc:
-                log_error(
-                    "M365 best practice dynamic guest group remediation failed",
-                    company_id=company_id,
-                    check_id=check_id,
-                    error=str(exc),
-                )
-                success = False
+                granted = False
+                if exc.http_status == 403:
+                    try:
+                        delegated_token = await acquire_delegated_token(company_id)
+                        if delegated_token:
+                            granted = await try_grant_missing_permissions(
+                                company_id, access_token=delegated_token
+                            )
+                    except Exception as grant_exc:  # noqa: BLE001 – preserve original Graph error
+                        log_error(
+                            "M365 best practice Graph remediation permission repair failed",
+                            company_id=company_id,
+                            check_id=check_id,
+                            error=str(grant_exc),
+                        )
+
+                if granted:
+                    try:
+                        graph_token = await acquire_access_token(
+                            company_id, force_client_credentials=True
+                        )
+                        success = await _remediate_create_dynamic_guest_group(graph_token)
+                    except Exception as retry_exc:  # noqa: BLE001 – normalize retry errors into remediation failure
+                        exc = (
+                            retry_exc
+                            if isinstance(retry_exc, M365Error)
+                            else M365Error(str(retry_exc))
+                        )
+                        success = False
+                else:
+                    success = False
+
+                if not success:
+                    log_error(
+                        "M365 best practice dynamic guest group remediation failed",
+                        company_id=company_id,
+                        check_id=check_id,
+                        error=str(exc),
+                    )
+                    failure_message = str(exc)
         elif check_id == "bp_authenticator_mfa_fatigue":
             try:
                 success, failure_message = await _remediate_authenticator_mfa_fatigue(
