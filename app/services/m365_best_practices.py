@@ -614,6 +614,10 @@ _MFA_FATIGUE_REMEDIATION_PAYLOAD: dict[str, Any] = {
 # not persist the stale pre-remediation state returned immediately after PATCH.
 _MFA_FATIGUE_VERIFICATION_ATTEMPTS = 3
 
+# Microsoft Forms settings updates can also be eventually consistent. Verify
+# remediation before reporting success so stale reads do not show a false fail.
+_FORMS_PHISHING_VERIFICATION_ATTEMPTS = 3
+
 
 _PHISHING_RESISTANT_AUTH_STRENGTH_ID = "00000000-0000-0000-0000-000000000004"
 
@@ -2334,6 +2338,30 @@ async def _check_internal_phishing_forms(token: str) -> dict[str, Any]:
     if data.get("internalPhishingProtectionEnabled"):
         return _result(check_id, check_name, STATUS_PASS, "Internal phishing protection for Forms is enabled.")
     return _result(check_id, check_name, STATUS_FAIL, "Internal phishing protection for Forms is disabled.")
+
+
+async def _remediate_internal_phishing_forms(token: str) -> tuple[bool, str]:
+    """Enable Forms internal phishing protection and verify Graph reflects it."""
+    await _graph_patch(
+        token,
+        _FORMS_SETTINGS_URL,
+        {"internalPhishingProtectionEnabled": True},
+    )
+
+    latest_details = ""
+    for attempt in range(1, _FORMS_PHISHING_VERIFICATION_ATTEMPTS + 1):
+        result = await _check_internal_phishing_forms(token)
+        latest_details = result.get("details") or latest_details
+        if result.get("status") == STATUS_PASS:
+            return True, ""
+        if attempt < _FORMS_PHISHING_VERIFICATION_ATTEMPTS:
+            await asyncio.sleep(_retry_backoff_seconds(attempt))
+
+    return (
+        False,
+        "Microsoft Graph did not confirm the updated Forms phishing protection setting: "
+        f"{latest_details}",
+    )
 
 
 async def _check_laps_enabled(token: str) -> dict[str, Any]:
@@ -6960,6 +6988,20 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             except M365Error as exc:
                 log_error(
                     "M365 Authenticator MFA-fatigue remediation failed",
+                    company_id=company_id,
+                    check_id=check_id,
+                    error=str(exc),
+                )
+                success = False
+                failure_message = str(exc)
+        elif check_id == "bp_internal_phishing_forms":
+            try:
+                success, failure_message = await _remediate_internal_phishing_forms(
+                    graph_token
+                )
+            except M365Error as exc:
+                log_error(
+                    "M365 internal phishing Forms remediation failed",
                     company_id=company_id,
                     check_id=check_id,
                     error=str(exc),
