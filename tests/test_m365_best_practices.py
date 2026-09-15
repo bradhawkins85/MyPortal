@@ -464,6 +464,107 @@ async def test_remediate_internal_phishing_forms_fails_when_graph_does_not_confi
     assert update_status.await_args.kwargs["remediation_status"] == "failed"
 
 
+@pytest.mark.anyio("asyncio")
+async def test_remediate_weak_auth_methods_disabled_waits_for_graph_consistency():
+    enabled = {"state": "enabled"}
+    disabled = {"state": "disabled"}
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+            return_value={},
+        ) as graph_patch,
+        patch(
+            "app.services.m365_best_practices._safe_graph_get",
+            new_callable=AsyncMock,
+            side_effect=[
+                enabled,
+                enabled,
+                enabled,
+                disabled,
+                disabled,
+                disabled,
+            ],
+        ) as graph_get,
+        patch(
+            "app.services.m365_best_practices.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ) as update_status,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_weak_auth_methods_disabled"
+        )
+
+    assert result["success"] is True
+    assert graph_patch.await_count == 3
+    graph_patch.assert_any_await(
+        "graph-token",
+        f"{bp_service._AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/Sms",
+        {"state": "disabled"},
+    )
+    graph_patch.assert_any_await(
+        "graph-token",
+        f"{bp_service._AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/Voice",
+        {"state": "disabled"},
+    )
+    graph_patch.assert_any_await(
+        "graph-token",
+        f"{bp_service._AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/Email",
+        {"state": "disabled"},
+    )
+    assert graph_get.await_count == 6
+    sleep.assert_awaited_once()
+    assert update_status.await_args.kwargs["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_weak_auth_methods_disabled_fails_when_graph_does_not_confirm():
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
+            "app.services.m365_best_practices._safe_graph_get",
+            new_callable=AsyncMock,
+            return_value={"state": "enabled"},
+        ),
+        patch(
+            "app.services.m365_best_practices.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ) as update_status,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_weak_auth_methods_disabled"
+        )
+
+    assert result["success"] is False
+    assert "did not confirm weak authentication methods were disabled" in result["message"]
+    assert "Weak methods still enabled: Sms, Voice, Email" in result["message"]
+    assert sleep.await_count == bp_service._WEAK_AUTH_METHODS_VERIFICATION_ATTEMPTS - 1
+    assert update_status.await_args.kwargs["remediation_status"] == "failed"
+
+
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
