@@ -74,12 +74,12 @@
   {# ------------------------------------------------------------------ #}
   {# Helper macro: stat-strip filter boxes                               #}
   {# ------------------------------------------------------------------ #}
-  {% macro filter_strip(results, table_id, secure_score=none) %}
+  {% macro filter_strip(results, secure_score=none) %}
   {% set pass_count = results | selectattr("status", "equalto", "pass") | list | length %}
   {% set fail_count = results | selectattr("status", "equalto", "fail") | list | length %}
   {% set unknown_count = results | selectattr("status", "equalto", "unknown") | list | length %}
   {% set na_count = results | selectattr("status", "equalto", "not_applicable") | list | length %}
-  <div class="stat-strip bp-filter-strip" data-bp-table="{{ table_id }}">
+  <div class="stat-strip bp-filter-strip">
     {% if secure_score %}
     <div class="stat-strip__stat stat-strip__stat--info"
          title="Microsoft Secure Score: {{ secure_score.current | round(1) }}/{{ secure_score.maximum | round(1) }}">
@@ -130,7 +130,7 @@
     extra_class='bp-table-toolbar'
   ) }}
   <div class="panel__body" style="padding:0">
-    <table class="table"{% if table_id %} id="{{ table_id }}" data-table data-table-id="m365-best-practices-{{ table_id }}"{% endif %}>
+    <table class="table bp-results-table"{% if table_id %} id="{{ table_id }}" data-table data-table-id="m365-best-practices-{{ table_id }}"{% endif %}>
       <thead>
         <tr>
           <th style="width:3rem" data-column-key="status" data-sort="string">Status</th>
@@ -277,12 +277,17 @@
   {% set intune_ios_applicable_results = intune_ios_results | rejectattr("status", "equalto", "not_applicable") | list %}
   {% set intune_macos_applicable_results = intune_macos_results | rejectattr("status", "equalto", "not_applicable") | list %}
 
+  {% if results %}
+  <section class="panel">
+    <div class="panel__body" style="padding-bottom:0">
+      {{ filter_strip(results, secure_score) }}
+    </div>
+  </section>
+  {% endif %}
+
   {% if not m365_results or m365_applicable_results %}
   <section class="panel">
     {% if m365_results %}
-      <div class="panel__body" style="padding-bottom:0">
-        {{ filter_strip(m365_results, 'bp-table-m365', secure_score) }}
-      </div>
       {{ result_table(m365_results, is_super_admin, can_manage_account_exclusions, can_edit_notes, 'bp-table-m365') }}
     {% else %}
       <div class="panel__body">
@@ -313,9 +318,6 @@
       <h3 class="panel__title">CIS Intune Benchmark – Windows</h3>
     </header>
     {% if intune_windows_results %}
-      <div class="panel__body" style="padding-bottom:0">
-        {{ filter_strip(intune_windows_results, 'bp-table-intune-windows') }}
-      </div>
       {{ result_table(intune_windows_results, is_super_admin, can_manage_account_exclusions, can_edit_notes, 'bp-table-intune-windows') }}
     {% else %}
       <div class="panel__body">
@@ -334,9 +336,6 @@
       <h3 class="panel__title">CIS Intune Benchmark – iOS / iPadOS</h3>
     </header>
     {% if intune_ios_results %}
-      <div class="panel__body" style="padding-bottom:0">
-        {{ filter_strip(intune_ios_results, 'bp-table-intune-ios') }}
-      </div>
       {{ result_table(intune_ios_results, is_super_admin, can_manage_account_exclusions, can_edit_notes, 'bp-table-intune-ios') }}
     {% else %}
       <div class="panel__body">
@@ -355,9 +354,6 @@
       <h3 class="panel__title">CIS Intune Benchmark – macOS</h3>
     </header>
     {% if intune_macos_results %}
-      <div class="panel__body" style="padding-bottom:0">
-        {{ filter_strip(intune_macos_results, 'bp-table-intune-macos') }}
-      </div>
       {{ result_table(intune_macos_results, is_super_admin, can_manage_account_exclusions, can_edit_notes, 'bp-table-intune-macos') }}
     {% else %}
       <div class="panel__body">
