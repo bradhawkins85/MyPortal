@@ -3505,6 +3505,10 @@ async def _load_m365_best_practices_context(request: Request, *, super_admin_onl
     return user, membership, company, company_id, None
 
 
+def _is_valid_m365_best_practice_check_id(check_id: str) -> bool:
+    return bool(re.fullmatch(r"[a-z0-9_]+", str(check_id or "").strip()))
+
+
 @app.get("/m365/best-practices", response_class=HTMLResponse)
 async def m365_best_practices_page(request: Request):
     user, membership, company, company_id, redirect = await _load_m365_best_practices_context(request)
@@ -3608,6 +3612,8 @@ async def run_single_m365_best_practice_check(request: Request, check_id: str):
     )
     if redirect:
         return redirect
+    if not _is_valid_m365_best_practice_check_id(check_id):
+        return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
     known_ids = {bp["id"] for bp in m365_best_practices_service.list_best_practices()}
     if check_id not in known_ids:
         return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
@@ -3637,6 +3643,8 @@ async def remediate_m365_best_practice(request: Request, check_id: str):
     )
     if redirect:
         return redirect
+    if not _is_valid_m365_best_practice_check_id(check_id):
+        return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
     # Validate that the check_id is a known best practice to prevent unintended operations
     known_ids = {bp["id"] for bp in m365_best_practices_service.list_best_practices()}
     if check_id not in known_ids:
@@ -3688,6 +3696,8 @@ async def set_m365_best_practice_account_exclusion(request: Request, check_id: s
     )
     if redirect:
         return redirect
+    if not _is_valid_m365_best_practice_check_id(check_id):
+        return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
     if check_id not in {bp["id"] for bp in m365_best_practices_service.list_best_practices()}:
         return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
     form = await request.form()
@@ -3732,6 +3742,8 @@ async def save_m365_best_practice_note(request: Request, check_id: str):
     user, membership, _, company_id, redirect = await _load_m365_best_practices_context(request)
     if redirect:
         return redirect
+    if not _is_valid_m365_best_practice_check_id(check_id):
+        return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
     if check_id not in {bp["id"] for bp in m365_best_practices_service.list_best_practices()}:
         return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
     form = await request.form()
@@ -3745,11 +3757,13 @@ async def save_m365_best_practice_note(request: Request, check_id: str):
     stored = await m365_best_practices_service.get_last_results(company_id)
     if not any(item.get("check_id") == check_id for item in stored):
         return flash_redirect("/m365/best-practices", "Check result is not available yet", "error")
-    await m365_best_practices_service.set_result_notes(
+    updated = await m365_best_practices_service.set_result_notes(
         company_id=company_id,
         check_id=check_id,
         notes=notes or None,
     )
+    if not updated:
+        return flash_redirect("/m365/best-practices", "Check result is not available yet", "error")
     log_info(
         "M365 best practice note updated",
         company_id=company_id,

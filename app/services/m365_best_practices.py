@@ -6317,9 +6317,13 @@ async def set_account_exclusion(
     )
 
 
-async def set_result_notes(*, company_id: int, check_id: str, notes: str | None) -> None:
+async def set_result_notes(*, company_id: int, check_id: str, notes: str | None) -> bool:
     """Persist the per-check technician/admin note for a company result."""
-    await bp_repo.update_result_notes(company_id=company_id, check_id=check_id, notes=notes)
+    return await bp_repo.update_result_notes(
+        company_id=company_id,
+        check_id=check_id,
+        notes=notes,
+    )
 
 
 async def _remediate_foreach_mailbox(

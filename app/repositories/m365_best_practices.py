@@ -191,9 +191,9 @@ async def list_results(company_id: int) -> list[dict[str, Any]]:
     return results
 
 
-async def update_result_notes(*, company_id: int, check_id: str, notes: str | None) -> None:
+async def update_result_notes(*, company_id: int, check_id: str, notes: str | None) -> bool:
     """Persist the technician/admin note for one stored best-practice result."""
-    await db.execute(
+    updated = await db.execute_rowcount(
         """
         UPDATE m365_best_practice_results
         SET notes = %s
@@ -201,6 +201,7 @@ async def update_result_notes(*, company_id: int, check_id: str, notes: str | No
         """,
         (notes, company_id, check_id),
     )
+    return updated > 0
 
 
 async def delete_results(company_id: int) -> None:
