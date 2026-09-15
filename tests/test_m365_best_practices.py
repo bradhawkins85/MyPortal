@@ -6015,6 +6015,7 @@ async def test_remediate_per_user_mfa_disables_non_disabled_enabled_users():
 @pytest.mark.anyio("asyncio")
 async def test_remediate_per_user_mfa_requires_enabled_conditional_access():
     upserts: list[dict] = []
+    safe_get_all = AsyncMock(return_value=[{"state": "disabled"}])
 
     with (
         patch(
@@ -6024,8 +6025,7 @@ async def test_remediate_per_user_mfa_requires_enabled_conditional_access():
         ),
         patch(
             "app.services.m365_best_practices._safe_graph_get_all",
-            new_callable=AsyncMock,
-            return_value=[{"state": "disabled"}],
+            safe_get_all,
         ),
         patch(
             "app.services.m365_best_practices._graph_patch",
@@ -6045,6 +6045,7 @@ async def test_remediate_per_user_mfa_requires_enabled_conditional_access():
         result["message"]
         == "Remediation command failed: No enabled Conditional Access policy found. Configure Conditional Access before disabling per-user MFA."
     )
+    safe_get_all.assert_awaited_once_with("graph-token", bp_service._CA_POLICIES_URL)
     graph_patch.assert_not_awaited()
     assert upserts[0]["remediation_status"] == "failed"
 
