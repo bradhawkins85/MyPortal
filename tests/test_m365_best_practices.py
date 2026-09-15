@@ -2083,7 +2083,7 @@ async def test_check_concealed_names_pass_when_display_enabled():
     with patch(
         "app.services.m365_best_practices._graph_get",
         new_callable=AsyncMock,
-        return_value={"displayConcealedNames": True},
+        return_value={"displayConcealedNames": False},
     ):
         result = await _check_concealed_names("token")
 
@@ -2098,7 +2098,7 @@ async def test_check_concealed_names_fail_when_concealed():
     with patch(
         "app.services.m365_best_practices._graph_get",
         new_callable=AsyncMock,
-        return_value={"displayConcealedNames": False},
+        return_value={"displayConcealedNames": True},
     ):
         result = await _check_concealed_names("token")
 

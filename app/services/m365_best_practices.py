@@ -432,25 +432,25 @@ async def _check_concealed_names(token: str) -> dict[str, Any]:
     token carries ``Reports.Read.All``.
     """
     check_id = "bp_concealed_names"
-    check_name = "Display concealed user, group, and site names in all reports is enabled"
+    check_name = "Concealed user, group, and site names in all reports is disabled"
     try:
         data = await _graph_get(token, _REPORT_SETTINGS_URL)
         display_concealed = data.get("displayConcealedNames")
-        if display_concealed is True:
+        if display_concealed is False:
             return {
                 "check_id": check_id,
                 "check_name": check_name,
                 "status": STATUS_PASS,
                 "details": "Report settings are configured to display real user, group, and site names.",
             }
-        if display_concealed is False:
+        if display_concealed is True:
             return {
                 "check_id": check_id,
                 "check_name": check_name,
                 "status": STATUS_FAIL,
                 "details": (
                     "Report settings are configured to conceal user, group, and site names. "
-                    "Enable display of real names to improve report usability and auditability."
+                    "Disable name concealment to improve report usability and auditability."
                 ),
             }
         return {
@@ -3718,25 +3718,25 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
     },
     {
         "id": "bp_concealed_names",
-        "name": "Display concealed user, group, and site names in all reports is enabled",
+        "name": "Concealed user, group, and site names in all reports is disabled",
         "description": (
             "Microsoft 365 usage reports should display real user, group, and site "
             "names so that administrators can accurately audit activity and identify "
-            "issues.  When concealed names are enabled, obfuscated identifiers are "
-            "shown instead, which reduces the usefulness of usage reports."
+            "issues.  When the 'Display concealed names' setting is enabled, obfuscated "
+            "identifiers are shown instead, which reduces the usefulness of usage reports."
         ),
         "remediation": (
             "Run the PowerShell command: "
-            "Update-MgAdminReportSetting -DisplayConcealedNames $true\n"
+            "Update-MgAdminReportSetting -DisplayConcealedNames $false\n"
             "Or via the Microsoft 365 admin center: Settings → Org settings → "
-            "Services → Reports → enable 'Display concealed user, group, and site names'."
+            "Services → Reports → disable 'Display concealed user, group, and site names'."
         ),
         "source": _check_concealed_names,
         "source_type": "graph",
         "default_enabled": True,
         "has_remediation": True,
         "remediation_url": _REPORT_SETTINGS_URL,
-        "remediation_payload": {"displayConcealedNames": True},
+        "remediation_payload": {"displayConcealedNames": False},
     },
     # ------------------------------------------------------------------
     # Identity & Conditional Access (Microsoft Graph)
