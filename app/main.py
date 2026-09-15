@@ -3505,6 +3505,13 @@ async def _load_m365_best_practices_context(request: Request, *, super_admin_onl
     return user, membership, company, company_id, None
 
 
+def _can_manage_m365_account_exclusions(user: dict, membership: dict | None) -> bool:
+    return bool(
+        user.get("is_super_admin")
+        or (membership and membership.get("is_admin"))
+    )
+
+
 @app.get("/m365/best-practices", response_class=HTMLResponse)
 async def m365_best_practices_page(request: Request):
     user, membership, company, company_id, redirect = await _load_m365_best_practices_context(request)
@@ -3524,6 +3531,7 @@ async def m365_best_practices_page(request: Request):
         "catalog": enabled_catalog,
         "has_credentials": bool(credentials),
         "is_super_admin": bool(user.get("is_super_admin")),
+        "can_manage_account_exclusions": _can_manage_m365_account_exclusions(user, membership),
     }
     return await _render_template("m365/best_practices.html", request, user, extra=extra)
 
@@ -3679,10 +3687,16 @@ async def remediate_m365_best_practice(request: Request, check_id: str):
 async def set_m365_best_practice_account_exclusion(request: Request, check_id: str):
     """Exclude or restore one account finding for one company/check pair."""
     user, membership, _, company_id, redirect = await _load_m365_best_practices_context(
-        request, super_admin_only=True,
+        request,
     )
     if redirect:
         return redirect
+    can_manage_account_exclusions = _can_manage_m365_account_exclusions(user, membership)
+    if not can_manage_account_exclusions:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Best-practices account exclusion permission required",
+        )
     if check_id not in {bp["id"] for bp in m365_best_practices_service.list_best_practices()}:
         return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
     form = await request.form()
