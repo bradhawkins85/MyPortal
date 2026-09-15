@@ -37,7 +37,6 @@
         <table class="table" id="cart-table" data-table data-table-id="cart">
           <thead>
             <tr>
-              <th scope="col" data-mobile-priority="supporting">Remove</th>
               <th scope="col" data-mobile-priority="supporting">Image</th>
               <th scope="col" data-sort="string" data-mobile-priority="essential">Name</th>
               <th scope="col" data-sort="string" data-mobile-priority="supporting">SKU</th>
@@ -49,12 +48,6 @@
           <tbody>
             {% for item in cart_items %}
               <tr>
-                <td data-label="Remove">
-                  <label class="checkbox checkbox--table">
-                    <input type="checkbox" name="remove" value="{{ item.product_id }}" />
-                    <span class="visually-hidden">Remove {{ item.product_name }}</span>
-                  </label>
-                </td>
                 <td data-label="Image" class="cart-table__image">
                   {% if item.product_image_url %}
                     <img src="{{ item.product_image_url }}" alt="" class="product-thumb" loading="lazy" />
@@ -87,7 +80,9 @@
                       step="1"
                       name="quantity_{{ item.product_id }}"
                       value="{{ item.quantity }}"
+                      data-cart-quantity
                       aria-label="Quantity for {{ item.product_name }}"
+                      aria-describedby="cart-quantity-status"
                       required
                     />
                   </div>
@@ -98,6 +93,7 @@
           </tbody>
         </table>
       </div>
+      <p id="cart-quantity-status" class="visually-hidden" role="status" aria-live="polite"></p>
     </form>
 
     {% set payment_methods = payment_method.split(',') %}
