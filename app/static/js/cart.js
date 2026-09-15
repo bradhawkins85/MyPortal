@@ -14,10 +14,19 @@
     return input ? input.value : null;
   }
 
+  let quantityRequest;
+
   function autoSaveQuantity(input) {
     const name = input.getAttribute('name');
     if (!name || !name.startsWith('quantity_')) return;
-    if (!input.validity.valid) return;
+    if (!input.validity.valid || input.dataset.saving === input.value) return;
+
+    if (quantityRequest) quantityRequest.abort();
+    quantityRequest = new AbortController();
+    input.dataset.saving = input.value;
+    input.setAttribute('aria-busy', 'true');
+    const status = document.getElementById('cart-quantity-status');
+    if (status) status.textContent = Number(input.value) === 0 ? 'Removing item from cart.' : 'Updating cart quantity.';
 
     const csrf = getCsrfToken();
     const formData = new FormData();
@@ -27,18 +36,35 @@
     fetch('/cart/update', {
       method: 'POST',
       body: formData,
-      redirect: 'manual',
+      signal: quantityRequest.signal,
     })
       .then((response) => {
-        if (response.type === 'opaqueredirect' || response.ok) {
-          window.location.href = window.location.pathname + '?_=' + Date.now();
-        } else {
-          window.location.reload();
-        }
-      })
-      .catch(() => {
+        if (!response.ok) throw new Error('Unable to update cart quantity.');
         window.location.reload();
+      })
+      .catch((error) => {
+        if (error.name === 'AbortError') return;
+        delete input.dataset.saving;
+        input.removeAttribute('aria-busy');
+        if (status) status.textContent = 'Unable to update the cart. Please try again.';
       });
+  }
+
+  function bindQuantityAutoSave(container) {
+    container.querySelectorAll('[data-cart-quantity]').forEach((input) => {
+      if (!(input instanceof HTMLInputElement)) return;
+
+      const debouncedSave = debounce(() => autoSaveQuantity(input), 350);
+      input.addEventListener('input', () => {
+        if (!input.validity.valid || input.value === '') return;
+        if (Number(input.value) === 0) {
+          autoSaveQuantity(input);
+        } else {
+          debouncedSave();
+        }
+      });
+      input.addEventListener('change', () => autoSaveQuantity(input));
+    });
   }
 
   function parseJson(elementId) {
@@ -114,8 +140,6 @@
         input.reportValidity();
       });
 
-      const debouncedSave = debounce(() => autoSaveQuantity(input), 600);
-      input.addEventListener('change', debouncedSave);
     });
   }
 
@@ -420,6 +444,7 @@
   document.addEventListener('DOMContentLoaded', () => {
     const container = document.body;
     bindStockLimitInputs(container);
+    bindQuantityAutoSave(container);
     handleFormSubmitAndReload();
 
     const modal = document.getElementById('cart-product-details-modal');
