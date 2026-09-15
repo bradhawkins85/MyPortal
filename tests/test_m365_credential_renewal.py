@@ -516,7 +516,7 @@ async def test_renew_expiring_renews_global_admin_credentials():
     ):
         result = await m365_service.renew_expiring_client_secrets()
 
-    mock_renew_admin.assert_awaited_once_with()
+    mock_renew_admin.assert_awaited_once()
     assert result == {"renewed": 1, "skipped": 0, "failed": 0}
 
 
@@ -564,6 +564,86 @@ async def test_renew_expiring_renews_company_admin_credentials():
 
     mock_renew_admin.assert_awaited_once_with(21)
     assert result == {"renewed": 1, "skipped": 0, "failed": 0}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_renew_expiring_global_admin_reprovision_counts_skipped():
+    """Global admin reprovision-required errors are counted as skipped."""
+    mock_settings = MagicMock()
+    mock_settings.m365_client_secret_renewal_days = 30
+
+    with (
+        patch.object(
+            m365_service.m365_repo,
+            "list_credentials_expiring_before",
+            AsyncMock(return_value=[]),
+        ),
+        patch.object(
+            m365_service,
+            "get_admin_m365_credentials",
+            AsyncMock(
+                return_value={
+                    "client_secret_expires_at": datetime.utcnow() + timedelta(days=1),
+                }
+            ),
+        ),
+        patch.object(
+            m365_service.m365_repo,
+            "list_provisioned_company_ids",
+            AsyncMock(return_value=set()),
+        ),
+        patch.object(
+            m365_service,
+            "renew_admin_client_secret",
+            AsyncMock(side_effect=m365_service.M365ReprovisionRequiredError("re-provisioning")),
+        ),
+        patch("app.services.m365.get_settings", return_value=mock_settings),
+    ):
+        result = await m365_service.renew_expiring_client_secrets()
+
+    assert result == {"renewed": 0, "skipped": 1, "failed": 0}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_renew_expiring_company_admin_error_counts_failed():
+    """Per-company admin renewal errors are counted as failed."""
+    mock_settings = MagicMock()
+    mock_settings.m365_client_secret_renewal_days = 30
+
+    with (
+        patch.object(
+            m365_service.m365_repo,
+            "list_credentials_expiring_before",
+            AsyncMock(return_value=[]),
+        ),
+        patch.object(
+            m365_service, "get_admin_m365_credentials", AsyncMock(return_value=None)
+        ),
+        patch.object(
+            m365_service.m365_repo,
+            "list_provisioned_company_ids",
+            AsyncMock(return_value={33}),
+        ),
+        patch.object(
+            m365_service,
+            "get_company_admin_credentials",
+            AsyncMock(
+                return_value={
+                    "client_secret_expires_at": datetime.utcnow() + timedelta(days=1),
+                    "app_object_id": "company-app-obj",
+                }
+            ),
+        ),
+        patch.object(
+            m365_service,
+            "renew_admin_client_secret",
+            AsyncMock(side_effect=m365_service.M365Error("Graph failure")),
+        ),
+        patch("app.services.m365.get_settings", return_value=mock_settings),
+    ):
+        result = await m365_service.renew_expiring_client_secrets()
+
+    assert result == {"renewed": 0, "skipped": 0, "failed": 1}
 
 
 @pytest.mark.anyio("asyncio")

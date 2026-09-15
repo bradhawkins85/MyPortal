@@ -196,6 +196,7 @@ DISCOVER_SCOPE = "openid profile"
 
 # Module slug used to store the admin app credentials for PKCE bootstrap flows
 _M365_ADMIN_MODULE_SLUG = "m365-admin"
+_M365_SECRET_DISPLAY_NAME = "MyPortal"
 
 # Well-known Microsoft public client used as a fallback for PKCE-based bootstrap
 # provisioning when no custom PKCE client is configured.  This is the Azure CLI
@@ -648,6 +649,10 @@ class M365NoDelegatedTokenError(M365Error):
     completed the 'Authorize portal access' connect flow).  Callers can
     catch this specific subclass to redirect the user to the connect flow.
     """
+
+
+class M365ReprovisionRequiredError(M365Error):
+    """Raised when automatic secret renewal requires app re-provisioning first."""
 
 
 def generate_pkce_pair() -> tuple[str, str]:
@@ -1835,7 +1840,7 @@ async def provision_app_registration(
         f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/addPassword",
         {
             "passwordCredential": {
-                "displayName": "MyPortal",
+                "displayName": _M365_SECRET_DISPLAY_NAME,
                 "endDateTime": secret_expiry_str,
             }
         },
@@ -2114,7 +2119,7 @@ async def renew_client_secret(company_id: int) -> None:
 
     app_object_id = creds.get("app_object_id")
     if not app_object_id:
-        raise M365Error(
+        raise M365ReprovisionRequiredError(
             "App object ID not stored – re-provisioning is required to enable "
             "automatic client secret renewal for this company"
         )
@@ -2141,7 +2146,7 @@ async def renew_client_secret(company_id: int) -> None:
         f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/addPassword",
         {
             "passwordCredential": {
-                "displayName": "MyPortal",
+                "displayName": _M365_SECRET_DISPLAY_NAME,
                 "endDateTime": new_expiry_str,
             }
         },
@@ -2203,7 +2208,7 @@ async def renew_admin_client_secret(company_id: int | None = None) -> None:
 
     app_object_id = creds.get("app_object_id")
     if not app_object_id:
-        raise M365Error(
+        raise M365ReprovisionRequiredError(
             "Admin app object ID not stored – re-provisioning is required to enable "
             "automatic admin client secret renewal"
         )
@@ -2230,7 +2235,7 @@ async def renew_admin_client_secret(company_id: int | None = None) -> None:
         f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/addPassword",
         {
             "passwordCredential": {
-                "displayName": "MyPortal",
+                "displayName": _M365_SECRET_DISPLAY_NAME,
                 "endDateTime": new_expiry_str,
             }
         },
@@ -2343,19 +2348,18 @@ async def renew_expiring_client_secrets() -> dict[str, Any]:
             admin_creds.get("client_secret_expires_at")
         )
         if admin_expires and admin_expires <= cutoff:
-            if admin_creds.get("app_object_id"):
-                try:
-                    await renew_admin_client_secret()
-                    renewed += 1
-                except M365Error as exc:
-                    log_error("Failed to renew global M365 admin client secret", error=str(exc))
-                    failed += 1
-            else:
+            try:
+                await renew_admin_client_secret()
+                renewed += 1
+            except M365ReprovisionRequiredError as exc:
                 log_error(
-                    "Skipping global M365 admin secret renewal – app_object_id not stored; "
-                    "re-provisioning required"
+                    "Skipping global M365 admin secret renewal",
+                    error=str(exc),
                 )
                 skipped += 1
+            except M365Error as exc:
+                log_error("Failed to renew global M365 admin client secret", error=str(exc))
+                failed += 1
 
     # Per-company admin credentials used for per-company PKCE provisioning
     try:
@@ -2364,8 +2368,26 @@ async def renew_expiring_client_secrets() -> dict[str, Any]:
         log_error("Failed to list company IDs for M365 admin renewal", error=str(exc))
         provisioned_company_ids = set()
 
-    for company_id in provisioned_company_ids:
-        company_admin_creds = await get_company_admin_credentials(company_id)
+    company_ids = sorted(provisioned_company_ids)
+    if company_ids:
+        company_admin_cred_pairs = await asyncio.gather(
+            *[
+                get_company_admin_credentials(company_id)
+                for company_id in company_ids
+            ],
+            return_exceptions=True,
+        )
+    else:
+        company_admin_cred_pairs = []
+
+    for company_id, company_admin_creds in zip(company_ids, company_admin_cred_pairs):
+        if isinstance(company_admin_creds, Exception):
+            log_error(
+                "Failed to load per-company M365 admin credentials for renewal",
+                company_id=company_id,
+                error=str(company_admin_creds),
+            )
+            continue
         if not company_admin_creds:
             continue
         admin_expires = _parse_client_secret_expires(
@@ -2373,17 +2395,16 @@ async def renew_expiring_client_secrets() -> dict[str, Any]:
         )
         if not admin_expires or admin_expires > cutoff:
             continue
-        if not company_admin_creds.get("app_object_id"):
-            log_error(
-                "Skipping per-company M365 admin secret renewal – app_object_id not stored; "
-                "re-provisioning required",
-                company_id=company_id,
-            )
-            skipped += 1
-            continue
         try:
             await renew_admin_client_secret(company_id)
             renewed += 1
+        except M365ReprovisionRequiredError as exc:
+            log_error(
+                "Skipping per-company M365 admin secret renewal",
+                company_id=company_id,
+                error=str(exc),
+            )
+            skipped += 1
         except M365Error as exc:
             log_error(
                 "Failed to renew per-company M365 admin client secret",
