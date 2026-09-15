@@ -2808,7 +2808,7 @@ async def test_check_user_consent_disallowed_unknown_on_error():
 
 @pytest.mark.anyio("asyncio")
 async def test_check_quarantine_notification_enabled_pass():
-    """All policies have notifications enabled and frequency=1: pass."""
+    """The global quarantine policy enables daily notifications: pass."""
     from app.services.m365_best_practices import _check_quarantine_notification_enabled
 
     with patch(
@@ -2818,9 +2818,9 @@ async def test_check_quarantine_notification_enabled_pass():
         mock_cmd.return_value = {
             "value": [
                 {
-                    "Name": "Default",
-                    "EnableEndUserSpamNotifications": True,
-                    "EndUserSpamNotificationFrequency": 1,
+                    "Name": "GlobalQuarantinePolicy",
+                    "ESNEnabled": True,
+                    "EndUserSpamNotificationFrequency": "1.00:00:00",
                 }
             ]
         }
@@ -2828,6 +2828,12 @@ async def test_check_quarantine_notification_enabled_pass():
 
     assert result["status"] == "pass"
     assert result["check_id"] == "bp_quarantine_notification_enabled"
+    mock_cmd.assert_awaited_once_with(
+        "token",
+        "tenant-id",
+        "Get-QuarantinePolicy",
+        {"QuarantinePolicyType": "GlobalQuarantinePolicy"},
+    )
 
 
 @pytest.mark.anyio("asyncio")
@@ -2842,9 +2848,9 @@ async def test_check_quarantine_notification_disabled_fails():
         mock_cmd.return_value = {
             "value": [
                 {
-                    "Name": "Default",
-                    "EnableEndUserSpamNotifications": False,
-                    "EndUserSpamNotificationFrequency": 1,
+                    "Name": "GlobalQuarantinePolicy",
+                    "ESNEnabled": False,
+                    "EndUserSpamNotificationFrequency": "1.00:00:00",
                 }
             ]
         }
@@ -2856,7 +2862,7 @@ async def test_check_quarantine_notification_disabled_fails():
 
 @pytest.mark.anyio("asyncio")
 async def test_check_quarantine_notification_high_frequency_fails():
-    """Policy with notifications enabled but frequency > 1 day: fail."""
+    """Global policy with notifications enabled but a weekly frequency: fail."""
     from app.services.m365_best_practices import _check_quarantine_notification_enabled
 
     with patch(
@@ -2866,16 +2872,30 @@ async def test_check_quarantine_notification_high_frequency_fails():
         mock_cmd.return_value = {
             "value": [
                 {
-                    "Name": "Default",
-                    "EnableEndUserSpamNotifications": True,
-                    "EndUserSpamNotificationFrequency": 3,
+                    "Name": "GlobalQuarantinePolicy",
+                    "ESNEnabled": True,
+                    "EndUserSpamNotificationFrequency": "7.00:00:00",
                 }
             ]
         }
         result = await _check_quarantine_notification_enabled("token", "tenant-id")
 
     assert result["status"] == "fail"
-    assert "frequency=3" in result["details"]
+    assert "7.00:00:00" in result["details"]
+
+
+def test_quarantine_notification_remediation_uses_quarantine_policy():
+    """Remediation must not call the deprecated hosted content filter settings."""
+    entry = next(
+        bp for bp in bp_service._BEST_PRACTICES
+        if bp["id"] == "bp_quarantine_notification_enabled"
+    )
+    assert entry["remediation_cmdlet"] == "Set-QuarantinePolicy"
+    assert entry["remediation_params"] == {
+        "Identity": "GlobalQuarantinePolicy",
+        "ESNEnabled": True,
+        "EndUserSpamNotificationFrequency": "1.00:00:00",
+    }
 
 
 @pytest.mark.anyio("asyncio")
