@@ -3436,6 +3436,12 @@ async def check_enterprise_app_permissions(
             # so diagnostics show an actionable failure.
             if app_id == _GRAPH_APP_ID and role_id == _SHAREPOINT_TENANT_SETTINGS_ROLE:
                 available = True
+            # Teams.ManageAsApp is required for Teams PowerShell cmdlet checks.
+            # The Skype/Teams SP may not be present in every tenant, but the
+            # role is always actionable: treat it as a reportable failure so
+            # diagnostics show Pass/Fail rather than "Not Supported".
+            if app_id == _TEAMS_APP_ID and role_id == _TEAMS_MANAGE_AS_APP_ROLE:
+                available = True
             if granted:
                 perm_status = "pass"
             elif not available:

@@ -130,6 +130,18 @@
               {% endif %}
             </td>
           </tr>
+          {% if perm_result.status == "fail" and perm.name == "Teams.ManageAsApp" %}
+          <tr>
+            <td colspan="5" style="background: var(--color-warning-bg, #fffbeb); border-top: none; padding: 0.5rem 1rem 0.75rem 3rem;">
+              <strong style="color: var(--color-warning, #92400e);">Remediation steps:</strong>
+              <ol style="margin: 0.35rem 0 0 1.25rem; padding: 0; color: var(--color-warning, #92400e);">
+                <li>Click <strong>Repair</strong> above, or re-run <strong>Authorize portal access</strong> on the <a href="/m365">Office 365 Configuration</a> page to attempt an automatic grant.</li>
+                <li>If the automatic grant fails, sign in to <a href="https://entra.microsoft.com" target="_blank" rel="noopener noreferrer">Microsoft Entra ID</a> as a Global Administrator and navigate to <strong>Enterprise applications &rsaquo; [your app] &rsaquo; Permissions &rsaquo; Grant admin consent</strong>.</li>
+                <li>Additionally, assign the <strong>Teams Service Administrator</strong> directory role to the service principal under <strong>Roles and administrators &rsaquo; Teams Service Administrator</strong>.</li>
+              </ol>
+            </td>
+          </tr>
+          {% endif %}
           {% endfor %}
         </tbody>
       </table>
