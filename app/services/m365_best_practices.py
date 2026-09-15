@@ -6445,15 +6445,50 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
                 success = True
             except M365Error as exc:
-                failure_message = str(exc)
-                log_error(
-                    "M365 best practice remediation command failed",
-                    company_id=company_id,
-                    check_id=check_id,
-                    cmdlet=cmdlet,
-                    error=str(exc),
-                )
-                success = False
+                # Older enterprise-app registrations can be missing a newly
+                # required EXO application or directory role.  In particular,
+                # Customer Lockbox needs Compliance Administrator in addition
+                # to Exchange.ManageAsApp.  Repair permissions with the stored
+                # delegated admin token, then obtain a new EXO token and retry
+                # exactly once.  Never retry other failures or retry without a
+                # confirmed grant, which avoids masking licensing and policy
+                # errors as permission problems.
+                granted = False
+                if exc.http_status == 403:
+                    try:
+                        delegated_token = await acquire_delegated_token(company_id)
+                        if delegated_token:
+                            granted = await try_grant_missing_permissions(
+                                company_id, access_token=delegated_token
+                            )
+                    except Exception as grant_exc:  # noqa: BLE001 – preserve original EXO error
+                        log_error(
+                            "M365 best practice remediation permission repair failed",
+                            company_id=company_id,
+                            check_id=check_id,
+                            error=str(grant_exc),
+                        )
+
+                if granted:
+                    try:
+                        exo_token, tenant_id = await _acquire_exo_access_token(company_id)
+                        await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
+                        success = True
+                    except M365Error as retry_exc:
+                        exc = retry_exc
+                        success = False
+                else:
+                    success = False
+
+                if not success:
+                    failure_message = str(exc)
+                    log_error(
+                        "M365 best practice remediation command failed",
+                        company_id=company_id,
+                        check_id=check_id,
+                        cmdlet=cmdlet,
+                        error=str(exc),
+                    )
     elif source_type == "graph":
         try:
             # Use an app-only (client credentials) token so that application
