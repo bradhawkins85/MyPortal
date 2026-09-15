@@ -185,7 +185,7 @@ class Settings(BaseSettings):
         default=730, validation_alias="M365_CLIENT_SECRET_LIFETIME_DAYS", ge=1
     )
     m365_client_secret_renewal_days: int = Field(
-        default=14, validation_alias="M365_CLIENT_SECRET_RENEWAL_DAYS", ge=1
+        default=30, validation_alias="M365_CLIENT_SECRET_RENEWAL_DAYS", ge=1
     )
     m365_onedrive_export_destination_parent_item_id: str = Field(
         default="root",
