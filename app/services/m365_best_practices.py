@@ -507,6 +507,9 @@ _DIRECTORY_ROLES_WITH_MEMBERS_URL = (
 _AUTHENTICATION_REQUIREMENTS_URL_TMPL = (
     "https://graph.microsoft.com/beta/users/{user_id}/authentication/requirements"
 )
+_ACTIVE_CONDITIONAL_ACCESS_POLICY_STATES = frozenset(
+    {"enabled", "enabledforreportingbutnotenforced"}
+)
 _USERS_LIST_URL = (
     "https://graph.microsoft.com/v1.0/users"
     "?$select=id,displayName,userPrincipalName,userType,onPremisesSyncEnabled"
@@ -6910,9 +6913,8 @@ async def _remediate_disable_per_user_mfa(
     if policies is None:
         return False, "Unable to enumerate Conditional Access policies."
 
-    configured_states = {"enabled", "enabledforreportingbutnotenforced"}
     has_configured_ca = any(
-        str(policy.get("state") or "").strip().lower() in configured_states
+        str(policy.get("state") or "").strip().lower() in _ACTIVE_CONDITIONAL_ACCESS_POLICY_STATES
         for policy in policies
     )
     if not has_configured_ca:
