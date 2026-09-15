@@ -6998,20 +6998,6 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             try:
                 success = await _remediate_create_dynamic_guest_group(graph_token)
             except M365Error as exc:
-<<<<<<< HEAD
-                log_error(
-                    "M365 best practice dynamic guest group remediation failed",
-                    company_id=company_id,
-                    check_id=check_id,
-                    error=str(exc),
-                )
-                success = False
-        elif bp.get("remediation_type") == "foreach_public_group_graph":
-            success = await _remediate_foreach_public_group_graph(
-                graph_token, company_id, check_id
-            )
-            # Remediation status is persisted by the shared epilogue below.
-=======
                 granted = False
                 if exc.http_status == 403:
                     try:
@@ -7052,7 +7038,11 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                         error=str(exc),
                     )
                     failure_message = str(exc)
->>>>>>> origin/main
+        elif bp.get("remediation_type") == "foreach_public_group_graph":
+            success = await _remediate_foreach_public_group_graph(
+                graph_token, company_id, check_id
+            )
+            # Remediation status is persisted by the shared epilogue below.
         elif check_id == "bp_authenticator_mfa_fatigue":
             try:
                 success, failure_message = await _remediate_authenticator_mfa_fatigue(
