@@ -512,6 +512,11 @@ _GROUPS_LIST_URL = (
     "?$select=id,displayName,visibility,groupTypes,membershipRule"
     "&$top=999"
 )
+_GROUPS_REMEDIATION_LIST_URL = (
+    "https://graph.microsoft.com/v1.0/groups"
+    "?$select=id,visibility,groupTypes"
+    "&$top=999"
+)
 _GROUP_URL_TMPL = "https://graph.microsoft.com/v1.0/groups/{group_id}"
 _CA_POLICIES_URL = (
     "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies"
@@ -6626,7 +6631,7 @@ async def _remediate_foreach_public_group_graph(
     graph_token: str, company_id: int, check_id: str
 ) -> bool:
     """Convert every non-excluded public Microsoft 365 group to Private."""
-    groups = await _safe_graph_get_all(graph_token, _GROUPS_LIST_URL)
+    groups = await _safe_graph_get_all(graph_token, _GROUPS_REMEDIATION_LIST_URL)
     if groups is None:
         log_error(
             "M365 foreach-public-group remediation – list groups failed",
@@ -6645,7 +6650,7 @@ async def _remediate_foreach_public_group_graph(
             error=str(exc),
         )
         return False
-    excluded_ids = {group_id for _, group_id in exclusions}
+    excluded_ids = {group_id for cid, group_id in exclusions if cid == check_id}
 
     public_group_ids: list[str] = []
     for group in groups:
