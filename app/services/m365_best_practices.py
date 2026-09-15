@@ -1353,26 +1353,25 @@ async def _check_restrict_anon_users_start_meeting(
 # ---------------------------------------------------------------------------
 
 
-async def _check_spf_records_published(token: str) -> dict[str, Any]:
+async def _check_spf_records_published(
+    _token: str, email_domains: list[str]
+) -> dict[str, Any]:
     check_id = "bp_spf_records_published"
     check_name = "SPF records are published for all Exchange Online domains"
-    domains_data = await _safe_graph_get_all(token, _DOMAINS_URL)
-    if domains_data is None:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
-                       "Unable to enumerate accepted domains from Microsoft Graph.")
-    exchange_domains = [
-        d.get("id") or d.get("name") or ""
-        for d in domains_data
-        if isinstance(d, dict)
-        and d.get("isVerified") is True
-        and not str(d.get("id") or "").endswith(".onmicrosoft.com")
-    ]
-    if not exchange_domains:
+    configured_domains = sorted(
+        {
+            str(domain).strip().lower()
+            for domain in email_domains
+            if str(domain).strip()
+        }
+    )
+    if not configured_domains:
         return _result(check_id, check_name, STATUS_PASS,
-                       "No custom verified domains found; SPF records are not required.")
+                       "No Email domains are configured for this company in MyPortal; "
+                       "SPF records are not required.")
     missing: list[str] = []
     errored: list[str] = []
-    for domain in exchange_domains:
+    for domain in configured_domains:
         records = await _dns_txt_records(domain)
         if records is None:
             errored.append(domain)
@@ -1386,7 +1385,8 @@ async def _check_spf_records_published(token: str) -> dict[str, Any]:
                        "verify SPF records manually: " + ", ".join(errored[:5]))
     if not missing:
         return _result(check_id, check_name, STATUS_PASS,
-                       f"SPF records found for all {len(exchange_domains)} verified domain(s).")
+                       f"SPF records found for all {len(configured_domains)} "
+                       "MyPortal Email domain(s).")
     suffix = f" (DNS errors for {len(errored)} domain(s))" if errored else ""
     return _result(check_id, check_name, STATUS_FAIL,
                    f"SPF TXT record missing for {len(missing)} domain(s): "
@@ -4991,6 +4991,7 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "source": _check_spf_records_published,
         "source_type": "graph",
+        "uses_company_email_domains": True,
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
