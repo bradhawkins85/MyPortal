@@ -5845,6 +5845,26 @@ def _antiphish_remediation_prerequisite_message(check_id: str) -> str:
     return "Automated remediation is not available for this anti-phishing policy state."
 
 
+_DEFAULT_ANTIPHISH_POLICY = "Office365 AntiPhish Default"
+
+
+async def _enable_domain_impersonation_protection(
+    exo_token: str,
+    tenant_id: str,
+) -> None:
+    """Enable organization-domain impersonation protection on the default anti-phish policy."""
+    await _exo_invoke_command(
+        exo_token,
+        tenant_id,
+        "Set-AntiPhishPolicy",
+        {
+            "Identity": _DEFAULT_ANTIPHISH_POLICY,
+            "EnableOrganizationDomainsProtection": True,
+            "Confirm": False,
+        },
+    )
+
+
 async def _remediate_matching_antiphish_policies(
     exo_token: str,
     tenant_id: str,
@@ -5852,7 +5872,13 @@ async def _remediate_matching_antiphish_policies(
     cmdlet: str,
     base_params: dict[str, Any],
 ) -> tuple[bool, str]:
-    """Apply an anti-phish remediation to each matching policy."""
+    """Apply an anti-phish remediation to each matching policy.
+
+    For domain-impersonation safety-tip remediations, if no policy currently
+    has domain impersonation protection enabled, the default policy
+    ("Office365 AntiPhish Default") is automatically configured with
+    EnableOrganizationDomainsProtection before the safety-tip setting is applied.
+    """
     try:
         data = await _exo_invoke_command(exo_token, tenant_id, "Get-AntiPhishPolicy")
     except M365Error as exc:
@@ -5867,7 +5893,11 @@ async def _remediate_matching_antiphish_policies(
             targets.append(identity)
 
     if not targets:
-        return False, _antiphish_remediation_prerequisite_message(check_id)
+        if check_id == "bp_antiphish_domain_impersonation_safety_tip":
+            await _enable_domain_impersonation_protection(exo_token, tenant_id)
+            targets.append(_DEFAULT_ANTIPHISH_POLICY)
+        else:
+            return False, _antiphish_remediation_prerequisite_message(check_id)
 
     for identity in targets:
         params = dict(base_params)
