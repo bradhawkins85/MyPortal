@@ -6834,13 +6834,13 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 else:
                     success = False
 
-                log_error(
-                    "M365 best practice dynamic guest group remediation failed",
-                    company_id=company_id,
-                    check_id=check_id,
-                    error=str(exc),
-                )
                 if not success:
+                    log_error(
+                        "M365 best practice dynamic guest group remediation failed",
+                        company_id=company_id,
+                        check_id=check_id,
+                        error=str(exc),
+                    )
                     failure_message = str(exc)
         elif check_id == "bp_authenticator_mfa_fatigue":
             try:
