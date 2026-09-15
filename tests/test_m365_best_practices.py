@@ -320,6 +320,7 @@ async def test_remediate_authenticator_mfa_fatigue_returns_manual_number_matchin
     }
     graph_get.assert_awaited_once()
     sleep.assert_not_awaited()
+    update_status.assert_awaited_once()
     assert update_status.await_args.kwargs["remediation_status"] == "failed"
 
 
