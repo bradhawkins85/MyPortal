@@ -4130,16 +4130,17 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "to a protected domain, helping users identify spoofed senders."
         ),
         "remediation": (
-            "Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+            "For each anti-phishing policy with domain impersonation protection enabled:\n"
+            "Set-AntiPhishPolicy -Identity <name> "
             "-EnableSimilarDomainsSafetyTips $true"
         ),
         "source": _check_antiphish_domain_impersonation_safety_tip,
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": True,
+        "remediation_type": "matching_antiphish_policy_exo",
         "remediation_cmdlet": "Set-AntiPhishPolicy",
         "remediation_params": {
-            "Identity": "Office365 AntiPhish Default",
             "EnableSimilarDomainsSafetyTips": True,
             "Confirm": False,
         },
@@ -4154,16 +4155,17 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "similar to a protected user, reducing the risk of impersonation attacks."
         ),
         "remediation": (
-            "Set-AntiPhishPolicy -Identity 'Office365 AntiPhish Default' "
+            "For each anti-phishing policy with user impersonation protection enabled:\n"
+            "Set-AntiPhishPolicy -Identity <name> "
             "-EnableSimilarUsersSafetyTips $true"
         ),
         "source": _check_antiphish_user_impersonation_safety_tip,
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": True,
+        "remediation_type": "matching_antiphish_policy_exo",
         "remediation_cmdlet": "Set-AntiPhishPolicy",
         "remediation_params": {
-            "Identity": "Office365 AntiPhish Default",
             "EnableSimilarUsersSafetyTips": True,
             "Confirm": False,
         },
@@ -5816,6 +5818,64 @@ async def _remediate_foreach_mailbox(
     return all_ok
 
 
+def _antiphish_policy_matches_remediation(check_id: str, row: dict[str, Any]) -> bool:
+    """Return whether an anti-phish policy is a valid remediation target."""
+    if check_id == "bp_antiphish_domain_impersonation_safety_tip":
+        return _coerce_exo_bool(row.get("EnableOrganizationDomainsProtection")) or _coerce_exo_bool(
+            row.get("EnableTargetedDomainsProtection")
+        )
+    if check_id == "bp_antiphish_user_impersonation_safety_tip":
+        return _coerce_exo_bool(row.get("EnableTargetedUserProtection"))
+    return False
+
+
+def _antiphish_remediation_prerequisite_message(check_id: str) -> str:
+    """Return an actionable failure message for unsupported anti-phish automation."""
+    if check_id == "bp_antiphish_domain_impersonation_safety_tip":
+        return (
+            "Automated remediation requires an anti-phishing policy with domain impersonation "
+            "protection enabled. Configure organization-domain or targeted-domain protection "
+            "first, then retry."
+        )
+    if check_id == "bp_antiphish_user_impersonation_safety_tip":
+        return (
+            "Automated remediation requires an anti-phishing policy with user impersonation "
+            "protection enabled. Configure targeted-user protection first, then retry."
+        )
+    return "Automated remediation is not available for this anti-phishing policy state."
+
+
+async def _remediate_matching_antiphish_policies(
+    exo_token: str,
+    tenant_id: str,
+    check_id: str,
+    cmdlet: str,
+    base_params: dict[str, Any],
+) -> tuple[bool, str]:
+    """Apply an anti-phish remediation to each matching policy."""
+    try:
+        data = await _exo_invoke_command(exo_token, tenant_id, "Get-AntiPhishPolicy")
+    except M365Error as exc:
+        return False, f"Unable to query Get-AntiPhishPolicy: {exc}"
+
+    targets: list[str] = []
+    for row in data.get("value") or []:
+        if not isinstance(row, dict) or not _antiphish_policy_matches_remediation(check_id, row):
+            continue
+        identity = str(row.get("Identity") or row.get("Name") or "").strip()
+        if identity and identity not in targets:
+            targets.append(identity)
+
+    if not targets:
+        return False, _antiphish_remediation_prerequisite_message(check_id)
+
+    for identity in targets:
+        params = dict(base_params)
+        params["Identity"] = identity
+        await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
+    return True, ""
+
+
 async def _remediate_foreach_user_graph(
     graph_token: str,
     company_id: int,
@@ -5926,6 +5986,23 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             success = await _remediate_foreach_mailbox(
                 exo_token, tenant_id, company_id, check_id, mailbox_params
             )
+        elif bp.get("remediation_type") == "matching_antiphish_policy_exo":
+            cmdlet = bp.get("remediation_cmdlet", "")
+            params = bp.get("remediation_params") or {}
+            try:
+                success, failure_message = await _remediate_matching_antiphish_policies(
+                    exo_token, tenant_id, check_id, cmdlet, params
+                )
+            except M365Error as exc:
+                failure_message = str(exc)
+                log_error(
+                    "M365 best practice remediation command failed",
+                    company_id=company_id,
+                    check_id=check_id,
+                    cmdlet=cmdlet,
+                    error=str(exc),
+                )
+                success = False
         else:
             cmdlet = bp.get("remediation_cmdlet", "")
             params = bp.get("remediation_params") or {}
