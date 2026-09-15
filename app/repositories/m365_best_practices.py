@@ -21,7 +21,6 @@ async def upsert_result(
     check_name: str,
     status: str,
     details: str,
-    notes: str | None = None,
     affected_accounts: list[dict[str, str]] | None = None,
     run_at: datetime,
 ) -> None:
@@ -33,13 +32,12 @@ async def upsert_result(
     await db.execute(
         """
         INSERT INTO m365_best_practice_results
-            (company_id, check_id, check_name, status, details, notes, affected_accounts, run_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            (company_id, check_id, check_name, status, details, affected_accounts, run_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             check_name = VALUES(check_name),
             status = VALUES(status),
             details = VALUES(details),
-            notes = notes,
             affected_accounts = VALUES(affected_accounts),
             run_at = VALUES(run_at)
         """,
@@ -49,7 +47,6 @@ async def upsert_result(
             check_name,
             status,
             details,
-            notes,
             json.dumps(affected_accounts or []),
             run_at,
         ),
