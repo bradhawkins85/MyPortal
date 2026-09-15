@@ -121,9 +121,9 @@ def test_score_history_page_loads_current_company_history(monkeypatch):
     assert render_template.await_args.kwargs["extra"]["history"] == history
 
 
-def test_best_practices_page_sets_account_exclusion_permission_for_company_viewers(monkeypatch):
+def test_best_practices_page_sets_account_exclusion_permission_for_company_admins(monkeypatch):
     async def fake_context(request, super_admin_only=False):
-        return {"id": 7, "is_super_admin": False, "company_id": 99}, {"can_view_m365_best_practices": True}, {"id": 99}, 99, None
+        return {"id": 7, "is_super_admin": False, "company_id": 99}, {"is_admin": True}, {"id": 99}, 99, None
 
     render_template = AsyncMock(return_value="best-practices-page")
     monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
@@ -144,20 +144,20 @@ def test_best_practices_page_sets_account_exclusion_permission_for_company_viewe
 
 def test_can_manage_m365_account_exclusions_helper_covers_all_permission_branches():
     assert main_module._can_manage_m365_account_exclusions(
-        {"is_super_admin": True}, {"can_view_m365_best_practices": False}
+        {"is_super_admin": True}, {"is_admin": False}
     ) is True
     assert main_module._can_manage_m365_account_exclusions(
-        {"is_super_admin": False}, {"can_view_m365_best_practices": True}
+        {"is_super_admin": False}, {"is_admin": True}
     ) is True
     assert main_module._can_manage_m365_account_exclusions(
-        {"is_super_admin": False}, {"can_view_m365_best_practices": False}
+        {"is_super_admin": False}, {"is_admin": False}
     ) is False
 
 
 def test_account_exclusion_endpoint_does_not_require_super_admin(monkeypatch):
     async def fake_context(request, super_admin_only=False):
         assert super_admin_only is False
-        return {"id": 7, "is_super_admin": False, "company_id": 99}, {"can_view_m365_best_practices": True}, {"id": 99}, 99, None
+        return {"id": 7, "is_super_admin": False, "company_id": 99}, {"is_admin": True}, {"id": 99}, 99, None
 
     monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
     monkeypatch.setattr(
@@ -203,7 +203,7 @@ def test_account_exclusion_endpoint_does_not_require_super_admin(monkeypatch):
 
 def test_account_exclusion_endpoint_forbids_users_without_permission(monkeypatch):
     async def fake_context(request, super_admin_only=False):
-        return {"id": 7, "is_super_admin": False, "company_id": 99}, {"can_view_m365_best_practices": False}, {"id": 99}, 99, None
+        return {"id": 7, "is_super_admin": False, "company_id": 99}, {"is_admin": False}, {"id": 99}, 99, None
 
     monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
 

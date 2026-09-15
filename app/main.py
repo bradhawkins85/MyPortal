@@ -3508,7 +3508,7 @@ async def _load_m365_best_practices_context(request: Request, *, super_admin_onl
 def _can_manage_m365_account_exclusions(user: dict, membership: dict | None) -> bool:
     return bool(
         user.get("is_super_admin")
-        or (membership and membership.get("can_view_m365_best_practices"))
+        or (membership and membership.get("is_admin"))
     )
 
 
