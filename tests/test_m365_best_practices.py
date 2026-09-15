@@ -6022,8 +6022,12 @@ async def test_remediate_per_user_mfa_disables_non_disabled_enabled_users():
 async def test_remediate_per_user_mfa_allows_report_only_conditional_access():
     upserts: list[dict] = []
     patched: list[tuple[str, dict]] = []
-    users = [{"id": "user-1", "accountEnabled": True}]
+    users = [
+        {"id": "user-1", "accountEnabled": True},
+        {"id": "user-2", "accountEnabled": True},
+    ]
     user_1_url = bp_service._AUTHENTICATION_REQUIREMENTS_URL_TMPL.format(user_id="user-1")
+    user_2_url = bp_service._AUTHENTICATION_REQUIREMENTS_URL_TMPL.format(user_id="user-2")
 
     async def fake_safe_get_all(_token: str, url: str):
         if url == bp_service._CA_POLICIES_URL:
@@ -6035,6 +6039,8 @@ async def test_remediate_per_user_mfa_allows_report_only_conditional_access():
     async def fake_safe_get(_token: str, url: str):
         if url == user_1_url:
             return {"perUserMfaState": "enabled"}
+        if url == user_2_url:
+            return {"perUserMfaState": "disabled"}
         raise AssertionError(f"unexpected requirements URL: {url}")
 
     async def fake_patch(_token: str, url: str, payload: dict) -> dict:
