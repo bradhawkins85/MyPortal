@@ -80,6 +80,7 @@ from app.services.m365 import (
     _graph_delete,
     _graph_patch,
     _graph_post,
+    _post_app_role_assignment_with_retry,
     acquire_access_token,
     acquire_delegated_token,
     try_grant_missing_permissions,
@@ -314,7 +315,7 @@ async def _remediate_global_admin_count(graph_token: str, company_id: int) -> tu
                 "accountEnabled": True, "displayName": f"MyPortal Emergency Administrator {slot}",
                 "mailNickname": alias, "userPrincipalName": upn,
                 "passwordProfile": {"forceChangePasswordNextSignIn": True, "password": password}})
-            assignment = await _graph_post(graph_token, "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments", {
+            assignment = await _post_app_role_assignment_with_retry(graph_token, "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments", {
                 "principalId": user["id"], "roleDefinitionId": _GLOBAL_ADMIN_ROLE_DEFINITION_ID, "directoryScopeId": "/"})
             await hudu_service.create_asset_password(company_id=hudu_id, name=f"M365 Global Administrator – {upn}",
                 username=upn, password=password, url="https://admin.microsoft.com/",
