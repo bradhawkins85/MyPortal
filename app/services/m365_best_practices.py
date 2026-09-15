@@ -6162,7 +6162,10 @@ async def _remediate_foreach_mailbox(
                 existing = set(mailbox.get(key) or [])
                 missing = [value for value in desired["Add"] if value not in existing]
                 if missing:
-                    update_params[key] = {"Add": missing}
+                    # The EXO REST API does not support the PowerShell hash-table
+                    # @{Add=...} syntax for array parameters.  Pass the full merged
+                    # list of values so the cmdlet receives a plain JSON array.
+                    update_params[key] = list(existing | set(desired["Add"]))
             elif mailbox.get(key) != desired:
                 update_params[key] = desired
 

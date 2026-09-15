@@ -3482,10 +3482,13 @@ async def test_remediate_mailbox_audit_actions_enables_and_adds_missing_actions(
 
     assert result is True
     set_call.assert_awaited_once()
-    assert set_call.await_args.args[3] == {
-        "Identity": "alice@contoso.com",
-        "AuditEnabled": True,
-        "AuditOwner": {"Add": ["SoftDelete", "Update"]},
+    called_params = set_call.await_args.args[3]
+    assert called_params["Identity"] == "alice@contoso.com"
+    assert called_params["AuditEnabled"] is True
+    # AuditOwner must be a plain list (the EXO REST API does not accept
+    # the @{Add=...} hash-table syntax); it should contain the full merged set.
+    assert set(called_params["AuditOwner"]) == {
+        "MailboxLogin", "HardDelete", "SoftDelete", "Update"
     }
 
 
