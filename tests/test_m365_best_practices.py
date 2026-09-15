@@ -11,6 +11,30 @@ from app.services import m365_best_practices as bp_service
 from app.services.m365 import M365Error
 
 
+def test_get_secure_score_summary_returns_numeric_values():
+    summary = bp_service.get_secure_score_summary(
+        [
+            {
+                "check_id": "bp_monitor_secure_score",
+                "details": "Secure Score is 42.5/80 (53.1% of maximum).",
+            }
+        ]
+    )
+
+    assert summary == {"current": 42.5, "maximum": 80.0, "percentage": 53.1}
+
+
+def test_get_secure_score_summary_ignores_unavailable_score():
+    assert bp_service.get_secure_score_summary(
+        [
+            {
+                "check_id": "bp_monitor_secure_score",
+                "details": "Secure Score is unavailable.",
+            }
+        ]
+    ) is None
+
+
 @pytest.mark.anyio("asyncio")
 async def test_account_exclusions_remove_only_matching_findings(monkeypatch):
     monkeypatch.setattr(

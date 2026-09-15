@@ -3,7 +3,7 @@ from pathlib import Path
 from jinja2 import ChoiceLoader, DictLoader, Environment, FileSystemLoader
 
 
-def _render_best_practices(results, catalog=None):
+def _render_best_practices(results, catalog=None, secure_score=None):
     templates = Path(__file__).parents[1] / "app" / "templates"
     loader = ChoiceLoader(
         [
@@ -30,6 +30,7 @@ def _render_best_practices(results, catalog=None):
         catalog=catalog or [],
         has_credentials=True,
         is_super_admin=False,
+        secure_score=secure_score,
     )
 
 
@@ -106,6 +107,17 @@ def test_score_history_is_available_from_page_header():
 
     assert 'href="/m365/best-practices/history"' in html
     assert "Score history" in html
+
+
+def test_secure_score_is_shown_in_main_stat_strip():
+    html = _render_best_practices(
+        [{"cis_group": "", "status": "pass", "check_name": "Secure Score"}],
+        secure_score={"current": 42.5, "maximum": 80.0, "percentage": 53.1},
+    )
+
+    assert "Secure Score" in html
+    assert "53.1%" in html
+    assert "Microsoft Secure Score: 42.5/80.0" in html
 
 
 def test_account_findings_have_per_check_exclude_and_restore_controls():
