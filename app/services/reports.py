@@ -776,6 +776,7 @@ async def _build_m365_best_practices_detail(company_id: int) -> dict[str, Any]:
                 "check_name": row.get("check_name"),
                 "status": str(row.get("status") or "").lower(),
                 "details": row.get("details"),
+                "notes": row.get("notes"),
                 "remediation_status": row.get("remediation_status"),
                 "run_at": _datetime_to_iso(row.get("run_at")),
             }

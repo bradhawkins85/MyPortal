@@ -21,6 +21,7 @@ async def upsert_result(
     check_name: str,
     status: str,
     details: str,
+    notes: str | None = None,
     affected_accounts: list[dict[str, str]] | None = None,
     run_at: datetime,
 ) -> None:
@@ -28,17 +29,26 @@ async def upsert_result(
     await db.execute(
         """
         INSERT INTO m365_best_practice_results
-            (company_id, check_id, check_name, status, details, affected_accounts, run_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+            (company_id, check_id, check_name, status, details, notes, affected_accounts, run_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             check_name = VALUES(check_name),
             status = VALUES(status),
             details = VALUES(details),
+            notes = COALESCE(notes, VALUES(notes)),
             affected_accounts = VALUES(affected_accounts),
             run_at = VALUES(run_at)
         """,
-        (company_id, check_id, check_name, status, details,
-         json.dumps(affected_accounts or []), run_at),
+        (
+            company_id,
+            check_id,
+            check_name,
+            status,
+            details,
+            notes,
+            json.dumps(affected_accounts or []),
+            run_at,
+        ),
     )
     await _upsert_daily_history(
         company_id=company_id,
@@ -161,7 +171,7 @@ async def list_results(company_id: int) -> list[dict[str, Any]]:
     """Return all stored best-practice results for a company."""
     rows = await db.fetch_all(
         """
-        SELECT check_id, check_name, status, details, affected_accounts, run_at,
+        SELECT check_id, check_name, status, details, notes, affected_accounts, run_at,
                remediation_status, remediated_at
         FROM m365_best_practice_results
         WHERE company_id = %s
@@ -178,6 +188,18 @@ async def list_results(company_id: int) -> list[dict[str, Any]]:
             item["affected_accounts"] = []
         results.append(item)
     return results
+
+
+async def update_result_notes(*, company_id: int, check_id: str, notes: str | None) -> None:
+    """Persist the technician/admin note for one stored best-practice result."""
+    await db.execute(
+        """
+        UPDATE m365_best_practice_results
+        SET notes = %s
+        WHERE company_id = %s AND check_id = %s
+        """,
+        (notes, company_id, check_id),
+    )
 
 
 async def delete_results(company_id: int) -> None:

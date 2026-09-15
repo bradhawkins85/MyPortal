@@ -56,6 +56,17 @@
     overflow-wrap: anywhere;
   }
   .bp-account-findings form { flex: 0 0 auto; }
+  .bp-note-editor textarea {
+    margin-top: 0.5rem;
+    min-height: 5rem;
+    width: 100%;
+  }
+  .bp-note-editor__actions {
+    margin-top: 0.5rem;
+  }
+  .bp-saved-note {
+    margin-top: 0.5rem;
+  }
 </style>
 {% endblock %}
 
@@ -110,7 +121,7 @@
   {# ------------------------------------------------------------------ #}
   {# Helper macro: render a results table                                #}
   {# ------------------------------------------------------------------ #}
-  {% macro result_table(checks, show_actions, table_id='') %}
+  {% macro result_table(checks, show_actions, can_edit_notes=false, table_id='') %}
   {{ table_toolbar(
     table_id,
     search=true,
@@ -195,6 +206,33 @@
               {% endif %}
             </div>
             {% endif %}
+            {% if check.notes %}
+            <div class="bp-saved-note">
+              <strong>Note:</strong> {{ check.notes }}
+            </div>
+            {% endif %}
+            {% if can_edit_notes %}
+            <details class="bp-note-editor" style="margin-top:0.5rem">
+              <summary style="cursor:pointer;color:var(--color-primary,#2563eb);font-size:0.875rem">
+                {{ 'Edit note' if check.notes else 'Add note' }}
+              </summary>
+              <form method="post" action="/m365/best-practices/note/{{ check.check_id }}">
+                {% if csrf_token %}
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                {% endif %}
+                <textarea
+                  class="form__control"
+                  name="notes"
+                  rows="3"
+                  maxlength="4000"
+                  placeholder="Add customer context or technician review notes."
+                >{{ check.notes or '' }}</textarea>
+                <div class="bp-note-editor__actions">
+                  <button type="submit" class="button button--small button--ghost">Save note</button>
+                </div>
+              </form>
+            </details>
+            {% endif %}
           </td>
           <td data-column-key="evaluated" data-value="{{ check.run_at.isoformat() if check.run_at else '' }}" style="white-space:nowrap">
             {% if check.run_at %}
@@ -246,7 +284,7 @@
       <div class="panel__body" style="padding-bottom:0">
         {{ filter_strip(m365_results, 'bp-table-m365', secure_score) }}
       </div>
-      {{ result_table(m365_results, is_super_admin, 'bp-table-m365') }}
+      {{ result_table(m365_results, is_super_admin, can_edit_notes, 'bp-table-m365') }}
     {% else %}
       <div class="panel__body">
         {% if not catalog %}
@@ -279,7 +317,7 @@
       <div class="panel__body" style="padding-bottom:0">
         {{ filter_strip(intune_windows_results, 'bp-table-intune-windows') }}
       </div>
-      {{ result_table(intune_windows_results, is_super_admin, 'bp-table-intune-windows') }}
+      {{ result_table(intune_windows_results, is_super_admin, can_edit_notes, 'bp-table-intune-windows') }}
     {% else %}
       <div class="panel__body">
         <p class="text-muted">No Intune Windows results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to run checks.{% endif %}</p>
@@ -300,7 +338,7 @@
       <div class="panel__body" style="padding-bottom:0">
         {{ filter_strip(intune_ios_results, 'bp-table-intune-ios') }}
       </div>
-      {{ result_table(intune_ios_results, is_super_admin, 'bp-table-intune-ios') }}
+      {{ result_table(intune_ios_results, is_super_admin, can_edit_notes, 'bp-table-intune-ios') }}
     {% else %}
       <div class="panel__body">
         <p class="text-muted">No Intune iOS/iPadOS results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to run checks.{% endif %}</p>
@@ -321,7 +359,7 @@
       <div class="panel__body" style="padding-bottom:0">
         {{ filter_strip(intune_macos_results, 'bp-table-intune-macos') }}
       </div>
-      {{ result_table(intune_macos_results, is_super_admin, 'bp-table-intune-macos') }}
+      {{ result_table(intune_macos_results, is_super_admin, can_edit_notes, 'bp-table-intune-macos') }}
     {% else %}
       <div class="panel__body">
         <p class="text-muted">No Intune macOS results yet.{% if is_super_admin %} Click <strong>Evaluate now</strong> to run checks.{% endif %}</p>

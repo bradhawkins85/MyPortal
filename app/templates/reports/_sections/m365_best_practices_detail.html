@@ -13,6 +13,7 @@
             <th>Check</th>
             <th>Status</th>
             <th>Details</th>
+            <th>Notes</th>
             <th>Remediation</th>
             <th>Last run</th>
           </tr>
@@ -26,6 +27,7 @@
                 <span class="status status--{{ status_map.get(check.status, 'neutral') }}">{{ check.status or '—' }}</span>
               </td>
               <td>{{ check.details or '—' }}</td>
+              <td>{{ check.notes or '—' }}</td>
               <td>{{ check.remediation_status or '—' }}</td>
               <td>
                 {% if check.run_at %}

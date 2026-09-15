@@ -3524,6 +3524,7 @@ async def m365_best_practices_page(request: Request):
         "catalog": enabled_catalog,
         "has_credentials": bool(credentials),
         "is_super_admin": bool(user.get("is_super_admin")),
+        "can_edit_notes": True,
     }
     return await _render_template("m365/best_practices.html", request, user, extra=extra)
 
@@ -3717,6 +3718,44 @@ async def set_m365_best_practice_account_exclusion(request: Request, check_id: s
     return flash_redirect(
         "/m365/best-practices",
         "Account excluded from this check" if excluded else "Account restored to this check",
+        "success",
+    )
+
+
+@app.post("/m365/best-practices/note/{check_id}", response_class=RedirectResponse)
+async def save_m365_best_practice_note(request: Request, check_id: str):
+    """Save or clear the technician/admin note for one stored best-practice result."""
+    user, membership, _, company_id, redirect = await _load_m365_best_practices_context(request)
+    if redirect:
+        return redirect
+    if check_id not in {bp["id"] for bp in m365_best_practices_service.list_best_practices()}:
+        return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
+    form = await request.form()
+    notes = str(form.get("notes") or "").strip()
+    if len(notes) > 4000:
+        return flash_redirect(
+            "/m365/best-practices",
+            "Check note must be 4000 characters or fewer",
+            "error",
+        )
+    stored = await m365_best_practices_service.get_last_results(company_id)
+    if not any(item.get("check_id") == check_id for item in stored):
+        return flash_redirect("/m365/best-practices", "Check result is not available yet", "error")
+    await m365_best_practices_service.set_result_notes(
+        company_id=company_id,
+        check_id=check_id,
+        notes=notes or None,
+    )
+    log_info(
+        "M365 best practice note updated",
+        company_id=company_id,
+        check_id=check_id,
+        user_id=user.get("id"),
+        cleared=not bool(notes),
+    )
+    return flash_redirect(
+        "/m365/best-practices",
+        "Check note saved" if notes else "Check note cleared",
         "success",
     )
 

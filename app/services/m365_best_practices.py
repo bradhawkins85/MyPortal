@@ -6268,6 +6268,7 @@ async def get_last_results(company_id: int) -> list[dict[str, Any]]:
             "description": bp_meta.get("description", ""),
             "status": status,
             "details": row.get("details") or "",
+            "notes": row.get("notes") or "",
             "run_at": row.get("run_at"),
             "remediation": get_remediation(check_id) if status == STATUS_FAIL else None,
             "has_remediation": bool(bp_meta.get("has_remediation")),
@@ -6314,6 +6315,11 @@ async def set_account_exclusion(
         company_id=company_id, check_id=check_id, account_id=account_id,
         account_name=account_name, excluded=excluded,
     )
+
+
+async def set_result_notes(*, company_id: int, check_id: str, notes: str | None) -> None:
+    """Persist the per-check technician/admin note for a company result."""
+    await bp_repo.update_result_notes(company_id=company_id, check_id=check_id, notes=notes)
 
 
 async def _remediate_foreach_mailbox(
@@ -6941,6 +6947,7 @@ __all__ = [
     "run_best_practices",
     "run_single_check",
     "get_last_results",
+    "set_result_notes",
     "get_secure_score_summary",
     "get_remediation",
     "remediate_check",
