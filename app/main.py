@@ -3753,13 +3753,14 @@ async def save_m365_best_practice_note(request: Request, check_id: str):
     if check_id not in {bp["id"] for bp in m365_best_practices_service.list_best_practices()}:
         return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
     form = await request.form()
-    notes = str(form.get("notes") or "").strip()
-    if len(notes) > 4000:
+    raw_notes = str(form.get("notes") or "")
+    if len(raw_notes) > 4000:
         return flash_redirect(
             "/m365/best-practices",
             "Check note must be 4000 characters or fewer",
             "error",
         )
+    notes = raw_notes.strip()
     updated = await m365_best_practices_service.set_result_notes(
         company_id=company_id,
         check_id=check_id,
