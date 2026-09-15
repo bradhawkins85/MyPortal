@@ -158,7 +158,8 @@ def test_authenticator_mfa_fatigue_catalog_entry_has_remediation():
     assert payload["featureSettings"]["@odata.type"] == (
         "#microsoft.graph.microsoftAuthenticatorFeatureSettings"
     )
-    for setting in bp_service._MFA_FATIGUE_PROTECTION_KEYS:
+    assert "numberMatchingRequiredState" not in payload["featureSettings"]
+    for setting in bp_service._MFA_FATIGUE_PATCHABLE_KEYS:
         feature = payload["featureSettings"][setting]
         assert feature == {
             "@odata.type": "#microsoft.graph.authenticationMethodFeatureConfiguration",
@@ -172,7 +173,7 @@ def test_authenticator_mfa_fatigue_catalog_entry_has_remediation():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_remediate_authenticator_mfa_fatigue_patches_all_user_settings():
+async def test_remediate_authenticator_mfa_fatigue_patches_supported_settings():
     with (
         patch(
             "app.services.m365_best_practices.acquire_access_token",
@@ -212,12 +213,12 @@ async def test_remediate_authenticator_mfa_fatigue_patches_all_user_settings():
         ),
         bp_service._MFA_FATIGUE_REMEDIATION_PAYLOAD,
     )
-    graph_get.assert_awaited_once()
+    assert graph_get.await_count == 2
     assert all(
         bp_service._MFA_FATIGUE_REMEDIATION_PAYLOAD["featureSettings"][setting][
             "includeTarget"
         ]["id"] == "all_users"
-        for setting in bp_service._MFA_FATIGUE_PROTECTION_KEYS
+        for setting in bp_service._MFA_FATIGUE_PATCHABLE_KEYS
     )
     update_status.assert_awaited_once()
     assert update_status.await_args.kwargs["remediation_status"] == "success"
@@ -251,7 +252,7 @@ async def test_remediate_authenticator_mfa_fatigue_waits_for_graph_consistency()
         patch(
             "app.services.m365_best_practices._safe_graph_get",
             new_callable=AsyncMock,
-            side_effect=[disabled, enabled],
+            side_effect=[disabled, disabled, enabled],
         ) as graph_get,
         patch(
             "app.services.m365_best_practices.asyncio.sleep",
@@ -267,9 +268,200 @@ async def test_remediate_authenticator_mfa_fatigue_waits_for_graph_consistency()
         )
 
     assert result["success"] is True
+    assert graph_get.await_count == 3
+    sleep.assert_awaited_once()
+    assert update_status.await_args.kwargs["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_authenticator_mfa_fatigue_returns_manual_number_matching_message():
+    number_matching_only_missing = {
+        "featureSettings": {
+            "numberMatchingRequiredState": {"state": "disabled"},
+            "displayAppInformationRequiredState": {"state": "enabled"},
+            "displayLocationInformationRequiredState": {"state": "enabled"},
+        }
+    }
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+        ) as graph_patch,
+        patch(
+            "app.services.m365_best_practices._safe_graph_get",
+            new_callable=AsyncMock,
+            return_value=number_matching_only_missing,
+        ) as graph_get,
+        patch(
+            "app.services.m365_best_practices.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ) as update_status,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_authenticator_mfa_fatigue"
+        )
+
+    assert result == {
+        "success": False,
+        "message": (
+            "Remediation command failed: "
+            f"{bp_service._MFA_FATIGUE_NUMBER_MATCHING_MANUAL_MESSAGE}"
+        ),
+    }
+    graph_get.assert_awaited_once()
+    graph_patch.assert_not_awaited()
+    sleep.assert_not_awaited()
+    update_status.assert_awaited_once()
+    assert update_status.await_args.kwargs["remediation_status"] == "failed"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_authenticator_mfa_fatigue_reports_partial_success_for_number_matching():
+    initially_disabled = {
+        "featureSettings": {
+            setting: {"state": "disabled"}
+            for setting in bp_service._MFA_FATIGUE_PROTECTION_KEYS
+        }
+    }
+    number_matching_only_missing = {
+        "featureSettings": {
+            "numberMatchingRequiredState": {"state": "disabled"},
+            "displayAppInformationRequiredState": {"state": "enabled"},
+            "displayLocationInformationRequiredState": {"state": "enabled"},
+        }
+    }
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+        ) as graph_patch,
+        patch(
+            "app.services.m365_best_practices._safe_graph_get",
+            new_callable=AsyncMock,
+            side_effect=[initially_disabled, number_matching_only_missing],
+        ) as graph_get,
+        patch(
+            "app.services.m365_best_practices.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ) as update_status,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_authenticator_mfa_fatigue"
+        )
+
+    assert result == {
+        "success": False,
+        "message": (
+            "Remediation command failed: "
+            f"{bp_service._MFA_FATIGUE_NUMBER_MATCHING_PARTIAL_MESSAGE}"
+        ),
+    }
+    assert graph_get.await_count == 2
+    graph_patch.assert_awaited_once()
+    sleep.assert_not_awaited()
+    update_status.assert_awaited_once()
+    assert update_status.await_args.kwargs["remediation_status"] == "failed"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_internal_phishing_forms_waits_for_graph_consistency():
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+            return_value={},
+        ) as graph_patch,
+        patch(
+            "app.services.m365_best_practices._safe_graph_get",
+            new_callable=AsyncMock,
+            side_effect=[
+                {"internalPhishingProtectionEnabled": False},
+                {"internalPhishingProtectionEnabled": True},
+            ],
+        ) as graph_get,
+        patch(
+            "app.services.m365_best_practices.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ) as update_status,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_internal_phishing_forms"
+        )
+
+    assert result["success"] is True
+    graph_patch.assert_awaited_once_with(
+        "graph-token",
+        bp_service._FORMS_SETTINGS_URL,
+        {"internalPhishingProtectionEnabled": True},
+    )
     assert graph_get.await_count == 2
     sleep.assert_awaited_once()
     assert update_status.await_args.kwargs["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_internal_phishing_forms_fails_when_graph_does_not_confirm():
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
+            "app.services.m365_best_practices._safe_graph_get",
+            new_callable=AsyncMock,
+            return_value={"internalPhishingProtectionEnabled": False},
+        ),
+        patch(
+            "app.services.m365_best_practices.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ) as update_status,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_internal_phishing_forms"
+        )
+
+    assert result["success"] is False
+    assert "did not confirm the updated Forms phishing protection setting" in result["message"]
+    assert sleep.await_count == bp_service._FORMS_PHISHING_VERIFICATION_ATTEMPTS - 1
+    assert update_status.await_args.kwargs["remediation_status"] == "failed"
 
 
 # ---------------------------------------------------------------------------
@@ -2902,7 +3094,6 @@ async def test_check_quarantine_notification_enabled_pass():
         "token",
         "tenant-id",
         "Get-QuarantinePolicy",
-        {"QuarantinePolicyType": "GlobalQuarantinePolicy"},
     )
 
 
@@ -2961,8 +3152,8 @@ def test_quarantine_notification_remediation_uses_quarantine_policy():
         if bp["id"] == "bp_quarantine_notification_enabled"
     )
     assert entry["remediation_cmdlet"] == "Set-QuarantinePolicy"
+    assert entry["remediation_type"] == "global_quarantine_policy_exo"
     assert entry["remediation_params"] == {
-        "Identity": "GlobalQuarantinePolicy",
         "ESNEnabled": True,
         "EndUserSpamNotificationFrequency": "1.00:00:00",
     }
@@ -2982,6 +3173,61 @@ async def test_check_quarantine_notification_unknown_on_error():
 
     assert result["status"] == "unknown"
     assert "EXO unavailable" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_quarantine_notification_resolves_global_policy_identity():
+    """Quarantine remediation targets the resolved global policy identity from EXO."""
+    upserts: list[dict] = []
+    invocations: list[dict] = []
+
+    async def fake_exo_invoke(token, tenant_id, cmdlet, params=None):
+        invocations.append({"cmdlet": cmdlet, "params": params})
+        if cmdlet == "Get-QuarantinePolicy":
+            return {
+                "value": [
+                    {
+                        "Name": "NonGlobalPolicy",
+                        "QuarantinePolicyType": "AdminOnlyAccessPolicy",
+                    },
+                    {
+                        "Name": "GlobalQuarantinePolicy EU",
+                        "QuarantinePolicyType": "GlobalQuarantinePolicy",
+                        "ESNEnabled": False,
+                        "EndUserSpamNotificationFrequency": "3.00:00:00",
+                    }
+                ]
+            }
+        return {}
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-abc"),
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            side_effect=fake_exo_invoke,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=10, check_id="bp_quarantine_notification_enabled"
+        )
+
+    assert result["success"] is True
+    assert upserts[0]["remediation_status"] == "success"
+    assert invocations[0]["cmdlet"] == "Get-QuarantinePolicy"
+    assert invocations[1]["cmdlet"] == "Set-QuarantinePolicy"
+    assert invocations[1]["params"] == {
+        "Identity": "GlobalQuarantinePolicy EU",
+        "ESNEnabled": True,
+        "EndUserSpamNotificationFrequency": "1.00:00:00",
+    }
 
 
 def test_quarantine_notification_in_catalog():
@@ -5189,6 +5435,43 @@ def test_dynamic_guest_group_catalog_entry_has_remediation():
     assert entry["has_remediation"] is True
 
 
+def test_only_managed_public_groups_catalog_entry_has_remediation():
+    entry = next(
+        bp for bp in bp_service._BEST_PRACTICES
+        if bp["id"] == "bp_only_managed_public_groups"
+    )
+    assert entry["source_type"] == "graph"
+    assert entry["remediation_type"] == "foreach_public_group_graph"
+    assert entry["has_remediation"] is True
+
+
+@pytest.mark.anyio("asyncio")
+async def test_only_managed_public_groups_lists_affected_groups():
+    groups = [
+        {
+            "id": "group-1",
+            "displayName": "Public Team",
+            "visibility": "Public",
+            "groupTypes": ["Unified"],
+        },
+        {
+            "id": "group-2",
+            "displayName": "Private Team",
+            "visibility": "Private",
+            "groupTypes": ["Unified"],
+        },
+    ]
+    with patch(
+        "app.services.m365_best_practices._safe_graph_get_all",
+        new_callable=AsyncMock,
+        return_value=groups,
+    ):
+        result = await bp_service._check_only_managed_public_groups("graph-token")
+
+    assert result["status"] == "fail"
+    assert result["affected_accounts"] == [{"id": "group-1", "name": "Public Team"}]
+
+
 @pytest.mark.anyio("asyncio")
 async def test_remediate_dynamic_guest_group_creates_security_group():
     created: list[tuple[str, dict]] = []
@@ -5241,6 +5524,89 @@ async def test_remediate_dynamic_guest_group_is_idempotent():
 
     assert success is True
     post.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_check_dynamic_guest_group_retries_after_permission_repair():
+    upserts: list[dict] = []
+    first_exc = M365Error("Microsoft Graph POST failed (403): denied", http_status=403)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            side_effect=["graph-token-1", "graph-token-2"],
+        ),
+        patch(
+            "app.services.m365_best_practices._remediate_create_dynamic_guest_group",
+            new_callable=AsyncMock,
+            side_effect=[first_exc, True],
+        ) as remediate_group,
+        patch(
+            "app.services.m365_best_practices.acquire_delegated_token",
+            new_callable=AsyncMock,
+            return_value="delegated-token",
+        ),
+        patch(
+            "app.services.m365_best_practices.try_grant_missing_permissions",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as grant_permissions,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=10, check_id="bp_dynamic_group_for_guests"
+        )
+
+    assert result["success"] is True
+    assert remediate_group.await_count == 2
+    assert remediate_group.await_args_list[0].args == ("graph-token-1",)
+    assert remediate_group.await_args_list[1].args == ("graph-token-2",)
+    grant_permissions.assert_awaited_once_with(10, access_token="delegated-token")
+    assert upserts[0]["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_check_dynamic_guest_group_returns_graph_error_details():
+    upserts: list[dict] = []
+    graph_exc = M365Error("Microsoft Graph POST failed (403): denied", http_status=403)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._remediate_create_dynamic_guest_group",
+            new_callable=AsyncMock,
+            side_effect=graph_exc,
+        ),
+        patch(
+            "app.services.m365_best_practices.acquire_delegated_token",
+            new_callable=AsyncMock,
+            return_value="delegated-token",
+        ),
+        patch(
+            "app.services.m365_best_practices.try_grant_missing_permissions",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=10, check_id="bp_dynamic_group_for_guests"
+        )
+
+    assert result["success"] is False
+    assert result["message"] == "Remediation command failed: Microsoft Graph POST failed (403): denied"
+    assert upserts[0]["remediation_status"] == "failed"
 
 
 def test_internal_keys_hide_remediation_type_and_mailbox_params():
@@ -6111,6 +6477,54 @@ async def test_remediate_organization_customization_success():
     assert result["success"] is True
     assert len(upserts) == 1
     assert upserts[0]["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_only_managed_public_groups_honors_exclusions():
+    patched_urls: list[str] = []
+    groups = [
+        {"id": "group-1", "visibility": "Public", "groupTypes": ["Unified"]},
+        {"id": "group-2", "visibility": "Public", "groupTypes": ["Unified"]},
+        {"id": "group-3", "visibility": "Private", "groupTypes": ["Unified"]},
+    ]
+
+    async def fake_graph_patch(token, url, payload):
+        assert payload == {"visibility": "Private"}
+        patched_urls.append(url)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._safe_graph_get_all",
+            new_callable=AsyncMock,
+            return_value=groups,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.get_account_exclusions",
+            new_callable=AsyncMock,
+            return_value={("bp_only_managed_public_groups", "group-2")},
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            side_effect=fake_graph_patch,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ) as mock_update_status,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=31, check_id="bp_only_managed_public_groups"
+        )
+
+    assert result["success"] is True
+    mock_update_status.assert_awaited_once()
+    assert mock_update_status.await_args.kwargs["remediation_status"] == "success"
+    assert patched_urls == ["https://graph.microsoft.com/v1.0/groups/group-1"]
 
 
 @pytest.mark.anyio("asyncio")

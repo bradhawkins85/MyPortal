@@ -3,7 +3,13 @@ from pathlib import Path
 from jinja2 import ChoiceLoader, DictLoader, Environment, FileSystemLoader
 
 
-def _render_best_practices(results, catalog=None, secure_score=None, can_edit_notes=False):
+def _render_best_practices(
+    results,
+    catalog=None,
+    secure_score=None,
+    can_manage_account_exclusions=False,
+    can_edit_notes=False,
+):
     templates = Path(__file__).parents[1] / "app" / "templates"
     loader = ChoiceLoader(
         [
@@ -30,6 +36,7 @@ def _render_best_practices(results, catalog=None, secure_score=None, can_edit_no
         catalog=catalog or [],
         has_credentials=True,
         is_super_admin=False,
+        can_manage_account_exclusions=can_manage_account_exclusions,
         secure_score=secure_score,
         can_edit_notes=can_edit_notes,
     )
@@ -121,7 +128,7 @@ def test_secure_score_is_shown_in_main_stat_strip():
     assert "Microsoft Secure Score: 42.5/80.0" in html
 
 
-def test_account_findings_have_per_check_exclude_and_restore_controls():
+def test_account_findings_show_exclusion_state_without_mutation_controls():
     html = _render_best_practices([
         {
             "cis_group": "", "status": "fail", "check_id": "bp_test",
@@ -133,10 +140,33 @@ def test_account_findings_have_per_check_exclude_and_restore_controls():
         }
     ])
 
-    # Non-admin users can see which findings were excluded, but cannot mutate them.
+    # Users without account-exclusion permission can still see excluded status.
     assert "one@example.com" in html
     assert "two@example.com — excluded" in html
     assert "/m365/best-practices/account-exclusion/bp_test" not in html
+
+
+def test_account_findings_show_per_account_exclude_and_restore_controls_when_permitted():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+                "affected_accounts": [
+                    {"id": "one", "name": "one@example.com", "excluded": False},
+                    {"id": "two", "name": "two@example.com", "excluded": True},
+                ],
+            }
+        ],
+        can_manage_account_exclusions=True,
+    )
+
+    assert "/m365/best-practices/account-exclusion/bp_test" in html
+    assert "Exclude" in html
+    assert "Restore" in html
 
 
 def test_notes_are_shown_and_editable_for_techs():
