@@ -6525,8 +6525,11 @@ async def _remediate_matching_antiphish_policies(
     for identity in targets:
         params = dict(base_params)
         params["Identity"] = identity
-        await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
-    return True, ""
+        try:
+            await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
+        except M365Error as exc:
+            return False, str(exc)
+        return True, ""
 
 
 async def _remediate_global_quarantine_policy(
