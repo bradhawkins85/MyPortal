@@ -145,3 +145,33 @@ def test_overview_includes_disposition_and_forensic_detail_counts(monkeypatch):
     assert metrics["forensic_with_original_mail_from"] == 3
     assert metrics["forensic_with_original_rcpt_to"] == 2
     assert metrics["forensic_with_dkim_details"] == 1
+
+
+def test_list_forensic_reports_can_limit_to_reject_and_quarantine(monkeypatch):
+    fetch_all = AsyncMock(return_value=[])
+    monkeypatch.setattr(dmarc.db, "fetch_all", fetch_all)
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+    asyncio.run(
+        dmarc.list_forensic_reports(
+            42,
+            start=start,
+            end=end,
+            limit=25,
+            offset=10,
+            reported_domain="example.com",
+            rejected_or_quarantined_only=True,
+        )
+    )
+
+    assert fetch_all.await_args.args[1] == (
+        42,
+        start,
+        end,
+        "example.com",
+        "example.com",
+        1,
+        25,
+        10,
+    )

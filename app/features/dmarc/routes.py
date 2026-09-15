@@ -89,6 +89,14 @@ async def page(
     organizations = await repo.organization_summary(
         company_id, range_start, range_end, policy_domain
     )
+    forensic_failures = await repo.list_forensic_reports(
+        company_id,
+        start=range_start,
+        end=range_end,
+        limit=25,
+        reported_domain=policy_domain,
+        rejected_or_quarantined_only=True,
+    )
     return await _main()._render_template(
         "dmarc/index.html",
         request,
@@ -103,6 +111,7 @@ async def page(
             "filter_end": end,
             "policy_domain": policy_domain,
             "policy_domains": domains,
+            "forensic_failures": forensic_failures,
         },
     )
 

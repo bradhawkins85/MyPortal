@@ -291,7 +291,14 @@ async def overview(
 
 
 async def list_forensic_reports(
-    company_id: int, *, start: Any, end: Any, limit: int = 50, offset: int = 0
+    company_id: int,
+    *,
+    start: Any,
+    end: Any,
+    limit: int = 50,
+    offset: int = 0,
+    reported_domain: str | None = None,
+    rejected_or_quarantined_only: bool = False,
 ) -> list[dict[str, Any]]:
     return await db.fetch_all(
         """SELECT id,feedback_type,user_agent,report_version,arrival_at,source_ip,reported_domain,
@@ -299,8 +306,19 @@ async def list_forensic_reports(
         dkim_domain,dkim_selector,identity_alignment,created_at
         FROM dmarc_forensic_reports WHERE company_id=%s
         AND COALESCE(arrival_at,created_at) >= %s AND COALESCE(arrival_at,created_at) < %s
+        AND (%s IS NULL OR reported_domain=%s)
+        AND (%s = 0 OR LOWER(COALESCE(delivery_result,'')) IN ('reject','quarantine'))
         ORDER BY COALESCE(arrival_at,created_at) DESC,id DESC LIMIT %s OFFSET %s""",
-        (company_id, start, end, min(max(limit, 1), 250), max(offset, 0)),
+        (
+            company_id,
+            start,
+            end,
+            reported_domain,
+            reported_domain,
+            1 if rejected_or_quarantined_only else 0,
+            min(max(limit, 1), 250),
+            max(offset, 0),
+        ),
     )
 
 

@@ -22,6 +22,12 @@ uses the provider UID/message ID, persists every attachment before moving or
 marking the message, retries transient failures with backoff, and leaves failed
 imports available for reprocessing.
 
+When senders publish forensic (RUF) reports with `Delivery-Result: reject` or
+`quarantine`, the `/dmarc` page shows the most recent failures and any sender or
+recipient values the provider included. Aggregate (RUA) reports should still be
+treated as domain-level summaries because they do not reliably contain full
+message addresses.
+
 ## Formats, limits, and retention
 
 XML, gzip containing one XML document, and zip containing flat XML members are
