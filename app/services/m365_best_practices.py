@@ -507,6 +507,11 @@ _DIRECTORY_ROLES_WITH_MEMBERS_URL = (
 _AUTHENTICATION_REQUIREMENTS_URL_TMPL = (
     "https://graph.microsoft.com/beta/users/{user_id}/authentication/requirements"
 )
+# Lowercased policy states considered actively configured for remediation gating.
+# Original Graph values: "enabled", "enabledForReportingButNotEnforced".
+_ACTIVE_CONDITIONAL_ACCESS_POLICY_STATES_LOWER = frozenset(
+    {"enabled", "enabledforreportingbutnotenforced"}
+)
 _USERS_LIST_URL = (
     "https://graph.microsoft.com/v1.0/users"
     "?$select=id,displayName,userPrincipalName,userType,onPremisesSyncEnabled"
@@ -6910,14 +6915,14 @@ async def _remediate_disable_per_user_mfa(
     if policies is None:
         return False, "Unable to enumerate Conditional Access policies."
 
-    has_enabled_ca = any(
-        str(policy.get("state") or "").lower() == "enabled"
+    has_configured_ca = any(
+        str(policy.get("state") or "").strip().lower() in _ACTIVE_CONDITIONAL_ACCESS_POLICY_STATES_LOWER
         for policy in policies
     )
-    if not has_enabled_ca:
+    if not has_configured_ca:
         return (
             False,
-            "No enabled Conditional Access policy found. Configure Conditional Access before disabling per-user MFA.",
+            "No active Conditional Access policy found. Configure Conditional Access before disabling per-user MFA.",
         )
 
     users = await _safe_graph_get_all(graph_token, _USERS_LIST_URL)
