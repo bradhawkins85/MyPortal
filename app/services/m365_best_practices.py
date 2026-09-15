@@ -4694,9 +4694,9 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source_type": "exo",
         "default_enabled": True,
         "has_remediation": True,
+        "remediation_type": "global_quarantine_policy_exo",
         "remediation_cmdlet": "Set-QuarantinePolicy",
         "remediation_params": {
-            "Identity": "GlobalQuarantinePolicy",
             "ESNEnabled": True,
             "EndUserSpamNotificationFrequency": "1.00:00:00",
         },
@@ -6529,6 +6529,37 @@ async def _remediate_matching_antiphish_policies(
     return True, ""
 
 
+async def _remediate_global_quarantine_policy(
+    exo_token: str,
+    tenant_id: str,
+    cmdlet: str,
+    base_params: dict[str, Any],
+) -> tuple[bool, str]:
+    """Apply remediation to the tenant's current global quarantine policy identity."""
+    try:
+        data = await _exo_invoke_command(
+            exo_token,
+            tenant_id,
+            "Get-QuarantinePolicy",
+            {"QuarantinePolicyType": "GlobalQuarantinePolicy"},
+        )
+    except M365Error as exc:
+        return False, f"Unable to query Get-QuarantinePolicy: {exc}"
+
+    rows = data.get("value") or []
+    policy = next((row for row in rows if isinstance(row, dict)), {})
+    identity = str(policy.get("Identity") or policy.get("Name") or "").strip()
+    if not identity:
+        identity = str(base_params.get("Identity") or "").strip()
+    if not identity:
+        return False, "Unable to determine the global quarantine policy identity."
+
+    params = dict(base_params)
+    params["Identity"] = identity
+    await _exo_invoke_command(exo_token, tenant_id, cmdlet, params)
+    return True, ""
+
+
 async def _remediate_foreach_user_graph(
     graph_token: str,
     company_id: int,
@@ -6699,6 +6730,23 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             try:
                 success, failure_message = await _remediate_matching_antiphish_policies(
                     exo_token, tenant_id, check_id, cmdlet, params
+                )
+            except M365Error as exc:
+                failure_message = str(exc)
+                log_error(
+                    "M365 best practice remediation command failed",
+                    company_id=company_id,
+                    check_id=check_id,
+                    cmdlet=cmdlet,
+                    error=str(exc),
+                )
+                success = False
+        elif bp.get("remediation_type") == "global_quarantine_policy_exo":
+            cmdlet = bp.get("remediation_cmdlet", "")
+            params = bp.get("remediation_params") or {}
+            try:
+                success, failure_message = await _remediate_global_quarantine_policy(
+                    exo_token, tenant_id, cmdlet, params
                 )
             except M365Error as exc:
                 failure_message = str(exc)
