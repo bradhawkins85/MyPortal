@@ -2437,41 +2437,6 @@ async def _check_laps_enabled(token: str) -> dict[str, Any]:
                    "LAPS is not enabled; enable it under Devices → All Devices → Device Settings → Enable Local Admin Password Solution.")
 
 
-async def _check_two_emergency_access_accounts(token: str) -> dict[str, Any]:
-    check_id = "bp_two_emergency_access_accounts"
-    check_name = "Two emergency access (break-glass) accounts are defined"
-    roles = await _safe_graph_get_all(token, _DIRECTORY_ROLES_URL)
-    if roles is None:
-        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to enumerate directory roles.")
-    ga_role_id: str | None = None
-    for role in roles:
-        if str(role.get("roleTemplateId") or "").lower() == _ROLE_TEMPLATE_GLOBAL_ADMIN.lower():
-            ga_role_id = role.get("id")
-            break
-    if not ga_role_id:
-        return _result(check_id, check_name, STATUS_UNKNOWN, "Global Administrator role is not currently activated in this tenant.")
-    members = await _safe_graph_get_all(
-        token, f"https://graph.microsoft.com/v1.0/directoryRoles/{ga_role_id}/members"
-    )
-    if members is None:
-        return _result(check_id, check_name, STATUS_UNKNOWN, "Unable to enumerate Global Administrator members.")
-    cloud_only = 0
-    for m in members:
-        data = await _safe_graph_get(
-            token, f"https://graph.microsoft.com/v1.0/users/{m.get('id')}"
-            "?$select=onPremisesSyncEnabled,accountEnabled"
-        )
-        if data and not data.get("onPremisesSyncEnabled") and data.get("accountEnabled"):
-            cloud_only += 1
-    if cloud_only >= 2:
-        return _result(check_id, check_name, STATUS_PASS,
-                       f"At least two cloud-only Global Administrator accounts are defined ({cloud_only} found). "
-                       "Verify that two of these are dedicated break-glass accounts excluded from MFA enforcement per the tenant runbook.")
-    return _result(check_id, check_name, STATUS_FAIL,
-                   f"Only {cloud_only} cloud-only Global Administrator account(s) found. "
-                   "Create at least two dedicated break-glass accounts.")
-
-
 # Name used when creating (and identifying) the MyPortal-managed protection alert policy.
 _BREAK_GLASS_ALERT_POLICY_NAME = "MyPortal – Break Glass Account Sign-In Alert"
 
@@ -4265,24 +4230,6 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_ENTRA_ID_P1, CAP_INTUNE_LAPS],
-    },
-    {
-        "id": "bp_two_emergency_access_accounts",
-        "name": "Two emergency access (break-glass) accounts are defined",
-        "description": (
-            "Maintain at least two cloud-only Global Administrator accounts "
-            "with strong, well-protected credentials so admins can recover "
-            "access if MFA, identity-provider, or federation fails."
-        ),
-        "remediation": (
-            "Create two cloud-only GA accounts (e.g. emergency1@<tenant>.onmicrosoft.com, "
-            "emergency2@…), exclude them from all CA policies (storing credentials "
-            "in physical safes), and document the recovery runbook."
-        ),
-        "source": _check_two_emergency_access_accounts,
-        "source_type": "graph",
-        "default_enabled": True,
-        "has_remediation": False,
     },
     {
         "id": "bp_break_glass_alert_policy",
