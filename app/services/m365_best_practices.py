@@ -6288,6 +6288,27 @@ async def get_last_results(company_id: int) -> list[dict[str, Any]]:
     return out
 
 
+def get_secure_score_summary(results: list[dict[str, Any]]) -> dict[str, float] | None:
+    """Return the latest Microsoft Secure Score values from evaluated results."""
+    secure_score_result = next(
+        (
+            result
+            for result in results
+            if result.get("check_id") == "bp_monitor_secure_score"
+        ),
+        None,
+    )
+    if not secure_score_result:
+        return None
+
+    current, maximum, percentage = bp_repo._parse_secure_score(
+        secure_score_result.get("details")
+    )
+    if current is None or maximum is None or percentage is None:
+        return None
+    return {"current": current, "maximum": maximum, "percentage": percentage}
+
+
 async def get_daily_history(company_id: int) -> list[dict[str, Any]]:
     """Return the company's daily best-practice and Secure Score snapshots."""
     return await bp_repo.list_daily_history(company_id)
@@ -6928,6 +6949,7 @@ __all__ = [
     "run_best_practices",
     "run_single_check",
     "get_last_results",
+    "get_secure_score_summary",
     "get_remediation",
     "remediate_check",
     "detect_tenant_capabilities",

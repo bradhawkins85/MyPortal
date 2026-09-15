@@ -3512,6 +3512,7 @@ async def m365_best_practices_page(request: Request):
         return redirect
     credentials = await m365_service.get_credentials(company_id)
     results = await m365_best_practices_service.get_last_results(company_id)
+    secure_score = m365_best_practices_service.get_secure_score_summary(results)
     catalog = m365_best_practices_service.list_best_practices()
     enabled_ids = await m365_best_practices_service.get_enabled_check_ids()
     enabled_catalog = [bp for bp in catalog if bp["id"] in enabled_ids]
@@ -3519,6 +3520,7 @@ async def m365_best_practices_page(request: Request):
         "title": "M365 Best Practices",
         "company": company,
         "results": results,
+        "secure_score": secure_score,
         "catalog": enabled_catalog,
         "has_credentials": bool(credentials),
         "is_super_admin": bool(user.get("is_super_admin")),

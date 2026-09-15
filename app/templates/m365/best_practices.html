@@ -63,12 +63,19 @@
   {# ------------------------------------------------------------------ #}
   {# Helper macro: stat-strip filter boxes                               #}
   {# ------------------------------------------------------------------ #}
-  {% macro filter_strip(results, table_id) %}
+  {% macro filter_strip(results, table_id, secure_score=none) %}
   {% set pass_count = results | selectattr("status", "equalto", "pass") | list | length %}
   {% set fail_count = results | selectattr("status", "equalto", "fail") | list | length %}
   {% set unknown_count = results | selectattr("status", "equalto", "unknown") | list | length %}
   {% set na_count = results | selectattr("status", "equalto", "not_applicable") | list | length %}
   <div class="stat-strip bp-filter-strip" data-bp-table="{{ table_id }}">
+    {% if secure_score %}
+    <div class="stat-strip__stat stat-strip__stat--info"
+         title="Microsoft Secure Score: {{ secure_score.current | round(1) }}/{{ secure_score.maximum | round(1) }}">
+      <span class="stat-strip__stat-label">Secure Score</span>
+      <span class="stat-strip__stat-value">{{ secure_score.percentage | round(1) }}%</span>
+    </div>
+    {% endif %}
     {% if pass_count %}
     <button type="button" class="stat-strip__stat stat-strip__stat--success bp-filter-btn"
             data-bp-status="pass" aria-pressed="false" title="Click to filter: Passed checks">
@@ -237,7 +244,7 @@
   <section class="panel">
     {% if m365_results %}
       <div class="panel__body" style="padding-bottom:0">
-        {{ filter_strip(m365_results, 'bp-table-m365') }}
+        {{ filter_strip(m365_results, 'bp-table-m365', secure_score) }}
       </div>
       {{ result_table(m365_results, is_super_admin, 'bp-table-m365') }}
     {% else %}
