@@ -3192,7 +3192,6 @@ async def _check_quarantine_notification_enabled(
             exo_token,
             tenant_id,
             "Get-QuarantinePolicy",
-            {"QuarantinePolicyType": "GlobalQuarantinePolicy"},
         )
     except M365Error as exc:
         return _result(check_id, check_name, STATUS_UNKNOWN,
@@ -6568,7 +6567,6 @@ async def _remediate_global_quarantine_policy(
             exo_token,
             tenant_id,
             "Get-QuarantinePolicy",
-            {"QuarantinePolicyType": "GlobalQuarantinePolicy"},
         )
     except M365Error as exc:
         return False, f"Unable to query Get-QuarantinePolicy: {exc}"

@@ -2902,7 +2902,6 @@ async def test_check_quarantine_notification_enabled_pass():
         "token",
         "tenant-id",
         "Get-QuarantinePolicy",
-        {"QuarantinePolicyType": "GlobalQuarantinePolicy"},
     )
 
 
