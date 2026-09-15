@@ -6650,7 +6650,7 @@ async def _remediate_foreach_public_group_graph(
             error=str(exc),
         )
         return False
-    excluded_ids = {group_id for cid, group_id in exclusions if cid == check_id}
+    excluded_ids = {group_id for _, group_id in exclusions}
 
     public_group_ids: list[str] = []
     for group in groups:
