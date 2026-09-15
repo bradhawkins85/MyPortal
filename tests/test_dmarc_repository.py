@@ -171,7 +171,6 @@ def test_list_forensic_reports_can_limit_to_reject_and_quarantine(monkeypatch):
         end,
         "example.com",
         "example.com",
-        1,
         25,
         10,
     )
