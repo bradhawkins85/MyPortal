@@ -5958,9 +5958,11 @@ async def test_remediate_per_user_mfa_disables_non_disabled_enabled_users():
         {"id": "user-1", "accountEnabled": True},
         {"id": "user-2", "accountEnabled": True},
         {"id": "user-3", "accountEnabled": False},
+        {"id": "user-4", "accountEnabled": True},
     ]
     user_1_url = bp_service._AUTHENTICATION_REQUIREMENTS_URL_TMPL.format(user_id="user-1")
     user_2_url = bp_service._AUTHENTICATION_REQUIREMENTS_URL_TMPL.format(user_id="user-2")
+    user_4_url = bp_service._AUTHENTICATION_REQUIREMENTS_URL_TMPL.format(user_id="user-4")
 
     async def fake_safe_get_all(_token: str, url: str):
         if url == bp_service._CA_POLICIES_URL:
@@ -5974,6 +5976,8 @@ async def test_remediate_per_user_mfa_disables_non_disabled_enabled_users():
             return {"perUserMfaState": "enabled"}
         if url == user_2_url:
             return {"perUserMfaState": "disabled"}
+        if url == user_4_url:
+            return {"perUserMfaState": "enforced"}
         return {"perUserMfaState": "disabled"}
 
     async def fake_patch(_token: str, url: str, payload: dict) -> dict:
@@ -6008,7 +6012,10 @@ async def test_remediate_per_user_mfa_disables_non_disabled_enabled_users():
         )
 
     assert result["success"] is True
-    assert patched == [(user_1_url, {"perUserMfaState": "disabled"})]
+    assert patched == [
+        (user_1_url, {"perUserMfaState": "disabled"}),
+        (user_4_url, {"perUserMfaState": "disabled"}),
+    ]
     assert upserts[0]["remediation_status"] == "success"
 
 
