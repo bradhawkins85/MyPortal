@@ -6194,6 +6194,7 @@ async def test_remediate_only_managed_public_groups_honors_exclusions():
         )
 
     assert result["success"] is True
+    assert len(upserts) == 1
     assert upserts[0]["remediation_status"] == "success"
     assert patched_urls == ["https://graph.microsoft.com/v1.0/groups/group-1"]
 

@@ -6652,7 +6652,7 @@ async def _remediate_foreach_public_group_graph(
         return False
     excluded_ids = {group_id for _, group_id in exclusions}
 
-    public_group_ids: list[str] = []
+    all_ok = True
     for group in groups:
         group_id = str(group.get("id") or "").strip()
         if not group_id:
@@ -6661,9 +6661,6 @@ async def _remediate_foreach_public_group_graph(
             continue
         if "Unified" not in (group.get("groupTypes") or []):
             continue
-        public_group_ids.append(group_id)
-    all_ok = True
-    for group_id in public_group_ids:
         if group_id in excluded_ids:
             continue
         group_url = _GROUP_URL_TMPL.format(group_id=group_id)
