@@ -4238,6 +4238,96 @@ async def test_remediate_customer_lockbox_failure():
     assert upserts[0]["remediation_status"] == "failed"
 
 
+@pytest.mark.anyio("asyncio")
+async def test_remediate_customer_lockbox_repairs_permissions_and_retries_403():
+    """A stale app registration is repaired before retrying Lockbox once."""
+    upserts: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            side_effect=[
+                ("stale-exo-token", "tenant-123"),
+                ("fresh-exo-token", "tenant-123"),
+            ],
+        ) as acquire_exo,
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            new_callable=AsyncMock,
+            side_effect=[M365Error("forbidden", http_status=403), {}],
+        ) as invoke,
+        patch(
+            "app.services.m365_best_practices.acquire_delegated_token",
+            new_callable=AsyncMock,
+            return_value="delegated-admin-token",
+        ) as acquire_delegated,
+        patch(
+            "app.services.m365_best_practices.try_grant_missing_permissions",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as grant_permissions,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=9, check_id="bp_customer_lockbox"
+        )
+
+    assert result["success"] is True
+    assert upserts[0]["remediation_status"] == "success"
+    assert acquire_exo.await_count == 2
+    acquire_delegated.assert_awaited_once_with(9)
+    grant_permissions.assert_awaited_once_with(
+        9, access_token="delegated-admin-token"
+    )
+    assert [call.args[0] for call in invoke.await_args_list] == [
+        "stale-exo-token",
+        "fresh-exo-token",
+    ]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_customer_lockbox_does_not_retry_unrepaired_403():
+    """A 403 remains actionable when no delegated admin token is available."""
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-123"),
+        ) as acquire_exo,
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            new_callable=AsyncMock,
+            side_effect=M365Error("forbidden", http_status=403),
+        ) as invoke,
+        patch(
+            "app.services.m365_best_practices.acquire_delegated_token",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "app.services.m365_best_practices.try_grant_missing_permissions",
+            new_callable=AsyncMock,
+        ) as grant_permissions,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=9, check_id="bp_customer_lockbox"
+        )
+
+    assert result["success"] is False
+    assert "forbidden" in result["message"]
+    assert acquire_exo.await_count == 1
+    assert invoke.await_count == 1
+    grant_permissions.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # Microsoft Teams checks (EXO InvokeCommand)
 # ---------------------------------------------------------------------------
