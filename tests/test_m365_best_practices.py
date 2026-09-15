@@ -81,15 +81,24 @@ def test_authenticator_mfa_fatigue_catalog_entry_has_remediation():
     assert entry["remediation_url"].endswith(
         "/authenticationMethodConfigurations/MicrosoftAuthenticator"
     )
-    assert entry["remediation_payload"] == {
-        "featureSettings": {
-            setting: {
-                "state": "enabled",
-                "includeTarget": {"targetType": "group", "id": "all_users"},
-            }
-            for setting in bp_service._MFA_FATIGUE_PROTECTION_KEYS
+    payload = entry["remediation_payload"]
+    assert payload["@odata.type"] == (
+        "#microsoft.graph.microsoftAuthenticatorAuthenticationMethodConfiguration"
+    )
+    assert payload["featureSettings"]["@odata.type"] == (
+        "#microsoft.graph.microsoftAuthenticatorFeatureSettings"
+    )
+    for setting in bp_service._MFA_FATIGUE_PROTECTION_KEYS:
+        feature = payload["featureSettings"][setting]
+        assert feature == {
+            "@odata.type": "#microsoft.graph.authenticationMethodFeatureConfiguration",
+            "state": "enabled",
+            "includeTarget": {
+                "@odata.type": "#microsoft.graph.featureTarget",
+                "targetType": "group",
+                "id": "all_users",
+            },
         }
-    }
 
 
 @pytest.mark.anyio("asyncio")
@@ -135,8 +144,10 @@ async def test_remediate_authenticator_mfa_fatigue_patches_all_user_settings():
     )
     graph_get.assert_awaited_once()
     assert all(
-        setting["includeTarget"]["id"] == "all_users"
-        for setting in bp_service._MFA_FATIGUE_REMEDIATION_PAYLOAD["featureSettings"].values()
+        bp_service._MFA_FATIGUE_REMEDIATION_PAYLOAD["featureSettings"][setting][
+            "includeTarget"
+        ]["id"] == "all_users"
+        for setting in bp_service._MFA_FATIGUE_PROTECTION_KEYS
     )
     update_status.assert_awaited_once()
     assert update_status.await_args.kwargs["remediation_status"] == "success"

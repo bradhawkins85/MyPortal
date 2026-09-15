@@ -565,12 +565,27 @@ _MFA_FATIGUE_PROTECTION_KEYS: tuple[str, ...] = (
 )
 
 _MFA_FATIGUE_REMEDIATION_PAYLOAD: dict[str, Any] = {
+    # Graph's update contract requires the concrete configuration type.  It
+    # can return 204 while silently retaining nested feature settings when the
+    # type discriminators are omitted, which makes the verification below
+    # report that app and location context are still disabled.
+    "@odata.type": (
+        "#microsoft.graph.microsoftAuthenticatorAuthenticationMethodConfiguration"
+    ),
     "featureSettings": {
-        setting: {
-            "state": "enabled",
-            "includeTarget": {"targetType": "group", "id": "all_users"},
-        }
-        for setting in _MFA_FATIGUE_PROTECTION_KEYS
+        "@odata.type": "#microsoft.graph.microsoftAuthenticatorFeatureSettings",
+        **{
+            setting: {
+                "@odata.type": "#microsoft.graph.authenticationMethodFeatureConfiguration",
+                "state": "enabled",
+                "includeTarget": {
+                    "@odata.type": "#microsoft.graph.featureTarget",
+                    "targetType": "group",
+                    "id": "all_users",
+                },
+            }
+            for setting in _MFA_FATIGUE_PROTECTION_KEYS
+        },
     }
 }
 
