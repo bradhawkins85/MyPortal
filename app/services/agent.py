@@ -419,17 +419,13 @@ def _apply_source_caps(
 ) -> list[dict[str, Any]]:
     selected: list[dict[str, Any]] = []
     seen_per_source: dict[str, int] = {}
-    overflow_penalty: dict[str, int] = {}
     for candidate in candidates:
         source_type = str(candidate.get("source_type") or "")
         cap = int(caps.get(source_type, 9999))
         used = seen_per_source.get(source_type, 0)
         if used >= cap:
-            overflow_penalty[source_type] = overflow_penalty.get(source_type, 0) + 1
             continue
-        item = dict(candidate)
-        item["overflow_candidates"] = overflow_penalty.get(source_type, 0)
-        selected.append(item)
+        selected.append(dict(candidate))
         seen_per_source[source_type] = used + 1
     return selected
 
