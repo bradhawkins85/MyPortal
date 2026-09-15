@@ -1523,7 +1523,7 @@ async def test_remediate_check_non_remediable_check_returns_failure():
 
 @pytest.mark.anyio("asyncio")
 async def test_get_last_results_includes_remediation_fields():
-    """get_last_results must expose has_remediation, remediation_status, remediated_at."""
+    """get_last_results must expose remediation metadata for the UI."""
     catalog = bp_service.list_best_practices()
     check_id = "bp_disable_direct_send"
     entry = next(bp for bp in catalog if bp["id"] == check_id)
@@ -1535,8 +1535,9 @@ async def test_get_last_results_includes_remediation_fields():
             "status": "fail",
             "details": "Direct Send enabled",
             "run_at": datetime(2026, 1, 1, 10, 0, 0),
-            "remediation_status": "success",
+            "remediation_status": "failed",
             "remediated_at": datetime(2026, 1, 2, 10, 0, 0),
+            "remediation_failure_reason": "Graph denied the update.",
         }
     ]
 
@@ -1562,8 +1563,9 @@ async def test_get_last_results_includes_remediation_fields():
     assert len(out) == 1
     item = out[0]
     assert item["has_remediation"] is True
-    assert item["remediation_status"] == "success"
+    assert item["remediation_status"] == "failed"
     assert item["remediated_at"] == datetime(2026, 1, 2, 10, 0, 0)
+    assert item["remediation_failure_reason"] == "Graph denied the update."
 
 
 # ---------------------------------------------------------------------------
@@ -6073,6 +6075,7 @@ async def test_remediate_check_dynamic_guest_group_returns_graph_error_details()
     assert result["success"] is False
     assert result["message"] == "Remediation command failed: Microsoft Graph POST failed (403): denied"
     assert upserts[0]["remediation_status"] == "failed"
+    assert upserts[0]["remediation_failure_reason"] == "Microsoft Graph POST failed (403): denied"
 
 
 def test_internal_keys_hide_remediation_type_and_mailbox_params():
