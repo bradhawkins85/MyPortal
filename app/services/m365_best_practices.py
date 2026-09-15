@@ -70,6 +70,7 @@ from app.services.cis_benchmark import (
 from app.services.m365 import (
     M365Error,
     _acquire_exo_access_token,
+    _coerce_exo_bool,
     _exo_invoke_command,
     _graph_get,
     _graph_get_all,
@@ -2520,7 +2521,8 @@ async def _check_antiphish_impersonated_domain_protection(
     enabled = [
         r.get("Name") or r.get("Identity") or "?"
         for r in rows
-        if isinstance(r, dict) and r.get("EnableTargetedDomainsProtection") is True
+        if isinstance(r, dict)
+        and _coerce_exo_bool(r.get("EnableTargetedDomainsProtection"))
     ]
     if enabled:
         return _result(check_id, check_name, STATUS_PASS,
@@ -2545,7 +2547,8 @@ async def _check_antiphish_impersonated_user_protection(
     enabled = [
         r.get("Name") or r.get("Identity") or "?"
         for r in rows
-        if isinstance(r, dict) and r.get("EnableTargetedUserProtection") is True
+        if isinstance(r, dict)
+        and _coerce_exo_bool(r.get("EnableTargetedUserProtection"))
     ]
     if enabled:
         return _result(check_id, check_name, STATUS_PASS,
@@ -2622,7 +2625,8 @@ async def _check_antiphish_domain_impersonation_safety_tip(
     enabled = [
         r.get("Name") or r.get("Identity") or "?"
         for r in rows
-        if isinstance(r, dict) and r.get("EnableSimilarDomainsSafetyTips") is True
+        if isinstance(r, dict)
+        and _coerce_exo_bool(r.get("EnableSimilarDomainsSafetyTips"))
     ]
     if enabled:
         return _result(check_id, check_name, STATUS_PASS,
@@ -2647,7 +2651,8 @@ async def _check_antiphish_user_impersonation_safety_tip(
     enabled = [
         r.get("Name") or r.get("Identity") or "?"
         for r in rows
-        if isinstance(r, dict) and r.get("EnableSimilarUsersSafetyTips") is True
+        if isinstance(r, dict)
+        and _coerce_exo_bool(r.get("EnableSimilarUsersSafetyTips"))
     ]
     if enabled:
         return _result(check_id, check_name, STATUS_PASS,
@@ -2672,7 +2677,8 @@ async def _check_antiphish_unusual_characters_safety_tip(
     enabled = [
         r.get("Name") or r.get("Identity") or "?"
         for r in rows
-        if isinstance(r, dict) and r.get("EnableUnusualCharactersSafetyTips") is True
+        if isinstance(r, dict)
+        and _coerce_exo_bool(r.get("EnableUnusualCharactersSafetyTips"))
     ]
     if enabled:
         return _result(check_id, check_name, STATUS_PASS,
