@@ -3525,6 +3525,14 @@ def _can_manage_m365_account_exclusions(user: dict, membership: dict | None) -> 
 
 
 def _can_submit_m365_best_practice_tickets(user: Mapping[str, Any], company_id: Any) -> bool:
+    """Return whether the current M365 best-practices viewer can request help.
+
+    ``_load_m365_best_practices_context`` already restricts page access to the
+    active company's super admins and members with M365 best-practices view
+    access. Any user who can view a failed check may open a support ticket for
+    that company, so this helper only verifies the identifiers required to
+    submit the ticket.
+    """
     if user.get("id") is None or company_id is None:
         return False
     try:
