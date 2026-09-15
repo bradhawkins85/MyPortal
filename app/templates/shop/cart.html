@@ -154,19 +154,8 @@
               <input
                 type="radio"
                 name="shippingOption"
-                value="address_on_file"
-                {% if not company_addresses %}checked{% endif %}
-                data-shipping-option
-              />
-              Ship to address on file{% if company_address %}: <span class="text-muted">{{ company_address }}</span>{% else %} <span class="text-muted">(no address on file)</span>{% endif %}
-            </label>
-          </div>
-          <div class="form-field form-field--radio">
-            <label class="radio-label">
-              <input
-                type="radio"
-                name="shippingOption"
                 value="specific_address"
+                {% if not company_addresses %}checked{% endif %}
                 data-shipping-option
               />
               Ship to a specific address

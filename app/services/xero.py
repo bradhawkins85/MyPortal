@@ -1374,6 +1374,28 @@ async def build_order_invoice(
             user_info_line["TaxType"] = str(tax_type).strip()
         line_items.append(user_info_line)
 
+    shipping_address = ", ".join(
+        str(summary.get(field) or "").strip()
+        for field in (
+            "shipping_street",
+            "shipping_city",
+            "shipping_state",
+            "shipping_postcode",
+            "shipping_country",
+        )
+        if str(summary.get(field) or "").strip()
+    )
+    if shipping_address:
+        shipping_line = {
+            "Description": f"Shipping address: {shipping_address}",
+            "Quantity": 0,
+            "UnitAmount": 0,
+            "AccountCode": str(account_code or "").strip(),
+        }
+        if tax_type:
+            shipping_line["TaxType"] = str(tax_type).strip()
+        line_items.append(shipping_line)
+
     # Use PO number as reference if available, otherwise use order number
     po_number = summary.get("po_number")
     reference = str(po_number).strip() if po_number else order_number

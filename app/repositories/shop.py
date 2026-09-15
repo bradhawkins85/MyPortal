@@ -1655,6 +1655,12 @@ async def get_order_summary(
             MAX(shipping_status) AS shipping_status,
             MAX(notes) AS notes,
             MAX(po_number) AS po_number,
+            MAX(shipping_option) AS shipping_option,
+            MAX(shipping_street) AS shipping_street,
+            MAX(shipping_city) AS shipping_city,
+            MAX(shipping_state) AS shipping_state,
+            MAX(shipping_postcode) AS shipping_postcode,
+            MAX(shipping_country) AS shipping_country,
             MAX(consignment_id) AS consignment_id,
             MAX(eta) AS eta
         FROM shop_orders
