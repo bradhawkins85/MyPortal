@@ -559,7 +559,7 @@ async def test_remediate_weak_auth_methods_disabled_fails_when_graph_does_not_co
         )
 
     assert result["success"] is False
-    assert "did not confirm weak authentication methods were disabled" in result["message"]
+    assert "did not confirm the updated weak authentication method state" in result["message"]
     assert "Weak methods still enabled: Sms, Voice, Email" in result["message"]
     assert sleep.await_count == bp_service._WEAK_AUTH_METHODS_VERIFICATION_ATTEMPTS - 1
     assert update_status.await_args.kwargs["remediation_status"] == "failed"
