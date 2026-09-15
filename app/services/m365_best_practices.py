@@ -6880,6 +6880,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             success = await _remediate_foreach_public_group_graph(
                 graph_token, company_id, check_id
             )
+            # Remediation status is persisted by the shared epilogue below.
         elif check_id == "bp_authenticator_mfa_fatigue":
             try:
                 success, failure_message = await _remediate_authenticator_mfa_fatigue(
