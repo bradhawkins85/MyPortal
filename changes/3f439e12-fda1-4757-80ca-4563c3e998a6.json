@@ -1,0 +1,7 @@
+{
+  "guid": "3f439e12-fda1-4757-80ca-4563c3e998a6",
+  "occurred_at": "2026-09-15T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Add automated remediation that restricts additional storage providers across all Outlook on the Web mailbox policies.",
+  "content_hash": "f5de37b924b15fd4424cc2114661117865b6a8edfe9a8ad4f5f8b7e773a73bf1"
+}

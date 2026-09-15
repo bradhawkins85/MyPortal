@@ -2937,6 +2937,83 @@ def test_outlook_addins_disabled_has_remediation():
     assert "source" not in entry
 
 
+def test_third_party_storage_owa_has_foreach_policy_remediation():
+    entry = {bp["id"]: bp for bp in bp_service._BEST_PRACTICES}[
+        "bp_third_party_storage_owa"
+    ]
+
+    assert entry["has_remediation"] is True
+    assert entry["remediation_type"] == "foreach_owa_mailbox_policy_exo"
+    assert entry["remediation_cmdlet"] == "Set-OwaMailboxPolicy"
+    assert entry["remediation_params"] == {
+        "AdditionalStorageProvidersAvailable": False
+    }
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_third_party_storage_owa_updates_every_noncompliant_policy():
+    policies = [
+        {
+            "Identity": "OwaMailboxPolicy-Default",
+            "AdditionalStorageProvidersAvailable": True,
+        },
+        {
+            "Name": "Restricted users",
+            "AdditionalStorageProvidersAvailable": True,
+        },
+        {
+            "Identity": "Already restricted",
+            "AdditionalStorageProvidersAvailable": False,
+        },
+    ]
+    calls: list[tuple[str, dict | None]] = []
+
+    async def fake_exo(_token, _tenant, cmdlet, params=None):
+        calls.append((cmdlet, params))
+        if cmdlet == "Get-OwaMailboxPolicy":
+            return {"value": policies}
+        return {}
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-id"),
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            side_effect=fake_exo,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ) as update_status,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_third_party_storage_owa"
+        )
+
+    assert result["success"] is True
+    assert calls == [
+        ("Get-OwaMailboxPolicy", None),
+        (
+            "Set-OwaMailboxPolicy",
+            {
+                "Identity": "OwaMailboxPolicy-Default",
+                "AdditionalStorageProvidersAvailable": False,
+            },
+        ),
+        (
+            "Set-OwaMailboxPolicy",
+            {
+                "Identity": "Restricted users",
+                "AdditionalStorageProvidersAvailable": False,
+            },
+        ),
+    ]
+    assert update_status.await_args.kwargs["remediation_status"] == "success"
+
+
 @pytest.mark.anyio("asyncio")
 async def test_antiphish_impersonated_domain_protection_fail():
     """Fail when no policy has EnableTargetedDomainsProtection True."""

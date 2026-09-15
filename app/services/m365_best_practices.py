@@ -4305,7 +4305,10 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "source": _check_third_party_storage_owa,
         "source_type": "exo",
         "default_enabled": True,
-        "has_remediation": False,
+        "has_remediation": True,
+        "remediation_type": "foreach_owa_mailbox_policy_exo",
+        "remediation_cmdlet": "Set-OwaMailboxPolicy",
+        "remediation_params": {"AdditionalStorageProvidersAvailable": False},
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
@@ -6209,6 +6212,61 @@ async def _remediate_foreach_mailbox(
     return all_ok
 
 
+async def _remediate_foreach_owa_mailbox_policy(
+    exo_token: str,
+    tenant_id: str,
+    company_id: int,
+    check_id: str,
+    policy_params: dict[str, Any],
+) -> bool:
+    """Apply the requested settings to every OWA mailbox policy.
+
+    Policies that already have the desired values are skipped, making the
+    operation safe to retry.  A failure on one policy does not prevent the
+    remaining policies from being remediated.
+    """
+    try:
+        data = await _exo_invoke_command(
+            exo_token, tenant_id, "Get-OwaMailboxPolicy"
+        )
+    except M365Error as exc:
+        log_error(
+            "M365 foreach-OWA-policy remediation – Get-OwaMailboxPolicy failed",
+            company_id=company_id,
+            check_id=check_id,
+            error=str(exc),
+        )
+        return False
+
+    all_ok = True
+    for policy in data.get("value") or []:
+        if not isinstance(policy, dict):
+            continue
+        identity = policy.get("Identity") or policy.get("Name")
+        already_compliant = all(
+            policy.get(key) == value for key, value in policy_params.items()
+        )
+        if not identity or already_compliant:
+            continue
+        try:
+            await _exo_invoke_command(
+                exo_token,
+                tenant_id,
+                "Set-OwaMailboxPolicy",
+                {"Identity": identity, **policy_params},
+            )
+        except M365Error as exc:
+            log_error(
+                "M365 foreach-OWA-policy remediation – Set-OwaMailboxPolicy failed",
+                company_id=company_id,
+                check_id=check_id,
+                identity=identity,
+                error=str(exc),
+            )
+            all_ok = False
+    return all_ok
+
+
 def _antiphish_policy_matches_remediation(check_id: str, row: dict[str, Any]) -> bool:
     """Return whether an anti-phish policy is a valid remediation target."""
     if check_id == "bp_antiphish_domain_impersonation_safety_tip":
@@ -6384,7 +6442,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     database, and returns a result dict with ``success`` (bool) and ``message``
     (str) keys.
 
-    Supports six remediation patterns:
+    Supports seven remediation patterns:
 
     * ``source_type="exo"`` – executes a single cmdlet via the Exchange Online
       REST API using the ``remediation_cmdlet`` and ``remediation_params``
@@ -6393,6 +6451,10 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
       fetches all user mailboxes and calls ``Set-Mailbox`` on each one that does
       not already satisfy the required parameters using the
       ``remediation_mailbox_params`` catalog field.
+    * ``source_type="exo"`` with
+      ``remediation_type="foreach_owa_mailbox_policy_exo"`` – fetches every
+      OWA mailbox policy and applies the catalog's remediation parameters to
+      each policy that does not already satisfy them.
     * ``source_type="graph"`` – issues a ``PATCH`` request to Microsoft Graph
       using the ``remediation_url`` and ``remediation_payload`` catalog fields.
     * ``source_type="graph"`` with ``remediation_type="foreach_user_graph"`` –
@@ -6441,6 +6503,11 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             mailbox_params = bp.get("remediation_mailbox_params") or {}
             success = await _remediate_foreach_mailbox(
                 exo_token, tenant_id, company_id, check_id, mailbox_params
+            )
+        elif bp.get("remediation_type") == "foreach_owa_mailbox_policy_exo":
+            params = bp.get("remediation_params") or {}
+            success = await _remediate_foreach_owa_mailbox_policy(
+                exo_token, tenant_id, company_id, check_id, params
             )
         elif bp.get("remediation_type") == "matching_antiphish_policy_exo":
             cmdlet = bp.get("remediation_cmdlet", "")
