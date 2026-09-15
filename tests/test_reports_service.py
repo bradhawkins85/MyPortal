@@ -528,6 +528,59 @@ async def test_build_company_report_populates_detail_data():
 
 
 @pytest.mark.asyncio
+async def test_build_company_report_m365_detail_includes_notes():
+    from app.services import reports
+    from unittest.mock import AsyncMock, patch
+    from contextlib import ExitStack
+
+    company = {"id": 22, "name": "M365 DetailCo"}
+    preferences = {key: True for key in reports.SECTION_KEYS}
+    detail_prefs = {key: (key == "m365_best_practices") for key in reports.SECTION_KEYS}
+
+    patches = [
+        patch.object(reports.company_repo, "get_company_by_id", new=AsyncMock(return_value=company)),
+        patch.object(reports.report_sections_repo, "get_section_preferences", new=AsyncMock(return_value=preferences)),
+        patch.object(reports.report_sections_repo, "get_detail_preferences", new=AsyncMock(return_value=detail_prefs)),
+        patch.object(
+            reports.report_sections_repo,
+            "get_company_report_settings",
+            new=AsyncMock(return_value={"auto_hide_empty": False, "section_order": None}),
+        ),
+        patch.object(
+            reports.m365_bp_repo,
+            "list_results",
+            new=AsyncMock(return_value=[
+                {
+                    "check_id": "bp_test",
+                    "check_name": "Test check",
+                    "status": "fail",
+                    "details": "Needs attention",
+                    "notes": "Customer approved temporary exception.",
+                    "run_at": datetime(2026, 9, 15, 1, 2, 3),
+                    "remediation_status": "pending",
+                }
+            ]),
+        ),
+    ]
+    for (obj, attr, mock) in _make_full_patches(reports):
+        if obj is reports.m365_bp_repo and attr == "list_results":
+            continue
+        patches.append(patch.object(obj, attr, new=mock))
+
+    with ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        report = await reports.build_company_report(22)
+
+    m365_section = report.section("m365_best_practices")
+    assert m365_section is not None
+    assert m365_section.detailed is True
+    checks = m365_section.detail_data.get("checks") or []
+    assert len(checks) == 1
+    assert checks[0]["notes"] == "Customer approved temporary exception."
+
+
+@pytest.mark.asyncio
 async def test_build_company_report_disabled_section_not_detailed():
     """A disabled section must never have detailed=True even if detail prefs say so."""
     from app.services import reports

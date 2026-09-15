@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import json
 from datetime import datetime
 from unittest.mock import AsyncMock
 
@@ -10,6 +12,15 @@ import app.main as main_module
 import app.services.m365_best_practices as bp_service
 from app.core.database import db
 from app.main import app, scheduler_service
+
+
+def _decode_flash_cookie(response) -> dict[str, str]:
+    cookie_header = response.headers.get("set-cookie", "")
+    assert "_flash=" in cookie_header
+    raw_cookie = cookie_header.split("_flash=", 1)[1].split(";", 1)[0]
+    signed = base64.b64decode(raw_cookie.encode("utf-8")).decode("utf-8")
+    payload = signed.rsplit("|", 1)[0]
+    return json.loads(payload)
 
 
 @pytest.fixture(autouse=True)
@@ -82,17 +93,19 @@ def test_run_best_practices_resets_to_unknown_before_queueing(monkeypatch):
         "reset_enabled_results_to_unknown",
         fake_reset,
     )
-    monkeypatch.setattr(main_module.background_tasks, "queue_background_task", fake_queue_background_task)
+    monkeypatch.setattr(
+        main_module.background_tasks, "queue_background_task", fake_queue_background_task
+    )
 
     with TestClient(app, follow_redirects=False) as client:
         response = client.post("/m365/best-practices/run")
 
     assert response.status_code == 303
     assert "success=" not in response.headers["location"]
-    flash_cookie = response.headers.get("set-cookie", "")
-    assert "_flash=" in flash_cookie
-    assert "success" in flash_cookie
-    assert "Best practice evaluation started" in flash_cookie
+    assert _decode_flash_cookie(response) == {
+        "message": "Best practice evaluation started in the background",
+        "variant": "success",
+    }
     assert events == ["reset", "queue"]
 
 
@@ -121,17 +134,65 @@ def test_score_history_page_loads_current_company_history(monkeypatch):
     assert render_template.await_args.kwargs["extra"]["history"] == history
 
 
+def test_best_practices_page_enables_note_editing_for_technician(monkeypatch):
+    async def fake_context(request, super_admin_only=False):
+        return {"id": 7, "is_super_admin": False}, {"role_name": "Technician"}, {"id": 99}, 99, None
+
+    render_template = AsyncMock(return_value="bp-page")
+    monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
+    monkeypatch.setattr(
+        main_module.m365_service,
+        "get_credentials",
+        AsyncMock(return_value={"tenant_id": "x"}),
+    )
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service, "get_last_results", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service, "get_secure_score_summary", lambda results: None
+    )
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "list_best_practices",
+        lambda: [{"id": "bp_test", "name": "Test check"}],
+    )
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "get_enabled_check_ids",
+        AsyncMock(return_value={"bp_test"}),
+    )
+    monkeypatch.setattr(main_module, "_render_template", render_template)
+
+    with TestClient(app) as client:
+        response = client.get("/m365/best-practices")
+
+    assert response.status_code == 200
+    assert render_template.await_args.kwargs["extra"]["can_edit_notes"] is True
+
+
 def test_best_practices_page_sets_account_exclusion_permission_for_company_admins(monkeypatch):
     async def fake_context(request, super_admin_only=False):
         return {"id": 7, "is_super_admin": False, "company_id": 99}, {"is_admin": True}, {"id": 99}, 99, None
 
     render_template = AsyncMock(return_value="best-practices-page")
     monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
-    monkeypatch.setattr(main_module.m365_service, "get_credentials", AsyncMock(return_value={"tenant_id": "t"}))
-    monkeypatch.setattr(main_module.m365_best_practices_service, "get_last_results", AsyncMock(return_value=[]))
-    monkeypatch.setattr(main_module.m365_best_practices_service, "get_secure_score_summary", lambda _results: None)
+    monkeypatch.setattr(
+        main_module.m365_service,
+        "get_credentials",
+        AsyncMock(return_value={"tenant_id": "t"}),
+    )
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service, "get_last_results", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service, "get_secure_score_summary", lambda _results: None
+    )
     monkeypatch.setattr(main_module.m365_best_practices_service, "list_best_practices", lambda: [])
-    monkeypatch.setattr(main_module.m365_best_practices_service, "get_enabled_check_ids", AsyncMock(return_value=set()))
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "get_enabled_check_ids",
+        AsyncMock(return_value=set()),
+    )
     monkeypatch.setattr(main_module, "_render_template", render_template)
 
     with TestClient(app) as client:
@@ -179,7 +240,9 @@ def test_account_exclusion_endpoint_does_not_require_super_admin(monkeypatch):
     )
     set_exclusion = AsyncMock()
     run_single = AsyncMock()
-    monkeypatch.setattr(main_module.m365_best_practices_service, "set_account_exclusion", set_exclusion)
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service, "set_account_exclusion", set_exclusion
+    )
     monkeypatch.setattr(main_module.m365_best_practices_service, "run_single_check", run_single)
 
     with TestClient(app, follow_redirects=False) as client:
@@ -214,3 +277,76 @@ def test_account_exclusion_endpoint_forbids_users_without_permission(monkeypatch
         )
 
     assert response.status_code == 403
+
+
+def test_save_note_route_allows_non_super_admins(monkeypatch):
+    async def fake_context(request, super_admin_only=False):
+        return {"id": 7, "is_super_admin": False}, {"role_name": "Technician"}, {"id": 99}, 99, None
+
+    set_notes = AsyncMock(return_value=True)
+    monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "list_best_practices",
+        lambda: [{"id": "bp_test", "name": "Test check"}],
+    )
+    monkeypatch.setattr(main_module.m365_best_practices_service, "set_result_notes", set_notes)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post("/m365/best-practices/note/bp_test", data={"notes": "Customer exception"})
+
+    assert response.status_code == 303
+    set_notes.assert_awaited_once_with(
+        company_id=99,
+        check_id="bp_test",
+        notes="Customer exception",
+    )
+
+
+def test_save_note_route_rejects_overlong_notes(monkeypatch):
+    async def fake_context(request, super_admin_only=False):
+        return {"id": 7, "is_super_admin": False}, {"role_name": "Technician"}, {"id": 99}, 99, None
+
+    monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "list_best_practices",
+        lambda: [{"id": "bp_test", "name": "Test check"}],
+    )
+    set_notes = AsyncMock()
+    monkeypatch.setattr(main_module.m365_best_practices_service, "set_result_notes", set_notes)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post("/m365/best-practices/note/bp_test", data={"notes": "x" * 4001})
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/m365/best-practices"
+    assert _decode_flash_cookie(response) == {
+        "message": "Check note must be 4000 characters or fewer",
+        "variant": "error",
+    }
+    set_notes.assert_not_awaited()
+
+
+def test_save_note_route_rejects_member_role(monkeypatch):
+    async def fake_context(request, super_admin_only=False):
+        return {"id": 7, "is_super_admin": False}, {"role_name": "Member"}, {"id": 99}, 99, None
+
+    set_notes = AsyncMock(return_value=True)
+    monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "list_best_practices",
+        lambda: [{"id": "bp_test", "name": "Test check"}],
+    )
+    monkeypatch.setattr(main_module.m365_best_practices_service, "set_result_notes", set_notes)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post("/m365/best-practices/note/bp_test", data={"notes": "Customer exception"})
+
+    assert response.status_code == 303
+    assert _decode_flash_cookie(response) == {
+        "message": "You do not have permission to edit check notes",
+        "variant": "error",
+    }
+    set_notes.assert_not_awaited()

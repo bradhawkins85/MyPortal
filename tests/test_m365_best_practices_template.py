@@ -3,7 +3,13 @@ from pathlib import Path
 from jinja2 import ChoiceLoader, DictLoader, Environment, FileSystemLoader
 
 
-def _render_best_practices(results, catalog=None, secure_score=None, can_manage_account_exclusions=False):
+def _render_best_practices(
+    results,
+    catalog=None,
+    secure_score=None,
+    can_manage_account_exclusions=False,
+    can_edit_notes=False,
+):
     templates = Path(__file__).parents[1] / "app" / "templates"
     loader = ChoiceLoader(
         [
@@ -32,6 +38,7 @@ def _render_best_practices(results, catalog=None, secure_score=None, can_manage_
         is_super_admin=False,
         can_manage_account_exclusions=can_manage_account_exclusions,
         secure_score=secure_score,
+        can_edit_notes=can_edit_notes,
     )
 
 
@@ -160,3 +167,23 @@ def test_account_findings_show_per_account_exclude_and_restore_controls_when_per
     assert "/m365/best-practices/account-exclusion/bp_test" in html
     assert "Exclude" in html
     assert "Restore" in html
+
+
+def test_notes_are_shown_and_editable_for_techs():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+                "notes": "Customer approved temporary exception.",
+            }
+        ],
+        can_edit_notes=True,
+    )
+
+    assert "Customer approved temporary exception." in html
+    assert 'action="/m365/best-practices/note/bp_test"' in html
+    assert "Save note" in html

@@ -3505,6 +3505,18 @@ async def _load_m365_best_practices_context(request: Request, *, super_admin_onl
     return user, membership, company, company_id, None
 
 
+def _is_valid_m365_best_practice_check_id(check_id: str) -> bool:
+    return bool(re.fullmatch(r"[a-z0-9_-]+", check_id))
+
+
+def _can_edit_m365_best_practice_notes(user: dict[str, Any], membership: dict[str, Any] | None) -> bool:
+    membership_role = str((membership or {}).get("role_name") or "").strip().lower()
+    return bool(
+        user.get("is_super_admin")
+        or membership_role in {"owner", "administrator", "technician"}
+    )
+
+
 def _can_manage_m365_account_exclusions(user: dict, membership: dict | None) -> bool:
     return bool(
         user.get("is_super_admin")
@@ -3531,6 +3543,7 @@ async def m365_best_practices_page(request: Request):
         "catalog": enabled_catalog,
         "has_credentials": bool(credentials),
         "is_super_admin": bool(user.get("is_super_admin")),
+        "can_edit_notes": _can_edit_m365_best_practice_notes(user, membership),
         "can_manage_account_exclusions": _can_manage_m365_account_exclusions(user, membership),
     }
     return await _render_template("m365/best_practices.html", request, user, extra=extra)
@@ -3611,6 +3624,8 @@ async def run_single_m365_best_practice_check(request: Request, check_id: str):
     )
     if redirect:
         return redirect
+    if not _is_valid_m365_best_practice_check_id(check_id):
+        return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
     known_ids = {bp["id"] for bp in m365_best_practices_service.list_best_practices()}
     if check_id not in known_ids:
         return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
@@ -3640,6 +3655,8 @@ async def remediate_m365_best_practice(request: Request, check_id: str):
     )
     if redirect:
         return redirect
+    if not _is_valid_m365_best_practice_check_id(check_id):
+        return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
     # Validate that the check_id is a known best practice to prevent unintended operations
     known_ids = {bp["id"] for bp in m365_best_practices_service.list_best_practices()}
     if check_id not in known_ids:
@@ -3691,6 +3708,8 @@ async def set_m365_best_practice_account_exclusion(request: Request, check_id: s
     )
     if redirect:
         return redirect
+    if not _is_valid_m365_best_practice_check_id(check_id):
+        return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
     can_manage_account_exclusions = _can_manage_m365_account_exclusions(user, membership)
     if not can_manage_account_exclusions:
         raise HTTPException(
@@ -3731,6 +3750,48 @@ async def set_m365_best_practice_account_exclusion(request: Request, check_id: s
     return flash_redirect(
         "/m365/best-practices",
         "Account excluded from this check" if excluded else "Account restored to this check",
+        "success",
+    )
+
+
+@app.post("/m365/best-practices/note/{check_id}", response_class=RedirectResponse)
+async def save_m365_best_practice_note(request: Request, check_id: str):
+    """Save or clear the technician/admin note for one stored best-practice result."""
+    user, membership, _, company_id, redirect = await _load_m365_best_practices_context(request)
+    if redirect:
+        return redirect
+    if not _can_edit_m365_best_practice_notes(user, membership):
+        return flash_redirect("/m365/best-practices", "You do not have permission to edit check notes", "error")
+    if not _is_valid_m365_best_practice_check_id(check_id):
+        return flash_redirect("/m365/best-practices", "Invalid best-practice check ID", "error")
+    if check_id not in {bp["id"] for bp in m365_best_practices_service.list_best_practices()}:
+        return flash_redirect("/m365/best-practices", "Unknown best-practice check ID", "error")
+    form = await request.form()
+    raw_notes = str(form.get("notes") or "")
+    notes = raw_notes.strip()
+    if len(notes) > 4000:
+        return flash_redirect(
+            "/m365/best-practices",
+            "Check note must be 4000 characters or fewer",
+            "error",
+        )
+    updated = await m365_best_practices_service.set_result_notes(
+        company_id=company_id,
+        check_id=check_id,
+        notes=notes or None,
+    )
+    if not updated:
+        return flash_redirect("/m365/best-practices", "Check result is not available yet", "error")
+    log_info(
+        "M365 best practice note updated",
+        company_id=company_id,
+        check_id=check_id,
+        user_id=user.get("id"),
+        cleared=not bool(notes),
+    )
+    return flash_redirect(
+        "/m365/best-practices",
+        "Check note saved" if notes else "Check note cleared",
         "success",
     )
 
