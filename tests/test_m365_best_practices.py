@@ -5189,6 +5189,43 @@ def test_dynamic_guest_group_catalog_entry_has_remediation():
     assert entry["has_remediation"] is True
 
 
+def test_only_managed_public_groups_catalog_entry_has_remediation():
+    entry = next(
+        bp for bp in bp_service._BEST_PRACTICES
+        if bp["id"] == "bp_only_managed_public_groups"
+    )
+    assert entry["source_type"] == "graph"
+    assert entry["remediation_type"] == "foreach_public_group_graph"
+    assert entry["has_remediation"] is True
+
+
+@pytest.mark.anyio("asyncio")
+async def test_only_managed_public_groups_lists_affected_groups():
+    groups = [
+        {
+            "id": "group-1",
+            "displayName": "Public Team",
+            "visibility": "Public",
+            "groupTypes": ["Unified"],
+        },
+        {
+            "id": "group-2",
+            "displayName": "Private Team",
+            "visibility": "Private",
+            "groupTypes": ["Unified"],
+        },
+    ]
+    with patch(
+        "app.services.m365_best_practices._safe_graph_get_all",
+        new_callable=AsyncMock,
+        return_value=groups,
+    ):
+        result = await bp_service._check_only_managed_public_groups("graph-token")
+
+    assert result["status"] == "fail"
+    assert result["affected_accounts"] == [{"id": "group-1", "name": "Public Team"}]
+
+
 @pytest.mark.anyio("asyncio")
 async def test_remediate_dynamic_guest_group_creates_security_group():
     created: list[tuple[str, dict]] = []
@@ -6111,6 +6148,54 @@ async def test_remediate_organization_customization_success():
     assert result["success"] is True
     assert len(upserts) == 1
     assert upserts[0]["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_only_managed_public_groups_honors_exclusions():
+    upserts: list[dict] = []
+    patched_urls: list[str] = []
+    groups = [
+        {"id": "group-1", "visibility": "Public", "groupTypes": ["Unified"]},
+        {"id": "group-2", "visibility": "Public", "groupTypes": ["Unified"]},
+        {"id": "group-3", "visibility": "Private", "groupTypes": ["Unified"]},
+    ]
+
+    async def fake_graph_patch(token, url, payload):
+        assert payload == {"visibility": "Private"}
+        patched_urls.append(url)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._safe_graph_get_all",
+            new_callable=AsyncMock,
+            return_value=groups,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.get_account_exclusions",
+            new_callable=AsyncMock,
+            return_value={("bp_only_managed_public_groups", "group-2")},
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            side_effect=fake_graph_patch,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=31, check_id="bp_only_managed_public_groups"
+        )
+
+    assert result["success"] is True
+    assert upserts[0]["remediation_status"] == "success"
+    assert patched_urls == ["https://graph.microsoft.com/v1.0/groups/group-1"]
 
 
 @pytest.mark.anyio("asyncio")
