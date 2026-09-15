@@ -35,6 +35,7 @@
           Best Practice checks are enabled or disabled <strong>globally</strong> across every company in MyPortal.
           Disabled checks are removed from per-company reports until re-enabled.
           Auto-Remediation will automatically apply the fix for supported checks immediately after each evaluation.
+          Create Ticket on Fail opens a company ticket only when a check changes from Pass to Fail; initial failures do not create tickets.
           Use <strong>Exclude for this company</strong> to skip a specific check for this company only; the global Enabled and Auto-Remediate settings remain unchanged for all other companies.
           Checks marked <span class="badge badge--info badge--cis">CIS</span> are sourced from the CIS Microsoft 365 Foundations Benchmark or CIS Intune Benchmarks.
         </p>
@@ -56,6 +57,7 @@
             <tr>
               <th style="width:6rem;text-align:center">Enabled</th>
               <th style="width:9rem;text-align:center">Auto-Remediate</th>
+              <th style="width:9rem;text-align:center">Create Ticket<br>on Fail</th>
               <th style="width:10rem;text-align:center">Exclude for<br>this company</th>
               <th>Best Practice</th>
               <th>Description</th>
@@ -88,6 +90,17 @@
                 {% else %}
                 <span class="text-muted" title="Automated remediation not supported for this check" style="font-size:0.8rem">—</span>
                 {% endif %}
+              </td>
+              <td style="text-align:center">
+                <label class="visually-hidden" for="ticket-{{ bp.id }}">Create ticket on fail for {{ bp.name }}</label>
+                <input
+                  type="checkbox"
+                  id="ticket-{{ bp.id }}"
+                  name="create_ticket_on_fail"
+                  value="{{ bp.id }}"
+                  {% if bp.create_ticket_on_fail %}checked{% endif %}
+                  title="Create a company ticket only when this check changes from pass to fail"
+                />
               </td>
               <td style="text-align:center">
                 <label class="visually-hidden" for="excl-{{ bp.id }}">Exclude {{ bp.name }} for this company</label>
@@ -132,6 +145,7 @@
             <tr>
               <th style="width:6rem;text-align:center">Enabled</th>
               <th style="width:9rem;text-align:center">Auto-Remediate</th>
+              <th style="width:9rem;text-align:center">Create Ticket<br>on Fail</th>
               <th style="width:10rem;text-align:center">Exclude for<br>this company</th>
               <th>Check</th>
               <th>Description</th>
@@ -146,6 +160,10 @@
               </td>
               <td style="text-align:center">
                 <span class="text-muted" title="Automated remediation not supported for this check" style="font-size:0.8rem">—</span>
+              </td>
+              <td style="text-align:center">
+                <label class="visually-hidden" for="ticket-{{ bp.id }}">Create ticket on fail for {{ bp.name }}</label>
+                <input type="checkbox" id="ticket-{{ bp.id }}" name="create_ticket_on_fail" value="{{ bp.id }}" {% if bp.create_ticket_on_fail %}checked{% endif %} title="Create a company ticket only when this check changes from pass to fail" />
               </td>
               <td style="text-align:center">
                 <label class="visually-hidden" for="excl-{{ bp.id }}">Exclude {{ bp.name }} for this company</label>
@@ -178,6 +196,7 @@
             <tr>
               <th style="width:6rem;text-align:center">Enabled</th>
               <th style="width:9rem;text-align:center">Auto-Remediate</th>
+              <th style="width:9rem;text-align:center">Create Ticket<br>on Fail</th>
               <th style="width:10rem;text-align:center">Exclude for<br>this company</th>
               <th>Check</th>
               <th>Description</th>
@@ -192,6 +211,10 @@
               </td>
               <td style="text-align:center">
                 <span class="text-muted" title="Automated remediation not supported for this check" style="font-size:0.8rem">—</span>
+              </td>
+              <td style="text-align:center">
+                <label class="visually-hidden" for="ticket-{{ bp.id }}">Create ticket on fail for {{ bp.name }}</label>
+                <input type="checkbox" id="ticket-{{ bp.id }}" name="create_ticket_on_fail" value="{{ bp.id }}" {% if bp.create_ticket_on_fail %}checked{% endif %} title="Create a company ticket only when this check changes from pass to fail" />
               </td>
               <td style="text-align:center">
                 <label class="visually-hidden" for="excl-{{ bp.id }}">Exclude {{ bp.name }} for this company</label>
@@ -224,6 +247,7 @@
             <tr>
               <th style="width:6rem;text-align:center">Enabled</th>
               <th style="width:9rem;text-align:center">Auto-Remediate</th>
+              <th style="width:9rem;text-align:center">Create Ticket<br>on Fail</th>
               <th style="width:10rem;text-align:center">Exclude for<br>this company</th>
               <th>Check</th>
               <th>Description</th>
@@ -238,6 +262,10 @@
               </td>
               <td style="text-align:center">
                 <span class="text-muted" title="Automated remediation not supported for this check" style="font-size:0.8rem">—</span>
+              </td>
+              <td style="text-align:center">
+                <label class="visually-hidden" for="ticket-{{ bp.id }}">Create ticket on fail for {{ bp.name }}</label>
+                <input type="checkbox" id="ticket-{{ bp.id }}" name="create_ticket_on_fail" value="{{ bp.id }}" {% if bp.create_ticket_on_fail %}checked{% endif %} title="Create a company ticket only when this check changes from pass to fail" />
               </td>
               <td style="text-align:center">
                 <label class="visually-hidden" for="excl-{{ bp.id }}">Exclude {{ bp.name }} for this company</label>

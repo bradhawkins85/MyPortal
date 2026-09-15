@@ -43,6 +43,34 @@ def _render_best_practices(
     )
 
 
+def _render_best_practices_settings(catalog):
+    templates = Path(__file__).parents[1] / "app" / "templates"
+    loader = ChoiceLoader(
+        [
+            DictLoader(
+                {
+                    "base.html": (
+                        "{% block header_title %}{% endblock %}"
+                        "{% block title %}{% endblock %}"
+                        "{% block header_actions %}{% endblock %}"
+                        "{% block styles %}{% endblock %}"
+                        "{% block content %}{% endblock %}"
+                        "{% block scripts %}{% endblock %}"
+                    ),
+                    "macros/header.html": (
+                        "{% macro page_header_actions(actions) %}{% endmacro %}"
+                    ),
+                }
+            ),
+            FileSystemLoader(templates),
+        ]
+    )
+    template = Environment(loader=loader, autoescape=True).get_template(
+        "m365/best_practices_settings.html"
+    )
+    return template.render(catalog=catalog, company={"id": 1, "name": "Contoso"})
+
+
 def test_wholly_not_applicable_section_is_hidden_but_global_stat_strip_remains():
     html = _render_best_practices(
         [
@@ -213,3 +241,24 @@ def test_notes_are_shown_and_editable_for_techs():
     assert "Customer approved temporary exception." in html
     assert 'action="/m365/best-practices/note/bp_test"' in html
     assert "Save note" in html
+
+
+def test_settings_table_includes_create_ticket_on_fail_option():
+    html = _render_best_practices_settings(
+        [
+            {
+                "id": "bp_test",
+                "name": "Test check",
+                "description": "Description",
+                "enabled": True,
+                "auto_remediate": False,
+                "create_ticket_on_fail": True,
+                "excluded": False,
+                "has_remediation": True,
+            }
+        ]
+    )
+
+    assert "Create Ticket" in html
+    assert 'name="create_ticket_on_fail"' in html
+    assert 'id="ticket-bp_test"' in html

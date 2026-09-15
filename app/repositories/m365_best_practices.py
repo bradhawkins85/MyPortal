@@ -58,6 +58,22 @@ async def upsert_result(
     )
 
 
+async def get_result_status(company_id: int, check_id: str) -> str | None:
+    """Return the currently stored status for a company/check pair, if any."""
+    row = await db.fetch_one(
+        """
+        SELECT status
+        FROM m365_best_practice_results
+        WHERE company_id = %s AND check_id = %s
+        """,
+        (company_id, check_id),
+    )
+    if not row:
+        return None
+    value = row.get("status")
+    return str(value) if value else None
+
+
 _SECURE_SCORE_PATTERN = re.compile(
     r"Secure Score is\s+([0-9]+(?:\.[0-9]+)?)/([0-9]+(?:\.[0-9]+)?)\s+\(([0-9]+(?:\.[0-9]+)?)%",
     re.IGNORECASE,
@@ -232,21 +248,35 @@ async def delete_result_for_check_and_company(company_id: int, check_id: str) ->
 # ---------------------------------------------------------------------------
 
 
-async def upsert_setting(*, check_id: str, enabled: bool, auto_remediate: bool = False) -> None:
-    """Create or update the global enabled flag and auto-remediate flag for a single check."""
+async def upsert_setting(
+    *,
+    check_id: str,
+    enabled: bool,
+    auto_remediate: bool = False,
+    create_ticket_on_fail: bool = False,
+) -> None:
+    """Create or update the global settings flags for a single check."""
     await db.execute(
         """
-        INSERT INTO m365_best_practice_settings (check_id, enabled, auto_remediate, updated_at)
-        VALUES (%s, %s, %s, %s)
+        INSERT INTO m365_best_practice_settings (
+            check_id,
+            enabled,
+            auto_remediate,
+            create_ticket_on_fail,
+            updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             enabled = VALUES(enabled),
             auto_remediate = VALUES(auto_remediate),
+            create_ticket_on_fail = VALUES(create_ticket_on_fail),
             updated_at = VALUES(updated_at)
         """,
         (
             check_id,
             1 if enabled else 0,
             1 if auto_remediate else 0,
+            1 if create_ticket_on_fail else 0,
             datetime.now(timezone.utc).replace(tzinfo=None),
         ),
     )
@@ -256,7 +286,7 @@ async def list_settings() -> list[dict[str, Any]]:
     """Return all global best-practice settings rows."""
     rows = await db.fetch_all(
         """
-        SELECT check_id, enabled, auto_remediate, updated_at
+        SELECT check_id, enabled, auto_remediate, create_ticket_on_fail, updated_at
         FROM m365_best_practice_settings
         ORDER BY check_id
         """,
@@ -266,17 +296,21 @@ async def list_settings() -> list[dict[str, Any]]:
         entry = dict(row)
         entry["enabled"] = bool(int(entry.get("enabled", 0) or 0))
         entry["auto_remediate"] = bool(int(entry.get("auto_remediate", 0) or 0))
+        entry["create_ticket_on_fail"] = bool(
+            int(entry.get("create_ticket_on_fail", 0) or 0)
+        )
         out.append(entry)
     return out
 
 
 async def get_settings_map() -> dict[str, dict[str, bool]]:
-    """Return a mapping of check_id → {enabled, auto_remediate} (both bool)."""
+    """Return a mapping of check_id → settings flags."""
     rows = await list_settings()
     return {
         row["check_id"]: {
             "enabled": bool(row["enabled"]),
             "auto_remediate": bool(row["auto_remediate"]),
+            "create_ticket_on_fail": bool(row["create_ticket_on_fail"]),
         }
         for row in rows
     }

@@ -41,6 +41,15 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def disable_ticket_on_fail_by_default(monkeypatch):
+    monkeypatch.setattr(
+        bp_service,
+        "get_create_ticket_on_fail_check_ids",
+        AsyncMock(return_value=set()),
+    )
+
+
 # ---------------------------------------------------------------------------
 # ReportSettings.ReadWrite.All in the required app roles
 # ---------------------------------------------------------------------------

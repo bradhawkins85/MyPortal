@@ -34,14 +34,17 @@ import re
 import secrets
 import string
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Union
+from html import escape
+from typing import Any, Awaitable, Callable, Mapping, Union
 
 import httpx
 
 from app.core.logging import log_error, log_info
 from app.repositories import companies as companies_repo
 from app.repositories import m365_best_practices as bp_repo
+from app.repositories import tickets as tickets_repo
 from app.services import hudu as hudu_service
+from app.services import tickets as tickets_service
 from app.services.cis_benchmark import (
     STATUS_FAIL,
     STATUS_PASS,
@@ -127,6 +130,9 @@ CAP_DEFENDER_O365_P1 = "defender_o365_p1"
 CAP_DEFENDER_O365_P2 = "defender_o365_p2"
 CAP_PURVIEW_DLP = "purview_dlp"
 CAP_INTUNE_LAPS = "intune_laps"
+
+_M365_FAILURE_TICKET_CATEGORY = "Microsoft 365"
+_M365_FAILURE_TICKET_MODULE = "m365_admin"
 
 # Friendly names used in the "not applicable" details message
 _CAPABILITY_FRIENDLY_NAMES: dict[str, str] = {
@@ -5608,6 +5614,16 @@ async def get_auto_remediate_check_ids() -> set[str]:
     return auto_remediate
 
 
+async def get_create_ticket_on_fail_check_ids() -> set[str]:
+    """Return the set of check_ids that should create tickets on pass→fail."""
+    settings = await bp_repo.get_settings_map()
+    return {
+        bp["id"]
+        for bp in _BEST_PRACTICES
+        if bp["id"] in settings and settings[bp["id"]].get("create_ticket_on_fail")
+    }
+
+
 async def reset_enabled_results_to_unknown(company_id: int) -> int:
     """Set all enabled (non-excluded) checks to Unknown for ``company_id``."""
     enabled = await get_enabled_check_ids()
@@ -5637,6 +5653,7 @@ async def list_settings_with_catalog(company_id: int | None = None) -> list[dict
     Each item contains the catalog metadata plus:
     - ``enabled`` boolean (global on/off, defaulting to ``default_enabled``)
     - ``auto_remediate`` boolean (auto-remediation after each evaluation)
+    - ``create_ticket_on_fail`` boolean (ticket created on pass→fail)
     - ``excluded`` boolean (per-company exclusion; only set when ``company_id`` is given)
     """
     settings = await bp_repo.get_settings_map()
@@ -5647,8 +5664,11 @@ async def list_settings_with_catalog(company_id: int | None = None) -> list[dict
     for bp in _BEST_PRACTICES:
         entry = _enrich_catalog_entry(bp)
         row = settings.get(bp["id"])
-        entry["enabled"] = row["enabled"] if row else bool(bp.get("default_enabled", True))
-        entry["auto_remediate"] = row["auto_remediate"] if row else False
+        entry["enabled"] = row.get("enabled") if row else bool(bp.get("default_enabled", True))
+        entry["auto_remediate"] = row.get("auto_remediate", False) if row else False
+        entry["create_ticket_on_fail"] = (
+            row.get("create_ticket_on_fail", False) if row else False
+        )
         entry["excluded"] = bp["id"] in excluded_ids
         out.append(entry)
     return out
@@ -5657,6 +5677,7 @@ async def list_settings_with_catalog(company_id: int | None = None) -> list[dict
 async def set_enabled_checks(
     enabled_check_ids: set[str],
     auto_remediate_check_ids: set[str] | None = None,
+    create_ticket_on_fail_check_ids: set[str] | None = None,
 ) -> None:
     """Persist the global enabled and auto-remediate flags for every catalog check.
 
@@ -5664,6 +5685,8 @@ async def set_enabled_checks(
     ``auto_remediate_check_ids`` controls which checks trigger automated
     remediation immediately after evaluation (only honoured for checks that
     declare ``has_remediation: True`` in the catalog).
+    ``create_ticket_on_fail_check_ids`` controls which checks create a ticket
+    when their status changes from pass to fail.
 
     For checks toggled off, any previously-stored per-company results are
     cleared so they no longer appear on company pages.
@@ -5677,14 +5700,28 @@ async def set_enabled_checks(
             for cid in auto_remediate_check_ids
             if cid in catalog and catalog[cid].get("has_remediation")
         }
+    create_ticket_filtered: set[str] = set()
+    if create_ticket_on_fail_check_ids is not None:
+        create_ticket_filtered = {
+            cid for cid in create_ticket_on_fail_check_ids if cid in catalog
+        }
+    else:
+        existing_settings = await bp_repo.get_settings_map()
+        create_ticket_filtered = {
+            cid
+            for cid, row in existing_settings.items()
+            if cid in catalog and row.get("create_ticket_on_fail")
+        }
     for bp in _BEST_PRACTICES:
         check_id = bp["id"]
         is_enabled = check_id in enabled_filtered
         is_auto_remediate = check_id in auto_remediate_filtered
+        should_create_ticket = check_id in create_ticket_filtered
         await bp_repo.upsert_setting(
             check_id=check_id,
             enabled=is_enabled,
             auto_remediate=is_auto_remediate,
+            create_ticket_on_fail=should_create_ticket,
         )
         if not is_enabled:
             await bp_repo.delete_result_for_check(check_id)
@@ -5692,7 +5729,94 @@ async def set_enabled_checks(
         "M365 Best Practice settings updated",
         enabled_count=len(enabled_filtered),
         auto_remediate_count=len(auto_remediate_filtered),
+        create_ticket_on_fail_count=len(create_ticket_filtered),
         total=len(_BEST_PRACTICES),
+    )
+
+
+def _build_failure_ticket_external_reference(company_id: int, check_id: str) -> str:
+    return f"m365-best-practice:{company_id}:{check_id}"
+
+
+def _format_run_timestamp(run_at: datetime) -> str:
+    return run_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+async def _maybe_create_ticket_on_fail(
+    *,
+    company_id: int,
+    check_id: str,
+    check_name: str,
+    status: str,
+    details: str,
+    run_at: datetime,
+    previous_status: str | None,
+    create_ticket_on_fail_ids: set[str],
+) -> None:
+    if (
+        status != STATUS_FAIL
+        or previous_status != STATUS_PASS
+        or check_id not in create_ticket_on_fail_ids
+    ):
+        return
+
+    external_reference = _build_failure_ticket_external_reference(company_id, check_id)
+    existing_ticket = await tickets_repo.find_open_ticket_by_external_reference(
+        external_reference
+    )
+    if existing_ticket:
+        log_info(
+            "M365 best practice failure ticket already open",
+            company_id=company_id,
+            check_id=check_id,
+            ticket_id=existing_ticket.get("id"),
+        )
+        return
+
+    company = await companies_repo.get_company_by_id(company_id)
+    company_name = (
+        str(company.get("name") or f"Company {company_id}")
+        if company
+        else f"Company {company_id}"
+    )
+    description = (
+        "<p>This ticket was created automatically because an M365 best-practice "
+        "check changed from <strong>Pass</strong> to <strong>Fail</strong>.</p>"
+        f"<p><strong>Company:</strong> {escape(company_name)}<br />"
+        f"<strong>Check:</strong> {escape(check_name)}<br />"
+        f"<strong>Check ID:</strong> {escape(check_id)}<br />"
+        f"<strong>Evaluated at:</strong> {escape(_format_run_timestamp(run_at))}</p>"
+        f"<h3>Failure details</h3><p>{escape(details or 'No details provided.')}</p>"
+    )
+    try:
+        ticket = await tickets_service.create_ticket(
+            subject=f"M365 best practice failed: {check_name}",
+            description=description,
+            requester_id=None,
+            company_id=company_id,
+            assigned_user_id=None,
+            priority="normal",
+            status=await tickets_service.resolve_status_or_default(None),
+            category=_M365_FAILURE_TICKET_CATEGORY,
+            module_slug=_M365_FAILURE_TICKET_MODULE,
+            external_reference=external_reference,
+            trigger_automations=True,
+            send_creation_notification=False,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        log_error(
+            "Failed to create M365 best practice failure ticket",
+            company_id=company_id,
+            check_id=check_id,
+            error=str(exc),
+        )
+        return
+
+    log_info(
+        "M365 best practice failure ticket created",
+        company_id=company_id,
+        check_id=check_id,
+        ticket_id=ticket.get("id"),
     )
 
 
@@ -5878,7 +6002,11 @@ async def _call_check_with_retry(
     raise M365Error(f"Best practice check '{check_id}' produced no result")
 
 
-async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
+async def run_best_practices(
+    company_id: int,
+    *,
+    previous_statuses: Mapping[str, str | None] | None = None,
+) -> list[dict[str, Any]]:
     """Run all globally-enabled best-practice checks for ``company_id``.
 
     Returns the list of result dicts (one per check) and persists each result
@@ -5889,12 +6017,16 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
     - has ``auto_remediate`` enabled globally (and ``has_remediation: True``)
 
     will have automated remediation triggered immediately.
+    Callers that reset stored results before running checks should pass
+    ``previous_statuses`` captured before that reset so pass→fail ticket
+    detection uses the pre-run state.
 
     Graph-based checks receive the Graph access token; Exchange-Online-based
     checks (``source_type == "exo"``) receive the EXO token and tenant ID
     acquired once lazily.  CIS Intune checks (``cis_group`` set) are run via
     their batch runner once per group and results cached for the run.
     """
+    previous_statuses = dict(previous_statuses or {})
     # Best-practice Graph checks are designed around application permissions.
     # Always use an app-only token to avoid reusing a cached delegated token
     # that may not carry equivalent privileges (e.g. AuditLog.Read.All).
@@ -5946,6 +6078,7 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
 
     enabled = await get_enabled_check_ids()
     auto_remediate_ids = await get_auto_remediate_check_ids()
+    create_ticket_on_fail_ids = await get_create_ticket_on_fail_check_ids()
     try:
         excluded = await bp_repo.get_company_exclusions(company_id)
     except Exception as exc:  # noqa: BLE001 – exclusion lookup must never break the runner
@@ -5979,6 +6112,7 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
         if check_id not in enabled or check_id in excluded:
             continue
         check_name = bp["name"]
+        previous_status = previous_statuses.get(check_id)
         cis_group = bp.get("cis_group")
         affected_accounts: list[dict[str, str]] = []
 
@@ -6115,10 +6249,24 @@ async def run_best_practices(company_id: int) -> list[dict[str, Any]]:
                 company_id=company_id,
                 check_id=check_id,
                 allow_auto_remediation=False,
+                previous_status=previous_status,
+                emit_ticket_on_fail=False,
             )
             status = refreshed["status"]
             details = refreshed["details"]
             run_at = refreshed["run_at"]
+            affected_accounts = refreshed.get("affected_accounts") or []
+
+        await _maybe_create_ticket_on_fail(
+            company_id=company_id,
+            check_id=check_id,
+            check_name=check_name,
+            status=status,
+            details=details,
+            run_at=run_at,
+            previous_status=previous_status,
+            create_ticket_on_fail_ids=create_ticket_on_fail_ids,
+        )
 
         results.append({
             "check_id": check_id,
@@ -6144,6 +6292,8 @@ async def run_single_check(
     check_id: str,
     *,
     allow_auto_remediation: bool = True,
+    previous_status: str | None = None,
+    emit_ticket_on_fail: bool = True,
 ) -> dict[str, Any]:
     """Run a single best-practice check by ``check_id`` for ``company_id``.
 
@@ -6155,6 +6305,8 @@ async def run_single_check(
     Raises :class:`ValueError` if ``check_id`` is unknown or not currently
     enabled globally.  ``allow_auto_remediation`` is disabled by post-remediation
     verification runs to prevent an unresolved check from remediating recursively.
+    Callers that reset stored results before evaluation can pass ``previous_status``
+    explicitly so pass→fail ticket detection still uses the pre-reset state.
     """
     catalog = _catalog_map()
     bp = catalog.get(check_id)
@@ -6164,6 +6316,11 @@ async def run_single_check(
     enabled = await get_enabled_check_ids()
     if check_id not in enabled:
         raise ValueError(f"Best-practice check '{check_id}' is not enabled")
+    create_ticket_on_fail_ids = (
+        await get_create_ticket_on_fail_check_ids() if emit_ticket_on_fail else set()
+    )
+    if previous_status is None and check_id in create_ticket_on_fail_ids:
+        previous_status = await bp_repo.get_result_status(company_id, check_id)
 
     # Keep single-check runs consistent with full runs: execute checks with an
     # app-only token so permission-sensitive checks don't depend on delegated
@@ -6321,6 +6478,20 @@ async def run_single_check(
             company_id=company_id,
             check_id=check_id,
             allow_auto_remediation=False,
+            previous_status=previous_status,
+            emit_ticket_on_fail=emit_ticket_on_fail,
+        )
+
+    if emit_ticket_on_fail:
+        await _maybe_create_ticket_on_fail(
+            company_id=company_id,
+            check_id=check_id,
+            check_name=check_name,
+            status=status,
+            details=details,
+            run_at=run_at,
+            previous_status=previous_status,
+            create_ticket_on_fail_ids=create_ticket_on_fail_ids,
         )
 
     log_info(
@@ -7191,6 +7362,7 @@ __all__ = [
     "list_settings_with_catalog",
     "get_enabled_check_ids",
     "get_auto_remediate_check_ids",
+    "get_create_ticket_on_fail_check_ids",
     "reset_enabled_results_to_unknown",
     "set_enabled_checks",
     "save_company_exclusions",

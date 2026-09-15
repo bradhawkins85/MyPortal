@@ -3579,6 +3579,19 @@ async def run_m365_best_practices(request: Request):
         return redirect
 
     user_id = user.get("id")
+    previous_statuses: dict[str, str | None] = {}
+    create_ticket_on_fail_ids = (
+        await m365_best_practices_service.get_create_ticket_on_fail_check_ids()
+    )
+    if create_ticket_on_fail_ids:
+        previous_results = await m365_best_practices_service.get_last_results(company_id)
+        previous_statuses = {
+            str(result.get("check_id")): (
+                str(result.get("status")) if result.get("status") is not None else None
+            )
+            for result in previous_results
+            if result.get("check_id")
+        }
     reset_count = await m365_best_practices_service.reset_enabled_results_to_unknown(company_id)
 
     def _on_complete(_results: list[dict]) -> None:
@@ -3598,7 +3611,10 @@ async def run_m365_best_practices(request: Request):
         )
 
     background_tasks.queue_background_task(
-        lambda: m365_best_practices_service.run_best_practices(company_id),
+        lambda: m365_best_practices_service.run_best_practices(
+            company_id,
+            previous_statuses=previous_statuses,
+        ),
         description="m365-best-practices-run",
         on_complete=_on_complete,
         on_error=_on_error,
@@ -3830,14 +3846,20 @@ async def save_m365_best_practices_settings(request: Request):
     form = await request.form()
     enabled_ids = {value for value in form.getlist("enabled")}
     auto_remediate_ids = {value for value in form.getlist("auto_remediate")}
+    create_ticket_on_fail_ids = {value for value in form.getlist("create_ticket_on_fail")}
     excluded_ids = {value for value in form.getlist("excluded")}
-    await m365_best_practices_service.set_enabled_checks(enabled_ids, auto_remediate_ids)
+    await m365_best_practices_service.set_enabled_checks(
+        enabled_ids,
+        auto_remediate_ids,
+        create_ticket_on_fail_ids,
+    )
     await m365_best_practices_service.save_company_exclusions(company_id, excluded_ids)
     log_info(
         "M365 best practice settings updated",
         user_id=user.get("id"),
         enabled_count=len(enabled_ids),
         auto_remediate_count=len(auto_remediate_ids),
+        create_ticket_on_fail_count=len(create_ticket_on_fail_ids),
         excluded_count=len(excluded_ids),
     )
     return flash_redirect("/m365/best-practices/settings", "Settings saved", "success")
