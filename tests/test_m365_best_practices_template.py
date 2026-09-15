@@ -69,3 +69,33 @@ def test_mixed_section_keeps_results_and_its_stat_strip():
     assert "CIS Intune Benchmark – Windows" in html
     assert 'data-bp-table="bp-table-intune-windows"' in html
     assert "Not Applicable" in html
+
+
+def test_results_table_supports_persisted_filtering_and_sorting():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "pass",
+                "check_name": "Secure defaults",
+                "details": "Enabled",
+            }
+        ]
+    )
+
+    assert 'data-table-id="m365-best-practices-bp-table-m365"' in html
+    assert 'data-table-filter="bp-table-m365"' in html
+    assert 'data-column-key="check" data-sort="string"' in html
+    assert 'data-column-key="evaluated" data-sort="date"' in html
+    assert '/static/js/tables.js' in html
+    assert '/static/js/m365_best_practices.js' in html
+
+
+def test_stat_filter_script_persists_each_checks_table_separately():
+    script = (
+        Path(__file__).parents[1] / "app" / "static" / "js" / "m365_best_practices.js"
+    ).read_text()
+
+    assert "myportal.m365BestPractices.statusFilters." in script
+    assert "window.localStorage.setItem(storageKey(tableId)" in script
+    assert "loadStatuses(tableId, availableStatuses)" in script
