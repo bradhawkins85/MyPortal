@@ -173,3 +173,7 @@ def test_list_forensic_reports_can_limit_to_reject_and_quarantine(monkeypatch):
         25,
         10,
     )
+    assert (
+        "LOWER(COALESCE(delivery_result,'')) IN ('reject','quarantine')"
+        in fetch_all.await_args.args[0]
+    )
