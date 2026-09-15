@@ -3,8 +3,34 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+from jinja2 import ChoiceLoader, DictLoader, Environment, FileSystemLoader
 
 from app.repositories import m365_best_practices as repository
+
+
+def _render_history(history) -> str:
+    templates = Path(__file__).parents[1] / "app" / "templates"
+    loader = ChoiceLoader(
+        [
+            DictLoader(
+                {
+                    "base.html": (
+                        "{% block header_title %}{% endblock %}"
+                        "{% block title %}{% endblock %}"
+                        "{% block header_actions %}{% endblock %}"
+                        "{% block styles %}{% endblock %}"
+                        "{% block content %}{% endblock %}"
+                        "{% block scripts %}{% endblock %}"
+                    )
+                }
+            ),
+            FileSystemLoader(templates),
+        ]
+    )
+    template = Environment(loader=loader, autoescape=True).get_template(
+        "m365/best_practices_history.html"
+    )
+    return template.render(history=history)
 
 
 @pytest.fixture
@@ -68,3 +94,27 @@ async def test_list_daily_history_bounds_the_parameterised_limit(monkeypatch) ->
     sql, params = fetch_all.await_args.args
     assert "LIMIT %s" in sql
     assert params == (9, 3650)
+
+
+def test_daily_history_page_is_searchable_sortable_and_uses_local_time() -> None:
+    html = _render_history(
+        [
+            {
+                "snapshot_date": date(2026, 9, 15),
+                "pass_count": 12,
+                "fail_count": 3,
+                "unknown_count": 2,
+                "not_applicable_count": 1,
+                "secure_score": 60,
+                "secure_score_max": 100,
+                "secure_score_percentage": 60,
+                "recorded_at": datetime(2026, 9, 15, 3, 4, 5),
+            }
+        ]
+    )
+
+    assert 'href="/m365/best-practices"' in html
+    assert 'data-table-id="m365-best-practices-history"' in html
+    assert 'data-column-key="secure-score" data-sort="number"' in html
+    assert 'data-utc="2026-09-15T03:04:05"' in html
+    assert '/static/js/tables.js' in html

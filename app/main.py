@@ -3515,17 +3515,36 @@ async def m365_best_practices_page(request: Request):
     catalog = m365_best_practices_service.list_best_practices()
     enabled_ids = await m365_best_practices_service.get_enabled_check_ids()
     enabled_catalog = [bp for bp in catalog if bp["id"] in enabled_ids]
-    history = await m365_best_practices_service.get_daily_history(company_id)
     extra = {
         "title": "M365 Best Practices",
         "company": company,
         "results": results,
         "catalog": enabled_catalog,
-        "history": history,
         "has_credentials": bool(credentials),
         "is_super_admin": bool(user.get("is_super_admin")),
     }
     return await _render_template("m365/best_practices.html", request, user, extra=extra)
+
+
+@app.get("/m365/best-practices/history", response_class=HTMLResponse)
+async def m365_best_practices_history_page(request: Request):
+    """Display daily security posture snapshots for the current company."""
+    user, membership, company, company_id, redirect = await _load_m365_best_practices_context(request)
+    if redirect:
+        return redirect
+    history = await m365_best_practices_service.get_daily_history(company_id)
+    extra = {
+        "title": "M365 Best Practices Score History",
+        "company": company,
+        "history": history,
+        "is_super_admin": bool(user.get("is_super_admin")),
+    }
+    return await _render_template(
+        "m365/best_practices_history.html",
+        request,
+        user,
+        extra=extra,
+    )
 
 
 @app.post("/m365/best-practices/run", response_class=RedirectResponse)
