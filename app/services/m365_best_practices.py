@@ -577,6 +577,12 @@ _MFA_FATIGUE_NUMBER_MATCHING_MANUAL_MESSAGE = (
     "matching in featureSettings. Enable Number matching manually in Entra, "
     "then re-evaluate the check."
 )
+_MFA_FATIGUE_NUMBER_MATCHING_PARTIAL_MESSAGE = (
+    "Supported Microsoft Authenticator app/location prompts were updated "
+    "automatically, but Microsoft Graph no longer supports toggling number "
+    "matching in featureSettings. Enable Number matching manually in Entra, "
+    "then re-evaluate the check."
+)
 
 _MFA_FATIGUE_REMEDIATION_PAYLOAD: dict[str, Any] = {
     # Graph's update contract requires the concrete configuration type.  It
@@ -2274,10 +2280,11 @@ async def _remediate_authenticator_mfa_fatigue(token: str) -> tuple[bool, str]:
         "MicrosoftAuthenticator"
     )
     current = await _safe_graph_get(token, url)
-    if current is not None:
-        missing = _get_authenticator_mfa_fatigue_missing_settings(current)
-        if missing and set(missing).issubset(_MFA_FATIGUE_MANUAL_ONLY_KEYS):
-            return False, _MFA_FATIGUE_NUMBER_MATCHING_MANUAL_MESSAGE
+    if current is None:
+        return False, "Unable to read Microsoft Authenticator policy."
+    missing = _get_authenticator_mfa_fatigue_missing_settings(current)
+    if missing and set(missing).issubset(_MFA_FATIGUE_MANUAL_ONLY_KEYS):
+        return False, _MFA_FATIGUE_NUMBER_MATCHING_MANUAL_MESSAGE
     await _graph_patch(token, url, _MFA_FATIGUE_REMEDIATION_PAYLOAD)
 
     latest_details = "Microsoft Graph did not return the updated policy."
@@ -2292,7 +2299,7 @@ async def _remediate_authenticator_mfa_fatigue(token: str) -> tuple[bool, str]:
             return True, ""
         latest_details = "Disabled MFA-fatigue protections: " + ", ".join(missing)
         if set(missing).issubset(_MFA_FATIGUE_MANUAL_ONLY_KEYS):
-            return False, _MFA_FATIGUE_NUMBER_MATCHING_MANUAL_MESSAGE
+            return False, _MFA_FATIGUE_NUMBER_MATCHING_PARTIAL_MESSAGE
         if attempt < _MFA_FATIGUE_VERIFICATION_ATTEMPTS:
             await asyncio.sleep(_retry_backoff_seconds(attempt))
 

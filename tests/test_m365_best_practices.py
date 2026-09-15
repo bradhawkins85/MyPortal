@@ -325,6 +325,64 @@ async def test_remediate_authenticator_mfa_fatigue_returns_manual_number_matchin
     assert update_status.await_args.kwargs["remediation_status"] == "failed"
 
 
+@pytest.mark.anyio("asyncio")
+async def test_remediate_authenticator_mfa_fatigue_reports_partial_success_for_number_matching():
+    initially_disabled = {
+        "featureSettings": {
+            setting: {"state": "disabled"}
+            for setting in bp_service._MFA_FATIGUE_PROTECTION_KEYS
+        }
+    }
+    number_matching_only_missing = {
+        "featureSettings": {
+            "numberMatchingRequiredState": {"state": "disabled"},
+            "displayAppInformationRequiredState": {"state": "enabled"},
+            "displayLocationInformationRequiredState": {"state": "enabled"},
+        }
+    }
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+        ) as graph_patch,
+        patch(
+            "app.services.m365_best_practices._safe_graph_get",
+            new_callable=AsyncMock,
+            side_effect=[initially_disabled, number_matching_only_missing],
+        ) as graph_get,
+        patch(
+            "app.services.m365_best_practices.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ) as update_status,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_authenticator_mfa_fatigue"
+        )
+
+    assert result == {
+        "success": False,
+        "message": (
+            "Remediation command failed: "
+            f"{bp_service._MFA_FATIGUE_NUMBER_MATCHING_PARTIAL_MESSAGE}"
+        ),
+    }
+    assert graph_get.await_count == 2
+    graph_patch.assert_awaited_once()
+    sleep.assert_not_awaited()
+    update_status.assert_awaited_once()
+    assert update_status.await_args.kwargs["remediation_status"] == "failed"
+
+
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
