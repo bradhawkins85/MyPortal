@@ -3201,7 +3201,7 @@ async def _check_quarantine_notification_enabled(
     if not rows:
         return _result(check_id, check_name, STATUS_UNKNOWN,
                        "No global quarantine policy was returned.")
-    policy = next((row for row in rows if isinstance(row, dict)), {})
+    policy = _select_global_quarantine_policy(rows)
     if policy.get("ESNEnabled") is not True:
         return _result(check_id, check_name, STATUS_FAIL,
                        "The global quarantine policy has notifications disabled.")
@@ -3212,6 +3212,30 @@ async def _check_quarantine_notification_enabled(
                        "it should be one day.")
     return _result(check_id, check_name, STATUS_PASS,
                    "The global quarantine policy has notifications enabled with a daily frequency.")
+
+
+def _select_global_quarantine_policy(rows: list[Any]) -> dict[str, Any]:
+    """Select the best global quarantine policy row from Get-QuarantinePolicy results."""
+    policies = [row for row in rows if isinstance(row, dict)]
+    if not policies:
+        return {}
+
+    typed_matches = [
+        row for row in policies
+        if str(row.get("QuarantinePolicyType") or "").strip().lower() == "globalquarantinepolicy"
+    ]
+    if typed_matches:
+        built_in = next((row for row in typed_matches if row.get("IsBuiltInPolicy") is True), None)
+        return built_in or typed_matches[0]
+
+    name_matches = [
+        row for row in policies
+        if str(row.get("Identity") or row.get("Name") or "").strip().lower() == "globalquarantinepolicy"
+    ]
+    if name_matches:
+        return name_matches[0]
+
+    return policies[0]
 
 
 _BEST_PRACTICES: list[dict[str, Any]] = [
@@ -6550,7 +6574,7 @@ async def _remediate_global_quarantine_policy(
         return False, f"Unable to query Get-QuarantinePolicy: {exc}"
 
     rows = data.get("value") or []
-    policy = next((row for row in rows if isinstance(row, dict)), {})
+    policy = _select_global_quarantine_policy(rows)
     identity = str(policy.get("Identity") or policy.get("Name") or "").strip()
     if not identity:
         identity = str(base_params.get("Identity") or "").strip()

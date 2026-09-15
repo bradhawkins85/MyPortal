@@ -2996,7 +2996,12 @@ async def test_remediate_quarantine_notification_resolves_global_policy_identity
             return {
                 "value": [
                     {
+                        "Name": "NonGlobalPolicy",
+                        "QuarantinePolicyType": "AdminOnlyAccessPolicy",
+                    },
+                    {
                         "Name": "GlobalQuarantinePolicy EU",
+                        "QuarantinePolicyType": "GlobalQuarantinePolicy",
                         "ESNEnabled": False,
                         "EndUserSpamNotificationFrequency": "3.00:00:00",
                     }
