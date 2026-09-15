@@ -4855,7 +4855,7 @@ async def test_remediate_antiphish_quarantine_domain_success():
     upserts: list[dict] = []
     invocations: list[dict] = []
 
-    async def fake_exo_invoke(token, tenant_id, cmdlet, params):
+    async def fake_exo_invoke(token, tenant_id, cmdlet, params=None):
         invocations.append({"cmdlet": cmdlet, "params": params})
         return {}
 
