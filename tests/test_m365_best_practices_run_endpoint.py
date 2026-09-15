@@ -166,5 +166,5 @@ def test_save_note_route_rejects_overlong_notes(monkeypatch):
         response = client.post("/m365/best-practices/note/bp_test", data={"notes": "x" * 4001})
 
     assert response.status_code == 303
-    assert "error" in response.headers.get("set-cookie", "")
+    assert response.headers["location"] == "/m365/best-practices"
     set_notes.assert_not_awaited()
