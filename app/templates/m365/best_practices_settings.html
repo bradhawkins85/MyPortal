@@ -11,8 +11,19 @@
   ]) }}
 {% endblock %}
 
+{% block styles %}
+<style>
+  .m365-best-practices-settings .table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: rgba(15, 23, 42, 0.96);
+  }
+</style>
+{% endblock %}
+
 {% block content %}
-  <section class="panel">
+  <section class="panel m365-best-practices-settings">
     <header class="panel__header">
       <div>
         <h2 class="panel__title">Manage Microsoft 365 Best Practices</h2>
