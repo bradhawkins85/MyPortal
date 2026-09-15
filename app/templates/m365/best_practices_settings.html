@@ -13,9 +13,13 @@
 
 {% block styles %}
 <style>
+  .m365-best-practices-settings {
+    --m365-settings-sticky-top: 0;
+  }
+
   .m365-best-practices-settings .table thead th {
     position: sticky;
-    top: 0;
+    top: var(--m365-settings-sticky-top);
     z-index: 5;
     background: var(--color-surface-2);
   }
