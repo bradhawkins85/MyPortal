@@ -698,7 +698,7 @@ async def test_try_grant_missing_permissions_assigns_exchange_admin_role():
             return _teams_sp_response()
         if "roleManagement/directory/roleAssignments" in url:
             return {"value": []}  # required directory roles not yet assigned
-        return _sp_response()
+        return _sp_response("11111111-1111-1111-1111-111111111111")
 
     async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
         posted.append({"url": url, "payload": payload})
