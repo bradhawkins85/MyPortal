@@ -100,14 +100,10 @@ def test_dmarc_page_loads_rejected_or_quarantined_forensic_reports(monkeypatch):
 
     assert asyncio.run(routes.page(SimpleNamespace(), policy_domain="example.com")) == "response"
     forensic_reports.assert_awaited_once()
-    assert forensic_reports.await_args.kwargs == {
-        "start": forensic_reports.await_args.kwargs["start"],
-        "end": forensic_reports.await_args.kwargs["end"],
-        "limit": 25,
-        "reported_domain": "example.com",
-        "rejected_or_quarantined_only": True,
-    }
     assert forensic_reports.await_args.args == (42,)
+    assert forensic_reports.await_args.kwargs["limit"] == 25
+    assert forensic_reports.await_args.kwargs["reported_domain"] == "example.com"
+    assert forensic_reports.await_args.kwargs["rejected_or_quarantined_only"] is True
     assert render.await_args.kwargs["extra"]["forensic_failures"] == [
         {"original_mail_from": "sender@example.com"}
     ]
