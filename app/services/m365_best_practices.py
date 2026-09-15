@@ -6828,8 +6828,12 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                             company_id, force_client_credentials=True
                         )
                         success = await _remediate_create_dynamic_guest_group(graph_token)
-                    except M365Error as retry_exc:
-                        exc = retry_exc
+                    except Exception as retry_exc:  # noqa: BLE001 – normalize retry errors into remediation failure
+                        exc = (
+                            retry_exc
+                            if isinstance(retry_exc, M365Error)
+                            else M365Error(str(retry_exc))
+                        )
                         success = False
                 else:
                     success = False
