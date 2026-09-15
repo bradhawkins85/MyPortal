@@ -468,7 +468,6 @@ async def test_remediate_internal_phishing_forms_fails_when_graph_does_not_confi
 async def test_remediate_weak_auth_methods_disabled_waits_for_graph_consistency():
     assert bp_service._WEAK_AUTH_METHODS_VERIFICATION_ATTEMPTS >= 2
     # This scenario models Graph converging on the second verification pass.
-    verification_rounds = 2
     enabled = {"state": "enabled"}
     disabled = {"state": "disabled"}
 
@@ -486,7 +485,7 @@ async def test_remediate_weak_auth_methods_disabled_waits_for_graph_consistency(
         patch(
             "app.services.m365_best_practices._safe_graph_get",
             new_callable=AsyncMock,
-            side_effect=([enabled] * 3 * (verification_rounds - 1)) + ([disabled] * 3),
+            side_effect=[enabled, enabled, enabled, disabled, disabled, disabled],
         ) as graph_get,
         patch(
             "app.services.m365_best_practices.asyncio.sleep",
@@ -518,8 +517,8 @@ async def test_remediate_weak_auth_methods_disabled_waits_for_graph_consistency(
         f"{bp_service._AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/Email",
         {"state": "disabled"},
     )
-    assert sleep.await_count == verification_rounds - 1
-    assert graph_get.await_count == 3 * verification_rounds
+    sleep.assert_awaited_once()
+    assert graph_get.await_count == 6
     assert update_status.await_args.kwargs["remediation_status"] == "success"
 
 
