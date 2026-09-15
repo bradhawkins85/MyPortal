@@ -570,6 +570,11 @@ _MFA_FATIGUE_REMEDIATION_PAYLOAD: dict[str, Any] = {
     }
 }
 
+# Authentication-method policy updates can be eventually consistent.  Verify
+# this remediation before reporting success so the subsequent UI refresh does
+# not persist the stale pre-remediation state returned immediately after PATCH.
+_MFA_FATIGUE_VERIFICATION_ATTEMPTS = 3
+
 
 _PHISHING_RESISTANT_AUTH_STRENGTH_ID = "00000000-0000-0000-0000-000000000004"
 
@@ -2145,6 +2150,26 @@ async def _check_authenticator_mfa_fatigue(token: str) -> dict[str, Any]:
         return _result(check_id, check_name, STATUS_PASS, "All MFA-fatigue protections are enabled.")
     return _result(check_id, check_name, STATUS_FAIL,
                    "Disabled MFA-fatigue protections: " + ", ".join(missing))
+
+
+async def _remediate_authenticator_mfa_fatigue(token: str) -> tuple[bool, str]:
+    """Apply and verify Authenticator protections despite Graph propagation lag."""
+    url = (
+        f"{_AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/"
+        "MicrosoftAuthenticator"
+    )
+    await _graph_patch(token, url, _MFA_FATIGUE_REMEDIATION_PAYLOAD)
+
+    latest_details = "Microsoft Graph did not return the updated policy."
+    for attempt in range(1, _MFA_FATIGUE_VERIFICATION_ATTEMPTS + 1):
+        result = await _check_authenticator_mfa_fatigue(token)
+        latest_details = result.get("details") or latest_details
+        if result.get("status") == STATUS_PASS:
+            return True, ""
+        if attempt < _MFA_FATIGUE_VERIFICATION_ATTEMPTS:
+            await asyncio.sleep(_retry_backoff_seconds(attempt))
+
+    return False, f"Microsoft Graph did not confirm the updated policy: {latest_details}"
 
 
 async def _check_weak_auth_methods_disabled(token: str) -> dict[str, Any]:
@@ -6562,6 +6587,20 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                     error=str(exc),
                 )
                 success = False
+        elif check_id == "bp_authenticator_mfa_fatigue":
+            try:
+                success, failure_message = await _remediate_authenticator_mfa_fatigue(
+                    graph_token
+                )
+            except M365Error as exc:
+                log_error(
+                    "M365 Authenticator MFA-fatigue remediation failed",
+                    company_id=company_id,
+                    check_id=check_id,
+                    error=str(exc),
+                )
+                success = False
+                failure_message = str(exc)
         else:
             remediation_url = bp.get("remediation_url", "")
             remediation_payload = bp.get("remediation_payload") or {}
