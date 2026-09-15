@@ -85,6 +85,15 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def disable_ticket_on_fail_by_default(monkeypatch):
+    monkeypatch.setattr(
+        bp_service,
+        "get_create_ticket_on_fail_check_ids",
+        AsyncMock(return_value=set()),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Catalog
 # ---------------------------------------------------------------------------
@@ -464,6 +473,102 @@ async def test_remediate_internal_phishing_forms_fails_when_graph_does_not_confi
     assert update_status.await_args.kwargs["remediation_status"] == "failed"
 
 
+@pytest.mark.anyio("asyncio")
+async def test_remediate_weak_auth_methods_disabled_waits_for_graph_consistency():
+    assert bp_service._WEAK_AUTH_METHODS_VERIFICATION_ATTEMPTS >= 2
+    # This scenario models Graph converging on the second verification pass.
+    enabled = {"state": "enabled"}
+    disabled = {"state": "disabled"}
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+            return_value={},
+        ) as graph_patch,
+        patch(
+            "app.services.m365_best_practices._safe_graph_get",
+            new_callable=AsyncMock,
+            side_effect=[enabled, enabled, enabled, disabled, disabled, disabled],
+        ) as graph_get,
+        patch(
+            "app.services.m365_best_practices.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ) as update_status,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_weak_auth_methods_disabled"
+        )
+
+    assert result["success"] is True
+    assert graph_patch.await_count == 3
+    graph_patch.assert_any_await(
+        "graph-token",
+        f"{bp_service._AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/Sms",
+        {"state": "disabled"},
+    )
+    graph_patch.assert_any_await(
+        "graph-token",
+        f"{bp_service._AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/Voice",
+        {"state": "disabled"},
+    )
+    graph_patch.assert_any_await(
+        "graph-token",
+        f"{bp_service._AUTH_METHODS_POLICY_URL}/authenticationMethodConfigurations/Email",
+        {"state": "disabled"},
+    )
+    sleep.assert_awaited_once()
+    assert graph_get.await_count == 6
+    assert update_status.await_args.kwargs["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_weak_auth_methods_disabled_fails_when_graph_does_not_confirm():
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
+            "app.services.m365_best_practices._safe_graph_get",
+            new_callable=AsyncMock,
+            return_value={"state": "enabled"},
+        ),
+        patch(
+            "app.services.m365_best_practices.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ) as update_status,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_weak_auth_methods_disabled"
+        )
+
+    assert result["success"] is False
+    assert "did not confirm the updated weak authentication method state" in result["message"]
+    assert "Weak methods still enabled: Sms, Voice, Email" in result["message"]
+    assert sleep.await_count == bp_service._WEAK_AUTH_METHODS_VERIFICATION_ATTEMPTS - 1
+    assert update_status.await_args.kwargs["remediation_status"] == "failed"
+
+
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
@@ -512,6 +617,11 @@ async def test_set_enabled_checks_persists_each_check_and_clears_disabled_result
 
     with (
         patch(
+            "app.services.m365_best_practices.bp_repo.get_settings_map",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
             "app.services.m365_best_practices.bp_repo.upsert_setting",
             new_callable=AsyncMock,
         ) as mock_upsert,
@@ -535,6 +645,11 @@ async def test_set_enabled_checks_persists_each_check_and_clears_disabled_result
 async def test_set_enabled_checks_ignores_unknown_check_ids():
     """Unknown check_ids in the input are silently ignored."""
     with (
+        patch(
+            "app.services.m365_best_practices.bp_repo.get_settings_map",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
         patch(
             "app.services.m365_best_practices.bp_repo.upsert_setting",
             new_callable=AsyncMock,
@@ -688,6 +803,164 @@ async def test_run_best_practices_handles_check_error_gracefully():
     mock_token.assert_awaited_once_with(1, force_client_credentials=True)
 
 
+@pytest.mark.anyio("asyncio")
+async def test_run_best_practices_creates_ticket_on_pass_to_fail_transition():
+    check_id = "bp_disable_direct_send"
+    bp_entry = next(bp for bp in bp_service._BEST_PRACTICES if bp["id"] == check_id)
+    real_source = bp_entry["source"]
+    bp_entry["source"] = AsyncMock(
+        return_value={"status": "fail", "details": "Direct Send enabled"}
+    )
+    created: list[dict] = []
+
+    try:
+        with (
+            patch(
+                "app.services.m365_best_practices.acquire_access_token",
+                new_callable=AsyncMock,
+                return_value="graph-token",
+            ),
+            patch(
+                "app.services.m365_best_practices.acquire_delegated_token",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.services.m365_best_practices.detect_tenant_capabilities",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.services.m365_best_practices._acquire_exo_access_token",
+                new_callable=AsyncMock,
+                return_value=("exo-token", "tenant-123"),
+            ),
+            patch(
+                "app.services.m365_best_practices.get_enabled_check_ids",
+                new_callable=AsyncMock,
+                return_value={check_id},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+            patch(
+                "app.services.m365_best_practices.get_create_ticket_on_fail_check_ids",
+                new_callable=AsyncMock,
+                return_value={check_id},
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.get_company_exclusions",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.services.m365_best_practices.tickets_repo.find_open_ticket_by_external_reference",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.services.m365_best_practices.companies_repo.get_company_by_id",
+                new_callable=AsyncMock,
+                return_value={"id": 42, "name": "Contoso"},
+            ),
+            patch(
+                "app.services.m365_best_practices.tickets_service.resolve_status_or_default",
+                new_callable=AsyncMock,
+                return_value="open",
+            ),
+            patch(
+                "app.services.m365_best_practices.tickets_service.create_ticket",
+                side_effect=lambda **kwargs: created.append(kwargs) or {"id": 123},
+            ),
+        ):
+            await bp_service.run_best_practices(
+                company_id=42,
+                previous_statuses={check_id: bp_service.STATUS_PASS},
+            )
+    finally:
+        bp_entry["source"] = real_source
+
+    assert len(created) == 1
+    assert created[0]["company_id"] == 42
+    assert created[0]["external_reference"] == f"m365-best-practice:42:{check_id}"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_best_practices_does_not_create_ticket_on_initial_fail():
+    check_id = "bp_disable_direct_send"
+    bp_entry = next(bp for bp in bp_service._BEST_PRACTICES if bp["id"] == check_id)
+    real_source = bp_entry["source"]
+    bp_entry["source"] = AsyncMock(
+        return_value={"status": "fail", "details": "Direct Send enabled"}
+    )
+
+    try:
+        with (
+            patch(
+                "app.services.m365_best_practices.acquire_access_token",
+                new_callable=AsyncMock,
+                return_value="graph-token",
+            ),
+            patch(
+                "app.services.m365_best_practices.acquire_delegated_token",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.services.m365_best_practices.detect_tenant_capabilities",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.services.m365_best_practices._acquire_exo_access_token",
+                new_callable=AsyncMock,
+                return_value=("exo-token", "tenant-123"),
+            ),
+            patch(
+                "app.services.m365_best_practices.get_enabled_check_ids",
+                new_callable=AsyncMock,
+                return_value={check_id},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+            patch(
+                "app.services.m365_best_practices.get_create_ticket_on_fail_check_ids",
+                new_callable=AsyncMock,
+                return_value={check_id},
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.get_company_exclusions",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.services.m365_best_practices.tickets_service.create_ticket",
+                new_callable=AsyncMock,
+            ) as create_ticket,
+        ):
+            await bp_service.run_best_practices(
+                company_id=42,
+                previous_statuses={},
+            )
+    finally:
+        bp_entry["source"] = real_source
+
+    create_ticket.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # run_single_check
 # ---------------------------------------------------------------------------
@@ -727,6 +1000,91 @@ async def test_run_single_check_runs_and_persists():
     assert upserts[0]["company_id"] == 42
     assert upserts[0]["check_id"] == enabled_id
     mock_token.assert_awaited_once_with(42, force_client_credentials=True)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_run_single_check_creates_ticket_on_pass_to_fail_transition():
+    check_id = "bp_disable_direct_send"
+    target = next(bp for bp in bp_service._BEST_PRACTICES if bp["id"] == check_id)
+    real_source = target["source"]
+    target["source"] = AsyncMock(
+        return_value={"check_id": check_id, "check_name": target["name"], "status": "fail", "details": "failed"}
+    )
+    created: list[dict] = []
+
+    try:
+        with (
+            patch(
+                "app.services.m365_best_practices.acquire_access_token",
+                new_callable=AsyncMock,
+                return_value="fake-token",
+            ),
+            patch(
+                "app.services.m365_best_practices.acquire_delegated_token",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.services.m365_best_practices.detect_tenant_capabilities",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.services.m365_best_practices._acquire_exo_access_token",
+                new_callable=AsyncMock,
+                return_value=("exo-token", "tenant-123"),
+            ),
+            patch(
+                "app.services.m365_best_practices.get_enabled_check_ids",
+                new_callable=AsyncMock,
+                return_value={check_id},
+            ),
+            patch(
+                "app.services.m365_best_practices.get_auto_remediate_check_ids",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+            patch(
+                "app.services.m365_best_practices.get_create_ticket_on_fail_check_ids",
+                new_callable=AsyncMock,
+                return_value={check_id},
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.get_result_status",
+                new_callable=AsyncMock,
+                return_value=bp_service.STATUS_PASS,
+            ),
+            patch(
+                "app.services.m365_best_practices.bp_repo.upsert_result",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.services.m365_best_practices.tickets_repo.find_open_ticket_by_external_reference",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.services.m365_best_practices.companies_repo.get_company_by_id",
+                new_callable=AsyncMock,
+                return_value={"id": 42, "name": "Contoso"},
+            ),
+            patch(
+                "app.services.m365_best_practices.tickets_service.resolve_status_or_default",
+                new_callable=AsyncMock,
+                return_value="open",
+            ),
+            patch(
+                "app.services.m365_best_practices.tickets_service.create_ticket",
+                side_effect=lambda **kwargs: created.append(kwargs) or {"id": 321},
+            ),
+        ):
+            result = await bp_service.run_single_check(company_id=42, check_id=check_id)
+    finally:
+        target["source"] = real_source
+
+    assert result["status"] == "fail"
+    assert len(created) == 1
+    assert created[0]["external_reference"] == f"m365-best-practice:42:{check_id}"
 
 
 @pytest.mark.anyio("asyncio")
@@ -1266,6 +1624,11 @@ async def test_set_enabled_checks_persists_auto_remediate_flag():
 
     with (
         patch(
+            "app.services.m365_best_practices.bp_repo.get_settings_map",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
             "app.services.m365_best_practices.bp_repo.upsert_setting",
             side_effect=lambda **kw: upserted.append(kw) or None,
         ),
@@ -1298,6 +1661,11 @@ async def test_set_enabled_checks_none_auto_remediate_defaults_to_false():
 
     with (
         patch(
+            "app.services.m365_best_practices.bp_repo.get_settings_map",
+            new_callable=AsyncMock,
+            return_value={},
+        ),
+        patch(
             "app.services.m365_best_practices.bp_repo.upsert_setting",
             side_effect=lambda **kw: upserted.append(kw) or None,
         ),
@@ -1324,7 +1692,11 @@ async def test_list_settings_with_catalog_includes_auto_remediate():
         new_callable=AsyncMock,
     ) as mock_map:
         mock_map.return_value = {
-            remediable_id: {"enabled": True, "auto_remediate": True},
+            remediable_id: {
+                "enabled": True,
+                "auto_remediate": True,
+                "create_ticket_on_fail": False,
+            },
         }
         rows = await bp_service.list_settings_with_catalog()
 
@@ -1336,6 +1708,100 @@ async def test_list_settings_with_catalog_includes_auto_remediate():
     other = next((r for r in rows if r["id"] != remediable_id), None)
     assert other is not None
     assert other["auto_remediate"] is False
+
+
+@pytest.mark.anyio("asyncio")
+async def test_set_enabled_checks_persists_create_ticket_on_fail_flag():
+    """set_enabled_checks must pass create_ticket_on_fail to upsert_setting."""
+    catalog = bp_service.list_best_practices()
+    selected_id = catalog[0]["id"]
+
+    upserted: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.bp_repo.upsert_setting",
+            side_effect=lambda **kw: upserted.append(kw) or None,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.delete_result_for_check",
+            new_callable=AsyncMock,
+        ),
+    ):
+        await bp_service.set_enabled_checks(
+            {selected_id},
+            auto_remediate_check_ids=set(),
+            create_ticket_on_fail_check_ids={selected_id},
+        )
+
+    selected_call = next((c for c in upserted if c["check_id"] == selected_id), None)
+    assert selected_call is not None
+    assert selected_call["create_ticket_on_fail"] is True
+
+    other = next((c for c in upserted if c["check_id"] != selected_id), None)
+    assert other is not None
+    assert other["create_ticket_on_fail"] is False
+
+
+@pytest.mark.anyio("asyncio")
+async def test_set_enabled_checks_preserves_create_ticket_on_fail_when_omitted():
+    """set_enabled_checks preserves existing create_ticket_on_fail flags when omitted."""
+    selected_id = bp_service.list_best_practices()[0]["id"]
+    upserted: list[dict] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.bp_repo.get_settings_map",
+            new_callable=AsyncMock,
+            return_value={
+                selected_id: {
+                    "enabled": True,
+                    "auto_remediate": False,
+                    "create_ticket_on_fail": True,
+                }
+            },
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.upsert_setting",
+            side_effect=lambda **kw: upserted.append(kw) or None,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.delete_result_for_check",
+            new_callable=AsyncMock,
+        ),
+    ):
+        await bp_service.set_enabled_checks({selected_id})
+
+    selected_call = next((c for c in upserted if c["check_id"] == selected_id), None)
+    assert selected_call is not None
+    assert selected_call["create_ticket_on_fail"] is True
+
+
+@pytest.mark.anyio("asyncio")
+async def test_list_settings_with_catalog_includes_create_ticket_on_fail():
+    """list_settings_with_catalog must expose create_ticket_on_fail for each entry."""
+    selected_id = bp_service.list_best_practices()[0]["id"]
+
+    with patch(
+        "app.services.m365_best_practices.bp_repo.get_settings_map",
+        new_callable=AsyncMock,
+        return_value={
+            selected_id: {
+                "enabled": True,
+                "auto_remediate": False,
+                "create_ticket_on_fail": True,
+            }
+        },
+    ):
+        rows = await bp_service.list_settings_with_catalog()
+
+    selected = next((r for r in rows if r["id"] == selected_id), None)
+    assert selected is not None
+    assert selected["create_ticket_on_fail"] is True
+
+    other = next((r for r in rows if r["id"] != selected_id), None)
+    assert other is not None
+    assert other["create_ticket_on_fail"] is False
 
 
 # ---------------------------------------------------------------------------
