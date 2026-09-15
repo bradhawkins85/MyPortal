@@ -3103,7 +3103,7 @@ async def test_get_last_results_filters_excluded_checks():
 
 
 # ---------------------------------------------------------------------------
-# Expanded best-practice catalog (65 additional checks)
+# Expanded best-practice catalog (64 additional checks)
 # ---------------------------------------------------------------------------
 
 
@@ -3139,7 +3139,6 @@ _EXPECTED_NEW_CHECK_IDS = {
     "bp_weak_auth_methods_disabled",
     "bp_internal_phishing_forms",
     "bp_laps_enabled",
-    "bp_two_emergency_access_accounts",
     # Exchange Online
     "bp_audit_bypass_disabled_mailboxes",
     "bp_audit_disabled_org_false",
