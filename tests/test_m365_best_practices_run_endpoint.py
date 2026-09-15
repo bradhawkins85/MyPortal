@@ -78,6 +78,11 @@ def test_run_best_practices_resets_to_unknown_before_queueing(monkeypatch):
 
     events: list[str] = []
 
+    async def fake_last_results(company_id: int) -> list[dict[str, str]]:
+        assert company_id == 99
+        events.append("load")
+        return [{"check_id": "bp_test", "status": "pass"}]
+
     async def fake_reset(company_id: int) -> int:
         assert company_id == 99
         events.append("reset")
@@ -88,6 +93,11 @@ def test_run_best_practices_resets_to_unknown_before_queueing(monkeypatch):
         assert description == "m365-best-practices-run"
 
     monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "get_last_results",
+        fake_last_results,
+    )
     monkeypatch.setattr(
         main_module.m365_best_practices_service,
         "reset_enabled_results_to_unknown",
@@ -106,7 +116,7 @@ def test_run_best_practices_resets_to_unknown_before_queueing(monkeypatch):
         "message": "Best practice evaluation started in the background",
         "variant": "success",
     }
-    assert events == ["reset", "queue"]
+    assert events == ["load", "reset", "queue"]
 
 
 def test_score_history_page_loads_current_company_history(monkeypatch):
@@ -201,6 +211,41 @@ def test_best_practices_page_sets_account_exclusion_permission_for_company_admin
     assert response.status_code == 200
     assert response.text == "best-practices-page"
     assert render_template.await_args.kwargs["extra"]["can_manage_account_exclusions"] is True
+
+
+def test_save_best_practice_settings_includes_create_ticket_on_fail(monkeypatch):
+    async def fake_context(request, super_admin_only=False):
+        return {"id": 7, "is_super_admin": True}, {}, {"id": 99}, 99, None
+
+    set_enabled = AsyncMock()
+    save_exclusions = AsyncMock()
+
+    monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "set_enabled_checks",
+        set_enabled,
+    )
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "save_company_exclusions",
+        save_exclusions,
+    )
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/m365/best-practices/settings",
+            data={
+                "enabled": ["bp_test"],
+                "auto_remediate": ["bp_test"],
+                "create_ticket_on_fail": ["bp_test"],
+                "excluded": ["bp_other"],
+            },
+        )
+
+    assert response.status_code == 303
+    set_enabled.assert_awaited_once_with({"bp_test"}, {"bp_test"}, {"bp_test"})
+    save_exclusions.assert_awaited_once_with(99, {"bp_other"})
 
 
 def test_can_manage_m365_account_exclusions_helper_covers_all_permission_branches():
