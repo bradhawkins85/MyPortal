@@ -37,6 +37,15 @@ def _display_user_name(user: dict[str, Any] | None) -> str:
     )
 
 
+def _as_utc_naive(value: datetime | None) -> datetime | None:
+    """Normalise datetimes so KPI comparisons work with MySQL DATETIME values."""
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
 def _build_bcp_kpi_items(
     *,
     activities: list[dict[str, Any]],
@@ -56,13 +65,13 @@ def _build_bcp_kpi_items(
     )
     rto_pct = int((rto_covered / total_activities) * 100) if total_activities else 0
 
-    recent_window = datetime.now(timezone.utc) - timedelta(days=365)
+    recent_window = datetime.now() - timedelta(days=365)
     completed_exercises = sum(
         1
         for item in training_items
         if item.get("status") == "Completed"
         and item.get("training_date")
-        and item["training_date"] >= recent_window
+        and (_as_utc_naive(item["training_date"]) or recent_window) >= recent_window
     )
     approved_reviews = sum(
         1 for item in review_items if item.get("approval_status") == "Approved"
@@ -1185,13 +1194,13 @@ async def bcp_roles(request: Request):
     all_users = await user_repo.list_users()
     collaboration_audit = await audit_log_repo.list_audit_logs(
         entity_type="bcp_role_assignment",
-        limit=10,
+        limit=100,
     )
     collaboration_audit = [
         entry
         for entry in collaboration_audit
         if (entry.get("metadata") or {}).get("company_id") == company_id
-    ]
+    ][:10]
 
     
     context = await _build_base_context(
@@ -2724,11 +2733,17 @@ async def update_incident_after_action_endpoint(
     if not before or before["plan_id"] != plan["id"]:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
 
+    reviewed_at = (
+        datetime.now(timezone.utc)
+        if (after_action_summary and after_action_summary.strip())
+        or (after_action_improvements and after_action_improvements.strip())
+        else None
+    )
     updated = await bcp_repo.update_incident_after_action(
         incident_id,
         after_action_summary=after_action_summary if after_action_summary else None,
         after_action_improvements=after_action_improvements if after_action_improvements else None,
-        after_action_reviewed_at=datetime.now(timezone.utc),
+        after_action_reviewed_at=reviewed_at,
     )
     await audit.record(
         action="bcp.incident.after_action.update",
