@@ -173,6 +173,15 @@ def _safe_action_url(value: Any) -> str:
     return "/admin/modules"
 
 
+def _command_matches_registered(command: str, registered: set[str]) -> bool:
+    if command in registered:
+        return True
+    return any(
+        item.endswith("*") and command.startswith(item[:-1])
+        for item in registered
+    )
+
+
 def _company_label(company_id: Any) -> str:
     if company_id in (None, ""):
         return "All companies"
@@ -304,8 +313,11 @@ async def build_operations_center(
 
     task_ids_by_module: dict[str, set[int]] = defaultdict(set)
     for task in tasks:
-        for module_slug in modules_for_command(_string_value(task.get("command"))):
-            if task.get("id") is not None:
+        if task.get("id") is None:
+            continue
+        command = _string_value(task.get("command"))
+        for module_slug, registered_commands in COMMANDS_BY_MODULE.items():
+            if _command_matches_registered(command, registered_commands):
                 task_ids_by_module[module_slug].add(int(task["id"]))
 
     runs_by_task: dict[int, list[Mapping[str, Any]]] = defaultdict(list)

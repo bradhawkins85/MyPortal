@@ -191,6 +191,8 @@ def test_modules_page_renders_operations_center(super_admin_context, monkeypatch
                     "slo_target_percent": 99,
                     "error_budget_total": 1,
                     "error_budget_used": 2,
+                    "error_budget_overrun": 1,
+                    "error_budget_remaining": 0,
                     "scheduled_task_count": 2,
                     "failed_webhook_count": 2,
                     "missing_fields": [],
