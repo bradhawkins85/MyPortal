@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -265,7 +265,7 @@ async def test_renew_admin_client_secret_validation_failure_restores_previous_se
         "client_secret": "old-secret",
         "app_object_id": APP_OBJECT_ID,
         "client_secret_key_id": OLD_KEY_ID,
-        "client_secret_expires_at": datetime.utcnow() + timedelta(days=4),
+        "client_secret_expires_at": datetime.now(timezone.utc) + timedelta(days=4),
         "pkce_client_id": "pkce-client-id",
     }
     posted_calls: list[dict[str, Any]] = []
