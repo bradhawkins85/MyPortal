@@ -572,7 +572,7 @@ def _find_conflicting_recipient(
 ) -> dict[str, Any] | None:
     """Find a non-baseline recipient that already owns the target name or address."""
     expected_name_folded = expected_name.casefold()
-    expected_addresses = {address.casefold() for address in expected_addresses if address}
+    expected_addresses_folded = {address.casefold() for address in expected_addresses if address}
     for row in recipients:
         recipient_type = str(row.get("RecipientTypeDetails") or row.get("RecipientType") or "").casefold()
         if recipient_type in allowed_types:
@@ -584,7 +584,7 @@ def _find_conflicting_recipient(
         }
         if expected_name_folded and expected_name_folded in candidate_names:
             return row
-        if expected_addresses and _exo_recipient_addresses(row) & expected_addresses:
+        if expected_addresses_folded and _exo_recipient_addresses(row) & expected_addresses_folded:
             return row
     return None
 
@@ -701,7 +701,16 @@ async def _remediate_it_contact_baseline(exo_token: str, tenant_id: str) -> tupl
         if refreshed_state["conflicts"]:
             return False, "; ".join(refreshed_state["conflicts"]) + ". Resolve the conflict manually; no changes were made."
         if (kind, profile) in refreshed_state["missing"]:
-            raise M365Error("Exchange Online object still missing after 409 conflict", http_status=409)
+            label = (
+                profile.get("contact")
+                or profile.get("group")
+                or _IT_BASELINE_RULE_NAME
+            )
+            return False, (
+                f"Exchange Online reported a conflict while creating {label}, "
+                "but the baseline object is still missing. Resolve the conflict "
+                "manually; no changes were made."
+            )
         return True, None
 
     for kind, profile in state["missing"]:

@@ -195,6 +195,27 @@ async def test_it_contact_baseline_treats_group_create_conflict_as_success_after
 
 
 @pytest.mark.anyio
+async def test_it_contact_baseline_returns_structured_error_when_create_conflict_still_missing(monkeypatch, baseline_config):
+    async def invoke(_token, _tenant, cmdlet, params=None):
+        if cmdlet == "Get-AcceptedDomain":
+            return {"value": [{"Name": "customer.example", "DomainType": "Authoritative", "Default": True}]}
+        if cmdlet.startswith("Get-"):
+            return {"value": []}
+        if cmdlet == "New-MailContact":
+            raise M365Error("Exchange Online New-MailContact failed (409)", http_status=409)
+        return {"value": []}
+
+    command = AsyncMock(side_effect=invoke)
+    monkeypatch.setattr(service, "_exo_invoke_command", command)
+
+    success, message = await service._remediate_it_contact_baseline("token", "tenant")
+
+    assert success is False
+    assert "still missing" in message
+    assert all(call.args[2] != "Set-MailContact" for call in command.await_args_list)
+
+
+@pytest.mark.anyio
 async def test_it_contact_baseline_rejects_onmicrosoft_default_domain(monkeypatch, baseline_config):
     monkeypatch.setattr(
         service,
