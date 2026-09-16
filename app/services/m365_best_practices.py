@@ -6066,12 +6066,12 @@ def build_failure_ticket_description(
     details: str,
     run_at: datetime | None,
     created_automatically: bool,
+    regression_detected: bool = False,
     requester_name: str | None = None,
     requester_email: str | None = None,
 ) -> str:
     bp = _catalog_map().get(check_id, {"id": check_id})
     posture = _posture_metadata_for_bp(bp)
-    regression_detected = created_automatically
     intro = (
         "This ticket was created automatically because an M365 best-practice "
         "check regressed from <strong>Pass</strong> to <strong>Fail</strong>."
@@ -6170,6 +6170,7 @@ async def _maybe_create_ticket_on_fail(
         details=details,
         run_at=run_at,
         created_automatically=True,
+        regression_detected=_is_regression(previous_status, status),
     )
     try:
         ticket = await tickets_service.create_ticket(
@@ -6987,7 +6988,11 @@ async def remediate_failed_checks_batch(company_id: int, *, scope: str) -> dict[
     succeeded = 0
     for candidate in candidates:
         check_id = str(candidate.get("check_id") or "")
-        outcome = await remediate_check(company_id=company_id, check_id=check_id)
+        try:
+            outcome = await remediate_check(company_id=company_id, check_id=check_id)
+        except (ValueError, M365Error) as exc:
+            failures.append(f"{candidate.get('check_name') or check_id}: remediation failed ({exc})")
+            continue
         try:
             await run_single_check(
                 company_id=company_id,

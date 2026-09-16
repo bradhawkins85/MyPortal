@@ -3826,7 +3826,7 @@ async def submit_m365_best_practice_ticket(request: Request, check_id: str):
     ticket = await tickets_service.create_ticket(
         subject=m365_best_practices_service.build_failure_ticket_subject(
             str(result.get("check_name") or check_id),
-            regression_detected=bool(str(result.get("details") or "").startswith("Regression detected:")),
+            regression_detected=bool(result.get("regression_detected")),
         ),
         description=m365_best_practices_service.build_failure_ticket_description(
             company_name=company_name,
@@ -3835,6 +3835,7 @@ async def submit_m365_best_practice_ticket(request: Request, check_id: str):
             details=str(result.get("details") or ""),
             run_at=result.get("run_at"),
             created_automatically=False,
+            regression_detected=bool(result.get("regression_detected")),
             requester_name=requester_name,
             requester_email=requester_email,
         ),

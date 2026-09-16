@@ -158,6 +158,62 @@ async def test_remediate_failed_checks_batch_scopes_to_selected_category(monkeyp
     remediate.assert_awaited_once_with(company_id=9, check_id="bp_block_legacy_auth")
     rerun.assert_awaited_once()
 
+
+def test_build_failure_ticket_description_only_mentions_regression_when_flagged():
+    description = bp_service.build_failure_ticket_description(
+        company_name="Contoso",
+        check_id="bp_block_legacy_auth",
+        check_name="Block legacy auth",
+        details="Control failed.",
+        run_at=None,
+        created_automatically=True,
+        regression_detected=False,
+    )
+
+    assert "regressed from <strong>Pass</strong> to <strong>Fail</strong>" not in description
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_failed_checks_batch_continues_after_one_failure(monkeypatch):
+    monkeypatch.setattr(
+        bp_service,
+        "get_last_results",
+        AsyncMock(
+            return_value=[
+                {
+                    "check_id": "bp_block_legacy_auth",
+                    "check_name": "Legacy auth",
+                    "status": "fail",
+                    "has_remediation": True,
+                    "batch_scope": "m365",
+                },
+                {
+                    "check_id": "bp_disable_direct_send",
+                    "check_name": "Direct send",
+                    "status": "fail",
+                    "has_remediation": True,
+                    "batch_scope": "m365",
+                },
+            ]
+        ),
+    )
+
+    async def fake_remediate_check(*, company_id: int, check_id: str):
+        if check_id == "bp_block_legacy_auth":
+            raise bp_service.M365Error("boom")
+        return {"success": True, "message": "ok"}
+
+    monkeypatch.setattr(bp_service, "remediate_check", fake_remediate_check)
+    rerun = AsyncMock(return_value={"status": "pass"})
+    monkeypatch.setattr(bp_service, "run_single_check", rerun)
+
+    result = await bp_service.remediate_failed_checks_batch(9, scope="m365")
+
+    assert result["success"] is False
+    assert result["failed"] == 1
+    assert result["succeeded"] == 1
+    rerun.assert_awaited_once()
+
 _GUEST_ROLE_ID_MOST_RESTRICTIVE = bp_service._GUEST_ROLE_ID_MOST_RESTRICTIVE
 
 
