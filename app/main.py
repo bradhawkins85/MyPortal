@@ -8697,6 +8697,30 @@ def _format_user_label(user_record: Mapping[str, Any] | None) -> str:
     return email or "System"
 
 
+def _format_booking_requester_name(user_record: Mapping[str, Any] | None) -> str:
+    """Build a booking prefill name from first/last name parts only."""
+    if not isinstance(user_record, Mapping):
+        return ""
+    return " ".join(
+        part.strip()
+        for part in (
+            str(user_record.get("first_name") or ""),
+            str(user_record.get("last_name") or ""),
+        )
+        if part and part.strip()
+    ).strip()
+
+
+async def _with_uninitialised_db_fallback(awaitable: Awaitable[Any], fallback: Any) -> Any:
+    """Return a fallback value when optional helpers run without an initialised DB."""
+    try:
+        return await awaitable
+    except RuntimeError as exc:
+        if "Database pool not initialised" in str(exc):
+            return fallback
+        raise
+
+
 async def _render_portal_ticket_detail(
     request: Request,
     user: dict[str, Any],
@@ -8884,20 +8908,12 @@ async def _render_portal_ticket_detail(
         except (TypeError, ValueError):
             requester_staff_record = None
     assigned_record = user_lookup.get(ticket.get("assigned_user_id"))
-    current_user_name = " ".join(
-        part.strip()
-        for part in (
-            str(user.get("first_name") or ""),
-            str(user.get("last_name") or ""),
-        )
-        if part and part.strip()
-    ).strip()
     booking_link_url = tickets_service.build_booking_link_url(
         assigned_record.get("booking_link_url") if assigned_record else None,
         ticket_id=ticket.get("id"),
         ticket_number=ticket.get("ticket_number") or ticket.get("id"),
         ticket_subject=ticket.get("subject"),
-        user_name=current_user_name,
+        user_name=_format_booking_requester_name(user),
         user_email=str(user.get("email") or ""),
         user_phone=str(user.get("mobile_phone") or ""),
         ticket_url=str(request.url),
@@ -9478,36 +9494,26 @@ async def _render_ticket_detail(
         "description_text": sanitized_description.text_content,
     }
     from app.services import slas as sla_service
-    try:
-        ticket_sla = (await sla_service.statuses_for_tickets([ticket_id])).get(
-            ticket_id,
-            {"state": "not_applicable", "label": "No SLA"},
+    ticket_sla = (
+        await _with_uninitialised_db_fallback(
+            sla_service.statuses_for_tickets([ticket_id]),
+            {},
         )
-    except RuntimeError as exc:
-        if "Database pool not initialised" in str(exc):
-            ticket_sla = {"state": "not_applicable", "label": "No SLA"}
-        else:
-            raise
+    ).get(ticket_id, {"state": "not_applicable", "label": "No SLA"})
 
     replies = await tickets_repo.list_replies(ticket_id)
-    try:
-        split_replies = await tickets_repo.list_split_replies_for_original(ticket_id)
-    except RuntimeError as exc:
-        if "Database pool not initialised" in str(exc):
-            split_replies = []
-        else:
-            raise
+    split_replies = await _with_uninitialised_db_fallback(
+        tickets_repo.list_split_replies_for_original(ticket_id),
+        [],
+    )
     replies = [*replies, *split_replies]
     watchers = await tickets_repo.list_watchers(ticket_id)
     from app.services import ticket_shipment_tracking as shipment_watch_service
 
-    try:
-        shipment_watch = await shipment_watch_service.get_watch_for_ticket(ticket_id)
-    except RuntimeError as exc:
-        if "Database pool not initialised" in str(exc):
-            shipment_watch = None
-        else:
-            raise
+    shipment_watch = await _with_uninitialised_db_fallback(
+        shipment_watch_service.get_watch_for_ticket(ticket_id),
+        None,
+    )
 
     related_user_ids: set[int] = set()
     for key in ("assigned_user_id", "requester_id"):
@@ -9786,21 +9792,13 @@ async def _render_ticket_detail(
         watcher_user = user_lookup.get(watcher.get("user_id"))
         enriched_watchers.append({**watcher, "user": watcher_user})
 
-    current_user_name = " ".join(
-        part.strip()
-        for part in (
-            str(user.get("first_name") or ""),
-            str(user.get("last_name") or ""),
-        )
-        if part and part.strip()
-    ).strip()
     assigned_user = user_lookup.get(ticket.get("assigned_user_id"))
     ticket_booking_link_url = tickets_service.build_booking_link_url(
         assigned_user.get("booking_link_url") if assigned_user else None,
         ticket_id=ticket.get("id"),
         ticket_number=ticket.get("ticket_number") or ticket.get("id"),
         ticket_subject=ticket.get("subject"),
-        user_name=current_user_name,
+        user_name=_format_booking_requester_name(user),
         user_email=str(user.get("email") or ""),
         user_phone=str(user.get("mobile_phone") or ""),
         ticket_url=str(request.url),
@@ -9933,20 +9931,14 @@ async def _render_ticket_detail(
         seen_priorities.add(normalised)
         priority_options.append(option_str)
 
-    try:
-        ticket_assets = await tickets_repo.list_ticket_assets(ticket_id)
-    except RuntimeError as exc:
-        if "Database pool not initialised" in str(exc):
-            ticket_assets = []
-        else:
-            raise
-    try:
-        ticket_suggested_assets = await tickets_repo.list_ticket_suggested_assets(ticket_id)
-    except RuntimeError as exc:
-        if "Database pool not initialised" in str(exc):
-            ticket_suggested_assets = []
-        else:
-            raise
+    ticket_assets = await _with_uninitialised_db_fallback(
+        tickets_repo.list_ticket_assets(ticket_id),
+        [],
+    )
+    ticket_suggested_assets = await _with_uninitialised_db_fallback(
+        tickets_repo.list_ticket_suggested_assets(ticket_id),
+        [],
+    )
     asset_selection: list[int] = []
     for linked in ticket_assets:
         asset_id = linked.get("asset_id")
@@ -10023,20 +10015,14 @@ async def _render_ticket_detail(
     asset_options.sort(key=lambda option: option["label"].lower())
 
     ticket_related_items = await _load_ticket_stored_related_items(ticket_id)
-    try:
-        ticket_expenses = await expenses_repo.list_expenses(ticket_id)
-    except RuntimeError as exc:
-        if "Database pool not initialised" in str(exc):
-            ticket_expenses = []
-        else:
-            raise
-    try:
-        ticket_canned_responses = await canned_responses_repo.list_responses()
-    except RuntimeError as exc:
-        if "Database pool not initialised" in str(exc):
-            ticket_canned_responses = []
-        else:
-            raise
+    ticket_expenses = await _with_uninitialised_db_fallback(
+        expenses_repo.list_expenses(ticket_id),
+        [],
+    )
+    ticket_canned_responses = await _with_uninitialised_db_fallback(
+        canned_responses_repo.list_responses(),
+        [],
+    )
     ticket_expense_total = sum(Decimal(str(expense.get("amount") or 0)) for expense in ticket_expenses)
 
     # Find relevant knowledge base articles based on AI tag matching
