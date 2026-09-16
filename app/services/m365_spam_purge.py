@@ -16,13 +16,29 @@ from app.services import m365 as m365_service
 POLL_INTERVAL_SECONDS = 30
 MAX_POLL_ATTEMPTS = 120
 TERMINAL_STATUSES = frozenset({"completed", "failed", "partiallysucceeded", "stopped"})
-# Transient SCC 500 error indicating the compliance organisation container is not
-# yet reachable.  Microsoft typically resolves this within a few minutes; we retry
-# New-ComplianceSearch with exponential back-off before giving up.
-_ORG_CONTAINER_ERROR = "organization container"
+# SCC reports both messages below when the request has reached a worker before
+# its Purview organization context is available.  Keep the matching deliberately
+# narrow: retries must not hide unrelated validation or authorization failures.
+_ORG_CONTEXT_ERRORS = ("organization container", "parameter name: orgunit")
 _NEW_SEARCH_MAX_RETRIES = 3
 _NEW_SEARCH_RETRY_BASE_SECONDS = 30
 _tasks: dict[tuple[int, str], asyncio.Task[None]] = {}
+
+
+def _is_organization_context_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in _ORG_CONTEXT_ERRORS)
+
+
+def _organization_context_error(organization: str) -> m365_service.M365Error:
+    """Return a useful operator-facing error without exposing directory paths."""
+    return m365_service.M365Error(
+        "Microsoft Purview could not load the compliance organization for "
+        f"{organization}. Confirm that the app is assigned Exchange or Compliance "
+        "Administrator, that the tenant has completed Purview provisioning, and "
+        "then retry the search.",
+        http_status=503,
+    )
 
 
 def _utcnow() -> datetime:
@@ -216,13 +232,15 @@ async def _run_search(request_id: int, *, retry: bool = False) -> None:
                 }, organization=organization)
                 break
             except m365_service.M365Error as exc:
-                if _ORG_CONTAINER_ERROR in str(exc).lower() and attempt < _NEW_SEARCH_MAX_RETRIES:
+                if _is_organization_context_error(exc) and attempt < _NEW_SEARCH_MAX_RETRIES:
                     wait = _NEW_SEARCH_RETRY_BASE_SECONDS * (2 ** attempt)
                     log_info(
                         "New-ComplianceSearch transient org-container error; retrying",
                         request_id=request_id, attempt=attempt + 1, wait_seconds=wait,
                     )
                     await asyncio.sleep(wait)
+                elif _is_organization_context_error(exc):
+                    raise _organization_context_error(organization) from exc
                 else:
                     raise
         await m365_service._scc_invoke_command(token, tenant_id, "Start-ComplianceSearch", {

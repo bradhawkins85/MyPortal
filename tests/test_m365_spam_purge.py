@@ -104,6 +104,16 @@ def test_scc_organization_requires_initial_domain(monkeypatch):
         asyncio.run(service._scc_organization(7))
 
 
+def test_orgunit_null_is_recognized_as_organization_context_error():
+    error = M365Error(
+        "Security & Compliance New-ComplianceSearch failed (500): "
+        "Value cannot be null. Parameter name: orgUnit",
+        http_status=500,
+    )
+
+    assert service._is_organization_context_error(error)
+
+
 def test_domain_read_all_is_provisioned_and_visible_in_diagnostics():
     domain_read_all = "dbb9058a-0e50-45d7-ae91-66909b5d4664"
 
@@ -152,6 +162,13 @@ async def test_scc_invoke_uses_initial_domain_in_route_and_anchor(monkeypatch):
     )
 
 
+def test_jwt_appid_supports_v2_azp_claim():
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "RS256"}).encode()).rstrip(b"=").decode()
+    payload = base64.urlsafe_b64encode(json.dumps({"azp": "v2-client-id"}).encode()).rstrip(b"=").decode()
+
+    assert _jwt_appid(f"{header}.{payload}.signature") == "v2-client-id"
+
+
 def test_spam_purge_template_has_review_confirmation_and_live_refresh():
     source = open("app/templates/m365/spam_purge.html", encoding="utf-8").read()
     assert 'name="confirmation"' in source
@@ -163,7 +180,14 @@ def test_spam_purge_template_has_review_confirmation_and_live_refresh():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_run_search_retries_new_compliance_search_on_org_container_error(monkeypatch):
+@pytest.mark.parametrize("error_detail", [
+    "Could not find the organization container "
+    "'CN=abc,OU=Microsoft Exchange Hosted Organizations'",
+    "Value cannot be null. Parameter name: orgUnit",
+])
+async def test_run_search_retries_new_compliance_search_on_org_container_error(
+    monkeypatch, error_detail,
+):
     """_run_search retries New-ComplianceSearch when a transient org-container 500 is returned."""
     request = {
         "id": 1, "company_id": 5, "search_name": "MyPortal spam removal test",
@@ -184,7 +208,7 @@ async def test_run_search_retries_new_compliance_search_on_org_container_error(m
 
     org_error = M365Error(
         "Security & Compliance New-ComplianceSearch failed (500): "
-        "Could not find the organization container 'CN=abc,OU=Microsoft Exchange Hosted Organizations'",
+        + error_detail,
         http_status=500,
     )
     invoke_calls: list[str] = []
@@ -291,7 +315,9 @@ async def test_run_search_exhausts_retries_and_marks_failed(monkeypatch):
         "Should sleep before each retry but not after the final failed attempt"
     failed_updates = [d for d in update_calls if d.get("search_status") == "failed"]
     assert failed_updates, "Search should be marked failed after exhausting retries"
-    assert "organization container" in failed_updates[-1].get("error_message", "")
+    error_message = failed_updates[-1].get("error_message", "")
+    assert "Confirm that the app is assigned Exchange or Compliance Administrator" in error_message
+    assert "organization container" not in error_message
 
 
 def test_spam_purge_sidebar_requires_explicit_permission():
