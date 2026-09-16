@@ -472,7 +472,13 @@ async def view_cart(
                 )
                 coterm_enabled = stored_coterm_enabled
 
-        effective_unit_price = coterm_price if coterm_enabled and coterm_price is not None else current_price
+        effective_unit_price = _effective_cart_unit_price(
+            {
+                "unit_price": current_price,
+                "coterm_enabled": coterm_enabled,
+                "coterm_price": coterm_price,
+            }
+        )
         line_total = effective_unit_price * quantity
         subtotal += line_total
 
