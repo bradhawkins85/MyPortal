@@ -182,6 +182,35 @@
         <h2>Executive Summary</h2>
         <p>{{ plan.executive_summary }}</p>
     </div>
+    {% if dependency_mappings %}
+    <div class="section">
+        <h2>Vendor & Resource Dependency Map</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Type</th>
+                    <th>Name</th>
+                    <th>Linked Activity</th>
+                    <th>Owner</th>
+                    <th>Dependency RTO</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for dependency in dependency_mappings %}
+                <tr>
+                    <td>{{ dependency.dependency_type }}</td>
+                    <td>{{ dependency.dependency_name }}</td>
+                    <td>{{ dependency.critical_activity_name or 'Plan-wide' }}</td>
+                    <td>{{ dependency.owner_name or '-' }}</td>
+                    <td>{{ dependency.rto_hours if dependency.rto_hours is not none else '-' }}</td>
+                    <td>{{ dependency.notes or '-' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
     {% endif %}
     
     {% if objectives %}
@@ -529,7 +558,7 @@
         <p><strong>Assigned to:</strong></p>
         <ul>
         {% for assignment in role.assignments %}
-            <li>{{ assignment.user_name }}{% if assignment.is_alternate %} (Alternate){% endif %}{% if assignment.contact_info %} - {{ assignment.contact_info }}{% endif %}</li>
+            <li>{{ assignment.user_name }} — {{ assignment.collaborator_role or 'Executor' }}{% if assignment.is_alternate %} (Alternate){% endif %}{% if assignment.contact_info %} - {{ assignment.contact_info }}{% endif %}</li>
         {% endfor %}
         </ul>
         {% endif %}
@@ -608,6 +637,33 @@
                     <td>{{ entry.happened_at.strftime('%Y-%m-%d %H:%M') if entry.happened_at else '-' }}</td>
                     <td>{{ entry.initials or '-' }}</td>
                     <td>{{ entry.notes }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    {% if incidents %}
+    <div class="section">
+        <h2>Incident Activations & After-Action Reviews</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Incident</th>
+                    <th>Status</th>
+                    <th>Closed</th>
+                    <th>After-Action Summary</th>
+                    <th>Improvement Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for incident in incidents %}
+                <tr>
+                    <td>#{{ incident.id }}<br>{{ incident.started_at.strftime('%d/%m/%Y %H:%M') if incident.started_at else '-' }}</td>
+                    <td>{{ incident.status }}</td>
+                    <td>{{ incident.closed_at.strftime('%d/%m/%Y %H:%M') if incident.closed_at else '-' }}</td>
+                    <td>{{ incident.after_action_summary or '-' }}</td>
+                    <td>{{ incident.after_action_improvements or '-' }}</td>
                 </tr>
             {% endfor %}
             </tbody>
@@ -773,6 +829,8 @@
                 <tr>
                     <th>Training Date</th>
                     <th>Training Type</th>
+                    <th>Status</th>
+                    <th>Scorecard</th>
                     <th>Comments</th>
                 </tr>
             </thead>
@@ -781,6 +839,8 @@
                 <tr>
                     <td>{{ item.training_date.strftime('%d/%m/%Y') if item.training_date else '-' }}</td>
                     <td>{{ item.training_type or '-' }}</td>
+                    <td>{{ item.status or 'Scheduled' }}</td>
+                    <td>{% if item.score_percent is not none %}{{ item.score_percent }}%{% elif item.participants_count is not none %}{{ item.participants_count }} participants{% else %}-{% endif %}</td>
                     <td>{{ item.comments or '-' }}</td>
                 </tr>
             {% endfor %}
@@ -796,16 +856,49 @@
             <thead>
                 <tr>
                     <th>Review Date</th>
+                    <th>Version</th>
+                    <th>Status</th>
+                    <th>Reviewer / Approver</th>
                     <th>Reason</th>
-                    <th>Changes Made</th>
+                    <th>Approval Snapshot</th>
                 </tr>
             </thead>
             <tbody>
             {% for item in review_items %}
                 <tr>
                     <td>{{ item.review_date.strftime('%d/%m/%Y') if item.review_date else '-' }}</td>
+                    <td>{{ item.version_label or '-' }}</td>
+                    <td>{{ item.approval_status or 'Draft' }}</td>
+                    <td>{{ item.reviewer_name or '-' }} / {{ item.approver_name or '-' }}</td>
                     <td>{{ item.reason or '-' }}</td>
-                    <td>{{ item.changes_made or '-' }}</td>
+                    <td>{{ item.approval_snapshot or item.changes_made or '-' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    {% if plan_change_log %}
+    <div class="section">
+        <h2>Recent Version Diffs</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Changed At</th>
+                    <th>Changed By</th>
+                    <th>Field Diff</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for change in plan_change_log %}
+                <tr>
+                    <td>{{ change.changed_at.strftime('%d/%m/%Y %H:%M') if change.changed_at else '-' }}</td>
+                    <td>{{ change.changed_by }}</td>
+                    <td>
+                        {% for field_name in change.fields %}
+                        <div><strong>{{ field_name }}</strong>: {{ change.before.get(field_name, '—') }} → {{ change.after.get(field_name, '—') }}</div>
+                        {% endfor %}
+                    </td>
                 </tr>
             {% endfor %}
             </tbody>

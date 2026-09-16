@@ -18,11 +18,15 @@ from app.schemas.bcp_models import (
     BcpChecklistItemResponse,
     BcpChecklistTickCreate,
     BcpChecklistTickResponse,
+    BcpCollaboratorRole,
     BcpContactCreate,
     BcpContactKind,
     BcpContactResponse,
     BcpCriticalActivityCreate,
     BcpCriticalActivityResponse,
+    BcpDependencyMapCreate,
+    BcpDependencyMapResponse,
+    BcpDependencyType,
     BcpDistributionEntryCreate,
     BcpDistributionEntryResponse,
     BcpEmergencyKitItemCreate,
@@ -48,6 +52,7 @@ from app.schemas.bcp_models import (
     BcpPlanResponse,
     BcpPlanUpdate,
     BcpPriority,
+    BcpReviewApprovalStatus,
     BcpRecoveryActionCreate,
     BcpRecoveryActionResponse,
     BcpRecoveryContactCreate,
@@ -64,6 +69,7 @@ from app.schemas.bcp_models import (
     BcpSupplierDependency,
     BcpTrainingItemCreate,
     BcpTrainingItemResponse,
+    BcpTrainingStatus,
 )
 
 
@@ -389,11 +395,13 @@ def test_bcp_role_assignment_create_valid():
     assignment = BcpRoleAssignmentCreate(
         role_id=1,
         user_id=1,
+        collaborator_role=BcpCollaboratorRole.CO_AUTHOR,
         is_alternate=False,
         contact_info="555-1234",
     )
     assert assignment.role_id == 1
     assert assignment.user_id == 1
+    assert assignment.collaborator_role == BcpCollaboratorRole.CO_AUTHOR
     assert assignment.is_alternate is False
 
 
@@ -503,10 +511,26 @@ def test_bcp_training_item_create_valid():
         plan_id=1,
         training_date=now,
         training_type="Tabletop Exercise",
+        status=BcpTrainingStatus.COMPLETED,
+        participants_count=8,
+        score_percent=92,
         comments="All staff participated successfully",
     )
     assert training.training_type == "Tabletop Exercise"
+    assert training.status == BcpTrainingStatus.COMPLETED
+    assert training.score_percent == 92
     assert training.comments == "All staff participated successfully"
+
+
+def test_bcp_training_item_create_invalid_score():
+    """Test Training Item validation rejects invalid score values."""
+    now = datetime.now(timezone.utc)
+    with pytest.raises(ValidationError):
+        BcpTrainingItemCreate(
+            plan_id=1,
+            training_date=now,
+            score_percent=101,
+        )
 
 
 def test_bcp_review_item_create_valid():
@@ -515,11 +539,52 @@ def test_bcp_review_item_create_valid():
     review = BcpReviewItemCreate(
         plan_id=1,
         review_date=now,
+        version_label="v2.0",
+        approval_status=BcpReviewApprovalStatus.APPROVED,
+        reviewed_by_user_id=3,
+        approved_by_user_id=4,
         reason="Annual review",
         changes_made="Updated contact list, revised RTO targets",
+        approval_snapshot="Approved at Q3 governance meeting",
     )
+    assert review.version_label == "v2.0"
+    assert review.approval_status == BcpReviewApprovalStatus.APPROVED
     assert review.reason == "Annual review"
-    assert review.changes_made == "Updated contact list, revised RTO targets"
+    assert review.approval_snapshot == "Approved at Q3 governance meeting"
+
+
+def test_bcp_dependency_map_create_valid():
+    """Test creating a valid dependency mapping."""
+    dependency = BcpDependencyMapCreate(
+        plan_id=1,
+        critical_activity_id=2,
+        dependency_type=BcpDependencyType.VENDOR,
+        dependency_name="Primary ISP",
+        owner_name="Network Team",
+        rto_hours=4,
+        notes="Redundant path available",
+    )
+    assert dependency.dependency_type == BcpDependencyType.VENDOR
+    assert dependency.dependency_name == "Primary ISP"
+
+
+def test_bcp_dependency_map_response():
+    """Test dependency mapping response schema."""
+    now = datetime.now(timezone.utc)
+    response = BcpDependencyMapResponse(
+        id=1,
+        plan_id=1,
+        critical_activity_id=2,
+        dependency_type=BcpDependencyType.RESOURCE,
+        dependency_name="Generator",
+        owner_name="Facilities",
+        rto_hours=2,
+        notes="Weekly test schedule",
+        created_at=now,
+        updated_at=now,
+    )
+    assert response.id == 1
+    assert response.dependency_type == BcpDependencyType.RESOURCE
 
 
 # ============================================================================

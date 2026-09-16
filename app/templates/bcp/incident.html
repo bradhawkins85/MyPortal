@@ -112,6 +112,16 @@
       </svg>
       Event Log
     </a>
+    <a href="/bcp/incident?tab=after-action"
+      class="tab {% if active_tab == 'after-action' %}active{% endif %}"
+      role="tab"
+      aria-selected="{% if active_tab == 'after-action' %}true{% else %}false{% endif %}"
+      aria-controls="after-action-panel">
+     <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true" focusable="false">
+       <path d="M14 2H6c-1.1 0-2 .9-2 2v16l4-4h10c1.1 0 2-.9 2-2V8l-6-6zm1 7V3.5L18.5 9H15z"/>
+     </svg>
+     After Action
+    </a>
   </div>
 
   <!-- Checklist Tab -->
@@ -415,6 +425,56 @@
         {% endif %}
       {% else %}
       <p class="text-muted">Start an incident to begin logging events.</p>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if active_tab == 'after-action' %}
+  <section class="card mobile-tab-content active" id="after-action-panel" role="tabpanel">
+    <div class="card-header">
+      <h2 class="card-title">Incident History & After-Action Reviews</h2>
+      <p class="text-muted text-sm">Capture outcomes, lessons learned, and remediation actions once an incident stabilises.</p>
+    </div>
+    <div class="card-body">
+      {% if incidents %}
+      {% for incident in incidents %}
+      <div class="card card--panel">
+        <div class="card-body">
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <strong>Incident #{{ incident.id }}</strong>
+              <div class="text-muted">{{ incident.started_at.strftime('%Y-%m-%d %H:%M UTC') if incident.started_at else '-' }}</div>
+            </div>
+            <div>
+              <strong>Status:</strong> {{ incident.status }}
+              <div class="text-muted">Closed {{ incident.closed_at.strftime('%Y-%m-%d %H:%M UTC') if incident.closed_at else '—' }}</div>
+            </div>
+          </div>
+          {% if can_edit %}
+          <form method="post" action="/bcp/incident/{{ incident.id }}/after-action" style="margin-top: 1rem;">
+            <div class="form-group">
+              <label class="form-label" for="after_action_summary_{{ incident.id }}">Summary</label>
+              <textarea id="after_action_summary_{{ incident.id }}" name="after_action_summary" class="form-control" rows="3">{{ incident.after_action_summary or '' }}</textarea>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="after_action_improvements_{{ incident.id }}">Improvement Actions</label>
+              <textarea id="after_action_improvements_{{ incident.id }}" name="after_action_improvements" class="form-control" rows="3">{{ incident.after_action_improvements or '' }}</textarea>
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm">Save After-Action Review</button>
+          </form>
+          {% else %}
+          <p><strong>Summary:</strong> {{ incident.after_action_summary or 'Not documented yet.' }}</p>
+          <p><strong>Improvement actions:</strong> {{ incident.after_action_improvements or 'Not documented yet.' }}</p>
+          {% endif %}
+          {% if incident.after_action_reviewed_at %}
+          <p class="text-muted text-sm">Reviewed {{ incident.after_action_reviewed_at.strftime('%Y-%m-%d %H:%M UTC') }}</p>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+      {% else %}
+      <p class="text-muted">No incidents have been logged yet.</p>
       {% endif %}
     </div>
   </section>
