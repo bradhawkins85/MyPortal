@@ -220,3 +220,19 @@ async def delete_template(company_id: int, template_id: int) -> bool:
         (company_id, template_id),
     )
     return bool(result)
+
+
+async def clear_default_template(company_id: int, *, exclude_template_id: int | None = None) -> None:
+    await _ensure_connection()
+    query = "UPDATE m365_signature_templates SET is_default = 0 WHERE company_id = %s"
+    params: list[Any] = [company_id]
+    if exclude_template_id is not None:
+        query += " AND id <> %s"
+        params.append(exclude_template_id)
+    await db.execute(query, tuple(params))
+
+
+async def set_default_template(company_id: int, template_id: int) -> SignatureTemplateRecord | None:
+    await clear_default_template(company_id, exclude_template_id=template_id)
+    await update_template(company_id, template_id, is_default=True)
+    return await get_template(company_id, template_id)

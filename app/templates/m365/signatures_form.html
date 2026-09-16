@@ -83,13 +83,37 @@
             ></div>
           </div>
           <textarea id="signature-html-value" name="html_content" data-rich-text-value hidden>{{ form_values.html_content or '' }}</textarea>
+          <p class="form-help" data-rich-text-feedback role="status" hidden></p>
         </div>
-        <p class="form-help">Supports formatting, links, images, tables, and template variables.</p>
+        <p class="form-help">Supports formatting, links, images, tables, template variables, and pasted signature content. Unsupported pasted images are removed with a warning.</p>
       </div>
       <div class="form-field form-field--full">
         <label class="form-label" for="signature-text-content">Plain-text signature</label>
         <textarea class="form-input form-input--textarea" id="signature-text-content" name="text_content" rows="8">{{ form_values.text_content or '' }}</textarea>
         <p class="form-help">Leave blank to generate the initial TXT version from the HTML signature before saving.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="signature-priority">Priority</label>
+        <input class="form-input" id="signature-priority" name="priority" type="number" min="0" step="1" value="{{ form_values.priority or '0' }}" />
+        <p class="form-help">Higher numbers win while the template is active.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="signature-default">
+          <input id="signature-default" name="is_default" type="checkbox" value="on" {% if form_values.is_default == 'on' %}checked{% endif %} />
+          Use as the default primary template
+        </label>
+        <p class="form-help">The default is used as the fallback when no higher-priority active template applies.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="signature-schedule-start">Activation start date</label>
+        <input class="form-input" id="signature-schedule-start" name="schedule_start_on" type="date" value="{{ form_values.schedule_start_on or '' }}" />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="signature-schedule-end">Activation end date</label>
+        <input class="form-input" id="signature-schedule-end" name="schedule_end_on" type="date" value="{{ form_values.schedule_end_on or '' }}" />
+      </div>
+      <div class="form-field form-field--full">
+        <p class="form-help">Scheduling uses <strong>{{ schedule_timezone }}</strong>. Active published templates are ordered by priority, then the configured default, then the earliest activation start date, then the lowest template ID.</p>
       </div>
       <div class="form-field">
         <label class="form-label" for="preview-staff-id">Preview staff member</label>
@@ -158,5 +182,6 @@
 
 {% block scripts %}
   {{ super() }}
+  <script src="{{ static_url('/static/js/purify.min.js') }}" defer></script>
   <script src="{{ static_url('/static/js/rich_text_editor.js') }}" defer></script>
 {% endblock %}
