@@ -173,6 +173,7 @@ from app.security.rate_limiter import (
     RateLimiterMiddleware,
     SimpleRateLimiter,
 )
+from app.security.session import ensure_datetime
 from app.security.request_logger import RequestLoggingMiddleware
 from app.security.security_headers import SecurityHeadersMiddleware
 from app.security.session import SessionData, session_manager
@@ -194,6 +195,7 @@ from app.services import m365 as m365_service
 from app.services import cis_benchmark as cis_benchmark_service
 from app.services import m365_best_practices as m365_best_practices_service
 from app.services import modules as modules_service
+from app.services import passkeys as passkeys_service
 from app.services import notification_event_settings as event_settings_service
 from app.services import message_templates as message_templates_service
 from app.services import products as products_service
@@ -708,6 +710,10 @@ endpoint_limiter = EndpointRateLimiter(redis_client=_rate_limit_redis)
 
 # Login: 5 attempts per 15 minutes per IP
 endpoint_limiter.add_limit("/api/auth/login", "POST", limit=5, window_seconds=900)
+endpoint_limiter.add_limit("/auth/passkeys/authenticate/options", "POST", limit=5, window_seconds=300)
+endpoint_limiter.add_limit("/auth/passkeys/authenticate/verify", "POST", limit=10, window_seconds=300)
+endpoint_limiter.add_limit("/auth/passkeys/register/options", "POST", limit=10, window_seconds=300)
+endpoint_limiter.add_limit("/auth/passkeys/register/verify", "POST", limit=10, window_seconds=300)
 
 # Password reset: 3 requests per hour per email
 def _password_reset_key(request: Request) -> str:
@@ -5989,6 +5995,33 @@ async def admin_profile_page(request: Request):
         totp_devices.append({"id": identifier, "name": name})
 
     totp_devices.sort(key=lambda entry: entry["name"].lower())
+    try:
+        passkeys = await auth_repo.list_passkeys_for_user(int(user["id"]))
+    except Exception:  # pragma: no cover - defensive logging for profile rendering
+        passkeys = []
+    profile_passkeys: list[dict[str, Any]] = []
+    for passkey in passkeys:
+        identifier = passkey.get("id")
+        if identifier is None:
+            continue
+        try:
+            identifier = int(identifier)
+        except (TypeError, ValueError):
+            continue
+        created_at = passkey.get("created_at")
+        last_used_at = passkey.get("last_used_at")
+        profile_passkeys.append(
+            {
+                "id": identifier,
+                "name": passkey.get("display_name") or "Passkey",
+                "created_at": ensure_datetime(created_at).isoformat() if created_at else None,
+                "last_used_at": ensure_datetime(last_used_at).isoformat() if last_used_at else None,
+                "transports": passkeys_service.parse_transports(passkey.get("transports")),
+                "credential_device_type": passkey.get("credential_device_type"),
+                "credential_backed_up": bool(passkey.get("credential_backed_up")),
+            }
+        )
+    profile_passkeys.sort(key=lambda entry: entry["name"].lower())
     m365_contacts_status = await user_m365_contacts_service.status_for_user(int(user["id"]))
 
     context = await _build_base_context(
@@ -5999,6 +6032,7 @@ async def admin_profile_page(request: Request):
             "profile_membership": membership,
             "profile_show_technician_tools": _can_edit_profile_technician_tools(user, membership),
             "profile_totp_devices": totp_devices,
+            "profile_passkeys": profile_passkeys,
             "profile_m365_contacts": m365_contacts_status,
         },
     )

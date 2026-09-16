@@ -22,6 +22,7 @@ _ALLOWED_UPDATE_COLUMNS = {
     "is_active",
     "email_verified_at",
     "force_password_change",
+    "passkey_user_handle",
 }
 
 

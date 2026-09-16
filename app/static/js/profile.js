@@ -53,6 +53,99 @@
     return response.json();
   }
 
+  function supportsPasskeys() {
+    return Boolean(window.PublicKeyCredential && navigator.credentials);
+  }
+
+  function decodeBase64Url(value) {
+    const padding = '='.repeat((4 - (value.length % 4 || 4)) % 4);
+    const base64 = `${value}${padding}`.replace(/-/g, '+').replace(/_/g, '/');
+    const raw = window.atob(base64);
+    const bytes = new Uint8Array(raw.length);
+    for (let index = 0; index < raw.length; index += 1) {
+      bytes[index] = raw.charCodeAt(index);
+    }
+    return bytes.buffer;
+  }
+
+  function encodeBase64Url(buffer) {
+    const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+    let binary = '';
+    bytes.forEach((byte) => {
+      binary += String.fromCharCode(byte);
+    });
+    return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/u, '');
+  }
+
+  function decodeCredentialOptions(publicKey) {
+    const options = { ...publicKey };
+    if (typeof options.challenge === 'string') {
+      options.challenge = decodeBase64Url(options.challenge);
+    }
+    if (options.user && typeof options.user.id === 'string') {
+      options.user = { ...options.user, id: decodeBase64Url(options.user.id) };
+    }
+    if (Array.isArray(options.excludeCredentials)) {
+      options.excludeCredentials = options.excludeCredentials.map((credential) => ({
+        ...credential,
+        id: decodeBase64Url(credential.id),
+      }));
+    }
+    if (Array.isArray(options.allowCredentials)) {
+      options.allowCredentials = options.allowCredentials.map((credential) => ({
+        ...credential,
+        id: decodeBase64Url(credential.id),
+      }));
+    }
+    return options;
+  }
+
+  function serializeCredential(credential) {
+    return {
+      id: credential.id,
+      type: credential.type,
+      rawId: encodeBase64Url(credential.rawId),
+      authenticatorAttachment: credential.authenticatorAttachment || null,
+      response: {
+        clientDataJSON: encodeBase64Url(credential.response.clientDataJSON),
+        ...(credential.response.attestationObject
+          ? {
+              attestationObject: encodeBase64Url(credential.response.attestationObject),
+              transports:
+                typeof credential.response.getTransports === 'function'
+                  ? credential.response.getTransports()
+                  : [],
+            }
+          : {}),
+        ...(credential.response.authenticatorData
+          ? { authenticatorData: encodeBase64Url(credential.response.authenticatorData) }
+          : {}),
+        ...(credential.response.signature
+          ? { signature: encodeBase64Url(credential.response.signature) }
+          : {}),
+        ...(credential.response.userHandle
+          ? { userHandle: encodeBase64Url(credential.response.userHandle) }
+          : {}),
+      },
+    };
+  }
+
+  function passkeyErrorMessage(error, fallback) {
+    if (!error || !error.name) {
+      return fallback;
+    }
+    if (error.name === 'NotAllowedError') {
+      return 'The passkey request was cancelled, timed out, or no credential was available.';
+    }
+    if (error.name === 'InvalidStateError') {
+      return 'This passkey is already registered to your account.';
+    }
+    if (error.name === 'NotSupportedError' || error.name === 'SecurityError') {
+      return 'Passkeys are not supported in this browser or on this connection.';
+    }
+    return fallback;
+  }
+
   function showMessage(config, message) {
     if (!message) {
       return;
@@ -112,6 +205,23 @@
     }
   } catch (error) {
     totpDevices = [];
+  }
+  let passkeys = [];
+  try {
+    const parsed = JSON.parse(root.dataset.passkeys || '[]');
+    if (Array.isArray(parsed)) {
+      passkeys = parsed.map((item) => ({
+        id: item.id,
+        name: item.name || 'Passkey',
+        created_at: item.created_at || null,
+        last_used_at: item.last_used_at || null,
+        transports: Array.isArray(item.transports) ? item.transports : [],
+        credential_device_type: item.credential_device_type || null,
+        credential_backed_up: Boolean(item.credential_backed_up),
+      }));
+    }
+  } catch (error) {
+    passkeys = [];
   }
 
   const passwordForm = document.getElementById('password-form');
@@ -684,6 +794,181 @@
     });
   }
 
+  const passkeyTable = document.getElementById('passkey-table');
+  const passkeyBody = root.querySelector('[data-passkey-body]');
+  const passkeyEmptyRow = root.querySelector('[data-passkey-empty]');
+  const passkeyAddForm = document.getElementById('passkey-add-form');
+  const passkeyNameInput = document.getElementById('passkey-name');
+  const passkeyPasswordInput = document.getElementById('passkey-current-password');
+  const passkeySuccess = { variant: 'success' };
+  const passkeyError = { variant: 'error' };
+
+  function formatDateTime(value) {
+    if (!value) {
+      return 'Never';
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return value;
+    }
+    return parsed.toLocaleString();
+  }
+
+  function renderPasskeys() {
+    if (!passkeyBody) {
+      return;
+    }
+    passkeys.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+    passkeyBody.innerHTML = '';
+    if (!passkeys.length) {
+      if (passkeyEmptyRow) {
+        passkeyEmptyRow.hidden = false;
+        passkeyBody.appendChild(passkeyEmptyRow);
+      }
+    } else {
+      if (passkeyEmptyRow) {
+        passkeyEmptyRow.hidden = true;
+      }
+      passkeys.forEach((item) => {
+        const row = document.createElement('tr');
+
+        const nameCell = document.createElement('td');
+        const transportSuffix = item.transports.length ? ` (${item.transports.join(', ')})` : '';
+        nameCell.textContent = `${item.name || 'Passkey'}${transportSuffix}`;
+        row.appendChild(nameCell);
+
+        const createdCell = document.createElement('td');
+        createdCell.textContent = formatDateTime(item.created_at);
+        row.appendChild(createdCell);
+
+        const lastUsedCell = document.createElement('td');
+        lastUsedCell.textContent = formatDateTime(item.last_used_at);
+        row.appendChild(lastUsedCell);
+
+        const actionsCell = document.createElement('td');
+        actionsCell.className = 'table__actions';
+
+        const renameButton = document.createElement('button');
+        renameButton.type = 'button';
+        renameButton.className = 'button button--ghost button--small';
+        renameButton.textContent = 'Rename';
+        renameButton.addEventListener('click', () => renamePasskey(item));
+        actionsCell.appendChild(renameButton);
+
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'button button--danger button--small';
+        removeButton.textContent = 'Remove';
+        removeButton.addEventListener('click', () => removePasskey(item));
+        actionsCell.appendChild(removeButton);
+
+        row.appendChild(actionsCell);
+        passkeyBody.appendChild(row);
+      });
+    }
+    if (passkeyTable) {
+      passkeyTable.dispatchEvent(new CustomEvent('table:rows-updated'));
+    }
+  }
+
+  async function renamePasskey(item) {
+    const nextName = window.prompt('Rename passkey', item.name || 'Passkey');
+    if (!nextName || !nextName.trim()) {
+      return;
+    }
+    try {
+      const updated = await requestJson(`/auth/passkeys/${item.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: nextName.trim() }),
+      });
+      passkeys = passkeys.map((entry) => (entry.id === item.id ? updated : entry));
+      renderPasskeys();
+      showMessage(passkeySuccess, 'Passkey renamed.');
+    } catch (error) {
+      showMessage(passkeyError, error.message || 'Unable to rename passkey.');
+    }
+  }
+
+  async function removePasskey(item) {
+    const confirmed = window.confirm(`Remove passkey "${item.name}"?`);
+    if (!confirmed) {
+      return;
+    }
+    const currentPassword = window.prompt(`Enter your current password to remove "${item.name}"`);
+    if (!currentPassword) {
+      return;
+    }
+    try {
+      await requestJson(`/auth/passkeys/${item.id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ current_password: currentPassword }),
+      });
+      passkeys = passkeys.filter((entry) => entry.id !== item.id);
+      renderPasskeys();
+      showMessage(passkeySuccess, 'Passkey removed.');
+    } catch (error) {
+      showMessage(passkeyError, error.message || 'Unable to remove passkey.');
+    }
+  }
+
+  if (passkeyAddForm) {
+    if (!supportsPasskeys()) {
+      const submitButton = passkeyAddForm.querySelector('[data-passkey-add]');
+      if (submitButton) {
+        submitButton.disabled = true;
+      }
+      showMessage(passkeyError, 'Passkeys are not supported in this browser or on this connection.');
+    }
+    passkeyAddForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!supportsPasskeys()) {
+        showMessage(passkeyError, 'Passkeys are not supported in this browser or on this connection.');
+        return;
+      }
+      const passkeyName = passkeyNameInput ? passkeyNameInput.value.trim() : '';
+      const currentPassword = passkeyPasswordInput ? passkeyPasswordInput.value : '';
+      if (!passkeyName) {
+        showMessage(passkeyError, 'Enter a name for the passkey.');
+        return;
+      }
+      if (!currentPassword) {
+        showMessage(passkeyError, 'Enter your current password to continue.');
+        return;
+      }
+      try {
+        const options = await requestJson('/auth/passkeys/register/options', {
+          method: 'POST',
+          body: JSON.stringify({ current_password: currentPassword }),
+        });
+        const credential = await navigator.credentials.create({
+          publicKey: decodeCredentialOptions(options.public_key),
+        });
+        if (!credential) {
+          throw new Error('No passkey was created.');
+        }
+        const created = await requestJson('/auth/passkeys/register/verify', {
+          method: 'POST',
+          body: JSON.stringify({
+            challenge_id: options.challenge_id,
+            name: passkeyName,
+            credential: serializeCredential(credential),
+          }),
+        });
+        passkeys.push(created);
+        renderPasskeys();
+        if (passkeyAddForm) {
+          passkeyAddForm.reset();
+        }
+        showMessage(passkeySuccess, 'Passkey registered successfully.');
+      } catch (error) {
+        showMessage(
+          passkeyError,
+          passkeyErrorMessage(error, error.message || 'Unable to register a passkey.'),
+        );
+      }
+    });
+  }
+
   root.querySelectorAll('[data-copy-target]').forEach((button) => {
     button.addEventListener('click', async () => {
       const targetId = button.getAttribute('data-copy-target');
@@ -707,4 +992,5 @@
   });
 
   renderTotpDevices();
+  renderPasskeys();
 })();

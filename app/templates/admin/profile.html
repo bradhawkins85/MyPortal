@@ -10,6 +10,7 @@
   id="profile-root"
   data-user-id="{{ current_user.id }}"
   data-totp-devices='{{ profile_totp_devices | tojson | safe }}'
+  data-passkeys='{{ profile_passkeys | tojson | safe }}'
 >
   <section class="management__content">
     <header class="management__header">
@@ -364,6 +365,48 @@
                 </div>
               </form>
             </div>
+          </div>
+          <section class="divider"></section>
+          <div data-passkeys>
+            <h3 class="card__subtitle">Passkeys</h3>
+            <p class="text-muted">
+              Add a passkey to sign in with your device biometrics, PIN, or a compatible security key. MyPortal requires your current password before enrolment or removal.
+            </p>
+            <form class="form" id="passkey-add-form" autocomplete="off">
+              <div class="form-grid">
+                <div class="form-field">
+                  <label class="form-label" for="passkey-name">Passkey name</label>
+                  <input class="form-input" id="passkey-name" name="passkeyName" maxlength="100" placeholder="e.g. Work laptop" required />
+                </div>
+                <div class="form-field">
+                  <label class="form-label" for="passkey-current-password">Current password</label>
+                  <input class="form-input" id="passkey-current-password" name="currentPassword" type="password" autocomplete="current-password" required />
+                </div>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="button" data-passkey-add>Register passkey</button>
+              </div>
+            </form>
+            <div class="table-wrapper">
+              <table class="table" id="passkey-table" data-table data-table-id="passkeys">
+                <thead>
+                  <tr>
+                    <th scope="col" data-sort="string">Name</th>
+                    <th scope="col">Created</th>
+                    <th scope="col">Last used</th>
+                    <th scope="col" class="table__actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody data-passkey-body>
+                  <tr class="table__empty" data-passkey-empty>
+                    <td colspan="4">No passkeys registered yet.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="form-help">
+              Removing a passkey blocks future MyPortal sign-ins with that credential, but it may still appear in your device or password manager until you remove it there too. Existing signed-in sessions stay active until they expire or you sign out.
+            </p>
           </div>
         </div>
         </section>

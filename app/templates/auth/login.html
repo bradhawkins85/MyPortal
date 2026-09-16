@@ -32,6 +32,11 @@
     <h1 class="auth-card__title">Welcome back</h1>
     <p class="auth-card__subtitle">Use your portal credentials to access the dashboard.</p>
   </header>
+  <div class="form-actions" style="margin-bottom: 1rem;">
+    <button type="button" class="button button--secondary" data-passkey-login>Sign in with a passkey</button>
+  </div>
+  <p class="form-help" data-passkey-help>Use your device biometrics, PIN, or security key if you have already registered a passkey. Your password sign-in option remains available below.</p>
+  <div class="form-error" role="alert" data-passkey-error hidden></div>
   <form
     class="auth-form"
     method="post"

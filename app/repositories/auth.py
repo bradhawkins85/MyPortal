@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
@@ -315,3 +316,229 @@ async def delete_totp_authenticator(user_id: int, authenticator_id: int) -> None
         "DELETE FROM user_totp_authenticators WHERE user_id = %s AND id = %s",
         (user_id, authenticator_id),
     )
+
+
+async def list_passkeys_for_user(user_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT id, user_id, credential_id, public_key, sign_count, transports, aaguid,
+               credential_device_type, credential_backed_up, display_name,
+               created_at, updated_at, last_used_at
+        FROM user_passkeys
+        WHERE user_id = %s
+        ORDER BY created_at ASC, id ASC
+        """,
+        (user_id,),
+    )
+    return list(rows)
+
+
+async def count_passkeys(user_id: int) -> int:
+    row = await db.fetch_one(
+        "SELECT COUNT(*) AS count FROM user_passkeys WHERE user_id = %s",
+        (user_id,),
+    )
+    return int((row or {}).get("count") or 0)
+
+
+async def get_passkey_by_id(user_id: int, passkey_id: int) -> Optional[dict[str, Any]]:
+    return await db.fetch_one(
+        """
+        SELECT id, user_id, credential_id, public_key, sign_count, transports, aaguid,
+               credential_device_type, credential_backed_up, display_name,
+               created_at, updated_at, last_used_at
+        FROM user_passkeys
+        WHERE id = %s AND user_id = %s
+        """,
+        (passkey_id, user_id),
+    )
+
+
+async def get_passkey_by_credential_id(credential_id: str) -> Optional[dict[str, Any]]:
+    return await db.fetch_one(
+        """
+        SELECT id, user_id, credential_id, public_key, sign_count, transports, aaguid,
+               credential_device_type, credential_backed_up, display_name,
+               created_at, updated_at, last_used_at
+        FROM user_passkeys
+        WHERE credential_id = %s
+        """,
+        (credential_id,),
+    )
+
+
+async def create_passkey(
+    *,
+    user_id: int,
+    credential_id: str,
+    public_key: bytes,
+    sign_count: int,
+    transports: list[str] | None,
+    aaguid: str | None,
+    credential_device_type: str | None,
+    credential_backed_up: bool,
+    display_name: str,
+) -> dict[str, Any]:
+    new_id = await db.execute_returning_lastrowid(
+        """
+        INSERT INTO user_passkeys (
+            user_id,
+            credential_id,
+            public_key,
+            sign_count,
+            transports,
+            aaguid,
+            credential_device_type,
+            credential_backed_up,
+            display_name,
+            created_at,
+            updated_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            user_id,
+            credential_id,
+            public_key.decode("latin1"),
+            sign_count,
+            json.dumps(transports or []),
+            aaguid,
+            credential_device_type,
+            1 if credential_backed_up else 0,
+            display_name,
+            datetime.utcnow(),
+            datetime.utcnow(),
+        ),
+    )
+    return await get_passkey_by_id(user_id, int(new_id))
+
+
+async def update_passkey_name(user_id: int, passkey_id: int, display_name: str) -> Optional[dict[str, Any]]:
+    await db.execute(
+        """
+        UPDATE user_passkeys
+        SET display_name = %s, updated_at = %s
+        WHERE id = %s AND user_id = %s
+        """,
+        (display_name, datetime.utcnow(), passkey_id, user_id),
+    )
+    return await get_passkey_by_id(user_id, passkey_id)
+
+
+async def update_passkey_after_authentication(
+    *,
+    passkey_id: int,
+    sign_count: int,
+    credential_device_type: str | None,
+    credential_backed_up: bool,
+    last_used_at: datetime,
+) -> None:
+    await db.execute(
+        """
+        UPDATE user_passkeys
+        SET sign_count = %s,
+            credential_device_type = %s,
+            credential_backed_up = %s,
+            last_used_at = %s,
+            updated_at = %s
+        WHERE id = %s
+        """,
+        (
+            sign_count,
+            credential_device_type,
+            1 if credential_backed_up else 0,
+            last_used_at,
+            last_used_at,
+            passkey_id,
+        ),
+    )
+
+
+async def delete_passkey(user_id: int, passkey_id: int) -> None:
+    await db.execute(
+        "DELETE FROM user_passkeys WHERE user_id = %s AND id = %s",
+        (user_id, passkey_id),
+    )
+
+
+async def create_passkey_challenge(
+    *,
+    challenge_id: str,
+    ceremony: str,
+    challenge: str,
+    expires_at: datetime,
+    browser_binding_hash: str | None = None,
+    user_id: int | None = None,
+    session_id: int | None = None,
+) -> None:
+    await db.execute(
+        """
+        INSERT INTO passkey_challenges (
+            challenge_id,
+            ceremony,
+            challenge,
+            browser_binding_hash,
+            user_id,
+            session_id,
+            expires_at,
+            created_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            challenge_id,
+            ceremony,
+            challenge,
+            browser_binding_hash,
+            user_id,
+            session_id,
+            expires_at,
+            datetime.utcnow(),
+        ),
+    )
+
+
+async def get_passkey_challenge(challenge_id: str) -> Optional[dict[str, Any]]:
+    return await db.fetch_one(
+        """
+        SELECT challenge_id, ceremony, challenge, browser_binding_hash, user_id,
+               session_id, expires_at, consumed_at, created_at
+        FROM passkey_challenges
+        WHERE challenge_id = %s
+        """,
+        (challenge_id,),
+    )
+
+
+async def consume_passkey_challenge(
+    *,
+    challenge_id: str,
+    ceremony: str,
+    browser_binding_hash: str | None = None,
+    user_id: int | None = None,
+    session_id: int | None = None,
+) -> bool:
+    params: list[Any] = [datetime.utcnow(), challenge_id, ceremony, datetime.utcnow()]
+    sql = """
+        UPDATE passkey_challenges
+        SET consumed_at = %s
+        WHERE challenge_id = %s
+          AND ceremony = %s
+          AND consumed_at IS NULL
+          AND expires_at >= %s
+    """
+    if browser_binding_hash is None:
+        sql += " AND browser_binding_hash IS NULL"
+    else:
+        sql += " AND browser_binding_hash = %s"
+        params.append(browser_binding_hash)
+    if user_id is None:
+        sql += " AND user_id IS NULL"
+    else:
+        sql += " AND user_id = %s"
+        params.append(user_id)
+    if session_id is None:
+        sql += " AND session_id IS NULL"
+    else:
+        sql += " AND session_id = %s"
+        params.append(session_id)
+    rowcount = await db.execute_rowcount(sql, tuple(params))
+    return rowcount == 1

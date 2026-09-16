@@ -21,6 +21,7 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 MAX_CSRF_FORM_PART_SIZE = 70 * 1024 * 1024
 DEFAULT_EXEMPT_PREFIXES = (
     "/auth/login",
+    "/auth/passkeys/authenticate",
     "/auth/register",
     "/auth/password/forgot",
     "/auth/password/reset",
