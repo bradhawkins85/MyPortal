@@ -171,6 +171,7 @@ def test_build_failure_ticket_description_only_mentions_regression_when_flagged(
     )
 
     assert "regressed from <strong>Pass</strong> to <strong>Fail</strong>" not in description
+    assert "created automatically because an M365 best-practice check failed" in description
 
 
 @pytest.mark.anyio("asyncio")

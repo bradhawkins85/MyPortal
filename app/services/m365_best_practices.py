@@ -6074,13 +6074,18 @@ def build_failure_ticket_description(
 ) -> str:
     bp = _catalog_map().get(check_id, {"id": check_id})
     posture = _posture_metadata_for_bp(bp)
-    intro = (
-        "This ticket was created automatically because an M365 best-practice "
-        "check regressed from <strong>Pass</strong> to <strong>Fail</strong>."
-        if regression_detected
-        else "A portal user requested technician assistance for a failed "
-        "M365 best-practice check."
-    )
+    if regression_detected:
+        intro = (
+            "This ticket was created automatically because an M365 best-practice "
+            "check regressed from <strong>Pass</strong> to <strong>Fail</strong>."
+        )
+    elif created_automatically:
+        intro = (
+            "This ticket was created automatically because an M365 best-practice "
+            "check failed and requires review."
+        )
+    else:
+        intro = "A portal user requested technician assistance for a failed M365 best-practice check."
     metadata_lines = [f"<strong>Company:</strong> {escape(company_name)}"]
     if requester_name:
         metadata_lines.append(f"<strong>Requester:</strong> {escape(requester_name)}")
