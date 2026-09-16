@@ -3009,14 +3009,12 @@ def _forms_permission_guidance(action: str) -> str:
         f"The enterprise app is missing the {_FORMS_PERMISSION_NAME} application "
         f"permission required to {action} via /beta/admin/forms. Ensure tenant "
         "admin consent has been granted, then on the M365 settings page click "
-        "'Authorise portal access' to re-grant the required permissions."
+        "'Authorize portal access' to re-grant the required permissions."
     )
 
 
 def _parse_forms_phishing_setting(data: dict[str, Any]) -> tuple[bool | None, str | None]:
     settings = data.get("settings")
-    if settings is None:
-        settings = data
     if not isinstance(settings, dict):
         return None, "Microsoft Graph did not return a Forms settings object."
     if "isInOrgFormsPhishingScanEnabled" not in settings:
@@ -8506,6 +8504,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 )
             except M365Error as exc:
                 granted = False
+                outcome_message = str(exc)
                 if exc.http_status == 403:
                     try:
                         delegated_token = await acquire_delegated_token(company_id)
@@ -8529,26 +8528,32 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                             graph_token
                         )
                     except Exception as retry_exc:  # noqa: BLE001 – normalize retry errors into remediation failure
-                        exc = (
+                        retry_error = (
                             retry_exc
                             if isinstance(retry_exc, M365Error)
                             else M365Error(str(retry_exc))
                         )
                         success = False
-                        outcome_message = str(exc)
+                        outcome_message = str(retry_error)
+                        log_error(
+                            "M365 internal phishing Forms remediation failed after permission repair",
+                            company_id=company_id,
+                            check_id=check_id,
+                            error=str(retry_error),
+                        )
                 else:
                     success = False
                     outcome_message = (
                         _forms_permission_guidance("update Microsoft Forms settings")
                         if exc.http_status == 403
-                        else str(exc)
+                        else outcome_message
                     )
                 if not success:
                     log_error(
                         "M365 internal phishing Forms remediation failed",
                         company_id=company_id,
                         check_id=check_id,
-                        error=str(exc),
+                        error=outcome_message,
                     )
         elif check_id == "bp_weak_auth_methods_disabled":
             try:

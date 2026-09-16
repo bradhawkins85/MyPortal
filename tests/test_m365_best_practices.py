@@ -663,7 +663,7 @@ async def test_check_internal_phishing_forms_403_returns_actionable_message():
 
     assert result["status"] == bp_service.STATUS_UNKNOWN
     assert "OrgSettings-Forms.ReadWrite.All" in result["details"]
-    assert "Authorise portal access" in result["details"]
+    assert "Authorize portal access" in result["details"]
 
 
 @pytest.mark.anyio("asyncio")
@@ -783,7 +783,7 @@ async def test_remediate_check_internal_phishing_forms_permission_denied_is_acti
 
     assert result["success"] is False
     assert "OrgSettings-Forms.ReadWrite.All" in result["message"]
-    assert "Authorise portal access" in result["message"]
+    assert "Authorize portal access" in result["message"]
     assert upserts[0]["remediation_status"] == "failed"
 
 
