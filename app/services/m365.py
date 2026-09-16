@@ -753,6 +753,8 @@ async def _lookup_application_object_id(access_token: str, client_id: str) -> st
     clean_client_id = str(client_id or "").strip()
     if not clean_client_id:
         return None
+    if not _GRAPH_OBJECT_ID_PATTERN.fullmatch(clean_client_id):
+        raise M365Error("Invalid Microsoft Entra application ID", http_status=400)
     app_id_filter = clean_client_id.replace("'", "''")
     data = await _graph_get(
         access_token,
