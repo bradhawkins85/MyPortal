@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -204,7 +204,7 @@ async def test_renew_admin_client_secret_backfills_missing_app_object_id():
         "client_secret": "old-secret",
         "app_object_id": None,
         "client_secret_key_id": OLD_KEY_ID,
-        "client_secret_expires_at": datetime.utcnow() + timedelta(days=4),
+        "client_secret_expires_at": datetime.now(timezone.utc) + timedelta(days=4),
         "pkce_client_id": "pkce-client-id",
     }
     persisted: list[dict[str, Any]] = []
@@ -265,7 +265,7 @@ async def test_renew_admin_client_secret_validation_failure_restores_previous_se
         "client_secret": "old-secret",
         "app_object_id": APP_OBJECT_ID,
         "client_secret_key_id": OLD_KEY_ID,
-        "client_secret_expires_at": datetime.utcnow() + timedelta(days=4),
+        "client_secret_expires_at": datetime.now(timezone.utc) + timedelta(days=4),
         "pkce_client_id": "pkce-client-id",
     }
     posted_calls: list[dict[str, Any]] = []
@@ -315,6 +315,66 @@ async def test_renew_admin_client_secret_validation_failure_restores_previous_se
     remove_call = next(c for c in posted_calls if "removePassword" in c["url"])
     assert remove_call["payload"]["keyId"] == NEW_KEY_ID
     assert exchange_mock.await_count == 2
+
+
+@pytest.mark.anyio
+async def test_renew_admin_client_secret_403_requires_reprovision():
+    """A Graph 403 during admin secret rotation returns re-provision guidance."""
+    stored_creds = {
+        "tenant_id": "tenant-1",
+        "client_id": "admin-client-id",
+        "client_secret": "old-secret",
+        "app_object_id": APP_OBJECT_ID,
+        "client_secret_key_id": OLD_KEY_ID,
+        "client_secret_expires_at": datetime.now(timezone.utc) + timedelta(days=4),
+        "pkce_client_id": "pkce-client-id",
+    }
+    graph_exc = m365_service.M365Error(
+        "Microsoft Graph POST failed (403): denied",
+        http_status=403,
+    )
+    mock_settings = MagicMock()
+    mock_settings.m365_client_secret_lifetime_days = 730
+
+    with (
+        patch.object(
+            m365_service, "get_admin_m365_credentials", AsyncMock(return_value=stored_creds)
+        ),
+        patch.object(
+            m365_service,
+            "_exchange_token",
+            AsyncMock(return_value=("old-token", None, None)),
+        ),
+        patch.object(m365_service, "_graph_post", AsyncMock(side_effect=graph_exc)),
+        patch("app.services.m365.get_settings", return_value=mock_settings),
+    ):
+        with pytest.raises(
+            m365_service.M365ReprovisionRequiredError,
+            match="Application.ReadWrite.OwnedBy",
+        ):
+            await m365_service.renew_admin_client_secret()
+
+
+@pytest.mark.anyio
+async def test_exchange_token_preserves_http_status_on_failure():
+    """_exchange_token surfaces the token endpoint HTTP status to callers."""
+    mock_response = MagicMock()
+    mock_response.status_code = 403
+    mock_response.text = "forbidden"
+
+    with patch("app.services.m365.httpx.AsyncClient") as mock_client_cls:
+        mock_client_cls.return_value.__aenter__.return_value.post = AsyncMock(
+            return_value=mock_response
+        )
+        with pytest.raises(m365_service.M365Error) as exc_info:
+            await m365_service._exchange_token(
+                tenant_id="tenant-1",
+                client_id="client-1",
+                client_secret="secret-1",
+                refresh_token=None,
+            )
+
+    assert exc_info.value.http_status == 403
 
 
 # ---------------------------------------------------------------------------

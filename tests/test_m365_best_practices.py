@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, call, patch
 import pytest
 
 from app.services import m365_best_practices as bp_service
-from app.services.m365 import M365Error
+from app.services.m365 import M365Error, M365ReprovisionRequiredError
 
 
 def test_get_secure_score_summary_returns_numeric_values():
@@ -2831,6 +2831,41 @@ async def test_remediate_app_credential_expiry_fails_for_environment_credentials
 
     assert result["success"] is False
     assert "environment variables" in result["message"]
+    assert upserts[0]["remediation_status"] == "failed"
+
+
+@pytest.mark.anyio
+async def test_remediate_app_credential_expiry_surfaces_reprovision_guidance():
+    """PKCE expiry remediation returns actionable guidance when the admin app cannot self-rotate."""
+    upserts: list[dict[str, Any]] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.get_company_admin_credentials",
+            new_callable=AsyncMock,
+            return_value={"client_id": "company-app", "client_secret": "old"},
+        ),
+        patch(
+            "app.services.m365_best_practices.renew_admin_client_secret",
+            new_callable=AsyncMock,
+            side_effect=M365ReprovisionRequiredError(
+                "Automatic MyPortal PKCE/bootstrap admin credential renewal requires "
+                "Application.ReadWrite.OwnedBy and the app to be registered as an owner "
+                "of its own app registration. Re-provision the managed admin app and retry."
+            ),
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_monitor_app_credential_expiry"
+        )
+
+    assert result["success"] is False
+    assert "Re-provision" in result["message"]
+    assert "Application.ReadWrite.OwnedBy" in result["message"]
     assert upserts[0]["remediation_status"] == "failed"
 
 
