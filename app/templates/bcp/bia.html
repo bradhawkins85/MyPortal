@@ -96,6 +96,7 @@
               <th>Importance</th>
               <th>Impact Summary</th>
               <th>RTO</th>
+              <th>Dependencies</th>
               {% if can_edit %}
               <th>Actions</th>
               {% endif %}
@@ -150,6 +151,7 @@
                   -
                 {% endif %}
               </td>
+              <td>{{ activity.dependency_count or 0 }}</td>
               {% if can_edit %}
               <td>
                 <div class="action-buttons">
@@ -172,6 +174,95 @@
       </div>
       {% else %}
       <p class="text-muted">No critical activities defined yet. Click "Add Critical Activity" to begin your BIA.</p>
+      {% endif %}
+    </div>
+  </section>
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Vendor & Resource Dependency Map</h2>
+      <p class="text-muted text-sm">Link vendors and internal resources to critical activities for reporting and recovery planning.</p>
+    </div>
+    <div class="card-body">
+      {% if can_edit %}
+      <form method="post" action="/bcp/dependencies">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="dependency_activity_id" class="form-label">Critical Activity</label>
+            <select id="dependency_activity_id" name="critical_activity_id" class="form-input">
+              <option value="">Plan-wide dependency</option>
+              {% for activity in activities %}
+              <option value="{{ activity.id }}">{{ activity.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="dependency_type" class="form-label required">Dependency Type</label>
+            <select id="dependency_type" name="dependency_type" class="form-input" required>
+              <option value="Vendor">Vendor</option>
+              <option value="Resource">Resource</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="dependency_name" class="form-label required">Dependency Name</label>
+            <input type="text" id="dependency_name" name="dependency_name" class="form-input" required>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="dependency_owner_name" class="form-label">Owner / Contact</label>
+            <input type="text" id="dependency_owner_name" name="owner_name" class="form-input">
+          </div>
+          <div class="form-group">
+            <label for="dependency_rto_hours" class="form-label">Dependency RTO (hours)</label>
+            <input type="number" id="dependency_rto_hours" name="rto_hours" class="form-input" min="0">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="dependency_notes" class="form-label">Notes</label>
+          <textarea id="dependency_notes" name="notes" class="form-input" rows="2"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">Add Dependency</button>
+      </form>
+      {% endif %}
+      {% if dependencies %}
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Name</th>
+              <th>Linked Activity</th>
+              <th>Owner</th>
+              <th>RTO</th>
+              <th>Notes</th>
+              {% if can_edit %}<th>Actions</th>{% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for dependency in dependencies %}
+            <tr>
+              <td>{{ dependency.dependency_type }}</td>
+              <td>{{ dependency.dependency_name }}</td>
+              <td>{{ dependency.critical_activity_name or 'Plan-wide' }}</td>
+              <td>{{ dependency.owner_name or '-' }}</td>
+              <td>{{ dependency.rto_hours if dependency.rto_hours is not none else '-' }}</td>
+              <td class="text-sm">{{ dependency.notes or '-' }}</td>
+              {% if can_edit %}
+              <td>
+                <form method="post" action="/bcp/dependencies/{{ dependency.id }}/delete">
+                  <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                  <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Delete this dependency mapping?')">Delete</button>
+                </form>
+              </td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% elif not can_edit %}
+      <p class="text-muted">No dependency mappings recorded yet.</p>
       {% endif %}
     </div>
   </section>

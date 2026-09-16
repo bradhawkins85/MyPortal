@@ -70,6 +70,39 @@ class BcpContactKind(str, Enum):
     EXTERNAL = "External"
 
 
+class BcpCollaboratorRole(str, Enum):
+    """Collaborator roles for plan operations."""
+
+    EXECUTOR = "Executor"
+    CO_AUTHOR = "CoAuthor"
+    REVIEWER = "Reviewer"
+    APPROVER = "Approver"
+
+
+class BcpTrainingStatus(str, Enum):
+    """Exercise lifecycle states."""
+
+    SCHEDULED = "Scheduled"
+    COMPLETED = "Completed"
+    CANCELLED = "Cancelled"
+
+
+class BcpReviewApprovalStatus(str, Enum):
+    """Approval states captured for review snapshots."""
+
+    DRAFT = "Draft"
+    IN_REVIEW = "InReview"
+    APPROVED = "Approved"
+    CHANGES_REQUESTED = "ChangesRequested"
+
+
+class BcpDependencyType(str, Enum):
+    """Dependency classifications."""
+
+    VENDOR = "Vendor"
+    RESOURCE = "Resource"
+
+
 # ============================================================================
 # Core Entity Schemas
 # ============================================================================
@@ -373,6 +406,10 @@ class BcpIncidentBase(BaseModel):
     started_at: datetime
     status: BcpIncidentStatus = Field(default=BcpIncidentStatus.ACTIVE)
     source: Optional[BcpIncidentSource] = None
+    closed_at: Optional[datetime] = None
+    after_action_summary: Optional[str] = None
+    after_action_improvements: Optional[str] = None
+    after_action_reviewed_at: Optional[datetime] = None
 
 
 class BcpIncidentCreate(BcpIncidentBase):
@@ -387,6 +424,10 @@ class BcpIncidentUpdate(BaseModel):
     started_at: Optional[datetime] = None
     status: Optional[BcpIncidentStatus] = None
     source: Optional[BcpIncidentSource] = None
+    closed_at: Optional[datetime] = None
+    after_action_summary: Optional[str] = None
+    after_action_improvements: Optional[str] = None
+    after_action_reviewed_at: Optional[datetime] = None
 
 
 class BcpIncidentResponse(BcpIncidentBase):
@@ -577,6 +618,7 @@ class BcpRoleAssignmentBase(BaseModel):
 
     role_id: int = Field(..., gt=0)
     user_id: int = Field(..., gt=0)
+    collaborator_role: BcpCollaboratorRole = Field(default=BcpCollaboratorRole.EXECUTOR)
     is_alternate: bool = Field(default=False)
     contact_info: Optional[str] = Field(None, max_length=500)
 
@@ -591,6 +633,7 @@ class BcpRoleAssignmentUpdate(BaseModel):
     """Schema for updating a Role Assignment."""
 
     user_id: Optional[int] = Field(None, gt=0)
+    collaborator_role: Optional[BcpCollaboratorRole] = None
     is_alternate: Optional[bool] = None
     contact_info: Optional[str] = Field(None, max_length=500)
 
@@ -841,7 +884,12 @@ class BcpTrainingItemBase(BaseModel):
     plan_id: int = Field(..., gt=0)
     training_date: datetime
     training_type: Optional[str] = Field(None, max_length=255)
+    status: BcpTrainingStatus = Field(default=BcpTrainingStatus.SCHEDULED)
+    participants_count: Optional[int] = Field(None, ge=0)
+    score_percent: Optional[int] = Field(None, ge=0, le=100)
     comments: Optional[str] = None
+    lessons_learned: Optional[str] = None
+    follow_up_actions: Optional[str] = None
 
 
 class BcpTrainingItemCreate(BcpTrainingItemBase):
@@ -855,7 +903,12 @@ class BcpTrainingItemUpdate(BaseModel):
 
     training_date: Optional[datetime] = None
     training_type: Optional[str] = Field(None, max_length=255)
+    status: Optional[BcpTrainingStatus] = None
+    participants_count: Optional[int] = Field(None, ge=0)
+    score_percent: Optional[int] = Field(None, ge=0, le=100)
     comments: Optional[str] = None
+    lessons_learned: Optional[str] = None
+    follow_up_actions: Optional[str] = None
 
 
 class BcpTrainingItemResponse(BcpTrainingItemBase):
@@ -874,8 +927,13 @@ class BcpReviewItemBase(BaseModel):
 
     plan_id: int = Field(..., gt=0)
     review_date: datetime
+    version_label: Optional[str] = Field(None, max_length=50)
+    approval_status: BcpReviewApprovalStatus = Field(default=BcpReviewApprovalStatus.DRAFT)
+    reviewed_by_user_id: Optional[int] = Field(None, gt=0)
+    approved_by_user_id: Optional[int] = Field(None, gt=0)
     reason: Optional[str] = None
     changes_made: Optional[str] = None
+    approval_snapshot: Optional[str] = None
 
 
 class BcpReviewItemCreate(BcpReviewItemBase):
@@ -888,12 +946,57 @@ class BcpReviewItemUpdate(BaseModel):
     """Schema for updating a Review Item."""
 
     review_date: Optional[datetime] = None
+    version_label: Optional[str] = Field(None, max_length=50)
+    approval_status: Optional[BcpReviewApprovalStatus] = None
+    reviewed_by_user_id: Optional[int] = Field(None, gt=0)
+    approved_by_user_id: Optional[int] = Field(None, gt=0)
     reason: Optional[str] = None
     changes_made: Optional[str] = None
+    approval_snapshot: Optional[str] = None
 
 
 class BcpReviewItemResponse(BcpReviewItemBase):
     """Schema for Review Item response."""
+
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class BcpDependencyMapBase(BaseModel):
+    """Base schema for linked dependencies."""
+
+    plan_id: int = Field(..., gt=0)
+    critical_activity_id: Optional[int] = Field(None, gt=0)
+    dependency_type: BcpDependencyType
+    dependency_name: str = Field(..., min_length=1, max_length=255)
+    owner_name: Optional[str] = Field(None, max_length=255)
+    rto_hours: Optional[int] = Field(None, ge=0)
+    notes: Optional[str] = None
+
+
+class BcpDependencyMapCreate(BcpDependencyMapBase):
+    """Schema for creating a dependency mapping."""
+
+    pass
+
+
+class BcpDependencyMapUpdate(BaseModel):
+    """Schema for updating a dependency mapping."""
+
+    critical_activity_id: Optional[int] = Field(None, gt=0)
+    dependency_type: Optional[BcpDependencyType] = None
+    dependency_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    owner_name: Optional[str] = Field(None, max_length=255)
+    rto_hours: Optional[int] = Field(None, ge=0)
+    notes: Optional[str] = None
+
+
+class BcpDependencyMapResponse(BcpDependencyMapBase):
+    """Schema for dependency mapping response."""
 
     id: int
     created_at: datetime

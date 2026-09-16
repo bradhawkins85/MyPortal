@@ -1,4 +1,5 @@
 {% extends "bcp/layout.html" %}
+{% from "macros/counters.html" import counter_strip %}
 
 
 {% block header_title %}BCP — Overview{% endblock %}
@@ -40,6 +41,15 @@
           <p class="form-value">{{ plan.next_review.strftime('%Y-%m-%d') if plan.next_review else 'Not scheduled' }}</p>
         </div>
       </div>
+    </div>
+  </section>
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Readiness Dashboard</h2>
+      <p class="text-muted text-sm">Operational KPIs for continuity readiness, cadence, and coverage.</p>
+    </div>
+    <div class="card-body">
+      {{ counter_strip(kpi_items) }}
     </div>
   </section>
   {% if has_bcp_planning_gaps and bcp_compliance_help_url %}
@@ -130,6 +140,83 @@
       </table>
       {% else %}
       <p class="text-muted">No distribution list entries yet.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Approval Snapshots & Dependencies</h2>
+      <div class="page-actions">
+        <a href="/bcp/schedules" class="btn btn-secondary btn-sm">Manage Reviews</a>
+        <a href="/bcp/bia" class="btn btn-secondary btn-sm">Manage Dependencies</a>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <p class="form-label">Approved snapshots</p>
+          <p class="form-value">{{ approved_review_count }}</p>
+        </div>
+        <div>
+          <p class="form-label">Mapped dependencies</p>
+          <p class="form-value">{{ dependency_count }}</p>
+        </div>
+      </div>
+      {% if recent_reviews %}
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Review Date</th>
+              <th>Version</th>
+              <th>Status</th>
+              <th>Snapshot</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in recent_reviews %}
+            <tr>
+              <td>{{ item.review_date.strftime('%Y-%m-%d') if item.review_date else '-' }}</td>
+              <td>{{ item.version_label or plan.version or '-' }}</td>
+              <td>{{ item.approval_status or 'Draft' }}</td>
+              <td class="text-sm">{{ item.approval_snapshot or item.changes_made or '-' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted">No approval snapshots captured yet.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Version Diff View</h2>
+      <p class="text-muted text-sm">Recent plan revisions captured from the audit trail.</p>
+    </div>
+    <div class="card-body">
+      {% if recent_plan_changes %}
+      {% for change in recent_plan_changes %}
+      <div class="card card--panel">
+        <div class="card-body">
+          <strong>{{ change.changed_at.strftime('%Y-%m-%d %H:%M') if change.changed_at else 'Unknown time' }}</strong>
+          <span class="text-muted">by {{ change.changed_by }}</span>
+          <ul class="list-disc list-inside space-y-1">
+            {% for field_name in change.changed_fields %}
+            <li>
+              <strong>{{ field_name.replace('_', ' ').title() }}</strong>:
+              {{ change.before.get(field_name, '—') }} → {{ change.after.get(field_name, '—') }}
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+      {% endfor %}
+      {% else %}
+      <p class="text-muted">Update the plan overview to generate a version diff snapshot.</p>
       {% endif %}
     </div>
   </section>

@@ -29,6 +29,20 @@ def mock_startup(monkeypatch):
     monkeypatch.setattr(scheduler_service, "start", fake_start)
     monkeypatch.setattr(scheduler_service, "stop", fake_stop)
     monkeypatch.setattr(main_module.settings, "enable_csrf", False)
+    async def fake_build_operations_center(modules):
+        return {
+            "summary": {},
+            "module_health": [],
+            "credential_alerts": [],
+            "setup_steps": [],
+            "dependency_graph": {"conflicts": [], "graph": []},
+        }
+
+    monkeypatch.setattr(
+        main_module.integration_operations_service,
+        "build_operations_center",
+        fake_build_operations_center,
+    )
 
 
 @pytest.fixture
@@ -148,3 +162,96 @@ def test_modules_page_renders_module_quick_actions_and_helpers(super_admin_conte
     assert 'id="webhook-url-modal"' in response.text
     assert '>Webhook URL</a>' not in response.text
     assert 'href="/api/integration-modules/xero/tenants"' in response.text
+
+
+def test_modules_page_renders_operations_center(super_admin_context, monkeypatch):
+    async def fake_list_modules():
+        return [
+            {"slug": "xero", "name": "Xero", "description": "", "enabled": True, "settings": {}},
+        ]
+
+    async def fake_build_operations_center(modules):
+        assert modules and modules[0]["slug"] == "xero"
+        return {
+            "summary": {
+                "enabled_modules": 1,
+                "healthy_modules": 0,
+                "warning_modules": 1,
+                "setup_modules": 0,
+                "degraded_modules": 0,
+                "failed_webhooks": 2,
+                "task_conflicts": 1,
+            },
+            "module_health": [
+                {
+                    "name": "Xero",
+                    "status_key": "warning",
+                    "status_label": "Credential warning",
+                    "slo_achieved_percent": 95.0,
+                    "slo_target_percent": 99,
+                    "error_budget_total": 1,
+                    "error_budget_used": 2,
+                    "error_budget_overrun": 1,
+                    "error_budget_remaining": 0,
+                    "scheduled_task_count": 2,
+                    "failed_webhook_count": 2,
+                    "missing_fields": [],
+                    "warnings": [{"message": "Access token expires in 2 day(s)"}],
+                }
+            ],
+            "credential_alerts": [
+                {
+                    "module_name": "Xero",
+                    "severity": "warning",
+                    "message": "Access token expires in 2 day(s)",
+                    "expires_at_iso": "2026-09-18T00:00:00+00:00",
+                }
+            ],
+            "setup_steps": [
+                {
+                    "module_name": "Xero",
+                    "issues": ["Create at least one scheduled task"],
+                    "action_url": "/admin/modules",
+                }
+            ],
+            "dependency_graph": {
+                "conflicts": [
+                    {
+                        "severity": "warning",
+                        "summary": "Near-simultaneous xero jobs",
+                        "detail": "Sync invoices and send invoices overlap.",
+                    }
+                ],
+                "graph": [
+                    {
+                        "name": "Sync invoices",
+                        "command": "sync_to_xero",
+                        "company_name": "All companies",
+                        "module_slugs": ["xero"],
+                        "next_run_iso": "2026-09-17T02:00:00+00:00",
+                        "conflict_count": 1,
+                        "related_tasks": ["Send invoices"],
+                    }
+                ],
+            },
+        }
+
+    monkeypatch.setattr(modules_service, "list_modules", fake_list_modules)
+    monkeypatch.setattr(
+        main_module.integration_operations_service,
+        "build_operations_center",
+        fake_build_operations_center,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/admin/modules")
+
+    assert response.status_code == 200
+    html = response.text
+    assert "Integration health center" in html
+    assert "Open dead-letter queue" in html
+    assert "Credential expiry warnings" in html
+    assert "Integration setup wizard" in html
+    assert "Scheduled task dependency graph" in html
+    assert "95.0% / 99%" in html
+    assert "Access token expires in 2 day(s)" in html

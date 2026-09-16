@@ -86,6 +86,8 @@ def queue_background_task(
         _BACKGROUND_TASKS.pop(resolved_task_id, None)
         try:
             completed.result()
+        except asyncio.CancelledError:  # pragma: no cover - shutdown / test cleanup
+            return
         except Exception as exc:  # pragma: no cover - defensive logging
             log_error(
                 "Background task raised an exception",
@@ -95,4 +97,3 @@ def queue_background_task(
 
     task.add_done_callback(_cleanup)
     return resolved_task_id
-

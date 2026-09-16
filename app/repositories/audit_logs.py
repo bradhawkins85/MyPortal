@@ -47,6 +47,7 @@ async def list_audit_logs(
     entity_id: int | None = None,
     user_id: int | None = None,
     action: str | None = None,
+    metadata_filters: dict[str, Any] | None = None,
     request_id: str | None = None,
     ip_address: str | None = None,
     since: datetime | None = None,
@@ -69,6 +70,10 @@ async def list_audit_logs(
     if action:
         clauses.append("al.action LIKE %s")
         params.append(f"%{action}%")
+    if metadata_filters:
+        for key, value in metadata_filters.items():
+            clauses.append("JSON_UNQUOTE(JSON_EXTRACT(al.metadata, %s)) = %s")
+            params.extend([f"$.{key}", str(value)])
     if request_id:
         clauses.append("al.request_id = %s")
         params.append(request_id)
@@ -112,6 +117,7 @@ async def count_audit_logs(
     entity_id: int | None = None,
     user_id: int | None = None,
     action: str | None = None,
+    metadata_filters: dict[str, Any] | None = None,
     request_id: str | None = None,
     ip_address: str | None = None,
     since: datetime | None = None,
@@ -132,6 +138,10 @@ async def count_audit_logs(
     if action:
         clauses.append("al.action LIKE %s")
         params.append(f"%{action}%")
+    if metadata_filters:
+        for key, value in metadata_filters.items():
+            clauses.append("JSON_UNQUOTE(JSON_EXTRACT(al.metadata, %s)) = %s")
+            params.extend([f"$.{key}", str(value)])
     if request_id:
         clauses.append("al.request_id = %s")
         params.append(request_id)

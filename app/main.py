@@ -210,6 +210,7 @@ from app.services import ticket_attachments as attachments_service
 from app.services import template_variables
 from app.services import webhook_monitor
 from app.services import xero as xero_service
+from app.services import integration_operations as integration_operations_service
 from app.services import issues as issues_service
 from app.services import reports as reports_service
 from app.services import reporting as reporting_service
@@ -2149,6 +2150,7 @@ async def _build_base_context(
         "can_manage_compliance_checks": _menu_can(menu_access, "menu.compliance_checks.library", write=True) or is_super_admin or _has_permission("can_manage_compliance_checks"),
         "can_view_m365_user_mailboxes": _menu_can(menu_access, "menu.m365.user_mailboxes") or is_super_admin or _has_permission("can_view_m365_user_mailboxes"),
         "can_view_m365_shared_mailboxes": _menu_can(menu_access, "menu.m365.shared_mailboxes") or is_super_admin or _has_permission("can_view_m365_shared_mailboxes"),
+        "can_access_m365_signatures": _menu_can(menu_access, "menu.m365.signatures") or is_super_admin,
         "can_access_m365_spam_purge": _menu_can(menu_access, "menu.m365.spam_purge", write=True),
         "can_access_chat": _menu_can(menu_access, "menu.chat") or is_super_admin or _has_permission("can_access_chat"),
         "can_access_marketing": _menu_can(menu_access, "menu.marketing") or has_marketing_access,
@@ -10266,6 +10268,7 @@ async def _render_modules_dashboard(
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
     modules = await modules_service.list_modules()
+    operations_center = await integration_operations_service.build_operations_center(modules)
     public_base = str(settings.public_base_url or "").strip().rstrip("/")
     if not public_base:
         public_base = str(request.base_url).rstrip("/")
@@ -10282,6 +10285,7 @@ async def _render_modules_dashboard(
         "title": "Integration modules",
         "modules": modules,
         "module_webhook_urls": module_webhook_urls,
+        "operations_center": operations_center,
         "success_message": success_message,
         "error_message": error_message,
     }

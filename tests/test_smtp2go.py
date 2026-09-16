@@ -634,7 +634,7 @@ async def test_process_webhook_event_delivered(monkeypatch):
     assert result is not None
     assert result['tracking_id'] == 'test-tracking-id'
     assert result['event_type'] == 'delivered'
-    assert len(execute_results) == 2  # Insert event + update reply
+    assert len(execute_results) == 3  # Insert event + update reply + recipient row update
 
 
 @pytest.mark.asyncio
@@ -675,7 +675,7 @@ async def test_process_webhook_event_opened(monkeypatch):
     assert result is not None
     assert result['tracking_id'] == 'test-tracking-id'
     assert result['event_type'] == 'open'
-    assert len(execute_results) == 2  # Insert event + update reply with open count
+    assert len(execute_results) == 3  # Insert event + update reply + recipient row update
 
 
 @pytest.mark.asyncio
@@ -717,7 +717,7 @@ async def test_process_webhook_event_clicked(monkeypatch):
     assert result is not None
     assert result['tracking_id'] == 'test-tracking-id'
     assert result['event_type'] == 'click'
-    assert len(execute_results) == 1  # Only insert event (no reply update for clicks)
+    assert len(execute_results) == 2  # Insert event + recipient row update
 
 
 @pytest.mark.asyncio

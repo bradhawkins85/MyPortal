@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Add external subscription - {{ app_name }}{% endblock %}
+{% block header_title %}<span class="header__title-text">Add external subscription</span>{% endblock %}
+{% block header_actions %}<a class="button button--ghost" href="/admin/subscriptions">Back to subscriptions</a>{% endblock %}
+
+{% block content %}
+<section class="card card--panel subscription-create-card">
+  <header class="card__header">
+    <div>
+      <h1 class="card__title">Register an existing subscription</h1>
+      <p class="card__description">Add a subscription that is already billed in an external environment. No initial invoice will be issued; MyPortal will manage its next renewal.</p>
+    </div>
+  </header>
+
+  {% if failure_message %}
+    <div class="alert alert--danger" role="alert">{{ failure_message }}</div>
+  {% endif %}
+  {% if form_errors %}
+    <div class="alert alert--danger" role="alert">
+      <strong>Please correct the following:</strong>
+      <ul>{% for error in form_errors.values() %}<li>{{ error }}</li>{% endfor %}</ul>
+    </div>
+  {% endif %}
+
+  <form method="post" action="/admin/subscriptions/create" class="subscription-create-form" novalidate>
+    {% include "partials/csrf.html" %}
+    <div class="form-grid">
+      <div class="form-field">
+        <label class="form-label" for="customer_id">Customer <span aria-hidden="true">*</span></label>
+        <select class="form-input" id="customer_id" name="customer_id" required aria-invalid="{{ 'true' if form_errors.customer_id else 'false' }}">
+          <option value="">Select a customer</option>
+          {% for company in companies %}<option value="{{ company.id }}" {% if form_values.customer_id|string == company.id|string %}selected{% endif %}>{{ company.name }}</option>{% endfor %}
+        </select>
+        {% if form_errors.customer_id %}<p class="form-error">{{ form_errors.customer_id }}</p>{% endif %}
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="product_id">Subscription product <span aria-hidden="true">*</span></label>
+        <select class="form-input" id="product_id" name="product_id" required aria-invalid="{{ 'true' if form_errors.product_id else 'false' }}">
+          <option value="">Select a subscription product</option>
+          {% for product in products %}<option value="{{ product.id }}" {% if form_values.product_id|string == product.id|string %}selected{% endif %}>{{ product.name }}{% if product.sku %} ({{ product.sku }}){% endif %}</option>{% endfor %}
+        </select>
+        {% if form_errors.product_id %}<p class="form-error">{{ form_errors.product_id }}</p>{% endif %}
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="start_date">Current term start date <span aria-hidden="true">*</span></label>
+        <input class="form-input" id="start_date" name="start_date" type="date" value="{{ form_values.start_date }}" required aria-invalid="{{ 'true' if form_errors.start_date else 'false' }}">
+        <p class="form-helper">The end date is calculated from the product's billing commitment.</p>
+        {% if form_errors.start_date %}<p class="form-error">{{ form_errors.start_date }}</p>{% endif %}
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="quantity">Quantity <span aria-hidden="true">*</span></label>
+        <input class="form-input" id="quantity" name="quantity" type="number" min="1" max="9999" step="1" value="{{ form_values.quantity }}" required aria-invalid="{{ 'true' if form_errors.quantity else 'false' }}">
+        {% if form_errors.quantity %}<p class="form-error">{{ form_errors.quantity }}</p>{% endif %}
+      </div>
+    </div>
+    <label class="checkbox-row" for="auto_renew">
+      <input id="auto_renew" name="auto_renew" type="checkbox" {% if form_values.auto_renew %}checked{% endif %}>
+      <span>Automatically renew this subscription at the end of its term</span>
+    </label>
+    <div class="form-actions">
+      <a class="button button--ghost" href="/admin/subscriptions">Cancel</a>
+      <button class="button" type="submit">Create subscription</button>
+    </div>
+  </form>
+</section>
+
+<style>
+.subscription-create-card { max-width: 62rem; margin: 0 auto; }
+.subscription-create-form { display: grid; gap: 1.5rem; }
+.subscription-create-form .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.subscription-create-form .form-field { min-width: 0; }
+.subscription-create-form .form-error { color: var(--color-danger, #b42318); margin: .35rem 0 0; }
+.subscription-create-form .checkbox-row { display: flex; align-items: flex-start; gap: .6rem; }
+.subscription-create-form .form-actions { display: flex; justify-content: flex-end; gap: .75rem; }
+.subscription-create-card .alert { margin-bottom: 1rem; }
+@media (max-width: 720px) { .subscription-create-form .form-grid { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}

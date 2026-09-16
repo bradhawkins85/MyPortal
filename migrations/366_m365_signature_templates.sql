@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS m365_signature_templates (
+    id INTEGER PRIMARY KEY AUTO_INCREMENT,
+    company_id INTEGER NOT NULL,
+    slug VARCHAR(120) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT NULL,
+    html_content LONGTEXT NOT NULL,
+    text_content LONGTEXT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'draft',
+    created_by_user_id INTEGER NULL,
+    updated_by_user_id INTEGER NULL,
+    published_at DATETIME NULL,
+    disabled_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_m365_signature_templates_company FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
+    CONSTRAINT fk_m365_signature_templates_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_m365_signature_templates_updated_by FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT uq_m365_signature_templates_company_slug UNIQUE (company_id, slug)
+);

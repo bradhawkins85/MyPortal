@@ -196,6 +196,9 @@ class Settings(BaseSettings):
     m365_client_secret_renewal_days: int = Field(
         default=30, validation_alias="M365_CLIENT_SECRET_RENEWAL_DAYS", ge=1
     )
+    integration_credential_warning_days: int = Field(
+        default=30, validation_alias="INTEGRATION_CREDENTIAL_WARNING_DAYS", ge=1
+    )
     m365_onedrive_export_destination_parent_item_id: str = Field(
         default="root",
         validation_alias="M365_ONEDRIVE_EXPORT_DESTINATION_PARENT_ITEM_ID",

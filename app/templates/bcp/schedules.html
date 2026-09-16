@@ -54,6 +54,8 @@
             <tr>
               <th>Date</th>
               <th>Type</th>
+              <th>Status</th>
+              <th>Scorecard</th>
               <th>Comments</th>
               {% if can_edit %}
               <th>Actions</th>
@@ -71,11 +73,24 @@
                 {% endif %}
               </td>
               <td><strong>{{ item.training_type or '-' }}</strong></td>
+              <td>{{ item.status or 'Scheduled' }}</td>
+              <td class="text-sm">
+                {% if item.score_percent is not none %}
+                  {{ item.score_percent }}%{% if item.participants_count is not none %} · {{ item.participants_count }} participants{% endif %}
+                {% elif item.participants_count is not none %}
+                  {{ item.participants_count }} participants
+                {% else %}
+                  -
+                {% endif %}
+                {% if item.follow_up_actions %}
+                  <div class="text-muted">{{ item.follow_up_actions }}</div>
+                {% endif %}
+              </td>
               <td class="text-sm">{{ item.comments or '-' }}</td>
               {% if can_edit %}
               <td>
                 <div class="action-buttons">
-                  <button type="button" class="btn-icon" onclick="editTraining({{ item.id }}, '{{ item.training_date.strftime('%Y-%m-%dT%H:%M') if item.training_date else '' }}', '{{ item.training_type or '' }}', '{{ item.comments or '' }}')" title="Edit">
+                  <button type="button" class="btn-icon" onclick='editTraining({{ item.id }}, {{ (item.training_date.strftime("%Y-%m-%dT%H:%M") if item.training_date else "")|tojson }}, {{ (item.training_type or "")|tojson }}, {{ (item.status or "Scheduled")|tojson }}, {{ item.participants_count|tojson }}, {{ item.score_percent|tojson }}, {{ (item.comments or "")|tojson }}, {{ (item.lessons_learned or "")|tojson }}, {{ (item.follow_up_actions or "")|tojson }})' title="Edit">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                       <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
                     </svg>
@@ -126,8 +141,12 @@
           <thead>
             <tr>
               <th>Date</th>
+              <th>Version</th>
+              <th>Status</th>
+              <th>Reviewer</th>
+              <th>Approver</th>
               <th>Reason for Review</th>
-              <th>Changes Made</th>
+              <th>Snapshot</th>
               {% if can_edit %}
               <th>Actions</th>
               {% endif %}
@@ -143,12 +162,16 @@
                   -
                 {% endif %}
               </td>
+              <td>{{ item.version_label or plan.version or '-' }}</td>
+              <td>{{ item.approval_status or 'Draft' }}</td>
+              <td class="text-sm">{{ item.reviewer.name or item.reviewer.email if item.reviewer else '-' }}</td>
+              <td class="text-sm">{{ item.approver.name or item.approver.email if item.approver else '-' }}</td>
               <td class="text-sm">{{ item.reason or '-' }}</td>
-              <td class="text-sm">{{ item.changes_made or '-' }}</td>
+              <td class="text-sm">{{ item.approval_snapshot or item.changes_made or '-' }}</td>
               {% if can_edit %}
               <td>
                 <div class="action-buttons">
-                  <button type="button" class="btn-icon" onclick="editReview({{ item.id }}, '{{ item.review_date.strftime('%Y-%m-%dT%H:%M') if item.review_date else '' }}', '{{ item.reason or '' }}', '{{ item.changes_made or '' }}')" title="Edit">
+                  <button type="button" class="btn-icon" onclick='editReview({{ item.id }}, {{ (item.review_date.strftime("%Y-%m-%dT%H:%M") if item.review_date else "")|tojson }}, {{ (item.version_label or "")|tojson }}, {{ (item.approval_status or "Draft")|tojson }}, {{ item.reviewed_by_user_id|tojson }}, {{ item.approved_by_user_id|tojson }}, {{ (item.reason or "")|tojson }}, {{ (item.changes_made or "")|tojson }}, {{ (item.approval_snapshot or "")|tojson }})' title="Edit">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                       <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
                     </svg>
@@ -198,9 +221,35 @@
           <label for="training_type" class="form-label">Type</label>
           <input type="text" id="training_type" name="training_type" class="form-control" placeholder="e.g., Tabletop Exercise, Full-scale Drill">
         </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="training_status" class="form-label">Status</label>
+            <select id="training_status" name="status" class="form-control">
+              <option value="Scheduled">Scheduled</option>
+              <option value="Completed">Completed</option>
+              <option value="Cancelled">Cancelled</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="training_participants_count" class="form-label">Participants</label>
+            <input type="number" id="training_participants_count" name="participants_count" class="form-control" min="0">
+          </div>
+          <div class="form-group">
+            <label for="training_score_percent" class="form-label">Score %</label>
+            <input type="number" id="training_score_percent" name="score_percent" class="form-control" min="0" max="100">
+          </div>
+        </div>
         <div class="form-group">
           <label for="training_comments" class="form-label">Comments</label>
           <textarea id="training_comments" name="comments" class="form-control" rows="3" placeholder="Training notes and outcomes"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="training_lessons_learned" class="form-label">Lessons Learned</label>
+          <textarea id="training_lessons_learned" name="lessons_learned" class="form-control" rows="2"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="training_follow_up_actions" class="form-label">Follow-up Actions</label>
+          <textarea id="training_follow_up_actions" name="follow_up_actions" class="form-control" rows="2"></textarea>
         </div>
       </div>
       <div class="modal-footer">
@@ -228,9 +277,35 @@
           <label for="edit_training_type" class="form-label">Type</label>
           <input type="text" id="edit_training_type" name="training_type" class="form-control" placeholder="e.g., Tabletop Exercise, Full-scale Drill">
         </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="edit_training_status" class="form-label">Status</label>
+            <select id="edit_training_status" name="status" class="form-control">
+              <option value="Scheduled">Scheduled</option>
+              <option value="Completed">Completed</option>
+              <option value="Cancelled">Cancelled</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="edit_training_participants_count" class="form-label">Participants</label>
+            <input type="number" id="edit_training_participants_count" name="participants_count" class="form-control" min="0">
+          </div>
+          <div class="form-group">
+            <label for="edit_training_score_percent" class="form-label">Score %</label>
+            <input type="number" id="edit_training_score_percent" name="score_percent" class="form-control" min="0" max="100">
+          </div>
+        </div>
         <div class="form-group">
           <label for="edit_training_comments" class="form-label">Comments</label>
           <textarea id="edit_training_comments" name="comments" class="form-control" rows="3" placeholder="Training notes and outcomes"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="edit_training_lessons_learned" class="form-label">Lessons Learned</label>
+          <textarea id="edit_training_lessons_learned" name="lessons_learned" class="form-control" rows="2"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="edit_training_follow_up_actions" class="form-label">Follow-up Actions</label>
+          <textarea id="edit_training_follow_up_actions" name="follow_up_actions" class="form-control" rows="2"></textarea>
         </div>
       </div>
       <div class="modal-footer">
@@ -254,6 +329,41 @@
           <label for="review_date" class="form-label required">Review Date</label>
           <input type="datetime-local" id="review_date" name="review_date" class="form-control" required>
         </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="version_label" class="form-label">Version</label>
+            <input type="text" id="version_label" name="version_label" class="form-control" placeholder="e.g., 1.1">
+          </div>
+          <div class="form-group">
+            <label for="approval_status" class="form-label">Approval Status</label>
+            <select id="approval_status" name="approval_status" class="form-control">
+              <option value="Draft">Draft</option>
+              <option value="InReview">In review</option>
+              <option value="Approved">Approved</option>
+              <option value="ChangesRequested">Changes requested</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="reviewed_by_user_id" class="form-label">Reviewer</label>
+            <select id="reviewed_by_user_id" name="reviewed_by_user_id" class="form-control">
+              <option value="">Select a reviewer...</option>
+              {% for user in all_users %}
+              <option value="{{ user.id }}">{{ user.name or user.email }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="approved_by_user_id" class="form-label">Approver</label>
+            <select id="approved_by_user_id" name="approved_by_user_id" class="form-control">
+              <option value="">Select an approver...</option>
+              {% for user in all_users %}
+              <option value="{{ user.id }}">{{ user.name or user.email }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
         <div class="form-group">
           <label for="reason" class="form-label">Reason for Review</label>
           <textarea id="reason" name="reason" class="form-control" rows="2" placeholder="e.g., Annual review, organizational change"></textarea>
@@ -261,6 +371,10 @@
         <div class="form-group">
           <label for="changes_made" class="form-label">Changes Made</label>
           <textarea id="changes_made" name="changes_made" class="form-control" rows="3" placeholder="Summary of changes made during review"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="approval_snapshot" class="form-label">Approval Snapshot</label>
+          <textarea id="approval_snapshot" name="approval_snapshot" class="form-control" rows="2" placeholder="Who approved what, and under which conditions"></textarea>
         </div>
       </div>
       <div class="modal-footer">
@@ -284,6 +398,41 @@
           <label for="edit_review_date" class="form-label required">Review Date</label>
           <input type="datetime-local" id="edit_review_date" name="review_date" class="form-control" required>
         </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="edit_version_label" class="form-label">Version</label>
+            <input type="text" id="edit_version_label" name="version_label" class="form-control">
+          </div>
+          <div class="form-group">
+            <label for="edit_approval_status" class="form-label">Approval Status</label>
+            <select id="edit_approval_status" name="approval_status" class="form-control">
+              <option value="Draft">Draft</option>
+              <option value="InReview">In review</option>
+              <option value="Approved">Approved</option>
+              <option value="ChangesRequested">Changes requested</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="edit_reviewed_by_user_id" class="form-label">Reviewer</label>
+            <select id="edit_reviewed_by_user_id" name="reviewed_by_user_id" class="form-control">
+              <option value="">Select a reviewer...</option>
+              {% for user in all_users %}
+              <option value="{{ user.id }}">{{ user.name or user.email }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="edit_approved_by_user_id" class="form-label">Approver</label>
+            <select id="edit_approved_by_user_id" name="approved_by_user_id" class="form-control">
+              <option value="">Select an approver...</option>
+              {% for user in all_users %}
+              <option value="{{ user.id }}">{{ user.name or user.email }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
         <div class="form-group">
           <label for="edit_reason" class="form-label">Reason for Review</label>
           <textarea id="edit_reason" name="reason" class="form-control" rows="2" placeholder="e.g., Annual review, organizational change"></textarea>
@@ -291,6 +440,10 @@
         <div class="form-group">
           <label for="edit_changes_made" class="form-label">Changes Made</label>
           <textarea id="edit_changes_made" name="changes_made" class="form-control" rows="3" placeholder="Summary of changes made during review"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="edit_approval_snapshot" class="form-label">Approval Snapshot</label>
+          <textarea id="edit_approval_snapshot" name="approval_snapshot" class="form-control" rows="2"></textarea>
         </div>
       </div>
       <div class="modal-footer">
@@ -302,18 +455,28 @@
 </dialog>
 
 <script>
-function editTraining(id, date, type, comments) {
+function editTraining(id, date, type, status, participantsCount, scorePercent, comments, lessonsLearned, followUpActions) {
   document.getElementById('edit_training_date').value = date;
   document.getElementById('edit_training_type').value = type;
+  document.getElementById('edit_training_status').value = status || 'Scheduled';
+  document.getElementById('edit_training_participants_count').value = participantsCount ?? '';
+  document.getElementById('edit_training_score_percent').value = scorePercent ?? '';
   document.getElementById('edit_training_comments').value = comments;
+  document.getElementById('edit_training_lessons_learned').value = lessonsLearned;
+  document.getElementById('edit_training_follow_up_actions').value = followUpActions;
   document.getElementById('editTrainingForm').action = '/bcp/training/' + id + '/update';
   document.getElementById('editTrainingModal').showModal();
 }
 
-function editReview(id, date, reason, changes) {
+function editReview(id, date, versionLabel, approvalStatus, reviewerId, approverId, reason, changes, approvalSnapshot) {
   document.getElementById('edit_review_date').value = date;
+  document.getElementById('edit_version_label').value = versionLabel;
+  document.getElementById('edit_approval_status').value = approvalStatus || 'Draft';
+  document.getElementById('edit_reviewed_by_user_id').value = reviewerId ?? '';
+  document.getElementById('edit_approved_by_user_id').value = approverId ?? '';
   document.getElementById('edit_reason').value = reason;
   document.getElementById('edit_changes_made').value = changes;
+  document.getElementById('edit_approval_snapshot').value = approvalSnapshot;
   document.getElementById('editReviewForm').action = '/bcp/review/' + id + '/update';
   document.getElementById('editReviewModal').showModal();
 }

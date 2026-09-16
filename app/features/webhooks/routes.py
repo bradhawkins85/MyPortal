@@ -23,13 +23,17 @@ def _main():
 async def admin_webhooks(
     request: Request,
     q: str = "",
+    status: str = "",
     event_limit: int = Query(default=1000, ge=1, le=5000),
 ):
     main_module = _main()
     current_user, redirect = await main_module._require_super_admin_page(request)
     if redirect:
         return redirect
-    events = await webhook_events_repo.list_events(search=q, limit=event_limit)
+    status_filter = str(status or "").strip().lower() or None
+    events = await webhook_events_repo.list_events(
+        status=status_filter, search=q, limit=event_limit
+    )
     prepared_events: list[dict[str, Any]] = []
     for event in events:
         serialised_event = main_module._serialise_mapping(event)
@@ -41,6 +45,7 @@ async def admin_webhooks(
         "title": "Webhook delivery queue",
         "events": prepared_events,
         "webhook_search": q,
+        "webhook_status": status_filter or "",
         "webhook_event_limit": event_limit,
         "webhook_event_limit_options": (200, 500, 1000, 2500, 5000),
     }

@@ -36,6 +36,8 @@ from app.schemas.auth import (
     PasswordResetConfirm,
     PasswordResetRequest,
     PasswordResetStatus,
+    RegistrationConflictResponse,
+    RegistrationPendingResponse,
     RegistrationRequest,
     SessionInfo,
     SessionResponse,
@@ -222,9 +224,19 @@ def _log_login_success(request: Request, user: dict[str, Any]) -> None:
 
 @router.post(
     "/register",
-    response_model=None,
+    response_model=LoginResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Register a new account",
+    responses={
+        status.HTTP_202_ACCEPTED: {
+            "model": RegistrationPendingResponse,
+            "description": "Registration created and awaiting email verification.",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": RegistrationConflictResponse,
+            "description": "Registration conflict for an existing account.",
+        },
+    },
 )
 async def register(
     payload: RegistrationRequest,

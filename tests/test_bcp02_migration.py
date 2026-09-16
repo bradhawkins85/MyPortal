@@ -231,3 +231,27 @@ def test_migration_no_drop_statements(migration_sql):
 def test_migration_no_truncate_statements(migration_sql):
     """Test that migration doesn't truncate any tables."""
     assert "TRUNCATE TABLE" not in migration_sql.upper(), "Migration should not truncate tables"
+
+
+def test_phase4_migration_file_exists():
+    """Test that the Phase 4 BCP migration file exists."""
+    migration_file = Path(__file__).parent.parent / "migrations" / "365_bcp_phase4_collaboration.sql"
+    assert migration_file.exists(), "Migration file 365_bcp_phase4_collaboration.sql does not exist"
+
+
+def test_phase4_migration_adds_collaboration_fields():
+    """Test that the Phase 4 migration adds collaboration and execution columns."""
+    migration_file = Path(__file__).parent.parent / "migrations" / "365_bcp_phase4_collaboration.sql"
+    migration_sql = migration_file.read_text().lower()
+
+    required_fragments = [
+        "alter table bcp_role_assignment",
+        "collaborator_role",
+        "alter table bcp_training_item",
+        "score_percent",
+        "after_action_summary",
+        "approval_snapshot",
+        "create table if not exists bcp_dependency_map",
+    ]
+    for fragment in required_fragments:
+        assert fragment in migration_sql, f"Expected fragment missing from phase 4 migration: {fragment}"
