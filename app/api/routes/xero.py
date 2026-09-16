@@ -15,6 +15,7 @@ from fastapi.responses import RedirectResponse
 from itsdangerous import URLSafeSerializer
 from itsdangerous import BadSignature
 from loguru import logger
+from pydantic import BaseModel
 
 from app.api.dependencies.modules import require_module_enabled
 from app.core.config import Settings, get_settings
@@ -31,6 +32,22 @@ router = APIRouter(prefix="/api/integration-modules/xero", tags=["Xero"], depend
 oauth_router = APIRouter(prefix="/xero", tags=["Xero OAuth"], dependencies=[Depends(_require_xero_enabled)])
 
 _settings: Settings | None = None
+
+
+class XeroCallbackResponse(BaseModel):
+    status: str
+
+
+class XeroTenantConnection(BaseModel):
+    tenant_id: str | None = None
+    tenant_name: str | None = None
+    tenant_type: str | None = None
+    created_date_utc: str | None = None
+
+
+class XeroTenantListResponse(BaseModel):
+    tenants: list[XeroTenantConnection]
+    current_tenant_id: str
 
 
 def _get_settings() -> Settings:
@@ -263,16 +280,17 @@ async def receive_webhook(request: Request) -> Response:
 
 @router.post(
     "/callback",
+    response_model=XeroCallbackResponse,
     status_code=status.HTTP_202_ACCEPTED,
     name="xero_receive_callback",
 )
-async def receive_callback(request: Request) -> dict[str, str]:
+async def receive_callback(request: Request) -> XeroCallbackResponse:
     """Legacy Xero callback endpoint retained for existing callback integrations."""
-    return {"status": "accepted"}
+    return XeroCallbackResponse(status="accepted")
 
 
-@router.get("/callback", name="xero_callback_probe")
-async def probe_callback(request: Request) -> dict[str, str]:
+@router.get("/callback", response_model=XeroCallbackResponse, name="xero_callback_probe")
+async def probe_callback(request: Request) -> XeroCallbackResponse:
     """Expose a lightweight probe endpoint for connectivity checks."""
 
     await _ensure_module_enabled()
@@ -281,11 +299,11 @@ async def probe_callback(request: Request) -> dict[str, str]:
             "Received Xero callback probe",
             query_params=dict(request.query_params),
         )
-    return {"status": "ok"}
+    return XeroCallbackResponse(status="ok")
 
 
-@router.get("/tenants", name="xero_list_tenants")
-async def list_tenants() -> dict[str, Any]:
+@router.get("/tenants", response_model=XeroTenantListResponse, name="xero_list_tenants")
+async def list_tenants() -> XeroTenantListResponse:
     """List available Xero tenants (organizations) for the configured credentials.
     
     Returns:
@@ -348,10 +366,10 @@ async def list_tenants() -> dict[str, Any]:
             current_tenant_id=current_tenant_id,
         )
         
-        return {
-            "tenants": tenants,
-            "current_tenant_id": current_tenant_id,
-        }
+        return XeroTenantListResponse(
+            tenants=[XeroTenantConnection(**tenant) for tenant in tenants],
+            current_tenant_id=str(current_tenant_id or ""),
+        )
     
     except httpx.HTTPStatusError as exc:
         logger.error(
