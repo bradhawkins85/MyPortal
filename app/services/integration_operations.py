@@ -109,7 +109,7 @@ def _credential_warnings(
                 "label": label,
                 "expires_at": expires_at,
                 "expires_at_iso": expires_at.isoformat(),
-                "days_remaining": int(delta_days) if delta_days >= 0 else int(delta_days),
+                "days_remaining": int(delta_days),
                 "severity": "danger" if delta_days <= 0 else "warning",
                 "message": (
                     f"{label} expired"
@@ -340,10 +340,7 @@ async def build_operations_center(
         issues: list[str] = []
         if missing_fields:
             issues.append("Add " + ", ".join(missing_fields))
-        if enabled and COMMANDS_BY_MODULE.get(slug) and not any(
-            bool(task.get("active", True)) and int(task.get("id") or 0) in task_ids
-            for task in tasks
-        ):
+        if enabled and COMMANDS_BY_MODULE.get(slug) and not task_ids:
             issues.append("Create at least one scheduled task")
         if warnings:
             issues.append(warnings[0]["message"])

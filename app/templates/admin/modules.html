@@ -12,6 +12,7 @@
 {% block content %}
   {% set ops = operations_center or {} %}
   {% set ops_summary = ops.summary or {} %}
+  {% set dependency_graph = ops.dependency_graph or {} %}
   <div class="management management--single" data-layout>
     <section class="management__content">
       <header class="management__header">
@@ -166,7 +167,7 @@
           </div>
         </header>
         <ul class="list">
-          {% for conflict in ops.dependency_graph.conflicts or [] %}
+          {% for conflict in dependency_graph.conflicts or [] %}
             <li>
               <span class="badge {{ 'badge--danger' if conflict.severity == 'danger' else 'badge--warning' }}">{{ conflict.summary }}</span>
               {{ conflict.detail }}
@@ -188,7 +189,7 @@
               </tr>
             </thead>
             <tbody>
-              {% for task in ops.dependency_graph.graph or [] %}
+              {% for task in dependency_graph.graph or [] %}
                 <tr>
                   <td data-label="Task">{{ task.name }}<div class="text-muted">{{ task.command }}</div></td>
                   <td data-label="Scope">{{ task.company_name }}</td>
