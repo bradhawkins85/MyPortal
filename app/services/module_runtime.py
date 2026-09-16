@@ -8,6 +8,62 @@ from typing import Any
 from app.repositories import integration_modules as module_repo
 
 
+_DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
+    "call-recordings": {
+        "recordings_path": "/var/lib/myportal/call_recordings",
+        "phone_system_type": "generic",
+    },
+    "ollama": {
+        "provider": "ollama",
+        "base_url": "http://127.0.0.1:11434",
+        "model": "llama3",
+        "prompt": "",
+        "api_key": "",
+    },
+    "plausible": {
+        "base_url": "",
+        "site_domain": "",
+        "api_key": "",
+        "track_opens": True,
+        "track_clicks": True,
+        "send_to_plausible": False,
+        "track_pageviews": False,
+        "pepper": "",
+        "send_pii": False,
+    },
+    "smtp2go": {
+        "api_key": "",
+        "enable_tracking": True,
+        "track_opens": True,
+        "track_clicks": True,
+        "webhook_secret": "",
+        "disable_webhook_signature_verification": False,
+        "manage_url": "/admin/modules/smtp2go",
+        "rate_limit_max_retries": 3,
+        "retry_backoff_seconds": 60,
+        "not_engaged_delay_seconds": 86400,
+        "ab_campaigns": [],
+    },
+    "solidtime": {
+        "base_url": "",
+        "api_token": "",
+        "organization_id": "",
+        "default_client_id": "",
+        "sync_tickets_to_projects": False,
+        "sync_projects_to_tickets": False,
+        "sync_time_entries_to_solidtime": False,
+        "sync_time_entries_from_solidtime": False,
+        "only_billable_to_solidtime": False,
+        "labour_type_to_task": False,
+        "webhook_secret": "",
+        "rate_limit_per_minute": 120,
+        "reconcile_interval_minutes": 15,
+        "monitor_successful_api_requests": False,
+        "manage_url": "/admin/modules/solidtime",
+    },
+}
+
+
 def _ensure_bool(value: Any, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
@@ -35,64 +91,7 @@ def _coerce_int(
 
 
 def _default_settings_for_slug(slug: str) -> dict[str, Any]:
-    if slug == "call-recordings":
-        return {
-            "recordings_path": "/var/lib/myportal/call_recordings",
-            "phone_system_type": "generic",
-        }
-    if slug == "ollama":
-        return {
-            "provider": "ollama",
-            "base_url": "http://127.0.0.1:11434",
-            "model": "llama3",
-            "prompt": "",
-            "api_key": "",
-        }
-    if slug == "plausible":
-        return {
-            "base_url": "",
-            "site_domain": "",
-            "api_key": "",
-            "track_opens": True,
-            "track_clicks": True,
-            "send_to_plausible": False,
-            "track_pageviews": False,
-            "pepper": "",
-            "send_pii": False,
-        }
-    if slug == "smtp2go":
-        return {
-            "api_key": "",
-            "enable_tracking": True,
-            "track_opens": True,
-            "track_clicks": True,
-            "webhook_secret": "",
-            "disable_webhook_signature_verification": False,
-            "manage_url": "/admin/modules/smtp2go",
-            "rate_limit_max_retries": 3,
-            "retry_backoff_seconds": 60,
-            "not_engaged_delay_seconds": 86400,
-            "ab_campaigns": [],
-        }
-    if slug == "solidtime":
-        return {
-            "base_url": "",
-            "api_token": "",
-            "organization_id": "",
-            "default_client_id": "",
-            "sync_tickets_to_projects": False,
-            "sync_projects_to_tickets": False,
-            "sync_time_entries_to_solidtime": False,
-            "sync_time_entries_from_solidtime": False,
-            "only_billable_to_solidtime": False,
-            "labour_type_to_task": False,
-            "webhook_secret": "",
-            "rate_limit_per_minute": 120,
-            "reconcile_interval_minutes": 15,
-            "monitor_successful_api_requests": False,
-            "manage_url": "/admin/modules/solidtime",
-        }
-    return {}
+    return deepcopy(_DEFAULT_SETTINGS.get(slug, {}))
 
 
 def _merge_settings(

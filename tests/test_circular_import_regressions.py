@@ -25,6 +25,10 @@ def _run_import_order(*module_names: str) -> subprocess.CompletedProcess[str]:
         import app.main as main_module
         from app.api.routes import bcp
 
+        bcp.configure_page_rendering(
+            build_base_context=main_module._build_base_context,
+            templates=main_module.templates,
+        )
         build_base_context, templates = bcp._get_page_rendering()
         assert build_base_context is main_module._build_base_context
         assert templates is main_module.templates
