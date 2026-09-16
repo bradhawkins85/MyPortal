@@ -13,6 +13,7 @@ from app.schemas.m365_spam_purge import SpamPurgeRequestCreate
 from app.schemas.m365_out_of_office import OutOfOfficeCreate
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
+from app.services import m365_signatures as signatures_service
 from app.services import m365_spam_purge as purge_service
 from app.services import m365_out_of_office as oof_service
 
@@ -53,6 +54,63 @@ async def _oof_context(request: Request, *, write: bool = False):
     if company_id is None:
         return user, None, flash_redirect("/", "Select a company first.", "error")
     return user, int(company_id), None
+
+
+async def _signature_context(request: Request, *, write: bool = False):
+    user, redirect = await _main()._require_menu_page_access(
+        request,
+        "menu.m365.signatures",
+        write=write,
+        detail="Signature management permission required",
+    )
+    if redirect:
+        return None, None, redirect
+    company_id = getattr(request.state, "active_company_id", None) or user.get("company_id")
+    if company_id is None:
+        return user, None, flash_redirect("/", "Select a company first.", "error")
+    return user, int(company_id), None
+
+
+def _empty_signature_form() -> dict[str, str]:
+    return {
+        "slug": "",
+        "name": "",
+        "description": "",
+        "html_content": "",
+        "text_content": "",
+    }
+
+
+def _optional_int(value) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _render_signature_form(
+    request: Request,
+    user: dict,
+    company_id: int,
+    *,
+    template_record: dict | None = None,
+    form_values: dict | None = None,
+    preview: dict | None = None,
+    selected_staff_id: int | None = None,
+):
+    staff_options = await signatures_service.list_preview_staff(company_id)
+    extra = {
+        "title": "Signature management",
+        "template_record": template_record or {},
+        "form_values": form_values or template_record or _empty_signature_form(),
+        "preview": preview,
+        "preview_staff": staff_options,
+        "selected_staff_id": selected_staff_id,
+        "variable_suggestions": await signatures_service.list_variable_suggestions(company_id),
+    }
+    return await _main()._render_template("m365/signatures_form.html", request, user, extra=extra)
 
 
 @router.get("/m365/out-of-office", response_class=HTMLResponse)
@@ -99,6 +157,215 @@ async def set_out_of_office(request: Request):
         failed_names = ", ".join(str(item["mailbox"]) for item in failures)
         return flash_redirect("/m365/out-of-office", f"Updated {len(results) - len(failures)} mailbox(es); failed: {failed_names}.", "error")
     return flash_redirect("/m365/out-of-office", f"Out of Office set for {len(results)} mailbox(es).", "success")
+
+
+@router.get("/m365/signatures", response_class=HTMLResponse)
+async def signatures_page(request: Request):
+    user, company_id, redirect = await _signature_context(request)
+    if redirect:
+        return redirect
+    templates = await signatures_service.list_templates(company_id)
+    return await _main()._render_template(
+        "m365/signatures.html",
+        request,
+        user,
+        extra={
+            "title": "Signature management",
+            "templates": templates,
+        },
+    )
+
+
+@router.get("/m365/signatures/new", response_class=HTMLResponse)
+async def signature_new_page(request: Request):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+    return await _render_signature_form(request, user, company_id)
+
+
+@router.post("/m365/signatures/new")
+async def create_signature_template(request: Request):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+    form = await request.form()
+    form_values = {
+        "slug": str(form.get("slug") or "").strip(),
+        "name": str(form.get("name") or "").strip(),
+        "description": str(form.get("description") or "").strip(),
+        "html_content": str(form.get("html_content") or ""),
+        "text_content": str(form.get("text_content") or ""),
+    }
+    preview_staff_id = _optional_int(form.get("preview_staff_id"))
+    if form.get("intent") == "preview":
+        if not preview_staff_id:
+            return flash_redirect("/m365/signatures/new", "Choose a staff member to preview this signature.", "error")
+        try:
+            preview = await signatures_service.render_preview(
+                company_id,
+                html_content=form_values["html_content"],
+                text_content=form_values["text_content"],
+                staff_id=preview_staff_id,
+            )
+        except (TypeError, ValueError) as exc:
+            return flash_redirect("/m365/signatures/new", str(exc), "error")
+        return await _render_signature_form(
+            request,
+            user,
+            company_id,
+            form_values=form_values,
+            preview=preview,
+            selected_staff_id=preview_staff_id,
+        )
+    try:
+        created = await signatures_service.create_template(
+            company_id=company_id,
+            slug=form_values["slug"],
+            name=form_values["name"],
+            description=form_values["description"] or None,
+            html_content=form_values["html_content"],
+            text_content=form_values["text_content"] or None,
+            user_id=int(user["id"]),
+        )
+    except ValueError as exc:
+        return flash_redirect("/m365/signatures/new", str(exc), "error")
+    await audit_service.record(
+        action="m365.signatures.create",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="m365_signature_template",
+        entity_id=int(created["id"]),
+        after={"slug": created["slug"], "status": created["status"]},
+    )
+    return flash_redirect(f"/m365/signatures/{created['id']}/edit", "Signature template created.", "success")
+
+
+@router.get("/m365/signatures/{template_id}/edit", response_class=HTMLResponse)
+async def signature_edit_page(template_id: int, request: Request):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+    template_record = await signatures_service.get_template(company_id, template_id)
+    if not template_record:
+        return flash_redirect("/m365/signatures", "Signature template not found.", "error")
+    return await _render_signature_form(request, user, company_id, template_record=template_record)
+
+
+@router.post("/m365/signatures/{template_id}/edit")
+async def update_signature_template(template_id: int, request: Request):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+    template_record = await signatures_service.get_template(company_id, template_id)
+    if not template_record:
+        return flash_redirect("/m365/signatures", "Signature template not found.", "error")
+    form = await request.form()
+    form_values = {
+        "slug": str(form.get("slug") or "").strip(),
+        "name": str(form.get("name") or "").strip(),
+        "description": str(form.get("description") or "").strip(),
+        "html_content": str(form.get("html_content") or ""),
+        "text_content": str(form.get("text_content") or ""),
+    }
+    preview_staff_id = _optional_int(form.get("preview_staff_id"))
+    if form.get("intent") == "preview":
+        if not preview_staff_id:
+            return flash_redirect(f"/m365/signatures/{template_id}/edit", "Choose a staff member to preview this signature.", "error")
+        try:
+            preview = await signatures_service.render_preview(
+                company_id,
+                html_content=form_values["html_content"],
+                text_content=form_values["text_content"],
+                staff_id=preview_staff_id,
+            )
+        except (TypeError, ValueError) as exc:
+            return flash_redirect(f"/m365/signatures/{template_id}/edit", str(exc), "error")
+        template_record = dict(template_record)
+        template_record.update(form_values)
+        return await _render_signature_form(
+            request,
+            user,
+            company_id,
+            template_record=template_record,
+            form_values=form_values,
+            preview=preview,
+            selected_staff_id=preview_staff_id,
+        )
+    try:
+        updated = await signatures_service.update_template(
+            company_id,
+            template_id,
+            slug=form_values["slug"],
+            name=form_values["name"],
+            description=form_values["description"] or None,
+            html_content=form_values["html_content"],
+            text_content=form_values["text_content"] or None,
+            user_id=int(user["id"]),
+        )
+    except ValueError as exc:
+        return flash_redirect(f"/m365/signatures/{template_id}/edit", str(exc), "error")
+    if not updated:
+        return flash_redirect("/m365/signatures", "Signature template not found.", "error")
+    await audit_service.record(
+        action="m365.signatures.update",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="m365_signature_template",
+        entity_id=int(updated["id"]),
+        after={"slug": updated["slug"], "status": updated["status"]},
+    )
+    return flash_redirect(f"/m365/signatures/{template_id}/edit", "Signature template updated.", "success")
+
+
+@router.post("/m365/signatures/{template_id}/clone")
+async def clone_signature_template(template_id: int, request: Request):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+    cloned = await signatures_service.clone_template(company_id, template_id, user_id=int(user["id"]))
+    if not cloned:
+        return flash_redirect("/m365/signatures", "Signature template not found.", "error")
+    return flash_redirect(f"/m365/signatures/{cloned['id']}/edit", "Signature template duplicated.", "success")
+
+
+@router.post("/m365/signatures/{template_id}/publish")
+async def publish_signature_template(template_id: int, request: Request):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+    updated = await signatures_service.publish_template(company_id, template_id, user_id=int(user["id"]))
+    if not updated:
+        return flash_redirect("/m365/signatures", "Signature template not found.", "error")
+    return flash_redirect(f"/m365/signatures/{template_id}/edit", "Signature template published.", "success")
+
+
+@router.post("/m365/signatures/{template_id}/disable")
+async def disable_signature_template(template_id: int, request: Request):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+    updated = await signatures_service.disable_template(company_id, template_id, user_id=int(user["id"]))
+    if not updated:
+        return flash_redirect("/m365/signatures", "Signature template not found.", "error")
+    return flash_redirect(f"/m365/signatures/{template_id}/edit", "Signature template disabled.", "success")
+
+
+@router.post("/m365/signatures/{template_id}/delete")
+async def delete_signature_template(template_id: int, request: Request):
+    user, company_id, redirect = await _signature_context(request, write=True)
+    if redirect:
+        return redirect
+    await signatures_service.delete_template(company_id, template_id)
+    await audit_service.record(
+        action="m365.signatures.delete",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="m365_signature_template",
+        entity_id=template_id,
+        after=None,
+    )
+    return flash_redirect("/m365/signatures", "Signature template deleted.", "success")
 
 
 @router.get("/m365/spam-purge", response_class=HTMLResponse)
