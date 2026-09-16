@@ -60,6 +60,9 @@ _EXO_ADMIN_ROLE_TEMPLATE_ID = "29232cdf-9323-42fd-ade2-1d097af3e4de"
 # The app must have the ``ComplianceManager.ReadWrite.All`` (or equivalent) application
 # permission and be assigned a Compliance Administrator (or global admin) role in the tenant.
 _SCC_SCOPE = "https://ps.compliance.protection.outlook.com/.default"
+_SCC_ORGANIZATION_PATTERN = re.compile(
+    r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.onmicrosoft\.com"
+)
 
 # Skype and Teams Tenant Admin API service principal app ID.
 # Teams PowerShell cmdlets (Get-CsTeamsMeetingPolicy, Get-CsTenantFederationConfiguration,
@@ -1168,6 +1171,8 @@ async def _scc_invoke_command(
     tenant_id: str,
     cmdlet_name: str,
     parameters: dict[str, Any] | None = None,
+    *,
+    organization: str | None = None,
 ) -> dict[str, Any]:
     """Call a Security & Compliance PowerShell cmdlet via the Purview REST InvokeCommand API.
 
@@ -1177,10 +1182,11 @@ async def _scc_invoke_command(
     Compliance Administrator (or Global Administrator) role assigned so that
     cmdlets such as ``Get-ProtectionAlert`` and ``New-ProtectionAlert`` succeed.
 
-    An ``X-AnchorMailbox`` header of the form ``app:{appid}@{tenant_id}`` is
-    included when the ``appid`` claim can be decoded from *scc_token*.  This
-    hints the correct Exchange/Purview forest and prevents the transient
-    "Could not find the organization container … DC=FFO,DC=extest" routing error.
+    An ``X-AnchorMailbox`` header is included when the ``appid`` claim can be
+    decoded from *scc_token*. Compliance-search callers should supply the
+    tenant's initial ``*.onmicrosoft.com`` *organization* because a tenant GUID
+    can be interpreted as an Exchange organization name and routed to the FFO
+    test forest. Other callers retain the tenant ID as their routing hint.
 
     Returns the raw JSON response body on success.  Raises :exc:`M365Error` on any
     non-200 HTTP status.
@@ -1199,9 +1205,11 @@ async def _scc_invoke_command(
         "Content-Type": "application/json; charset=utf-8",
     }
     appid = _jwt_appid(scc_token)
-    _anchor_tenant = str(tenant_id or "").strip()
-    if appid and _anchor_tenant:
-        headers["X-AnchorMailbox"] = f"app:{appid}@{_anchor_tenant}"
+    anchor = str(organization or tenant_id or "").strip().lower()
+    if organization and not _SCC_ORGANIZATION_PATTERN.fullmatch(anchor):
+        raise M365Error("Invalid Security & Compliance organization identifier")
+    if appid and anchor:
+        headers["X-AnchorMailbox"] = f"app:{appid}@{anchor}"
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(url, headers=headers, json=payload)
