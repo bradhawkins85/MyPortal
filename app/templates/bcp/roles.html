@@ -82,7 +82,8 @@
               <tr>
                 <th>Name</th>
                 <th>Email</th>
-                <th>Role Type</th>
+                <th>Coverage</th>
+                <th>Collaborator Role</th>
                 <th>Contact Info</th>
                 {% if can_edit %}
                 <th>Actions</th>
@@ -107,10 +108,11 @@
                     <span class="badge badge-primary">Primary</span>
                   {% endif %}
                 </td>
+                <td>{{ assignment.collaborator_role or 'Executor' }}</td>
                 <td>{{ assignment.contact_info or '-' }}</td>
                 {% if can_edit %}
                 <td>
-                  <button class="btn-icon" onclick="showEditAssignmentModal({{ assignment.id }}, {{ assignment.user_id }}, {{ assignment.is_alternate|tojson }}, {{ assignment.contact_info|tojson if assignment.contact_info else 'null' }})" title="Edit">
+                  <button class="btn-icon" onclick="showEditAssignmentModal({{ assignment.id }}, {{ assignment.user_id }}, {{ (assignment.collaborator_role or 'Executor')|tojson }}, {{ assignment.is_alternate|tojson }}, {{ assignment.contact_info|tojson if assignment.contact_info else 'null' }})" title="Edit">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                       <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
                     </svg>
@@ -142,6 +144,38 @@
       </div>
     </section>
   {% endif %}
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Collaboration Audit Trail</h2>
+      <p class="text-muted text-sm">Recent collaborator assignment changes are captured for auditability.</p>
+    </div>
+    <div class="card-body">
+      {% if collaboration_audit %}
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Action</th>
+              <th>User</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in collaboration_audit %}
+            <tr>
+              <td>{{ entry.created_at.strftime('%Y-%m-%d %H:%M') if entry.created_at else '-' }}</td>
+              <td>{{ entry.action }}</td>
+              <td>{{ entry.user_email or ('User ' ~ entry.user_id) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted">No collaborator changes have been logged yet.</p>
+      {% endif %}
+    </div>
+  </section>
 </div>
 
 <!-- Add Role Modal -->
@@ -230,6 +264,15 @@
             This is an alternate/backup assignment
           </label>
         </div>
+        <div class="form-group">
+          <label for="assign_collaborator_role" class="form-label">Collaborator Role</label>
+          <select id="assign_collaborator_role" name="collaborator_role" class="form-control">
+            <option value="Executor">Executor</option>
+            <option value="CoAuthor">Co-author</option>
+            <option value="Reviewer">Reviewer</option>
+            <option value="Approver">Approver</option>
+          </select>
+        </div>
         
         <div class="form-group">
           <label for="assign_contact_info">Emergency Contact Info</label>
@@ -275,6 +318,15 @@
             This is an alternate/backup assignment
           </label>
         </div>
+        <div class="form-group">
+          <label for="edit_assign_collaborator_role" class="form-label">Collaborator Role</label>
+          <select id="edit_assign_collaborator_role" name="collaborator_role" class="form-control">
+            <option value="Executor">Executor</option>
+            <option value="CoAuthor">Co-author</option>
+            <option value="Reviewer">Reviewer</option>
+            <option value="Approver">Approver</option>
+          </select>
+        </div>
         
         <div class="form-group">
           <label for="edit_assign_contact_info">Emergency Contact Info</label>
@@ -319,6 +371,7 @@ function showAssignUserModal(roleId, roleTitle) {
   document.getElementById('assignUserModalTitle').textContent = 'Assign User to ' + roleTitle;
   document.getElementById('assign_user_id').value = '';
   document.querySelector('#assignUserForm input[name="is_alternate"]').checked = false;
+  document.getElementById('assign_collaborator_role').value = 'Executor';
   document.getElementById('assign_contact_info').value = '';
   modal.style.display = 'flex';
 }
@@ -327,11 +380,12 @@ function closeAssignUserModal() {
   document.getElementById('assignUserModal').style.display = 'none';
 }
 
-function showEditAssignmentModal(assignmentId, userId, isAlternate, contactInfo) {
+function showEditAssignmentModal(assignmentId, userId, collaboratorRole, isAlternate, contactInfo) {
   const modal = document.getElementById('editAssignmentModal');
   const form = document.getElementById('editAssignmentForm');
   form.action = '/bcp/roles/assignments/' + assignmentId + '/update';
   document.getElementById('edit_assign_user_id').value = userId;
+  document.getElementById('edit_assign_collaborator_role').value = collaboratorRole || 'Executor';
   document.getElementById('edit_is_alternate').checked = isAlternate;
   document.getElementById('edit_assign_contact_info').value = contactInfo || '';
   modal.style.display = 'flex';

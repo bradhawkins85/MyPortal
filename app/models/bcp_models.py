@@ -339,6 +339,18 @@ class BcpIncident(Base, TimestampMixin):
         nullable=True,
         comment="How incident was triggered",
     )
+    closed_at: Mapped[Optional[datetime]] = mapped_column(
+        nullable=True, comment="Incident closure time"
+    )
+    after_action_summary: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="Summary of the after-action review"
+    )
+    after_action_improvements: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="Follow-up improvement actions"
+    )
+    after_action_reviewed_at: Mapped[Optional[datetime]] = mapped_column(
+        nullable=True, comment="When the after-action review was completed"
+    )
 
     __table_args__ = (
         Index("idx_bcp_incident_plan", "plan_id"),
@@ -509,6 +521,18 @@ class BcpRoleAssignment(Base, TimestampMixin):
         nullable=False,
     )
     user_id: Mapped[int] = mapped_column(Integer, nullable=False, comment="Assigned user")
+    collaborator_role: Mapped[str] = mapped_column(
+        SQLEnum(
+            "Executor",
+            "CoAuthor",
+            "Reviewer",
+            "Approver",
+            name="bcp_collaborator_role_enum",
+        ),
+        nullable=False,
+        default="Executor",
+        comment="Collaborator role for plan execution and approvals",
+    )
     is_alternate: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, comment="Is this an alternate/backup?"
     )
@@ -746,13 +770,44 @@ class BcpTrainingItem(Base, TimestampMixin):
     training_type: Mapped[Optional[str]] = mapped_column(
         String(255), nullable=True, comment="Type of training (e.g., Tabletop, Full-scale)"
     )
+    status: Mapped[str] = mapped_column(
+        SQLEnum(
+            "Scheduled",
+            "Completed",
+            "Cancelled",
+            name="bcp_training_status_enum",
+        ),
+        nullable=False,
+        default="Scheduled",
+        comment="Exercise or drill status",
+    )
+    participants_count: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, comment="Number of participants in the exercise"
+    )
+    score_percent: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, comment="Exercise scorecard result out of 100"
+    )
     comments: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="Training notes and outcomes"
+    )
+    lessons_learned: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="Lessons learned from the exercise"
+    )
+    follow_up_actions: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="Follow-up actions raised by the exercise"
     )
 
     __table_args__ = (
         Index("idx_bcp_training_plan", "plan_id"),
         Index("idx_bcp_training_date", "training_date"),
+        CheckConstraint(
+            "participants_count >= 0 OR participants_count IS NULL",
+            name="ck_bcp_training_participants_non_negative",
+        ),
+        CheckConstraint(
+            "score_percent >= 0 AND score_percent <= 100 OR score_percent IS NULL",
+            name="ck_bcp_training_score_range",
+        ),
     )
 
 
@@ -772,14 +827,85 @@ class BcpReviewItem(Base, TimestampMixin):
     review_date: Mapped[datetime] = mapped_column(
         nullable=False, comment="Date of review"
     )
+    version_label: Mapped[Optional[str]] = mapped_column(
+        String(50), nullable=True, comment="Version label reviewed"
+    )
+    approval_status: Mapped[str] = mapped_column(
+        SQLEnum(
+            "Draft",
+            "InReview",
+            "Approved",
+            "ChangesRequested",
+            name="bcp_review_approval_status_enum",
+        ),
+        nullable=False,
+        default="Draft",
+        comment="Approval state snapshot for this review",
+    )
+    reviewed_by_user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, comment="Assigned reviewer"
+    )
+    approved_by_user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, comment="Assigned approver"
+    )
     reason: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="Reason for review"
     )
     changes_made: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="Summary of changes made"
     )
+    approval_snapshot: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="Approval evidence or snapshot summary"
+    )
 
     __table_args__ = (
         Index("idx_bcp_review_plan", "plan_id"),
         Index("idx_bcp_review_date", "review_date"),
+    )
+
+
+class BcpDependencyMap(Base, TimestampMixin):
+    """
+    Vendor and resource dependencies linked to critical activities.
+    """
+
+    __tablename__ = "bcp_dependency_map"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    plan_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("bcp_plan.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    critical_activity_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("bcp_critical_activity.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    dependency_type: Mapped[str] = mapped_column(
+        SQLEnum("Vendor", "Resource", name="bcp_dependency_type_enum"),
+        nullable=False,
+        comment="Dependency classification",
+    )
+    dependency_name: Mapped[str] = mapped_column(
+        String(255), nullable=False, comment="Name of the vendor or resource"
+    )
+    owner_name: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, comment="Dependency owner or contact"
+    )
+    rto_hours: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, comment="Dependency recovery target in hours"
+    )
+    notes: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="Dependency notes and failure impact"
+    )
+
+    __table_args__ = (
+        Index("idx_bcp_dependency_plan", "plan_id"),
+        Index("idx_bcp_dependency_activity", "critical_activity_id"),
+        Index("idx_bcp_dependency_type", "dependency_type"),
+        CheckConstraint(
+            "rto_hours >= 0 OR rto_hours IS NULL",
+            name="ck_bcp_dependency_rto_non_negative",
+        ),
     )
