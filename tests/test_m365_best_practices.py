@@ -7390,3 +7390,500 @@ async def test_remediate_organization_customization_failure():
 
     assert result["success"] is False
     assert upserts[0]["remediation_status"] == "failed"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_ews_required_apps_allowed_fails_when_dependency_missing_from_allow_list():
+    observed_app = "11111111-1111-1111-1111-111111111111"
+    permission_app = "22222222-2222-2222-2222-222222222222"
+
+    async def fake_graph_get(_token, url):
+        if "appId eq '00000002-0000-0ff1-ce00-000000000000'" in url:
+            return {"value": [{"id": "exo-sp"}]}
+        if url.endswith("servicePrincipals/sp-observed?$select=appId,displayName"):
+            return {"appId": observed_app, "displayName": "Observed App"}
+        if url.endswith("servicePrincipals/sp-permission?$select=appId,displayName"):
+            return {"appId": permission_app, "displayName": "Permission App"}
+        raise AssertionError(f"Unexpected Graph URL: {url}")
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-id"),
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            new_callable=AsyncMock,
+            return_value={"value": [{"EwsEnabled": None, "EwsAllowedAppIDs": []}]},
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_get",
+            side_effect=fake_graph_get,
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_get_all",
+            new_callable=AsyncMock,
+            return_value=[
+                {
+                    "appRoleId": "e4a3c0d2-0003-4b45-8fd7-d8e34591ad28",
+                    "principalId": "sp-observed",
+                    "principalType": "ServicePrincipal",
+                    "principalDisplayName": "Observed App",
+                },
+                {
+                    "appRoleId": "e4a3c0d2-0003-4b45-8fd7-d8e34591ad28",
+                    "principalId": "sp-permission",
+                    "principalType": "ServicePrincipal",
+                    "principalDisplayName": "Permission App",
+                },
+            ],
+        ),
+        patch(
+            "app.services.m365_best_practices.acquire_delegated_token",
+            new_callable=AsyncMock,
+            return_value="delegated-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._download_graph_csv_report",
+            new_callable=AsyncMock,
+            return_value=[
+                {"AppId": observed_app, "Usage": "5", "Date": "2026-09-15", "Feature": "EWS"},
+            ],
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.list_results",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+    ):
+        result = await bp_service._check_ews_required_apps_allowed("graph-token", 42)
+
+    assert result["status"] == "fail"
+    assert "EwsEnabled is not explicitly set" in result["details"]
+    assert "Observed EWS usage" in result["details"]
+    assert "EWS application permissions only" in result["details"]
+    assert result["affected_accounts"] == [
+        {
+            "id": observed_app,
+            "name": f"Observed App ({observed_app}, observed EWS usage)",
+        }
+    ]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_ews_required_apps_allowed_is_unknown_when_usage_data_unavailable():
+    permission_app = "22222222-2222-2222-2222-222222222222"
+
+    async def fake_graph_get(_token, url):
+        if "appId eq '00000002-0000-0ff1-ce00-000000000000'" in url:
+            return {"value": [{"id": "exo-sp"}]}
+        if url.endswith("servicePrincipals/sp-permission?$select=appId,displayName"):
+            return {"appId": permission_app, "displayName": "Permission App"}
+        raise AssertionError(f"Unexpected Graph URL: {url}")
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-id"),
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            new_callable=AsyncMock,
+            return_value={"value": [{"EwsEnabled": True, "EwsAllowedAppIDs": []}]},
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_get",
+            side_effect=fake_graph_get,
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_get_all",
+            new_callable=AsyncMock,
+            return_value=[
+                {
+                    "appRoleId": "e4a3c0d2-0003-4b45-8fd7-d8e34591ad28",
+                    "principalId": "sp-permission",
+                    "principalType": "ServicePrincipal",
+                    "principalDisplayName": "Permission App",
+                }
+            ],
+        ),
+        patch(
+            "app.services.m365_best_practices.acquire_delegated_token",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.list_results",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+    ):
+        result = await bp_service._check_ews_required_apps_allowed("graph-token", 42)
+
+    assert result["status"] == "unknown"
+    assert "EWS usage data is unavailable" in result["details"]
+    assert "Add reviewed AppIDs to the check notes" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_ews_required_apps_allowed_passes_with_observed_and_reviewed_apps():
+    observed_app = "11111111-1111-1111-1111-111111111111"
+    reviewed_app = "22222222-2222-2222-2222-222222222222"
+
+    async def fake_graph_get(_token, url):
+        if "appId eq '00000002-0000-0ff1-ce00-000000000000'" in url:
+            return {"value": [{"id": "exo-sp"}]}
+        if url.endswith("servicePrincipals/sp-observed?$select=appId,displayName"):
+            return {"appId": observed_app, "displayName": "Observed App"}
+        if url.endswith("servicePrincipals/sp-reviewed?$select=appId,displayName"):
+            return {"appId": reviewed_app, "displayName": "Reviewed App"}
+        raise AssertionError(f"Unexpected Graph URL: {url}")
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-id"),
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            new_callable=AsyncMock,
+            return_value={
+                "value": [
+                    {
+                        "EwsEnabled": True,
+                        "EwsAllowedAppIDs": [observed_app, reviewed_app],
+                    }
+                ]
+            },
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_get",
+            side_effect=fake_graph_get,
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_get_all",
+            new_callable=AsyncMock,
+            return_value=[
+                {
+                    "appRoleId": "e4a3c0d2-0003-4b45-8fd7-d8e34591ad28",
+                    "principalId": "sp-observed",
+                    "principalType": "ServicePrincipal",
+                    "principalDisplayName": "Observed App",
+                },
+                {
+                    "appRoleId": "e4a3c0d2-0003-4b45-8fd7-d8e34591ad28",
+                    "principalId": "sp-reviewed",
+                    "principalType": "ServicePrincipal",
+                    "principalDisplayName": "Reviewed App",
+                },
+            ],
+        ),
+        patch(
+            "app.services.m365_best_practices.acquire_delegated_token",
+            new_callable=AsyncMock,
+            return_value="delegated-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._download_graph_csv_report",
+            new_callable=AsyncMock,
+            return_value=[
+                {"AppId": observed_app, "Usage": "2", "Date": "2026-09-15", "Feature": "EWS"},
+            ],
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.list_results",
+            new_callable=AsyncMock,
+            return_value=[
+                {
+                    "check_id": "bp_ews_required_apps_allowed",
+                    "notes": f"Approved AppIDs: {reviewed_app}",
+                }
+            ],
+        ),
+    ):
+        result = await bp_service._check_ews_required_apps_allowed("graph-token", 42)
+
+    assert result["status"] == "pass"
+    assert "Approved from notes for infrequent or manually confirmed use" in result["details"]
+    assert "Reviewed App" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_ews_required_apps_allowed_preserves_existing_entries():
+    observed_app = "11111111-1111-1111-1111-111111111111"
+    reviewed_app = "22222222-2222-2222-2222-222222222222"
+    existing_app = "33333333-3333-3333-3333-333333333333"
+    exo_calls: list[tuple[str, dict | None]] = []
+
+    async def fake_graph_get(_token, url):
+        if "appId eq '00000002-0000-0ff1-ce00-000000000000'" in url:
+            return {"value": [{"id": "exo-sp"}]}
+        if url.endswith("servicePrincipals/sp-observed?$select=appId,displayName"):
+            return {"appId": observed_app, "displayName": "Observed App"}
+        if url.endswith("servicePrincipals/sp-reviewed?$select=appId,displayName"):
+            return {"appId": reviewed_app, "displayName": "Reviewed App"}
+        raise AssertionError(f"Unexpected Graph URL: {url}")
+
+    async def fake_exo(_token, _tenant, cmdlet, parameters=None):
+        exo_calls.append((cmdlet, parameters))
+        if cmdlet == "Get-OrganizationConfig" and len(exo_calls) == 1:
+            return {
+                "value": [
+                    {
+                        "EwsEnabled": False,
+                        "EwsAllowedAppIDs": [existing_app],
+                    }
+                ]
+            }
+        if cmdlet == "Set-OrganizationConfig":
+            return {}
+        if cmdlet == "Get-OrganizationConfig" and len(exo_calls) == 3:
+            return {
+                "value": [
+                    {
+                        "EwsEnabled": True,
+                        "EwsAllowedAppIDs": [existing_app, observed_app, reviewed_app],
+                    }
+                ]
+            }
+        raise AssertionError(f"Unexpected EXO call: {cmdlet} {parameters}")
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices.acquire_delegated_token",
+            new_callable=AsyncMock,
+            return_value="delegated-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-id"),
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_get",
+            side_effect=fake_graph_get,
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_get_all",
+            new_callable=AsyncMock,
+            return_value=[
+                {
+                    "appRoleId": "e4a3c0d2-0003-4b45-8fd7-d8e34591ad28",
+                    "principalId": "sp-observed",
+                    "principalType": "ServicePrincipal",
+                    "principalDisplayName": "Observed App",
+                },
+                {
+                    "appRoleId": "e4a3c0d2-0003-4b45-8fd7-d8e34591ad28",
+                    "principalId": "sp-reviewed",
+                    "principalType": "ServicePrincipal",
+                    "principalDisplayName": "Reviewed App",
+                },
+            ],
+        ),
+        patch(
+            "app.services.m365_best_practices._download_graph_csv_report",
+            new_callable=AsyncMock,
+            return_value=[
+            {"AppId": observed_app, "Usage": "7", "Date": "2026-09-15", "Feature": "EWS"},
+            ],
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.list_results",
+            new_callable=AsyncMock,
+            return_value=[
+                {
+                    "check_id": "bp_ews_required_apps_allowed",
+                    "notes": reviewed_app,
+                }
+            ],
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            side_effect=fake_exo,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ) as update_status,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=9, check_id="bp_ews_required_apps_allowed"
+        )
+
+    assert result["success"] is True
+    assert (
+        "Set-OrganizationConfig",
+        {
+            "EwsEnabled": True,
+            "EwsAllowedAppIDs": [existing_app, observed_app, reviewed_app],
+        },
+    ) in exo_calls
+    assert update_status.await_args.kwargs["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_ews_required_apps_allowed_is_idempotent():
+    observed_app = "11111111-1111-1111-1111-111111111111"
+    exo = AsyncMock(
+        return_value={
+            "value": [
+                {
+                    "EwsEnabled": True,
+                    "EwsAllowedAppIDs": [observed_app],
+                }
+            ]
+        }
+    )
+
+    async def fake_graph_get(_token, url):
+        if "appId eq '00000002-0000-0ff1-ce00-000000000000'" in url:
+            return {"value": [{"id": "exo-sp"}]}
+        if url.endswith("servicePrincipals/sp-observed?$select=appId,displayName"):
+            return {"appId": observed_app, "displayName": "Observed App"}
+        raise AssertionError(f"Unexpected Graph URL: {url}")
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices.acquire_delegated_token",
+            new_callable=AsyncMock,
+            return_value="delegated-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-id"),
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_get",
+            side_effect=fake_graph_get,
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_get_all",
+            new_callable=AsyncMock,
+            return_value=[
+                {
+                    "appRoleId": "e4a3c0d2-0003-4b45-8fd7-d8e34591ad28",
+                    "principalId": "sp-observed",
+                    "principalType": "ServicePrincipal",
+                    "principalDisplayName": "Observed App",
+                }
+            ],
+        ),
+        patch(
+            "app.services.m365_best_practices._download_graph_csv_report",
+            new_callable=AsyncMock,
+            return_value=[
+            {"AppId": observed_app, "Usage": "3", "Date": "2026-09-15", "Feature": "EWS"},
+            ],
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.list_results",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            exo,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=9, check_id="bp_ews_required_apps_allowed"
+        )
+
+    assert result["success"] is True
+    assert "No remediation changes were needed" in result["message"]
+    assert exo.await_count == 1
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_ews_required_apps_allowed_refuses_without_confirmed_dependency():
+    permission_app = "22222222-2222-2222-2222-222222222222"
+    exo = AsyncMock(
+        return_value={
+            "value": [
+                {
+                    "EwsEnabled": False,
+                    "EwsAllowedAppIDs": [],
+                }
+            ]
+        }
+    )
+
+    async def fake_graph_get(_token, url):
+        if "appId eq '00000002-0000-0ff1-ce00-000000000000'" in url:
+            return {"value": [{"id": "exo-sp"}]}
+        if url.endswith("servicePrincipals/sp-permission?$select=appId,displayName"):
+            return {"appId": permission_app, "displayName": "Permission App"}
+        raise AssertionError(f"Unexpected Graph URL: {url}")
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices.acquire_delegated_token",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-id"),
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_get",
+            side_effect=fake_graph_get,
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_get_all",
+            new_callable=AsyncMock,
+            return_value=[
+                {
+                    "appRoleId": "e4a3c0d2-0003-4b45-8fd7-d8e34591ad28",
+                    "principalId": "sp-permission",
+                    "principalType": "ServicePrincipal",
+                    "principalDisplayName": "Permission App",
+                }
+            ],
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.list_results",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            exo,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=9, check_id="bp_ews_required_apps_allowed"
+        )
+
+    assert result["success"] is False
+    assert "No confirmed EWS dependency was found" in result["message"]
+    assert exo.await_count == 1
