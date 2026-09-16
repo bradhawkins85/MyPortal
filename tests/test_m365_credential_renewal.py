@@ -204,7 +204,7 @@ async def test_renew_admin_client_secret_backfills_missing_app_object_id():
         "client_secret": "old-secret",
         "app_object_id": None,
         "client_secret_key_id": OLD_KEY_ID,
-        "client_secret_expires_at": datetime.utcnow() + timedelta(days=4),
+        "client_secret_expires_at": datetime.now(timezone.utc) + timedelta(days=4),
         "pkce_client_id": "pkce-client-id",
     }
     persisted: list[dict[str, Any]] = []
@@ -326,7 +326,7 @@ async def test_renew_admin_client_secret_403_requires_reprovision():
         "client_secret": "old-secret",
         "app_object_id": APP_OBJECT_ID,
         "client_secret_key_id": OLD_KEY_ID,
-        "client_secret_expires_at": datetime.utcnow() + timedelta(days=4),
+        "client_secret_expires_at": datetime.now(timezone.utc) + timedelta(days=4),
         "pkce_client_id": "pkce-client-id",
     }
     graph_exc = m365_service.M365Error(
