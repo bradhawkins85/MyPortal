@@ -79,9 +79,9 @@ def _install_scheduled_invoice_mocks(monkeypatch, state: dict[str, object] | Non
         stored["status"] = status
         return dict(stored)
 
-    async def fake_patch(invoice_id, **updates):
+    async def fake_patch(scheduled_invoice_id, **updates):
         assert stored is not None
-        assert invoice_id == stored["id"]
+        assert scheduled_invoice_id == stored["id"]
         stored.update(updates)
         patch_calls.append(dict(updates))
         return dict(stored)
@@ -486,6 +486,11 @@ async def test_skips_duplicate_reminders_and_invoices(monkeypatch):
         renewals_service.license_repo,
         "list_staff_by_license_for_company",
         AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        renewals_service.company_repo,
+        "get_company_by_id",
+        AsyncMock(return_value={"id": 41, "name": "Duplicate Co"}),
     )
     monkeypatch.setattr(subscriptions_repo, "update_subscription", AsyncMock(return_value=None))
     generate_mock = AsyncMock()
