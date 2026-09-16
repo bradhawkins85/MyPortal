@@ -81,7 +81,7 @@ async def list_subscriptions(
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     
     query = f"""
-        SELECT s.*, p.name as product_name, c.name as category_name
+        SELECT s.*, p.name as product_name, p.sku as product_sku, c.name as category_name
         FROM subscriptions s
         LEFT JOIN shop_products p ON s.product_id = p.id
         LEFT JOIN subscription_categories c ON s.subscription_category_id = c.id
@@ -113,7 +113,7 @@ async def get_subscription(subscription_id: str) -> dict[str, Any] | None:
     """Get a subscription by ID."""
     row = await db.fetch_one(
         """
-        SELECT s.*, p.name as product_name, c.name as category_name
+        SELECT s.*, p.name as product_name, p.sku as product_sku, c.name as category_name
         FROM subscriptions s
         LEFT JOIN shop_products p ON s.product_id = p.id
         LEFT JOIN subscription_categories c ON s.subscription_category_id = c.id

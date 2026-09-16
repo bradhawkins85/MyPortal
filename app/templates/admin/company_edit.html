@@ -484,6 +484,22 @@
         <p class="form-help">Number of calendar days after issue that Xero invoices are due. Leave blank to use <code>XERO_INVOICE_DUE_DAYS</code> (14 days by default).</p>
       </div>
       <div class="form-field">
+        <label class="form-label">Xero invoice delivery</label>
+        <div class="form-checkbox-group">
+          <label class="form-checkbox__label">
+            <input type="checkbox" name="xeroAutoSendSubscriptionInvoices" form="company-settings-form" value="1"
+              {% if form_data.xero_auto_send_subscription_invoices %}checked{% endif %} />
+            <span>Automatically send subscription purchase invoices</span>
+          </label>
+          <label class="form-checkbox__label">
+            <input type="checkbox" name="xeroAutoSendProductInvoices" form="company-settings-form" value="1"
+              {% if form_data.xero_auto_send_product_invoices %}checked{% endif %} />
+            <span>Automatically send product purchase invoices</span>
+          </label>
+        </div>
+        <p class="form-help">Disabled purchase types are still created in Xero as draft invoices. Mixed carts are split when these settings differ.</p>
+      </div>
+      <div class="form-field">
         <label class="form-label">Purchase order options</label>
         <div class="form-checkbox-group">
           <label class="form-checkbox__label">

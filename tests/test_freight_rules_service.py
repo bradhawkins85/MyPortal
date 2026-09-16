@@ -45,6 +45,25 @@ def test_calculate_cart_freight_applies_default_rule_per_dispatch_warehouse():
     assert all(entry["amount"] == Decimal("15.00") for entry in result["breakdown"])
 
 
+def test_calculate_cart_freight_excludes_subscriptions_but_keeps_products():
+    cart_items = [
+        {"product_id": 1, "quantity": 1, "line_total": Decimal("100.00")},
+        {"product_id": 2, "quantity": 1, "line_total": Decimal("50.00")},
+    ]
+    stock = {"stock_nsw": 5, "stock_qld": 0, "stock_vic": 0, "stock_sa": 0, "stock_wa": 0}
+    product_lookup = {
+        1: {"id": 1, "subscription_category_id": 10, **stock},
+        2: {"id": 2, "subscription_category_id": None, **stock},
+    }
+    rules = [{"id": 1, "name": "Freight", "is_default": True, "conditions": [], "freight_amount": Decimal("12.00")}]
+
+    result = freight_service.calculate_cart_freight(cart_items, product_lookup, rules)
+
+    assert result["cart_subtotal"] == Decimal("50.00")
+    assert result["freight_total"] == Decimal("12.00")
+    assert result["breakdown"][0]["shipment_quantity"] == 1
+
+
 def test_calculate_cart_freight_charges_once_for_multiple_items_in_same_shipment():
     cart_items = [
         {
