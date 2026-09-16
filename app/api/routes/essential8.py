@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 
 from app.api.dependencies.auth import require_super_admin, get_current_user
@@ -679,16 +679,16 @@ async def get_requirement_trends(
 async def export_requirement_bundle(
     company_id: int,
     control_id: Optional[int] = None,
-    format: str = "json",
+    export_format: str = Query("json", alias="format"),
     _: None = Depends(require_database),
     user: dict = Depends(get_current_user),
 ):
     await _assert_company_compliance_access(user, company_id)
     bundle = await essential8_repo.build_requirement_export_bundle(company_id, control_id=control_id)
     filename_root = f"essential8_audit_bundle_{company_id}"
-    if format == "json":
+    if export_format == "json":
         return bundle
-    if format == "txt":
+    if export_format == "txt":
         lines = [f"Essential 8 compliance export for company {company_id}"]
         for record in bundle.get("requirements", []):
             lines.append(
@@ -701,7 +701,7 @@ async def export_requirement_bundle(
             media_type="text/plain; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="{filename_root}.txt"'},
         )
-    if format == "docx":
+    if export_format == "docx":
         from docx import Document
 
         document = Document()
@@ -740,7 +740,7 @@ async def export_requirement_bundle(
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             headers={"Content-Disposition": f'attachment; filename="{filename_root}.docx"'},
         )
-    if format == "pdf":
+    if export_format == "pdf":
         try:
             from weasyprint import HTML  # type: ignore
         except (ImportError, OSError) as exc:  # pragma: no cover

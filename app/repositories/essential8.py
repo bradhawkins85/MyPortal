@@ -1021,24 +1021,54 @@ async def list_requirement_evidence(
     company_id: int,
     requirement_id: int,
 ) -> list[dict[str, Any]]:
+    return (
+        await list_requirement_evidence_map(
+            company_id,
+            requirement_ids=[requirement_id],
+        )
+    ).get(requirement_id, [])
+
+
+async def list_requirement_evidence_map(
+    company_id: int,
+    *,
+    control_id: Optional[int] = None,
+    requirement_ids: Optional[list[int]] = None,
+) -> dict[int, list[dict[str, Any]]]:
+    params: dict[str, Any] = {"company_id": company_id}
+    joins = ""
+    filters: list[str] = ["e.company_id = %(company_id)s"]
+    if control_id is not None:
+        joins = " INNER JOIN essential8_requirements er ON er.id = e.requirement_id"
+        filters.append("er.control_id = %(control_id)s")
+        params["control_id"] = control_id
+    if requirement_ids:
+        placeholders: list[str] = []
+        for index, requirement_id in enumerate(requirement_ids):
+            key = f"requirement_id_{index}"
+            params[key] = requirement_id
+            placeholders.append(f"%({key})s")
+        filters.append(f"e.requirement_id IN ({', '.join(placeholders)})")
     rows = await db.fetch_all(
-        """
+        f"""
         SELECT
-            id, company_id, requirement_id, version_number, title, description,
-            file_name, content_type, file_path, file_size_bytes, uploaded_by,
-            uploaded_at, is_current
-        FROM company_essential8_requirement_evidence
-        WHERE company_id = %(company_id)s AND requirement_id = %(requirement_id)s
+            e.id, e.company_id, e.requirement_id, e.version_number, e.title, e.description,
+            e.file_name, e.content_type, e.file_path, e.file_size_bytes, e.uploaded_by,
+            e.uploaded_at, e.is_current
+        FROM company_essential8_requirement_evidence e
+        {joins}
+        WHERE {' AND '.join(filters)}
         ORDER BY version_number DESC, uploaded_at DESC
         """,
-        {"company_id": company_id, "requirement_id": requirement_id},
+        params,
     )
-    result: list[dict[str, Any]] = []
+    result: dict[int, list[dict[str, Any]]] = {}
     for row in rows:
         item = dict(row)
+        requirement_id = int(item["requirement_id"])
         item["uploaded_at"] = _format_datetime(item.get("uploaded_at"))
         item["is_current"] = bool(item.get("is_current"))
-        result.append(item)
+        result.setdefault(requirement_id, []).append(item)
     return result
 
 
@@ -1115,16 +1145,13 @@ async def get_requirement_trend(
     rows = await db.fetch_all(
         f"""
         SELECT
-            substr(COALESCE(a.created_at, cerc.updated_at, cerc.created_at), 1, 10) AS trend_date,
+            substr(COALESCE(cerc.updated_at, cerc.created_at), 1, 10) AS trend_date,
             er.control_id,
             er.maturity_level,
-            COALESCE(a.to_status, cerc.status, 'not_started') AS status,
+            COALESCE(cerc.status, 'not_started') AS status,
             COUNT(*) AS total
         FROM company_essential8_requirement_compliance cerc
         INNER JOIN essential8_requirements er ON er.id = cerc.requirement_id
-        LEFT JOIN company_essential8_requirement_audit a
-            ON a.company_id = cerc.company_id
-           AND a.requirement_id = cerc.requirement_id
         WHERE cerc.company_id = %(company_id)s{control_clause}
         GROUP BY trend_date, er.control_id, er.maturity_level, status
         ORDER BY trend_date, er.control_id, er.maturity_level, status
@@ -1142,10 +1169,7 @@ async def build_requirement_export_bundle(
     requirements = await list_essential8_requirements(control_id=control_id)
     compliance_rows = await list_company_requirement_compliance(company_id, control_id=control_id)
     compliance_map = {int(row["requirement_id"]): row for row in compliance_rows}
-    evidence_map: dict[int, list[dict[str, Any]]] = {}
-    for requirement in requirements:
-        req_id = int(requirement["id"])
-        evidence_map[req_id] = await list_requirement_evidence(company_id, req_id)
+    evidence_map = await list_requirement_evidence_map(company_id, control_id=control_id)
     bundle_rows: list[dict[str, Any]] = []
     for requirement in requirements:
         req_id = int(requirement["id"])

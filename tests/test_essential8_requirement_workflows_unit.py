@@ -113,11 +113,11 @@ async def test_export_bundle_includes_default_status_for_untracked_requirements(
     )
     monkeypatch.setattr(
         essential8_repo,
-        "list_requirement_evidence",
-        AsyncMock(side_effect=[
-            [{"version_number": 1, "title": "Tracked evidence", "file_name": "tracked.pdf", "file_path": "compliance/essential8/tracked.pdf"}],
-            [],
-        ]),
+        "list_requirement_evidence_map",
+        AsyncMock(return_value={
+            11: [{"version_number": 1, "title": "Tracked evidence", "file_name": "tracked.pdf", "file_path": "compliance/essential8/tracked.pdf"}],
+            12: [],
+        }),
     )
 
     bundle = await essential8_repo.build_requirement_export_bundle(8, control_id=1)

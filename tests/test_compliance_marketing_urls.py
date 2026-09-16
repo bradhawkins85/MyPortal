@@ -191,8 +191,8 @@ async def test_control_requirements_page_sets_help_per_requirement(monkeypatch):
     )
     monkeypatch.setattr(
         compliance_routes.essential8_repo,
-        "list_requirement_evidence",
-        AsyncMock(return_value=[]),
+        "list_requirement_evidence_map",
+        AsyncMock(return_value={}),
     )
     monkeypatch.setattr(
         compliance_routes.essential8_repo,

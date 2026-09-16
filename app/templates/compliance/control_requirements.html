@@ -657,72 +657,6 @@ document.addEventListener('DOMContentLoaded', () => {
           body: JSON.stringify(formData)
         });
 
-        if (canManage) {
-          document.getElementById('bulk-save-button')?.addEventListener('click', async () => {
-            const selected = Array.from(document.querySelectorAll('[data-requirement-select]:checked'))
-              .map(input => parseInt(input.value, 10))
-              .filter(Boolean);
-            if (!selected.length) {
-              showNotification('Select at least one requirement for the bulk update', 'error');
-              return;
-            }
-            try {
-              const resp = await fetch(`/api/essential8/companies/${companyId}/requirements/compliance/bulk`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'X-CSRF-Token': csrfToken
-                },
-                body: JSON.stringify({
-                  requirement_ids: selected,
-                  status: document.getElementById('bulk-status').value
-                })
-              });
-              if (resp.ok) {
-                window.location.reload();
-              } else {
-                const data = await resp.json();
-                showNotification(data.detail || 'Bulk update failed', 'error');
-              }
-            } catch (error) {
-              console.error('Error:', error);
-              showNotification('Bulk update failed', 'error');
-            }
-          });
-
-          document.querySelectorAll('[data-upload-evidence]').forEach(btn => {
-            btn.addEventListener('click', async () => {
-              const requirementId = btn.dataset.uploadEvidence;
-              const title = document.getElementById(`req-evidence-title-${requirementId}`)?.value || '';
-              const fileInput = document.getElementById(`req-evidence-file-${requirementId}`);
-              const file = fileInput?.files?.[0];
-              if (!title || !file) {
-                showNotification('Choose a file and provide an evidence title', 'error');
-                return;
-              }
-              const payload = new FormData();
-              payload.append('title', title);
-              payload.append('evidence_file', file);
-              try {
-                const resp = await fetch(`/api/essential8/companies/${companyId}/requirements/${requirementId}/evidence/upload`, {
-                  method: 'POST',
-                  headers: { 'X-CSRF-Token': csrfToken },
-                  body: payload
-                });
-                if (resp.ok) {
-                  window.location.reload();
-                } else {
-                  const data = await resp.json();
-                  showNotification(data.detail || 'Evidence upload failed', 'error');
-                }
-              } catch (error) {
-                console.error('Error:', error);
-                showNotification('Evidence upload failed', 'error');
-              }
-            });
-          });
-        }
-
         if (response.ok) {
           updateRequirementStatus(requirementId, formData.status);
           showNotification('Requirement updated successfully', 'success');
@@ -735,6 +669,72 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   });
+
+  if (canManage) {
+    document.getElementById('bulk-save-button')?.addEventListener('click', async () => {
+      const selected = Array.from(document.querySelectorAll('[data-requirement-select]:checked'))
+        .map(input => parseInt(input.value, 10))
+        .filter(Boolean);
+      if (!selected.length) {
+        showNotification('Select at least one requirement for the bulk update', 'error');
+        return;
+      }
+      try {
+        const resp = await fetch(`/api/essential8/companies/${companyId}/requirements/compliance/bulk`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken
+          },
+          body: JSON.stringify({
+            requirement_ids: selected,
+            status: document.getElementById('bulk-status').value
+          })
+        });
+        if (resp.ok) {
+          window.location.reload();
+        } else {
+          const data = await resp.json();
+          showNotification(data.detail || 'Bulk update failed', 'error');
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        showNotification('Bulk update failed', 'error');
+      }
+    });
+
+    document.querySelectorAll('[data-upload-evidence]').forEach(uploadBtn => {
+      uploadBtn.addEventListener('click', async () => {
+        const requirementId = uploadBtn.dataset.uploadEvidence;
+        const title = document.getElementById(`req-evidence-title-${requirementId}`)?.value || '';
+        const fileInput = document.getElementById(`req-evidence-file-${requirementId}`);
+        const file = fileInput?.files?.[0];
+        if (!title || !file) {
+          showNotification('Choose a file and provide an evidence title', 'error');
+          return;
+        }
+        const payload = new FormData();
+        payload.append('title', title);
+        payload.append('evidence_file', file);
+        try {
+          const resp = await fetch(`/api/essential8/companies/${companyId}/requirements/${requirementId}/evidence/upload`, {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken },
+            body: payload
+          });
+          if (resp.ok) {
+            window.location.reload();
+          } else {
+            const data = await resp.json();
+            showNotification(data.detail || 'Evidence upload failed', 'error');
+          }
+        } catch (error) {
+          console.error('Error:', error);
+          showNotification('Evidence upload failed', 'error');
+        }
+      });
+    });
+  }
 
   function updateRequirementStatus(requirementId, status) {
     const item = document.querySelector(`[data-requirement-id="${requirementId}"]`);

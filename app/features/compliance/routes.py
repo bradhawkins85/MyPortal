@@ -228,11 +228,10 @@ async def compliance_control_requirements_page(request: Request, control_id: int
     requirement_compliance_map = {}
     for rc in control_data.get("requirement_compliance", []):
         requirement_compliance_map[rc["requirement_id"]] = rc
-    evidence_map = {
-        requirement["id"]: await essential8_repo.list_requirement_evidence(company_id, requirement["id"])
-        for key in ("requirements_ml1", "requirements_ml2", "requirements_ml3")
-        for requirement in control_data.get(key, [])
-    }
+    evidence_map = await essential8_repo.list_requirement_evidence_map(
+        company_id,
+        control_id=control_id,
+    )
     requirement_help_links = {
         item["requirement_id"]: item
         for item in await essential8_repo.list_requirement_marketing_page_links()
