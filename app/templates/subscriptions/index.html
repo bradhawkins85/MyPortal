@@ -305,7 +305,9 @@
       } else {
         html += `<li><strong>New quantity at term end:</strong> ${preview.newQuantityAtTermEnd}</li>`;
       }
-      html += `<li><strong>New pending charges:</strong> $${preview.newTotalCharges}</li>`;
+      if (Number(preview.newTotalCharges) > 0) {
+        html += `<li><strong>New pending charges:</strong> $${preview.newTotalCharges}</li>`;
+      }
       
       html += `<li class="text-xs text-gray-600 mt-2">Term ends: ${preview.endDate}</li>`;
       html += '</ul>';

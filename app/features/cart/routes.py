@@ -843,15 +843,14 @@ async def update_cart_items(request: Request) -> RedirectResponse:
         )
         updated_count += 1
 
-    if coterm_updates:
+    for product_id, desired_coterm_enabled in coterm_updates.items():
+        if product_id in removals:
+            continue
         from app.services.subscription_pricing import (
             calculate_coterm_price,
             get_coterm_anchor_for_product,
         )
 
-    for product_id, desired_coterm_enabled in coterm_updates.items():
-        if product_id in removals:
-            continue
         existing = await main_module.cart_repo.get_item(session.id, product_id)
         if not existing:
             invalid_entries = True
