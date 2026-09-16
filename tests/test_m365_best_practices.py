@@ -788,6 +788,47 @@ async def test_remediate_check_internal_phishing_forms_permission_denied_is_acti
 
 
 @pytest.mark.anyio("asyncio")
+async def test_remediate_check_internal_phishing_forms_reports_permission_repair_failure():
+    upserts: list[dict] = []
+    graph_exc = M365Error("Microsoft Graph PATCH failed (403): denied", http_status=403)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._remediate_internal_phishing_forms",
+            new_callable=AsyncMock,
+            side_effect=graph_exc,
+        ),
+        patch(
+            "app.services.m365_best_practices.acquire_delegated_token",
+            new_callable=AsyncMock,
+            return_value="delegated-token",
+        ),
+        patch(
+            "app.services.m365_best_practices.try_grant_missing_permissions",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("grant repair failed"),
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=10, check_id="bp_internal_phishing_forms"
+        )
+
+    assert result["success"] is False
+    assert "OrgSettings-Forms.ReadWrite.All" in result["message"]
+    assert "Automatic permission repair also failed: grant repair failed" in result["message"]
+    assert upserts[0]["remediation_status"] == "failed"
+
+
+@pytest.mark.anyio("asyncio")
 async def test_remediate_check_internal_phishing_forms_update_failure_reports_graph_error():
     with (
         patch(

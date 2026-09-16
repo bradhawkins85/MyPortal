@@ -3022,7 +3022,7 @@ def _parse_forms_phishing_setting(data: dict[str, Any]) -> tuple[bool | None, st
             None,
             "Microsoft Graph did not return the isInOrgFormsPhishingScanEnabled Forms setting.",
         )
-    value = settings.get("isInOrgFormsPhishingScanEnabled")
+    value = settings["isInOrgFormsPhishingScanEnabled"]
     if isinstance(value, bool):
         return value, None
     return (
@@ -8505,6 +8505,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             except M365Error as exc:
                 granted = False
                 outcome_message = str(exc)
+                permission_repair_error = ""
                 if exc.http_status == 403:
                     try:
                         delegated_token = await acquire_delegated_token(company_id)
@@ -8513,11 +8514,12 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                                 company_id, access_token=delegated_token
                             )
                     except Exception as grant_exc:  # noqa: BLE001 – preserve original Graph error
+                        permission_repair_error = str(grant_exc)
                         log_error(
                             "M365 best practice Forms remediation permission repair failed",
                             company_id=company_id,
                             check_id=check_id,
-                            error=str(grant_exc),
+                            error=permission_repair_error,
                         )
                 if granted:
                     try:
@@ -8543,11 +8545,15 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                         )
                 else:
                     success = False
-                    outcome_message = (
-                        _forms_permission_guidance("update Microsoft Forms settings")
-                        if exc.http_status == 403
-                        else outcome_message
-                    )
+                    if exc.http_status == 403:
+                        outcome_message = _forms_permission_guidance(
+                            "update Microsoft Forms settings"
+                        )
+                        if permission_repair_error:
+                            outcome_message = (
+                                f"{outcome_message} Automatic permission repair also failed: "
+                                f"{permission_repair_error}"
+                            )
                 if not success:
                     log_error(
                         "M365 internal phishing Forms remediation failed",
