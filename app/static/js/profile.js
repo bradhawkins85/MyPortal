@@ -113,6 +113,23 @@
   } catch (error) {
     totpDevices = [];
   }
+  let passkeys = [];
+  try {
+    const parsed = JSON.parse(root.dataset.passkeys || '[]');
+    if (Array.isArray(parsed)) {
+      passkeys = parsed.map((item) => ({
+        id: item.id,
+        name: item.name || 'Passkey',
+        created_at: item.created_at || null,
+        last_used_at: item.last_used_at || null,
+        transports: Array.isArray(item.transports) ? item.transports : [],
+        credential_device_type: item.credential_device_type || null,
+        credential_backed_up: Boolean(item.credential_backed_up),
+      }));
+    }
+  } catch (error) {
+    passkeys = [];
+  }
 
   const passwordForm = document.getElementById('password-form');
   const passwordSuccess = { variant: 'success' };
@@ -684,6 +701,264 @@
     });
   }
 
+  const passkeyTable = document.getElementById('passkey-table');
+  const passkeyBody = root.querySelector('[data-passkey-body]');
+  const passkeyEmptyRow = root.querySelector('[data-passkey-empty]');
+  const passkeyAddForm = document.getElementById('passkey-add-form');
+  const passkeyNameInput = document.getElementById('passkey-name');
+  const passkeyPasswordInput = document.getElementById('passkey-current-password');
+  const passkeySuccess = { variant: 'success' };
+  const passkeyError = { variant: 'error' };
+  const passkeyUtils = window.MyPortalPasskeyUtils;
+
+  function formatDateTime(value) {
+    if (!value) {
+      return 'Never';
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return value;
+    }
+    return parsed.toLocaleString();
+  }
+
+  function renderPasskeys() {
+    if (!passkeyBody) {
+      return;
+    }
+    passkeys.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+    passkeyBody.innerHTML = '';
+    if (!passkeys.length) {
+      if (passkeyEmptyRow) {
+        passkeyEmptyRow.hidden = false;
+        passkeyBody.appendChild(passkeyEmptyRow);
+      }
+    } else {
+      if (passkeyEmptyRow) {
+        passkeyEmptyRow.hidden = true;
+      }
+      passkeys.forEach((item) => {
+        const row = document.createElement('tr');
+
+        const nameCell = document.createElement('td');
+        const transportSuffix = item.transports.length ? ` (${item.transports.join(', ')})` : '';
+        nameCell.textContent = `${item.name || 'Passkey'}${transportSuffix}`;
+        row.appendChild(nameCell);
+
+        const createdCell = document.createElement('td');
+        createdCell.textContent = formatDateTime(item.created_at);
+        row.appendChild(createdCell);
+
+        const lastUsedCell = document.createElement('td');
+        lastUsedCell.textContent = formatDateTime(item.last_used_at);
+        row.appendChild(lastUsedCell);
+
+        const actionsCell = document.createElement('td');
+        actionsCell.className = 'table__actions';
+
+        const renameButton = document.createElement('button');
+        renameButton.type = 'button';
+        renameButton.className = 'button button--ghost button--small';
+        renameButton.textContent = 'Rename';
+        renameButton.addEventListener('click', () => renamePasskey(item));
+        actionsCell.appendChild(renameButton);
+
+        const removeButton = document.createElement('button');
+        removeButton.type = 'button';
+        removeButton.className = 'button button--danger button--small';
+        removeButton.textContent = 'Remove';
+        removeButton.addEventListener('click', () => removePasskey(item));
+        actionsCell.appendChild(removeButton);
+
+        row.appendChild(actionsCell);
+        passkeyBody.appendChild(row);
+      });
+    }
+    if (passkeyTable) {
+      passkeyTable.dispatchEvent(new CustomEvent('table:rows-updated'));
+    }
+  }
+
+  async function renamePasskey(item) {
+    const nextName = window.prompt('Rename passkey', item.name || 'Passkey');
+    if (!nextName || !nextName.trim()) {
+      return;
+    }
+    try {
+      const updated = await requestJson(`/auth/passkeys/${item.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: nextName.trim() }),
+      });
+      passkeys = passkeys.map((entry) => (entry.id === item.id ? updated : entry));
+      renderPasskeys();
+      showMessage(passkeySuccess, 'Passkey renamed.');
+    } catch (error) {
+      showMessage(passkeyError, error.message || 'Unable to rename passkey.');
+    }
+  }
+
+  async function removePasskey(item) {
+    const confirmed = window.confirm(`Remove passkey "${item.name}"?`);
+    if (!confirmed) {
+      return;
+    }
+    const currentPassword = await promptForPassword(`Enter your current password to remove "${item.name}"`);
+    if (!currentPassword) {
+      return;
+    }
+    try {
+      await requestJson(`/auth/passkeys/${item.id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ current_password: currentPassword }),
+      });
+      passkeys = passkeys.filter((entry) => entry.id !== item.id);
+      renderPasskeys();
+      showMessage(passkeySuccess, 'Passkey removed.');
+    } catch (error) {
+      showMessage(passkeyError, error.message || 'Unable to remove passkey.');
+    }
+  }
+
+  function promptForPassword(message) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.style.position = 'fixed';
+      overlay.style.inset = '0';
+      overlay.style.background = 'rgba(15, 23, 42, 0.65)';
+      overlay.style.display = 'flex';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+      overlay.style.padding = '1rem';
+      overlay.style.zIndex = '1000';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'card card--panel';
+      dialog.style.maxWidth = '28rem';
+      dialog.style.width = '100%';
+
+      const form = document.createElement('form');
+      form.className = 'form';
+      const body = document.createElement('div');
+      body.className = 'card__body card__body--stacked';
+      const text = document.createElement('p');
+      text.textContent = message;
+      body.appendChild(text);
+      const field = document.createElement('div');
+      field.className = 'form-field';
+      const label = document.createElement('label');
+      label.className = 'form-label';
+      label.htmlFor = 'passkey-remove-password';
+      label.textContent = 'Current password';
+      field.appendChild(label);
+      const input = document.createElement('input');
+      input.className = 'form-input';
+      input.id = 'passkey-remove-password';
+      input.type = 'password';
+      input.autocomplete = 'current-password';
+      input.required = true;
+      field.appendChild(input);
+      body.appendChild(field);
+      const actions = document.createElement('div');
+      actions.className = 'form-actions';
+      const cancelButton = document.createElement('button');
+      cancelButton.type = 'button';
+      cancelButton.className = 'button button--ghost';
+      cancelButton.setAttribute('data-passkey-cancel', 'true');
+      cancelButton.textContent = 'Cancel';
+      actions.appendChild(cancelButton);
+      const submitButton = document.createElement('button');
+      submitButton.type = 'submit';
+      submitButton.className = 'button';
+      submitButton.textContent = 'Continue';
+      actions.appendChild(submitButton);
+      body.appendChild(actions);
+      form.appendChild(body);
+
+      const cleanup = (value) => {
+        overlay.remove();
+        resolve(value);
+      };
+
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const passwordInput = form.querySelector('#passkey-remove-password');
+        cleanup(passwordInput ? passwordInput.value : '');
+      });
+      form.querySelector('[data-passkey-cancel]').addEventListener('click', () => cleanup(''));
+      overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) {
+          cleanup('');
+        }
+      });
+
+      dialog.appendChild(form);
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+      const focusTarget = form.querySelector('#passkey-remove-password');
+      if (focusTarget) {
+        focusTarget.focus();
+      }
+    });
+  }
+
+  if (passkeyAddForm) {
+    if (!passkeyUtils || !passkeyUtils.supportsPasskeys()) {
+      const submitButton = passkeyAddForm.querySelector('[data-passkey-add]');
+      if (submitButton) {
+        submitButton.disabled = true;
+      }
+      showMessage(passkeyError, 'Passkeys are not supported in this browser or on this connection.');
+    }
+    passkeyAddForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!passkeyUtils || !passkeyUtils.supportsPasskeys()) {
+        showMessage(passkeyError, 'Passkeys are not supported in this browser or on this connection.');
+        return;
+      }
+      const passkeyName = passkeyNameInput ? passkeyNameInput.value.trim() : '';
+      const currentPassword = passkeyPasswordInput ? passkeyPasswordInput.value : '';
+      if (!passkeyName) {
+        showMessage(passkeyError, 'Enter a name for the passkey.');
+        return;
+      }
+      if (!currentPassword) {
+        showMessage(passkeyError, 'Enter your current password to continue.');
+        return;
+      }
+      try {
+        const options = await requestJson('/auth/passkeys/register/options', {
+          method: 'POST',
+          body: JSON.stringify({ current_password: currentPassword }),
+        });
+        const credential = await navigator.credentials.create({
+          publicKey: passkeyUtils.decodeCredentialOptions(options.public_key),
+        });
+        if (!credential) {
+          throw new Error('No passkey was created.');
+        }
+        const created = await requestJson('/auth/passkeys/register/verify', {
+          method: 'POST',
+          body: JSON.stringify({
+            challenge_id: options.challenge_id,
+            name: passkeyName,
+            credential: passkeyUtils.serializeCredential(credential),
+          }),
+        });
+        passkeys.push(created);
+        renderPasskeys();
+        if (passkeyAddForm) {
+          passkeyAddForm.reset();
+        }
+        showMessage(passkeySuccess, 'Passkey registered successfully.');
+      } catch (error) {
+        showMessage(
+          passkeyError,
+          passkeyUtils.passkeyErrorMessage(error, error.message || 'Unable to register a passkey.'),
+        );
+      }
+    });
+  }
+
   root.querySelectorAll('[data-copy-target]').forEach((button) => {
     button.addEventListener('click', async () => {
       const targetId = button.getAttribute('data-copy-target');
@@ -707,4 +982,5 @@
   });
 
   renderTotpDevices();
+  renderPasskeys();
 })();

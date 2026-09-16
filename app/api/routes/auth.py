@@ -32,6 +32,14 @@ from app.schemas.auth import (
     ImpersonationRequest,
     LoginRequest,
     LoginResponse,
+    PasskeyBeginRegistrationRequest,
+    PasskeyChallengeResponse,
+    PasskeyCredentialRequest,
+    PasskeyDeleteRequest,
+    PasskeyFinishRegistrationRequest,
+    PasskeyItem,
+    PasskeyListResponse,
+    PasskeyRenameRequest,
     PasswordChangeRequest,
     PasswordResetConfirm,
     PasswordResetRequest,
@@ -50,9 +58,11 @@ from app.schemas.users import UserResponse
 from app.security.passwords import verify_password
 from app.security.session import SessionData, ensure_datetime, session_manager
 from app.services import company_access
+from app.services import audit as audit_service
 from app.services import impersonation as impersonation_service
 from app.services import message_templates as message_templates_service
 from app.services import email as email_service
+from app.services import passkeys as passkeys_service
 from app.services import staff_access as staff_access_service
 
 
@@ -209,7 +219,7 @@ def _log_login_failure(request: Request, email: str, reason: str) -> None:
     )
 
 
-def _log_login_success(request: Request, user: dict[str, Any]) -> None:
+def _log_login_success(request: Request, user: dict[str, Any], *, auth_method: str = "password") -> None:
     email = str(user.get("email", "")).lower()
     ip = _client_ip(request)
     user_id = user.get("id")
@@ -219,7 +229,115 @@ def _log_login_success(request: Request, user: dict[str, Any]) -> None:
         user_id=user_id,
         ip=ip,
         user_agent=_user_agent(request),
+        auth_method=auth_method,
     )
+
+
+def _build_passkey_item(record: dict[str, Any]) -> PasskeyItem:
+    return PasskeyItem(
+        id=int(record["id"]),
+        name=str(record.get("display_name") or "Passkey"),
+        created_at=ensure_datetime(record.get("created_at")),
+        last_used_at=(
+            ensure_datetime(record.get("last_used_at"))
+            if record.get("last_used_at")
+            else None
+        ),
+        transports=passkeys_service.parse_transports(record.get("transports")),
+        credential_device_type=record.get("credential_device_type"),
+        credential_backed_up=bool(record.get("credential_backed_up")),
+    )
+
+
+def _passkey_summary(record: dict[str, Any]) -> dict[str, Any]:
+    return _build_passkey_item(record).model_dump(mode="json")
+
+
+def _passkey_login_cookie_name() -> str:
+    return f"{settings.session_cookie_name}_passkey_login"
+
+
+def _request_is_secure(request: Request) -> bool:
+    if settings.environment.lower() == "production":
+        return True
+    scheme = (request.url.scheme or "").lower()
+    return scheme == "https"
+
+
+def _set_passkey_login_cookie(response: Response, request: Request, token: str) -> None:
+    response.set_cookie(
+        _passkey_login_cookie_name(),
+        token,
+        httponly=True,
+        secure=_request_is_secure(request),
+        max_age=passkeys_service.PASSKEY_CHALLENGE_TTL_SECONDS,
+        samesite="lax",
+    )
+
+
+def _get_passkey_credential_id(credential: dict[str, Any]) -> str:
+    credential_id = credential.get("id")
+    if not isinstance(credential_id, str) or not credential_id.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Credential identifier is required")
+    return credential_id.strip()
+
+
+def _require_password_reauthentication(current_user: dict[str, Any], current_password: str) -> None:
+    stored_hash = current_user.get("password_hash")
+    if not stored_hash or not verify_password(current_password, stored_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+
+
+async def _ensure_passkey_user_handle(current_user: dict[str, Any]) -> str:
+    existing = str(current_user.get("passkey_user_handle") or "").strip()
+    if existing:
+        return existing
+    handle = passkeys_service.generate_user_handle()
+    await user_repo.update_user(int(current_user["id"]), passkey_user_handle=handle)
+    current_user["passkey_user_handle"] = handle
+    return handle
+
+
+async def _complete_login_response(
+    *,
+    request: Request,
+    user: dict[str, Any],
+    auth_method: str,
+    passkey_record: dict[str, Any] | None = None,
+    totp_devices: list[dict[str, Any]] | None = None,
+) -> Response:
+    if totp_devices is None:
+        totp_devices = await auth_repo.get_totp_authenticators(user["id"])
+    requires_totp_enrollment = not bool(totp_devices)
+    login_timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
+    user = await user_repo.record_login(user["id"], login_timestamp)
+    active_company_id = await _determine_active_company_id(user)
+    session = await session_manager.create_session(
+        user["id"], request, active_company_id=active_company_id
+    )
+    if active_company_id is not None:
+        user["company_id"] = active_company_id
+    response_model = _build_login_response(
+        user,
+        session,
+        requires_totp_enrollment=requires_totp_enrollment,
+        redirect="/security/2fa" if requires_totp_enrollment else None,
+    )
+    response = JSONResponse(content=response_model.model_dump(mode="json"))
+    session_manager.apply_session_cookies(response, session, request)
+    _log_login_success(request, user, auth_method=auth_method)
+    if passkey_record is not None:
+        await audit_service.log_action(
+            action="auth.passkey.login.succeeded",
+            user_id=int(user["id"]),
+            entity_type="user_passkey",
+            entity_id=int(passkey_record["id"]),
+            metadata={
+                "credential_id_hash": passkeys_service.credential_id_hash(str(passkey_record["credential_id"])),
+            },
+            request=request,
+        )
+    return response
 
 
 @router.post(
@@ -419,7 +537,6 @@ async def login(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
 
     totp_devices = await auth_repo.get_totp_authenticators(user["id"])
-    requires_totp_enrollment = not bool(totp_devices)
     if totp_devices:
         if not payload.totp_code:
             _log_login_failure(request, payload.email, "totp_required")
@@ -435,26 +552,12 @@ async def login(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid TOTP code")
 
     await auth_repo.clear_login_attempts(identifier)
-
-    login_timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
-    user = await user_repo.record_login(user["id"], login_timestamp)
-
-    active_company_id = await _determine_active_company_id(user)
-    session = await session_manager.create_session(
-        user["id"], request, active_company_id=active_company_id
+    return await _complete_login_response(
+        request=request,
+        user=user,
+        auth_method="password",
+        totp_devices=totp_devices,
     )
-    if active_company_id is not None:
-        user["company_id"] = active_company_id
-    response_model = _build_login_response(
-        user,
-        session,
-        requires_totp_enrollment=requires_totp_enrollment,
-        redirect="/security/2fa" if requires_totp_enrollment else None,
-    )
-    response = JSONResponse(content=response_model.model_dump(mode="json"))
-    session_manager.apply_session_cookies(response, session, request)
-    _log_login_success(request, user)
-    return response
 
 
 @router.post(
@@ -767,3 +870,299 @@ async def delete_totp(
         )
     await auth_repo.delete_totp_authenticator(current_user["id"], authenticator_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/passkeys",
+    response_model=PasskeyListResponse,
+    summary="List registered passkeys",
+)
+async def list_passkeys(
+    current_user: dict = Depends(get_current_user),
+) -> PasskeyListResponse:
+    items = await auth_repo.list_passkeys_for_user(int(current_user["id"]))
+    return PasskeyListResponse(items=[_build_passkey_item(item) for item in items])
+
+
+@router.post(
+    "/passkeys/register/options",
+    response_model=PasskeyChallengeResponse,
+    summary="Begin passkey registration",
+)
+async def begin_passkey_registration(
+    payload: PasskeyBeginRegistrationRequest,
+    session: SessionData = Depends(get_current_session),
+    current_user: dict = Depends(get_current_user),
+    _: None = Depends(require_database),
+) -> PasskeyChallengeResponse:
+    _require_password_reauthentication(current_user, payload.current_password)
+    handle = await _ensure_passkey_user_handle(current_user)
+    existing = await auth_repo.list_passkeys_for_user(int(current_user["id"]))
+    options = passkeys_service.registration_options(
+        user=current_user,
+        user_handle=handle,
+        existing_credentials=existing,
+    )
+    await auth_repo.create_passkey_challenge(
+        challenge_id=options["challenge_id"],
+        ceremony="registration",
+        challenge=options["challenge"],
+        user_id=int(current_user["id"]),
+        session_id=int(session.id),
+        expires_at=options["expires_at"],
+    )
+    return PasskeyChallengeResponse(
+        challenge_id=options["challenge_id"],
+        public_key=options["public_key"],
+        expires_at=options["expires_at"],
+    )
+
+
+@router.post(
+    "/passkeys/register/verify",
+    response_model=PasskeyItem,
+    summary="Finish passkey registration",
+)
+async def finish_passkey_registration(
+    payload: PasskeyFinishRegistrationRequest,
+    request: Request,
+    session: SessionData = Depends(get_current_session),
+    current_user: dict = Depends(get_current_user),
+    _: None = Depends(require_database),
+) -> PasskeyItem:
+    challenge = await auth_repo.get_passkey_challenge(payload.challenge_id)
+    if not challenge:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Passkey registration has expired")
+    consumed = await auth_repo.consume_passkey_challenge(
+        challenge_id=payload.challenge_id,
+        ceremony="registration",
+        user_id=int(current_user["id"]),
+        session_id=int(session.id),
+    )
+    if not consumed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Passkey registration has expired")
+    try:
+        verified = passkeys_service.verify_registration(
+            credential=payload.credential,
+            expected_challenge=str(challenge["challenge"]),
+        )
+        credential_id = _get_passkey_credential_id(payload.credential)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await audit_service.log_action(
+            action="auth.passkey.registration.failed",
+            user_id=int(current_user["id"]),
+            metadata={"reason": "verification_failed"},
+            request=request,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Passkey registration could not be verified",
+        ) from exc
+    existing = await auth_repo.get_passkey_by_credential_id(credential_id)
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This passkey is already registered")
+    try:
+        created = await auth_repo.create_passkey(
+            user_id=int(current_user["id"]),
+            credential_id=credential_id,
+            public_key=verified.credential_public_key,
+            sign_count=int(verified.sign_count),
+            transports=passkeys_service.parse_transports(payload.credential.get("response", {}).get("transports")),
+            aaguid=str(verified.aaguid or ""),
+            credential_device_type=getattr(verified.credential_device_type, "value", None),
+            credential_backed_up=bool(verified.credential_backed_up),
+            display_name=payload.name.strip(),
+        )
+    except Exception as exc:
+        if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This passkey is already registered") from exc
+        raise
+    await audit_service.record_create(
+        action="auth.passkey.registration.succeeded",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="user_passkey",
+        entity_id=int(created["id"]),
+        after=_passkey_summary(created),
+        metadata={"credential_id_hash": passkeys_service.credential_id_hash(credential_id)},
+    )
+    return _build_passkey_item(created)
+
+
+@router.patch(
+    "/passkeys/{passkey_id}",
+    response_model=PasskeyItem,
+    summary="Rename a passkey",
+)
+async def rename_passkey(
+    passkey_id: int,
+    payload: PasskeyRenameRequest,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+) -> PasskeyItem:
+    existing = await auth_repo.get_passkey_by_id(int(current_user["id"]), passkey_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Passkey not found")
+    updated = await auth_repo.update_passkey_name(int(current_user["id"]), passkey_id, payload.name.strip())
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Passkey not found")
+    await audit_service.record(
+        action="auth.passkey.renamed",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="user_passkey",
+        entity_id=passkey_id,
+        before=_passkey_summary(existing),
+        after=_passkey_summary(updated),
+        metadata={"credential_id_hash": passkeys_service.credential_id_hash(str(updated["credential_id"]))},
+    )
+    return _build_passkey_item(updated)
+
+
+@router.delete(
+    "/passkeys/{passkey_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove a passkey",
+)
+async def delete_passkey(
+    passkey_id: int,
+    payload: PasskeyDeleteRequest,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+) -> Response:
+    existing = await auth_repo.get_passkey_by_id(int(current_user["id"]), passkey_id)
+    if not existing:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Passkey not found")
+    _require_password_reauthentication(current_user, payload.current_password)
+    if await auth_repo.count_passkeys(int(current_user["id"])) <= 1:
+        has_fallback = bool(current_user.get("password_hash")) and bool(current_user.get("email"))
+        if not has_fallback:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You must keep another sign-in or recovery method before removing your final passkey",
+            )
+    await auth_repo.delete_passkey(int(current_user["id"]), passkey_id)
+    await audit_service.record_delete(
+        action="auth.passkey.removed",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="user_passkey",
+        entity_id=passkey_id,
+        before=_passkey_summary(existing),
+        metadata={"credential_id_hash": passkeys_service.credential_id_hash(str(existing["credential_id"]))},
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/passkeys/authenticate/options",
+    response_model=PasskeyChallengeResponse,
+    summary="Begin passkey authentication",
+)
+async def begin_passkey_authentication(
+    request: Request,
+    _: None = Depends(require_database),
+) -> Response:
+    browser_binding = request.cookies.get(_passkey_login_cookie_name()) or passkeys_service.generate_browser_binding_token()
+    options = passkeys_service.authentication_options()
+    await auth_repo.create_passkey_challenge(
+        challenge_id=options["challenge_id"],
+        ceremony="authentication",
+        challenge=options["challenge"],
+        browser_binding_hash=passkeys_service.browser_binding_hash(browser_binding),
+        expires_at=options["expires_at"],
+    )
+    response = JSONResponse(
+        content=PasskeyChallengeResponse(
+            challenge_id=options["challenge_id"],
+            public_key=options["public_key"],
+            expires_at=options["expires_at"],
+        ).model_dump(mode="json")
+    )
+    _set_passkey_login_cookie(response, request, browser_binding)
+    return response
+
+
+@router.post(
+    "/passkeys/authenticate/verify",
+    response_model=LoginResponse,
+    summary="Finish passkey authentication",
+)
+async def finish_passkey_authentication(
+    payload: PasskeyCredentialRequest,
+    request: Request,
+    _: None = Depends(require_database),
+) -> Response:
+    browser_binding = request.cookies.get(_passkey_login_cookie_name())
+    failure_detail = "Passkey sign-in failed. Use another sign-in option and try again."
+    if not browser_binding:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail)
+    challenge = await auth_repo.get_passkey_challenge(payload.challenge_id)
+    if not challenge:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail)
+    consumed = await auth_repo.consume_passkey_challenge(
+        challenge_id=payload.challenge_id,
+        ceremony="authentication",
+        browser_binding_hash=passkeys_service.browser_binding_hash(browser_binding),
+    )
+    if not consumed:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail)
+    try:
+        credential_id = _get_passkey_credential_id(payload.credential)
+    except HTTPException:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail) from None
+    passkey = await auth_repo.get_passkey_by_credential_id(credential_id)
+    if not passkey:
+        await audit_service.log_action(
+            action="auth.passkey.login.failed",
+            user_id=None,
+            metadata={"reason": "credential_not_found", "credential_id_hash": passkeys_service.credential_id_hash(credential_id)},
+            request=request,
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail)
+    user = await user_repo.get_user_by_id(int(passkey["user_id"]))
+    if not user or int(user.get("is_active", 1)) != 1:
+        await audit_service.log_action(
+            action="auth.passkey.login.failed",
+            user_id=int(passkey["user_id"]),
+            entity_type="user_passkey",
+            entity_id=int(passkey["id"]),
+            metadata={"reason": "account_ineligible", "credential_id_hash": passkeys_service.credential_id_hash(credential_id)},
+            request=request,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Passkey sign-in is not available for this account.",
+        )
+    try:
+        verified = passkeys_service.verify_authentication(
+            credential=payload.credential,
+            expected_challenge=str(challenge["challenge"]),
+            public_key=passkeys_service.base64url_to_bytes_safe(str(passkey.get("public_key") or "")),
+            sign_count=int(passkey.get("sign_count") or 0),
+        )
+    except Exception as exc:
+        await audit_service.log_action(
+            action="auth.passkey.login.failed",
+            user_id=int(user["id"]),
+            entity_type="user_passkey",
+            entity_id=int(passkey["id"]),
+            metadata={"reason": "verification_failed", "credential_id_hash": passkeys_service.credential_id_hash(credential_id)},
+            request=request,
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail) from exc
+    await auth_repo.update_passkey_after_authentication(
+        passkey_id=int(passkey["id"]),
+        sign_count=int(verified.new_sign_count),
+        credential_device_type=getattr(verified.credential_device_type, "value", None),
+        credential_backed_up=bool(verified.credential_backed_up),
+        last_used_at=datetime.utcnow(),
+    )
+    return await _complete_login_response(
+        request=request,
+        user=user,
+        auth_method="passkey",
+        passkey_record=passkey,
+    )
