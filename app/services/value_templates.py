@@ -461,7 +461,10 @@ def _replace_var_tokens(value: str, context: Mapping[str, Any] | None) -> str:
     for start, end, expression, format_pattern in matches:
         parts.append(value[last_index:start])
         resolved = _resolve_vars_value(context, expression)
-        parts.append(str(_format_vars_value(resolved, format_pattern)))
+        rendered = _format_vars_value(resolved, format_pattern)
+        parts.append(
+            rendered if isinstance(rendered, str) else _stringify_template_value(rendered)
+        )
         last_index = end
 
     parts.append(value[last_index:])

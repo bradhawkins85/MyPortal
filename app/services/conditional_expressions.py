@@ -10,6 +10,8 @@ import re
 from typing import Any
 
 
+_CONDITIONAL_OPENER_LENGTH = 2
+_CONDITIONAL_CLOSER_LENGTH = 2
 _MAX_CONDITIONAL_LENGTH = 4096
 
 # Pattern to match comparison operators
@@ -98,7 +100,13 @@ def _iter_conditional_matches(
         if start < 0:
             break
 
-        parse_limit = min(text_length, start + _MAX_CONDITIONAL_LENGTH + 2)
+        parse_limit = min(
+            text_length,
+            start
+            + _CONDITIONAL_OPENER_LENGTH
+            + _MAX_CONDITIONAL_LENGTH
+            + _CONDITIONAL_CLOSER_LENGTH,
+        )
         cursor = _skip_whitespace(text, start + 2, parse_limit)
         if cursor >= parse_limit:
             search_from = start + 2
