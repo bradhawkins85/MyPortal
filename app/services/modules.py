@@ -533,6 +533,40 @@ def _ensure_list(value: Any) -> list[str]:
     return result
 
 
+def _extract_ticket_reply_id(context: Any) -> int | None:
+    """Return the reply that caused a ticket notification, when available."""
+
+    if not isinstance(context, Mapping):
+        return None
+
+    candidates: list[Any] = []
+    metadata = context.get("metadata")
+    if isinstance(metadata, Mapping):
+        candidates.extend([metadata.get("reply_id"), metadata.get("ticket_reply_id")])
+
+    # System-authored replies (including shipment updates) are deliberately not
+    # treated as a ticket's latest technician reply, but the event still carries
+    # the triggering reply directly.
+    reply = context.get("reply")
+    if isinstance(reply, Mapping):
+        candidates.append(reply.get("id"))
+
+    ticket = context.get("ticket")
+    if isinstance(ticket, Mapping):
+        latest_reply = ticket.get("latest_reply")
+        if isinstance(latest_reply, Mapping):
+            candidates.append(latest_reply.get("id"))
+
+    for candidate in candidates:
+        try:
+            reply_id = int(candidate)
+        except (TypeError, ValueError):
+            continue
+        if reply_id > 0:
+            return reply_id
+    return None
+
+
 def _extract_ticket_id_from_email_payload(payload: Mapping[str, Any]) -> int | None:
     context = payload.get("context")
     candidates: list[Any] = [payload.get("ticket_id")]
@@ -3317,36 +3351,8 @@ async def _invoke_smtp(
         attachments = await _load_ticket_email_attachments(payload)
 
     # Extract ticket reply ID from context if present, to enable email tracking
-    enable_tracking = False
-    ticket_reply_id: int | None = None
-    context = payload.get("context")
-    if isinstance(context, Mapping):
-        # Check if this is a ticket reply notification
-        # Try metadata first (for direct notification events)
-        metadata = context.get("metadata")
-        if isinstance(metadata, Mapping):
-            # Look for reply_id or ticket_reply_id in metadata
-            reply_id_value = metadata.get("reply_id") or metadata.get("ticket_reply_id")
-            if reply_id_value is not None:
-                try:
-                    ticket_reply_id = int(reply_id_value)
-                    enable_tracking = True
-                except (TypeError, ValueError):
-                    pass
-
-        # If not found in metadata, check ticket.latest_reply.id (for automation events)
-        if ticket_reply_id is None:
-            ticket = context.get("ticket")
-            if isinstance(ticket, Mapping):
-                latest_reply = ticket.get("latest_reply")
-                if isinstance(latest_reply, Mapping):
-                    reply_id_value = latest_reply.get("id")
-                    if reply_id_value is not None:
-                        try:
-                            ticket_reply_id = int(reply_id_value)
-                            enable_tracking = True
-                        except (TypeError, ValueError):
-                            pass
+    ticket_reply_id = _extract_ticket_reply_id(payload.get("context"))
+    enable_tracking = ticket_reply_id is not None
 
     event = await webhook_monitor.create_manual_event(
         name="module.smtp.send",
@@ -3561,29 +3567,7 @@ async def _invoke_smtp2go(
                     custom_headers_dict[header_name] = header_value
 
     enable_tracking = _ensure_bool(settings.get("enable_tracking"), True)
-    ticket_reply_id: int | None = None
-    context = payload.get("context")
-    if isinstance(context, Mapping):
-        metadata = context.get("metadata")
-        if isinstance(metadata, Mapping):
-            reply_id_value = metadata.get("reply_id") or metadata.get("ticket_reply_id")
-            if reply_id_value is not None:
-                try:
-                    ticket_reply_id = int(reply_id_value)
-                except (TypeError, ValueError):
-                    ticket_reply_id = None
-
-        if ticket_reply_id is None:
-            ticket = context.get("ticket")
-            if isinstance(ticket, Mapping):
-                latest_reply = ticket.get("latest_reply")
-                if isinstance(latest_reply, Mapping):
-                    reply_id_value = latest_reply.get("id")
-                    if reply_id_value is not None:
-                        try:
-                            ticket_reply_id = int(reply_id_value)
-                        except (TypeError, ValueError):
-                            ticket_reply_id = None
+    ticket_reply_id = _extract_ticket_reply_id(payload.get("context"))
 
     event = await webhook_monitor.create_manual_event(
         name="module.smtp2go.send",
