@@ -1194,13 +1194,9 @@ async def bcp_roles(request: Request):
     all_users = await user_repo.list_users()
     collaboration_audit = await audit_log_repo.list_audit_logs(
         entity_type="bcp_role_assignment",
-        limit=500,
+        metadata_filters={"company_id": company_id},
+        limit=10,
     )
-    collaboration_audit = [
-        entry
-        for entry in collaboration_audit
-        if (entry.get("metadata") or {}).get("company_id") == company_id
-    ][:10]
 
     
     context = await _build_base_context(
