@@ -50,6 +50,11 @@ async def test_sets_separate_messages_for_only_cached_user_mailboxes(monkeypatch
         return {}
 
     monkeypatch.setattr(m365_out_of_office.m365_repo, "get_mailboxes", fake_mailboxes)
+    monkeypatch.setattr(
+        m365_out_of_office.companies_repo,
+        "get_email_domains_for_company",
+        lambda company_id: _async_value(["example.com"]),
+    )
     monkeypatch.setattr(m365_out_of_office.m365_service, "acquire_access_token", fake_token)
     monkeypatch.setattr(m365_out_of_office.m365_service, "_graph_patch", fake_patch)
 
@@ -72,5 +77,57 @@ async def test_rejects_mailbox_not_in_company_cache(monkeypatch):
         return []
 
     monkeypatch.setattr(m365_out_of_office.m365_repo, "get_mailboxes", fake_mailboxes)
+    monkeypatch.setattr(
+        m365_out_of_office.companies_repo,
+        "get_email_domains_for_company",
+        lambda company_id: _async_value(["example.com"]),
+    )
+    with pytest.raises(ValueError, match="Unknown user mailbox"):
+        await m365_out_of_office.set_automatic_replies(7, _payload())
+
+
+async def _async_value(value):
+    return value
+
+
+@pytest.mark.anyio
+async def test_selectable_mailboxes_only_include_company_email_domains(monkeypatch):
+    async def fake_mailboxes(company_id, mailbox_type):
+        assert (company_id, mailbox_type) == (7, "UserMailbox")
+        return [
+            {"display_name": "Allowed", "user_principal_name": "allowed@Example.com"},
+            {"display_name": "Other tenant", "user_principal_name": "user@other.com"},
+            {"display_name": "Invalid", "user_principal_name": "not-an-email"},
+        ]
+
+    async def fake_domains(company_id):
+        assert company_id == 7
+        return ["example.com"]
+
+    monkeypatch.setattr(m365_out_of_office.m365_repo, "get_mailboxes", fake_mailboxes)
+    monkeypatch.setattr(
+        m365_out_of_office.companies_repo, "get_email_domains_for_company", fake_domains
+    )
+
+    result = await m365_out_of_office.get_selectable_mailboxes(7)
+
+    assert result == [
+        {"display_name": "Allowed", "user_principal_name": "allowed@Example.com"}
+    ]
+
+
+@pytest.mark.anyio
+async def test_rejects_cached_mailbox_outside_company_email_domains(monkeypatch):
+    async def fake_mailboxes(company_id, mailbox_type):
+        return [{"user_principal_name": "one@example.com"}]
+
+    async def fake_domains(company_id):
+        return ["different.example"]
+
+    monkeypatch.setattr(m365_out_of_office.m365_repo, "get_mailboxes", fake_mailboxes)
+    monkeypatch.setattr(
+        m365_out_of_office.companies_repo, "get_email_domains_for_company", fake_domains
+    )
+
     with pytest.raises(ValueError, match="Unknown user mailbox"):
         await m365_out_of_office.set_automatic_replies(7, _payload())
