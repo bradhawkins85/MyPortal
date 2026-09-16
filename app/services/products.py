@@ -651,7 +651,7 @@ async def _process_feed_item(
     feed_name = str(item.get("product_name") or "").strip()
     description = str(item.get("product_name2") or "").strip() or None
     source_description_hash = hashlib.sha1(
-        (description or "").encode("utf-8")
+        (description or "").encode("utf-8"), usedforsecurity=False
     ).hexdigest()
     stored_description_hash = (
         str(current_product.get("source_description_hash") or "").strip()
