@@ -857,7 +857,7 @@ async def _download_graph_csv_report(access_token: str, url: str) -> list[dict[s
     try:
         async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
             response = await client.get(url, headers=headers)
-            if response.status_code in (302, 303, 307, 308):
+            if response.status_code in (301, 302, 303, 307, 308):
                 download_url = str(response.headers.get("Location") or "").strip()
                 if not download_url:
                     raise M365Error("Microsoft Graph report export missing download URL")
