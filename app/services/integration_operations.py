@@ -150,6 +150,7 @@ def _telemetry_summary(total: int, failures: int) -> dict[str, Any]:
             "achieved_percent": None,
             "error_budget_total": 0,
             "error_budget_used": 0,
+            "error_budget_overrun": 0,
             "error_budget_remaining": 0,
         }
     budget_total = max(1, ceil(total * 0.01))
@@ -157,7 +158,8 @@ def _telemetry_summary(total: int, failures: int) -> dict[str, Any]:
         "target_percent": 99,
         "achieved_percent": round(((total - failures) / total) * 100, 1),
         "error_budget_total": budget_total,
-        "error_budget_used": failures,
+        "error_budget_used": min(failures, budget_total),
+        "error_budget_overrun": max(0, failures - budget_total),
         "error_budget_remaining": max(0, budget_total - failures),
     }
 
@@ -390,6 +392,7 @@ async def build_operations_center(
                 "slo_achieved_percent": telemetry["achieved_percent"],
                 "error_budget_total": telemetry["error_budget_total"],
                 "error_budget_used": telemetry["error_budget_used"],
+                "error_budget_overrun": telemetry.get("error_budget_overrun", 0),
                 "error_budget_remaining": telemetry["error_budget_remaining"],
                 "warnings": warnings,
                 "missing_fields": missing_fields,

@@ -90,7 +90,7 @@
                   </td>
                   <td data-label="Error budget" data-value="{{ row.error_budget_remaining }}">
                     {% if row.error_budget_total %}
-                      {{ row.error_budget_used }}/{{ row.error_budget_total }} used
+                      {{ row.error_budget_used }}/{{ row.error_budget_total }} used{% if row.error_budget_overrun %} (+{{ row.error_budget_overrun }} over){% endif %}
                     {% else %}
                       <span class="text-muted">—</span>
                     {% endif %}

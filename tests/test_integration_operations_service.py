@@ -121,6 +121,16 @@ async def test_build_operations_center_aggregates_health_and_conflicts(monkeypat
         "COMMANDS_BY_MODULE",
         {"xero": {"sync_to_xero"}, "m365-admin": {"sync_m365_data"}},
     )
+    next_runs = {
+        1: datetime(2026, 9, 17, 2, 0, tzinfo=timezone.utc),
+        2: datetime(2026, 9, 17, 2, 1, tzinfo=timezone.utc),
+        3: datetime(2026, 9, 17, 3, 30, tzinfo=timezone.utc),
+    }
+    monkeypatch.setattr(
+        integration_operations.cron_calendar,
+        "calculate_next_run",
+        lambda task, **_: next_runs.get(task.get("id")),
+    )
     monkeypatch.setattr(
         integration_operations.scheduled_tasks_repo, "list_tasks", fake_list_tasks
     )
@@ -135,7 +145,7 @@ async def test_build_operations_center_aggregates_health_and_conflicts(monkeypat
 
     assert result["summary"]["enabled_modules"] == 2
     assert result["summary"]["failed_webhooks"] == 1
-    assert result["summary"]["task_conflicts"] >= 2
+    assert result["summary"]["task_conflicts"] == 2
     assert any(
         item["summary"].startswith("Duplicate schedule")
         for item in result["dependency_graph"]["conflicts"]
@@ -145,6 +155,7 @@ async def test_build_operations_center_aggregates_health_and_conflicts(monkeypat
     assert xero["status_key"] == "warning"
     assert xero["failed_webhook_count"] == 1
     assert xero["slo_achieved_percent"] == 33.3
+    assert xero["error_budget_overrun"] == 1
 
     m365_admin = next(
         item for item in result["module_health"] if item["slug"] == "m365-admin"
