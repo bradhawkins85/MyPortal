@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/tables.html" import data_table, table_toolbar %}
+
+{% block title %}Spam search & purge{% endblock %}
+{% block header_title %}Spam search & purge{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "New search", "type": "button", "variant": "primary", "attrs": {"data-focus-search": "true"}},
+    {"label": "API documentation", "type": "link", "href": "/docs"}
+  ]) }}
+{% endblock %}
+
+{% block styles %}
+<style>
+  .purge-grid { display:grid; grid-template-columns:minmax(0, 1fr) minmax(18rem, .55fr); gap:var(--space-4); }
+  .purge-form-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:var(--space-3); }
+  .purge-form-grid .form-field--wide { grid-column:1 / -1; }
+  .purge-summary { display:grid; gap:var(--space-3); margin:0; }
+  .purge-summary div { display:flex; justify-content:space-between; align-items:flex-start; gap:var(--space-3); min-height:1.75rem; border-bottom:1px solid var(--color-border); padding-bottom:var(--space-2); }
+  .purge-summary dt { color:var(--color-text-muted); } .purge-summary dd { margin:0; font-weight:600; }
+  .purge-query { max-width:28rem; overflow-wrap:anywhere; font-family:monospace; font-size:.8rem; }
+  .purge-actions { display:flex; align-items:center; gap:var(--space-2); min-width:15rem; }
+  .purge-actions .input { width:6rem; }
+  .purge-details { max-width:36rem; white-space:pre-wrap; overflow-wrap:anywhere; font-size:.8rem; }
+  .purge-summary + .form-help { margin-top:var(--space-4); }
+  @media (max-width: 900px) { .purge-grid { grid-template-columns:1fr; } }
+  @media (max-width: 600px) { .purge-form-grid { grid-template-columns:1fr; } .purge-form-grid .form-field--wide { grid-column:auto; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="purge-grid">
+  <section class="card card--panel" id="new-spam-search">
+    <header class="card__header">
+      <div><h2 class="card__title">Define a compliance search</h2><p class="card__subtitle">Search first. Review the result count and details before starting a separate purge.</p></div>
+    </header>
+    <div class="card__body">
+      <form method="post" action="/m365/spam-purge/search" class="purge-form-grid" autocomplete="off">
+        <div class="form-field"><label for="sender">Sender address</label><input class="input" type="email" id="sender" name="sender" maxlength="320" placeholder="sender@example.com"></div>
+        <div class="form-field"><label for="subject">Subject contains</label><input class="input" type="text" id="subject" name="subject" maxlength="500" placeholder="Urgent invoice"></div>
+        <div class="form-field"><label for="receivedFrom">Received from</label><input class="input" type="date" id="receivedFrom" name="receivedFrom"></div>
+        <div class="form-field"><label for="receivedTo">Received to</label><input class="input" type="date" id="receivedTo" name="receivedTo"></div>
+        <div class="form-field form-field--wide">
+          <label for="contentMatchQuery">Additional ContentMatchQuery <span class="text-muted">(advanced)</span></label>
+          <textarea class="input" id="contentMatchQuery" name="contentMatchQuery" maxlength="2000" rows="3" placeholder='(Recipients:"person@example.com")'></textarea>
+          <p class="form-help">All populated fields are combined with AND. At least a sender, subject, or advanced query is required.</p>
+        </div>
+        <div class="form-field form-field--wide"><button class="button button--primary" type="submit">Run search</button></div>
+      </form>
+    </div>
+  </section>
+
+  <aside class="card card--panel">
+    <header class="card__header"><div><h2 class="card__title">Safe workflow</h2><p class="card__subtitle">Permanent deletion requires an explicit second action.</p></div></header>
+    <div class="card__body">
+      <dl class="purge-summary">
+        <div><dt>1. Search</dt><dd>Non-destructive</dd></div>
+        <div><dt>2. Review</dt><dd>Count + details</dd></div>
+        <div><dt>3. Confirm</dt><dd>Type PURGE</dd></div>
+        <div><dt>Purge mode</dt><dd>Hard delete</dd></div>
+      </dl>
+      <p class="form-help">Searches run against all Exchange locations in the selected company tenant. Every action is retained in history and the audit log.</p>
+    </div>
+  </aside>
+</div>
+
+<section class="card card--panel">
+  <header class="card__header"><div><h2 class="card__title">Request history</h2><p class="card__subtitle">Live search and purge progress, matching counts, and recorded results.</p></div></header>
+  <div class="card__body">
+    {% set columns = [
+      {"key":"created", "label":"Created", "sort_type":"date", "mobile_priority":"essential", "width":"13%"},
+      {"key":"criteria", "label":"Criteria", "mobile_priority":"essential", "width":"27%"},
+      {"key":"search", "label":"Search status"},
+      {"key":"matched", "label":"Matched", "sort_type":"number"},
+      {"key":"purge", "label":"Purge status"},
+      {"key":"removed", "label":"Removed", "sort_type":"number"},
+      {"key":"requested_by", "label":"Requested by", "default_visible":false},
+      {"key":"actions", "label":"Review / action", "sortable":false, "mobile_priority":"essential", "width":"15%"}
+    ] %}
+    {{ table_toolbar("spam-purge-history", search=true, search_placeholder="Filter requests", columns=columns) }}
+    {% call data_table(columns, table_id="spam-purge-history", columns=columns, aria_label="Spam purge request history") %}
+      {% for item in requests %}
+      {% set search_variant = 'success' if item.search_status == 'completed' else 'danger' if item.search_status == 'failed' else 'warning' if item.search_status in ['queued','starting','running'] else 'neutral' %}
+      {% set purge_variant = 'success' if item.purge_status == 'completed' else 'danger' if item.purge_status == 'failed' else 'warning' if item.purge_status in ['queued','starting','running'] else 'neutral' %}
+      <tr>
+        <td data-column-key="created" data-sort-value="{{ item.created_at }}"><span data-utc="{{ item.created_at }}">{{ item.created_at }}</span></td>
+        <td data-column-key="criteria"><div class="purge-query">{{ item.content_match_query }}</div></td>
+        <td data-column-key="search"><span class="status status--{{ search_variant }}">{{ item.search_status|replace('_',' ')|title }}</span></td>
+        <td data-column-key="matched" data-sort-value="{{ item.matched_items }}">{{ item.matched_items }}</td>
+        <td data-column-key="purge"><span class="status status--{{ purge_variant }}">{{ item.purge_status|replace('_',' ')|title }}</span></td>
+        <td data-column-key="removed" data-sort-value="{{ item.removed_items }}">{{ item.removed_items }}</td>
+        <td data-column-key="requested_by">{{ item.requested_by_email or item.created_by }}</td>
+        <td data-column-key="actions">
+          <details>
+            <summary class="button button--ghost button--small">Review</summary>
+            <div class="purge-details">
+              <strong>Search name</strong><br>{{ item.search_name }}<br><br>
+              {% if item.error_message %}<span class="status status--danger">Error</span> {{ item.error_message }}<br><br>{% endif %}
+              {% if item.search_details %}<strong>Search details</strong><br>{{ item.search_details|tojson(indent=2) }}<br><br>{% endif %}
+              {% if item.purge_details %}<strong>Purge details</strong><br>{{ item.purge_details|tojson(indent=2) }}<br><br>{% endif %}
+              {% if item.search_status == 'completed' and item.matched_items > 0 and item.purge_status in ['not_started','failed'] %}
+              <form method="post" action="/m365/spam-purge/{{ item.id }}/purge" class="purge-actions">
+                <label class="visually-hidden" for="confirmation-{{ item.id }}">Type PURGE</label>
+                <input class="input" id="confirmation-{{ item.id }}" name="confirmation" required pattern="PURGE" autocomplete="off" placeholder="PURGE">
+                <button class="button button--danger button--small" type="submit">Hard delete {{ item.matched_items }}</button>
+              </form>
+              {% elif item.search_status == 'completed' and item.matched_items == 0 %}<span class="text-muted">Nothing to purge.</span>{% endif %}
+            </div>
+          </details>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="table__empty">No spam search requests yet.</td></tr>
+      {% endfor %}
+    {% endcall %}
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.querySelector('[data-focus-search]')?.addEventListener('click', () => {
+    document.getElementById('sender')?.focus();
+    document.getElementById('new-spam-search')?.scrollIntoView({behavior: 'smooth'});
+  });
+  {% if active_jobs %}window.setTimeout(() => window.location.reload(), 10000);{% endif %}
+</script>
+{% endblock %}

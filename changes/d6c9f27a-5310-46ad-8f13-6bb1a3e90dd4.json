@@ -1,0 +1,7 @@
+{
+  "guid": "d6c9f27a-5310-46ad-8f13-6bb1a3e90dd4",
+  "occurred_at": "2026-09-16T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added a reviewed Office 365 spam compliance search and hard-delete purge workspace with progress and audit history.",
+  "content_hash": "m365-spam-search-purge-ui-v1"
+}

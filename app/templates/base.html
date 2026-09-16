@@ -382,11 +382,14 @@
                   <a href="/m365/diagnostics" {% if current_path.startswith('/m365/diagnostics') %}aria-current="page"{% endif %}>Diagnostics</a>
                 </li>
                 {% endif %}
+                {% if is_super_admin or is_helpdesk_technician %}<li class="menu__subitem">
+                  <a href="/m365/spam-purge" {% if current_path.startswith('/m365/spam-purge') %}aria-current="page"{% endif %}>Spam Search &amp; Purge</a>
+                </li>{% endif %}
               </ul>
             </li>
           {% endif %}
-          {% if not can_manage_licenses and (can_view_m365_best_practices or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes) %}
-            {% set m365_active = current_path.startswith('/m365/best-practices') or current_path.startswith('/m365/mailboxes') %}
+          {% if not can_manage_licenses and (can_view_m365_best_practices or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes or is_helpdesk_technician) %}
+            {% set m365_active = current_path.startswith('/m365/best-practices') or current_path.startswith('/m365/mailboxes') or current_path.startswith('/m365/spam-purge') %}
             <li class="menu__item menu__item--expandable {% if m365_active %}menu__item--expanded{% endif %}" data-menu-key="/m365">
               <button class="menu__toggle" type="button" data-menu-toggle aria-expanded="{% if m365_active %}true{% else %}false{% endif %}">
                 <span class="menu__icon" aria-hidden="true">
@@ -411,6 +414,11 @@
                 {% if can_view_m365_shared_mailboxes %}
                 <li class="menu__subitem">
                   <a href="/m365/mailboxes/shared" {% if current_path.startswith('/m365/mailboxes/shared') %}aria-current="page"{% endif %}>Shared Mailboxes</a>
+                </li>
+                {% endif %}
+                {% if is_helpdesk_technician %}
+                <li class="menu__subitem">
+                  <a href="/m365/spam-purge" {% if current_path.startswith('/m365/spam-purge') %}aria-current="page"{% endif %}>Spam Search &amp; Purge</a>
                 </li>
                 {% endif %}
               </ul>
