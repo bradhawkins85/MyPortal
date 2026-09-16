@@ -295,7 +295,10 @@ async def sync_invoice_to_xero(
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
     result = await xero_service.sync_invoice(invoice_id, auto_send=auto_send)
-    if result.get("status") == "skipped" and result.get("reason") == "Invoice requires approval before Xero sync":
+    if result.get("status") == "skipped" and any(
+        entry.get("skip_code") == "approval_required"
+        for entry in result.get("skipped_invoices") or []
+    ):
         await audit_service.record(
             action="invoice.xero_sync_blocked",
             request=request,
@@ -520,6 +523,8 @@ async def run_xero_batch_sync(
         summary["status"] = "partial"
     elif summary["failedCount"]:
         summary["status"] = "failed"
+    elif summary["syncedCount"] == 0 and summary["failedCount"] == 0 and summary["skippedCount"] > 0:
+        summary["status"] = "skipped"
     await audit_service.record(
         action="invoice.xero_batch_sync",
         request=request,

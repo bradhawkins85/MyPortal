@@ -138,6 +138,18 @@ def _format_invoice_records(
     return formatted, total_amount, paid_count
 
 
+def _build_xero_queue_context(invoices: list[dict[str, Any]]) -> dict[str, Any]:
+    unsynced_invoices = [invoice for invoice in invoices if not invoice["xero_invoice_id"]]
+    approval_queue = [invoice for invoice in unsynced_invoices if invoice["needs_approval"]]
+    exception_queue = [invoice for invoice in unsynced_invoices if invoice["has_sync_exception"]]
+    return {
+        "unsynced_invoice_count": len(unsynced_invoices),
+        "approval_queue_count": len(approval_queue),
+        "exception_queue_count": len(exception_queue),
+        "exception_queue": exception_queue[:10],
+    }
+
+
 @router.api_route("/invoices", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def invoices_page(request: Request):
     main_module = _main()
@@ -151,9 +163,6 @@ async def invoices_page(request: Request):
     unpaid_count = max(len(records) - paid_count, 0)
     total_amount_display = f"${total_amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):,.2f}"
     status_options = sorted({invoice["status_slug"] for invoice in formatted if invoice["status_slug"]})
-    unsynced_invoices = [invoice for invoice in formatted if not invoice["xero_invoice_id"]]
-    approval_queue = [invoice for invoice in unsynced_invoices if invoice["needs_approval"]]
-    exception_queue = [invoice for invoice in unsynced_invoices if invoice["has_sync_exception"]]
     extra = {
         "title": "Invoices",
         "invoices": formatted,
@@ -167,10 +176,7 @@ async def invoices_page(request: Request):
         "is_global_invoices": False,
         "invoice_table_id": "invoice",
         "can_sync_invoices_to_xero": bool(user.get("is_super_admin")),
-        "unsynced_invoice_count": len(unsynced_invoices),
-        "approval_queue_count": len(approval_queue),
-        "exception_queue_count": len(exception_queue),
-        "exception_queue": exception_queue[:10],
+        **_build_xero_queue_context(formatted),
     }
     return await main_module._render_template("invoices/index.html", request, user, extra=extra)
 
@@ -191,9 +197,6 @@ async def global_invoices_page(request: Request):
     unpaid_count = max(len(records) - paid_count, 0)
     total_amount_display = f"${total_amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):,.2f}"
     status_options = sorted({invoice["status_slug"] for invoice in formatted if invoice["status_slug"]})
-    unsynced_invoices = [invoice for invoice in formatted if not invoice["xero_invoice_id"]]
-    approval_queue = [invoice for invoice in unsynced_invoices if invoice["needs_approval"]]
-    exception_queue = [invoice for invoice in unsynced_invoices if invoice["has_sync_exception"]]
     extra = {
         "title": "Global invoices",
         "invoices": formatted,
@@ -207,10 +210,7 @@ async def global_invoices_page(request: Request):
         "is_global_invoices": True,
         "invoice_table_id": "invoice-global",
         "can_sync_invoices_to_xero": bool(user.get("is_super_admin")),
-        "unsynced_invoice_count": len(unsynced_invoices),
-        "approval_queue_count": len(approval_queue),
-        "exception_queue_count": len(exception_queue),
-        "exception_queue": exception_queue[:10],
+        **_build_xero_queue_context(formatted),
     }
     return await main_module._render_template("invoices/index.html", request, user, extra=extra)
 

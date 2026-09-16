@@ -2612,6 +2612,7 @@ async def sync_company(
                 {
                     "invoice_id": invoice_id,
                     "invoice_number": working_invoice_number,
+                    "skip_code": "approval_required",
                     "reason": reason,
                 }
             )
