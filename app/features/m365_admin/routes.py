@@ -356,7 +356,9 @@ async def delete_signature_template(template_id: int, request: Request):
     user, company_id, redirect = await _signature_context(request, write=True)
     if redirect:
         return redirect
-    await signatures_service.delete_template(company_id, template_id)
+    deleted = await signatures_service.delete_template(company_id, template_id)
+    if not deleted:
+        return flash_redirect("/m365/signatures", "Signature template not found.", "error")
     await audit_service.record(
         action="m365.signatures.delete",
         request=request,

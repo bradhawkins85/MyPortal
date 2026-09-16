@@ -283,7 +283,7 @@ async def list_variable_suggestions(company_id: int) -> list[str]:
         if name:
             suggestions.append(f"{{{{company.variables.{name}}}}}")
             suggestions.append(f"{{{{custom.{name}}}}}")
-    return suggestions
+    return list(dict.fromkeys(suggestions))
 
 
 __all__ = [

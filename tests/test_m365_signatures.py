@@ -83,6 +83,7 @@ async def test_variable_suggestions_include_company_variables(monkeypatch):
 
     assert "{{company.variables.support_phone}}" in suggestions
     assert "{{custom.support_phone}}" in suggestions
+    assert suggestions.count("{{company.variables.support_phone}}") == 1
 
 
 def test_signature_templates_compile_and_expose_designer_copy():
