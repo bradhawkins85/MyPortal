@@ -2834,7 +2834,7 @@ async def test_remediate_app_credential_expiry_fails_for_environment_credentials
     assert upserts[0]["remediation_status"] == "failed"
 
 
-@pytest.mark.anyio("asyncio")
+@pytest.mark.anyio
 async def test_remediate_app_credential_expiry_surfaces_reprovision_guidance():
     """PKCE expiry remediation returns actionable guidance when the admin app cannot self-rotate."""
     upserts: list[dict[str, Any]] = []
