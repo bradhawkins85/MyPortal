@@ -92,6 +92,15 @@ class Settings(BaseSettings):
         default=60, validation_alias="MIGRATION_LOCK_TIMEOUT"
     )
     redis_url: str | None = Field(default=None, validation_alias="REDIS_URL")
+    m365_it_external_email_address: str = Field(
+        default="", validation_alias="M365_IT_EXTERNAL_EMAIL_ADDRESS"
+    )
+    m365_it_support_external_email_address: str = Field(
+        default="", validation_alias="M365_IT_SUPPORT_EXTERNAL_EMAIL_ADDRESS"
+    )
+    m365_it_recipient_address_contains_words: str = Field(
+        default="", validation_alias="M365_IT_RECIPIENT_ADDRESS_CONTAINS_WORDS"
+    )
     session_cookie_name: str = Field(
         default="myportal_session",
         validation_alias=AliasChoices("SESSION_COOKIE_NAME", "SESSION_COOKIE"),
