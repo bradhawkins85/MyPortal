@@ -4,8 +4,18 @@
 
 {% block title %}Subscriptions - {{ app_name }}{% endblock %}
 
+{% block header_actions %}
+{% if is_super_admin %}
+<a class="button" href="/admin/subscriptions/create">Add external subscription</a>
+{% endif %}
+{% endblock %}
+
 {% block content %}
 <div class="admin-page">
+    {% set success_message = request.query_params.get('success') %}
+    {% if success_message %}
+    <div class="alert alert--success" role="status">{{ success_message }}</div>
+    {% endif %}
     <div class="admin-header">
         <h1>Subscriptions</h1>
         <p class="subtitle">Manage customer subscriptions and renewals</p>
