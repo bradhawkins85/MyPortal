@@ -233,6 +233,7 @@ _MISSING_PERMISSION_ERROR_CODE = "Authentication_MSGraphPermissionMissing"
 _GRAPH_ROLE_NAMES: dict[str, str] = {
     "df021288-bdef-4463-88db-98f22de89214": "User.Read.All",
     "741f803b-c850-494e-b5df-cde7c675a1ca": "User.ReadWrite.All",
+    "9e3f62cf-ca93-4989-b6ce-bf83c28f9fe8": "RoleManagement.ReadWrite.Directory",
     "7ab1d382-f21e-4acd-a863-ba3e13f7da61": "Directory.Read.All",
     "18a4783c-866b-4cc7-a460-3d5e5662c884": "Application.ReadWrite.OwnedBy",
     "246dd0d5-5bd0-4def-940b-0421030a5b68": "Policy.Read.All",
