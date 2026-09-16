@@ -32,6 +32,10 @@ class SMTP2GoError(Exception):
     """Raised when SMTP2Go API request fails."""
 
 
+# These in-memory observability stores intentionally trade durability for the
+# smallest possible implementation surface. They expose recent retry / follow-up
+# state in the local worker process for operators, but they are not used for
+# correctness and are not shared across multiple workers or restarts.
 _DELIVERY_QUEUE_EVENTS: deque[dict[str, Any]] = deque(maxlen=100)
 _PENDING_NOT_ENGAGED_KEYS: set[str] = set()
 
@@ -124,7 +128,7 @@ def generate_tracking_id() -> str:
     return secrets.token_urlsafe(32)
 
 
-def _coerce_int(value: Any, default: int, *, minimum: int = 0) -> int:
+def coerce_int(value: Any, default: int, *, minimum: int = 0) -> int:
     try:
         resolved = int(value)
     except (TypeError, ValueError):
@@ -274,7 +278,7 @@ def select_ab_test_winner(campaign: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(variants, list):
         variants = []
     metric = str(campaign_data.get("winner_metric") or "click_rate").strip() or "click_rate"
-    minimum_sample_size = _coerce_int(
+    minimum_sample_size = coerce_int(
         campaign_data.get("minimum_sample_size"), 25, minimum=1
     )
     scored_variants: list[dict[str, Any]] = []
@@ -283,11 +287,11 @@ def select_ab_test_winner(campaign: dict[str, Any] | None) -> dict[str, Any]:
         if not isinstance(raw_variant, dict):
             continue
         variant = dict(raw_variant)
-        delivered = _coerce_int(variant.get("delivered"), 0)
-        sent = _coerce_int(variant.get("sent"), delivered)
-        opens = _coerce_int(variant.get("opened"), 0)
-        clicks = _coerce_int(variant.get("clicked"), 0)
-        bounces = _coerce_int(variant.get("bounced"), 0)
+        delivered = coerce_int(variant.get("delivered"), 0)
+        sent = coerce_int(variant.get("sent"), delivered)
+        opens = coerce_int(variant.get("opened"), 0)
+        clicks = coerce_int(variant.get("clicked"), 0)
+        bounces = coerce_int(variant.get("bounced"), 0)
         sample_size = max(delivered, sent)
         variant_metrics = {
             "open_rate": round((opens / sample_size) * 100, 2) if sample_size else 0.0,
@@ -421,8 +425,6 @@ async def _schedule_not_engaged_follow_up(
     if task_key in _PENDING_NOT_ENGAGED_KEYS:
         return False
 
-    _PENDING_NOT_ENGAGED_KEYS.add(task_key)
-
     async def _runner() -> dict[str, Any]:
         await asyncio.sleep(delay_seconds)
         if await _has_recent_engagement(
@@ -445,13 +447,18 @@ async def _schedule_not_engaged_follow_up(
     def _cleanup(_: Any) -> None:
         _PENDING_NOT_ENGAGED_KEYS.discard(task_key)
 
-    background_service.queue_background_task(
-        lambda: _runner(),
-        task_id=f"smtp2go-not-engaged-{tracking_id}-{hash(task_key)}",
-        description=f"smtp2go-not-engaged-{tracking_id}",
-        on_complete=_cleanup,
-        on_error=lambda exc: _cleanup(exc),
-    )
+    try:
+        _PENDING_NOT_ENGAGED_KEYS.add(task_key)
+        background_service.queue_background_task(
+            lambda: _runner(),
+            task_id=f"smtp2go-not-engaged-{tracking_id}-{hash(task_key)}",
+            description=f"smtp2go-not-engaged-{tracking_id}",
+            on_complete=_cleanup,
+            on_error=lambda exc: _cleanup(exc),
+        )
+    except Exception:
+        _PENDING_NOT_ENGAGED_KEYS.discard(task_key)
+        raise
     return True
 
 
@@ -744,6 +751,7 @@ async def send_email_via_api(
     # Get SMTP2Go configuration from integration module
     from app.services import modules as modules_service
     
+    attempt = 0
     try:
         module_settings = await modules_service.get_module_settings('smtp2go')
         if not module_settings:
@@ -853,8 +861,8 @@ async def send_email_via_api(
                 "value": tracking_id
             })
         
-        max_retries = _coerce_int(module_settings.get("rate_limit_max_retries"), 3)
-        retry_backoff_seconds = _coerce_int(
+        max_retries = coerce_int(module_settings.get("rate_limit_max_retries"), 3)
+        retry_backoff_seconds = coerce_int(
             module_settings.get("retry_backoff_seconds"), 60, minimum=1
         )
 
@@ -869,7 +877,6 @@ async def send_email_via_api(
                 error=str(exc),
             )
         response = None
-        attempt = 0
         retry_history: list[dict[str, Any]] = []
         async with httpx.AsyncClient(timeout=30.0) as client:
             while True:
@@ -877,7 +884,7 @@ async def send_email_via_api(
                 response = await client.post(api_url, json=payload)
 
                 if response.status_code == 429 and attempt <= max_retries + 1:
-                    retry_after = _coerce_int(
+                    retry_after = coerce_int(
                         response.headers.get("Retry-After"),
                         retry_backoff_seconds,
                         minimum=1,
@@ -909,7 +916,7 @@ async def send_email_via_api(
                     await asyncio.sleep(retry_after)
                     continue
 
-                if response.status_code >= 500 and attempt <= max_retries:
+                if response.status_code >= 500 and attempt <= max_retries + 1:
                     retry_history.append(
                         {
                             "attempt": attempt,
@@ -1088,7 +1095,7 @@ async def send_email_via_api(
             status="failed",
             subject=subject,
             recipients=to,
-            attempt=locals().get("attempt", 0),
+            attempt=attempt,
             error=str(exc),
         )
         raise SMTP2GoError(f"API request failed: {str(exc)}") from exc
@@ -1103,7 +1110,7 @@ async def send_email_via_api(
             status="failed",
             subject=subject,
             recipients=to,
-            attempt=locals().get("attempt", 0),
+            attempt=attempt,
             error=str(exc),
         )
         raise SMTP2GoError(f"Send failed: {str(exc)}") from exc
@@ -1470,7 +1477,7 @@ async def process_webhook_event(
                 from app.services import modules as modules_service
 
                 module_settings = await modules_service.get_module_settings("smtp2go")
-                delay_seconds = _coerce_int(
+                delay_seconds = coerce_int(
                     (module_settings or {}).get("not_engaged_delay_seconds"),
                     86400,
                     minimum=0,
@@ -1588,7 +1595,7 @@ async def record_raw_webhook_event(
 async def get_analytics_summary(days: int = 30) -> dict[str, Any]:
     """Aggregate recent SMTP2Go delivery and engagement analytics."""
 
-    window_days = _coerce_int(days, 30, minimum=1)
+    window_days = coerce_int(days, 30, minimum=1)
     cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
     totals: Counter[str] = Counter()
     trends: dict[str, Counter[str]] = {}

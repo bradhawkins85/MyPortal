@@ -25,14 +25,6 @@ def _main():
     return main_module
 
 
-def _coerce_positive_int(value: Any, default: int, *, minimum: int = 0) -> int:
-    try:
-        resolved = int(str(value).strip())
-    except (TypeError, ValueError):
-        return default
-    return max(minimum, resolved)
-
-
 async def _render_smtp2go_dashboard(
     request: Request,
     user: dict[str, Any],
@@ -106,13 +98,13 @@ async def admin_update_smtp2go_settings(request: Request):
     settings.update(
         {
             "manage_url": "/admin/modules/smtp2go",
-            "rate_limit_max_retries": _coerce_positive_int(
+            "rate_limit_max_retries": smtp2go_service.coerce_int(
                 form.get("rateLimitMaxRetries"), 3
             ),
-            "retry_backoff_seconds": _coerce_positive_int(
+            "retry_backoff_seconds": smtp2go_service.coerce_int(
                 form.get("retryBackoffSeconds"), 60, minimum=1
             ),
-            "not_engaged_delay_seconds": _coerce_positive_int(
+            "not_engaged_delay_seconds": smtp2go_service.coerce_int(
                 form.get("notEngagedDelaySeconds"), 86400
             ),
             "ab_campaigns": campaigns,
