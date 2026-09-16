@@ -149,6 +149,40 @@ def test_score_history_page_loads_current_company_history(monkeypatch):
     assert render_template.await_args.kwargs["extra"]["history"] == history
 
 
+def test_batch_remediation_route_calls_service(monkeypatch):
+    async def fake_context(request, super_admin_only=False):
+        return {"id": 7, "is_super_admin": True}, {}, {"id": 99}, 99, None
+
+    remediate_batch = AsyncMock(
+        return_value={
+            "success": True,
+            "message": "Batch remediation finished for Microsoft 365: 1 succeeded, 0 failed.",
+            "total": 1,
+            "succeeded": 1,
+            "failed": 0,
+        }
+    )
+    monkeypatch.setattr(main_module, "_load_m365_best_practices_context", fake_context)
+    monkeypatch.setattr(
+        main_module.m365_best_practices_service,
+        "remediate_failed_checks_batch",
+        remediate_batch,
+    )
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/m365/best-practices/remediate-batch",
+            data={"scope": "m365"},
+        )
+
+    assert response.status_code == 303
+    remediate_batch.assert_awaited_once_with(company_id=99, scope="m365")
+    assert _decode_flash_cookie(response) == {
+        "message": "Batch remediation finished for Microsoft 365: 1 succeeded, 0 failed.",
+        "variant": "success",
+    }
+
+
 def test_best_practices_page_enables_note_editing_for_technician(monkeypatch):
     async def fake_context(request, super_admin_only=False):
         return {"id": 7, "is_super_admin": False}, {"role_name": "Technician"}, {"id": 99}, 99, None

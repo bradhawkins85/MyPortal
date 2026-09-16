@@ -3559,6 +3559,7 @@ async def m365_best_practices_page(request: Request):
         "results": results,
         "secure_score": secure_score,
         "catalog": enabled_catalog,
+        "batch_scopes": m365_best_practices_service.get_batch_remediation_scopes(results),
         "has_credentials": bool(credentials),
         "is_super_admin": bool(user.get("is_super_admin")),
         "can_edit_notes": _can_edit_m365_best_practice_notes(user, membership),
@@ -3735,6 +3736,42 @@ async def remediate_m365_best_practice(request: Request, check_id: str):
     return flash_redirect("/m365/best-practices", message, "error")
 
 
+@app.post("/m365/best-practices/remediate-batch", response_class=RedirectResponse)
+async def remediate_m365_best_practice_batch(request: Request):
+    """Run automated remediation for all failed checks in one benchmark scope."""
+    user, _membership, _, company_id, redirect = await _load_m365_best_practices_context(
+        request, super_admin_only=True,
+    )
+    if redirect:
+        return redirect
+    form = await request.form()
+    scope = str(form.get("scope") or "").strip()
+    try:
+        result = await m365_best_practices_service.remediate_failed_checks_batch(
+            company_id=company_id,
+            scope=scope,
+        )
+    except ValueError:
+        return flash_redirect("/m365/best-practices", "Invalid remediation batch scope", "error")
+    log_info(
+        "M365 best practice batch remediation triggered",
+        company_id=company_id,
+        scope=scope,
+        user_id=user.get("id"),
+        total=result.get("total"),
+        succeeded=result.get("succeeded"),
+        failed=result.get("failed"),
+    )
+    variant = "success" if result.get("success") else "error"
+    if result.get("total") == 0:
+        variant = "info"
+    return flash_redirect(
+        "/m365/best-practices",
+        result.get("message", "Batch remediation completed"),
+        variant,
+    )
+
+
 @app.post("/m365/best-practices/ticket/{check_id}", response_class=RedirectResponse)
 async def submit_m365_best_practice_ticket(request: Request, check_id: str):
     """Create a support ticket for one failed best-practice check."""
@@ -3788,7 +3825,8 @@ async def submit_m365_best_practice_ticket(request: Request, check_id: str):
     company_name = str((company or {}).get("name") or f"Company {company_id}").strip()
     ticket = await tickets_service.create_ticket(
         subject=m365_best_practices_service.build_failure_ticket_subject(
-            str(result.get("check_name") or check_id)
+            str(result.get("check_name") or check_id),
+            regression_detected=bool(str(result.get("details") or "").startswith("Regression detected:")),
         ),
         description=m365_best_practices_service.build_failure_ticket_description(
             company_name=company_name,

@@ -28,6 +28,7 @@ from app.repositories import shop as shop_repo
 from app.repositories import staff as staff_repo
 from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import voice_monitor as voice_monitor_repo
+from app.services import m365_best_practices as m365_bp_service
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +261,7 @@ async def _build_active_user_accounts(company_id: int) -> dict[str, Any]:
 
 async def _build_m365_best_practices(company_id: int) -> dict[str, Any]:
     results = await m365_bp_repo.list_results(company_id)
+    history = await m365_bp_repo.list_daily_history(company_id, limit=30)
     counts: dict[str, int] = {
         "pass": 0,
         "fail": 0,
@@ -275,14 +277,47 @@ async def _build_m365_best_practices(company_id: int) -> dict[str, Any]:
             counts[status] += 1
         else:
             counts["other"] += 1
+    exposure = {"critical": 0, "high": 0, "medium": 0, "low": 0, "risk_points": 0}
+    for row in results:
+        if str(row.get("status") or "").lower() != "fail":
+            continue
+        bp = m365_bp_service._catalog_map().get(
+            str(row.get("check_id") or ""),
+            {"id": str(row.get("check_id") or "")},
+        )
+        posture = m365_bp_service._posture_metadata_for_bp(bp)
+        severity = str(posture.get("risk_severity") or "medium")
+        if severity in exposure:
+            exposure[severity] += 1
+        exposure["risk_points"] += int(posture.get("risk_score") or 0)
     total = len(results)
     # Exclude N/A and unknown from the pass-rate denominator
     rated_total = total - counts["not_applicable"] - counts["unknown"] - counts["other"]
     passed = counts["pass"]
     pass_percentage = round((passed / rated_total * 100.0), 1) if rated_total else 0.0
+    latest_snapshot = history[0] if history else None
+    oldest_snapshot = history[-1] if history else None
+    secure_score_delta = None
+    fail_delta = None
+    if latest_snapshot and oldest_snapshot and latest_snapshot is not oldest_snapshot:
+        latest_secure = latest_snapshot.get("secure_score_percentage")
+        oldest_secure = oldest_snapshot.get("secure_score_percentage")
+        if latest_secure is not None and oldest_secure is not None:
+            secure_score_delta = round(float(latest_secure) - float(oldest_secure), 1)
+        fail_delta = int(latest_snapshot.get("fail_count") or 0) - int(
+            oldest_snapshot.get("fail_count") or 0
+        )
     return {
         "total": total,
         "counts": counts,
+        "exposure": exposure,
+        "history_window_days": len(history),
+        "trend": {
+            "fail_delta": fail_delta,
+            "secure_score_delta": secure_score_delta,
+            "latest_snapshot_date": _date_to_iso(latest_snapshot.get("snapshot_date")) if latest_snapshot else None,
+            "baseline_snapshot_date": _date_to_iso(oldest_snapshot.get("snapshot_date")) if oldest_snapshot else None,
+        },
         "pass_percentage": pass_percentage,
         "last_run_at": _max_datetime(row.get("run_at") for row in results),
     }
@@ -770,6 +805,11 @@ async def _build_m365_best_practices_detail(company_id: int) -> dict[str, Any]:
     results = await m365_bp_repo.list_results(company_id)
     checks: list[dict[str, Any]] = []
     for row in results:
+        bp = m365_bp_service._catalog_map().get(
+            str(row.get("check_id") or ""),
+            {"id": str(row.get("check_id") or "")},
+        )
+        posture = m365_bp_service._posture_metadata_for_bp(bp)
         checks.append(
             {
                 "check_id": row.get("check_id"),
@@ -778,12 +818,22 @@ async def _build_m365_best_practices_detail(company_id: int) -> dict[str, Any]:
                 "details": row.get("details"),
                 "notes": row.get("notes"),
                 "remediation_status": row.get("remediation_status"),
+                "risk_severity": posture.get("risk_severity"),
+                "risk_score": posture.get("risk_score"),
+                "business_impact": posture.get("business_impact"),
+                "benchmark_category": posture.get("benchmark_category"),
                 "run_at": _datetime_to_iso(row.get("run_at")),
             }
         )
     # Sort: fails first, then warns, then pass, then others.
     _order = {"fail": 0, "warn": 1, "error": 2, "pass": 3, "not_applicable": 4}
-    checks.sort(key=lambda c: (_order.get(c.get("status") or "", 5), c.get("check_name") or ""))
+    checks.sort(
+        key=lambda c: (
+            _order.get(c.get("status") or "", 5),
+            -int(c.get("risk_score") or 0),
+            c.get("check_name") or "",
+        )
+    )
     return {"checks": checks, "total": len(checks)}
 
 

@@ -460,6 +460,7 @@ def _make_full_patches(reports_module):
         (reports_module.assets_repo, "count_active_assets_by_type", AsyncMock(return_value=2)),
         (reports_module.staff_repo, "count_staff", AsyncMock(return_value=2)),
         (reports_module.m365_bp_repo, "list_results", AsyncMock(return_value=[])),
+        (reports_module.m365_bp_repo, "list_daily_history", AsyncMock(return_value=[])),
         (reports_module.shop_repo, "list_order_summaries", AsyncMock(return_value=[])),
         (reports_module.licenses_repo, "list_company_licenses", AsyncMock(return_value=[])),
         (reports_module.licenses_repo, "list_staff_by_license_for_company", AsyncMock(return_value={})),
@@ -578,6 +579,39 @@ async def test_build_company_report_m365_detail_includes_notes():
     checks = m365_section.detail_data.get("checks") or []
     assert len(checks) == 1
     assert checks[0]["notes"] == "Customer approved temporary exception."
+    assert checks[0]["risk_severity"] == "medium"
+    assert checks[0]["benchmark_category"] == "Microsoft 365"
+
+
+@pytest.mark.asyncio
+async def test_build_m365_best_practices_adds_exposure_and_trend_data():
+    from app.services import reports
+
+    with patch.object(
+        reports.m365_bp_repo,
+        "list_results",
+        new=AsyncMock(
+            return_value=[
+                {"check_id": "bp_block_legacy_auth", "status": "fail", "run_at": datetime(2026, 9, 15, 1, 2, 3)},
+                {"check_id": "bp_monitor_secure_score", "status": "pass", "run_at": datetime(2026, 9, 15, 1, 2, 3)},
+            ]
+        ),
+    ), patch.object(
+        reports.m365_bp_repo,
+        "list_daily_history",
+        new=AsyncMock(
+            return_value=[
+                {"snapshot_date": datetime(2026, 9, 15).date(), "fail_count": 1, "secure_score_percentage": 75.0},
+                {"snapshot_date": datetime(2026, 9, 1).date(), "fail_count": 3, "secure_score_percentage": 60.0},
+            ]
+        ),
+    ):
+        result = await reports._build_m365_best_practices(22)
+
+    assert result["exposure"]["critical"] == 1
+    assert result["exposure"]["risk_points"] == 90
+    assert result["trend"]["fail_delta"] == -2
+    assert result["trend"]["secure_score_delta"] == 15.0
 
 
 @pytest.mark.asyncio

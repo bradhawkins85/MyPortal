@@ -77,6 +77,87 @@ async def test_account_exclusions_pass_check_when_all_findings_are_excluded(monk
     assert "All 1 listed account finding(s) are excluded" in details
     assert accounts[0]["excluded"] is True
 
+
+@pytest.mark.anyio("asyncio")
+async def test_get_last_results_prioritises_failed_high_risk_checks(monkeypatch):
+    monkeypatch.setattr(
+        bp_service.bp_repo,
+        "list_results",
+        AsyncMock(
+            return_value=[
+                {
+                    "check_id": "bp_monitor_secure_score",
+                    "check_name": "Secure Score",
+                    "status": "fail",
+                    "details": "Unavailable",
+                    "run_at": datetime(2026, 9, 15, 1, 2, 3),
+                },
+                {
+                    "check_id": "bp_block_legacy_auth",
+                    "check_name": "Legacy auth",
+                    "status": "fail",
+                    "details": "Blocked",
+                    "run_at": datetime(2026, 9, 15, 1, 2, 3),
+                },
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        bp_service,
+        "get_enabled_check_ids",
+        AsyncMock(return_value={"bp_monitor_secure_score", "bp_block_legacy_auth"}),
+    )
+    monkeypatch.setattr(
+        bp_service.bp_repo,
+        "get_company_exclusions",
+        AsyncMock(return_value=set()),
+    )
+
+    results = await bp_service.get_last_results(7)
+
+    assert [result["check_id"] for result in results] == [
+        "bp_block_legacy_auth",
+        "bp_monitor_secure_score",
+    ]
+    assert results[0]["risk_score"] > results[1]["risk_score"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_failed_checks_batch_scopes_to_selected_category(monkeypatch):
+    monkeypatch.setattr(
+        bp_service,
+        "get_last_results",
+        AsyncMock(
+            return_value=[
+                {
+                    "check_id": "bp_block_legacy_auth",
+                    "check_name": "Legacy auth",
+                    "status": "fail",
+                    "has_remediation": True,
+                    "batch_scope": "m365",
+                },
+                {
+                    "check_id": "intune_windows_firewall",
+                    "check_name": "Windows firewall",
+                    "status": "fail",
+                    "has_remediation": True,
+                    "batch_scope": "intune_windows",
+                },
+            ]
+        ),
+    )
+    remediate = AsyncMock(return_value={"success": True, "message": "ok"})
+    rerun = AsyncMock(return_value={"status": "pass"})
+    monkeypatch.setattr(bp_service, "remediate_check", remediate)
+    monkeypatch.setattr(bp_service, "run_single_check", rerun)
+
+    result = await bp_service.remediate_failed_checks_batch(9, scope="m365")
+
+    assert result["success"] is True
+    assert result["total"] == 1
+    remediate.assert_awaited_once_with(company_id=9, check_id="bp_block_legacy_auth")
+    rerun.assert_awaited_once()
+
 _GUEST_ROLE_ID_MOST_RESTRICTIVE = bp_service._GUEST_ROLE_ID_MOST_RESTRICTIVE
 
 
@@ -126,6 +207,21 @@ def test_get_remediation_known_check():
 def test_get_remediation_unknown_check_returns_default():
     text = bp_service.get_remediation("bp_does_not_exist")
     assert "Microsoft" in text
+
+
+def test_catalog_entries_include_posture_metadata_and_guidance():
+    entry = next(
+        bp for bp in bp_service.list_best_practices() if bp["id"] == "bp_block_legacy_auth"
+    )
+
+    assert entry["risk_severity"] == "critical"
+    assert entry["risk_score"] == 90
+    assert entry["benchmark_category"] == "Microsoft 365"
+    assert entry["batch_scope"] == "m365"
+    assert "tenant compromise" in entry["business_impact"]
+    assert isinstance(entry["remediation_runbook"], list)
+    assert entry["remediation_runbook"]
+    assert "Capture the current" in entry["rollback_guidance"]
 
 
 def test_provision_app_roles_include_best_practice_permissions():
