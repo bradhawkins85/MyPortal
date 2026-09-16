@@ -16,6 +16,12 @@ from app.services import m365 as m365_service
 POLL_INTERVAL_SECONDS = 30
 MAX_POLL_ATTEMPTS = 120
 TERMINAL_STATUSES = frozenset({"completed", "failed", "partiallysucceeded", "stopped"})
+# Transient SCC 500 error indicating the compliance organisation container is not
+# yet reachable.  Microsoft typically resolves this within a few minutes; we retry
+# New-ComplianceSearch with exponential back-off before giving up.
+_ORG_CONTAINER_ERROR = "organization container"
+_NEW_SEARCH_MAX_RETRIES = 3
+_NEW_SEARCH_RETRY_BASE_SECONDS = 30
 _tasks: dict[tuple[int, str], asyncio.Task[None]] = {}
 
 
@@ -176,10 +182,23 @@ async def _run_search(request_id: int, *, retry: bool = False) -> None:
                 })
             except Exception:  # noqa: BLE001 - absence is expected on an early failure
                 pass
-        await m365_service._scc_invoke_command(token, tenant_id, "New-ComplianceSearch", {
-            "Name": request["search_name"], "ExchangeLocation": "All",
-            "ContentMatchQuery": request["content_match_query"],
-        })
+        for attempt in range(_NEW_SEARCH_MAX_RETRIES + 1):
+            try:
+                await m365_service._scc_invoke_command(token, tenant_id, "New-ComplianceSearch", {
+                    "Name": request["search_name"], "ExchangeLocation": "All",
+                    "ContentMatchQuery": request["content_match_query"],
+                })
+                break
+            except m365_service.M365Error as exc:
+                if _ORG_CONTAINER_ERROR in str(exc).lower() and attempt < _NEW_SEARCH_MAX_RETRIES:
+                    wait = _NEW_SEARCH_RETRY_BASE_SECONDS * (2 ** attempt)
+                    log_info(
+                        "New-ComplianceSearch transient org-container error; retrying",
+                        request_id=request_id, attempt=attempt + 1, wait_seconds=wait,
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    raise
         await m365_service._scc_invoke_command(token, tenant_id, "Start-ComplianceSearch", {
             "Identity": request["search_name"],
         })
