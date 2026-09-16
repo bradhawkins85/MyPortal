@@ -993,6 +993,23 @@ async def get_ticket_by_external_reference(
     return _normalise_ticket(row) if row else None
 
 
+async def get_reply_by_external_reference(
+    ticket_id: int,
+    external_reference: str,
+) -> TicketRecord | None:
+    row = await db.fetch_one(
+        """
+        SELECT tr.*, lt.name AS labour_type_name, lt.code AS labour_type_code
+        FROM ticket_replies tr
+        LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id
+        WHERE tr.ticket_id = %s AND tr.external_reference = %s
+        LIMIT 1
+        """,
+        (ticket_id, external_reference),
+    )
+    return _normalise_reply(row) if row else None
+
+
 async def find_open_ticket_by_external_reference(
     external_reference: str,
 ) -> TicketRecord | None:

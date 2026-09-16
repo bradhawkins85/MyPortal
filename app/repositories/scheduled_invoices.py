@@ -1,23 +1,68 @@
 """Repository for managing scheduled invoices."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
 from app.core.database import db
 
 
+_ALLOWED_PATCH_COLUMNS = frozenset({
+    "status",
+    "reminder_ticket_id",
+    "reminder_reply_id",
+    "reminder_sent_at",
+    "reminder_email_sent_at",
+    "reminder_error",
+    "invoice_id",
+    "invoice_number",
+    "invoice_sent_at",
+    "invoice_error",
+})
+
+
 def _normalize_scheduled_invoice(row: dict[str, Any]) -> dict[str, Any]:
     """Normalize a scheduled invoice row from the database."""
-    return {
+    invoice = {
         "id": int(row["id"]),
         "customer_id": int(row["customer_id"]),
         "scheduled_for_date": row["scheduled_for_date"],
         "status": row["status"],
+        "reminder_ticket_id": (
+            int(row["reminder_ticket_id"])
+            if row.get("reminder_ticket_id") is not None
+            else None
+        ),
+        "reminder_reply_id": (
+            int(row["reminder_reply_id"])
+            if row.get("reminder_reply_id") is not None
+            else None
+        ),
+        "invoice_id": int(row["invoice_id"]) if row.get("invoice_id") is not None else None,
+        "invoice_number": row.get("invoice_number"),
+        "reminder_error": row.get("reminder_error"),
+        "invoice_error": row.get("invoice_error"),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
     }
+    for key in (
+        "created_at",
+        "updated_at",
+        "reminder_sent_at",
+        "reminder_email_sent_at",
+        "invoice_sent_at",
+    ):
+        value = row.get(key)
+        if value is None:
+            invoice[key] = None
+            continue
+        if not isinstance(value, datetime):
+            value = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        invoice[key] = value
+    return invoice
 
 
 def _normalize_invoice_line(row: dict[str, Any]) -> dict[str, Any]:
@@ -140,6 +185,30 @@ async def update_scheduled_invoice_status(invoice_id: int, status: str) -> None:
     )
 
 
+async def patch_scheduled_invoice(invoice_id: int, **updates: Any) -> dict[str, Any]:
+    """Patch allowed scheduled invoice fields."""
+    unknown = set(updates) - _ALLOWED_PATCH_COLUMNS
+    if unknown:
+        raise ValueError(
+            f"Unsupported scheduled invoice fields: {', '.join(sorted(unknown))}"
+        )
+    if not updates:
+        existing = await get_scheduled_invoice(invoice_id)
+        if not existing:
+            raise ValueError("Scheduled invoice not found")
+        return existing
+    columns = ", ".join(f"{column} = %s" for column in updates.keys())
+    params = list(updates.values()) + [invoice_id]
+    await db.execute(
+        f"UPDATE scheduled_invoices SET {columns} WHERE id = %s",
+        tuple(params),
+    )
+    updated = await get_scheduled_invoice(invoice_id)
+    if not updated:
+        raise ValueError("Scheduled invoice not found after update")
+    return updated
+
+
 async def get_invoice_lines(invoice_id: int) -> list[dict[str, Any]]:
     """Get all lines for a scheduled invoice."""
     rows = await db.fetch_all(
@@ -171,6 +240,14 @@ async def add_invoice_line(
         ) VALUES (%s, %s, %s, %s, %s, %s)
         """,
         (invoice_id, subscription_id, product_id, term_start, term_end, price),
+    )
+
+
+async def delete_invoice_lines(invoice_id: int) -> None:
+    """Delete all lines for a scheduled invoice."""
+    await db.execute(
+        "DELETE FROM scheduled_invoice_lines WHERE scheduled_invoice_id = %s",
+        (invoice_id,),
     )
 
 
