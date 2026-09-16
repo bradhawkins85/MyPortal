@@ -71,6 +71,7 @@
 {% block header_actions %}
   {{ page_header_actions([
     {"label": "Licenses", "type": "link", "href": "/licenses"},
+    {"label": "Signatures", "type": "link", "href": "/m365/signatures"},
     {"label": "User Mailboxes", "type": "link", "href": "/m365/mailboxes/users"},
     {"label": "Shared Mailboxes", "type": "link", "href": "/m365/mailboxes/shared"}
   ]) }}
@@ -154,6 +155,14 @@
       <section class="m365-card">
         <header class="m365-card__header"><span class="m365-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm1 5h-2v2h2V7Zm0 4h-2v6h2v-6Z"/></svg></span><div><h3>Synchronisation</h3><p>What happens after setup.</p></div></header>
         <ul class="m365-checklist"><li>Credentials are stored securely for this company.</li><li>Microsoft Graph access is granted by an administrator.</li><li>License and mailbox data can be refreshed manually or by scheduled tasks.</li></ul>
+      </section>
+
+      <section class="m365-card">
+        <header class="m365-card__header"><span class="m365-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H9l-4 2V6a2 2 0 0 1 2-2Zm2 4v2h10V8Zm0 4v2h7v-2Z"/></svg></span><div><h3>Signature management</h3><p>Design managed Microsoft 365 signatures with HTML, TXT, and live staff previews.</p></div></header>
+        <div class="m365-actions">
+          <a href="/m365/signatures" class="button button--ghost">Open signature workspace</a>
+        </div>
+        <p class="form-help">Existing personal signatures remain untouched while managed templates are reviewed and published centrally.</p>
       </section>
     </aside>
   </div>

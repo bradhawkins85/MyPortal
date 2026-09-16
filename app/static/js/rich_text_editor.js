@@ -99,6 +99,28 @@
       setActiveLinkAttributes(selection);
       return;
     }
+    if (command === 'image') {
+      const url = window.prompt('Enter image URL', 'https://');
+      const sanitised = sanitiseLinkUrl(url);
+      if (!sanitised) {
+        return;
+      }
+      document.execCommand('insertImage', false, sanitised);
+      return;
+    }
+    if (command === 'table') {
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) {
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      const fragment = range.createContextualFragment(
+        '<table role="presentation"><tbody><tr><td>Column 1</td><td>Column 2</td></tr><tr><td>Value 1</td><td>Value 2</td></tr></tbody></table><p></p>',
+      );
+      range.deleteContents();
+      range.insertNode(fragment);
+      return;
+    }
     if (command === 'removeFormat') {
       document.execCommand('removeFormat');
       document.execCommand('unlink');

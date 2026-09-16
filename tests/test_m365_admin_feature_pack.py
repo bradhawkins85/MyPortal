@@ -19,6 +19,9 @@ def test_m365_admin_pack_owns_spam_purge_routes():
     assert PACK.slug == "m365_admin"
     assert PACK.version
     paths = {route.path for router in PACK.routers for route in router.routes}
+    assert "/m365/signatures" in paths
+    assert "/m365/signatures/new" in paths
+    assert "/m365/signatures/{template_id}/edit" in paths
     assert "/m365/spam-purge" in paths
     assert "/m365/spam-purge/api/requests" in paths
     assert "/m365/spam-purge/api/requests/{request_id}/purge" in paths

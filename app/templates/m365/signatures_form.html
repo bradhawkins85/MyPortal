@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block title %}Signature management{% endblock %}
+{% block header_title %}Signature management{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Back to signatures", "type": "link", "href": "/m365/signatures"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+  <section class="card card--panel">
+    <header class="card__header card__header--actions">
+      <div>
+        <h2 class="card__title">{{ 'Edit signature template' if template_record.id else 'New signature template' }}</h2>
+        <p class="card__subtitle">
+          Design the HTML signature visually, maintain an exact TXT version, and preview resolved staff values before publishing.
+        </p>
+      </div>
+      {% if template_record.id %}
+        <div class="button-group">
+          <form method="post" action="/m365/signatures/{{ template_record.id }}/clone">
+            {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+            <button type="submit" class="button button--ghost">Duplicate</button>
+          </form>
+          {% if template_record.status != 'published' %}
+            <form method="post" action="/m365/signatures/{{ template_record.id }}/publish">
+              {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+              <button type="submit" class="button">Publish</button>
+            </form>
+          {% else %}
+            <form method="post" action="/m365/signatures/{{ template_record.id }}/disable">
+              {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+              <button type="submit" class="button button--ghost">Disable</button>
+            </form>
+          {% endif %}
+          <form method="post" action="/m365/signatures/{{ template_record.id }}/delete" onsubmit="return confirm('Delete this managed signature template?');">
+            {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+            <button type="submit" class="button button--danger">Delete</button>
+          </form>
+        </div>
+      {% endif %}
+    </header>
+    <form method="post" action="{% if template_record.id %}/m365/signatures/{{ template_record.id }}/edit{% else %}/m365/signatures/new{% endif %}" class="form" autocomplete="off">
+      {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+      <div class="form-field">
+        <label class="form-label" for="signature-slug">Slug</label>
+        <input class="form-input" id="signature-slug" name="slug" maxlength="120" required value="{{ form_values.slug or '' }}" />
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="signature-name">Name</label>
+        <input class="form-input" id="signature-name" name="name" maxlength="255" required value="{{ form_values.name or '' }}" />
+      </div>
+      <div class="form-field form-field--full">
+        <label class="form-label" for="signature-description">Description</label>
+        <textarea class="form-input form-input--textarea" id="signature-description" name="description" rows="2">{{ form_values.description or '' }}</textarea>
+      </div>
+      <div class="form-field form-field--full">
+        <label class="form-label" for="signature-html-value" id="signature-html-label">HTML signature</label>
+        <div class="rich-text-editor" data-rich-text-editor aria-labelledby="signature-html-label">
+          <div class="rich-text-editor__toolbar" role="toolbar" aria-label="Signature formatting options">
+            <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="bold" aria-label="Bold"><span aria-hidden="true">B</span></button>
+            <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="italic" aria-label="Italic"><span aria-hidden="true">I</span></button>
+            <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="underline" aria-label="Underline"><span aria-hidden="true">U</span></button>
+            <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="insertUnorderedList" aria-label="Bulleted list"><span aria-hidden="true">•</span></button>
+            <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="insertOrderedList" aria-label="Numbered list"><span aria-hidden="true">1.</span></button>
+            <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="link" aria-label="Insert link"><span aria-hidden="true">🔗</span></button>
+            <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="image" aria-label="Insert image"><span aria-hidden="true">🖼</span></button>
+            <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="table" aria-label="Insert table"><span aria-hidden="true">▦</span></button>
+            <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="removeFormat" aria-label="Clear formatting"><span aria-hidden="true">✕</span></button>
+          </div>
+          <div class="rich-text-editor__body">
+            <div
+              class="rich-text-editor__surface"
+              data-rich-text-content
+              contenteditable="true"
+              role="textbox"
+              aria-labelledby="signature-html-label"
+              aria-multiline="true"
+              data-placeholder="Design the HTML signature..."
+            ></div>
+          </div>
+          <textarea id="signature-html-value" name="html_content" data-rich-text-value hidden>{{ form_values.html_content or '' }}</textarea>
+        </div>
+        <p class="form-help">Supports formatting, links, images, tables, and template variables.</p>
+      </div>
+      <div class="form-field form-field--full">
+        <label class="form-label" for="signature-text-content">Plain-text signature</label>
+        <textarea class="form-input form-input--textarea" id="signature-text-content" name="text_content" rows="8">{{ form_values.text_content or '' }}</textarea>
+        <p class="form-help">Leave blank to generate the initial TXT version from the HTML signature before saving.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="preview-staff-id">Preview staff member</label>
+        <select class="form-input" id="preview-staff-id" name="preview_staff_id">
+          <option value="">Choose staff member</option>
+          {% for item in preview_staff %}
+            <option value="{{ item.id }}" {% if selected_staff_id == item.id %}selected{% endif %}>{{ item.label }}{% if item.email %} — {{ item.email }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="button" name="intent" value="save">{{ 'Update template' if template_record.id else 'Save template' }}</button>
+        <button type="submit" class="button button--ghost" name="intent" value="preview">Preview</button>
+        <a class="button button--ghost" href="/m365/signatures">Cancel</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Suggested template variables</h2>
+        <p class="card__subtitle">Use staff details, company values, and automation tokens when building signatures.</p>
+      </div>
+    </header>
+    <div class="card__body">
+      <div class="table-wrapper">
+        <table class="table">
+          <thead><tr><th scope="col">Variable</th></tr></thead>
+          <tbody>
+            {% for token in variable_suggestions %}
+              <tr><td><code>{{ token }}</code></td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  {% if preview %}
+    <section class="card card--panel">
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title">Preview</h2>
+          <p class="card__subtitle">Resolved output for the selected staff member.</p>
+        </div>
+      </header>
+      <div class="card__body card__body--stacked">
+        {% if preview.missing_tokens %}
+          <div class="alert alert--warning">
+            Missing values: {% for token in preview.missing_tokens %}<code>{{ token }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+          </div>
+        {% endif %}
+        <div>
+          <h3 class="card__subtitle">HTML</h3>
+          <div class="card card--panel" style="padding: 1rem;">{{ preview.html | safe }}</div>
+        </div>
+        <div>
+          <h3 class="card__subtitle">Plain text</h3>
+          <pre class="form-input form-input--textarea" style="white-space: pre-wrap;">{{ preview.text }}</pre>
+        </div>
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ static_url('/static/js/rich_text_editor.js') }}" defer></script>
+{% endblock %}
