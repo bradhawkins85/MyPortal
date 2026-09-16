@@ -317,7 +317,7 @@ async def test_renew_admin_client_secret_validation_failure_restores_previous_se
     assert exchange_mock.await_count == 2
 
 
-@pytest.mark.anyio("asyncio")
+@pytest.mark.anyio
 async def test_renew_admin_client_secret_403_requires_reprovision():
     """A Graph 403 during admin secret rotation returns re-provision guidance."""
     stored_creds = {
@@ -355,7 +355,7 @@ async def test_renew_admin_client_secret_403_requires_reprovision():
             await m365_service.renew_admin_client_secret()
 
 
-@pytest.mark.anyio("asyncio")
+@pytest.mark.anyio
 async def test_exchange_token_preserves_http_status_on_failure():
     """_exchange_token surfaces the token endpoint HTTP status to callers."""
     mock_response = MagicMock()
