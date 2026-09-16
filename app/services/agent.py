@@ -103,13 +103,13 @@ def _count_tokens(text: str) -> int:
 
     if not text:
         return 0
-    if tiktoken is not None:
-        try:
-            encoding = tiktoken.get_encoding("cl100k_base")
-            return len(encoding.encode(text))
-        except Exception:  # pragma: no cover - defensive fallback for model data issues
-            return max(1, (len(text) + 3) // 4)
-    return max(1, (len(text) + 3) // 4)
+    if tiktoken is None:
+        return max(1, (len(text) + 3) // 4)
+    try:
+        encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text))
+    except Exception:  # pragma: no cover - defensive fallback for model data issues
+        return max(1, (len(text) + 3) // 4)
 
 
 def _trim_sections_to_token_budget(

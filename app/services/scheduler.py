@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re
+from contextlib import suppress
 from asyncio.subprocess import PIPE
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1925,11 +1926,8 @@ class SchedulerService:
 
     def _ensure_update_flag_directory(self) -> None:
         _SYSTEM_UPDATE_FLAG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        try:
+        with suppress(OSError):
             os.chmod(_SYSTEM_UPDATE_FLAG_PATH.parent, 0o700)
-        except OSError:
-            # Best-effort permission hardening; failures are non-fatal for scheduling.
-            return
 
     async def _get_git_ref(self, ref: str) -> str | None:
         process = await asyncio.create_subprocess_exec(

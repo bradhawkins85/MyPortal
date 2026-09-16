@@ -358,7 +358,6 @@ def _grandstream_parse_create_time(value: Any) -> datetime | None:
         return datetime.fromtimestamp(float(text), tz=timezone.utc)
     except (OverflowError, OSError, ValueError):
         return _coerce_datetime_value(text)
-    return _coerce_datetime_value(text)
 
 
 def _grandstream_parse_duration(value: Any) -> int | None:
