@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}<span class="header__title-text">Session drilldown</span>{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "All sessions", "type": "link", "variant": "ghost", "href": "/admin/sessions"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+  <section class="card card--panel">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">{{ session_detail.display_name }}</h2>
+        <p class="card__subtitle">Correlated browser-session activity and audit events for governance review.</p>
+      </div>
+      <form method="post" action="/admin/sessions/{{ session_detail.id }}/revoke" class="inline-form" onsubmit="return confirm('Revoke this session?');">
+        {% include "partials/csrf.html" %}
+        <button type="submit" class="button button--ghost button--danger">Revoke session</button>
+      </form>
+    </header>
+    <div class="card__body">
+      <dl class="description-list">
+        <div class="description-list__row"><dt>User</dt><dd>{{ session_detail.display_name }}</dd></div>
+        <div class="description-list__row"><dt>Email</dt><dd>{{ session_detail.user_email or '—' }}</dd></div>
+        <div class="description-list__row"><dt>Company</dt><dd>{{ session_detail.company_name or '—' }}</dd></div>
+        <div class="description-list__row"><dt>Source IP</dt><dd>{{ session_detail.ip_address or '—' }}</dd></div>
+        <div class="description-list__row"><dt>User agent</dt><dd>{{ session_detail.user_agent or '—' }}</dd></div>
+        <div class="description-list__row"><dt>Created</dt><dd>{% if session_detail.created_at_iso %}<span data-utc="{{ session_detail.created_at_iso }}"></span>{% else %}—{% endif %}</dd></div>
+        <div class="description-list__row"><dt>Last seen</dt><dd>{% if session_detail.last_seen_at_iso %}<span data-utc="{{ session_detail.last_seen_at_iso }}"></span>{% else %}—{% endif %}</dd></div>
+        <div class="description-list__row"><dt>Expires</dt><dd>{% if session_detail.expires_at_iso %}<span data-utc="{{ session_detail.expires_at_iso }}"></span>{% else %}—{% endif %}</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="card card--panel mt-lg">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Correlated audit trail</h2>
+        <p class="card__subtitle">Rows matched by session user, source IP, and the recorded activity window.</p>
+      </div>
+    </header>
+    <div class="table-wrapper">
+      <table class="table table--stack-mobile" data-table data-table-id="session-audit">
+        <thead>
+          <tr>
+            <th scope="col">When</th>
+            <th scope="col">Action</th>
+            <th scope="col">Entity</th>
+            <th scope="col">Request ID</th>
+            <th scope="col">Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in correlated_audit_logs %}
+            <tr>
+              <td data-label="When">{% if entry.created_at_iso %}<span data-utc="{{ entry.created_at_iso }}"></span>{% else %}—{% endif %}</td>
+              <td data-label="Action">{{ entry.action }}</td>
+              <td data-label="Entity">{{ entry.entity_type or '—' }}{% if entry.entity_id %} #{{ entry.entity_id }}{% endif %}</td>
+              <td data-label="Request ID">
+                {% if entry.request_id %}
+                  <a href="/admin/audit-logs?request_id={{ entry.request_id | urlencode }}"><code>{{ entry.request_id }}</code></a>
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+              <td data-label="Details">
+                {% if entry.metadata %}
+                  <code>{{ entry.metadata | tojson }}</code>
+                {% else %}
+                  <span class="text-muted">—</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5" class="table__empty">No correlated audit activity was found for this session.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

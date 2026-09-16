@@ -8,6 +8,8 @@ from urllib.parse import urlsplit
 
 from app.core.database import db
 from app.core.logging import log_warning
+from app.repositories import audit_logs as audit_repo
+from app.repositories import auth as auth_repo
 
 
 def _to_utc(value: Any) -> datetime | None:
@@ -175,6 +177,67 @@ async def list_active_user_sessions(*, limit: int = 200) -> list[dict[str, Any]]
             }
         )
     return sessions
+
+
+async def get_active_user_session(session_id: int) -> dict[str, Any] | None:
+    row = await auth_repo.get_session_by_id(int(session_id))
+    if not row:
+        return None
+    row = dict(row)
+    if int(row.get("is_active") or 0) != 1:
+        return None
+    user_id = row.get("user_id")
+    user_name = "Unknown"
+    user_email = None
+    company_name = None
+    if user_id is not None:
+        user_rows = await _safe_fetch_all(
+            """
+            SELECT u.email, u.first_name, u.last_name, c.name AS company_name
+            FROM users AS u
+            LEFT JOIN companies AS c ON c.id = u.company_id
+            WHERE u.id = %s
+            LIMIT 1
+            """,
+            (int(user_id),),
+            source="user_session_lookup",
+        )
+        if user_rows:
+            user_row = user_rows[0]
+            user_name = _name_or_email(user_row)
+            user_email = user_row.get("email")
+            company_name = user_row.get("company_name")
+    return {
+        **row,
+        "display_name": user_name,
+        "user_email": user_email,
+        "company_name": company_name,
+        "created_at": _to_utc(row.get("created_at")),
+        "last_seen_at": _to_utc(row.get("last_seen_at")),
+        "expires_at": _to_utc(row.get("expires_at")),
+    }
+
+
+async def list_session_audit_activity(
+    session_id: int,
+    *,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    session = await get_active_user_session(session_id)
+    if not session:
+        return []
+    created_at = session.get("created_at")
+    last_seen_at = session.get("last_seen_at") or session.get("expires_at")
+    kwargs: dict[str, Any] = {
+        "user_id": int(session["user_id"]) if session.get("user_id") is not None else None,
+        "since": created_at,
+        "until": last_seen_at,
+        "limit": max(1, min(limit, 500)),
+    }
+    ip_address = session.get("ip_address")
+    if ip_address:
+        kwargs["ip_address"] = ip_address
+    return await audit_repo.list_audit_logs(**kwargs)
 
 
 async def list_recent_connection_activity(

@@ -11,6 +11,7 @@ from app.features.service_status import PACK
 
 EXPECTED = {
     ("GET", "/service-status"),
+    ("GET", "/service-status/public/{company_id}/{token}"),
 }
 
 

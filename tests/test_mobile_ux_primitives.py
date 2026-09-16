@@ -73,6 +73,10 @@ def test_priority_a_pages_use_mobile_primitives():
     notifications = _read(APP / "templates" / "notifications" / "index.html")
     assert "mobile_collapsible" in notifications
 
+    staff_index = _read(APP / "templates" / "staff" / "index.html")
+    assert "staff-requests-table" in staff_index
+    assert "table--stack-mobile" in staff_index
+
 
 def test_tables_js_uses_standard_mobile_breakpoint():
     js = _read(APP / "static" / "js" / "tables.js")

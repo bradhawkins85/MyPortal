@@ -14,9 +14,10 @@ imported lazily from ``app.main``; see the pack ``__init__`` and the
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 
+from app.repositories import companies as company_repo
 from app.services import service_status as service_status_service
 
 
@@ -57,6 +58,37 @@ async def service_status_dashboard(request: Request):
         user,
         extra={
             "title": "Service status",
+            "service_status_entries": services,
+            "service_status_summary": summary,
+            "service_status_definitions": service_status_service.STATUS_DEFINITIONS,
+            "service_status_lookup": status_lookup,
+        },
+    )
+
+
+@router.get("/service-status/public/{company_id}/{token}", response_class=HTMLResponse)
+async def public_service_status_dashboard(request: Request, company_id: int, token: str):
+    if not service_status_service.is_valid_public_status_token(company_id, token):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Status page not found.",
+        )
+    company = await company_repo.get_company_by_id(company_id)
+    if not company or int(company.get("archived") or 0) == 1:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Status page not found.",
+        )
+    services = await service_status_service.list_services_for_company(company_id)
+    summary = service_status_service.summarise_services(services)
+    status_lookup = {entry["value"]: entry for entry in service_status_service.STATUS_DEFINITIONS}
+    return await _main()._render_template(
+        "service_status/public_dashboard.html",
+        request,
+        {"id": 0, "is_super_admin": False},
+        extra={
+            "title": f"{company.get('name') or 'Company'} service status",
+            "public_company": company,
             "service_status_entries": services,
             "service_status_summary": summary,
             "service_status_definitions": service_status_service.STATUS_DEFINITIONS,

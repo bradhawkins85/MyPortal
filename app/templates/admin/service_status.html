@@ -18,6 +18,36 @@
 
 {% block content %}
 <div class="admin-grid service-status-admin">
+  {% if company_options and service_status_public_urls %}
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div>
+        <h2 class="card__title">Published status pages</h2>
+        <p class="card__subtitle">Share signed, company-specific status links without exposing the admin workspace.</p>
+      </div>
+    </header>
+    <div class="table-wrapper">
+      <table class="table table--stack-mobile" data-table data-table-id="service-status-public-links">
+        <thead>
+          <tr>
+            <th scope="col">Company</th>
+            <th scope="col">Public status link</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for company in company_options %}
+            {% if company.id in service_status_public_urls %}
+            <tr>
+              <td data-label="Company">{{ company.name }}</td>
+              <td data-label="Public status link"><a href="{{ service_status_public_urls[company.id] }}" target="_blank" rel="noopener noreferrer">{{ service_status_public_urls[company.id] }}</a></td>
+            </tr>
+            {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
   <section class="card card--panel">
     <header class="card__header card__header--stacked">
       <div>

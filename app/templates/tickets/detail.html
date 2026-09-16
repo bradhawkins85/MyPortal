@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
+{% from "macros/mobile.html" import mobile_collapsible %}
 
 {% block header_title %}Ticket{% endblock %}
 
@@ -339,6 +340,7 @@
             </div>
           </article>
 
+          {% call mobile_collapsible('Reply', open=True, id='ticket-reply-mobile') %}
           <article class="card card--panel">
             <header class="card__header">
               <div class="card__title-group">
@@ -509,6 +511,7 @@
               {% endif %}
             </div>
           </article>
+          {% endcall %}
 
           <article class="card card--panel" id="conversation">
             <header class="card__header">

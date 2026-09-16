@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% from "macros/counters.html" import counter_strip %}
+
+{% block header_title %}
+  <div class="header__title-content header__title-content--stacked">
+    <span class="header__title-text">Public service status</span>
+    <span class="header__title-meta">{{ public_company.name or 'Company' }}</span>
+  </div>
+{% endblock %}
+
+{% block content %}
+<div class="service-status">
+  {% set strip_items = [] %}
+  {% for definition in service_status_definitions %}
+    {% set _ = strip_items.append({
+        "label":   definition.label,
+        "value":   service_status_summary.by_status.get(definition.value, 0),
+        "variant": definition.value,
+    }) %}
+  {% endfor %}
+  {{ counter_strip(strip_items, total=service_status_summary.total, total_label="Published services",
+                   class="service-status__stats") }}
+
+  {% if service_status_entries %}
+    <div class="service-status__grid">
+      {% for service in service_status_entries %}
+        {% set status_meta = service_status_lookup.get(service.status) %}
+        {% set variant = status_meta.variant if status_meta else 'status--neutral' %}
+        {% set label = status_meta.label if status_meta else service.status|title %}
+        {% set description = status_meta.description if status_meta else '' %}
+        {% set status_value = service.status or 'operational' %}
+        <article class="service-card service-card--{{ status_value }}">
+          <header class="service-card__header">
+            <h3 class="service-card__title">{{ service.name }}</h3>
+            <span class="status {{ variant }}">{{ label }}</span>
+          </header>
+          {% if service.status_message %}
+            <p class="service-card__message">{{ service.status_message }}</p>
+          {% elif description %}
+            <p class="service-card__message service-card__message--muted">{{ description }}</p>
+          {% endif %}
+          {% if service.description %}
+            <p class="service-card__description">{{ service.description }}</p>
+          {% endif %}
+          <footer class="service-card__footer">
+            {% if service.updated_at %}
+              <span>Updated {{ service.updated_at.strftime('%d %b %Y %H:%M') if service.updated_at.__class__.__name__ == 'datetime' else service.updated_at }}</span>
+            {% else %}
+              <span>Update time unavailable</span>
+            {% endif %}
+          </footer>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="service-status__empty">
+      <p class="text-muted">No public service entries are currently published for this company.</p>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

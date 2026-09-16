@@ -5790,6 +5790,14 @@ async def admin_service_status_page(request: Request):
         for company in companies
         if company.get("id") is not None
     }
+    public_status_urls = {
+        int(company["id"]): (
+            f"/service-status/public/{int(company['id'])}/"
+            f"{service_status_service.build_public_status_token(int(company['id']))}"
+        )
+        for company in companies
+        if company.get("id") is not None
+    }
     return await _render_template(
         "admin/service_status.html",
         request,
@@ -5802,6 +5810,7 @@ async def admin_service_status_page(request: Request):
             "service_status_lookup": status_lookup,
             "company_options": companies,
             "service_status_company_lookup": company_lookup,
+            "service_status_public_urls": public_status_urls,
             "service_status_editing": editing_service,
             "service_status_default": service_status_service.DEFAULT_STATUS,
         },
@@ -6135,6 +6144,95 @@ async def admin_sessions_page(request: Request):
             "title": "Sessions",
             "active_sessions": active_sessions,
             "recent_connections": recent_connections,
+        },
+    )
+
+
+@app.get("/admin/sessions/{session_id}", response_class=HTMLResponse)
+async def admin_session_detail_page(request: Request, session_id: int):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    session_detail = await access_activity_repo.get_active_user_session(session_id)
+    if not session_detail:
+        return flash_redirect("/admin/sessions", "Session not found.", "error")
+    session_detail["created_at_iso"] = _to_iso(session_detail.get("created_at"))
+    session_detail["last_seen_at_iso"] = _to_iso(session_detail.get("last_seen_at"))
+    session_detail["expires_at_iso"] = _to_iso(session_detail.get("expires_at"))
+    correlated_audit_logs = await access_activity_repo.list_session_audit_activity(
+        session_id,
+        limit=200,
+    )
+    for entry in correlated_audit_logs:
+        entry["created_at_iso"] = _to_iso(entry.get("created_at"))
+    return await _render_template(
+        "admin/session_detail.html",
+        request,
+        current_user,
+        extra={
+            "title": "Session detail",
+            "session_detail": session_detail,
+            "correlated_audit_logs": correlated_audit_logs,
+        },
+    )
+
+
+@app.post("/admin/sessions/{session_id}/revoke", response_class=HTMLResponse)
+async def admin_session_revoke(request: Request, session_id: int):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    record = await auth_repo.get_session_by_id(session_id)
+    if not record or int(record.get("is_active") or 0) != 1:
+        return flash_redirect("/admin/sessions", "Active session not found.", "error")
+    actor_session = getattr(request.state, "session", None)
+    if actor_session is None:
+        actor_session = await session_manager.load_session(request)
+    if actor_session and int(actor_session.id) == session_id:
+        return flash_redirect(
+            f"/admin/sessions/{session_id}",
+            "You cannot revoke your current session from this screen.",
+            "error",
+        )
+    from app.services import audit as audit_service
+
+    await auth_repo.deactivate_session(session_id)
+    updated = dict(record)
+    updated["is_active"] = 0
+    await audit_service.record(
+        action="auth.session.revoke",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="user_session",
+        entity_id=session_id,
+        before=record,
+        after=updated,
+        metadata={"target_user_id": record.get("user_id")},
+    )
+    return flash_redirect(
+        "/admin/sessions",
+        "Session revoked.",
+        "success",
+    )
+
+
+@app.get("/admin/benchmarking", response_class=HTMLResponse)
+async def admin_benchmarking_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.services import benchmarking_dashboard as benchmarking_dashboard_service
+
+    rows = await benchmarking_dashboard_service.build_cross_company_summary(limit=500)
+    for row in rows:
+        row["snapshot_date_iso"] = _to_iso(row.get("snapshot_date"))
+    return await _render_template(
+        "admin/benchmarking.html",
+        request,
+        current_user,
+        extra={
+            "title": "Benchmarking",
+            "benchmark_rows": rows,
         },
     )
 

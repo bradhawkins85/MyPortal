@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
+{% from "macros/mobile.html" import mobile_collapsible %}
 {% block title %}Dashboard{% endblock %}
 {% block header_title %}<span class="header__title-text">Dashboard</span>{% endblock %}
 {% block header_actions %}{{ page_header_actions([]) }}{% endblock %}
@@ -7,12 +8,14 @@
 <section class="dashboard-workspace" data-dashboard-app>
   <header class="dashboard-hero">
     <div><p class="dashboard-hero__eyebrow">Workspace overview</p><h1>Your dashboard</h1><p>Live company insights, shortcuts and automation data in one flexible view.</p></div>
-    <div class="dashboard-toolbar" data-dashboard-toolbar hidden>
-      <button class="button button--secondary" type="button" data-dashboard-add>Add panel</button>
-      <button class="button button--secondary" type="button" data-dashboard-import>Import</button>
-      <button class="button button--secondary" type="button" data-dashboard-export>Export</button>
-      <button class="button" type="button" data-dashboard-save disabled>Save layout</button>
-    </div>
+    {% call mobile_collapsible('Dashboard actions', open=False, id='dashboard-actions-mobile') %}
+      <div class="dashboard-toolbar" data-dashboard-toolbar hidden>
+        <button class="button button--secondary" type="button" data-dashboard-add>Add panel</button>
+        <button class="button button--secondary" type="button" data-dashboard-import>Import</button>
+        <button class="button button--secondary" type="button" data-dashboard-export>Export</button>
+        <button class="button" type="button" data-dashboard-save disabled>Save layout</button>
+      </div>
+    {% endcall %}
   </header>
   <div class="dashboard-context"><span class="dashboard-context__dot"></span><span data-dashboard-source>Loading dashboard…</span></div>
   <div class="dashboard-grid" data-dashboard-grid aria-live="polite"><div class="dashboard-loading">Loading your panels…</div></div>

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import ipaddress
 import json
 import re
@@ -12,6 +14,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.core.config import get_settings
 from app.core.logging import log_error, log_warning
 from app.repositories import service_status as service_status_repo
 from app.services import modules as modules_service
@@ -90,6 +93,22 @@ def normalise_company_ids(company_ids: Sequence[int | str] | None) -> list[int]:
         seen.add(value)
         normalised.append(value)
     return normalised
+
+
+def build_public_status_token(company_id: int) -> str:
+    payload = f"service-status-public:{int(company_id)}".encode("utf-8")
+    return hmac.new(
+        get_settings().secret_key.encode("utf-8"),
+        payload,
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def is_valid_public_status_token(company_id: int, token: str | None) -> bool:
+    candidate = str(token or "").strip().lower()
+    if not candidate:
+        return False
+    return hmac.compare_digest(build_public_status_token(company_id), candidate)
 
 
 def _clean_text(value: Any) -> str | None:
