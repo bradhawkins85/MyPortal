@@ -1,0 +1,7 @@
+{
+  "guid": "8d9d673f-c345-470e-942c-e4216381aede",
+  "occurred_at": "2026-09-16T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Proactively renew Xero OAuth tokens during the daily keepalive so idle integrations remain connected.",
+  "content_hash": "4d530eb402de924609ab3bb35d9df14d5e2f34e4e05f7663dc00758d6f8eeb52"
+}

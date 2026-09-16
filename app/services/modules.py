@@ -381,6 +381,19 @@ async def acquire_xero_access_token() -> str:
         return await refresh_xero_access_token()
 
 
+async def renew_xero_access_token() -> str:
+    """Proactively rotate the Xero tokens, serialising against normal use.
+
+    Unlike :func:`acquire_xero_access_token`, this deliberately refreshes even
+    when the cached access token is still valid.  Xero rotates refresh tokens
+    on every successful exchange, so using the same lock as request-time token
+    acquisition prevents concurrent refreshes from persisting an obsolete
+    token.
+    """
+    async with _XERO_TOKEN_REFRESH_LOCK:
+        return await refresh_xero_access_token()
+
+
 def _get_xero_token_keepalive_interval_seconds() -> int:
     """Return how often the background Xero OAuth keepalive should run."""
     raw_value = str(os.getenv("XERO_TOKEN_KEEPALIVE_INTERVAL_SECONDS", "")).strip()
@@ -426,7 +439,10 @@ async def _xero_token_keepalive_once() -> bool:
     if not all(str(credentials.get(field) or "").strip() for field in required_fields):
         return False
 
-    await acquire_xero_access_token()
+    # Rotate the refresh token on every keepalive run rather than merely
+    # returning a still-valid cached access token.  This makes the scheduled
+    # task a genuine renewal and keeps an otherwise idle integration alive.
+    await renew_xero_access_token()
     return True
 
 
