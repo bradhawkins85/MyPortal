@@ -466,6 +466,16 @@ class Database:
         
         # Replace JSON column type with TEXT
         sql = re.sub(r'\bJSON\b', 'TEXT', sql, flags=re.IGNORECASE)
+
+        # SQLite supports ADD COLUMN, but not MySQL's idempotency or placement
+        # modifiers. Migration tracking ensures each file is only applied once.
+        sql = re.sub(
+            r'\bADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\b',
+            'ADD COLUMN',
+            sql,
+            flags=re.IGNORECASE,
+        )
+        sql = re.sub(r'\s+AFTER\s+\w+(?=\s*;|\s*$)', '', sql, flags=re.IGNORECASE)
         
         # Handle ENUM types - convert to VARCHAR with CHECK constraint
         # This is a simplified approach; complex ENUMs may need manual handling

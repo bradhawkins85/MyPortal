@@ -2104,8 +2104,12 @@ async def _fetch_inbound_recommendation_map(
 async def populate_product_inbound_recommendations(product: dict[str, Any]) -> None:
     """Attach reverse recommendation links for an admin product detail view."""
     product_id = _coerce_int(product.get("id"), default=0)
-    cross_map = await _fetch_inbound_recommendation_map("shop_product_cross_sells", [product_id])
-    upsell_map = await _fetch_inbound_recommendation_map("shop_product_upsells", [product_id])
+    cross_map = await _fetch_inbound_recommendation_map(
+        "shop_product_cross_sells", [product_id]
+    )
+    upsell_map = await _fetch_inbound_recommendation_map(
+        "shop_product_upsells", [product_id]
+    )
     product["linked_from_cross_sell_products"] = cross_map.get(product_id, [])
     product["linked_from_upsell_products"] = upsell_map.get(product_id, [])
 
@@ -2399,6 +2403,7 @@ async def upsert_product_from_feed(
     sku: str,
     vendor_sku: str,
     description: str | None,
+    source_description_hash: str | None,
     image_url: str | None,
     price: Decimal,
     vip_price: Decimal,
@@ -2422,15 +2427,16 @@ async def upsert_product_from_feed(
     await db.execute(
         """
         INSERT INTO shop_products
-            (name, sku, vendor_sku, description, image_url, price, vip_price, stock,
+            (name, sku, vendor_sku, description, source_description_hash, image_url, price, vip_price, stock,
              category_id, stock_nsw, stock_qld, stock_vic, stock_sa, stock_wa, buy_price,
              weight, length, width, height, stock_at, warranty_length, manufacturer, product_link)
         VALUES
-            (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             name = VALUES(name),
             sku = VALUES(sku),
             description = VALUES(description),
+            source_description_hash = VALUES(source_description_hash),
             image_url = IFNULL(VALUES(image_url), image_url),
             price = VALUES(price),
             vip_price = VALUES(vip_price),
@@ -2459,6 +2465,7 @@ async def upsert_product_from_feed(
             sku,
             vendor_sku,
             description,
+            source_description_hash,
             image_url,
             price,
             vip_price,
@@ -2479,6 +2486,16 @@ async def upsert_product_from_feed(
             manufacturer,
             product_link,
         ),
+    )
+
+
+async def update_product_source_description_hash(
+    product_id: int, source_description_hash: str
+) -> None:
+    """Mark a feed description processed only after reformatting succeeds."""
+    await db.execute(
+        "UPDATE shop_products SET source_description_hash = %s WHERE id = %s",
+        (source_description_hash, product_id),
     )
 
 

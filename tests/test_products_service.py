@@ -1,6 +1,7 @@
+import hashlib
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -65,16 +66,15 @@ async def test_import_product_by_vendor_sku_processes_feed_item(monkeypatch):
 
     assert result is True
     mock_get_item.assert_awaited_once_with("ABC123")
-    assert mock_get_product.await_args_list == [
-        call("ABC123", include_archived=True),
-        call("ABC123", include_archived=True),
-    ]
-    mock_process.assert_awaited_once_with(item, existing_product)
-    refresh.assert_awaited_once_with(42)
+    mock_get_product.assert_awaited_once_with("ABC123", include_archived=True)
+    mock_process.assert_awaited_once_with(
+        item, existing_product, reformat_changed_description=True
+    )
+    refresh.assert_not_called()
 
 
 @pytest.mark.anyio("asyncio")
-async def test_import_product_by_vendor_sku_refreshes_description_for_existing_product(
+async def test_import_product_by_vendor_sku_delegates_description_refresh(
     monkeypatch,
 ):
     item = {"sku": "ABC123"}
@@ -98,7 +98,10 @@ async def test_import_product_by_vendor_sku_refreshes_description_for_existing_p
     result = await products_service.import_product_by_vendor_sku("ABC123")
 
     assert result is True
-    refresh.assert_awaited_once_with(42)
+    products_service._process_feed_item.assert_awaited_once_with(
+        item, existing_product, reformat_changed_description=True
+    )
+    refresh.assert_not_called()
 
 
 @pytest.mark.anyio("asyncio")
@@ -573,6 +576,118 @@ def _make_feed_item(sku: str, opt_accessori: str | None = None) -> dict:
         "image_url": None,
         "opt_accessori": opt_accessori,
     }
+
+
+async def _run_description_sync(monkeypatch, item, existing_product, *, ai_error=None):
+    upsert = AsyncMock()
+    improve = AsyncMock(
+        side_effect=ai_error,
+        return_value={"description": "<p>AI formatted</p>", "features": []},
+    )
+    update_hash = AsyncMock()
+    monkeypatch.setattr(products_service.shop_repo, "upsert_product_from_feed", upsert)
+    monkeypatch.setattr(
+        products_service.product_descriptions, "improve_product_description", improve
+    )
+    monkeypatch.setattr(
+        products_service.shop_repo,
+        "update_product_source_description_hash",
+        update_hash,
+    )
+    monkeypatch.setattr(
+        products_service,
+        "_get_or_create_category_hierarchy",
+        AsyncMock(return_value=None),
+    )
+    await products_service._process_feed_item(
+        item,
+        existing_product,
+        update_recommendations=False,
+        reformat_changed_description=True,
+    )
+    return upsert, improve, update_hash
+
+
+@pytest.mark.anyio("asyncio")
+async def test_unchanged_feed_description_preserves_ai_description(monkeypatch):
+    item = {**_make_feed_item("SKU-1"), "product_name2": "Source description"}
+    source_hash = hashlib.sha1(b"Source description").hexdigest()
+    existing = {
+        "id": 1,
+        "description": "<p>AI formatted description</p>",
+        "source_description_hash": source_hash,
+    }
+
+    upsert, improve, update_hash = await _run_description_sync(
+        monkeypatch, item, existing
+    )
+
+    assert upsert.await_args.kwargs["description"] == existing["description"]
+    assert upsert.await_args.kwargs["source_description_hash"] == source_hash
+    improve.assert_not_called()
+    update_hash.assert_not_called()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_changed_feed_description_is_reformatted_and_hash_committed(monkeypatch):
+    item = {**_make_feed_item("SKU-2"), "product_name2": "Changed source"}
+    new_hash = hashlib.sha1(b"Changed source").hexdigest()
+    existing = {
+        "id": 2,
+        "description": "<p>Old AI description</p>",
+        "source_description_hash": hashlib.sha1(b"Old source").hexdigest(),
+    }
+
+    upsert, improve, update_hash = await _run_description_sync(
+        monkeypatch, item, existing
+    )
+
+    assert upsert.await_args.kwargs["description"] == "Changed source"
+    assert (
+        upsert.await_args.kwargs["source_description_hash"]
+        == existing["source_description_hash"]
+    )
+    improve.assert_awaited_once_with(2)
+    update_hash.assert_awaited_once_with(2, new_hash)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_failed_reformat_leaves_old_hash_for_retry(monkeypatch):
+    item = {**_make_feed_item("SKU-3"), "product_name2": "Changed source"}
+    old_hash = hashlib.sha1(b"Old source").hexdigest()
+    existing = {
+        "id": 3,
+        "description": "<p>Old AI description</p>",
+        "source_description_hash": old_hash,
+    }
+
+    upsert, improve, update_hash = await _run_description_sync(
+        monkeypatch, item, existing, ai_error=RuntimeError("AI unavailable")
+    )
+
+    assert upsert.await_args.kwargs["source_description_hash"] == old_hash
+    improve.assert_awaited_once_with(3)
+    update_hash.assert_not_called()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_legacy_product_hash_initialisation_preserves_description(monkeypatch):
+    item = {**_make_feed_item("SKU-4"), "product_name2": "Current source"}
+    new_hash = hashlib.sha1(b"Current source").hexdigest()
+    existing = {
+        "id": 4,
+        "description": "<p>Existing AI description</p>",
+        "source_description_hash": None,
+    }
+
+    upsert, improve, update_hash = await _run_description_sync(
+        monkeypatch, item, existing
+    )
+
+    assert upsert.await_args.kwargs["description"] == existing["description"]
+    assert upsert.await_args.kwargs["source_description_hash"] == new_hash
+    improve.assert_not_called()
+    update_hash.assert_not_called()
 
 
 @pytest.mark.anyio("asyncio")
