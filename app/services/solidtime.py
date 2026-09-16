@@ -45,7 +45,7 @@ from app.repositories import companies as company_repo
 from app.repositories import solidtime_links as links_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import users as user_repo
-from app.services import modules as modules_service
+from app.services import module_runtime as modules_service
 from app.services import rate_limit_store
 from app.services import webhook_monitor
 from app.services.redis import get_redis_client

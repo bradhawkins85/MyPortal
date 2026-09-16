@@ -3,6 +3,7 @@ BCP (Business Continuity Planning) routes and page handlers.
 """
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -21,6 +22,39 @@ from app.services.sanitization import sanitize_rich_text
 router = APIRouter(prefix="/bcp", tags=["Business Continuity Planning"])
 
 settings = get_settings()
+
+_build_page_base_context: Callable[..., Awaitable[dict[str, Any]]] | None = None
+_page_templates: Any | None = None
+
+
+def configure_page_rendering(
+    *,
+    build_base_context: Callable[..., Awaitable[dict[str, Any]]],
+    templates: Any,
+) -> None:
+    """Bind shared page-rendering dependencies during application assembly."""
+
+    global _build_page_base_context, _page_templates
+    _build_page_base_context = build_base_context
+    _page_templates = templates
+
+
+def _get_page_rendering() -> tuple[Callable[..., Awaitable[dict[str, Any]]], Any]:
+    if _build_page_base_context is None or _page_templates is None:
+        raise RuntimeError("BCP page rendering has not been configured")
+    return _build_page_base_context, _page_templates
+
+
+async def _render_page(
+    template_name: str,
+    request: Request,
+    user: dict[str, Any],
+    *,
+    extra: dict[str, Any] | None = None,
+) -> HTMLResponse:
+    build_base_context, templates = _get_page_rendering()
+    context = await build_base_context(request, user, extra=extra)
+    return templates.TemplateResponse(template_name, context)
 
 
 def _display_user_name(user: dict[str, Any] | None) -> str:
@@ -350,11 +384,10 @@ async def bcp_overview(request: Request):
         or len(distribution_list) == 0
     )
     
-    # Import template rendering from main
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -381,7 +414,7 @@ async def bcp_glossary(request: Request):
     """BCP Glossary page."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
 
     
     # Define glossary terms
@@ -428,7 +461,7 @@ async def bcp_glossary(request: Request):
         },
     ]
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -446,7 +479,7 @@ async def bcp_risks(request: Request, severity: str = Query(None), heatmap_filte
     """BCP Risks page with list, heatmap, and legend."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     from app.services.risk_calculator import (
         get_severity_band_info,
         get_likelihood_scale,
@@ -478,7 +511,7 @@ async def bcp_risks(request: Request, severity: str = Query(None), heatmap_filte
     heatmap_data = await bcp_repo.get_risk_heatmap_data(plan["id"])
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -504,7 +537,7 @@ async def bcp_risks_heatmap_partial(request: Request):
     """Return just the heatmap HTML for HTMX updates."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import templates
+    _, templates = _get_page_rendering()
     from app.services.risk_calculator import get_severity_band_info
     
     # Get or create plan for this company
@@ -531,7 +564,7 @@ async def bcp_bia(request: Request, sort_by: str = Query("importance")):
     """BCP Business Impact Analysis page with critical activities list."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     from app.services.time_utils import humanize_hours
     
     # Get or create plan for this company
@@ -565,7 +598,7 @@ async def bcp_bia(request: Request, sort_by: str = Query("importance")):
         activity["dependency_count"] = dependency_counts.get(activity["id"], 0)
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -587,7 +620,7 @@ async def bcp_incident(request: Request, tab: str = Query("checklist")):
     """BCP Incident Console with tabs for Checklist, Contacts, and Event Log."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -643,7 +676,7 @@ async def bcp_incident(request: Request, tab: str = Query("checklist")):
         event_log = await bcp_repo.list_event_log_entries(plan["id"], incident_id=active_incident["id"])
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -674,7 +707,7 @@ async def bcp_recovery(
     """BCP Recovery Actions page with filters."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     from app.repositories import users as user_repo
     from app.services.time_utils import humanize_hours
     from datetime import datetime
@@ -718,7 +751,7 @@ async def bcp_recovery(
     activities = await bcp_repo.list_critical_activities(plan["id"], sort_by="name")
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -743,7 +776,7 @@ async def bcp_contacts(request: Request):
     """BCP Contacts & Claims page."""
     user, company_id = await _require_bcp_view(request)
 
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
 
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -762,7 +795,7 @@ async def bcp_contacts(request: Request):
     insurance_claims = await bcp_repo.list_insurance_claims(plan["id"])
 
 
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -857,7 +890,7 @@ async def bcp_schedules(request: Request):
     """BCP Training & Review Schedules page."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     from app.repositories import users as user_repo
     
     # Get or create plan for this company
@@ -876,7 +909,7 @@ async def bcp_schedules(request: Request):
         item["approver"] = users_by_id.get(item.get("approved_by_user_id"))
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -1171,7 +1204,7 @@ async def bcp_roles(request: Request):
     """BCP Roles & Responsibilities page."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     from app.repositories import audit_logs as audit_log_repo
     from app.repositories import users as user_repo
     
@@ -1199,7 +1232,7 @@ async def bcp_roles(request: Request):
     )
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -1395,7 +1428,7 @@ async def bcp_export(request: Request):
     """BCP Export landing page with download options."""
     user, company_id = await _require_bcp_export(request)
 
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
 
 
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -1451,7 +1484,7 @@ async def bcp_export(request: Request):
         },
     ]
 
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -1898,7 +1931,7 @@ async def bcp_insurance(request: Request):
     """BCP Insurance page with policies table."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -1910,7 +1943,7 @@ async def bcp_insurance(request: Request):
     policies = await bcp_repo.list_insurance_policies(plan["id"])
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -2089,7 +2122,7 @@ async def bcp_backups(request: Request):
     """BCP Backups page with backup items table."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -2103,7 +2136,7 @@ async def bcp_backups(request: Request):
     # Get all backup items (manual + auto-created from backup jobs)
     backups = await bcp_repo.list_backup_items(plan["id"])
 
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -2254,14 +2287,14 @@ async def bcp_bia_new(request: Request):
     """New critical activity page."""
     user, company_id = await _require_bcp_edit(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -2280,7 +2313,7 @@ async def bcp_bia_edit(request: Request, activity_id: int):
     """Edit page for a critical activity."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     from app.services.time_utils import humanize_hours
     
     # Get the activity
@@ -2294,7 +2327,7 @@ async def bcp_bia_edit(request: Request, activity_id: int):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -3143,7 +3176,7 @@ async def bcp_evacuation(request: Request):
     """BCP Evacuation Procedures page."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -3157,7 +3190,7 @@ async def bcp_evacuation(request: Request):
         evacuation = await bcp_repo.create_evacuation_plan(plan["id"])
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -3209,7 +3242,7 @@ async def bcp_emergency_kit(request: Request, tab: str = Query("documents")):
     """BCP Emergency Kit page with Documents and Equipment tabs."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -3228,7 +3261,7 @@ async def bcp_emergency_kit(request: Request, tab: str = Query("documents")):
     equipment_items = [item for item in all_items if item["category"] == "Equipment"]
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -3596,7 +3629,7 @@ async def bcp_recovery_checklist(request: Request):
     """BCP Recovery Checklist page for Crisis & Recovery phase."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -3650,7 +3683,7 @@ async def bcp_recovery_checklist(request: Request):
         checklist_with_ticks = [{**item, "tick": None} for item in checklist_items]
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -3675,7 +3708,7 @@ async def bcp_recovery_contacts(request: Request):
     """BCP Recovery Contacts page with contact type, organisation, contact, title, phone/mobile."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -3687,7 +3720,7 @@ async def bcp_recovery_contacts(request: Request):
     contacts = await bcp_repo.list_recovery_contacts(plan["id"])
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -3832,7 +3865,7 @@ async def bcp_insurance_claims(request: Request):
     """BCP Insurance Claims page with insurer, date, claim details, follow-up actions."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -3844,7 +3877,7 @@ async def bcp_insurance_claims(request: Request):
     claims = await bcp_repo.list_insurance_claims(plan["id"])
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -4007,7 +4040,7 @@ async def bcp_market_changes(request: Request):
     """BCP Market Changes page with market change, impact to business, business options."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -4019,7 +4052,7 @@ async def bcp_market_changes(request: Request):
     changes = await bcp_repo.list_market_changes(plan["id"])
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -4158,7 +4191,7 @@ async def bcp_wellbeing(request: Request):
     """BCP Staff Wellbeing informational page with admin-editable links/phone numbers."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     
     # Get or create plan for this company
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -4207,7 +4240,7 @@ async def bcp_wellbeing(request: Request):
         },
     ]
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -4231,7 +4264,7 @@ async def bcp_seed_info(request: Request):
     """BCP Seeding Info page - shows what defaults are seeded and how to manage them."""
     user, company_id = await _require_bcp_view(request)
     
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     from app.services.bcp_seeding import get_seeding_documentation
     
     # Get or create plan for this company
@@ -4245,7 +4278,7 @@ async def bcp_seed_info(request: Request):
     seed_docs = get_seeding_documentation()
 
     
-    context = await _build_base_context(
+    context = await build_base_context(
         request,
         user,
         extra={
@@ -4333,9 +4366,9 @@ async def _require_bcp_library_admin(request: Request) -> dict[str, Any]:
 async def bcp_global_library(request: Request):
     """Manage reusable risk and BIA assessments and customer assignments."""
     user = await _require_bcp_library_admin(request)
-    from app.main import _build_base_context, templates
+    build_base_context, templates = _get_page_rendering()
     from app.repositories import companies as company_repo
-    context = await _build_base_context(request, user, extra={
+    context = await build_base_context(request, user, extra={
         "title": "Global BCP Assessment Library",
         "global_risks": await bcp_repo.list_global_risks(),
         "global_bias": await bcp_repo.list_global_bia_assessments(),

@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from app.repositories import call_recordings as call_recordings_repo
-from app.services import modules as modules_service
+from app.services import module_runtime as modules_service
 from app.services import webhook_monitor
 from app.services.transcription import WhisperXSettings
 
