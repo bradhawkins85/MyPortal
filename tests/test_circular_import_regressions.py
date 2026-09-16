@@ -5,7 +5,7 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import Request
@@ -120,10 +120,15 @@ async def test_module_runtime_merges_service_defaults(monkeypatch):
             return smtp2go_row
         return None
 
-    repo_mock = AsyncMock(side_effect=fake_get_module)
+    requested_slugs: list[str] = []
+
+    async def tracking_get_module(slug: str):
+        requested_slugs.append(slug)
+        return await fake_get_module(slug)
+
     # module_runtime resolves configuration through module_repo.get_module(...)
     # so patching the imported repository module exercises the production seam.
-    monkeypatch.setattr(module_runtime.module_repo, "get_module", repo_mock)
+    monkeypatch.setattr(module_runtime.module_repo, "get_module", tracking_get_module)
 
     call_recordings_module = await module_runtime.get_module(
         "call-recordings", redact=False
@@ -136,7 +141,7 @@ async def test_module_runtime_merges_service_defaults(monkeypatch):
     assert smtp2go_settings is not None
     assert smtp2go_settings["manage_url"] == "/admin/modules/smtp2go"
     assert smtp2go_settings["not_engaged_delay_seconds"] == 86400
-    assert [call.args[0] for call in repo_mock.await_args_list] == [
+    assert requested_slugs == [
         "call-recordings",
         "smtp2go",
     ]

@@ -195,27 +195,34 @@ def _resolve_module_settings(slug: str, settings: dict[str, Any] | None) -> dict
                 resolved[setting_key] = _ensure_bool(env_value, False)
         rate_limit_value = os.getenv("SOLIDTIME_RATE_LIMIT_PER_MINUTE")
         if rate_limit_value is None:
-            rate_limit_value = resolved.get("rate_limit_per_minute")
-        resolved["rate_limit_per_minute"] = _coerce_int(
-            rate_limit_value,
-            _coerce_int(resolved.get("rate_limit_per_minute"), 120, minimum=1, maximum=600),
-            minimum=1,
-            maximum=600,
-        )
+            resolved["rate_limit_per_minute"] = _coerce_int(
+                resolved.get("rate_limit_per_minute"),
+                120,
+                minimum=1,
+                maximum=600,
+            )
+        else:
+            resolved["rate_limit_per_minute"] = _coerce_int(
+                rate_limit_value,
+                120,
+                minimum=1,
+                maximum=600,
+            )
         reconcile_value = os.getenv("SOLIDTIME_RECONCILE_INTERVAL_MINUTES")
         if reconcile_value is None:
-            reconcile_value = resolved.get("reconcile_interval_minutes")
-        resolved["reconcile_interval_minutes"] = _coerce_int(
-            reconcile_value,
-            _coerce_int(
+            resolved["reconcile_interval_minutes"] = _coerce_int(
                 resolved.get("reconcile_interval_minutes"),
                 15,
                 minimum=5,
                 maximum=1440,
-            ),
-            minimum=5,
-            maximum=1440,
-        )
+            )
+        else:
+            resolved["reconcile_interval_minutes"] = _coerce_int(
+                reconcile_value,
+                15,
+                minimum=5,
+                maximum=1440,
+            )
     return resolved
 
 
