@@ -108,7 +108,7 @@ def _allocate_requirement_evidence_storage_path(
     company_id: int,
     requirement_id: int,
     safe_name: str,
-) -> tuple[Path, str, Path]:
+) -> tuple[Path, Path]:
     storage_root = _requirement_upload_dir().resolve()
     suffix = Path(safe_name).suffix.lower()
     storage_name = f"company_{company_id}_requirement_{requirement_id}_{uuid4().hex}{suffix}"
@@ -119,7 +119,7 @@ def _allocate_requirement_evidence_storage_path(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid evidence file name") from exc
     if storage_path.parent != storage_root:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid evidence file name")
-    return storage_root, storage_name, storage_path
+    return storage_root, storage_path
 
 
 def _open_requirement_evidence_storage_file(
@@ -129,7 +129,7 @@ def _open_requirement_evidence_storage_file(
     safe_name: str,
 ) -> tuple[Path, Path, BinaryIO]:
     for _ in range(5):
-        storage_root, _, storage_path = _allocate_requirement_evidence_storage_path(
+        storage_root, storage_path = _allocate_requirement_evidence_storage_path(
             company_id=company_id,
             requirement_id=requirement_id,
             safe_name=safe_name,
@@ -720,7 +720,7 @@ async def upload_requirement_evidence(
                     )
                 handle.write(chunk)
     except Exception:
-        if created_file and storage_path.parent == storage_root:
+        if created_file and storage_root is not None and storage_path is not None and storage_path.parent == storage_root:
             storage_path.unlink(missing_ok=True)
         raise
     finally:
