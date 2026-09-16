@@ -119,6 +119,7 @@
           {% set can_access_m365_configuration = is_super_admin or menu_access.get('menu.m365.configuration') in ['read', 'write'] %}
           {% set can_access_m365_licenses = is_super_admin or menu_access.get('menu.m365.licenses') in ['read', 'write'] %}
           {% set can_access_m365_diagnostics = is_super_admin or menu_access.get('menu.m365.diagnostics') in ['read', 'write'] %}
+          {% set can_access_m365_out_of_office = is_super_admin or menu_access.get('menu.m365.out_of_office') in ['read', 'write'] %}
           {% set can_access_compliance_checks_library = is_super_admin or menu_access.get('menu.compliance_checks.library') in ['read', 'write'] %}
           {% set can_access_all_tickets = (can_access_all_tickets | default(false)) or is_super_admin or menu_access.get('menu.tickets') == 'write' %}
           {% set can_access_tickets = (can_access_tickets | default(false)) or is_super_admin or menu_access.get('menu.tickets') in ['read', 'write'] %}
@@ -149,7 +150,7 @@
           {% set can_access_admin_profile = is_super_admin or menu_access.get('menu.admin.profile') in ['read', 'write'] %}
           {% set can_access_admin_backup_summary = is_super_admin or menu_access.get('menu.admin.backup_summary') in ['read', 'write'] %}
           {% set can_access_admin_company = (can_access_admin_company | default(false)) or is_super_admin or menu_access.get('menu.admin.company') in ['read', 'write'] %}
-          {% set has_company_section = can_access_tickets or can_manage_issues or can_access_marketing or can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_access_network_devices or can_manage_licenses or can_manage_subscriptions or can_access_voice_monitor or can_manage_invoices or can_manage_staff or can_view_compliance or can_view_bcp or can_view_m365_best_practices or can_view_compliance_checks or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes %}
+          {% set has_company_section = can_access_tickets or can_manage_issues or can_access_marketing or can_access_shop or can_access_cart or can_access_orders or can_access_forms or can_manage_assets or can_access_network_devices or can_manage_licenses or can_manage_subscriptions or can_access_voice_monitor or can_manage_invoices or can_manage_staff or can_view_compliance or can_view_bcp or can_view_m365_best_practices or can_view_compliance_checks or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes or can_access_m365_out_of_office %}
           {% set is_company_admin = can_access_admin_company %}
           {% set has_admin_access = is_super_admin or can_access_admin_company or can_access_admin_profile or can_access_admin_backup_summary %}
           {% if can_access_dashboard %}
@@ -382,14 +383,19 @@
                   <a href="/m365/diagnostics" {% if current_path.startswith('/m365/diagnostics') %}aria-current="page"{% endif %}>Diagnostics</a>
                 </li>
                 {% endif %}
+                {% if can_access_m365_out_of_office %}
+                <li class="menu__subitem">
+                  <a href="/m365/out-of-office" {% if current_path.startswith('/m365/out-of-office') %}aria-current="page"{% endif %}>Out of Office</a>
+                </li>
+                {% endif %}
                 {% if is_super_admin or is_helpdesk_technician %}<li class="menu__subitem">
                   <a href="/m365/spam-purge" {% if current_path.startswith('/m365/spam-purge') %}aria-current="page"{% endif %}>Spam Search &amp; Purge</a>
                 </li>{% endif %}
               </ul>
             </li>
           {% endif %}
-          {% if not can_manage_licenses and (can_view_m365_best_practices or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes or is_helpdesk_technician) %}
-            {% set m365_active = current_path.startswith('/m365/best-practices') or current_path.startswith('/m365/mailboxes') or current_path.startswith('/m365/spam-purge') %}
+          {% if not can_manage_licenses and (can_view_m365_best_practices or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes or can_access_m365_out_of_office or is_helpdesk_technician) %}
+            {% set m365_active = current_path.startswith('/m365/best-practices') or current_path.startswith('/m365/mailboxes') or current_path.startswith('/m365/out-of-office') or current_path.startswith('/m365/spam-purge') %}
             <li class="menu__item menu__item--expandable {% if m365_active %}menu__item--expanded{% endif %}" data-menu-key="/m365">
               <button class="menu__toggle" type="button" data-menu-toggle aria-expanded="{% if m365_active %}true{% else %}false{% endif %}">
                 <span class="menu__icon" aria-hidden="true">
@@ -414,6 +420,11 @@
                 {% if can_view_m365_shared_mailboxes %}
                 <li class="menu__subitem">
                   <a href="/m365/mailboxes/shared" {% if current_path.startswith('/m365/mailboxes/shared') %}aria-current="page"{% endif %}>Shared Mailboxes</a>
+                </li>
+                {% endif %}
+                {% if can_access_m365_out_of_office %}
+                <li class="menu__subitem">
+                  <a href="/m365/out-of-office" {% if current_path.startswith('/m365/out-of-office') %}aria-current="page"{% endif %}>Out of Office</a>
                 </li>
                 {% endif %}
                 {% if is_helpdesk_technician %}

@@ -1,0 +1,7 @@
+{
+  "guid": "9c61ba73-9515-48d5-8f77-bb07f57693cc",
+  "occurred_at": "2026-09-16T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added role-controlled Microsoft 365 Out of Office scheduling for one or more user mailboxes.",
+  "content_hash": "m365-out-of-office-scheduling"
+}

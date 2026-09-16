@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block title %}Out of Office{% endblock %}
+{% block header_title %}Out of Office{% endblock %}
+{% block header_actions %}{{ page_header_actions([{"label":"API documentation","type":"link","href":"/docs"}]) }}{% endblock %}
+
+{% block styles %}
+<style>
+  .oof-grid { display:grid; grid-template-columns:minmax(18rem,.7fr) minmax(0,1.3fr); gap:var(--space-4); }
+  .oof-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-3); }
+  .oof-wide { grid-column:1/-1; }
+  .oof-mailboxes { max-height:22rem; overflow:auto; border:1px solid var(--color-border); border-radius:var(--radius-md); }
+  .oof-mailbox { display:flex; gap:var(--space-2); align-items:flex-start; padding:var(--space-3); border-bottom:1px solid var(--color-border); }
+  .oof-mailbox:last-child { border-bottom:0; }
+  .oof-mailbox span { min-width:0; overflow-wrap:anywhere; }
+  .oof-tools { display:flex; align-items:center; gap:var(--space-2); margin-bottom:var(--space-2); }
+  @media (max-width:800px) { .oof-grid,.oof-fields { grid-template-columns:1fr; } .oof-wide { grid-column:auto; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<form method="post" action="/m365/out-of-office" id="oof-form" class="oof-grid">
+  <section class="card card--panel">
+    <header class="card__header"><div><h2 class="card__title">User mailboxes</h2><p class="card__subtitle">Choose one or more synced user mailboxes.</p></div></header>
+    <div class="card__body">
+      <div class="oof-tools">
+        <input class="input" id="mailbox-filter" type="search" placeholder="Filter mailboxes" aria-label="Filter mailboxes">
+        <button class="button button--ghost button--small" type="button" id="select-all">Select all</button>
+      </div>
+      <div class="oof-mailboxes" id="mailbox-list">
+        {% for mailbox in mailboxes %}
+        <label class="oof-mailbox" data-mailbox-row>
+          <input type="checkbox" name="mailboxes" value="{{ mailbox.user_principal_name }}" {% if not can_write %}disabled{% endif %}>
+          <span><strong>{{ mailbox.display_name }}</strong><br><small class="text-muted">{{ mailbox.user_principal_name }}</small></span>
+        </label>
+        {% else %}<p class="table__empty">No synced user mailboxes are available.</p>{% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header"><div><h2 class="card__title">Automatic reply</h2><p class="card__subtitle">Times are entered in your local timezone and sent to Microsoft 365 as UTC.</p></div></header>
+    <div class="card__body oof-fields">
+      <div class="form-field"><label for="start-local">Starts</label><input class="input" id="start-local" type="datetime-local" required {% if not can_write %}disabled{% endif %}><input type="hidden" name="start_time" id="start-time"></div>
+      <div class="form-field"><label for="end-local">Ends</label><input class="input" id="end-local" type="datetime-local" required {% if not can_write %}disabled{% endif %}><input type="hidden" name="end_time" id="end-time"></div>
+      <div class="form-field oof-wide"><label for="internal-message">Internal sender message</label><textarea class="input" id="internal-message" name="internal_message" rows="6" maxlength="10000" required {% if not can_write %}disabled{% endif %}></textarea></div>
+      <div class="form-field oof-wide"><label><input type="checkbox" name="same_message" id="same-message" checked {% if not can_write %}disabled{% endif %}> Use the same message for external senders</label></div>
+      <div class="form-field oof-wide" id="external-field" hidden><label for="external-message">External sender message</label><textarea class="input" id="external-message" name="external_message" rows="6" maxlength="10000" {% if not can_write %}disabled{% endif %}></textarea></div>
+      <div class="form-field oof-wide">
+        {% if can_write %}<button class="button button--primary" type="submit" {% if not mailboxes %}disabled{% endif %}>Set Out of Office</button>
+        {% else %}<p class="form-help">Your role has read-only access. Write permission is required to apply automatic replies.</p>{% endif %}
+      </div>
+    </div>
+  </section>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const same = document.getElementById('same-message');
+  const externalField = document.getElementById('external-field');
+  const external = document.getElementById('external-message');
+  const syncExternal = () => { externalField.hidden = same.checked; external.required = !same.checked; };
+  same?.addEventListener('change', syncExternal); syncExternal();
+  document.getElementById('mailbox-filter')?.addEventListener('input', event => {
+    const query = event.target.value.toLocaleLowerCase();
+    document.querySelectorAll('[data-mailbox-row]').forEach(row => { row.hidden = !row.textContent.toLocaleLowerCase().includes(query); });
+  });
+  document.getElementById('select-all')?.addEventListener('click', () => {
+    const visible = [...document.querySelectorAll('[data-mailbox-row]:not([hidden]) input:not(:disabled)')];
+    const shouldSelect = visible.some(input => !input.checked); visible.forEach(input => { input.checked = shouldSelect; });
+  });
+  document.getElementById('oof-form')?.addEventListener('submit', event => {
+    if (!document.querySelector('input[name="mailboxes"]:checked')) { event.preventDefault(); window.alert('Select at least one mailbox.'); return; }
+    for (const [localId, utcId] of [['start-local','start-time'],['end-local','end-time']]) {
+      const value = document.getElementById(localId).value;
+      if (!value) { event.preventDefault(); return; }
+      document.getElementById(utcId).value = new Date(value).toISOString();
+    }
+  });
+})();
+</script>
+{% endblock %}

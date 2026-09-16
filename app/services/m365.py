@@ -126,6 +126,7 @@ _PROVISION_APP_ROLES: list[str] = [
     # Additional permissions for mailbox reporting:
     "230c1aed-a721-4c5d-9cb4-a90514e508ef",  # Reports.Read.All
     "40f97065-369a-49f4-947c-6a255697ae91",  # MailboxSettings.Read
+    "6931bccd-447a-43d1-b442-00a195474933",  # MailboxSettings.ReadWrite
     # Required by the "Display concealed names in reports" best-practice check
     # (GET /admin/reportSettings) and its PATCH-based remediation. Distinct
     # from Reports.Read.All – /admin/reportSettings rejects tokens that lack
@@ -236,6 +237,7 @@ _GRAPH_ROLE_NAMES: dict[str, str] = {
     "b0afded3-3588-46d8-8b3d-9842eff778da": "AuditLog.Read.All",
     "230c1aed-a721-4c5d-9cb4-a90514e508ef": "Reports.Read.All",
     "40f97065-369a-49f4-947c-6a255697ae91": "MailboxSettings.Read",
+    "6931bccd-447a-43d1-b442-00a195474933": "MailboxSettings.ReadWrite",
     "ee353f83-55ef-4b78-82da-555bfa2b4b95": "ReportSettings.ReadWrite.All",
     "e2a3a72e-5f79-4c64-b1b1-878b674786c9": "Mail.ReadWrite",
     "dbaae8cf-10b5-4b86-a4a1-f871c94c6695": "GroupMember.ReadWrite.All",
