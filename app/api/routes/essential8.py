@@ -97,6 +97,8 @@ def _sanitize_requirement_evidence_filename(filename: str | None) -> str:
     stem = basename[: -len(suffix)] if suffix else basename
     safe_stem = sanitize_filename(stem).rstrip(".") or "upload"
     safe_suffix = sanitize_filename(suffix[1:] if suffix.startswith(".") else suffix)
+    if suffix and not safe_suffix:
+        safe_suffix = "bin"
     if safe_suffix:
         safe_suffix = f".{safe_suffix}"
     max_stem_length = max(1, 255 - len(safe_suffix))
@@ -113,10 +115,6 @@ def _allocate_requirement_evidence_storage_path(
     suffix = Path(safe_name).suffix.lower()
     storage_name = f"company_{company_id}_requirement_{requirement_id}_{uuid4().hex}{suffix}"
     storage_path = (storage_root / storage_name).resolve(strict=False)
-    try:
-        storage_path.relative_to(storage_root)
-    except ValueError as exc:  # pragma: no cover - defensive guard
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid evidence file name") from exc
     if storage_path.parent != storage_root:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid evidence file name")
     return storage_root, storage_path
