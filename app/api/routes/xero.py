@@ -15,7 +15,7 @@ from fastapi.responses import RedirectResponse
 from itsdangerous import URLSafeSerializer
 from itsdangerous import BadSignature
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.dependencies.modules import require_module_enabled
 from app.core.config import Settings, get_settings
@@ -39,10 +39,12 @@ class XeroCallbackResponse(BaseModel):
 
 
 class XeroTenantConnection(BaseModel):
-    tenant_id: str | None = None
-    tenant_name: str | None = None
-    tenant_type: str | None = None
-    created_date_utc: str | None = None
+    model_config = ConfigDict(populate_by_name=True)
+
+    tenant_id: str | None = Field(default=None, alias="tenantId")
+    tenant_name: str | None = Field(default=None, alias="tenantName")
+    tenant_type: str | None = Field(default=None, alias="tenantType")
+    created_date_utc: str | None = Field(default=None, alias="createdDateUtc")
 
 
 class XeroTenantListResponse(BaseModel):
