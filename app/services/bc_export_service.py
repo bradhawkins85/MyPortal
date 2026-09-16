@@ -585,7 +585,7 @@ async def _gather_bcp_export_data(plan_id: int, event_log_limit: int) -> dict[st
             {
                 "changed_at": entry.get("created_at"),
                 "changed_by": entry.get("user_email") or f"User {entry.get('user_id')}",
-                "fields": sorted(set(before.keys()) | set(after.keys())),
+                "changed_fields": sorted(set(before.keys()) | set(after.keys())),
                 "before": before,
                 "after": after,
             }

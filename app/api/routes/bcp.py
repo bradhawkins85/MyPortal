@@ -65,7 +65,7 @@ def _build_bcp_kpi_items(
     )
     rto_pct = int((rto_covered / total_activities) * 100) if total_activities else 0
 
-    recent_window = datetime.now() - timedelta(days=365)
+    recent_window = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=365)
     completed_exercises = sum(
         1
         for item in training_items
@@ -1194,7 +1194,7 @@ async def bcp_roles(request: Request):
     all_users = await user_repo.list_users()
     collaboration_audit = await audit_log_repo.list_audit_logs(
         entity_type="bcp_role_assignment",
-        limit=100,
+        limit=500,
     )
     collaboration_audit = [
         entry

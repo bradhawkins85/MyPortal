@@ -895,7 +895,7 @@
                     <td>{{ change.changed_at.strftime('%d/%m/%Y %H:%M') if change.changed_at else '-' }}</td>
                     <td>{{ change.changed_by }}</td>
                     <td>
-                        {% for field_name in change.fields %}
+                        {% for field_name in change.changed_fields %}
                         <div><strong>{{ field_name }}</strong>: {{ change.before.get(field_name, '—') }} → {{ change.after.get(field_name, '—') }}</div>
                         {% endfor %}
                     </td>
