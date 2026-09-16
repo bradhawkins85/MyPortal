@@ -29,20 +29,20 @@ async def _ensure_connection() -> None:
 def _make_aware(value: Any) -> datetime | None:
     if not value:
         return None
-
-
-def _make_date(value: Any) -> date | None:
-        if not value:
-            return None
-        if isinstance(value, datetime):
-            return value.date()
-        if isinstance(value, date):
-            return value
-        return None
     if isinstance(value, datetime):
         if value.tzinfo is None:
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
+    return None
+
+
+def _make_date(value: Any) -> date | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
     return None
 
 
