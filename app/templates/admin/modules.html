@@ -10,10 +10,220 @@
 {% endblock %}
 
 {% block content %}
+  {% set ops = operations_center or {} %}
+  {% set ops_summary = ops.summary or {} %}
   <div class="management management--single" data-layout>
     <section class="management__content">
       <header class="management__header">
       </header>
+
+      <section class="card card--panel">
+        <header class="card__header card__header--stacked">
+          <div>
+            <h2 class="card__title">Integration health center</h2>
+            <p class="card__subtitle">Review enabled-module health, error budget pressure, dead-letter queue load, and first-run setup gaps from one place.</p>
+          </div>
+          <div class="stats-grid">
+            <div class="stat">
+              <span class="stat__label">Enabled</span>
+              <span class="stat__value">{{ ops_summary.enabled_modules or 0 }}</span>
+            </div>
+            <div class="stat">
+              <span class="stat__label">Healthy</span>
+              <span class="stat__value">{{ ops_summary.healthy_modules or 0 }}</span>
+            </div>
+            <div class="stat">
+              <span class="stat__label">Warnings</span>
+              <span class="stat__value">{{ ops_summary.warning_modules or 0 }}</span>
+            </div>
+            <div class="stat">
+              <span class="stat__label">Degraded</span>
+              <span class="stat__value">{{ ops_summary.degraded_modules or 0 }}</span>
+            </div>
+            <div class="stat">
+              <span class="stat__label">Failed webhooks</span>
+              <span class="stat__value">{{ ops_summary.failed_webhooks or 0 }}</span>
+            </div>
+            <div class="stat">
+              <span class="stat__label">Task conflicts</span>
+              <span class="stat__value">{{ ops_summary.task_conflicts or 0 }}</span>
+            </div>
+          </div>
+        </header>
+        <div class="card__controls">
+          <a class="button button--ghost" href="/admin/webhooks?status=failed&event_limit=200">Open dead-letter queue</a>
+          <a class="button button--ghost" href="/admin/scheduled-tasks">Review scheduled tasks</a>
+        </div>
+        <div class="table-wrapper">
+          <table class="table" id="integration-health-table" data-table data-table-id="integration-health">
+            <thead>
+              <tr>
+                <th scope="col" data-sort="string">Module</th>
+                <th scope="col" data-sort="string">Status</th>
+                <th scope="col" data-sort="number">SLO</th>
+                <th scope="col" data-sort="number">Error budget</th>
+                <th scope="col" data-sort="number">Scheduled tasks</th>
+                <th scope="col" data-sort="number">Failed webhooks</th>
+                <th scope="col" data-sort="string">Setup blockers</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in ops.module_health or [] %}
+                <tr>
+                  <td data-label="Module">{{ row.name }}</td>
+                  <td data-label="Status">
+                    <span class="badge {% if row.status_key == 'healthy' %}badge--success{% elif row.status_key == 'disabled' %}badge--secondary{% elif row.status_key == 'warning' or row.status_key == 'setup' %}badge--warning{% else %}badge--danger{% endif %}">
+                      {{ row.status_label }}
+                    </span>
+                  </td>
+                  <td data-label="SLO" data-value="{{ row.slo_achieved_percent if row.slo_achieved_percent is not none else -1 }}">
+                    {% if row.slo_achieved_percent is not none %}
+                      {{ row.slo_achieved_percent }}% / {{ row.slo_target_percent }}%
+                    {% else %}
+                      <span class="text-muted">No recent telemetry</span>
+                    {% endif %}
+                  </td>
+                  <td data-label="Error budget" data-value="{{ row.error_budget_remaining }}">
+                    {% if row.error_budget_total %}
+                      {{ row.error_budget_used }}/{{ row.error_budget_total }} used
+                    {% else %}
+                      <span class="text-muted">—</span>
+                    {% endif %}
+                  </td>
+                  <td data-label="Scheduled tasks">{{ row.scheduled_task_count }}</td>
+                  <td data-label="Failed webhooks">{{ row.failed_webhook_count }}</td>
+                  <td data-label="Setup blockers">
+                    {% if row.missing_fields %}
+                      {{ row.missing_fields | join(', ') }}
+                    {% elif row.warnings %}
+                      {{ row.warnings[0].message }}
+                    {% else %}
+                      <span class="text-muted">None</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="7" class="table__empty">No integration modules are registered.</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="admin-grid admin-grid--columns">
+        <section class="card card--panel">
+          <header class="card__header">
+            <div>
+              <h2 class="card__title">Credential expiry warnings</h2>
+              <p class="card__subtitle">Surface expiring OAuth tokens and client secrets before integrations fail.</p>
+            </div>
+          </header>
+          <ul class="list">
+            {% for warning in ops.credential_alerts or [] %}
+              <li>
+                <span class="badge {{ 'badge--danger' if warning.severity == 'danger' else 'badge--warning' }}">{{ warning.module_name }}</span>
+                {{ warning.message }}
+                {% if warning.expires_at_iso %}
+                  <span class="text-muted">(<span data-utc="{{ warning.expires_at_iso }}"></span>)</span>
+                {% endif %}
+              </li>
+            {% else %}
+              <li class="text-muted">No credential renewal warnings are currently queued.</li>
+            {% endfor %}
+          </ul>
+        </section>
+
+        <section class="card card--panel">
+          <header class="card__header">
+            <div>
+              <h2 class="card__title">Integration setup wizard</h2>
+              <p class="card__subtitle">Work through the next missing configuration step for each module before enabling production traffic.</p>
+            </div>
+          </header>
+          <ol class="list">
+            {% for step in ops.setup_steps or [] %}
+              <li>
+                <strong>{{ step.module_name }}</strong>
+                <div>{{ step.issues | join(' · ') }}</div>
+                {% if step.action_url and step.action_url.startswith('/') %}
+                  <div><a href="{{ step.action_url }}">Open configuration</a></div>
+                {% endif %}
+              </li>
+            {% else %}
+              <li class="text-muted">Every tracked integration has the expected baseline setup.</li>
+            {% endfor %}
+          </ol>
+        </section>
+      </div>
+
+      <section class="card card--panel">
+        <header class="card__header">
+          <div>
+            <h2 class="card__title">Scheduled task dependency graph</h2>
+            <p class="card__subtitle">Shared module ownership highlights risky overlaps, duplicate schedules, and commands that may compete for the same integration window.</p>
+          </div>
+        </header>
+        <ul class="list">
+          {% for conflict in ops.dependency_graph.conflicts or [] %}
+            <li>
+              <span class="badge {{ 'badge--danger' if conflict.severity == 'danger' else 'badge--warning' }}">{{ conflict.summary }}</span>
+              {{ conflict.detail }}
+            </li>
+          {% else %}
+            <li class="text-muted">No risky overlaps or duplicate integration schedules were detected.</li>
+          {% endfor %}
+        </ul>
+        <div class="table-wrapper">
+          <table class="table" id="integration-dependency-graph" data-table data-table-id="integration-dependency-graph">
+            <thead>
+              <tr>
+                <th scope="col" data-sort="string">Task</th>
+                <th scope="col" data-sort="string">Scope</th>
+                <th scope="col" data-sort="string">Modules</th>
+                <th scope="col" data-sort="date">Next run</th>
+                <th scope="col" data-sort="number">Conflicts</th>
+                <th scope="col" data-sort="string">Related tasks</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for task in ops.dependency_graph.graph or [] %}
+                <tr>
+                  <td data-label="Task">{{ task.name }}<div class="text-muted">{{ task.command }}</div></td>
+                  <td data-label="Scope">{{ task.company_name }}</td>
+                  <td data-label="Modules">
+                    {% if task.module_slugs %}
+                      {{ task.module_slugs | join(', ') }}
+                    {% else %}
+                      <span class="text-muted">Unowned command</span>
+                    {% endif %}
+                  </td>
+                  <td data-label="Next run" data-value="{{ task.next_run_iso or '' }}">
+                    {% if task.next_run_iso %}
+                      <span data-utc="{{ task.next_run_iso }}"></span>
+                    {% else %}
+                      <span class="text-muted">—</span>
+                    {% endif %}
+                  </td>
+                  <td data-label="Conflicts">{{ task.conflict_count }}</td>
+                  <td data-label="Related tasks">
+                    {% if task.related_tasks %}
+                      {{ task.related_tasks | join(', ') }}
+                    {% else %}
+                      <span class="text-muted">None</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="6" class="table__empty">No active scheduled tasks are available for dependency analysis.</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section class="card card--panel">
         <div class="table-wrapper">

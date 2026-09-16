@@ -210,6 +210,7 @@ from app.services import ticket_attachments as attachments_service
 from app.services import template_variables
 from app.services import webhook_monitor
 from app.services import xero as xero_service
+from app.services import integration_operations as integration_operations_service
 from app.services import issues as issues_service
 from app.services import reports as reports_service
 from app.services import reporting as reporting_service
@@ -10266,6 +10267,7 @@ async def _render_modules_dashboard(
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
     modules = await modules_service.list_modules()
+    operations_center = await integration_operations_service.build_operations_center(modules)
     public_base = str(settings.public_base_url or "").strip().rstrip("/")
     if not public_base:
         public_base = str(request.base_url).rstrip("/")
@@ -10282,6 +10284,7 @@ async def _render_modules_dashboard(
         "title": "Integration modules",
         "modules": modules,
         "module_webhook_urls": module_webhook_urls,
+        "operations_center": operations_center,
         "success_message": success_message,
         "error_message": error_message,
     }
