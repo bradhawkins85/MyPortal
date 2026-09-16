@@ -228,7 +228,13 @@ async def _get_xero_rate_lookup_credentials() -> tuple[str | None, str | None]:
     return tenant_id, access_token
 
 
-async def generate_invoice(company_id: int) -> dict[str, Any]:
+async def generate_invoice(
+    company_id: int,
+    *,
+    ticket_ids: list[int] | None = None,
+    include_recurring_items: bool = True,
+    approval_required: bool = False,
+) -> dict[str, Any]:
     """Generate a local invoice for the given company.
 
     Builds invoice line items from:
@@ -259,14 +265,16 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
 
     # Build recurring invoice items. When Xero is configured, pass credentials
     # so items without a local price override use their Xero sales price.
-    recurring_line_items = await xero_service.build_recurring_invoice_items(
-        company_id,
-        tax_type=None,
-        context=context,
-        tenant_id=tenant_id,
-        access_token=access_token,
-        include_metadata=True,
-    )
+    recurring_line_items: list[dict[str, Any]] = []
+    if include_recurring_items:
+        recurring_line_items = await xero_service.build_recurring_invoice_items(
+            company_id,
+            tax_type=None,
+            context=context,
+            tenant_id=tenant_id,
+            access_token=access_token,
+            include_metadata=True,
+        )
 
     line_item_template = await _get_xero_line_item_template()
 
@@ -276,6 +284,8 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
     billable_tickets_found = 0
 
     billable_statuses = _get_env_xero_billable_statuses()
+
+    requested_ticket_ids = {int(ticket_id) for ticket_id in ticket_ids or [] if ticket_id}
 
     # Fetch all tickets for the company and find unbilled ones
     try:
@@ -292,11 +302,16 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
         all_tickets = []
 
     for ticket in all_tickets:
+        try:
+            ticket_id = int(ticket.get("id")) if ticket.get("id") is not None else None
+        except (TypeError, ValueError):
+            ticket_id = None
+        if requested_ticket_ids and ticket_id not in requested_ticket_ids:
+            continue
+
         ticket_status = str(ticket.get("status") or "").strip().lower()
         if ticket_status not in billable_statuses:
             continue
-
-        ticket_id = ticket.get("id")
         if not ticket_id:
             continue
 
@@ -468,7 +483,8 @@ async def generate_invoice(company_id: int) -> dict[str, Any]:
             invoice_number=invoice_number,
             amount=total_amount,
             due_date=due_date,
-            status="draft",
+            status="pending_approval" if approval_required else "draft",
+            approval_required=approval_required,
         )
     except Exception as exc:
         logger.error(
