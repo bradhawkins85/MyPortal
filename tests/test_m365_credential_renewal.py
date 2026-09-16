@@ -253,7 +253,7 @@ async def test_renew_admin_client_secret_backfills_missing_app_object_id():
     assert persisted[2]["client_secret"] == "new-secret"
     add_call = next(c for c in posted_calls if "addPassword" in c["url"])
     assert APP_OBJECT_ID in add_call["url"]
-    exchange_mock.assert_awaited_once()
+    assert exchange_mock.await_count == 2
 
 
 @pytest.mark.anyio("asyncio")
