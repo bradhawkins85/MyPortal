@@ -2,251 +2,160 @@
 {% from "macros/header.html" import page_header_actions %}
 
 {% block header_title %}Office 365{% endblock %}
-
 {% block title %}Office 365{% endblock %}
 
 {% block styles %}
 <style>
-  .provision-step {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-  }
-  .provision-step__label {
-    white-space: nowrap;
-    font-weight: 600;
-    min-width: 4rem;
-  }
-  .provision-step + .provision-step {
-    margin-top: 0.75rem;
+  .m365-page { display: grid; gap: 1rem; max-width: 1180px; margin: 0 auto; }
+  .m365-hero { display: flex; align-items: center; justify-content: space-between; gap: 1.25rem; padding: 1.15rem 1.25rem; border: 1px solid rgba(96, 165, 250, .22); border-radius: .9rem; background: linear-gradient(120deg, rgba(37, 99, 235, .16), rgba(30, 41, 59, .72) 55%); }
+  .m365-hero__copy { display: flex; align-items: center; gap: 1rem; min-width: 0; }
+  .m365-hero__icon, .m365-section-icon { display: grid; place-items: center; flex: 0 0 auto; color: #93c5fd; background: rgba(59, 130, 246, .14); border-radius: .7rem; }
+  .m365-hero__icon { width: 3rem; height: 3rem; }
+  .m365-hero__icon svg, .m365-section-icon svg { width: 1.4rem; height: 1.4rem; fill: currentColor; }
+  .m365-hero h2, .m365-card h3, .m365-card p { margin-top: 0; }
+  .m365-hero h2 { margin-bottom: .2rem; font-size: 1.18rem; }
+  .m365-hero p { margin: 0; color: rgba(226, 232, 240, .72); font-size: .9rem; }
+  .m365-status { display: inline-flex; align-items: center; gap: .45rem; flex: 0 0 auto; padding: .38rem .7rem; border-radius: 999px; font-size: .78rem; font-weight: 700; background: rgba(248, 113, 113, .12); color: #fecaca; border: 1px solid rgba(248, 113, 113, .28); }
+  .m365-status--connected { background: rgba(52, 211, 153, .12); color: #a7f3d0; border-color: rgba(52, 211, 153, .28); }
+  .m365-status__dot { width: .45rem; height: .45rem; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px rgba(248, 113, 113, .1); }
+  .m365-status--connected .m365-status__dot { box-shadow: 0 0 0 3px rgba(52, 211, 153, .1); }
+  .m365-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, .75fr); gap: 1rem; align-items: start; }
+  .m365-stack { display: grid; gap: 1rem; min-width: 0; }
+  .m365-card { min-width: 0; padding: 1.15rem; border: 1px solid rgba(148, 163, 184, .14); border-radius: .85rem; background: rgba(30, 41, 59, .72); }
+  .m365-card__header { display: flex; gap: .75rem; align-items: flex-start; margin-bottom: 1rem; }
+  .m365-card__header h3 { margin-bottom: .18rem; font-size: 1rem; }
+  .m365-card__header p { margin-bottom: 0; font-size: .82rem; color: rgba(226, 232, 240, .65); line-height: 1.45; }
+  .m365-section-icon { width: 2.25rem; height: 2.25rem; }
+  .m365-section-icon svg { width: 1.12rem; height: 1.12rem; }
+  .m365-steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+  .m365-step { display: flex; flex-direction: column; gap: .65rem; padding: .85rem; border-radius: .7rem; background: rgba(15, 23, 42, .42); border: 1px solid rgba(148, 163, 184, .12); }
+  .m365-step__top { display: flex; align-items: center; gap: .55rem; }
+  .m365-step__number { display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 50%; color: #bfdbfe; background: rgba(59, 130, 246, .2); font-size: .72rem; font-weight: 800; }
+  .m365-step__title { font-size: .85rem; font-weight: 700; }
+  .m365-step p { margin: 0; color: rgba(226, 232, 240, .62); font-size: .76rem; line-height: 1.4; }
+  .m365-step .button { align-self: flex-start; margin-top: auto; }
+  .m365-facts { display: grid; gap: .65rem; margin: 0; }
+  .m365-fact { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: .65rem; align-items: baseline; padding-bottom: .65rem; border-bottom: 1px solid rgba(148, 163, 184, .11); }
+  .m365-fact:last-child { padding-bottom: 0; border-bottom: 0; }
+  .m365-fact dt { color: rgba(226, 232, 240, .58); font-size: .74rem; }
+  .m365-fact dd { margin: 0; overflow-wrap: anywhere; font-size: .79rem; }
+  .m365-actions { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: 1rem; }
+  .m365-checklist { display: grid; gap: .65rem; margin: 0; padding: 0; list-style: none; }
+  .m365-checklist li { position: relative; padding-left: 1.45rem; color: rgba(226, 232, 240, .78); font-size: .8rem; line-height: 1.4; }
+  .m365-checklist li::before { content: "✓"; position: absolute; left: 0; color: #60a5fa; font-weight: 800; }
+  .m365-disclosure { padding: 0; overflow: hidden; }
+  .m365-disclosure > summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.15rem; cursor: pointer; list-style: none; }
+  .m365-disclosure > summary::-webkit-details-marker { display: none; }
+  .m365-disclosure > summary::after { content: "+"; color: #93c5fd; font-size: 1.3rem; line-height: 1; }
+  .m365-disclosure[open] > summary::after { content: "−"; }
+  .m365-disclosure > summary h3 { margin: 0; font-size: .92rem; }
+  .m365-disclosure > summary span { display: block; margin-top: .2rem; color: rgba(226, 232, 240, .55); font-size: .74rem; }
+  .m365-disclosure__body { padding: 0 1.15rem 1.15rem; border-top: 1px solid rgba(148, 163, 184, .11); }
+  .m365-disclosure__body > p { margin: .85rem 0; font-size: .8rem; }
+  .m365-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
+  .m365-form .form-field { margin: 0; }
+  .m365-form .form-field--wide, .m365-form .form-actions { grid-column: 1 / -1; }
+  .m365-form .form-actions { justify-content: flex-start; }
+  .m365-danger-zone { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(248, 113, 113, .16); }
+  .m365-danger-zone p { margin: 0; color: rgba(226, 232, 240, .6); font-size: .75rem; }
+  @media (max-width: 900px) { .m365-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 640px) {
+    .m365-hero { align-items: flex-start; flex-direction: column; }
+    .m365-steps, .m365-form { grid-template-columns: 1fr; }
+    .m365-form .form-field--wide, .m365-form .form-actions { grid-column: auto; }
+    .m365-danger-zone { align-items: flex-start; flex-direction: column; }
   }
 </style>
 {% endblock %}
 
 {% block header_actions %}
-  {% if has_credentials %}
-    {{ page_header_actions([
-      {"label": "User Mailboxes", "type": "link", "href": "/m365/mailboxes/users"},
-      {"label": "Shared Mailboxes", "type": "link", "href": "/m365/mailboxes/shared"}
-    ]) }}
-  {% endif %}
+  {{ page_header_actions([
+    {"label": "Licenses", "type": "link", "href": "/licenses"},
+    {"label": "User Mailboxes", "type": "link", "href": "/m365/mailboxes/users"},
+    {"label": "Shared Mailboxes", "type": "link", "href": "/m365/mailboxes/shared"}
+  ]) }}
 {% endblock %}
 
 {% block content %}
-  <section class="panel">
-    <header class="panel__header">
-      <div>
-        <h2 class="panel__title">Microsoft 365 integration</h2>
-        <p class="panel__subtitle">
-          Configure Azure AD credentials and authorize the tenant so license counts and assignments can be synchronised.
-        </p>
-      </div>
-    </header>
-    <div class="panel__body">
-      {% if credential %}
-      <dl class="definition-list">
-        <div class="definition-list__item">
-          <dt>Tenant ID</dt>
-          <dd>{{ credential.tenant_id }}</dd>
-        </div>
-        <div class="definition-list__item">
-          <dt>Client ID</dt>
-          <dd>{{ credential.client_id }}</dd>
-        </div>
-        <div class="definition-list__item">
-          <dt>Token expires</dt>
-          <dd>{{ credential.token_expires_at or 'Not available' }}</dd>
-        </div>
-      </dl>
-      {% else %}
-      <p>No Microsoft 365 credentials have been stored for this company.</p>
-      {% endif %}
-      <p class="text-muted">License synchronisation contacts Microsoft Graph using application permissions. The refresh token is encrypted before storage and never displayed once saved.</p>
+<div class="m365-page">
+  <section class="m365-hero" aria-labelledby="m365-title">
+    <div class="m365-hero__copy">
+      <span class="m365-hero__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 5.5 10.5 3v8H3V5.5Zm9-2.9L21 1v10h-9V2.6ZM3 12.5h7.5v8L3 18.5v-6Zm9 0h9v10l-9-1.6v-8.4Z"/></svg></span>
+      <div><h2 id="m365-title">Microsoft 365 connection</h2><p>Manage tenant access, credentials, and connection health for {{ company.name if company and company.name else 'this company' }}.</p></div>
     </div>
+    <span class="m365-status{% if has_credentials %} m365-status--connected{% endif %}"><span class="m365-status__dot"></span>{{ 'Connected' if has_credentials else 'Not connected' }}</span>
   </section>
 
-  {% if is_super_admin %}
-  <section class="panel">
-    <header class="panel__header">
-      <h3 class="panel__title">Auto-provision enterprise app</h3>
-    </header>
-    <div class="panel__body">
-      <p>Automatically create a dedicated enterprise app registration in the tenant with the required permissions. The customer's Global Admin signs in to grant consent — no manual Azure portal steps required.</p>
-      <div style="margin-top: 1rem;">
-        <div class="provision-step">
-          <span class="provision-step__label">Step 1</span>
-          <a href="/m365/discover" class="button">Sign in as Global Admin</a>
+  <div class="m365-grid">
+    <main class="m365-stack">
+      {% if is_super_admin %}
+      <section class="m365-card" aria-labelledby="setup-title">
+        <header class="m365-card__header">
+          <span class="m365-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 0 1 5 5v1h1a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3v-8a3 3 0 0 1 3-3h1V7a5 5 0 0 1 5-5Zm0 2a3 3 0 0 0-3 3v1h6V7a3 3 0 0 0-3-3Zm0 8a2 2 0 0 0-1 3.73V18h2v-2.27A2 2 0 0 0 12 12Z"/></svg></span>
+          <div><h3 id="setup-title">Guided tenant setup</h3><p>Create and authorise a dedicated enterprise app without manually configuring the Azure portal.</p></div>
+        </header>
+        <div class="m365-steps">
+          <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">1</span><span class="m365-step__title">Identify tenant</span></div><p>A Global Admin signs in so the tenant can be discovered securely.</p><a href="/m365/discover" class="button">Sign in as Global Admin</a></div>
+          <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">2</span><span class="m365-step__title">Grant portal access</span></div><p>Approve the required Microsoft Graph permissions and offline access.</p>{% if has_credentials %}<a href="/m365/connect" class="button">Authorise portal access</a>{% else %}<button type="button" class="button button--secondary" disabled title="Complete step 1 first">Complete step 1 first</button>{% endif %}</div>
         </div>
-        <p class="form-help" style="margin-top: 0.5rem;">The Global Admin signs in to identify the tenant automatically, then grants consent for the required permissions.</p>
-        {% if has_credentials %}
-        <div class="provision-step">
-          <span class="provision-step__label">Step 2</span>
-          <a href="/m365/connect" class="button">Authorise portal access</a>
-        </div>
-        {% endif %}
-      </div>
-    </div>
-  </section>
-  {% endif %}
-
-  {% if is_super_admin %}
-  <details class="card card--panel card-collapsible">
-    <summary class="card__header card__header--collapsible">
-      <div>
-        <h3 class="card__title">Admin enterprise app</h3>
-      </div>
-      <div class="card__collapsible-meta" aria-hidden="true">
-        <span class="card__toggle-icon"></span>
-      </div>
-    </summary>
-    <div class="card-collapsible__content">
-      <p class="text-muted" style="margin-bottom: 1rem;">
-        Configure per-company admin credentials for the enterprise app used to auto-provision customer app registrations. These settings override the global module configuration.
-      </p>
-      {% if admin_credential %}
-      <dl class="definition-list" style="margin-bottom: 1rem;">
-        <div class="definition-list__item">
-          <dt>Admin Client ID</dt>
-          <dd>{{ admin_credential.client_id }}</dd>
-        </div>
-        {% if admin_credential.tenant_id %}
-        <div class="definition-list__item">
-          <dt>Admin Tenant ID</dt>
-          <dd>{{ admin_credential.tenant_id }}</dd>
-        </div>
-        {% endif %}
-        {% if admin_credential.client_secret_expires_at %}
-        <div class="definition-list__item">
-          <dt>Secret expires</dt>
-          <dd>{{ admin_credential.client_secret_expires_at }}</dd>
-        </div>
-        {% endif %}
-      </dl>
+      </section>
       {% endif %}
-      <form method="post" action="/m365/admin-credentials" class="form-grid">
-        {% if csrf_token %}
-        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-        {% endif %}
-        <label class="form-field">
-          <span class="form-label">Admin Client ID</span>
-          <input type="text" name="adminClientId" class="input" value="{{ admin_credential.client_id if admin_credential else '' }}" required placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
-          <span class="form-help">The Azure AD application ID for the admin enterprise app registration.</span>
-        </label>
-        <label class="form-field">
-          <span class="form-label">Admin Client Secret</span>
-          <input type="password" name="adminClientSecret" class="input" placeholder="Enter a new client secret" {% if not admin_credential %}required{% endif %} />
-          <span class="form-help">Leave blank to keep existing secret. Secrets are encrypted at rest.</span>
-        </label>
-        <label class="form-field">
-          <span class="form-label">Admin Tenant ID (optional)</span>
-          <input type="text" name="adminTenantId" class="input" value="{{ admin_credential.tenant_id if admin_credential else '' }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
-          <span class="form-help">The tenant ID for the admin app (usually the partner/MSP tenant).</span>
-        </label>
-        <div class="form-actions">
-          <button type="submit" class="button">Save admin credentials</button>
+
+      {% if is_super_admin %}
+      <details class="m365-card m365-disclosure"{% if not has_credentials %} open{% endif %}>
+        <summary><div><h3>Connection credentials</h3><span>Tenant application IDs and encrypted secret</span></div></summary>
+        <div class="m365-disclosure__body">
+          <form method="post" action="/m365/credentials" class="m365-form">
+            {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+            <label class="form-field"><span class="form-label">Tenant ID</span><input type="text" id="manage-cred-tenant-id" name="tenantId" class="input" value="{{ credential.tenant_id if credential else '' }}" required autocomplete="off" /></label>
+            <label class="form-field"><span class="form-label">Client ID</span><input type="text" name="clientId" class="input" value="{{ credential.client_id if credential else '' }}" required autocomplete="off" /></label>
+            <label class="form-field form-field--wide"><span class="form-label">Client secret</span><input type="password" name="clientSecret" class="input" placeholder="{{ 'Leave blank to keep the current secret' if credential else 'Enter client secret' }}" {% if not credential %}required{% endif %} autocomplete="new-password" /><span class="form-help">Encrypted at rest and never displayed after saving.</span></label>
+            <div class="form-actions"><button type="submit" class="button">Save credentials</button>{% if credential %}<button type="submit" class="button button--ghost" formaction="/m365/test" formnovalidate>Test connection</button>{% endif %}</div>
+          </form>
+          {% if credential %}<div class="m365-danger-zone"><p>Removing credentials stops Microsoft 365 synchronisation.</p><form method="post" action="/m365/credentials/delete">{% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}<button type="submit" class="button button--danger" onclick="return confirm('Delete stored Microsoft 365 credentials?');">Delete credentials</button></form></div>{% endif %}
         </div>
-      </form>
-      {% if admin_credential %}
-      <form method="post" action="/m365/admin-credentials/delete" class="form-inline" style="margin-top: 0.75rem;">
-        {% if csrf_token %}
-        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-        {% endif %}
-        <button type="submit" class="button button--secondary" onclick="return confirm('Delete admin enterprise app credentials? This company will fall back to global module settings.');">Delete admin credentials</button>
-      </form>
-      {% endif %}
-    </div>
-  </details>
-  {% endif %}
+      </details>
 
-  {% if is_super_admin %}
-  <details class="card card--panel card-collapsible">
-    <summary class="card__header card__header--collapsible">
-      <div>
-        <h3 class="card__title">Manage credentials</h3>
-      </div>
-      <div class="card__collapsible-meta" aria-hidden="true">
-        <span class="card__toggle-icon"></span>
-      </div>
-    </summary>
-    <div class="card-collapsible__content">
-      <form method="post" action="/m365/credentials" class="form-grid">
-        {% if csrf_token %}
-        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-        {% endif %}
-        <label class="form-field">
-          <span class="form-label">Tenant ID</span>
-          <input type="text" id="manage-cred-tenant-id" name="tenantId" class="input" value="{{ credential.tenant_id if credential else '' }}" required />
-        </label>
-        <label class="form-field">
-          <span class="form-label">Client ID</span>
-          <input type="text" name="clientId" class="input" value="{{ credential.client_id if credential else '' }}" required />
-        </label>
-        <label class="form-field">
-          <span class="form-label">Client secret</span>
-          <input type="password" name="clientSecret" class="input" placeholder="Enter a new client secret" {% if not credential %}required{% endif %} />
-          <span class="form-help">Secrets are encrypted at rest; re-enter to rotate.</span>
-        </label>
-        <div class="form-actions">
-          <button type="submit" class="button">Save credentials</button>
+      <details class="m365-card m365-disclosure">
+        <summary><div><h3>Advanced provisioning credentials</h3><span>Optional per-company override for the admin enterprise app</span></div></summary>
+        <div class="m365-disclosure__body">
+          <p class="text-muted">Use these only when this company should not use the global provisioning configuration.</p>
+          <form method="post" action="/m365/admin-credentials" class="m365-form">
+            {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+            <label class="form-field"><span class="form-label">Admin Client ID</span><input type="text" name="adminClientId" class="input" value="{{ admin_credential.client_id if admin_credential else '' }}" required autocomplete="off" /></label>
+            <label class="form-field"><span class="form-label">Admin Tenant ID <span class="text-muted">(optional)</span></span><input type="text" name="adminTenantId" class="input" value="{{ admin_credential.tenant_id if admin_credential else '' }}" autocomplete="off" /></label>
+            <label class="form-field form-field--wide"><span class="form-label">Admin Client Secret</span><input type="password" name="adminClientSecret" class="input" placeholder="{{ 'Leave blank to keep the current secret' if admin_credential else 'Enter client secret' }}" {% if not admin_credential %}required{% endif %} autocomplete="new-password" /><span class="form-help">Encrypted at rest. Enter a value only to add or rotate the secret.</span></label>
+            <div class="form-actions"><button type="submit" class="button">Save admin credentials</button></div>
+          </form>
+          {% if admin_credential %}<div class="m365-danger-zone"><p>Removing this override restores the global module configuration.</p><form method="post" action="/m365/admin-credentials/delete">{% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}<button type="submit" class="button button--danger" onclick="return confirm('Delete admin enterprise app credentials? This company will fall back to global module settings.');">Delete override</button></form></div>{% endif %}
         </div>
-      </form>
-      {% if credential %}
-      <form method="post" action="/m365/test" class="form-inline" style="margin-top: 0.75rem;">
-        {% if csrf_token %}
-        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-        {% endif %}
-        <button type="submit" class="button button--ghost">Test connectivity</button>
-      </form>
-      <form method="post" action="/m365/credentials/delete" class="form-inline">
-        {% if csrf_token %}
-        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-        {% endif %}
-        <button type="submit" class="button button--secondary" onclick="return confirm('Delete stored Microsoft 365 credentials?');">Delete credentials</button>
-      </form>
+      </details>
       {% endif %}
-    </div>
-  </details>
-  {% endif %}
+    </main>
 
-  {% if has_credentials and is_super_admin %}
-  <section class="panel">
-    <header class="panel__header">
-      <h3 class="panel__title">Mailbox report privacy check</h3>
-    </header>
-    <div class="panel__body">
-      <p>
-        Microsoft 365 can conceal mailbox identifiers in usage reports when the admin centre privacy
-        option <em>Display concealed user, group, and site names in all reports</em> is enabled.
-        When active, mailbox sync will fail because real user addresses cannot be identified.
-      </p>
-      <p class="text-muted">
-        Use this check to confirm whether the privacy setting is interfering with mailbox sync.
-        If the check reports concealment, sign in to the
-        <a href="https://admin.microsoft.com" target="_blank" rel="noopener noreferrer">Microsoft 365 admin centre</a>,
-        go to <strong>Settings → Org settings → Services → Reports</strong> and disable
-        <em>Display concealed user, group, and site names in all reports</em>, then re-run the check.
-      </p>
-      <form method="post" action="/m365/checks/report-privacy" class="form-inline" style="margin-top: 0.75rem;">
-        {% if csrf_token %}
-        <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
-        {% endif %}
-        <button type="submit" class="button button--ghost">Check mailbox report privacy</button>
-      </form>
-    </div>
-  </section>
-  {% endif %}
+    <aside class="m365-stack" aria-label="Connection details and tools">
+      <section class="m365-card">
+        <header class="m365-card__header"><span class="m365-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm-1 5v6h6v-2h-4V7h-2Z"/></svg></span><div><h3>Connection overview</h3><p>Current tenant authentication state.</p></div></header>
+        <dl class="m365-facts">
+          <div class="m365-fact"><dt>Status</dt><dd>{{ 'Ready to synchronise' if has_credentials else 'Setup required' }}</dd></div>
+          <div class="m365-fact"><dt>Token expiry</dt><dd>{% if credential and credential.token_expires_at %}<time data-utc="{{ credential.token_expires_at }}">{{ credential.token_expires_at }}</time>{% else %}Not available{% endif %}</dd></div>
+          {% if is_super_admin %}<div class="m365-fact"><dt>Provisioning</dt><dd>{{ 'Company override' if has_admin_credentials else ('Global configuration' if admin_credentials_configured else 'Not configured') }}</dd></div>{% endif %}
+        </dl>
+      </section>
 
-  <section class="panel">
-    <header class="panel__header">
-      <h3 class="panel__title">How synchronisation works</h3>
-    </header>
-    <div class="panel__body">
-      <ol class="list list--ordered">
-        <li>Store a tenant ID, client ID, and client secret for the company (or use Auto-provision if available).</li>
-        <li>Authorize the application using the "Authorize portal access" button to grant offline access.</li>
-        <li>Trigger a sync from the Licenses tab to import subscribed SKUs and assigned users.</li>
-      </ol>
-      <p class="text-muted">Scheduled tasks can also call the synchronisation service to keep allocation data aligned with Microsoft 365.</p>
-    </div>
-  </section>
+      {% if has_credentials and is_super_admin %}
+      <section class="m365-card">
+        <header class="m365-card__header"><span class="m365-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2 3 6v6c0 5 3.8 9.7 9 10 5.2-.3 9-5 9-10V6l-9-4Zm-1 14-4-4 1.4-1.4 2.6 2.6 5.6-5.6L18 9l-7 7Z"/></svg></span><div><h3>Mailbox report privacy</h3><p>Confirm that usage reports expose the identifiers required for mailbox sync.</p></div></header>
+        <form method="post" action="/m365/checks/report-privacy">{% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}<button type="submit" class="button button--ghost">Run privacy check</button></form>
+        <p class="form-help">If concealment is detected, update Reports settings in the <a href="https://admin.microsoft.com" target="_blank" rel="noopener noreferrer">Microsoft 365 admin centre</a>.</p>
+      </section>
+      {% endif %}
+
+      <section class="m365-card">
+        <header class="m365-card__header"><span class="m365-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm1 5h-2v2h2V7Zm0 4h-2v6h2v-6Z"/></svg></span><div><h3>Synchronisation</h3><p>What happens after setup.</p></div></header>
+        <ul class="m365-checklist"><li>Credentials are stored securely for this company.</li><li>Microsoft Graph access is granted by an administrator.</li><li>License and mailbox data can be refreshed manually or by scheduled tasks.</li></ul>
+      </section>
+    </aside>
+  </div>
+</div>
 {% endblock %}
