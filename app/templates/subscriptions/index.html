@@ -1,36 +1,35 @@
 {% extends "base.html" %}
+{% from "macros/counters.html" import counter_strip %}
 
 {% block header_title %}Subscriptions{% endblock %}
 
 {% block title %}Subscriptions{% endblock %}
 
 {% block content %}
-<section class="panel">
-  <header class="panel__header">
-    <div class="panel__meta">
-      <strong>Renewal forecast</strong>
-    </div>
-  </header>
-  <div class="panel__body">
-    <div class="stat-cards">
-      <div class="stat-card">
-        <div class="stat-label">Renewing in 30 days</div>
-        <div class="stat-value">{{ renewal_forecast.renewing_in_30_days }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Renewing in 60 days</div>
-        <div class="stat-value">{{ renewal_forecast.renewing_in_60_days }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Projected 90-day renewal revenue</div>
-        <div class="stat-value">${{ '%.2f'|format(renewal_forecast.projected_revenue_90) }}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Accounts needing attention</div>
-        <div class="stat-value">{{ churn_report.total_at_risk }}</div>
-      </div>
-    </div>
-  </div>
+<section aria-labelledby="renewal-forecast-heading">
+  <h2 id="renewal-forecast-heading" class="visually-hidden">Renewal forecast</h2>
+  {{ counter_strip([
+    {
+      "label": "Renewing in 30 days",
+      "value": renewal_forecast.renewing_in_30_days,
+      "variant": "info",
+    },
+    {
+      "label": "Renewing in 60 days",
+      "value": renewal_forecast.renewing_in_60_days,
+      "variant": "warning",
+    },
+    {
+      "label": "Projected 90-day renewal revenue",
+      "value": "$%.2f"|format(renewal_forecast.projected_revenue_90),
+      "variant": "success",
+    },
+    {
+      "label": "Accounts needing attention",
+      "value": churn_report.total_at_risk,
+      "variant": "danger",
+    },
+  ]) }}
 </section>
 
 <section class="panel">

@@ -358,5 +358,8 @@ def test_subscriptions_page_shows_forecast_and_risk_summary(authorized_user_cont
     assert "Renewal forecast" in html
     assert "Projected 90-day renewal revenue" in html
     assert "Accounts needing attention" in html
+    assert 'class="stat-strip"' in html
+    assert html.count('class="stat-strip__stat ') == 4
+    assert 'class="stat-cards"' not in html
     assert "Risk: High" in html
     assert "Pending decrease requests indicate a planned contraction." in html
