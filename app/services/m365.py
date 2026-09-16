@@ -2383,7 +2383,8 @@ async def renew_admin_client_secret(company_id: int | None = None) -> dict[str, 
         expires_at=new_expiry_str,
     )
 
-    revoked_previous = True
+    had_previous_key = bool(old_key_id)
+    revoked_previous = False
     if old_key_id:
         try:
             await _graph_post(
@@ -2391,28 +2392,7 @@ async def renew_admin_client_secret(company_id: int | None = None) -> dict[str, 
                 f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/removePassword",
                 {"keyId": old_key_id},
             )
-            if new_key_id and new_key_id != old_key_id:
-                if company_id is None:
-                    await update_admin_m365_credentials(
-                        client_id=client_id,
-                        client_secret=new_secret,
-                        tenant_id=tenant_id,
-                        app_object_id=app_object_id,
-                        client_secret_key_id=new_key_id,
-                        client_secret_expires_at=new_expires_at,
-                        pkce_client_id=creds.get("pkce_client_id"),
-                    )
-                else:
-                    await upsert_company_admin_credentials(
-                        company_id=company_id,
-                        client_id=client_id,
-                        client_secret=new_secret,
-                        tenant_id=tenant_id,
-                        app_object_id=app_object_id,
-                        client_secret_key_id=new_key_id,
-                        client_secret_expires_at=new_expires_at,
-                        pkce_client_id=creds.get("pkce_client_id"),
-                    )
+            revoked_previous = True
             log_info(
                 "Revoked old M365 admin client secret",
                 company_id=company_id,
@@ -2426,8 +2406,31 @@ async def renew_admin_client_secret(company_id: int | None = None) -> dict[str, 
                 old_key_id=old_key_id,
                 error=str(exc),
             )
+    if revoked_previous and new_key_id and new_key_id != old_key_id:
+        if company_id is None:
+            await update_admin_m365_credentials(
+                client_id=client_id,
+                client_secret=new_secret,
+                tenant_id=tenant_id,
+                app_object_id=app_object_id,
+                client_secret_key_id=new_key_id,
+                client_secret_expires_at=new_expires_at,
+                pkce_client_id=creds.get("pkce_client_id"),
+            )
+        else:
+            await upsert_company_admin_credentials(
+                company_id=company_id,
+                client_id=client_id,
+                client_secret=new_secret,
+                tenant_id=tenant_id,
+                app_object_id=app_object_id,
+                client_secret_key_id=new_key_id,
+                client_secret_expires_at=new_expires_at,
+                pkce_client_id=creds.get("pkce_client_id"),
+            )
     return {
         "expires_at": new_expires_at,
+        "had_previous_key": had_previous_key,
         "key_id": new_key_id,
         "revoked_previous": revoked_previous,
     }

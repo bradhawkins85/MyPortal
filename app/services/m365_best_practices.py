@@ -8316,14 +8316,15 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 renewal_result = await renew_admin_client_secret(
                     company_id if target["scope"] == "company" else None
                 )
-                revoked_previous = bool(renewal_result.get("revoked_previous", True))
+                had_previous_key = bool(renewal_result.get("had_previous_key", False))
+                revoked_previous = bool(renewal_result.get("revoked_previous", False))
                 expires_at = renewal_result.get("expires_at")
                 expires_text = (
                     expires_at.date().isoformat()
                     if isinstance(expires_at, datetime)
                     else "the configured lifetime window"
                 )
-                if revoked_previous:
+                if not had_previous_key or revoked_previous:
                     success = True
                     outcome_message = (
                         "Rotated the MyPortal PKCE/bootstrap credential and validated the replacement. "
