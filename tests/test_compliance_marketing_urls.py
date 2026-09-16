@@ -205,6 +205,11 @@ async def test_control_requirements_page_sets_help_per_requirement(monkeypatch):
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
+        compliance_routes.users_repo,
+        "list_users_for_company",
+        AsyncMock(return_value=[{"id": 7, "email": "owner@example.com"}]),
+    )
+    monkeypatch.setattr(
         compliance_routes,
         "_main",
         lambda: SimpleNamespace(_render_template=fake_render_template),

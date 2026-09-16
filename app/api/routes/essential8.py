@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from app.api.dependencies.auth import require_super_admin, get_current_user
 from app.api.dependencies.database import require_database
 from app.repositories import essential8 as essential8_repo
+from app.repositories import users as users_repo
 from app.repositories import user_companies as user_company_repo
 from app.schemas.essential8 import (
     ApprovalStatus,
@@ -32,6 +33,7 @@ from app.schemas.essential8 import (
 )
 
 router = APIRouter(prefix="/api/essential8", tags=["Essential 8 Compliance"])
+_MAX_REQUIREMENT_EVIDENCE_SIZE_BYTES = 15 * 1024 * 1024
 
 
 async def _get_company_membership(user: dict, company_id: int) -> dict | None:
@@ -63,6 +65,17 @@ async def _assert_company_compliance_access(user: dict, company_id: int, *, writ
             detail="Administrator access is required to manage compliance requirements",
         )
     return membership
+
+
+async def _validate_requirement_owner(company_id: int, owner_user_id: int | None) -> None:
+    if owner_user_id is None:
+        return
+    owner = await users_repo.get_user_by_id(owner_user_id)
+    if not owner or int(owner.get("company_id") or 0) != company_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Owner must be a valid company member",
+        )
 
 
 def _requirement_upload_dir() -> Path:
@@ -439,6 +452,7 @@ async def create_company_requirement_compliance(
             status_code=status.HTTP_409_CONFLICT,
             detail="Requirement compliance record already exists",
         )
+    await _validate_requirement_owner(company_id, payload.owner_user_id)
     
     record = await essential8_repo.create_company_requirement_compliance(
         **payload.model_dump(),
@@ -504,6 +518,7 @@ async def update_company_requirement_compliance(
     
     # Update the record
     updates = payload.model_dump(exclude_unset=True)
+    await _validate_requirement_owner(company_id, updates.get("owner_user_id"))
     if "approval_status" in updates and "approved_at" not in updates:
         if updates["approval_status"] == ApprovalStatus.APPROVED:
             updates["approved_at"] = datetime.now(timezone.utc)
@@ -625,12 +640,29 @@ async def upload_requirement_evidence(
     safe_name = Path(evidence_file.filename or "evidence.bin").name
     if not safe_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Evidence file name is required")
-    content = await evidence_file.read()
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     storage_name = f"company_{company_id}_requirement_{requirement_id}_{timestamp}_{safe_name}"
     storage_dir = _requirement_upload_dir()
     storage_path = storage_dir / storage_name
-    storage_path.write_bytes(content)
+    total_size = 0
+    try:
+        with storage_path.open("wb") as handle:
+            while True:
+                chunk = await evidence_file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > _MAX_REQUIREMENT_EVIDENCE_SIZE_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="Uploaded evidence file exceeds the 15 MB limit",
+                    )
+                handle.write(chunk)
+    except Exception:
+        storage_path.unlink(missing_ok=True)
+        raise
+    finally:
+        await evidence_file.close()
     relative_path = f"compliance/essential8/{storage_name}"
     return await essential8_repo.add_requirement_evidence(
         company_id=company_id,
@@ -640,7 +672,7 @@ async def upload_requirement_evidence(
         file_name=safe_name,
         content_type=evidence_file.content_type,
         file_path=relative_path,
-        file_size_bytes=len(content),
+        file_size_bytes=total_size,
         uploaded_by=user.get("id"),
     )
 

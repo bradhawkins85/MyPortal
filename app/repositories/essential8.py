@@ -1160,7 +1160,7 @@ async def get_requirement_trend(
     rows = await db.fetch_all(
         f"""
         SELECT
-            substr(COALESCE(cerc.updated_at, cerc.created_at), 1, 10) AS trend_date,
+            DATE(COALESCE(cerc.updated_at, cerc.created_at)) AS trend_date,
             er.control_id,
             er.maturity_level,
             COALESCE(cerc.status, 'not_started') AS status,

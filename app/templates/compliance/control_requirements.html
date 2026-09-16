@@ -9,7 +9,7 @@
   ]) }}
 {% endblock %}
 
-{% macro requirement_workflow_form(req, req_compliance, requirement_evidence_map, can_manage, csrf_token) %}
+{% macro requirement_workflow_form(req, req_compliance, requirement_evidence_map, company_members, can_manage, csrf_token) %}
   {% set evidence_items = requirement_evidence_map.get(req.id, []) %}
   <form class="compliance-form" data-requirement-form="{{ req.id }}">
     <div class="form-field">
@@ -39,8 +39,15 @@
       <input type="date" id="req-target-{{ req.id }}" class="form-input" value="{% if req_compliance and req_compliance.target_compliance_date %}{{ req_compliance.target_compliance_date }}{% endif %}" />
     </div>
     <div class="form-field">
-      <label for="req-owner-{{ req.id }}" class="form-label">Owner user ID</label>
-      <input type="number" id="req-owner-{{ req.id }}" class="form-input" min="1" value="{% if req_compliance and req_compliance.owner_user_id %}{{ req_compliance.owner_user_id }}{% endif %}" />
+      <label for="req-owner-{{ req.id }}" class="form-label">Owner</label>
+      <select id="req-owner-{{ req.id }}" class="form-input">
+        <option value="">Unassigned</option>
+        {% for member in company_members %}
+        <option value="{{ member.id }}" {% if req_compliance and req_compliance.owner_user_id == member.id %}selected{% endif %}>
+          {{ member.email }}
+        </option>
+        {% endfor %}
+      </select>
     </div>
     <div class="form-field">
       <label for="req-approval-{{ req.id }}" class="form-label">Approval status</label>
@@ -289,7 +296,7 @@
               </div>
             </summary>
             <div class="card-collapsible__content requirement-item__details" id="requirement-details-{{ req.id }}" data-requirement-details>
-              {{ requirement_workflow_form(req, req_compliance, requirement_evidence_map, can_manage, csrf_token) }}
+              {{ requirement_workflow_form(req, req_compliance, requirement_evidence_map, company_members, can_manage, csrf_token) }}
             </div>
           </details>
           {% endfor %}
@@ -336,7 +343,7 @@
               </div>
             </summary>
             <div class="card-collapsible__content requirement-item__details" id="requirement-details-{{ req.id }}" data-requirement-details>
-              {{ requirement_workflow_form(req, req_compliance, requirement_evidence_map, can_manage, csrf_token) }}
+              {{ requirement_workflow_form(req, req_compliance, requirement_evidence_map, company_members, can_manage, csrf_token) }}
             </div>
           </details>
           {% endfor %}
@@ -383,7 +390,7 @@
               </div>
             </summary>
             <div class="card-collapsible__content requirement-item__details" id="requirement-details-{{ req.id }}" data-requirement-details>
-              {{ requirement_workflow_form(req, req_compliance, requirement_evidence_map, can_manage, csrf_token) }}
+              {{ requirement_workflow_form(req, req_compliance, requirement_evidence_map, company_members, can_manage, csrf_token) }}
             </div>
           </details>
           {% endfor %}

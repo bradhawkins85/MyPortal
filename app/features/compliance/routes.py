@@ -14,6 +14,7 @@ from app.repositories import companies as company_repo
 from app.repositories import compliance_checks as cc_repo
 from app.repositories import essential8 as essential8_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import users as users_repo
 from app.repositories import user_companies as user_company_repo
 from app.security.flash import flash_redirect
 from app.services import tickets as tickets_service
@@ -248,6 +249,7 @@ async def compliance_control_requirements_page(request: Request, control_id: int
         control_id,
         {"ml1": "not_started", "ml2": "not_started", "ml3": "not_started"},
     )
+    company_members = await users_repo.list_users_for_company(company_id)
 
     extra = {
         "title": f"{control_data['control']['name']} - Requirements",
@@ -261,6 +263,7 @@ async def compliance_control_requirements_page(request: Request, control_id: int
         "ml3_status": ctrl_ml["ml3"],
         "requirement_compliance_map": requirement_compliance_map,
         "requirement_evidence_map": evidence_map,
+        "company_members": company_members,
         "reminder_summary": await essential8_repo.get_requirement_reminder_summary(company_id),
         "trend_rows": await essential8_repo.get_requirement_trend(company_id, control_id=control_id),
         "company": company,
