@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.repositories import shop as shop_repo
+from app.services import shop as shop_service
 
 
 def recurring_quantity(item: Mapping[str, Any]) -> int:
@@ -47,6 +48,7 @@ async def sync_subscription_recurring_item(
     sku = str(product.get("sku") or "").strip()
     existing = existing or await find_existing_item(company_id, product)
     canceled = cancellation_date is not None or subscription.get("status") == "canceled"
+    billing_plan = shop_service.get_subscription_billing_plan(product)
     values = {
         "product_code": sku,
         "description_template": str(product.get("invoice_description") or product.get("name") or sku),
@@ -54,11 +56,25 @@ async def sync_subscription_recurring_item(
         "price_override": float(Decimal(str(subscription.get("unit_price") or 0))),
         "active": not canceled and int(subscription.get("quantity") or 0) > 0,
     }
+    if billing_plan:
+        _commitment, payment_frequency = billing_plan
+        values["billing_frequency"] = "yearly" if payment_frequency == "annual" else "monthly"
+        values["clear_billing_interval"] = True
     if cancellation_date is not None:
         values["end_date"] = cancellation_date
     elif not (existing and preserve_existing_schedule):
         values["start_date"] = subscription.get("start_date")
-        values["end_date"] = subscription.get("end_date")
+        # Active auto-renewing subscriptions have no recurring-item end date.
+        # The subscription term itself still records the current commitment.
+        if subscription.get("auto_renew", True):
+            values["clear_end_date"] = True
+        else:
+            values["end_date"] = subscription.get("end_date")
+    if not existing:
+        # Clear flags are update-only repository arguments; NULL is already the
+        # default when a new recurring item is created.
+        values.pop("clear_billing_interval", None)
+        values.pop("clear_end_date", None)
     if existing:
         updated = await recurring_items_repo.update_recurring_invoice_item(int(existing["id"]), **values)
         if not updated:

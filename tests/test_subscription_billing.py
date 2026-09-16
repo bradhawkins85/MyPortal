@@ -62,3 +62,46 @@ def test_adopted_item_keeps_schedule_and_billing_history(monkeypatch):
     assert "start_date" not in captured
     assert "end_date" not in captured
     assert "last_billed_at" not in captured
+
+
+def test_annual_payment_creates_yearly_recurring_item_without_end_date(monkeypatch):
+    captured = {}
+
+    async def product(_product_id):
+        return {
+            "id": 3,
+            "sku": "ANNUAL-1",
+            "name": "Annual plan",
+            "price_annual_annual_payment": Decimal("275.00"),
+        }
+
+    async def create(**values):
+        captured.update(values)
+        return {"id": 10, **values}
+
+    async def find(_company_id, _product):
+        return None
+
+    monkeypatch.setattr(subscription_billing.shop_repo, "get_product_by_id", product)
+    monkeypatch.setattr(subscription_billing, "find_existing_item", find)
+    monkeypatch.setattr(
+        subscription_billing.recurring_items_repo,
+        "create_recurring_invoice_item",
+        create,
+    )
+
+    asyncio.run(subscription_billing.sync_subscription_recurring_item({
+        "customer_id": 4,
+        "product_id": 3,
+        "quantity": 1,
+        "unit_price": Decimal("275.00"),
+        "status": "active",
+        "auto_renew": True,
+        "start_date": date(2026, 9, 16),
+        "end_date": date(2027, 9, 16),
+    }))
+
+    assert captured["price_override"] == 275.0
+    assert captured["billing_frequency"] == "yearly"
+    assert "billing_interval" not in captured
+    assert "end_date" not in captured
