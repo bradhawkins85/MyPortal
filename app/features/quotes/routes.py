@@ -58,6 +58,25 @@ def _format_pdf_date(value: Any) -> str:
     return escape(str(value))
 
 
+def _quote_item_stock_status(item: dict[str, Any]) -> tuple[str, bool]:
+    """Return the current customer-facing availability for a quoted item."""
+    if item.get("subscription_category_id") is not None:
+        return "Available", True
+
+    try:
+        stock = int(item.get("stock") or 0)
+        quoted_quantity = int(item.get("quantity") or 0)
+    except (TypeError, ValueError):
+        stock = 0
+        quoted_quantity = 0
+
+    if stock <= 0:
+        return "Out of stock", False
+    if quoted_quantity > stock:
+        return "Insufficient stock", False
+    return "In stock", True
+
+
 def _absolute_asset_url(request: Request, url: str | None) -> str | None:
     if not url:
         return None
@@ -139,10 +158,18 @@ def _build_quote_pdf_html(
         qty = int(item.get("quantity") or 0)
         unit_price = Decimal(str(item.get("price") or "0"))
         line_total = unit_price * qty
+        stock_status, is_available = _quote_item_stock_status(item)
+        stock_note = (
+            ""
+            if is_available
+            else "<br><span class='stock-note'>Confirm availability before placing an order.</span>"
+        )
         rows.append(
             "<tr>"
             f"<td><strong>{escape(str(item.get('product_name') or 'Product'))}</strong><br>"
             f"<span class='muted'>SKU: {escape(str(item.get('sku') or '—'))}</span></td>"
+            f"<td><strong class='stock-status {'stock-in' if is_available else 'stock-out'}'>"
+            f"{stock_status}</strong>{stock_note}</td>"
             f"<td class='num'>{qty}</td>"
             f"<td class='num'>{_format_money(unit_price)}</td>"
             f"<td class='num'>{_format_money(line_total)}</td>"
@@ -154,6 +181,17 @@ def _build_quote_pdf_html(
 
     detail_pages = []
     for item in items:
+        stock_status, is_available = _quote_item_stock_status(item)
+        availability_html = (
+            f"<div class='availability {'stock-in' if is_available else 'stock-out'}'>"
+            f"<strong>Stock status: {stock_status}</strong>"
+            + (
+                ""
+                if is_available
+                else "<span>Confirm availability before placing an order.</span>"
+            )
+            + "</div>"
+        )
         image_url = (
             _pdf_image_src(request, item.get("image_url"))
             if include_line_images
@@ -190,6 +228,7 @@ def _build_quote_pdf_html(
             "</div>"
             f"{image_html}"
             "</div>"
+            f"{availability_html}"
             f"<div class='description rich-text-viewer'>{description}</div>"
             f"{product_link_html}"
             "</section>"
@@ -221,6 +260,10 @@ def _build_quote_pdf_html(
     td {{ border-bottom: 1px solid #e4e8ef; padding: 9px; vertical-align: top; }}
     .num {{ text-align: right; white-space: nowrap; }}
     .muted, .text-muted {{ color: #6b7280; }}
+    .stock-status {{ white-space: nowrap; }}
+    .stock-in {{ color: #166534; }}
+    .stock-out {{ color: #b91c1c; }}
+    .stock-note {{ color: #b91c1c; font-size: 9px; }}
     .thumb-col {{ width: 58px; }}
     .line-thumb {{ border: 1px solid #e5e7eb; border-radius: 6px; max-height: 42px; max-width: 52px; object-fit: contain; }}
     .totals {{ margin-left: auto; margin-top: 18px; width: 260px; }}
@@ -233,6 +276,10 @@ def _build_quote_pdf_html(
     .product-image-card {{ align-items: center; display: flex; flex: 0 0 42%; justify-content: center; min-height: 150px; padding: 0; }}
     .detail-image {{ display: block; max-height: 170px; max-width: 100%; object-fit: contain; }}
     .description {{ font-size: 12px; margin-top: 18px; }}
+    .availability {{ border-radius: 6px; margin-top: 12px; padding: 9px 11px; }}
+    .availability.stock-in {{ background: #f0fdf4; }}
+    .availability.stock-out {{ background: #fef2f2; }}
+    .availability span {{ display: block; margin-top: 2px; }}
     .description p {{ margin: 0 0 8px; }}
     .description ul, .description ol {{ margin: 0 0 8px 18px; padding: 0; }}
     .description iframe {{ border: 1px solid #e5e7eb; min-height: 260px; width: 100%; }}
@@ -255,7 +302,7 @@ def _build_quote_pdf_html(
     </div>
     <h2 class="section-title">Quote Items</h2>
     <table>
-      <thead><tr><th>Product</th><th class="num">Qty</th><th class="num">Unit</th><th class="num">Total</th></tr></thead>
+      <thead><tr><th>Product</th><th>Stock status</th><th class="num">Qty</th><th class="num">Unit</th><th class="num">Total</th></tr></thead>
       <tbody>{''.join(rows)}</tbody>
     </table>
     <div class="totals"><div class="grand"><span>Total</span><span>{_format_money(subtotal)}</span></div></div>
