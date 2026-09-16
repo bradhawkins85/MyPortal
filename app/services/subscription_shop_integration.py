@@ -137,13 +137,24 @@ async def create_subscriptions_from_order(
                 auto_renew=True,
                 created_by=user_id,
             )
-            await subscription_billing.sync_subscription_recurring_item(
+            recurring_item = await subscription_billing.sync_subscription_recurring_item(
                 subscription,
                 existing=existing_recurring,
                 preserve_existing_schedule=existing_recurring is not None,
             )
-            
+
+            from app.services.invoice_generator import generate_subscription_invoice
+
+            purchase_unit_price = prorated_price if prorated_price is not None else unit_price
             created_subscriptions.append(subscription)
+
+            invoice_result = await generate_subscription_invoice(
+                company_id,
+                recurring_item=recurring_item,
+                quantity=quantity,
+                unit_amount=Decimal(str(purchase_unit_price)),
+            )
+            subscription["invoice_result"] = invoice_result
             
             logger.info(
                 "Created subscription from order",

@@ -3016,21 +3016,32 @@ async def send_order_to_xero(
                 access_token=access_token,
             )
 
-    has_subscriptions = any(
-        item.get("is_subscription") for item in invoice_data["context"].get("items", [])
+    # Subscription purchases are first recorded by MyPortal's invoice generator.
+    # This legacy order path must therefore contain physical/product lines only.
+    item_context = invoice_data["context"].get("items", [])
+    order_lines = invoice_data["line_items"][:len(item_context)]
+    product_lines = (
+        [
+            line
+            for line, context_item in zip(order_lines, item_context)
+            if not context_item.get("is_subscription")
+        ]
+        if item_context
+        else list(invoice_data["line_items"])
     )
-    has_products = any(
-        not item.get("is_subscription") for item in invoice_data["context"].get("items", [])
+    if not product_lines:
+        return {
+            "status": "skipped",
+            "reason": "Subscription items are invoiced through MyPortal",
+            "order_number": order_number,
+            "company_id": company_id,
+        }
+    informational_lines = (
+        invoice_data["line_items"][len(item_context):] if item_context else []
     )
-    subscription_auto_send = bool(company.get("xero_auto_send_subscription_invoices", 1))
+    invoice_data["line_items"] = product_lines + informational_lines
     product_auto_send = bool(company.get("xero_auto_send_product_invoices", 1))
-    # A mixed cart remains one invoice when both policies agree. If they differ,
-    # split it so each purchase type independently honours its delivery policy.
-    auto_send = (
-        subscription_auto_send if has_subscriptions and not has_products
-        else product_auto_send if has_products and not has_subscriptions
-        else subscription_auto_send and product_auto_send
-    )
+    auto_send = product_auto_send
 
     due_date = date.today() + timedelta(days=resolve_invoice_due_days(company))
     xero_payload = {
@@ -3047,34 +3058,6 @@ async def send_order_to_xero(
         xero_payload["SentToContact"] = True
 
     xero_payloads = [xero_payload]
-    if has_subscriptions and has_products and subscription_auto_send != product_auto_send:
-        item_context = invoice_data["context"]["items"]
-        product_lines = invoice_data["line_items"][:len(item_context)]
-        informational_lines = invoice_data["line_items"][len(item_context):]
-        xero_payloads = []
-        for is_subscription, should_send, label in (
-            (True, subscription_auto_send, "Subscriptions"),
-            (False, product_auto_send, "Products"),
-        ):
-            selected_lines = [
-                line for line, context_item in zip(product_lines, item_context)
-                if bool(context_item.get("is_subscription")) is is_subscription
-            ]
-            split_payload = dict(xero_payload)
-            shared_lines = informational_lines
-            if is_subscription:
-                shared_lines = [
-                    line for line in informational_lines
-                    if line.get("Description") != "Freight"
-                ]
-            split_payload["LineItems"] = selected_lines + shared_lines
-            split_payload["Reference"] = f'{invoice_data["reference"]} - {label}'
-            split_payload["Status"] = "AUTHORISED" if should_send else "DRAFT"
-            if should_send:
-                split_payload["SentToContact"] = True
-            else:
-                split_payload.pop("SentToContact", None)
-            xero_payloads.append(split_payload)
 
     # Make API call to Xero
     api_url = "https://api.xero.com/api.xro/2.0/Invoices"
