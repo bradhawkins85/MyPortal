@@ -121,6 +121,8 @@ async def test_module_runtime_merges_service_defaults(monkeypatch):
         return None
 
     repo_mock = AsyncMock(side_effect=fake_get_module)
+    # module_runtime resolves configuration through module_repo.get_module(...)
+    # so patching the imported repository module exercises the production seam.
     monkeypatch.setattr(module_runtime.module_repo, "get_module", repo_mock)
 
     call_recordings_module = await module_runtime.get_module(

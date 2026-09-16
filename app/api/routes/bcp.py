@@ -31,7 +31,11 @@ def configure_page_rendering(
     build_base_context: Callable[..., Awaitable[dict[str, Any]]],
     templates: Any,
 ) -> None:
-    """Bind shared page-rendering dependencies during application assembly."""
+    """Bind shared page-rendering dependencies during application assembly.
+
+    Reconfiguration is allowed so tests and reload flows can swap in a fresh
+    rendering pair without leaving the route module partially configured.
+    """
 
     global _page_rendering
     _page_rendering = (build_base_context, templates)
