@@ -11,6 +11,9 @@ _HAS_SIGALRM_TIMEOUT = hasattr(signal, "SIGALRM") and hasattr(signal, "setitimer
 
 @contextmanager
 def _time_limit(seconds: float):
+    if not _HAS_SIGALRM_TIMEOUT:
+        raise RuntimeError("SIGALRM-based time limits are not available")
+
     def _raise_timeout(signum, frame):
         raise TimeoutError(f"parser exceeded {seconds} second limit")
 
