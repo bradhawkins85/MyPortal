@@ -896,10 +896,18 @@ async def _build_essential8_detail(company_id: int) -> dict[str, Any]:
     """Per-control breakdown with maturity-level statuses for the detail page."""
     controls = await essential8_repo.list_essential8_controls()
     per_control = await essential8_repo.get_per_maturity_statuses_for_company(company_id)
+    bundle = await essential8_repo.build_requirement_export_bundle(company_id)
+    requirements_by_control: dict[int, list[dict[str, Any]]] = {}
+    for requirement in bundle.get("requirements", []):
+        control_id = requirement.get("control_id")
+        if control_id is None:
+            continue
+        requirements_by_control.setdefault(int(control_id), []).append(requirement)
     rows: list[dict[str, Any]] = []
     for control in controls:
         control_id = control.get("id")
         statuses = per_control.get(control_id, {}) if control_id is not None else {}
+        requirement_rows = requirements_by_control.get(int(control_id), []) if control_id is not None else []
         rows.append(
             {
                 "id": control_id,
@@ -908,9 +916,22 @@ async def _build_essential8_detail(company_id: int) -> dict[str, Any]:
                 "ml1": statuses.get("ml1", "not_started"),
                 "ml2": statuses.get("ml2", "not_started"),
                 "ml3": statuses.get("ml3", "not_started"),
+                "requirement_count": len(requirement_rows),
+                "evidence_reference_count": sum(
+                    int(requirement.get("evidence_reference_count") or 0)
+                    for requirement in requirement_rows
+                ),
+                "pending_approval_count": sum(
+                    1 for requirement in requirement_rows
+                    if requirement.get("approval_status") == "pending_approval"
+                ),
             }
         )
-    return {"controls": rows, "total": len(rows)}
+    return {
+        "controls": rows,
+        "total": len(rows),
+        "generated_at": bundle.get("generated_at"),
+    }
 
 
 async def _build_compliance_checks_detail(company_id: int) -> dict[str, Any]:

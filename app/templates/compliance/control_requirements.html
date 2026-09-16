@@ -9,6 +9,111 @@
   ]) }}
 {% endblock %}
 
+{% macro requirement_workflow_form(req, req_compliance, requirement_evidence_map, company_members, can_manage, csrf_token) %}
+  {% set evidence_items = requirement_evidence_map.get(req.id, []) %}
+  <form class="compliance-form" data-requirement-form="{{ req.id }}">
+    <div class="form-field">
+      <label for="req-status-{{ req.id }}" class="form-label">Status</label>
+      <select id="req-status-{{ req.id }}" class="form-input" required>
+        <option value="not_started" {% if req_compliance and req_compliance.status == 'not_started' %}selected{% endif %}>Not started</option>
+        <option value="in_progress" {% if req_compliance and req_compliance.status == 'in_progress' %}selected{% endif %}>In progress</option>
+        <option value="compliant" {% if req_compliance and req_compliance.status == 'compliant' %}selected{% endif %}>Compliant</option>
+        <option value="non_compliant" {% if req_compliance and req_compliance.status == 'non_compliant' %}selected{% endif %}>Non-compliant</option>
+        <option value="not_applicable" {% if req_compliance and req_compliance.status == 'not_applicable' %}selected{% endif %}>Not applicable</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label for="req-evidence-{{ req.id }}" class="form-label">Evidence</label>
+      <textarea id="req-evidence-{{ req.id }}" class="form-input form-input--textarea" rows="2" placeholder="Links to documentation, screenshots, etc.">{% if req_compliance %}{{ req_compliance.evidence or '' }}{% endif %}</textarea>
+    </div>
+    <div class="form-field">
+      <label for="req-notes-{{ req.id }}" class="form-label">Notes</label>
+      <textarea id="req-notes-{{ req.id }}" class="form-input form-input--textarea" rows="2" placeholder="Implementation details, outstanding items, etc.">{% if req_compliance %}{{ req_compliance.notes or '' }}{% endif %}</textarea>
+    </div>
+    <div class="form-field">
+      <label for="req-reviewed-{{ req.id }}" class="form-label">Last reviewed date</label>
+      <input type="date" id="req-reviewed-{{ req.id }}" class="form-input" value="{% if req_compliance and req_compliance.last_reviewed_date %}{{ req_compliance.last_reviewed_date }}{% endif %}" />
+    </div>
+    <div class="form-field">
+      <label for="req-target-{{ req.id }}" class="form-label">Target compliance date</label>
+      <input type="date" id="req-target-{{ req.id }}" class="form-input" value="{% if req_compliance and req_compliance.target_compliance_date %}{{ req_compliance.target_compliance_date }}{% endif %}" />
+    </div>
+    <div class="form-field">
+      <label for="req-owner-{{ req.id }}" class="form-label">Owner</label>
+      <select id="req-owner-{{ req.id }}" class="form-input">
+        <option value="">Unassigned</option>
+        {% for member in company_members %}
+        <option value="{{ member.id }}" {% if req_compliance and req_compliance.owner_user_id == member.id %}selected{% endif %}>
+          {{ member.email }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-field">
+      <label for="req-approval-{{ req.id }}" class="form-label">Approval status</label>
+      <select id="req-approval-{{ req.id }}" class="form-input">
+        <option value="draft" {% if not req_compliance or req_compliance.approval_status == 'draft' %}selected{% endif %}>Draft</option>
+        <option value="pending_approval" {% if req_compliance and req_compliance.approval_status == 'pending_approval' %}selected{% endif %}>Pending approval</option>
+        <option value="approved" {% if req_compliance and req_compliance.approval_status == 'approved' %}selected{% endif %}>Approved</option>
+        <option value="changes_requested" {% if req_compliance and req_compliance.approval_status == 'changes_requested' %}selected{% endif %}>Changes requested</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label for="req-approval-notes-{{ req.id }}" class="form-label">Approval notes</label>
+      <textarea id="req-approval-notes-{{ req.id }}" class="form-input form-input--textarea" rows="2">{% if req_compliance %}{{ req_compliance.approval_notes or '' }}{% endif %}</textarea>
+    </div>
+    <div class="form-field">
+      <label for="req-reminder-days-{{ req.id }}" class="form-label">Reminder days before due date</label>
+      <input type="number" id="req-reminder-days-{{ req.id }}" class="form-input" min="0" value="{% if req_compliance and req_compliance.reminder_days_before is not none %}{{ req_compliance.reminder_days_before }}{% else %}14{% endif %}" />
+    </div>
+    <div class="form-field">
+      <label class="form-label" for="req-overdue-enabled-{{ req.id }}">Overdue alerts enabled</label>
+      <input type="checkbox" id="req-overdue-enabled-{{ req.id }}" {% if not req_compliance or req_compliance.overdue_alert_enabled %}checked{% endif %} />
+    </div>
+    <div class="form-field">
+      <label class="form-label">Evidence versions</label>
+      {% if evidence_items %}
+      <ul class="evidence-list">
+        {% for evidence in evidence_items %}
+        <li class="evidence-list__item">
+          <span class="tag tag--muted">v{{ evidence.version_number }}</span>
+          <strong>{{ evidence.title }}</strong>
+          <div class="text--muted"><a href="/uploads/{{ evidence.file_path }}" target="_blank" rel="noopener noreferrer">{{ evidence.file_name }}</a>{% if evidence.file_size_bytes %} · {{ evidence.file_size_bytes }} bytes{% endif %}</div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="text--muted">No evidence files uploaded yet.</p>
+      {% endif %}
+    </div>
+    {% if can_manage %}
+    <div class="form-field">
+      <label for="req-evidence-title-{{ req.id }}" class="form-label">Evidence upload title</label>
+      <input type="text" id="req-evidence-title-{{ req.id }}" class="form-input" placeholder="Quarterly audit screenshot" />
+    </div>
+    <div class="form-field">
+      <label for="req-evidence-file-{{ req.id }}" class="form-label">Upload evidence file</label>
+      <input type="file" id="req-evidence-file-{{ req.id }}" class="form-input" />
+    </div>
+    {% endif %}
+    <div class="compliance-form__actions">
+      {% if can_manage %}
+      <button type="button" class="button button--primary button--small" data-save-requirement="{{ req.id }}">Save</button>
+      <button type="button" class="button button--ghost button--small" data-upload-evidence="{{ req.id }}">Upload evidence</button>
+      {% endif %}
+      {% if req.show_compliance_help and req.compliance_help_url %}
+      <a href="{{ req.compliance_help_url }}" class="button button--ghost button--small">
+        Get compliance help
+      </a>
+      <button type="submit" form="e8-ticket-form-{{ req.id }}" class="button button--primary button--small">Submit ticket</button>
+      {% endif %}
+    </div>
+  </form>
+  <form id="e8-ticket-form-{{ req.id }}" method="post" action="/compliance/requirements/{{ req.id }}/ticket" class="requirement-item__ticket-form">
+    {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+  </form>
+{% endmacro %}
+
 {% block content %}
 <div class="management management--single compliance" data-layout>
   <section class="management__content">
@@ -85,7 +190,70 @@
       <div class="alert alert--info compliance__note">
         <strong>Note:</strong> The control is considered <strong>Compliant</strong> when all requirements are either <strong>Compliant</strong> or <strong>Not applicable</strong>.
       </div>
+      <div class="compliance-summary__grid" style="margin-top:1rem">
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">Pending approvals</span>
+          <span class="compliance-summary__value">{{ reminder_summary.pending_approval_count or 0 }}</span>
+        </div>
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">Reminder due</span>
+          <span class="compliance-summary__value">{{ reminder_summary.reminder_due_count or 0 }}</span>
+        </div>
+        <div class="compliance-summary__item">
+          <span class="compliance-summary__label">Overdue</span>
+          <span class="compliance-summary__value">{{ reminder_summary.overdue_count or 0 }}</span>
+        </div>
+      </div>
+      <div class="compliance-form__actions" style="margin-top:1rem">
+        <a href="/api/essential8/companies/{{ company.id }}/requirements/export-bundle?control_id={{ control.id }}&format=pdf" class="button button--ghost button--small">Export PDF bundle</a>
+        <a href="/api/essential8/companies/{{ company.id }}/requirements/export-bundle?control_id={{ control.id }}&format=docx" class="button button--ghost button--small">Export Word bundle</a>
+      </div>
+      {% if can_manage %}
+      <hr class="divider" />
+      <div class="form-field">
+        <label for="bulk-status" class="form-label">Bulk update selected requirements</label>
+        <div class="compliance-form__actions">
+          <select id="bulk-status" class="form-input">
+            <option value="not_started">Not started</option>
+            <option value="in_progress">In progress</option>
+            <option value="compliant">Compliant</option>
+            <option value="non_compliant">Non-compliant</option>
+            <option value="not_applicable">Not applicable</option>
+          </select>
+          <button type="button" class="button button--primary button--small" id="bulk-save-button">Apply to selected</button>
+        </div>
+        <p class="form__hint">Select one or more requirements, then apply a validated status update in one action.</p>
+      </div>
+      {% endif %}
     </div>
+
+    {% if trend_rows %}
+    <div class="card card--panel">
+      <h2 class="card__title">Historical trend</h2>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Maturity level</th>
+              <th>Status</th>
+              <th>Total requirements</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in trend_rows[-12:] %}
+            <tr>
+              <td>{{ row.trend_date or '—' }}</td>
+              <td>{{ (row.maturity_level or 'ml').upper() }}</td>
+              <td>{{ row.status | replace('_', ' ') | title }}</td>
+              <td>{{ row.total or 0 }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
 
     <div class="compliance-requirements">
       <section class="card card--panel compliance-requirements__group" data-level="ml1">
@@ -115,6 +283,12 @@
                   <span class="badge badge--status-not_started" data-requirement-status>Not started</span>
                   {% endif %}
                 </div>
+                {% if can_manage %}
+                <label onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:0.35rem">
+                  <input type="checkbox" data-requirement-select value="{{ req.id }}" />
+                  <span class="text--muted">Bulk</span>
+                </label>
+                {% endif %}
                 {% if req.show_compliance_help and req.compliance_help_url %}
                 <a href="{{ req.compliance_help_url }}" class="requirement-item__help-btn" title="Get Compliance Help" aria-label="Get Compliance Help" onclick="event.stopPropagation()">?</a>
                 {% endif %}
@@ -122,42 +296,7 @@
               </div>
             </summary>
             <div class="card-collapsible__content requirement-item__details" id="requirement-details-{{ req.id }}" data-requirement-details>
-              <form class="compliance-form" data-requirement-form="{{ req.id }}">
-                <div class="form-field">
-                  <label for="req-status-{{ req.id }}" class="form-label">Status</label>
-                  <select id="req-status-{{ req.id }}" class="form-input" required>
-                    <option value="not_started" {% if req_compliance and req_compliance.status == 'not_started' %}selected{% endif %}>Not started</option>
-                    <option value="in_progress" {% if req_compliance and req_compliance.status == 'in_progress' %}selected{% endif %}>In progress</option>
-                    <option value="compliant" {% if req_compliance and req_compliance.status == 'compliant' %}selected{% endif %}>Compliant</option>
-                    <option value="non_compliant" {% if req_compliance and req_compliance.status == 'non_compliant' %}selected{% endif %}>Non-compliant</option>
-                    <option value="not_applicable" {% if req_compliance and req_compliance.status == 'not_applicable' %}selected{% endif %}>Not applicable</option>
-                  </select>
-                </div>
-                <div class="form-field">
-                  <label for="req-evidence-{{ req.id }}" class="form-label">Evidence</label>
-                  <textarea id="req-evidence-{{ req.id }}" class="form-input form-input--textarea" rows="2" placeholder="Links to documentation, screenshots, etc.">{% if req_compliance %}{{ req_compliance.evidence or '' }}{% endif %}</textarea>
-                </div>
-                <div class="form-field">
-                  <label for="req-notes-{{ req.id }}" class="form-label">Notes</label>
-                  <textarea id="req-notes-{{ req.id }}" class="form-input form-input--textarea" rows="2" placeholder="Implementation details, outstanding items, etc.">{% if req_compliance %}{{ req_compliance.notes or '' }}{% endif %}</textarea>
-                </div>
-                <div class="form-field">
-                  <label for="req-reviewed-{{ req.id }}" class="form-label">Last reviewed date</label>
-                  <input type="date" id="req-reviewed-{{ req.id }}" class="form-input" value="{% if req_compliance and req_compliance.last_reviewed_date %}{{ req_compliance.last_reviewed_date }}{% endif %}" />
-                </div>
-                <div class="compliance-form__actions">
-                  <button type="button" class="button button--primary button--small" data-save-requirement="{{ req.id }}">Save</button>
-                  {% if req.show_compliance_help and req.compliance_help_url %}
-                  <a href="{{ req.compliance_help_url }}" class="button button--ghost button--small">
-                    Get compliance help
-                  </a>
-                  <button type="submit" form="e8-ticket-form-{{ req.id }}" class="button button--primary button--small">Submit ticket</button>
-                  {% endif %}
-                </div>
-              </form>
-              <form id="e8-ticket-form-{{ req.id }}" method="post" action="/compliance/requirements/{{ req.id }}/ticket" class="requirement-item__ticket-form">
-                {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
-              </form>
+              {{ requirement_workflow_form(req, req_compliance, requirement_evidence_map, company_members, can_manage, csrf_token) }}
             </div>
           </details>
           {% endfor %}
@@ -191,6 +330,12 @@
                   <span class="badge badge--status-not_started" data-requirement-status>Not started</span>
                   {% endif %}
                 </div>
+                {% if can_manage %}
+                <label onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:0.35rem">
+                  <input type="checkbox" data-requirement-select value="{{ req.id }}" />
+                  <span class="text--muted">Bulk</span>
+                </label>
+                {% endif %}
                 {% if req.show_compliance_help and req.compliance_help_url %}
                 <a href="{{ req.compliance_help_url }}" class="requirement-item__help-btn" title="Get Compliance Help" aria-label="Get Compliance Help" onclick="event.stopPropagation()">?</a>
                 {% endif %}
@@ -198,42 +343,7 @@
               </div>
             </summary>
             <div class="card-collapsible__content requirement-item__details" id="requirement-details-{{ req.id }}" data-requirement-details>
-              <form class="compliance-form" data-requirement-form="{{ req.id }}">
-                <div class="form-field">
-                  <label for="req-status-{{ req.id }}" class="form-label">Status</label>
-                  <select id="req-status-{{ req.id }}" class="form-input" required>
-                    <option value="not_started" {% if req_compliance and req_compliance.status == 'not_started' %}selected{% endif %}>Not started</option>
-                    <option value="in_progress" {% if req_compliance and req_compliance.status == 'in_progress' %}selected{% endif %}>In progress</option>
-                    <option value="compliant" {% if req_compliance and req_compliance.status == 'compliant' %}selected{% endif %}>Compliant</option>
-                    <option value="non_compliant" {% if req_compliance and req_compliance.status == 'non_compliant' %}selected{% endif %}>Non-compliant</option>
-                    <option value="not_applicable" {% if req_compliance and req_compliance.status == 'not_applicable' %}selected{% endif %}>Not applicable</option>
-                  </select>
-                </div>
-                <div class="form-field">
-                  <label for="req-evidence-{{ req.id }}" class="form-label">Evidence</label>
-                  <textarea id="req-evidence-{{ req.id }}" class="form-input form-input--textarea" rows="2" placeholder="Links to documentation, screenshots, etc.">{% if req_compliance %}{{ req_compliance.evidence or '' }}{% endif %}</textarea>
-                </div>
-                <div class="form-field">
-                  <label for="req-notes-{{ req.id }}" class="form-label">Notes</label>
-                  <textarea id="req-notes-{{ req.id }}" class="form-input form-input--textarea" rows="2" placeholder="Implementation details, outstanding items, etc.">{% if req_compliance %}{{ req_compliance.notes or '' }}{% endif %}</textarea>
-                </div>
-                <div class="form-field">
-                  <label for="req-reviewed-{{ req.id }}" class="form-label">Last reviewed date</label>
-                  <input type="date" id="req-reviewed-{{ req.id }}" class="form-input" value="{% if req_compliance and req_compliance.last_reviewed_date %}{{ req_compliance.last_reviewed_date }}{% endif %}" />
-                </div>
-                <div class="compliance-form__actions">
-                  <button type="button" class="button button--primary button--small" data-save-requirement="{{ req.id }}">Save</button>
-                  {% if req.show_compliance_help and req.compliance_help_url %}
-                  <a href="{{ req.compliance_help_url }}" class="button button--ghost button--small">
-                    Get compliance help
-                  </a>
-                  <button type="submit" form="e8-ticket-form-{{ req.id }}" class="button button--primary button--small">Submit ticket</button>
-                  {% endif %}
-                </div>
-              </form>
-              <form id="e8-ticket-form-{{ req.id }}" method="post" action="/compliance/requirements/{{ req.id }}/ticket" class="requirement-item__ticket-form">
-                {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
-              </form>
+              {{ requirement_workflow_form(req, req_compliance, requirement_evidence_map, company_members, can_manage, csrf_token) }}
             </div>
           </details>
           {% endfor %}
@@ -267,6 +377,12 @@
                   <span class="badge badge--status-not_started" data-requirement-status>Not started</span>
                   {% endif %}
                 </div>
+                {% if can_manage %}
+                <label onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:0.35rem">
+                  <input type="checkbox" data-requirement-select value="{{ req.id }}" />
+                  <span class="text--muted">Bulk</span>
+                </label>
+                {% endif %}
                 {% if req.show_compliance_help and req.compliance_help_url %}
                 <a href="{{ req.compliance_help_url }}" class="requirement-item__help-btn" title="Get Compliance Help" aria-label="Get Compliance Help" onclick="event.stopPropagation()">?</a>
                 {% endif %}
@@ -274,42 +390,7 @@
               </div>
             </summary>
             <div class="card-collapsible__content requirement-item__details" id="requirement-details-{{ req.id }}" data-requirement-details>
-              <form class="compliance-form" data-requirement-form="{{ req.id }}">
-                <div class="form-field">
-                  <label for="req-status-{{ req.id }}" class="form-label">Status</label>
-                  <select id="req-status-{{ req.id }}" class="form-input" required>
-                    <option value="not_started" {% if req_compliance and req_compliance.status == 'not_started' %}selected{% endif %}>Not started</option>
-                    <option value="in_progress" {% if req_compliance and req_compliance.status == 'in_progress' %}selected{% endif %}>In progress</option>
-                    <option value="compliant" {% if req_compliance and req_compliance.status == 'compliant' %}selected{% endif %}>Compliant</option>
-                    <option value="non_compliant" {% if req_compliance and req_compliance.status == 'non_compliant' %}selected{% endif %}>Non-compliant</option>
-                    <option value="not_applicable" {% if req_compliance and req_compliance.status == 'not_applicable' %}selected{% endif %}>Not applicable</option>
-                  </select>
-                </div>
-                <div class="form-field">
-                  <label for="req-evidence-{{ req.id }}" class="form-label">Evidence</label>
-                  <textarea id="req-evidence-{{ req.id }}" class="form-input form-input--textarea" rows="2" placeholder="Links to documentation, screenshots, etc.">{% if req_compliance %}{{ req_compliance.evidence or '' }}{% endif %}</textarea>
-                </div>
-                <div class="form-field">
-                  <label for="req-notes-{{ req.id }}" class="form-label">Notes</label>
-                  <textarea id="req-notes-{{ req.id }}" class="form-input form-input--textarea" rows="2" placeholder="Implementation details, outstanding items, etc.">{% if req_compliance %}{{ req_compliance.notes or '' }}{% endif %}</textarea>
-                </div>
-                <div class="form-field">
-                  <label for="req-reviewed-{{ req.id }}" class="form-label">Last reviewed date</label>
-                  <input type="date" id="req-reviewed-{{ req.id }}" class="form-input" value="{% if req_compliance and req_compliance.last_reviewed_date %}{{ req_compliance.last_reviewed_date }}{% endif %}" />
-                </div>
-                <div class="compliance-form__actions">
-                  <button type="button" class="button button--primary button--small" data-save-requirement="{{ req.id }}">Save</button>
-                  {% if req.show_compliance_help and req.compliance_help_url %}
-                  <a href="{{ req.compliance_help_url }}" class="button button--ghost button--small">
-                    Get compliance help
-                  </a>
-                  <button type="submit" form="e8-ticket-form-{{ req.id }}" class="button button--primary button--small">Submit ticket</button>
-                  {% endif %}
-                </div>
-              </form>
-              <form id="e8-ticket-form-{{ req.id }}" method="post" action="/compliance/requirements/{{ req.id }}/ticket" class="requirement-item__ticket-form">
-                {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
-              </form>
+              {{ requirement_workflow_form(req, req_compliance, requirement_evidence_map, company_members, can_manage, csrf_token) }}
             </div>
           </details>
           {% endfor %}
@@ -322,6 +403,7 @@
 <script>
 document.addEventListener('DOMContentLoaded', () => {
   const companyId = {{ (company.id if company else None) | tojson }};
+  const canManage = {{ can_manage | tojson }};
   const csrfToken = getCsrfToken();
 
   const requirementItems = document.querySelectorAll('.requirement-item');
@@ -368,6 +450,12 @@ document.addEventListener('DOMContentLoaded', () => {
         evidence: document.getElementById(`req-evidence-${requirementId}`).value || null,
         notes: document.getElementById(`req-notes-${requirementId}`).value || null,
         last_reviewed_date: document.getElementById(`req-reviewed-${requirementId}`).value || null,
+        target_compliance_date: document.getElementById(`req-target-${requirementId}`)?.value || null,
+        owner_user_id: parseOptionalInt(document.getElementById(`req-owner-${requirementId}`)?.value),
+        approval_status: document.getElementById(`req-approval-${requirementId}`)?.value || 'draft',
+        approval_notes: document.getElementById(`req-approval-notes-${requirementId}`)?.value || null,
+        reminder_days_before: parseOptionalInt(document.getElementById(`req-reminder-days-${requirementId}`)?.value),
+        overdue_alert_enabled: document.getElementById(`req-overdue-enabled-${requirementId}`)?.checked ?? true,
       };
 
       try {
@@ -405,6 +493,72 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  if (canManage) {
+    document.getElementById('bulk-save-button')?.addEventListener('click', async () => {
+      const selected = Array.from(document.querySelectorAll('[data-requirement-select]:checked'))
+        .map(input => parseInt(input.value, 10))
+        .filter(Boolean);
+      if (!selected.length) {
+        showNotification('Select at least one requirement for the bulk update', 'error');
+        return;
+      }
+      try {
+        const resp = await fetch(`/api/essential8/companies/${companyId}/requirements/compliance/bulk`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken
+          },
+          body: JSON.stringify({
+            requirement_ids: selected,
+            status: document.getElementById('bulk-status').value
+          })
+        });
+        if (resp.ok) {
+          window.location.reload();
+        } else {
+          const data = await resp.json();
+          showNotification(data.detail || 'Bulk update failed', 'error');
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        showNotification('Bulk update failed', 'error');
+      }
+    });
+
+    document.querySelectorAll('[data-upload-evidence]').forEach(uploadBtn => {
+      uploadBtn.addEventListener('click', async () => {
+        const requirementId = uploadBtn.dataset.uploadEvidence;
+        const title = document.getElementById(`req-evidence-title-${requirementId}`)?.value || '';
+        const fileInput = document.getElementById(`req-evidence-file-${requirementId}`);
+        const file = fileInput?.files?.[0];
+        if (!title || !file) {
+          showNotification('Choose a file and provide an evidence title', 'error');
+          return;
+        }
+        const payload = new FormData();
+        payload.append('title', title);
+        payload.append('evidence_file', file);
+        try {
+          const resp = await fetch(`/api/essential8/companies/${companyId}/requirements/${requirementId}/evidence/upload`, {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken },
+            body: payload
+          });
+          if (resp.ok) {
+            window.location.reload();
+          } else {
+            const data = await resp.json();
+            showNotification(data.detail || 'Evidence upload failed', 'error');
+          }
+        } catch (error) {
+          console.error('Error:', error);
+          showNotification('Evidence upload failed', 'error');
+        }
+      });
+    });
+  }
+
   function updateRequirementStatus(requirementId, status) {
     const item = document.querySelector(`[data-requirement-id="${requirementId}"]`);
     if (!item) return;
@@ -427,6 +581,11 @@ document.addEventListener('DOMContentLoaded', () => {
       .split('; ')
       .find(row => row.startsWith('myportal_session_csrf='))
       ?.split('=')[1] || '';
+  }
+
+  function parseOptionalInt(value) {
+    const parsed = parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : null;
   }
 
   function showNotification(message, type) {
