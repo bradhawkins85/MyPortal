@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from app.features.reporting import handlers as reporting_handlers
 from app.repositories import reporting as reporting_repo
+from app.services import report_query_builder
 
 
 def test_admin_reporting_clone_prefills_create_form(monkeypatch):
@@ -49,15 +50,24 @@ def test_admin_reporting_clone_prefills_create_form(monkeypatch):
         lambda: _eligible_users(),
     )
     monkeypatch.setattr(reporting_repo, "get_query", fake_get_query)
-    monkeypatch.setattr(reporting_repo, "list_permission_user_ids", fake_list_permissions)
+    monkeypatch.setattr(
+        reporting_repo, "list_permission_user_ids", fake_list_permissions
+    )
+    monkeypatch.setattr(
+        report_query_builder, "describe_schema", lambda: _empty_schema()
+    )
 
-    response = asyncio.run(reporting_handlers.admin_reporting_clone(SimpleNamespace(), 12))
+    response = asyncio.run(
+        reporting_handlers.admin_reporting_clone(SimpleNamespace(), 12)
+    )
 
     assert response.status_code == 200
     assert captured["template"] == "admin/reporting_form.html"
     extra = captured["extra"]
     assert extra["form_action"] == "/admin/reporting"
     assert extra["submit_label"] == "Create cloned report"
+    assert extra["test_action"] == "/admin/reporting"
+    assert extra["builder_schema"] == {"tables": [], "relations": []}
     assert extra["granted_user_ids"] == {7, 9}
     assert extra["report"] == {
         **source,
@@ -77,11 +87,15 @@ def test_admin_reporting_clone_redirects_when_source_is_missing(monkeypatch):
     monkeypatch.setattr(
         reporting_handlers,
         "_main",
-        lambda: SimpleNamespace(_require_super_admin_page=fake_require_super_admin_page),
+        lambda: SimpleNamespace(
+            _require_super_admin_page=fake_require_super_admin_page
+        ),
     )
     monkeypatch.setattr(reporting_repo, "get_query", fake_get_query)
 
-    response = asyncio.run(reporting_handlers.admin_reporting_clone(SimpleNamespace(), 404))
+    response = asyncio.run(
+        reporting_handlers.admin_reporting_clone(SimpleNamespace(), 404)
+    )
 
     assert response.status_code == 303
     assert response.headers["location"] == "/admin/reporting"
@@ -89,3 +103,7 @@ def test_admin_reporting_clone_redirects_when_source_is_missing(monkeypatch):
 
 async def _eligible_users():
     return [{"id": 7, "label": "Tech One"}, {"id": 9, "label": "Tech Two"}]
+
+
+async def _empty_schema():
+    return {"tables": [], "relations": []}
