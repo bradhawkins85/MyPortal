@@ -8,6 +8,7 @@ from typing import Any, Optional
 from app.core.database import db
 from app.core.logging import log_info
 from app.security.encryption import decrypt_secret, encrypt_secret
+from app.services import passkeys as passkeys_service
 
 
 def _hash_session_token(token: str) -> str:
@@ -398,7 +399,7 @@ async def create_passkey(
         (
             user_id,
             credential_id,
-            public_key.decode("latin1"),
+            passkeys_service.bytes_to_base64url(public_key),
             sign_count,
             json.dumps(transports or []),
             aaguid,

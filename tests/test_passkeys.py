@@ -72,7 +72,7 @@ async def test_finish_passkey_authentication_creates_session(monkeypatch):
             "id": 7,
             "user_id": 42,
             "credential_id": credential_id,
-            "public_key": "stored-public-key",
+            "public_key": passkeys_service.bytes_to_base64url(b"stored-public-key"),
             "sign_count": 3,
             "credential_backed_up": 0,
         }
@@ -167,7 +167,13 @@ async def test_finish_passkey_authentication_rejects_ineligible_user(monkeypatch
         return True
 
     async def fake_get_passkey_by_credential_id(credential_id):
-        return {"id": 7, "user_id": 42, "credential_id": credential_id, "public_key": "stored-public-key", "sign_count": 0}
+        return {
+            "id": 7,
+            "user_id": 42,
+            "credential_id": credential_id,
+            "public_key": passkeys_service.bytes_to_base64url(b"stored-public-key"),
+            "sign_count": 0,
+        }
 
     async def fake_get_user_by_id(user_id):
         return {"id": user_id, "email": "user@example.com", "is_active": 0}

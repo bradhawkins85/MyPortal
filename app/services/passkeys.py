@@ -32,6 +32,14 @@ def _bytes_to_base64url(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
 
 
+def bytes_to_base64url(value: bytes) -> str:
+    return _bytes_to_base64url(value)
+
+
+def base64url_to_bytes_safe(value: str) -> bytes:
+    return base64url_to_bytes(value)
+
+
 def _normalise_name(value: str | None, *, fallback: str) -> str:
     if value and value.strip():
         return value.strip()

@@ -8,11 +8,15 @@ function initPasskeyLogin() {
   const passkeyUtils = window.MyPortalPasskeyUtils;
   const button = document.querySelector('[data-passkey-login]');
   const errorContainer = document.querySelector('[data-passkey-error]');
+  const helpText = document.querySelector('[data-passkey-help]');
   if (!button || !passkeyUtils) {
     return;
   }
   if (!passkeyUtils.supportsPasskeys()) {
     button.disabled = true;
+    if (helpText) {
+      helpText.hidden = true;
+    }
     if (errorContainer) {
       errorContainer.hidden = false;
       errorContainer.textContent = 'Passkeys are not supported in this browser. Sign in with your password instead.';

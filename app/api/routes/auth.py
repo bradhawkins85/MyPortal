@@ -1140,7 +1140,7 @@ async def finish_passkey_authentication(
         verified = passkeys_service.verify_authentication(
             credential=payload.credential,
             expected_challenge=str(challenge["challenge"]),
-            public_key=str(passkey.get("public_key") or "").encode("latin1"),
+            public_key=passkeys_service.base64url_to_bytes_safe(str(passkey.get("public_key") or "")),
             sign_count=int(passkey.get("sign_count") or 0),
         )
     except Exception as exc:
