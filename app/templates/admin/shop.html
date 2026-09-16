@@ -85,17 +85,6 @@
           value="{{ search_term }}"
           data-admin-product-search
         />
-        <select class="form-input card__control" id="stock-filter">
-          <option value="">All stock</option>
-          <option value="in">In stock</option>
-          <option value="out">Out of stock</option>
-        </select>
-        <select class="form-input card__control" id="category-filter">
-          <option value="">All categories</option>
-          {% for category in filter_categories %}
-            <option value="{{ category.id }}">{{ '— ' if category.parent_id else '' }}{{ category.name }}</option>
-          {% endfor %}
-        </select>
         <label class="checkbox card__control">
           <input type="checkbox" id="show-archived" {% if show_archived %}checked{% endif %} />
           <span>Show archived</span>
@@ -162,7 +151,7 @@
             <th scope="col" data-sort="number" data-column="vip">VIP</th>
             <th scope="col" data-sort="number" data-column="profit">Profit</th>
             <th scope="col" data-sort="number" data-column="vip-profit">VIP Profit</th>
-            <th scope="col" data-sort="string" data-column="category">Category</th>
+            <th scope="col" data-sort="string" data-column="category" data-filter-options="multiple">Category</th>
             <th scope="col" data-sort="number" data-column="stock">Stock</th>
             <th scope="col" class="table__actions">Actions</th>
           </tr>
