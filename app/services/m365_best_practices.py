@@ -851,7 +851,7 @@ def _csv_row_value(row: Mapping[str, Any], *names: str) -> str:
 
 async def _download_graph_csv_report(access_token: str, url: str) -> list[dict[str, str]]:
     headers = {
-        "Authorization": f"******",
+        "Authorization": "Bearer " + access_token,
         "Accept": "text/csv",
     }
     try:
@@ -1115,6 +1115,8 @@ async def _collect_ews_dependency_state(
 
     return {
         "config": org,
+        "exo_token": exo_token,
+        "tenant_id": tenant_id,
         "ews_enabled": org.get("EwsEnabled"),
         "current_allowed": current_allowed,
         "required_apps": required_apps,
@@ -7613,7 +7615,8 @@ async def _remediate_ews_dependency_allow_list(
             "approved infrequent AppIDs to the check notes before enabling EWS.",
         )
 
-    exo_token, tenant_id = await _acquire_exo_access_token(company_id)
+    exo_token = str(state["exo_token"])
+    tenant_id = str(state["tenant_id"])
     current_allowed = list(state["current_allowed"])
     required_ids = [app["app_id"] for app in required_apps]
     merged_allowed = list(current_allowed)
