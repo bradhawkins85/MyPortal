@@ -45,18 +45,6 @@ def _get_page_rendering() -> tuple[Callable[..., Awaitable[dict[str, Any]]], Any
     return _build_page_base_context, _page_templates
 
 
-async def _render_page(
-    template_name: str,
-    request: Request,
-    user: dict[str, Any],
-    *,
-    extra: dict[str, Any] | None = None,
-) -> HTMLResponse:
-    build_base_context, templates = _get_page_rendering()
-    context = await build_base_context(request, user, extra=extra)
-    return templates.TemplateResponse(template_name, context)
-
-
 def _display_user_name(user: dict[str, Any] | None) -> str:
     """Return a stable display name for user-facing BCP tables."""
     if not user:
