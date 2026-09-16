@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from app.core.database import db
@@ -29,6 +29,16 @@ async def _ensure_connection() -> None:
 def _make_aware(value: Any) -> datetime | None:
     if not value:
         return None
+
+
+def _make_date(value: Any) -> date | None:
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        return None
     if isinstance(value, datetime):
         if value.tzinfo is None:
             return value.replace(tzinfo=timezone.utc)
@@ -45,6 +55,12 @@ def _normalise_record(row: Mapping[str, Any] | None) -> SignatureTemplateRecord 
             record[key] = int(record[key])
     for key in ("created_at", "updated_at", "published_at", "disabled_at"):
         record[key] = _make_aware(record.get(key))
+    for key in ("schedule_start_on", "schedule_end_on"):
+        record[key] = _make_date(record.get(key))
+    if "priority" in record and record["priority"] is not None:
+        record["priority"] = int(record["priority"])
+    if "is_default" in record:
+        record["is_default"] = bool(record["is_default"])
     return record
 
 
@@ -53,6 +69,7 @@ async def list_templates(company_id: int) -> list[SignatureTemplateRecord]:
     rows = await db.fetch_all(
         """
         SELECT id, company_id, slug, name, description, html_content, text_content, status,
+               priority, is_default, schedule_start_on, schedule_end_on,
                created_by_user_id, updated_by_user_id, published_at, disabled_at,
                created_at, updated_at
         FROM m365_signature_templates
@@ -69,6 +86,7 @@ async def get_template(company_id: int, template_id: int) -> SignatureTemplateRe
     row = await db.fetch_one(
         """
         SELECT id, company_id, slug, name, description, html_content, text_content, status,
+               priority, is_default, schedule_start_on, schedule_end_on,
                created_by_user_id, updated_by_user_id, published_at, disabled_at,
                created_at, updated_at
         FROM m365_signature_templates
@@ -84,6 +102,7 @@ async def get_template_by_slug(company_id: int, slug: str) -> SignatureTemplateR
     row = await db.fetch_one(
         """
         SELECT id, company_id, slug, name, description, html_content, text_content, status,
+               priority, is_default, schedule_start_on, schedule_end_on,
                created_by_user_id, updated_by_user_id, published_at, disabled_at,
                created_at, updated_at
         FROM m365_signature_templates
@@ -103,6 +122,10 @@ async def create_template(
     html_content: str,
     text_content: str,
     status: str,
+    priority: int,
+    is_default: bool,
+    schedule_start_on: date | None,
+    schedule_end_on: date | None,
     created_by_user_id: int | None,
     updated_by_user_id: int | None,
     published_at: datetime | None = None,
@@ -113,9 +136,10 @@ async def create_template(
         """
         INSERT INTO m365_signature_templates (
             company_id, slug, name, description, html_content, text_content, status,
+            priority, is_default, schedule_start_on, schedule_end_on,
             created_by_user_id, updated_by_user_id, published_at, disabled_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             company_id,
@@ -125,6 +149,10 @@ async def create_template(
             html_content,
             text_content,
             status,
+            priority,
+            1 if is_default else 0,
+            schedule_start_on,
+            schedule_end_on,
             created_by_user_id,
             updated_by_user_id,
             published_at.replace(tzinfo=None) if isinstance(published_at, datetime) else published_at,
@@ -154,6 +182,10 @@ async def update_template(
         "html_content",
         "text_content",
         "status",
+        "priority",
+        "is_default",
+        "schedule_start_on",
+        "schedule_end_on",
         "created_by_user_id",
         "updated_by_user_id",
         "published_at",
