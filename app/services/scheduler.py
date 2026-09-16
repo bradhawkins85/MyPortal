@@ -1737,10 +1737,8 @@ class SchedulerService:
             slugs.append(slug)
 
         if not slugs:
-            try:
+            with suppress(OSError):
                 _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
-            except OSError:
-                return
             return
 
         try:
@@ -1794,9 +1792,7 @@ class SchedulerService:
 
         if not failed:
             try:
-                _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
-            except FileNotFoundError:
-                return
+                _FEATURE_PACK_RELOAD_FLAG_PATH.unlink(missing_ok=True)
             except OSError as exc:
                 log_error(
                     "Failed to clear feature pack reload flag",
