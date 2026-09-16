@@ -73,6 +73,16 @@ class LoginResponse(BaseModel):
     redirect: Optional[str] = None
 
 
+class RegistrationPendingResponse(BaseModel):
+    detail: str
+    verification_required: bool = True
+
+
+class RegistrationConflictResponse(BaseModel):
+    detail: str
+    account_setup_reset_available: bool | None = None
+
+
 class SessionResponse(LoginResponse):
     pass
 

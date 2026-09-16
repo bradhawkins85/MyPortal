@@ -22,6 +22,7 @@ from app.security.flash import flash_redirect
 from app.core.logging import log_error, log_info
 from app.repositories import invoices as invoice_repo
 from app.repositories import users as user_repo
+from app.schemas.xero import XeroCallbackResponse, XeroTenantConnection, XeroTenantListResponse
 from app.security.session import session_manager
 from app.services import modules as modules_service
 from app.services import audit as audit_service
@@ -263,16 +264,17 @@ async def receive_webhook(request: Request) -> Response:
 
 @router.post(
     "/callback",
+    response_model=XeroCallbackResponse,
     status_code=status.HTTP_202_ACCEPTED,
     name="xero_receive_callback",
 )
-async def receive_callback(request: Request) -> dict[str, str]:
+async def receive_callback(request: Request) -> XeroCallbackResponse:
     """Legacy Xero callback endpoint retained for existing callback integrations."""
-    return {"status": "accepted"}
+    return XeroCallbackResponse(status="accepted")
 
 
-@router.get("/callback", name="xero_callback_probe")
-async def probe_callback(request: Request) -> dict[str, str]:
+@router.get("/callback", response_model=XeroCallbackResponse, name="xero_callback_probe")
+async def probe_callback(request: Request) -> XeroCallbackResponse:
     """Expose a lightweight probe endpoint for connectivity checks."""
 
     await _ensure_module_enabled()
@@ -281,11 +283,11 @@ async def probe_callback(request: Request) -> dict[str, str]:
             "Received Xero callback probe",
             query_params=dict(request.query_params),
         )
-    return {"status": "ok"}
+    return XeroCallbackResponse(status="ok")
 
 
-@router.get("/tenants", name="xero_list_tenants")
-async def list_tenants() -> dict[str, Any]:
+@router.get("/tenants", response_model=XeroTenantListResponse, name="xero_list_tenants")
+async def list_tenants() -> XeroTenantListResponse:
     """List available Xero tenants (organizations) for the configured credentials.
     
     Returns:
@@ -327,20 +329,15 @@ async def list_tenants() -> dict[str, Any]:
             connections_response.raise_for_status()
             connections = connections_response.json()
         
-        # Format tenant information
-        tenants = [
-            {
-                "tenant_id": conn.get("tenantId"),
-                "tenant_name": conn.get("tenantName"),
-                "tenant_type": conn.get("tenantType"),
-                "created_date_utc": conn.get("createdDateUtc"),
-            }
-            for conn in connections
-        ]
+        tenants = [XeroTenantConnection.model_validate(conn) for conn in connections]
         
         # Get current tenant_id from settings
         settings = module.get("settings") or {}
-        current_tenant_id = settings.get("tenant_id", "")
+        current_tenant_id = settings.get("tenant_id")
+        if isinstance(current_tenant_id, str):
+            current_tenant_id = current_tenant_id.strip() or None
+        elif current_tenant_id is not None:
+            current_tenant_id = str(current_tenant_id).strip() or None
         
         logger.info(
             "Listed Xero tenants",
@@ -348,10 +345,10 @@ async def list_tenants() -> dict[str, Any]:
             current_tenant_id=current_tenant_id,
         )
         
-        return {
-            "tenants": tenants,
-            "current_tenant_id": current_tenant_id,
-        }
+        return XeroTenantListResponse(
+            tenants=tenants,
+            current_tenant_id=current_tenant_id,
+        )
     
     except httpx.HTTPStatusError as exc:
         logger.error(
