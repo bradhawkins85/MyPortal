@@ -421,11 +421,29 @@
 
     // A screen wake lock reduces the chance of an actively viewed ticket page
     // being suspended. Browsers may still suspend background tabs by design.
+    let wakeLock = null;
     async function requestWakeLock() {
       if (document.visibilityState !== 'visible' || !navigator.wakeLock) return;
-      try { await navigator.wakeLock.request('screen'); } catch (error) { /* permission/device dependent */ }
+      if (wakeLock) return;
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; }, { once: true });
+      } catch (error) { /* permission/device dependent */ }
     }
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') requestWakeLock(); });
+    async function releaseWakeLock() {
+      if (!wakeLock) return;
+      const heldWakeLock = wakeLock;
+      wakeLock = null;
+      try { await heldWakeLock.release(); } catch (error) { /* browser dependent */ }
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        requestWakeLock();
+        return;
+      }
+      releaseWakeLock();
+    });
+    window.addEventListener('pagehide', () => { releaseWakeLock(); }, { once: true });
     requestWakeLock();
 
     if (historyButton && dialog && historyContent) {

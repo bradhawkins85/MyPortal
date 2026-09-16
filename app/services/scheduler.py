@@ -1353,9 +1353,6 @@ class SchedulerService:
                             plan_id = plan.get("id")
 
                             if plan_id:
-                                # Get distribution list for the plan
-                                await bcp_repo.list_distribution_list(plan_id)
-
                                 # Create notification
                                 message = f"Upcoming BCP plan review scheduled for {item['review_date'].strftime('%Y-%m-%d %H:%M')}"
                                 if item.get("reason"):
