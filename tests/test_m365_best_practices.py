@@ -713,6 +713,9 @@ async def test_remediate_check_internal_phishing_forms_retries_after_permission_
     upserts: list[dict] = []
     first_exc = M365Error("Microsoft Graph PATCH failed (403): denied", http_status=403)
 
+    async def capture_update(**kw):
+        upserts.append(kw)
+
     with (
         patch(
             "app.services.m365_best_practices.acquire_access_token",
@@ -736,7 +739,8 @@ async def test_remediate_check_internal_phishing_forms_retries_after_permission_
         ) as grant_permissions,
         patch(
             "app.services.m365_best_practices.bp_repo.update_remediation_status",
-            side_effect=lambda **kw: upserts.append(kw) or None,
+            new_callable=AsyncMock,
+            side_effect=capture_update,
         ),
     ):
         result = await bp_service.remediate_check(
@@ -756,6 +760,9 @@ async def test_remediate_check_internal_phishing_forms_permission_denied_is_acti
     upserts: list[dict] = []
     graph_exc = M365Error("Microsoft Graph PATCH failed (403): denied", http_status=403)
 
+    async def capture_update(**kw):
+        upserts.append(kw)
+
     with (
         patch(
             "app.services.m365_best_practices.acquire_access_token",
@@ -774,7 +781,8 @@ async def test_remediate_check_internal_phishing_forms_permission_denied_is_acti
         ),
         patch(
             "app.services.m365_best_practices.bp_repo.update_remediation_status",
-            side_effect=lambda **kw: upserts.append(kw) or None,
+            new_callable=AsyncMock,
+            side_effect=capture_update,
         ),
     ):
         result = await bp_service.remediate_check(
@@ -791,6 +799,9 @@ async def test_remediate_check_internal_phishing_forms_permission_denied_is_acti
 async def test_remediate_check_internal_phishing_forms_reports_permission_repair_failure():
     upserts: list[dict] = []
     graph_exc = M365Error("Microsoft Graph PATCH failed (403): denied", http_status=403)
+
+    async def capture_update(**kw):
+        upserts.append(kw)
 
     with (
         patch(
@@ -815,7 +826,8 @@ async def test_remediate_check_internal_phishing_forms_reports_permission_repair
         ),
         patch(
             "app.services.m365_best_practices.bp_repo.update_remediation_status",
-            side_effect=lambda **kw: upserts.append(kw) or None,
+            new_callable=AsyncMock,
+            side_effect=capture_update,
         ),
     ):
         result = await bp_service.remediate_check(

@@ -8504,6 +8504,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 )
             except M365Error as exc:
                 granted = False
+                success = False
                 outcome_message = str(exc)
                 permission_repair_error = ""
                 if exc.http_status == 403:
