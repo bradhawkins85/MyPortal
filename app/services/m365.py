@@ -2249,7 +2249,7 @@ async def renew_client_secret(company_id: int) -> None:
             )
 
 
-async def renew_admin_client_secret(company_id: int | None = None) -> None:
+async def renew_admin_client_secret(company_id: int | None = None) -> dict[str, Any]:
     """Renew stored M365 admin credentials used for PKCE/bootstrap flows."""
     if company_id is None:
         creds = await get_admin_m365_credentials()
@@ -2298,6 +2298,8 @@ async def renew_admin_client_secret(company_id: int | None = None) -> None:
         new_expiry_date.year, new_expiry_date.month, new_expiry_date.day
     )
     old_key_id: str | None = creds.get("client_secret_key_id")
+    old_expires_at = _parse_client_secret_expires(creds.get("client_secret_expires_at"))
+    persisted_key_id = old_key_id or new_key_id
 
     if company_id is None:
         await update_admin_m365_credentials(
@@ -2305,7 +2307,7 @@ async def renew_admin_client_secret(company_id: int | None = None) -> None:
             client_secret=new_secret,
             tenant_id=tenant_id,
             app_object_id=app_object_id,
-            client_secret_key_id=new_key_id,
+            client_secret_key_id=persisted_key_id,
             client_secret_expires_at=new_expires_at,
             pkce_client_id=creds.get("pkce_client_id"),
         )
@@ -2316,10 +2318,63 @@ async def renew_admin_client_secret(company_id: int | None = None) -> None:
             client_secret=new_secret,
             tenant_id=tenant_id,
             app_object_id=app_object_id,
-            client_secret_key_id=new_key_id,
+            client_secret_key_id=persisted_key_id,
             client_secret_expires_at=new_expires_at,
             pkce_client_id=creds.get("pkce_client_id"),
         )
+
+    try:
+        await _exchange_token(
+            tenant_id=tenant_id,
+            client_id=client_id,
+            client_secret=new_secret,
+            refresh_token=None,
+        )
+    except M365Error as exc:
+        log_error(
+            "New M365 admin client secret validation failed; restoring previous credential",
+            company_id=company_id,
+            new_key_id=new_key_id,
+            error=str(exc),
+        )
+        if new_key_id:
+            try:
+                await _graph_post(
+                    access_token,
+                    f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/removePassword",
+                    {"keyId": new_key_id},
+                )
+            except M365Error as cleanup_exc:
+                log_error(
+                    "Failed to remove unvalidated M365 admin client secret",
+                    company_id=company_id,
+                    new_key_id=new_key_id,
+                    error=str(cleanup_exc),
+                )
+        if company_id is None:
+            await update_admin_m365_credentials(
+                client_id=client_id,
+                client_secret=client_secret,
+                tenant_id=tenant_id,
+                app_object_id=app_object_id,
+                client_secret_key_id=old_key_id,
+                client_secret_expires_at=old_expires_at,
+                pkce_client_id=creds.get("pkce_client_id"),
+            )
+        else:
+            await upsert_company_admin_credentials(
+                company_id=company_id,
+                client_id=client_id,
+                client_secret=client_secret,
+                tenant_id=tenant_id,
+                app_object_id=app_object_id,
+                client_secret_key_id=old_key_id,
+                client_secret_expires_at=old_expires_at,
+                pkce_client_id=creds.get("pkce_client_id"),
+            )
+        raise M365Error(
+            "Replacement M365 admin credential failed validation; previous credential restored"
+        ) from exc
 
     log_info(
         "Renewed M365 admin client secret",
@@ -2328,6 +2383,7 @@ async def renew_admin_client_secret(company_id: int | None = None) -> None:
         expires_at=new_expiry_str,
     )
 
+    revoked_previous = True
     if old_key_id:
         try:
             await _graph_post(
@@ -2335,18 +2391,46 @@ async def renew_admin_client_secret(company_id: int | None = None) -> None:
                 f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/removePassword",
                 {"keyId": old_key_id},
             )
+            if new_key_id and new_key_id != old_key_id:
+                if company_id is None:
+                    await update_admin_m365_credentials(
+                        client_id=client_id,
+                        client_secret=new_secret,
+                        tenant_id=tenant_id,
+                        app_object_id=app_object_id,
+                        client_secret_key_id=new_key_id,
+                        client_secret_expires_at=new_expires_at,
+                        pkce_client_id=creds.get("pkce_client_id"),
+                    )
+                else:
+                    await upsert_company_admin_credentials(
+                        company_id=company_id,
+                        client_id=client_id,
+                        client_secret=new_secret,
+                        tenant_id=tenant_id,
+                        app_object_id=app_object_id,
+                        client_secret_key_id=new_key_id,
+                        client_secret_expires_at=new_expires_at,
+                        pkce_client_id=creds.get("pkce_client_id"),
+                    )
             log_info(
                 "Revoked old M365 admin client secret",
                 company_id=company_id,
                 old_key_id=old_key_id,
             )
         except M365Error as exc:
+            revoked_previous = False
             log_error(
                 "Failed to revoke old M365 admin client secret",
                 company_id=company_id,
                 old_key_id=old_key_id,
                 error=str(exc),
             )
+    return {
+        "expires_at": new_expires_at,
+        "key_id": new_key_id,
+        "revoked_previous": revoked_previous,
+    }
 
 
 async def renew_expiring_client_secrets() -> dict[str, Any]:

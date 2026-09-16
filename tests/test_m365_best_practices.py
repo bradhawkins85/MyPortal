@@ -1759,7 +1759,22 @@ async def test_get_auto_remediate_check_ids_empty_when_none_set():
         return_value={},
     ):
         ids = await bp_service.get_auto_remediate_check_ids()
-    assert ids == set()
+
+    assert "bp_monitor_app_credential_expiry" in ids
+
+
+@pytest.mark.anyio("asyncio")
+async def test_list_settings_with_catalog_defaults_pkce_expiry_check_to_auto_remediate():
+    """The PKCE credential-expiry check auto-remediates by default until explicitly changed."""
+    with patch(
+        "app.services.m365_best_practices.bp_repo.get_settings_map",
+        new_callable=AsyncMock,
+        return_value={},
+    ):
+        rows = await bp_service.list_settings_with_catalog()
+
+    entry = next(r for r in rows if r["id"] == "bp_monitor_app_credential_expiry")
+    assert entry["auto_remediate"] is True
 
 
 @pytest.mark.anyio("asyncio")
@@ -2499,6 +2514,78 @@ async def test_remediate_sspr_failure_on_token_acquisition_error():
     assert len(upserts) == 1
     assert upserts[0]["company_id"] == 1
     assert upserts[0]["check_id"] == "bp_self_service_password_reset"
+    assert upserts[0]["remediation_status"] == "failed"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_app_credential_expiry_rotates_myportal_pkce_secret():
+    """The PKCE expiry remediation uses managed admin credentials instead of generic Graph PATCH."""
+    upserts: list[dict[str, Any]] = []
+    expiry = datetime(2026, 2, 1, 0, 0, 0)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.get_company_admin_credentials",
+            new_callable=AsyncMock,
+            return_value={"client_id": "company-app", "client_secret": "old"},
+        ),
+        patch(
+            "app.services.m365_best_practices.renew_admin_client_secret",
+            new_callable=AsyncMock,
+            return_value={"expires_at": expiry, "revoked_previous": True},
+        ) as mock_renew,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+        ) as mock_acquire,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_monitor_app_credential_expiry"
+        )
+
+    assert result["success"] is True
+    assert "2026-02-01" in result["message"]
+    mock_renew.assert_awaited_once_with(7)
+    mock_acquire.assert_not_awaited()
+    assert upserts[0]["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_app_credential_expiry_fails_for_environment_credentials():
+    """Environment-managed PKCE credentials return an actionable remediation failure."""
+    upserts: list[dict[str, Any]] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.get_company_admin_credentials",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "app.services.m365_best_practices.get_admin_m365_credentials",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "app.services.m365_best_practices.get_effective_admin_credentials",
+            new_callable=AsyncMock,
+            return_value={"client_id": "env-app", "client_secret": "env-secret"},
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_monitor_app_credential_expiry"
+        )
+
+    assert result["success"] is False
+    assert "environment variables" in result["message"]
     assert upserts[0]["remediation_status"] == "failed"
 
 

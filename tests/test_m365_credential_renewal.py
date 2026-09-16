@@ -185,6 +185,72 @@ async def test_graph_post_handles_204_no_content():
 
 
 # ---------------------------------------------------------------------------
+# Tests: renew_admin_client_secret
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_renew_admin_client_secret_validation_failure_restores_previous_secret():
+    """Validation failure restores the previous admin credential and removes the new secret."""
+    stored_creds = {
+        "tenant_id": "tenant-1",
+        "client_id": "admin-client-id",
+        "client_secret": "old-secret",
+        "app_object_id": "admin-app-obj",
+        "client_secret_key_id": "old-key-id",
+        "client_secret_expires_at": datetime.utcnow() + timedelta(days=4),
+        "pkce_client_id": "pkce-client-id",
+    }
+    posted_calls: list[dict[str, Any]] = []
+    persisted: list[dict[str, Any]] = []
+
+    async def mock_post(token: str, url: str, payload: dict) -> dict:
+        posted_calls.append({"url": url, "payload": payload})
+        if "addPassword" in url:
+            return {"secretText": "new-secret", "keyId": "new-key-id"}
+        if "removePassword" in url:
+            return {}
+        return {}
+
+    exchange_mock = AsyncMock(
+        side_effect=[
+            ("old-token", None, None),
+            m365_service.M365Error("new secret rejected"),
+        ]
+    )
+    mock_settings = MagicMock()
+    mock_settings.m365_client_secret_lifetime_days = 730
+
+    with (
+        patch.object(
+            m365_service, "get_admin_m365_credentials", AsyncMock(return_value=stored_creds)
+        ),
+        patch.object(m365_service, "_exchange_token", exchange_mock),
+        patch.object(m365_service, "_graph_post", side_effect=mock_post),
+        patch.object(
+            m365_service,
+            "update_admin_m365_credentials",
+            side_effect=lambda **kwargs: persisted.append(kwargs) or None,
+        ),
+        patch("app.services.m365.get_settings", return_value=mock_settings),
+    ):
+        with pytest.raises(
+            m365_service.M365Error,
+            match="previous credential restored",
+        ):
+            await m365_service.renew_admin_client_secret()
+
+    assert len(persisted) == 2
+    assert persisted[0]["client_secret"] == "new-secret"
+    assert persisted[0]["client_secret_key_id"] == "old-key-id"
+    assert persisted[1]["client_secret"] == "old-secret"
+    assert persisted[1]["client_secret_key_id"] == "old-key-id"
+    remove_call = next(c for c in posted_calls if "removePassword" in c["url"])
+    assert remove_call["payload"]["keyId"] == "new-key-id"
+    assert exchange_mock.await_count == 2
+
+
+# ---------------------------------------------------------------------------
 # Tests: renew_client_secret
 # ---------------------------------------------------------------------------
 
