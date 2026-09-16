@@ -1144,6 +1144,25 @@ async def _acquire_scc_access_token(company_id: int) -> tuple[str, str]:
     return access_token, tenant_id
 
 
+def _jwt_appid(token: str) -> str | None:
+    """Extract the ``appid`` claim from a JWT access token without verification.
+
+    Used to build an ``X-AnchorMailbox`` routing hint for SCC REST API calls so
+    that requests reach the correct Exchange/Purview forest rather than the
+    Microsoft-internal FFO pre-production environment (DC=FFO,DC=extest).
+    """
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return None
+        padding = 4 - len(parts[1]) % 4
+        payload_bytes = base64.urlsafe_b64decode(parts[1] + "=" * padding)
+        claims = json.loads(payload_bytes)
+        return str(claims["appid"]) if "appid" in claims else None
+    except Exception:  # noqa: BLE001 - best-effort; absence is non-fatal
+        return None
+
+
 async def _scc_invoke_command(
     scc_token: str,
     tenant_id: str,
@@ -1157,6 +1176,11 @@ async def _scc_invoke_command(
     using an app-only Security & Compliance access token.  The app must have a
     Compliance Administrator (or Global Administrator) role assigned so that
     cmdlets such as ``Get-ProtectionAlert`` and ``New-ProtectionAlert`` succeed.
+
+    An ``X-AnchorMailbox`` header of the form ``app:{appid}@{tenant_id}`` is
+    included when the ``appid`` claim can be decoded from *scc_token*.  This
+    hints the correct Exchange/Purview forest and prevents the transient
+    "Could not find the organization container … DC=FFO,DC=extest" routing error.
 
     Returns the raw JSON response body on success.  Raises :exc:`M365Error` on any
     non-200 HTTP status.
@@ -1174,6 +1198,10 @@ async def _scc_invoke_command(
         "Accept-Encoding": "identity",
         "Content-Type": "application/json; charset=utf-8",
     }
+    appid = _jwt_appid(scc_token)
+    _anchor_tenant = str(tenant_id or "").strip()
+    if appid and _anchor_tenant:
+        headers["X-AnchorMailbox"] = f"app:{appid}@{_anchor_tenant}"
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(url, headers=headers, json=payload)

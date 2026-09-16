@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.services import m365_spam_purge as service
-from app.services.m365 import M365Error
+from app.services.m365 import M365Error, _jwt_appid
 
 
 @pytest.fixture
@@ -212,3 +212,24 @@ def test_spam_purge_permission_is_available_to_roles():
     )
     assert permission["admin_only"] is True
     assert permission["levels"] == ["none", "read", "write"]
+
+def test_jwt_appid_extracts_appid_from_valid_jwt():
+    import base64, json
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "RS256"}).encode()).rstrip(b"=").decode()
+    payload = base64.urlsafe_b64encode(json.dumps({"appid": "my-client-id", "tid": "my-tenant"}).encode()).rstrip(b"=").decode()
+    token = f"{header}.{payload}.fakesig"
+    assert _jwt_appid(token) == "my-client-id"
+
+
+def test_jwt_appid_returns_none_when_claim_absent():
+    import base64, json
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "RS256"}).encode()).rstrip(b"=").decode()
+    payload = base64.urlsafe_b64encode(json.dumps({"tid": "my-tenant"}).encode()).rstrip(b"=").decode()
+    token = f"{header}.{payload}.fakesig"
+    assert _jwt_appid(token) is None
+
+
+def test_jwt_appid_returns_none_for_invalid_token():
+    assert _jwt_appid("notavalidjwt") is None
+    assert _jwt_appid("") is None
+
