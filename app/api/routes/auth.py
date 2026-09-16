@@ -261,9 +261,7 @@ def _request_is_secure(request: Request) -> bool:
     if settings.environment.lower() == "production":
         return True
     scheme = (request.url.scheme or "").lower()
-    if scheme == "https":
-        return True
-    return request.headers.get("x-forwarded-proto", "").lower() == "https"
+    return scheme == "https"
 
 
 def _set_passkey_login_cookie(response: Response, request: Request, token: str) -> None:
