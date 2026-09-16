@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import html
+import hashlib
 import socket
 from ipaddress import ip_address
 from datetime import date, datetime, timezone
@@ -637,6 +638,7 @@ async def _process_feed_item(
     *,
     update_recommendations: bool = True,
     download_image_if_new: bool = True,
+    reformat_changed_description: bool = False,
 ) -> bool:
     code = str(item.get("sku") or "").strip()
     if not code:
@@ -648,6 +650,23 @@ async def _process_feed_item(
 
     feed_name = str(item.get("product_name") or "").strip()
     description = str(item.get("product_name2") or "").strip() or None
+    source_description_hash = hashlib.sha1(
+        (description or "").encode("utf-8")
+    ).hexdigest()
+    stored_description_hash = (
+        str(current_product.get("source_description_hash") or "").strip()
+        if current_product
+        else ""
+    )
+    # Existing rows pre-date source hashing. Initialise them from the current
+    # feed without touching their potentially AI-generated shop description.
+    is_legacy_description = current_product is not None and not stored_description_hash
+    description_changed = (
+        current_product is None or stored_description_hash != source_description_hash
+    )
+    shop_description = description
+    if current_product and (is_legacy_description or not description_changed):
+        shop_description = current_product.get("description")
 
     rrp = _to_decimal(item.get("rrp"))
     existing_price = (
@@ -713,9 +732,13 @@ async def _process_feed_item(
     feed_image_url = str(item.get("image_url") or "").strip()
     feed_website_url = str(item.get("website_url") or "").strip()
     existing_product_link = (
-        str(current_product.get("product_link") or "").strip() if current_product else ""
+        str(current_product.get("product_link") or "").strip()
+        if current_product
+        else ""
     )
-    product_link = feed_website_url if feed_website_url and not existing_product_link else None
+    product_link = (
+        feed_website_url if feed_website_url and not existing_product_link else None
+    )
     image_url: str | None = None
     if existing_image_url:
         image_url = None
@@ -726,7 +749,12 @@ async def _process_feed_item(
         name=name[:255],
         sku=code,
         vendor_sku=code,
-        description=description,
+        description=shop_description,
+        source_description_hash=(
+            source_description_hash
+            if is_legacy_description or not description_changed
+            else stored_description_hash or None
+        ),
         image_url=image_url,
         price=price,
         vip_price=vip_price,
@@ -747,6 +775,37 @@ async def _process_feed_item(
         manufacturer=manufacturer,
         product_link=product_link,
     )
+
+    if (
+        reformat_changed_description
+        and description_changed
+        and not is_legacy_description
+    ):
+        product_id = int(current_product.get("id") or 0) if current_product else 0
+        if not product_id:
+            product_after_upsert = await shop_repo.get_product_by_sku(
+                code, include_archived=True
+            )
+            product_id = (
+                int(product_after_upsert.get("id") or 0) if product_after_upsert else 0
+            )
+        if product_id:
+            try:
+                result = await product_descriptions.improve_product_description(
+                    product_id
+                )
+                if result is not None:
+                    await shop_repo.update_product_source_description_hash(
+                        product_id, source_description_hash
+                    )
+            # Leave the old hash in place so the next sync retries failures.
+            except Exception as exc:
+                log_error(
+                    "Failed to reformat changed feed product description",
+                    sku=code,
+                    product_id=product_id,
+                    error=str(exc),
+                )
 
     if update_recommendations:
         opt_accessori_raw = item.get("opt_accessori")
@@ -789,7 +848,9 @@ async def import_product_by_vendor_sku(vendor_sku: str) -> bool:
     )
 
     try:
-        processed = await _process_feed_item(item, existing_product)
+        processed = await _process_feed_item(
+            item, existing_product, reformat_changed_description=True
+        )
     except Exception as exc:
         log_error(
             "Failed to import product from stock feed",
@@ -805,21 +866,6 @@ async def import_product_by_vendor_sku(vendor_sku: str) -> bool:
                 existing_id = int(existing_product["id"])
             except (TypeError, ValueError):  # pragma: no cover - defensive
                 existing_id = None
-        imported_product = await shop_repo.get_product_by_sku(
-            cleaned_vendor_sku, include_archived=True
-        )
-        if imported_product and imported_product.get("id"):
-            try:
-                await product_descriptions.improve_product_description(
-                    int(imported_product["id"])
-                )
-            except Exception as exc:  # pragma: no cover - AI/network/database safety
-                log_error(
-                    "Failed to refresh imported product description",
-                    vendor_sku=cleaned_vendor_sku,
-                    product_id=imported_product.get("id"),
-                    error=str(exc),
-                )
         log_info(
             "Imported product from stock feed",
             vendor_sku=cleaned_vendor_sku,
@@ -872,6 +918,7 @@ async def update_products_from_feed() -> None:
                 existing_product,
                 update_recommendations=False,
                 download_image_if_new=False,
+                reformat_changed_description=True,
             ):
                 processed += 1
         except Exception as exc:  # pragma: no cover - defensive logging
