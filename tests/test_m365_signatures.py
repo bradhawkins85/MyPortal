@@ -86,6 +86,46 @@ async def test_variable_suggestions_include_company_variables(monkeypatch):
     assert suggestions.count("{{company.variables.support_phone}}") == 1
 
 
+@pytest.mark.anyio
+async def test_clone_template_truncates_slug_before_copy_suffix(monkeypatch):
+    source_slug = "x" * 120
+
+    async def fake_get_template(company_id: int, template_id: int):
+        return {
+            "id": template_id,
+            "slug": source_slug,
+            "name": "Primary",
+            "description": None,
+            "html_content": "<p>Hello</p>",
+            "text_content": "Hello",
+        }
+
+    async def fake_get_template_by_slug(company_id: int, slug: str):
+        assert len(slug) <= 120
+        return None
+
+    async def fake_create_template(**kwargs):
+        return kwargs
+
+    monkeypatch.setattr(m365_signatures, "get_template", fake_get_template)
+    monkeypatch.setattr(
+        m365_signatures.signatures_repo,
+        "get_template_by_slug",
+        fake_get_template_by_slug,
+    )
+    monkeypatch.setattr(
+        m365_signatures.signatures_repo,
+        "create_template",
+        fake_create_template,
+    )
+
+    cloned = await m365_signatures.clone_template(7, 11, user_id=5)
+
+    assert cloned is not None
+    assert cloned["slug"].endswith("-copy")
+    assert len(cloned["slug"]) <= 120
+
+
 def test_signature_templates_compile_and_expose_designer_copy():
     environment = Environment(loader=FileSystemLoader(ROOT / "app" / "templates"))
 

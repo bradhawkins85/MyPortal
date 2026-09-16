@@ -120,7 +120,7 @@ async def clone_template(company_id: int, template_id: int, *, user_id: int | No
     source = await get_template(company_id, template_id)
     if not source:
         return None
-    base_slug = str(source.get("slug") or "signature")
+    base_slug = str(source.get("slug") or "signature")[:110].rstrip("._-") or "signature"
     candidate = f"{base_slug}-copy"
     index = 2
     while await signatures_repo.get_template_by_slug(company_id, candidate):
@@ -242,7 +242,6 @@ async def render_preview(
         "html": sanitised_html.html,
         "text": rendered_text,
         "missing_tokens": missing_tokens,
-        "context": context,
     }
 
 
@@ -273,7 +272,6 @@ async def list_variable_suggestions(company_id: int) -> list[str]:
         "{{staff.department}}",
         "{{user.fullName}}",
         "{{company.name}}",
-        "{{company.variables.support_phone}}",
         "{{APP_PORTAL_URL}}",
         "{{NOW_UTC}}",
     ]
