@@ -1,0 +1,7 @@
+{
+  "guid": "905afe80-1ee7-46d6-9512-567f76665bca",
+  "occurred_at": "2026-09-16T00:00Z",
+  "change_type": "Fix",
+  "summary": "Add Domain.Read.All to M365 provisioning and diagnostics, and route Purview spam purge requests by the tenant initial onmicrosoft.com domain.",
+  "content_hash": "93645be22eaa4df389601bb69be33b1f8861a7ee0dc0743cbe94f6463bc51094"
+}

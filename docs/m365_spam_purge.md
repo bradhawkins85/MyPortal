@@ -39,6 +39,10 @@ destructive action. Calling the search endpoint again retries a failed search;
 the web history also presents a **Retry search** action for failed requests.
 
 Compliance commands resolve and use the tenant's initial
-`*.onmicrosoft.com` domain as the Purview organization identifier. The app
-registration therefore needs Microsoft Graph `Domain.Read.All` application
-permission in addition to the Purview roles above.
+`*.onmicrosoft.com` domain in both the Purview InvokeCommand route and routing
+header, matching the organization supplied to an app-only `Connect-IPPSSession`.
+Using the tenant GUID in the route can cause Purview to look for a `CN` named
+after that GUID in the FFO test forest. The app registration therefore needs
+Microsoft Graph `Domain.Read.All` application permission in addition to the
+Purview roles above. This permission is included in provisioning, automatic
+permission repair, and M365 permission diagnostics.

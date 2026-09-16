@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 from datetime import date
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import httpx
 
+from app.services import m365 as m365_service
 from app.services import m365_spam_purge as service
 from app.services.m365 import M365Error, _jwt_appid
 
@@ -68,6 +72,86 @@ def test_start_purge_is_company_scoped(monkeypatch):
         asyncio.run(service.start_purge(7, 2))
 
 
+def test_scc_organization_uses_initial_onmicrosoft_domain(monkeypatch):
+    async def fake_token(_company_id):
+        return "graph-token"
+
+    async def fake_graph(token, url):
+        assert token == "graph-token"
+        assert "$select=id,isInitial" in url
+        return {"value": [
+            {"id": "contoso.com", "isInitial": False},
+            {"id": "ContosoTenant.onmicrosoft.com", "isInitial": True},
+        ]}
+
+    monkeypatch.setattr(service.m365_service, "acquire_access_token", fake_token)
+    monkeypatch.setattr(service.m365_service, "_graph_get", fake_graph)
+
+    assert asyncio.run(service._scc_organization(7)) == "contosotenant.onmicrosoft.com"
+
+
+def test_scc_organization_requires_initial_domain(monkeypatch):
+    async def fake_token(_company_id):
+        return "graph-token"
+
+    async def fake_graph(_token, _url):
+        return {"value": [{"id": "contoso.com", "isInitial": False}]}
+
+    monkeypatch.setattr(service.m365_service, "acquire_access_token", fake_token)
+    monkeypatch.setattr(service.m365_service, "_graph_get", fake_graph)
+
+    with pytest.raises(ValueError, match="Domain.Read.All"):
+        asyncio.run(service._scc_organization(7))
+
+
+def test_domain_read_all_is_provisioned_and_visible_in_diagnostics():
+    domain_read_all = "dbb9058a-0e50-45d7-ae91-66909b5d4664"
+
+    assert domain_read_all in m365_service.get_required_app_role_ids()
+    graph = next(
+        app for app in m365_service.ENTERPRISE_APP_CATALOG
+        if app["name"] == "Microsoft Graph"
+    )
+    assert {item["id"]: item["name"] for item in graph["permissions"]}[domain_read_all] == (
+        "Domain.Read.All"
+    )
+
+
+@pytest.mark.anyio("asyncio")
+async def test_scc_invoke_uses_initial_domain_in_route_and_anchor(monkeypatch):
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "RS256"}).encode()).rstrip(b"=").decode()
+    payload = base64.urlsafe_b64encode(json.dumps({"appid": "client-id"}).encode()).rstrip(b"=").decode()
+    token = f"{header}.{payload}.signature"
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            captured.update(url=url, headers=headers, json=json)
+            return httpx.Response(200, json={"value": []})
+
+    monkeypatch.setattr(m365_service.httpx, "AsyncClient", FakeClient)
+
+    await m365_service._scc_invoke_command(
+        token, "08fa9092-c049-429b-bd82-28119ef5dd7f", "Get-ComplianceSearch",
+        organization="contoso.onmicrosoft.com",
+    )
+
+    assert "/contoso.onmicrosoft.com/InvokeCommand" in captured["url"]
+    assert "08fa9092-c049-429b-bd82-28119ef5dd7f" not in captured["url"]
+    assert captured["headers"]["X-AnchorMailbox"] == (
+        "app:client-id@contoso.onmicrosoft.com"
+    )
+
+
 def test_spam_purge_template_has_review_confirmation_and_live_refresh():
     source = open("app/templates/m365/spam_purge.html", encoding="utf-8").read()
     assert 'name="confirmation"' in source
@@ -106,9 +190,12 @@ async def test_run_search_retries_new_compliance_search_on_org_container_error(m
     invoke_calls: list[str] = []
     call_count = 0
 
-    async def fake_scc_invoke(_token, _tenant, cmdlet, _params=None):
+    organizations: list[str | None] = []
+
+    async def fake_scc_invoke(_token, _tenant, cmdlet, _params=None, **kwargs):
         nonlocal call_count
         invoke_calls.append(cmdlet)
+        organizations.append(kwargs.get("organization"))
         if cmdlet == "New-ComplianceSearch":
             call_count += 1
             if call_count < 2:
@@ -122,6 +209,11 @@ async def test_run_search_retries_new_compliance_search_on_org_container_error(m
             "app.services.m365_spam_purge.m365_service._acquire_scc_access_token",
             new_callable=AsyncMock,
             return_value=("tok", "tenant-id"),
+        ),
+        patch(
+            "app.services.m365_spam_purge._scc_organization",
+            new_callable=AsyncMock,
+            return_value="contoso.onmicrosoft.com",
         ),
         patch(
             "app.services.m365_spam_purge.m365_service._scc_invoke_command",
@@ -139,6 +231,7 @@ async def test_run_search_retries_new_compliance_search_on_org_container_error(m
     search_status_updates = [d.get("search_status") for d in update_calls if "search_status" in d]
     assert "failed" not in search_status_updates, "Search should not be marked failed after a successful retry"
     assert "completed" in search_status_updates
+    assert set(organizations) == {"contoso.onmicrosoft.com"}
 
 
 @pytest.mark.anyio("asyncio")
@@ -167,7 +260,7 @@ async def test_run_search_exhausts_retries_and_marks_failed(monkeypatch):
         http_status=500,
     )
 
-    async def always_fail(_token, _tenant, cmdlet, _params=None):
+    async def always_fail(_token, _tenant, cmdlet, _params=None, **_kwargs):
         if cmdlet == "New-ComplianceSearch":
             raise org_error
         return {}
@@ -177,6 +270,11 @@ async def test_run_search_exhausts_retries_and_marks_failed(monkeypatch):
             "app.services.m365_spam_purge.m365_service._acquire_scc_access_token",
             new_callable=AsyncMock,
             return_value=("tok", "tenant-id"),
+        ),
+        patch(
+            "app.services.m365_spam_purge._scc_organization",
+            new_callable=AsyncMock,
+            return_value="contoso.onmicrosoft.com",
         ),
         patch(
             "app.services.m365_spam_purge.m365_service._scc_invoke_command",
@@ -214,7 +312,6 @@ def test_spam_purge_permission_is_available_to_roles():
     assert permission["levels"] == ["none", "read", "write"]
 
 def test_jwt_appid_extracts_appid_from_valid_jwt():
-    import base64, json
     header = base64.urlsafe_b64encode(json.dumps({"alg": "RS256"}).encode()).rstrip(b"=").decode()
     payload = base64.urlsafe_b64encode(json.dumps({"appid": "my-client-id", "tid": "my-tenant"}).encode()).rstrip(b"=").decode()
     token = f"{header}.{payload}.fakesig"
@@ -222,7 +319,6 @@ def test_jwt_appid_extracts_appid_from_valid_jwt():
 
 
 def test_jwt_appid_returns_none_when_claim_absent():
-    import base64, json
     header = base64.urlsafe_b64encode(json.dumps({"alg": "RS256"}).encode()).rstrip(b"=").decode()
     payload = base64.urlsafe_b64encode(json.dumps({"tid": "my-tenant"}).encode()).rstrip(b"=").decode()
     token = f"{header}.{payload}.fakesig"
@@ -232,4 +328,3 @@ def test_jwt_appid_returns_none_when_claim_absent():
 def test_jwt_appid_returns_none_for_invalid_token():
     assert _jwt_appid("notavalidjwt") is None
     assert _jwt_appid("") is None
-
