@@ -30,6 +30,8 @@ the batch runners in ``cis_benchmark.py``.
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import re
 import secrets
 import string
@@ -686,6 +688,15 @@ _SECURITY_DEFAULTS_URL = (
     "https://graph.microsoft.com/v1.0/policies/identitySecurityDefaultsEnforcementPolicy"
 )
 _SPO_SETTINGS_URL = "https://graph.microsoft.com/v1.0/admin/sharepoint/settings"
+_EWS_EXO_APP_ID = "00000002-0000-0ff1-ce00-000000000000"
+_EWS_FULL_ACCESS_AS_APP_ROLE = "e4a3c0d2-0003-4b45-8fd7-d8e34591ad28"
+_EWS_USAGE_REPORT_URL = (
+    "https://graph.microsoft.com/beta/reports/"
+    "getApiUsage(period='D30',serviceArea='Microsoft Exchange')"
+)
+_APP_ID_PATTERN = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
 
 # Well-known directory role template IDs used by several checks
 _ROLE_TEMPLATE_GLOBAL_ADMIN = "62e90394-69f5-4237-9190-012177145e10"
@@ -794,6 +805,326 @@ async def _safe_graph_get_all(token: str, url: str) -> list[dict[str, Any]] | No
         return await _graph_get_all(token, url)
     except M365Error:
         return None
+
+
+def _extract_app_ids(value: Any) -> list[str]:
+    """Return unique, lower-cased AppIDs found in *value*."""
+    text = ""
+    if isinstance(value, list):
+        text = ",".join(str(item or "") for item in value)
+    elif value is not None:
+        text = str(value)
+    seen: set[str] = set()
+    app_ids: list[str] = []
+    for match in _APP_ID_PATTERN.finditer(text):
+        app_id = match.group(0).lower()
+        if app_id not in seen:
+            seen.add(app_id)
+            app_ids.append(app_id)
+    return app_ids
+
+
+def _format_app_label(app_id: str, display_name: str | None, *, suffix: str | None = None) -> str:
+    label = (display_name or "").strip() or "Unknown application"
+    if suffix:
+        return f"{label} ({app_id}, {suffix})"
+    return f"{label} ({app_id})"
+
+
+def _format_ews_enabled(value: Any) -> str:
+    if value is None or str(value).strip() == "":
+        return "not explicitly set"
+    return "$true" if _coerce_exo_bool(value) else "$false"
+
+
+def _csv_row_value(row: Mapping[str, Any], *names: str) -> str:
+    normalised = {
+        re.sub(r"\s+", " ", str(key or "").strip().lower()): str(value or "").strip()
+        for key, value in row.items()
+    }
+    for name in names:
+        value = normalised.get(re.sub(r"\s+", " ", name.strip().lower()), "")
+        if value:
+            return value
+    return ""
+
+
+async def _download_graph_csv_report(access_token: str, url: str) -> list[dict[str, str]]:
+    headers = {
+        "Authorization": f"******",
+        "Accept": "text/csv",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+            response = await client.get(url, headers=headers)
+            if response.status_code in (302, 303, 307, 308):
+                download_url = str(response.headers.get("Location") or "").strip()
+                if not download_url:
+                    raise M365Error("Microsoft Graph report export missing download URL")
+                csv_response = await client.get(download_url)
+            else:
+                csv_response = response
+    except httpx.TimeoutException as exc:
+        raise M365Error(
+            f"Microsoft Graph report request timed out ({type(exc).__name__})"
+        ) from exc
+    except httpx.NetworkError as exc:
+        raise M365Error(
+            f"Microsoft Graph report network error ({type(exc).__name__})"
+        ) from exc
+
+    if csv_response.status_code != 200:
+        raise M365Error(
+            f"Microsoft Graph report request failed ({csv_response.status_code})",
+            http_status=csv_response.status_code,
+        )
+
+    csv_text = csv_response.text
+    if "\x00" in csv_text:
+        for encoding in ("utf-16", "utf-16-le", "utf-16-be"):
+            try:
+                csv_text = csv_response.content.decode(encoding)
+                break
+            except UnicodeDecodeError:
+                continue
+
+    rows: list[dict[str, str]] = []
+    reader = csv.DictReader(io.StringIO(csv_text))
+    for row in reader:
+        filtered = {str(key): str(value or "") for key, value in row.items() if key is not None}
+        if not filtered:
+            continue
+        if "sep=" in next(iter(filtered)).lower() and len(filtered) == 1:
+            continue
+        rows.append(filtered)
+    return rows
+
+
+async def _resolve_app_display_names(
+    graph_token: str, app_ids: list[str]
+) -> dict[str, str | None]:
+    resolved: dict[str, str | None] = {}
+    for app_id in app_ids:
+        try:
+            data = await _graph_get(
+                graph_token,
+                (
+                    "https://graph.microsoft.com/v1.0/servicePrincipals"
+                    f"?$filter=appId eq '{app_id}'&$select=appId,displayName"
+                ),
+            )
+        except M365Error:
+            resolved[app_id] = None
+            continue
+        rows = data.get("value") or []
+        row = rows[0] if rows and isinstance(rows[0], dict) else {}
+        name = str(row.get("displayName") or "").strip()
+        resolved[app_id] = name or None
+    return resolved
+
+
+async def _get_ews_permission_inventory(graph_token: str) -> tuple[list[dict[str, str]], list[str]]:
+    service_principals = await _graph_get(
+        graph_token,
+        (
+            "https://graph.microsoft.com/v1.0/servicePrincipals"
+            f"?$filter=appId eq '{_EWS_EXO_APP_ID}'&$select=id"
+        ),
+    )
+    exo_entries = service_principals.get("value") or []
+    exo_sp_id = str((exo_entries[0] or {}).get("id") or "").strip() if exo_entries else ""
+    if not exo_sp_id:
+        raise M365Error("Exchange Online service principal not found in tenant")
+
+    assignments = await _graph_get_all(
+        graph_token,
+        (
+            "https://graph.microsoft.com/v1.0/servicePrincipals/"
+            f"{exo_sp_id}/appRoleAssignedTo"
+            "?$select=appRoleId,principalId,principalType,principalDisplayName&$top=999"
+        ),
+    )
+    apps: list[dict[str, str]] = []
+    unresolved: list[str] = []
+    for assignment in assignments:
+        if str(assignment.get("principalType") or "").strip().lower() != "serviceprincipal":
+            continue
+        app_role_id = str(assignment.get("appRoleId") or "").strip().lower()
+        if app_role_id != _EWS_FULL_ACCESS_AS_APP_ROLE:
+            continue
+        principal_id = str(assignment.get("principalId") or "").strip()
+        fallback_name = str(assignment.get("principalDisplayName") or "").strip()
+        try:
+            principal = await _graph_get(
+                graph_token,
+                (
+                    "https://graph.microsoft.com/v1.0/servicePrincipals/"
+                    f"{principal_id}?$select=appId,displayName"
+                ),
+            )
+        except M365Error:
+            label = fallback_name or principal_id or "unknown service principal"
+            unresolved.append(label)
+            continue
+        app_id = str(principal.get("appId") or "").strip().lower()
+        display_name = str(principal.get("displayName") or fallback_name or "").strip()
+        if not app_id:
+            unresolved.append(display_name or principal_id or "unknown service principal")
+            continue
+        apps.append(
+            {
+                "app_id": app_id,
+                "display_name": display_name or "Unknown application",
+            }
+        )
+
+    seen: set[str] = set()
+    deduped: list[dict[str, str]] = []
+    for app in apps:
+        app_id = app["app_id"]
+        if app_id in seen:
+            continue
+        seen.add(app_id)
+        deduped.append(app)
+    deduped.sort(key=lambda item: ((item.get("display_name") or "").lower(), item["app_id"]))
+    return deduped, sorted(set(unresolved))
+
+
+async def _get_ews_usage_apps(
+    delegated_token: str,
+) -> list[dict[str, str | int]]:
+    rows = await _download_graph_csv_report(delegated_token, _EWS_USAGE_REPORT_URL)
+    usage_by_app: dict[str, dict[str, str | int]] = {}
+    for row in rows:
+        protocol = _csv_row_value(row, "Protocol", "API", "API Family", "Feature")
+        if protocol and "ews" not in protocol.lower():
+            continue
+        app_ids = _extract_app_ids(
+            _csv_row_value(row, "AppId", "Application Id", "ApplicationID", "Client Id")
+        )
+        if not app_ids:
+            continue
+        app_id = app_ids[0]
+        usage_raw = _csv_row_value(row, "Usage", "Calls", "Successful Requests", "Count")
+        try:
+            usage = int(float(usage_raw or "0"))
+        except ValueError:
+            usage = 0
+        last_seen = _csv_row_value(row, "Date", "Last Activity Date", "Report Refresh Date")
+        existing = usage_by_app.setdefault(
+            app_id,
+            {"app_id": app_id, "usage": 0, "last_seen": ""},
+        )
+        existing["usage"] = int(existing.get("usage") or 0) + max(usage, 0)
+        if last_seen and last_seen > str(existing.get("last_seen") or ""):
+            existing["last_seen"] = last_seen
+
+    return [
+        usage_by_app[app_id]
+        for app_id in sorted(usage_by_app)
+    ]
+
+
+async def _get_stored_best_practice_notes(company_id: int, check_id: str) -> str:
+    rows = await bp_repo.list_results(company_id)
+    row = next((item for item in rows if item.get("check_id") == check_id), None)
+    return str((row or {}).get("notes") or "")
+
+
+async def _collect_ews_dependency_state(
+    graph_token: str, company_id: int
+) -> dict[str, Any]:
+    check_id = "bp_ews_required_apps_allowed"
+    exo_token, tenant_id = await _acquire_exo_access_token(company_id)
+    config = await _exo_invoke_command(exo_token, tenant_id, "Get-OrganizationConfig")
+    org = _exo_first_value(config)
+    current_allowed = _extract_app_ids(org.get("EwsAllowedAppIDs"))
+    allowed_set = set(current_allowed)
+
+    permission_apps, unresolved_permission_apps = await _get_ews_permission_inventory(
+        graph_token
+    )
+
+    usage_apps: list[dict[str, str | int]] = []
+    usage_error: str | None = None
+    try:
+        delegated_token = await acquire_delegated_token(company_id)
+    except Exception:  # noqa: BLE001 - actionable state reported below
+        delegated_token = None
+    if not delegated_token:
+        usage_error = (
+            "EWS usage data is unavailable. Re-authorise portal access with a "
+            "Global Reader or Global Administrator account so the delegated "
+            "Reports.Read.All report can be queried."
+        )
+    else:
+        try:
+            usage_apps = await _get_ews_usage_apps(delegated_token)
+        except M365Error as exc:
+            usage_error = (
+                "EWS usage data could not be read from Microsoft 365 usage reports: "
+                f"{exc}"
+            )
+
+    notes = await _get_stored_best_practice_notes(company_id, check_id)
+    approved_note_ids = _extract_app_ids(notes)
+
+    permission_by_id = {app["app_id"]: dict(app) for app in permission_apps}
+    observed_ids = [str(app["app_id"]) for app in usage_apps if app.get("app_id")]
+
+    names_to_resolve = sorted(
+        (set(observed_ids) | set(approved_note_ids))
+        - set(permission_by_id)
+    )
+    resolved_names = await _resolve_app_display_names(graph_token, names_to_resolve)
+
+    observed_apps: list[dict[str, str]] = []
+    for app in usage_apps:
+        app_id = str(app["app_id"])
+        display_name = permission_by_id.get(app_id, {}).get("display_name") or resolved_names.get(app_id)
+        observed_apps.append(
+            {
+                "app_id": app_id,
+                "display_name": str(display_name or "Unknown application"),
+                "usage": str(app.get("usage") or 0),
+                "last_seen": str(app.get("last_seen") or ""),
+            }
+        )
+
+    approved_note_apps: list[dict[str, str]] = []
+    for app_id in approved_note_ids:
+        if app_id in {app["app_id"] for app in observed_apps}:
+            continue
+        display_name = permission_by_id.get(app_id, {}).get("display_name") or resolved_names.get(app_id)
+        approved_note_apps.append(
+            {
+                "app_id": app_id,
+                "display_name": str(display_name or "Unknown application"),
+            }
+        )
+
+    required_apps = observed_apps + approved_note_apps
+    missing_required_apps = [
+        app for app in required_apps if app["app_id"] not in allowed_set
+    ]
+    permission_only_apps = [
+        app
+        for app in permission_apps
+        if app["app_id"] not in {item["app_id"] for item in required_apps}
+    ]
+
+    return {
+        "config": org,
+        "ews_enabled": org.get("EwsEnabled"),
+        "current_allowed": current_allowed,
+        "required_apps": required_apps,
+        "observed_apps": observed_apps,
+        "approved_note_apps": approved_note_apps,
+        "permission_only_apps": permission_only_apps,
+        "missing_required_apps": missing_required_apps,
+        "unresolved_permission_apps": unresolved_permission_apps,
+        "usage_error": usage_error,
+    }
 
 
 async def _get_directory_role_member_ids(token: str) -> set[str] | None:
@@ -2431,6 +2762,135 @@ def _get_authenticator_mfa_fatigue_missing_settings(data: dict[str, Any]) -> lis
         k for k in _MFA_FATIGUE_PROTECTION_KEYS
         if str(((fs.get(k) or {}).get("state")) or "").lower() != "enabled"
     ]
+
+
+async def _check_ews_required_apps_allowed(
+    graph_token: str, company_id: int
+) -> dict[str, Any]:
+    check_id = "bp_ews_required_apps_allowed"
+    check_name = "Exchange Web Services is enabled only for confirmed required applications"
+    try:
+        state = await _collect_ews_dependency_state(graph_token, company_id)
+    except M365Error as exc:
+        return _result(
+            check_id,
+            check_name,
+            STATUS_UNKNOWN,
+            f"Unable to inspect EWS configuration and dependencies: {exc}",
+        )
+
+    current_allowed = state["current_allowed"]
+    observed_apps = state["observed_apps"]
+    approved_note_apps = state["approved_note_apps"]
+    permission_only_apps = state["permission_only_apps"]
+    missing_required_apps = state["missing_required_apps"]
+    unresolved_permission_apps = state["unresolved_permission_apps"]
+    usage_error = state["usage_error"]
+
+    allowed_suffix = (
+        f": {', '.join(current_allowed[:5])}"
+        + ("…" if len(current_allowed) > 5 else "")
+        if current_allowed
+        else "."
+    )
+    details_parts = [
+        "Current configuration: "
+        f"EwsEnabled is {_format_ews_enabled(state['ews_enabled'])}; "
+        f"EwsAllowedAppIDs contains {len(current_allowed)} AppID(s){allowed_suffix}"
+    ]
+    if observed_apps:
+        details_parts.append(
+            "Observed EWS usage: "
+            + ", ".join(
+                _format_app_label(
+                    app["app_id"],
+                    app.get("display_name"),
+                    suffix=f"usage={app.get('usage') or '0'}"
+                    + (
+                        f", last seen {app['last_seen']}"
+                        if app.get("last_seen")
+                        else ""
+                    ),
+                )
+                for app in observed_apps[:5]
+            )
+            + ("." if len(observed_apps) <= 5 else f" (and {len(observed_apps) - 5} more).")
+        )
+    else:
+        details_parts.append("Observed EWS usage: none confirmed in the available usage report data.")
+    if approved_note_apps:
+        details_parts.append(
+            "Approved from notes for infrequent or manually confirmed use: "
+            + ", ".join(
+                _format_app_label(app["app_id"], app.get("display_name"))
+                for app in approved_note_apps[:5]
+            )
+            + ("." if len(approved_note_apps) <= 5 else f" (and {len(approved_note_apps) - 5} more).")
+        )
+    if permission_only_apps:
+        details_parts.append(
+            "EWS application permissions only (review before allowing): "
+            + ", ".join(
+                _format_app_label(app["app_id"], app.get("display_name"))
+                for app in permission_only_apps[:5]
+            )
+            + ("." if len(permission_only_apps) <= 5 else f" (and {len(permission_only_apps) - 5} more).")
+        )
+    if unresolved_permission_apps:
+        details_parts.append(
+            "Unresolved applications with EWS-related permissions require review: "
+            + ", ".join(unresolved_permission_apps[:5])
+            + ("." if len(unresolved_permission_apps) <= 5 else f" (and {len(unresolved_permission_apps) - 5} more).")
+        )
+    if missing_required_apps:
+        details_parts.append(
+            "Required AppIDs missing from EwsAllowedAppIDs: "
+            + ", ".join(
+                _format_app_label(app["app_id"], app.get("display_name"))
+                for app in missing_required_apps[:5]
+            )
+            + ("." if len(missing_required_apps) <= 5 else f" (and {len(missing_required_apps) - 5} more).")
+        )
+    if usage_error:
+        details_parts.append(usage_error)
+    if permission_only_apps or usage_error:
+        details_parts.append(
+            "Add reviewed AppIDs to the check notes if you need remediation to include infrequently used applications."
+        )
+
+    required_apps = state["required_apps"]
+    if required_apps and (
+        state["ews_enabled"] is not True or bool(missing_required_apps)
+    ):
+        status = STATUS_FAIL
+    elif usage_error or unresolved_permission_apps:
+        status = STATUS_UNKNOWN
+    else:
+        status = STATUS_PASS
+
+    observed_ids = {app["app_id"] for app in observed_apps}
+    affected_accounts = [
+        {
+            "id": app["app_id"],
+            "name": _format_app_label(
+                app["app_id"],
+                app.get("display_name"),
+                suffix=(
+                    "observed EWS usage"
+                    if app["app_id"] in observed_ids
+                    else "approved in notes"
+                ),
+            ),
+        }
+        for app in missing_required_apps
+    ]
+    return _result(
+        check_id,
+        check_name,
+        status,
+        " ".join(details_parts),
+        affected_accounts=affected_accounts or None,
+    )
 
 
 async def _remediate_authenticator_mfa_fatigue(token: str) -> tuple[bool, str]:
@@ -4569,6 +5029,28 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
     {
+        "id": "bp_ews_required_apps_allowed",
+        "name": "Exchange Web Services is enabled only for confirmed required applications",
+        "description": (
+            "EWS retirement requires tenants that still depend on Exchange Web "
+            "Services to explicitly enable EWS and restrict access to approved "
+            "application IDs only."
+        ),
+        "remediation": (
+            "Review observed EWS usage, add any infrequently used but approved "
+            "AppIDs to the check notes, then enable EWS with "
+            "Set-OrganizationConfig -EwsEnabled $true -EwsAllowedAppIDs "
+            "<existing + approved app IDs>."
+        ),
+        "source": _check_ews_required_apps_allowed,
+        "source_type": "graph",
+        "uses_company_id": True,
+        "default_enabled": True,
+        "has_remediation": True,
+        "remediation_type": "ews_dependency_allow_list",
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
         "id": "bp_customer_lockbox",
         "name": "Ensure the customer lockbox feature is enabled",
         "description": (
@@ -6588,7 +7070,13 @@ async def run_best_practices(
                         check_id=check_id,
                     )
                 else:
-                    if bp.get("uses_company_email_domains"):
+                    if bp.get("uses_company_id"):
+                        raw = await _call_check_with_retry(
+                            lambda r=runner: r(graph_token, company_id),  # type: ignore[call-arg,misc]
+                            company_id=company_id,
+                            check_id=check_id,
+                        )
+                    elif bp.get("uses_company_email_domains"):
                         email_domains = await companies_repo.get_email_domains_for_company(company_id)
                         raw = await _call_check_with_retry(
                             lambda r=runner: r(graph_token, email_domains),  # type: ignore[call-arg,misc]
@@ -6826,7 +7314,13 @@ async def run_single_check(
                     check_id=check_id,
                 )
             else:
-                if bp.get("uses_company_email_domains"):
+                if bp.get("uses_company_id"):
+                    raw = await _call_check_with_retry(
+                        lambda r=runner: r(graph_token, company_id),  # type: ignore[call-arg,misc]
+                        company_id=company_id,
+                        check_id=check_id,
+                    )
+                elif bp.get("uses_company_email_domains"):
                     email_domains = await companies_repo.get_email_domains_for_company(company_id)
                     raw = await _call_check_with_retry(
                         lambda r=runner: r(graph_token, email_domains),  # type: ignore[call-arg,misc]
@@ -7104,6 +7598,67 @@ async def set_result_notes(*, company_id: int, check_id: str, notes: str | None)
         company_id=company_id,
         check_id=check_id,
         notes=notes,
+    )
+
+
+async def _remediate_ews_dependency_allow_list(
+    graph_token: str, company_id: int
+) -> tuple[bool, str]:
+    state = await _collect_ews_dependency_state(graph_token, company_id)
+    required_apps = state["required_apps"]
+    if not required_apps:
+        return (
+            False,
+            "No confirmed EWS dependency was found. Review observed usage and add any "
+            "approved infrequent AppIDs to the check notes before enabling EWS.",
+        )
+
+    exo_token, tenant_id = await _acquire_exo_access_token(company_id)
+    current_allowed = list(state["current_allowed"])
+    required_ids = [app["app_id"] for app in required_apps]
+    merged_allowed = list(current_allowed)
+    merged_seen = set(current_allowed)
+    for app_id in required_ids:
+        if app_id not in merged_seen:
+            merged_seen.add(app_id)
+            merged_allowed.append(app_id)
+
+    missing_required = [
+        app_id for app_id in required_ids if app_id not in set(current_allowed)
+    ]
+    params: dict[str, Any] = {}
+    if state["ews_enabled"] is not True:
+        params["EwsEnabled"] = True
+    if missing_required:
+        params["EwsAllowedAppIDs"] = merged_allowed
+
+    if not params:
+        return (
+            True,
+            "EWS is already enabled for the confirmed required applications. "
+            "No remediation changes were needed.",
+        )
+
+    await _exo_invoke_command(exo_token, tenant_id, "Set-OrganizationConfig", params)
+    verified = await _exo_invoke_command(exo_token, tenant_id, "Get-OrganizationConfig")
+    verified_cfg = _exo_first_value(verified)
+    verified_allowed = set(_extract_app_ids(verified_cfg.get("EwsAllowedAppIDs")))
+    missing_after = [
+        app_id for app_id in required_ids if app_id not in verified_allowed
+    ]
+    if verified_cfg.get("EwsEnabled") is not True or missing_after:
+        return (
+            False,
+            "EWS remediation was submitted, but the updated configuration was not yet "
+            "fully visible when re-read. Wait a few minutes for Exchange Online "
+            "propagation, test the approved apps, then re-run the check.",
+        )
+
+    return (
+        True,
+        "Enabled EWS for the tenant and preserved the existing EwsAllowedAppIDs "
+        "while adding the confirmed required AppIDs. Test the approved applications "
+        "again after Exchange Online propagation completes.",
     )
 
 
@@ -7766,7 +8321,21 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 "success": False,
                 "message": graph_token_error_message,
             }
-        if bp.get("remediation_type") == "global_admin_accounts":
+        if bp.get("remediation_type") == "ews_dependency_allow_list":
+            try:
+                success, failure_message = await _remediate_ews_dependency_allow_list(
+                    graph_token, company_id
+                )
+            except M365Error as exc:
+                log_error(
+                    "M365 EWS dependency remediation failed",
+                    company_id=company_id,
+                    check_id=check_id,
+                    error=str(exc),
+                )
+                success = False
+                failure_message = str(exc)
+        elif bp.get("remediation_type") == "global_admin_accounts":
             try:
                 success, failure_message = await _remediate_global_admin_count(graph_token, company_id)
             except Exception as exc:
@@ -7967,7 +8536,8 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
         return {
             "success": True,
             "message": (
-                "Remediation command executed successfully. "
+                failure_message
+                or "Remediation command executed successfully. "
                 "Re-evaluate the check to confirm the change took effect."
             ),
         }
