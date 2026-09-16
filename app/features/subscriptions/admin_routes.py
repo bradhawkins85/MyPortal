@@ -18,7 +18,10 @@ from fastapi.responses import HTMLResponse
 from app.core.logging import log_error
 from app.repositories import subscription_categories as categories_repo
 from app.repositories import subscriptions as subscriptions_repo
-from app.services.voice_monitor_billing import contract_display, is_voice_monitor_subscription
+from app.services.voice_monitor_billing import (
+    contract_display,
+    is_voice_monitor_subscription,
+)
 
 
 router = APIRouter(tags=["Subscriptions"])
@@ -38,7 +41,9 @@ async def admin_subscriptions_page(
     category_filter: str | None = Query(default=None, alias="category"),
 ):
     """Admin page for viewing and managing subscriptions."""
-    current_user, membership, redirect = await _main()._require_administration_access(request)
+    current_user, membership, redirect = await _main()._require_administration_access(
+        request
+    )
     if redirect:
         return redirect
 
@@ -55,7 +60,9 @@ async def admin_subscriptions_page(
 
     try:
         subs = await subscriptions_repo.list_subscriptions(
-            customer_id=active_company_id if not current_user.get("is_super_admin") else None,
+            customer_id=active_company_id
+            if not current_user.get("is_super_admin")
+            else None,
             status=status_filter,
             category_id=int(category_filter) if category_filter else None,
             limit=500,

@@ -5,6 +5,24 @@
 
 {% block title %}Subscriptions{% endblock %}
 
+{% block header_actions %}
+{% if is_super_admin %}
+<div class="header-title-menu">
+  <details class="header-title-menu__dropdown" data-header-menu>
+    <summary class="header-title-menu__toggle" data-header-menu-toggle aria-haspopup="true">
+      Actions
+      <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" class="header-title-menu__icon"><path d="M6.2 8.2a1 1 0 0 1 1.4 0L12 12.6l4.4-4.4a1 1 0 0 1 1.4 1.4l-5.1 5.1a1 1 0 0 1-1.4 0L6.2 9.6a1 1 0 0 1 0-1.4z" /></svg>
+    </summary>
+    <ul class="header-title-menu__list" role="menu">
+      <li class="header-title-menu__item" role="none">
+        <button type="button" class="header-title-menu__link" role="menuitem" data-open-existing-subscription>Add existing subscription</button>
+      </li>
+    </ul>
+  </details>
+</div>
+{% endif %}
+{% endblock %}
+
 {% block content %}
 <section aria-labelledby="renewal-forecast-heading">
   <h2 id="renewal-forecast-heading" class="visually-hidden">Renewal forecast</h2>
@@ -158,6 +176,54 @@
   </form>
 </dialog>
 
+{% if is_super_admin %}
+<dialog id="existing-subscription-dialog" class="dialog" aria-labelledby="existing-subscription-title">
+  <form class="dialog__container" id="existing-subscription-form">
+    <header class="dialog__header">
+      <div>
+        <h3 class="dialog__title" id="existing-subscription-title">Add existing subscription</h3>
+        <p class="text-muted">Register a subscription already billed in an external environment. No initial invoice will be created.</p>
+      </div>
+      <button type="button" class="dialog__close" aria-label="Close" data-existing-subscription-close><span aria-hidden="true">&times;</span></button>
+    </header>
+    <div class="dialog__body">
+      <div class="alert alert--danger" role="alert" data-existing-subscription-errors hidden></div>
+      <div class="form-field">
+        <label class="form-field__label" for="existing-customer">Customer</label>
+        <select class="form-input" id="existing-customer" name="customerId" required>
+          <option value="">Select a customer</option>
+          {% for item in creation_companies %}<option value="{{ item.id }}">{{ item.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-field__label" for="existing-product">Subscription product</label>
+        <select class="form-input" id="existing-product" name="productId" required>
+          <option value="">Select a subscription product</option>
+          {% for item in creation_products %}<option value="{{ item.id }}">{{ item.name }}{% if item.sku %} ({{ item.sku }}){% endif %}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-field__label" for="existing-start-date">Current term start date</label>
+        <input class="form-input" id="existing-start-date" name="startDate" type="date" value="{{ creation_default_start_date }}" required>
+        <p class="form-field__hint">The term end is calculated from the selected product's commitment.</p>
+      </div>
+      <div class="form-field">
+        <label class="form-field__label" for="existing-quantity">Quantity</label>
+        <input class="form-input" id="existing-quantity" name="quantity" type="number" min="1" max="9999" step="1" value="1" required>
+      </div>
+      <label class="checkbox-row" for="existing-auto-renew">
+        <input id="existing-auto-renew" name="autoRenew" type="checkbox" checked>
+        <span>Automatically renew at the end of the current term</span>
+      </label>
+    </div>
+    <footer class="dialog__footer">
+      <button type="button" class="button button--secondary" data-existing-subscription-close>Cancel</button>
+      <button type="submit" class="button" data-existing-subscription-submit>Create subscription</button>
+    </footer>
+  </form>
+</dialog>
+{% endif %}
+
 <div id="subscription-toast" class="toast" role="status" aria-live="polite"></div>
 {% endblock %}
 
@@ -181,10 +247,27 @@
     const changeReasonInput = document.getElementById('change-reason');
     const previewButton = document.getElementById('preview-change-btn');
     const submitButton = document.getElementById('submit-change');
+    const existingDialog = document.getElementById('existing-subscription-dialog');
+    const existingForm = document.getElementById('existing-subscription-form');
+    const existingErrors = document.querySelector('[data-existing-subscription-errors]');
+    const existingSubmit = document.querySelector('[data-existing-subscription-submit]');
     
     let currentSubscriptionId = null;
     let currentChangeType = null;
     let currentPreview = null;
+
+    function showExistingErrors(messages) {
+      if (!existingErrors) return;
+      existingErrors.replaceChildren();
+      const list = document.createElement('ul');
+      messages.forEach((message) => {
+        const item = document.createElement('li');
+        item.textContent = message;
+        list.appendChild(item);
+      });
+      existingErrors.appendChild(list);
+      existingErrors.hidden = false;
+    }
 
     function showToast(message, type = 'info') {
       if (!toast) return;
@@ -403,6 +486,57 @@
         openAddDialog(subscriptionId, currentQuantity, endDate);
       });
     });
+
+    document.querySelectorAll('[data-open-existing-subscription]').forEach((button) => {
+      button.addEventListener('click', () => {
+        button.closest('details')?.removeAttribute('open');
+        existingErrors?.setAttribute('hidden', '');
+        if (existingDialog && typeof existingDialog.showModal === 'function') existingDialog.showModal();
+      });
+    });
+
+    document.querySelectorAll('[data-existing-subscription-close]').forEach((button) => {
+      button.addEventListener('click', () => existingDialog?.close());
+    });
+
+    if (existingForm) {
+      existingForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (!existingForm.reportValidity()) return;
+        existingErrors.hidden = true;
+        existingSubmit.disabled = true;
+        const form = new FormData(existingForm);
+        const payload = {
+          customerId: Number(form.get('customerId')),
+          productId: Number(form.get('productId')),
+          startDate: form.get('startDate'),
+          quantity: Number(form.get('quantity')),
+          autoRenew: form.get('autoRenew') === 'on',
+        };
+        try {
+          const response = await fetch('/api/v1/subscriptions', {
+            method: 'POST',
+            credentials: 'include',
+            headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || ''},
+            body: JSON.stringify(payload),
+          });
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            const detail = body.detail;
+            if (Array.isArray(detail)) throw new Error(detail.map((item) => item.msg).join('; '));
+            throw new Error(detail || 'The subscription could not be created.');
+          }
+          const subscription = await response.json();
+          existingDialog.close();
+          showToast(`Subscription ${subscription.id} created successfully.`, 'success');
+          setTimeout(() => window.location.reload(), 1200);
+        } catch (error) {
+          showExistingErrors([error.message || 'The subscription could not be created.']);
+        } finally {
+          existingSubmit.disabled = false;
+        }
+      });
+    }
 
     document.querySelectorAll('[data-subscription-decrease]').forEach((button) => {
       button.addEventListener('click', () => {
