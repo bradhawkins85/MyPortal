@@ -105,5 +105,6 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ static_url('/static/js/passkey_utils.js') }}" defer></script>
 <script type="module" src="{{ static_url('/static/js/auth.js') }}"></script>
 {% endblock %}

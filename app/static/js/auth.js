@@ -4,106 +4,14 @@ const initAuthForms = () => {
   initPasskeyLogin();
 };
 
-function supportsPasskeys() {
-  return Boolean(window.PublicKeyCredential && navigator.credentials);
-}
-
-function decodeBase64Url(value) {
-  const padding = '='.repeat((4 - (value.length % 4 || 4)) % 4);
-  const base64 = `${value}${padding}`.replace(/-/g, '+').replace(/_/g, '/');
-  const raw = window.atob(base64);
-  const bytes = new Uint8Array(raw.length);
-  for (let index = 0; index < raw.length; index += 1) {
-    bytes[index] = raw.charCodeAt(index);
-  }
-  return bytes.buffer;
-}
-
-function encodeBase64Url(buffer) {
-  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  let binary = '';
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-  return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/u, '');
-}
-
-function decodeCredentialOptions(publicKey) {
-  const options = { ...publicKey };
-  if (typeof options.challenge === 'string') {
-    options.challenge = decodeBase64Url(options.challenge);
-  }
-  if (options.user && typeof options.user.id === 'string') {
-    options.user = { ...options.user, id: decodeBase64Url(options.user.id) };
-  }
-  if (Array.isArray(options.excludeCredentials)) {
-    options.excludeCredentials = options.excludeCredentials.map((credential) => ({
-      ...credential,
-      id: decodeBase64Url(credential.id),
-    }));
-  }
-  if (Array.isArray(options.allowCredentials)) {
-    options.allowCredentials = options.allowCredentials.map((credential) => ({
-      ...credential,
-      id: decodeBase64Url(credential.id),
-    }));
-  }
-  return options;
-}
-
-function serializeCredential(credential) {
-  return {
-    id: credential.id,
-    type: credential.type,
-    rawId: encodeBase64Url(credential.rawId),
-    authenticatorAttachment: credential.authenticatorAttachment || null,
-    response: {
-      clientDataJSON: encodeBase64Url(credential.response.clientDataJSON),
-      ...(credential.response.attestationObject
-        ? {
-            attestationObject: encodeBase64Url(credential.response.attestationObject),
-            transports:
-              typeof credential.response.getTransports === 'function'
-                ? credential.response.getTransports()
-                : [],
-          }
-        : {}),
-      ...(credential.response.authenticatorData
-        ? { authenticatorData: encodeBase64Url(credential.response.authenticatorData) }
-        : {}),
-      ...(credential.response.signature
-        ? { signature: encodeBase64Url(credential.response.signature) }
-        : {}),
-      ...(credential.response.userHandle
-        ? { userHandle: encodeBase64Url(credential.response.userHandle) }
-        : {}),
-    },
-  };
-}
-
-function passkeyErrorMessage(error, fallback) {
-  if (!error || !error.name) {
-    return fallback;
-  }
-  if (error.name === 'NotAllowedError') {
-    return 'The passkey request was cancelled or timed out. You can still sign in with your password.';
-  }
-  if (error.name === 'InvalidStateError') {
-    return 'This passkey is already registered to your account.';
-  }
-  if (error.name === 'NotSupportedError' || error.name === 'SecurityError') {
-    return 'Passkeys are not available in this browser or on this connection. Use your password instead.';
-  }
-  return fallback;
-}
-
 function initPasskeyLogin() {
+  const passkeyUtils = window.MyPortalPasskeyUtils;
   const button = document.querySelector('[data-passkey-login]');
   const errorContainer = document.querySelector('[data-passkey-error]');
-  if (!button) {
+  if (!button || !passkeyUtils) {
     return;
   }
-  if (!supportsPasskeys()) {
+  if (!passkeyUtils.supportsPasskeys()) {
     button.disabled = true;
     if (errorContainer) {
       errorContainer.hidden = false;
@@ -132,7 +40,7 @@ function initPasskeyLogin() {
         throw new Error(optionsResult.detail || 'Unable to start passkey sign-in.');
       }
       const credential = await navigator.credentials.get({
-        publicKey: decodeCredentialOptions(optionsResult.public_key),
+        publicKey: passkeyUtils.decodeCredentialOptions(optionsResult.public_key),
       });
       if (!credential) {
         throw new Error('No passkey was selected.');
@@ -146,7 +54,7 @@ function initPasskeyLogin() {
         },
         body: JSON.stringify({
           challenge_id: optionsResult.challenge_id,
-          credential: serializeCredential(credential),
+          credential: passkeyUtils.serializeCredential(credential),
         }),
       });
       const verifyResult = await verifyResponse.json();
@@ -157,7 +65,10 @@ function initPasskeyLogin() {
     } catch (error) {
       if (errorContainer) {
         errorContainer.hidden = false;
-        errorContainer.textContent = passkeyErrorMessage(error, error.message || 'Passkey sign-in failed.');
+        errorContainer.textContent = passkeyUtils.passkeyErrorMessage(
+          error,
+          error.message || 'Passkey sign-in failed.',
+        );
       }
     } finally {
       button.disabled = false;

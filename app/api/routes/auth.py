@@ -304,8 +304,10 @@ async def _complete_login_response(
     user: dict[str, Any],
     auth_method: str,
     passkey_record: dict[str, Any] | None = None,
+    totp_devices: list[dict[str, Any]] | None = None,
 ) -> Response:
-    totp_devices = await auth_repo.get_totp_authenticators(user["id"])
+    if totp_devices is None:
+        totp_devices = await auth_repo.get_totp_authenticators(user["id"])
     requires_totp_enrollment = not bool(totp_devices)
     login_timestamp = datetime.now(timezone.utc).replace(tzinfo=None)
     user = await user_repo.record_login(user["id"], login_timestamp)
@@ -550,7 +552,12 @@ async def login(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid TOTP code")
 
     await auth_repo.clear_login_attempts(identifier)
-    return await _complete_login_response(request=request, user=user, auth_method="password")
+    return await _complete_login_response(
+        request=request,
+        user=user,
+        auth_method="password",
+        totp_devices=totp_devices,
+    )
 
 
 @router.post(

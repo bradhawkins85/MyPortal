@@ -53,99 +53,6 @@
     return response.json();
   }
 
-  function supportsPasskeys() {
-    return Boolean(window.PublicKeyCredential && navigator.credentials);
-  }
-
-  function decodeBase64Url(value) {
-    const padding = '='.repeat((4 - (value.length % 4 || 4)) % 4);
-    const base64 = `${value}${padding}`.replace(/-/g, '+').replace(/_/g, '/');
-    const raw = window.atob(base64);
-    const bytes = new Uint8Array(raw.length);
-    for (let index = 0; index < raw.length; index += 1) {
-      bytes[index] = raw.charCodeAt(index);
-    }
-    return bytes.buffer;
-  }
-
-  function encodeBase64Url(buffer) {
-    const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-    let binary = '';
-    bytes.forEach((byte) => {
-      binary += String.fromCharCode(byte);
-    });
-    return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/u, '');
-  }
-
-  function decodeCredentialOptions(publicKey) {
-    const options = { ...publicKey };
-    if (typeof options.challenge === 'string') {
-      options.challenge = decodeBase64Url(options.challenge);
-    }
-    if (options.user && typeof options.user.id === 'string') {
-      options.user = { ...options.user, id: decodeBase64Url(options.user.id) };
-    }
-    if (Array.isArray(options.excludeCredentials)) {
-      options.excludeCredentials = options.excludeCredentials.map((credential) => ({
-        ...credential,
-        id: decodeBase64Url(credential.id),
-      }));
-    }
-    if (Array.isArray(options.allowCredentials)) {
-      options.allowCredentials = options.allowCredentials.map((credential) => ({
-        ...credential,
-        id: decodeBase64Url(credential.id),
-      }));
-    }
-    return options;
-  }
-
-  function serializeCredential(credential) {
-    return {
-      id: credential.id,
-      type: credential.type,
-      rawId: encodeBase64Url(credential.rawId),
-      authenticatorAttachment: credential.authenticatorAttachment || null,
-      response: {
-        clientDataJSON: encodeBase64Url(credential.response.clientDataJSON),
-        ...(credential.response.attestationObject
-          ? {
-              attestationObject: encodeBase64Url(credential.response.attestationObject),
-              transports:
-                typeof credential.response.getTransports === 'function'
-                  ? credential.response.getTransports()
-                  : [],
-            }
-          : {}),
-        ...(credential.response.authenticatorData
-          ? { authenticatorData: encodeBase64Url(credential.response.authenticatorData) }
-          : {}),
-        ...(credential.response.signature
-          ? { signature: encodeBase64Url(credential.response.signature) }
-          : {}),
-        ...(credential.response.userHandle
-          ? { userHandle: encodeBase64Url(credential.response.userHandle) }
-          : {}),
-      },
-    };
-  }
-
-  function passkeyErrorMessage(error, fallback) {
-    if (!error || !error.name) {
-      return fallback;
-    }
-    if (error.name === 'NotAllowedError') {
-      return 'The passkey request was cancelled, timed out, or no credential was available.';
-    }
-    if (error.name === 'InvalidStateError') {
-      return 'This passkey is already registered to your account.';
-    }
-    if (error.name === 'NotSupportedError' || error.name === 'SecurityError') {
-      return 'Passkeys are not supported in this browser or on this connection.';
-    }
-    return fallback;
-  }
-
   function showMessage(config, message) {
     if (!message) {
       return;
@@ -802,6 +709,7 @@
   const passkeyPasswordInput = document.getElementById('passkey-current-password');
   const passkeySuccess = { variant: 'success' };
   const passkeyError = { variant: 'error' };
+  const passkeyUtils = window.MyPortalPasskeyUtils;
 
   function formatDateTime(value) {
     if (!value) {
@@ -894,7 +802,7 @@
     if (!confirmed) {
       return;
     }
-    const currentPassword = window.prompt(`Enter your current password to remove "${item.name}"`);
+    const currentPassword = await promptForPassword(`Enter your current password to remove "${item.name}"`);
     if (!currentPassword) {
       return;
     }
@@ -911,8 +819,90 @@
     }
   }
 
+  function promptForPassword(message) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.style.position = 'fixed';
+      overlay.style.inset = '0';
+      overlay.style.background = 'rgba(15, 23, 42, 0.65)';
+      overlay.style.display = 'flex';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+      overlay.style.padding = '1rem';
+      overlay.style.zIndex = '1000';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'card card--panel';
+      dialog.style.maxWidth = '28rem';
+      dialog.style.width = '100%';
+
+      const form = document.createElement('form');
+      form.className = 'form';
+      const body = document.createElement('div');
+      body.className = 'card__body card__body--stacked';
+      const text = document.createElement('p');
+      text.textContent = message;
+      body.appendChild(text);
+      const field = document.createElement('div');
+      field.className = 'form-field';
+      const label = document.createElement('label');
+      label.className = 'form-label';
+      label.htmlFor = 'passkey-remove-password';
+      label.textContent = 'Current password';
+      field.appendChild(label);
+      const input = document.createElement('input');
+      input.className = 'form-input';
+      input.id = 'passkey-remove-password';
+      input.type = 'password';
+      input.autocomplete = 'current-password';
+      input.required = true;
+      field.appendChild(input);
+      body.appendChild(field);
+      const actions = document.createElement('div');
+      actions.className = 'form-actions';
+      const cancelButton = document.createElement('button');
+      cancelButton.type = 'button';
+      cancelButton.className = 'button button--ghost';
+      cancelButton.setAttribute('data-passkey-cancel', 'true');
+      cancelButton.textContent = 'Cancel';
+      actions.appendChild(cancelButton);
+      const submitButton = document.createElement('button');
+      submitButton.type = 'submit';
+      submitButton.className = 'button';
+      submitButton.textContent = 'Continue';
+      actions.appendChild(submitButton);
+      body.appendChild(actions);
+      form.appendChild(body);
+
+      const cleanup = (value) => {
+        overlay.remove();
+        resolve(value);
+      };
+
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const passwordInput = form.querySelector('#passkey-remove-password');
+        cleanup(passwordInput ? passwordInput.value : '');
+      });
+      form.querySelector('[data-passkey-cancel]').addEventListener('click', () => cleanup(''));
+      overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) {
+          cleanup('');
+        }
+      });
+
+      dialog.appendChild(form);
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+      const focusTarget = form.querySelector('#passkey-remove-password');
+      if (focusTarget) {
+        focusTarget.focus();
+      }
+    });
+  }
+
   if (passkeyAddForm) {
-    if (!supportsPasskeys()) {
+    if (!passkeyUtils || !passkeyUtils.supportsPasskeys()) {
       const submitButton = passkeyAddForm.querySelector('[data-passkey-add]');
       if (submitButton) {
         submitButton.disabled = true;
@@ -921,7 +911,7 @@
     }
     passkeyAddForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      if (!supportsPasskeys()) {
+      if (!passkeyUtils || !passkeyUtils.supportsPasskeys()) {
         showMessage(passkeyError, 'Passkeys are not supported in this browser or on this connection.');
         return;
       }
@@ -941,7 +931,7 @@
           body: JSON.stringify({ current_password: currentPassword }),
         });
         const credential = await navigator.credentials.create({
-          publicKey: decodeCredentialOptions(options.public_key),
+          publicKey: passkeyUtils.decodeCredentialOptions(options.public_key),
         });
         if (!credential) {
           throw new Error('No passkey was created.');
@@ -951,7 +941,7 @@
           body: JSON.stringify({
             challenge_id: options.challenge_id,
             name: passkeyName,
-            credential: serializeCredential(credential),
+            credential: passkeyUtils.serializeCredential(credential),
           }),
         });
         passkeys.push(created);
@@ -963,7 +953,7 @@
       } catch (error) {
         showMessage(
           passkeyError,
-          passkeyErrorMessage(error, error.message || 'Unable to register a passkey.'),
+          passkeyUtils.passkeyErrorMessage(error, error.message || 'Unable to register a passkey.'),
         );
       }
     });
