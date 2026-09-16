@@ -236,7 +236,7 @@ async def receive_webhook(request: Request) -> Response:
     for event in payload.get("events") or []:
         try:
             results.append(await _apply_xero_invoice_event(event, request))
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to process Xero invoice webhook event")
             results.append({"status": "failed", "error": "Internal processing error"})
 

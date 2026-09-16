@@ -4380,11 +4380,6 @@ async def _invoke_create_ticket(
     if external_reference is not None:
         external_reference = str(external_reference).strip() or None
 
-    try:
-        existing = await tickets_repo.get_ticket(ticket_id_int)
-    except RuntimeError:
-        existing = None
-
     # Create webhook event for tracking
     event = await webhook_monitor.create_manual_event(
         name="module.create-ticket.create",

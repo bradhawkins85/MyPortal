@@ -4,7 +4,7 @@ import secrets
 from typing import Any
 
 from app.core.config import get_settings
-from app.services.matrix import MatrixConfigError, _admin_headers, _request
+from app.services.matrix import _admin_headers, _request
 
 _settings = get_settings()
 

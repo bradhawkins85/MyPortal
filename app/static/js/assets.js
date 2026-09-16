@@ -321,7 +321,6 @@
     const trayNotificationCheckbox = document.getElementById('asset-send-tray-notification');
     const noFieldsMessage = document.getElementById('no-fields-message');
     let currentAssetId = null;
-    let currentAssetName = '';
     let fieldDefinitions = [];
 
     async function loadFieldDefinitions() {
@@ -402,8 +401,6 @@
 
     async function openModal(assetId, assetName) {
       currentAssetId = assetId;
-      currentAssetName = assetName;
-      
       assetNameElement.textContent = `Asset: ${assetName}`;
       
       const [definitions, values] = await Promise.all([
@@ -418,7 +415,6 @@
     function closeModal() {
       modal.style.display = 'none';
       currentAssetId = null;
-      currentAssetName = '';
       if (trayNotificationCheckbox instanceof HTMLInputElement) {
         trayNotificationCheckbox.checked = false;
       }

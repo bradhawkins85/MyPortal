@@ -6,9 +6,7 @@ in knowledge base article content based on the viewing context (e.g., company).
 
 from __future__ import annotations
 
-import html
 import re
-from typing import Any, Mapping
 
 # Pattern to match conditional blocks
 # Matches: <kb-if company="Company Name">content</kb-if>

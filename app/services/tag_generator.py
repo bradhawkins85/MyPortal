@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Mapping
 
 from app.core.logging import log_error
 from app.services import modules as modules_service

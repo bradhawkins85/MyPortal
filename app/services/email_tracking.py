@@ -14,7 +14,7 @@ import re
 import secrets
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode
 
 import httpx
 from itsdangerous import BadSignature, URLSafeSerializer

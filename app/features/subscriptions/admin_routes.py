@@ -27,6 +27,7 @@ from app.repositories import companies as companies_repo
 from app.repositories import subscription_categories as categories_repo
 from app.repositories import shop as shop_repo
 from app.repositories import subscriptions as subscriptions_repo
+from app.security.csrf import parse_csrf_form
 from app.services.voice_monitor_billing import (
     contract_display,
     is_voice_monitor_subscription,

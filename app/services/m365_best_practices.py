@@ -3762,7 +3762,7 @@ async def _check_third_party_storage_owa(
         return _result(check_id, check_name, STATUS_PASS,
                        "Additional storage providers are restricted in all OWA mailbox policies.")
     return _result(check_id, check_name, STATUS_FAIL,
-                   f"OWA policies allowing third-party storage: " + ", ".join(bad))
+                   "OWA policies allowing third-party storage: " + ", ".join(bad))
 
 
 async def _check_outlook_addins_disabled(

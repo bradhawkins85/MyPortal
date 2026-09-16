@@ -21,7 +21,6 @@ from app.repositories import company_recurring_invoice_items as recurring_items_
 from app.repositories import ticket_billed_time_entries as billed_time_repo
 from app.repositories import ticket_expenses as expenses_repo
 from app.repositories import tickets as tickets_repo
-from app.repositories import users as users_repo
 from app.services import modules as modules_service
 from app.services import xero as xero_service
 

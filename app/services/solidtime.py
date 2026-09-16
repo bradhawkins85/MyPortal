@@ -36,7 +36,6 @@ from urllib.parse import urlparse
 
 import nh3
 import httpx
-from loguru import logger
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 

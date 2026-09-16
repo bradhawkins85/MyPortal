@@ -18,7 +18,7 @@ from app.repositories import tray as tray_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import site_settings as site_settings_repo
 from app.repositories import users as user_repo
-from app.security.encryption import decrypt_secret, encrypt_secret
+from app.security.encryption import encrypt_secret
 from app.security.session import SessionData
 from app.services import matrix as matrix_service
 from app.services import tray as tray_service
@@ -407,9 +407,6 @@ def _render_popup(
     branding_display_name: str | None = None,
 ) -> str:
     """Render the standalone popup HTML using the Jinja2 template."""
-    from jinja2 import Environment, PackageLoader, select_autoescape
-    from app.core.config import get_settings
-
     # Lazy-load the template from the app's templates directory.
     import os
 

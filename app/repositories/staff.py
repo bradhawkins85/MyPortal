@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timezone
-from typing import Any, Iterable, List, Sequence
+from typing import Any, Iterable, List
 
 from app.core.database import db
 from app.repositories import staff_custom_fields as staff_custom_fields_repo

@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from app.core import module_capabilities
 from app.core.config import get_settings
 from app.core.database import db
 from app.core.logging import log_error, log_info
@@ -44,7 +45,7 @@ from app.services import ticket_shipment_tracking as shipment_watch_service
 from app.services import backup_jobs as backup_jobs_service
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import rag_relationships as rag_relationship_repo
-from app.core.module_capabilities import COMMANDS_BY_MODULE, modules_for_command
+from app.core.module_capabilities import modules_for_command
 from app.repositories import integration_modules as module_repo
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -53,6 +54,7 @@ _OUTPUT_PREVIEW_LIMIT = 2000
 _SYSTEM_UPDATE_FLAG_PATH = _PROJECT_ROOT / "var" / "state" / "system_update.flag"
 _DEFAULT_UPGRADE_MODE = "graceful"
 _VALID_UPGRADE_MODES = {"graceful", "rolling", "restart"}
+COMMANDS_BY_MODULE = module_capabilities.COMMANDS_BY_MODULE
 # Flag file that ``scripts/upgrade.sh`` writes when it pulls a
 # feature-pack-only diff.  The scheduler polls it on a short interval
 # and reloads each listed slug in-process so the running app picks up
@@ -1353,9 +1355,7 @@ class SchedulerService:
 
                             if plan_id:
                                 # Get distribution list for the plan
-                                _unused_distribution_list = (
-                                    await bcp_repo.list_distribution_list(plan_id)
-                                )
+                                await bcp_repo.list_distribution_list(plan_id)
 
                                 # Create notification
                                 message = f"Upcoming BCP plan review scheduled for {item['review_date'].strftime('%Y-%m-%d %H:%M')}"

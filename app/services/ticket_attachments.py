@@ -4,7 +4,6 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
-import os
 import re
 import secrets
 from io import BytesIO

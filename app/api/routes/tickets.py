@@ -996,7 +996,6 @@ async def get_ticket(
     actor: dict = Depends(_resolve_ticket_actor),
 ) -> TicketDetail:
     current_user: dict | None = actor.get("user")
-    api_key_record: dict | None = actor.get("api_key")
     # API key requests get full helpdesk access via a synthetic super-admin user dict
     effective_user = (
         current_user if current_user else {"id": None, "is_super_admin": True}
@@ -1012,7 +1011,6 @@ async def update_ticket(
     actor: dict = Depends(_resolve_ticket_actor),
 ) -> TicketDetail:
     current_user: dict | None = actor.get("user")
-    api_key_record: dict | None = actor.get("api_key")
     # For session users, enforce helpdesk technician permission
     if current_user is not None:
         if not current_user.get("is_super_admin"):
@@ -1118,7 +1116,6 @@ async def delete_ticket(
     actor: dict = Depends(_resolve_ticket_actor),
 ) -> None:
     current_user: dict | None = actor.get("user")
-    api_key_record: dict | None = actor.get("api_key")
     # For session users, require super admin
     if current_user is not None and not current_user.get("is_super_admin"):
         raise HTTPException(

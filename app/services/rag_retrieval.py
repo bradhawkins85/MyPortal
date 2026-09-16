@@ -16,7 +16,6 @@ from app.services.rag_index import (
     cosine_similarity,
     embed_text,
     embedding_model,
-    normalise_text,
     tokenise,
 )
 from app.services.rag_permissions import can_access_candidate
