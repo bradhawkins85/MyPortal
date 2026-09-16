@@ -20,7 +20,7 @@
       </div>
     </header>
     <div class="table-wrapper">
-      <table class="table" id="active-sessions-table" data-table data-table-id="admin-active-sessions">
+      <table class="table table--stack-mobile" id="active-sessions-table" data-table data-table-id="admin-active-sessions">
         <thead>
           <tr>
             <th scope="col" data-sort="string" data-column-key="user">User</th>
@@ -29,6 +29,7 @@
             <th scope="col" data-sort="string" data-column-key="agent">User agent</th>
             <th scope="col" data-sort="date" data-column-key="last_seen">Last seen</th>
             <th scope="col" data-sort="date" data-column-key="expires">Expires</th>
+            <th scope="col" class="table__actions">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -52,10 +53,19 @@
                   —
                 {% endif %}
               </td>
+              <td data-label="Actions" class="table__actions">
+                <div class="table__action-buttons">
+                  <a class="button button--ghost button--small" href="/admin/sessions/{{ session.id }}">Drill down</a>
+                  <form method="post" action="/admin/sessions/{{ session.id }}/revoke" class="inline-form" onsubmit="return confirm('Revoke this session?');">
+                    {% include "partials/csrf.html" %}
+                    <button type="submit" class="button button--ghost button--small button--danger">Revoke</button>
+                  </form>
+                </div>
+              </td>
             </tr>
           {% else %}
             <tr>
-              <td colspan="6" class="table__empty">No active user sessions were found.</td>
+              <td colspan="7" class="table__empty">No active user sessions were found.</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -80,7 +90,7 @@
       </div>
     </header>
     <div class="table-wrapper">
-      <table class="table" id="recent-connections-table" data-table data-table-id="admin-recent-connections">
+      <table class="table table--stack-mobile" id="recent-connections-table" data-table data-table-id="admin-recent-connections">
         <thead>
           <tr>
             <th scope="col" data-sort="string" data-column-key="method">Access method</th>

@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import ipaddress
 import json
 import re
 import socket
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 
+from app.core.config import get_settings
 from app.core.logging import log_error, log_warning
 from app.repositories import service_status as service_status_repo
 from app.services import modules as modules_service
@@ -90,6 +93,45 @@ def normalise_company_ids(company_ids: Sequence[int | str] | None) -> list[int]:
         seen.add(value)
         normalised.append(value)
     return normalised
+
+
+def _public_status_token_component(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    return str(value).strip()
+
+
+def public_status_token_seed(company: Mapping[str, Any] | None) -> str:
+    if not company:
+        return ""
+    parts = [
+        _public_status_token_component(company.get("updated_at")),
+        _public_status_token_component(company.get("created_at")),
+        _public_status_token_component(company.get("name")),
+        _public_status_token_component(company.get("id")),
+    ]
+    return "|".join(part for part in parts if part)
+
+
+def build_public_status_token(company_id: int, *, seed: Any = None) -> str:
+    payload = (
+        f"service-status-public:{int(company_id)}:"
+        f"{_public_status_token_component(seed)}"
+    ).encode("utf-8")
+    return hmac.new(
+        get_settings().secret_key.encode("utf-8"),
+        payload,
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def is_valid_public_status_token(company_id: int, token: str | None, *, seed: Any = None) -> bool:
+    candidate = str(token or "").strip().lower()
+    if not candidate:
+        return False
+    return hmac.compare_digest(build_public_status_token(company_id, seed=seed), candidate)
 
 
 def _clean_text(value: Any) -> str | None:

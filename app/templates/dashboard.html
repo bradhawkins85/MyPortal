@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
+{% from "macros/mobile.html" import mobile_collapsible %}
 {% block title %}Dashboard{% endblock %}
 {% block header_title %}<span class="header__title-text">Dashboard</span>{% endblock %}
 {% block header_actions %}{{ page_header_actions([]) }}{% endblock %}
@@ -15,6 +16,11 @@
     </div>
   </header>
   <div class="dashboard-context"><span class="dashboard-context__dot"></span><span data-dashboard-source>Loading dashboard…</span></div>
+  <div class="u-only-mobile">
+    {% call mobile_collapsible('Dashboard help', open=False, id='dashboard-help-mobile') %}
+      <p class="text-muted">Use the dashboard actions toolbar to add, import, export, or save panels when it becomes available.</p>
+    {% endcall %}
+  </div>
   <div class="dashboard-grid" data-dashboard-grid aria-live="polite"><div class="dashboard-loading">Loading your panels…</div></div>
 </section>
 
