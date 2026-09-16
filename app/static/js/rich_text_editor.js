@@ -1,5 +1,6 @@
 (function () {
   const ALLOWED_LINK_PROTOCOLS = /^(https?:|mailto:|tel:)/i;
+  const ALLOWED_IMAGE_PROTOCOLS = /^(https?:|data:image\/)/i;
 
   function sanitiseLinkUrl(url) {
     if (!url) {
@@ -68,6 +69,109 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
+  }
+
+  function sanitizePastedHtml(value) {
+    const source = typeof value === 'string' ? value : '';
+    if (!source || !window.DOMPurify || typeof window.DOMPurify.sanitize !== 'function') {
+      return '';
+    }
+    return window.DOMPurify.sanitize(source, { USE_PROFILES: { html: true } });
+  }
+
+  function showEditorMessage(editor, message, variant) {
+    const feedback = editor.querySelector('[data-rich-text-feedback]');
+    if (!(feedback instanceof HTMLElement)) {
+      return;
+    }
+    feedback.hidden = !message;
+    feedback.textContent = message || '';
+    feedback.classList.toggle('text-danger', !!message && variant === 'error');
+    feedback.classList.toggle('text-muted', !!message && variant !== 'error');
+  }
+
+  function isSupportedImageSource(src) {
+    return ALLOWED_IMAGE_PROTOCOLS.test(String(src || '').trim());
+  }
+
+  function insertHtmlAtSelection(surface, html) {
+    surface.focus({ preventScroll: true });
+    const selection = window.getSelection();
+    const range = selection && selection.rangeCount > 0
+      ? selection.getRangeAt(0)
+      : (() => {
+          const fallbackRange = document.createRange();
+          fallbackRange.selectNodeContents(surface);
+          fallbackRange.collapse(false);
+          return fallbackRange;
+        })();
+    range.deleteContents();
+    const fragment = range.createContextualFragment(html);
+    range.insertNode(fragment);
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+      selection.collapseToEnd();
+    }
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+      reader.onerror = () => reject(new Error('Failed to read pasted image.'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handlePaste(surface, hidden, editor, event) {
+    const clipboard = event.clipboardData;
+    if (!clipboard) {
+      return;
+    }
+    const imageFiles = Array.from(clipboard.items || [])
+      .filter((item) => item.kind === 'file' && item.type && item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file) => file instanceof File);
+
+    const html = clipboard.getData('text/html');
+    if (html) {
+      event.preventDefault();
+      const sanitizedHtml = sanitizePastedHtml(html);
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = sanitizedHtml;
+      let removedImages = 0;
+      wrapper.querySelectorAll('img').forEach((image) => {
+        const src = image.getAttribute('src') || '';
+        if (isSupportedImageSource(src)) {
+          return;
+        }
+        image.remove();
+        removedImages += 1;
+      });
+      insertHtmlAtSelection(surface, wrapper.innerHTML);
+      updateSurfaceState(surface, hidden);
+      if (removedImages > 0) {
+        showEditorMessage(editor, 'Some pasted images could not be imported automatically. Use an HTTPS image URL or paste the image by itself.', 'error');
+      } else if (imageFiles.length > 0) {
+        showEditorMessage(editor, 'Pasted signature formatting was imported. Inline clipboard images could not be matched automatically.', 'error');
+      } else {
+        showEditorMessage(editor, '', 'info');
+      }
+      return;
+    }
+
+    if (imageFiles.length > 0) {
+      event.preventDefault();
+      try {
+        const dataUrls = await Promise.all(imageFiles.map((file) => readFileAsDataUrl(file)));
+        insertHtmlAtSelection(surface, dataUrls.map((src) => `<img src="${src}" alt="Pasted image" />`).join(''));
+        updateSurfaceState(surface, hidden);
+        showEditorMessage(editor, 'Pasted images were imported into the signature.', 'info');
+      } catch (error) {
+        showEditorMessage(editor, 'A pasted image could not be imported. Paste the image again or use an HTTPS image URL.', 'error');
+      }
+    }
   }
 
   function updateSurfaceState(surface, hidden) {
@@ -149,6 +253,11 @@
     });
     surface.addEventListener('blur', () => {
       updateSurfaceState(surface, hidden);
+    });
+    surface.addEventListener('paste', (event) => {
+      handlePaste(surface, hidden, editor, event).catch(() => {
+        showEditorMessage(editor, 'Pasted content could not be imported safely.', 'error');
+      });
     });
 
     editor.querySelectorAll('[data-rich-text-button]').forEach((button) => {

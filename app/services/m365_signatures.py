@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from app.core.config import get_settings
 from app.repositories import companies as companies_repo
 from app.repositories import company_variables as company_variables_repo
 from app.repositories import m365_signatures as signatures_repo
@@ -27,6 +29,84 @@ def _normalise_slug(slug: str) -> str:
 def _normalise_status(status: str | None) -> str:
     candidate = str(status or "draft").strip().lower()
     return candidate if candidate in {"draft", "published", "disabled"} else "draft"
+
+
+def _normalise_priority(priority: Any) -> int:
+    try:
+        return max(0, int(priority or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _normalise_date(value: Any) -> date | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        return date.fromisoformat(value.strip())
+    raise ValueError("Invalid schedule date")
+
+
+def _validate_schedule_dates(start_on: date | None, end_on: date | None) -> None:
+    if start_on and end_on and start_on > end_on:
+        raise ValueError("Schedule start date must be on or before the end date")
+
+
+def get_schedule_timezone_name() -> str:
+    return str(get_settings().default_timezone or "UTC").strip() or "UTC"
+
+
+def current_schedule_date(*, now: datetime | None = None, timezone_name: str | None = None) -> date:
+    active_now = now or datetime.now(timezone.utc)
+    if active_now.tzinfo is None:
+        active_now = active_now.replace(tzinfo=timezone.utc)
+    tz_name = timezone_name or get_schedule_timezone_name()
+    try:
+        tzinfo = ZoneInfo(tz_name)
+    except Exception:
+        tzinfo = timezone.utc
+    return active_now.astimezone(tzinfo).date()
+
+
+def is_template_active(
+    template: dict[str, Any],
+    *,
+    on_date: date | None = None,
+) -> bool:
+    if _normalise_status(template.get("status")) != "published":
+        return False
+    effective_date = on_date or current_schedule_date()
+    start_on = _normalise_date(template.get("schedule_start_on"))
+    end_on = _normalise_date(template.get("schedule_end_on"))
+    if start_on and effective_date < start_on:
+        return False
+    if end_on and effective_date > end_on:
+        return False
+    return True
+
+
+def pick_primary_template(
+    templates: list[dict[str, Any]],
+    *,
+    on_date: date | None = None,
+) -> dict[str, Any] | None:
+    effective_date = on_date or current_schedule_date()
+    active = [template for template in templates if is_template_active(template, on_date=effective_date)]
+    if not active:
+        return None
+
+    def _sort_key(template: dict[str, Any]) -> tuple[int, int, int, int]:
+        return (
+            _normalise_priority(template.get("priority")),
+            1 if template.get("is_default") else 0,
+            -((_normalise_date(template.get("schedule_start_on")) or date.max).toordinal()),
+            -int(template.get("id") or 0),
+        )
+
+    return max(active, key=_sort_key)
 
 
 def generate_initial_text(html_content: str | None) -> str:
@@ -62,6 +142,10 @@ async def create_template(
     description: str | None,
     html_content: str,
     text_content: str | None,
+    priority: Any = 0,
+    is_default: bool = False,
+    schedule_start_on: Any = None,
+    schedule_end_on: Any = None,
     user_id: int | None,
 ) -> dict[str, Any]:
     normalised_slug = _normalise_slug(slug)
@@ -70,7 +154,10 @@ async def create_template(
         raise ValueError("A signature template with this slug already exists")
     sanitised = sanitize_rich_text(html_content)
     final_text = str(text_content or "").strip() or generate_initial_text(sanitised.html)
-    return await signatures_repo.create_template(
+    parsed_start_on = _normalise_date(schedule_start_on)
+    parsed_end_on = _normalise_date(schedule_end_on)
+    _validate_schedule_dates(parsed_start_on, parsed_end_on)
+    created = await signatures_repo.create_template(
         company_id=company_id,
         slug=normalised_slug,
         name=str(name or "").strip(),
@@ -78,9 +165,22 @@ async def create_template(
         html_content=sanitised.html,
         text_content=final_text,
         status="draft",
+        priority=_normalise_priority(priority),
+        is_default=bool(is_default),
+        schedule_start_on=parsed_start_on,
+        schedule_end_on=parsed_end_on,
         created_by_user_id=user_id,
         updated_by_user_id=user_id,
     )
+    if bool(is_default):
+        updated = await signatures_repo.set_default_template(
+            company_id,
+            int(created["id"]),
+            updated_by_user_id=user_id,
+        )
+        if updated:
+            return updated
+    return created
 
 
 async def update_template(
@@ -92,6 +192,10 @@ async def update_template(
     description: str | None,
     html_content: str,
     text_content: str | None,
+    priority: Any = 0,
+    is_default: bool = False,
+    schedule_start_on: Any = None,
+    schedule_end_on: Any = None,
     user_id: int | None,
 ) -> dict[str, Any] | None:
     current = await get_template(company_id, template_id)
@@ -103,7 +207,10 @@ async def update_template(
         raise ValueError("A signature template with this slug already exists")
     sanitised = sanitize_rich_text(html_content)
     final_text = str(text_content or "").strip() or generate_initial_text(sanitised.html)
-    return await signatures_repo.update_template(
+    parsed_start_on = _normalise_date(schedule_start_on)
+    parsed_end_on = _normalise_date(schedule_end_on)
+    _validate_schedule_dates(parsed_start_on, parsed_end_on)
+    updated = await signatures_repo.update_template(
         company_id,
         template_id,
         slug=normalised_slug,
@@ -111,9 +218,22 @@ async def update_template(
         description=str(description).strip() if isinstance(description, str) and description.strip() else None,
         html_content=sanitised.html,
         text_content=final_text,
+        priority=_normalise_priority(priority),
+        is_default=bool(is_default),
+        schedule_start_on=parsed_start_on,
+        schedule_end_on=parsed_end_on,
         updated_by_user_id=user_id,
         disabled_at=None if current.get("status") != "disabled" else current.get("disabled_at"),
     )
+    if not updated:
+        return None
+    if bool(is_default):
+        return await signatures_repo.set_default_template(
+            company_id,
+            template_id,
+            updated_by_user_id=user_id,
+        )
+    return updated
 
 
 async def clone_template(company_id: int, template_id: int, *, user_id: int | None) -> dict[str, Any] | None:
@@ -134,6 +254,10 @@ async def clone_template(company_id: int, template_id: int, *, user_id: int | No
         html_content=str(source.get("html_content") or ""),
         text_content=str(source.get("text_content") or ""),
         status="draft",
+        priority=_normalise_priority(source.get("priority")),
+        is_default=False,
+        schedule_start_on=_normalise_date(source.get("schedule_start_on")),
+        schedule_end_on=_normalise_date(source.get("schedule_end_on")),
         created_by_user_id=user_id,
         updated_by_user_id=user_id,
     )
@@ -284,6 +408,15 @@ async def list_variable_suggestions(company_id: int) -> list[str]:
     return list(dict.fromkeys(suggestions))
 
 
+async def get_primary_template(
+    company_id: int,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any] | None:
+    templates = await list_templates(company_id)
+    return pick_primary_template(templates, on_date=current_schedule_date(now=now))
+
+
 __all__ = [
     "build_preview_context",
     "clone_template",
@@ -291,10 +424,14 @@ __all__ = [
     "delete_template",
     "disable_template",
     "generate_initial_text",
+    "get_primary_template",
+    "get_schedule_timezone_name",
     "get_template",
+    "is_template_active",
     "list_preview_staff",
     "list_templates",
     "list_variable_suggestions",
+    "pick_primary_template",
     "publish_template",
     "render_preview",
     "update_template",

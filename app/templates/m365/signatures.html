@@ -23,6 +23,16 @@
       </div>
     </header>
     <div class="card__body card__body--stacked">
+      <div class="alert alert--info" role="status">
+        Scheduling uses <strong>{{ schedule_timezone }}</strong>. Active published templates are ordered by priority, then the configured default, then the earliest activation start date, then the lowest template ID.
+      </div>
+      {% if current_primary %}
+        <div class="card card--panel">
+          <div class="card__body">
+            <strong>Current primary template:</strong> {{ current_primary.name }} <code>{{ current_primary.slug }}</code>
+          </div>
+        </div>
+      {% endif %}
       {% if templates %}
         <div class="table-wrapper">
           <table class="table">
@@ -31,6 +41,8 @@
                 <th scope="col">Name</th>
                 <th scope="col">Slug</th>
                 <th scope="col">Status</th>
+                <th scope="col">Priority</th>
+                <th scope="col">Schedule</th>
                 <th scope="col">Updated</th>
                 <th scope="col">Actions</th>
               </tr>
@@ -38,9 +50,21 @@
             <tbody>
               {% for item in templates %}
                 <tr>
-                  <td>{{ item.name }}</td>
+                  <td>
+                    {{ item.name }}
+                    {% if current_primary and current_primary.id == item.id %}<span class="badge badge--success">Primary</span>{% endif %}
+                    {% if item.is_default %}<span class="badge badge--info">Default</span>{% endif %}
+                  </td>
                   <td><code>{{ item.slug }}</code></td>
                   <td>{{ item.status|replace('_', ' ')|title }}</td>
+                  <td>{{ item.priority or 0 }}</td>
+                  <td>
+                    {% if item.schedule_start_on or item.schedule_end_on %}
+                      {{ item.schedule_start_on.isoformat() if item.schedule_start_on else 'Immediate' }} → {{ item.schedule_end_on.isoformat() if item.schedule_end_on else 'No end' }}
+                    {% else %}
+                      Always active when published
+                    {% endif %}
+                  </td>
                   <td>{% if item.updated_at %}<time data-utc="{{ item.updated_at.isoformat() }}">{{ item.updated_at.isoformat() }}</time>{% else %}—{% endif %}</td>
                   <td>
                     <div class="button-group">

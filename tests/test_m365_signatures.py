@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import date
 
 import pytest
 from jinja2 import Environment, FileSystemLoader
@@ -135,9 +136,104 @@ def test_signature_templates_compile_and_expose_designer_copy():
     source = (ROOT / "app" / "templates" / "m365" / "signatures_form.html").read_text(
         encoding="utf-8"
     )
-    assert "Supports formatting, links, images, tables, and template variables." in source
+    assert "pasted signature content" in source
     assert "Plain-text signature" in source
     assert "Preview staff member" in source
+    assert "Activation start date" in source
+    assert "purify.min.js" in source
+
+
+def test_pick_primary_template_prefers_priority_then_default_then_schedule():
+    primary = m365_signatures.pick_primary_template(
+        [
+            {
+                "id": 1,
+                "status": "published",
+                "priority": 5,
+                "is_default": True,
+                "schedule_start_on": None,
+                "schedule_end_on": None,
+            },
+            {
+                "id": 2,
+                "status": "published",
+                "priority": 8,
+                "is_default": False,
+                "schedule_start_on": date(2026, 9, 1),
+                "schedule_end_on": date(2026, 9, 30),
+            },
+        ],
+        on_date=date(2026, 9, 16),
+    )
+
+    assert primary is not None
+    assert primary["id"] == 2
+
+
+def test_pick_primary_template_uses_default_for_equal_priority():
+    primary = m365_signatures.pick_primary_template(
+        [
+            {
+                "id": 4,
+                "status": "published",
+                "priority": 3,
+                "is_default": False,
+                "schedule_start_on": date(2026, 9, 1),
+                "schedule_end_on": date(2026, 9, 30),
+            },
+            {
+                "id": 5,
+                "status": "published",
+                "priority": 3,
+                "is_default": True,
+                "schedule_start_on": None,
+                "schedule_end_on": None,
+            },
+        ],
+        on_date=date(2026, 9, 16),
+    )
+
+    assert primary is not None
+    assert primary["id"] == 5
+
+
+def test_is_template_active_respects_inclusive_schedule_bounds():
+    template = {
+        "status": "published",
+        "schedule_start_on": date(2026, 9, 1),
+        "schedule_end_on": date(2026, 9, 30),
+    }
+
+    assert m365_signatures.is_template_active(template, on_date=date(2026, 9, 1)) is True
+    assert m365_signatures.is_template_active(template, on_date=date(2026, 9, 30)) is True
+    assert m365_signatures.is_template_active(template, on_date=date(2026, 10, 1)) is False
+
+
+def test_pick_primary_template_uses_earliest_start_date_for_equal_priority():
+    primary = m365_signatures.pick_primary_template(
+        [
+            {
+                "id": 7,
+                "status": "published",
+                "priority": 4,
+                "is_default": False,
+                "schedule_start_on": date(2026, 9, 10),
+                "schedule_end_on": date(2026, 9, 30),
+            },
+            {
+                "id": 8,
+                "status": "published",
+                "priority": 4,
+                "is_default": False,
+                "schedule_start_on": date(2026, 9, 1),
+                "schedule_end_on": date(2026, 9, 30),
+            },
+        ],
+        on_date=date(2026, 9, 16),
+    )
+
+    assert primary is not None
+    assert primary["id"] == 8
 
 
 def test_signature_sidebar_requires_explicit_permission():

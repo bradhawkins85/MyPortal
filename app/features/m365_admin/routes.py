@@ -78,6 +78,10 @@ def _empty_signature_form() -> dict[str, str]:
         "description": "",
         "html_content": "",
         "text_content": "",
+        "priority": "0",
+        "is_default": "",
+        "schedule_start_on": "",
+        "schedule_end_on": "",
     }
 
 
@@ -88,6 +92,34 @@ def _optional_int(value) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _signature_form_values(record: dict | None = None, *, form=None) -> dict[str, str]:
+    if form is not None:
+        return {
+            "slug": str(form.get("slug") or "").strip(),
+            "name": str(form.get("name") or "").strip(),
+            "description": str(form.get("description") or "").strip(),
+            "html_content": str(form.get("html_content") or ""),
+            "text_content": str(form.get("text_content") or ""),
+            "priority": str(form.get("priority") or "0").strip() or "0",
+            "is_default": "on" if form.get("is_default") == "on" else "",
+            "schedule_start_on": str(form.get("schedule_start_on") or "").strip(),
+            "schedule_end_on": str(form.get("schedule_end_on") or "").strip(),
+        }
+    if not record:
+        return _empty_signature_form()
+    return {
+        "slug": str(record.get("slug") or "").strip(),
+        "name": str(record.get("name") or "").strip(),
+        "description": str(record.get("description") or "").strip(),
+        "html_content": str(record.get("html_content") or ""),
+        "text_content": str(record.get("text_content") or ""),
+        "priority": str(record.get("priority") or 0),
+        "is_default": "on" if record.get("is_default") else "",
+        "schedule_start_on": record["schedule_start_on"].isoformat() if record.get("schedule_start_on") else "",
+        "schedule_end_on": record["schedule_end_on"].isoformat() if record.get("schedule_end_on") else "",
+    }
 
 
 async def _render_signature_form(
@@ -104,10 +136,11 @@ async def _render_signature_form(
     extra = {
         "title": "Signature management",
         "template_record": template_record or {},
-        "form_values": form_values or template_record or _empty_signature_form(),
+        "form_values": form_values or _signature_form_values(template_record),
         "preview": preview,
         "preview_staff": staff_options,
         "selected_staff_id": selected_staff_id,
+        "schedule_timezone": signatures_service.get_schedule_timezone_name(),
         "variable_suggestions": await signatures_service.list_variable_suggestions(company_id),
     }
     return await _main()._render_template("m365/signatures_form.html", request, user, extra=extra)
@@ -165,12 +198,15 @@ async def signatures_page(request: Request):
     if redirect:
         return redirect
     templates = await signatures_service.list_templates(company_id)
+    current_primary = await signatures_service.get_primary_template(company_id)
     return await _main()._render_template(
         "m365/signatures.html",
         request,
         user,
         extra={
             "title": "Signature management",
+            "current_primary": current_primary,
+            "schedule_timezone": signatures_service.get_schedule_timezone_name(),
             "templates": templates,
         },
     )
@@ -190,13 +226,7 @@ async def create_signature_template(request: Request):
     if redirect:
         return redirect
     form = await request.form()
-    form_values = {
-        "slug": str(form.get("slug") or "").strip(),
-        "name": str(form.get("name") or "").strip(),
-        "description": str(form.get("description") or "").strip(),
-        "html_content": str(form.get("html_content") or ""),
-        "text_content": str(form.get("text_content") or ""),
-    }
+    form_values = _signature_form_values(form=form)
     preview_staff_id = _optional_int(form.get("preview_staff_id"))
     if form.get("intent") == "preview":
         if not preview_staff_id:
@@ -226,6 +256,10 @@ async def create_signature_template(request: Request):
             description=form_values["description"] or None,
             html_content=form_values["html_content"],
             text_content=form_values["text_content"] or None,
+            priority=form_values["priority"],
+            is_default=form_values["is_default"] == "on",
+            schedule_start_on=form_values["schedule_start_on"] or None,
+            schedule_end_on=form_values["schedule_end_on"] or None,
             user_id=int(user["id"]),
         )
     except ValueError as exc:
@@ -261,13 +295,7 @@ async def update_signature_template(template_id: int, request: Request):
     if not template_record:
         return flash_redirect("/m365/signatures", "Signature template not found.", "error")
     form = await request.form()
-    form_values = {
-        "slug": str(form.get("slug") or "").strip(),
-        "name": str(form.get("name") or "").strip(),
-        "description": str(form.get("description") or "").strip(),
-        "html_content": str(form.get("html_content") or ""),
-        "text_content": str(form.get("text_content") or ""),
-    }
+    form_values = _signature_form_values(form=form)
     preview_staff_id = _optional_int(form.get("preview_staff_id"))
     if form.get("intent") == "preview":
         if not preview_staff_id:
@@ -301,6 +329,10 @@ async def update_signature_template(template_id: int, request: Request):
             description=form_values["description"] or None,
             html_content=form_values["html_content"],
             text_content=form_values["text_content"] or None,
+            priority=form_values["priority"],
+            is_default=form_values["is_default"] == "on",
+            schedule_start_on=form_values["schedule_start_on"] or None,
+            schedule_end_on=form_values["schedule_end_on"] or None,
             user_id=int(user["id"]),
         )
     except ValueError as exc:
