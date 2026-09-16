@@ -107,7 +107,7 @@ def test_admin_reporting_ai_query_redacts_raw_module_error(monkeypatch):
     assert logged["kwargs"]["status"] == "failed"
     assert logged["kwargs"]["reason_type"] == "str"
     assert logged["kwargs"]["reason_length"] > 0
-    assert "secret" not in json.dumps(logged["kwargs"])
+    assert "select * from users" not in json.dumps(logged["kwargs"])
 
 
 def test_admin_reporting_ai_query_preserves_validation_message(monkeypatch):

@@ -16,9 +16,9 @@ from app.security.flash import flash_redirect
 
 _REPORTING_SLUG_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _APPROVED_AI_QUERY_MODULE_REASONS = {
-    "Module disabled",
-    "Module not fully configured",
-    "pending_restart",
+    "Module disabled": "Module disabled",
+    "Module not fully configured": "Module not fully configured",
+    "pending_restart": "Module pending restart",
 }
 
 
@@ -47,9 +47,7 @@ def _reporting_message(value: str | None, *, max_length: int = 240) -> str | Non
 
 def _approved_ai_query_module_reason(value: Any) -> str | None:
     cleaned = _reporting_message(str(value) if value is not None else None)
-    if cleaned in _APPROVED_AI_QUERY_MODULE_REASONS:
-        return cleaned
-    return None
+    return _APPROVED_AI_QUERY_MODULE_REASONS.get(cleaned)
 
 
 def _reporting_user_label(record: Any) -> str:
@@ -455,7 +453,7 @@ async def admin_reporting_ai_query(request: Request):
             log_error(
                 "Reporting AI query module failed",
                 status=str(response.get("status") or ""),
-                reason_type=type(reason).__name__ if reason is not None else None,
+                reason_type=type(reason).__name__,
                 reason_length=len(str(reason)) if reason is not None else 0,
             )
             raise _AIQueryModuleFailure("module failure")
