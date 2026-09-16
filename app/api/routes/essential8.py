@@ -127,15 +127,15 @@ def _open_requirement_evidence_storage_file(
     company_id: int,
     requirement_id: int,
     safe_name: str,
-) -> tuple[Path, str, Path, BinaryIO]:
+) -> tuple[Path, BinaryIO]:
     for _ in range(5):
-        storage_root, storage_name, storage_path = _allocate_requirement_evidence_storage_path(
+        _, _, storage_path = _allocate_requirement_evidence_storage_path(
             company_id=company_id,
             requirement_id=requirement_id,
             safe_name=safe_name,
         )
         try:
-            return storage_root, storage_name, storage_path, storage_path.open("xb")
+            return storage_path, storage_path.open("xb")
         except FileExistsError:
             continue
     raise HTTPException(
@@ -697,13 +697,19 @@ async def upload_requirement_evidence(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requirement not found")
     safe_name = _sanitize_requirement_evidence_filename(evidence_file.filename)
     total_size = 0
-    storage_root, storage_name, storage_path, storage_handle = _open_requirement_evidence_storage_file(
-        company_id=company_id,
-        requirement_id=requirement_id,
-        safe_name=safe_name,
-    )
-    created_file = True
+    storage_root: Path | None = None
+    storage_name: str | None = None
+    storage_path: Path | None = None
+    created_file = False
     try:
+        storage_path, storage_handle = _open_requirement_evidence_storage_file(
+            company_id=company_id,
+            requirement_id=requirement_id,
+            safe_name=safe_name,
+        )
+        storage_root = storage_path.parent
+        storage_name = storage_path.name
+        created_file = True
         with storage_handle as handle:
             while True:
                 chunk = await evidence_file.read(1024 * 1024)
