@@ -1168,7 +1168,7 @@ async def _scc_invoke_command(
         }
     }
     headers = {
-        "Authorization": f"******",
+        "Authorization": f"Bearer {scc_token}",
         "Accept-Encoding": "identity",
         "Content-Type": "application/json; charset=utf-8",
     }
