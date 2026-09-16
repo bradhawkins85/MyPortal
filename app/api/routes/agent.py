@@ -7,11 +7,17 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
-from app.schemas.agent import AgentQueryRequest, AgentQueryResponse
+from app.schemas.agent import (
+    AgentQueryRequest,
+    AgentQueryResponse,
+    AgentSavedSearchCreateRequest,
+    AgentSavedSearchItem,
+)
 from app.services import agent as agent_service
 from app.core.database import db
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import rag_relationships as rag_relationship_repo
+from app.repositories import agent_saved_searches as saved_search_repo
 
 router = APIRouter(prefix="/api/agent", tags=["Agent"])
 _RAG_INDEX_TASKS: dict[int, asyncio.Task[None]] = {}
@@ -30,6 +36,7 @@ async def query_agent(
         current_user,
         active_company_id=active_company_id,
         memberships=memberships,
+        source_filters=payload.source_filters,
     )
     return AgentQueryResponse(**result)
 
@@ -47,6 +54,7 @@ async def stream_agent_query(
         current_user,
         active_company_id=active_company_id,
         memberships=memberships,
+        source_filters=payload.source_filters,
     )
 
     async def events():
@@ -76,6 +84,65 @@ async def stream_agent_query(
         yield f"data: {json.dumps({'event': 'done'}, default=str)}\n\n"
 
     return StreamingResponse(events(), media_type="text/event-stream")
+
+
+@router.get("/saved-searches", response_model=list[AgentSavedSearchItem])
+async def list_saved_searches(
+    current_user: dict = Depends(get_current_user),
+) -> list[AgentSavedSearchItem]:
+    try:
+        user_id = int(current_user.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="User session is invalid"
+        )
+    records = await saved_search_repo.list_for_user(user_id)
+    return [AgentSavedSearchItem(**item) for item in records]
+
+
+@router.post("/saved-searches", response_model=AgentSavedSearchItem)
+async def create_saved_search(
+    payload: AgentSavedSearchCreateRequest,
+    current_user: dict = Depends(get_current_user),
+) -> AgentSavedSearchItem:
+    try:
+        user_id = int(current_user.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="User session is invalid"
+        )
+    is_super_admin = bool(current_user.get("is_super_admin"))
+    item = await saved_search_repo.create_or_update(
+        user_id=user_id,
+        name=payload.name,
+        query_text=payload.query,
+        source_filters=list(payload.source_filters),
+        is_shared=bool(payload.is_shared) and is_super_admin,
+    )
+    return AgentSavedSearchItem(**item)
+
+
+@router.delete("/saved-searches/{saved_search_id}")
+async def delete_saved_search(
+    saved_search_id: int,
+    current_user: dict = Depends(get_current_user),
+) -> dict[str, bool]:
+    try:
+        user_id = int(current_user.get("id"))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="User session is invalid"
+        )
+    deleted = await saved_search_repo.delete_for_user(
+        saved_search_id=saved_search_id,
+        user_id=user_id,
+        allow_shared=bool(current_user.get("is_super_admin")),
+    )
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Saved search not found"
+        )
+    return {"deleted": True}
 
 
 @router.get("/rag/health")
