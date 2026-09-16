@@ -196,6 +196,67 @@ async def test_graph_post_handles_204_no_content():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_renew_admin_client_secret_backfills_missing_app_object_id():
+    """Renewal recovers and persists a missing admin app object ID from Graph."""
+    stored_creds = {
+        "tenant_id": "tenant-1",
+        "client_id": "66666666-6666-6666-6666-666666666666",
+        "client_secret": "old-secret",
+        "app_object_id": None,
+        "client_secret_key_id": OLD_KEY_ID,
+        "client_secret_expires_at": datetime.utcnow() + timedelta(days=4),
+        "pkce_client_id": "pkce-client-id",
+    }
+    persisted: list[dict[str, Any]] = []
+    posted_calls: list[dict[str, Any]] = []
+
+    async def mock_get(token: str, url: str) -> dict:
+        if "applications?$filter=appId eq" in url:
+            return {"value": [{"id": APP_OBJECT_ID}]}
+        return {"value": []}
+
+    async def mock_post(token: str, url: str, payload: dict) -> dict:
+        posted_calls.append({"url": url, "payload": payload})
+        if "addPassword" in url:
+            return {"secretText": "new-secret", "keyId": NEW_KEY_ID}
+        if "removePassword" in url:
+            return {}
+        return {}
+
+    exchange_mock = AsyncMock(return_value=("old-token", None, None))
+    mock_settings = MagicMock()
+    mock_settings.m365_client_secret_lifetime_days = 730
+
+    with (
+        patch.object(
+            m365_service, "get_admin_m365_credentials", AsyncMock(return_value=stored_creds)
+        ),
+        patch.object(m365_service, "_exchange_token", exchange_mock),
+        patch.object(m365_service, "_graph_get", side_effect=mock_get),
+        patch.object(m365_service, "_graph_post", side_effect=mock_post),
+        patch.object(
+            m365_service,
+            "update_admin_m365_credentials",
+            side_effect=lambda **kwargs: persisted.append(kwargs) or None,
+        ),
+        patch("app.services.m365.get_settings", return_value=mock_settings),
+    ):
+        result = await m365_service.renew_admin_client_secret()
+
+    assert result["key_id"] == NEW_KEY_ID
+    assert len(persisted) == 3
+    assert persisted[0]["app_object_id"] == APP_OBJECT_ID
+    assert persisted[0]["client_secret"] == "old-secret"
+    assert persisted[1]["app_object_id"] == APP_OBJECT_ID
+    assert persisted[1]["client_secret"] == "new-secret"
+    assert persisted[2]["app_object_id"] == APP_OBJECT_ID
+    assert persisted[2]["client_secret"] == "new-secret"
+    add_call = next(c for c in posted_calls if "addPassword" in c["url"])
+    assert APP_OBJECT_ID in add_call["url"]
+    assert exchange_mock.await_count == 2
+
+
+@pytest.mark.anyio("asyncio")
 async def test_renew_admin_client_secret_validation_failure_restores_previous_secret():
     """Validation failure restores the previous admin credential and removes the new secret."""
     stored_creds = {

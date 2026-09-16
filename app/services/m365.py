@@ -748,6 +748,23 @@ def _parse_client_secret_expires(value: Any) -> datetime | None:
     return None
 
 
+async def _lookup_application_object_id(access_token: str, client_id: str) -> str | None:
+    """Return the Entra application object ID for an application (client) ID."""
+    clean_client_id = str(client_id or "").strip()
+    if not clean_client_id:
+        return None
+    if not _GRAPH_OBJECT_ID_PATTERN.fullmatch(clean_client_id):
+        raise M365Error("Invalid Microsoft Entra application ID", http_status=400)
+    data = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/applications"
+        f"?$filter=appId eq '{clean_client_id}'&$select=id",
+    )
+    app = next(iter(data.get("value") or []), None)
+    app_object_id = str((app or {}).get("id") or "").strip()
+    return app_object_id or None
+
+
 async def get_credentials(company_id: int) -> dict[str, Any] | None:
     record = await m365_repo.get_credentials(company_id)
     if not record:
@@ -2258,13 +2275,6 @@ async def renew_admin_client_secret(company_id: int | None = None) -> dict[str, 
     if not creds:
         raise M365Error("No M365 admin credentials found")
 
-    app_object_id = creds.get("app_object_id")
-    if not app_object_id:
-        raise M365ReprovisionRequiredError(
-            "Admin app object ID not stored – re-provisioning is required to enable "
-            "automatic admin client secret renewal"
-        )
-
     tenant_id = str(creds.get("tenant_id") or "").strip()
     client_id = str(creds.get("client_id") or "").strip()
     client_secret = str(creds.get("client_secret") or "").strip()
@@ -2277,6 +2287,27 @@ async def renew_admin_client_secret(company_id: int | None = None) -> dict[str, 
         client_secret=client_secret,
         refresh_token=None,
     )
+
+    app_object_id = str(creds.get("app_object_id") or "").strip()
+    if not app_object_id:
+        app_object_id = await _lookup_application_object_id(access_token, client_id)
+        if not app_object_id:
+            raise M365ReprovisionRequiredError(
+                "Admin app object ID not stored – re-provisioning is required to enable "
+                "automatic admin client secret renewal"
+            )
+        await _persist_backfilled_admin_app_object_id(
+            company_id=company_id,
+            client_id=client_id,
+            client_secret=client_secret,
+            tenant_id=tenant_id,
+            app_object_id=app_object_id,
+            client_secret_key_id=creds.get("client_secret_key_id"),
+            client_secret_expires_at=_parse_client_secret_expires(
+                creds.get("client_secret_expires_at")
+            ),
+            pkce_client_id=creds.get("pkce_client_id"),
+        )
 
     secret_lifetime_days = get_settings().m365_client_secret_lifetime_days
     new_expiry_date = date.today() + timedelta(days=secret_lifetime_days)
@@ -2674,6 +2705,41 @@ async def update_admin_m365_credentials(
     )
     log_info(
         "Updated M365 admin credentials in integration module", client_id=client_id
+    )
+
+
+async def _persist_backfilled_admin_app_object_id(
+    *,
+    company_id: int | None,
+    client_id: str,
+    client_secret: str,
+    tenant_id: str,
+    app_object_id: str,
+    client_secret_key_id: str | None,
+    client_secret_expires_at: datetime | None,
+    pkce_client_id: str | None,
+) -> None:
+    """Persist a recovered admin app object ID without changing the active secret."""
+    if company_id is None:
+        await update_admin_m365_credentials(
+            client_id=client_id,
+            client_secret=client_secret,
+            tenant_id=tenant_id,
+            app_object_id=app_object_id,
+            client_secret_key_id=client_secret_key_id,
+            client_secret_expires_at=client_secret_expires_at,
+            pkce_client_id=pkce_client_id,
+        )
+        return
+    await upsert_company_admin_credentials(
+        company_id=company_id,
+        client_id=client_id,
+        client_secret=client_secret,
+        tenant_id=tenant_id,
+        app_object_id=app_object_id,
+        client_secret_key_id=client_secret_key_id,
+        client_secret_expires_at=client_secret_expires_at,
+        pkce_client_id=pkce_client_id,
     )
 
 
