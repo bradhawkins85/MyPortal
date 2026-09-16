@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 import secrets
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from functools import lru_cache
@@ -30,6 +31,21 @@ def _quantize_money(value: Any) -> Decimal:
         return raw.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     except (InvalidOperation, TypeError, ValueError):
         return Decimal("0.00")
+
+
+def _is_truthy(value: Any) -> bool:
+    """Return whether *value* should be treated as a checked/true form value."""
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "on", "yes"}
+
+
+def _effective_cart_unit_price(item: Mapping[str, Any]) -> Decimal:
+    """Return the price that should be charged for a cart line item."""
+    coterm_price = item.get("coterm_price")
+    if _is_truthy(item.get("coterm_enabled")) and coterm_price is not None:
+        return _quantize_money(coterm_price)
+    return _quantize_money(item.get("unit_price"))
 
 
 @lru_cache(maxsize=1)
@@ -339,6 +355,10 @@ async def view_cart(
     main_module = _main()
     from app.repositories import freight_rules as freight_rules_repo
     from app.services import freight_rules as freight_rules_service
+    from app.services.subscription_pricing import (
+        calculate_coterm_price,
+        get_coterm_anchor_for_product,
+    )
 
     (
         user,
@@ -420,7 +440,46 @@ async def view_cart(
         description = product.get("description")
         description_html = main_module.sanitize_rich_text(str(description or "")).html
         image_url = product.get("image_url")
-        line_total = current_price * quantity
+        subscription_category_id = product.get("subscription_category_id")
+        stored_coterm_enabled = _is_truthy(item.get("coterm_enabled"))
+        stored_coterm_end_date = item.get("coterm_end_date")
+        stored_coterm_price = (
+            _normalise_price(item.get("coterm_price"))
+            if item.get("coterm_price") is not None
+            else None
+        )
+        coterm_available = False
+        coterm_category_name: str | None = None
+        coterm_end_date = None
+        coterm_price = None
+        coterm_enabled = False
+
+        if subscription_category_id is not None and company_id is not None:
+            coterm_anchor = await get_coterm_anchor_for_product(
+                company_id,
+                resolved_product_id,
+                subscription_category_id,
+            )
+            anchor_date = coterm_anchor.get("anchor_date") if coterm_anchor else None
+            if anchor_date and anchor_date >= date.today():
+                coterm_available = True
+                coterm_category_name = coterm_anchor.get("category_name")
+                coterm_end_date = anchor_date
+                coterm_price = calculate_coterm_price(
+                    current_price,
+                    date.today(),
+                    anchor_date,
+                )
+                coterm_enabled = stored_coterm_enabled
+
+        effective_unit_price = _effective_cart_unit_price(
+            {
+                "unit_price": current_price,
+                "coterm_enabled": coterm_enabled,
+                "coterm_price": coterm_price,
+            }
+        )
+        line_total = effective_unit_price * quantity
         subtotal += line_total
 
         cart_product_ids.append(resolved_product_id)
@@ -429,9 +488,16 @@ async def view_cart(
         hydrated.update(
             {
                 "unit_price": current_price,
+                "effective_unit_price": effective_unit_price,
+                "full_term_unit_price": current_price,
                 "line_total": line_total,
                 "available_stock": int(product.get("stock") or 0),
-                "subscription_category_id": product.get("subscription_category_id"),
+                "subscription_category_id": subscription_category_id,
+                "coterm_available": coterm_available,
+                "coterm_category_name": coterm_category_name,
+                "coterm_enabled": coterm_enabled,
+                "coterm_end_date": coterm_end_date,
+                "coterm_price": coterm_price,
                 "product_name": name,
                 "product_sku": sku,
                 "product_vendor_sku": vendor_sku,
@@ -449,6 +515,9 @@ async def view_cart(
                 vendor_sku != item.get("product_vendor_sku"),
                 description != item.get("product_description"),
                 image_url != item.get("product_image_url"),
+                stored_coterm_enabled != coterm_enabled,
+                stored_coterm_end_date != coterm_end_date,
+                stored_coterm_price != coterm_price,
             ]
         ):
             await main_module.cart_repo.upsert_item(
@@ -461,6 +530,9 @@ async def view_cart(
                 vendor_sku=vendor_sku,
                 description=description,
                 image_url=image_url,
+                coterm_enabled=coterm_enabled,
+                coterm_end_date=coterm_end_date,
+                coterm_price=coterm_price,
             )
 
         cart_items_payload.append(
@@ -472,7 +544,7 @@ async def view_cart(
                 "description": description,
                 "description_html": description_html,
                 "image_url": image_url,
-                "unit_price": f"{current_price:.2f}",
+                "unit_price": f"{effective_unit_price:.2f}",
                 "quantity": quantity,
                 "line_total": f"{line_total:.2f}",
             }
@@ -665,6 +737,11 @@ async def view_cart(
 )
 async def update_cart_items(request: Request) -> RedirectResponse:
     main_module = _main()
+    from app.services.subscription_pricing import (
+        calculate_coterm_price,
+        get_coterm_anchor_for_product,
+    )
+
     (
         user,
         membership,
@@ -684,10 +761,18 @@ async def update_cart_items(request: Request) -> RedirectResponse:
 
     form = await request.form()
     updates: dict[int, int] = {}
+    coterm_updates: dict[int, bool] = {}
     removals: set[int] = set()
     invalid_entries = False
     stock_conflicts: set[int] = set()
     max_quantity = 9999
+    coterm_conflicts = False
+    coterm_updated_count = 0
+
+    try:
+        is_vip = bool(company and int(company.get("is_vip") or 0) == 1)
+    except (TypeError, ValueError):
+        is_vip = False
 
     if isinstance(form, FormData):
         items = form.multi_items()
@@ -695,6 +780,15 @@ async def update_cart_items(request: Request) -> RedirectResponse:
         items = form.items()
 
     for key, raw_value in items:
+        if isinstance(key, str) and key.startswith("coterm_"):
+            suffix = key[len("coterm_") :]
+            try:
+                product_id = int(suffix)
+            except (TypeError, ValueError):
+                invalid_entries = True
+                continue
+            coterm_updates[product_id] = _is_truthy(raw_value)
+            continue
         if not isinstance(key, str) or not key.startswith("quantity_"):
             continue
         suffix = key[len("quantity_") :]
@@ -760,6 +854,82 @@ async def update_cart_items(request: Request) -> RedirectResponse:
         )
         updated_count += 1
 
+    for product_id, desired_coterm_enabled in coterm_updates.items():
+        if product_id in removals:
+            continue
+        existing = await main_module.cart_repo.get_item(session.id, product_id)
+        if not existing:
+            invalid_entries = True
+            continue
+
+        product = await main_module.shop_repo.get_product_by_id(
+            product_id,
+            company_id=company_id,
+        )
+        if not product:
+            invalid_entries = True
+            removals.add(product_id)
+            continue
+
+        current_price = _quantize_money(
+            main_module.shop_service.get_product_price(product, is_vip=is_vip)
+        )
+        coterm_end_date = None
+        coterm_price = None
+
+        if desired_coterm_enabled:
+            subscription_category_id = product.get("subscription_category_id")
+            if subscription_category_id is None:
+                desired_coterm_enabled = False
+                coterm_conflicts = True
+            else:
+                coterm_anchor = await get_coterm_anchor_for_product(
+                    company_id,
+                    product_id,
+                    subscription_category_id,
+                )
+                anchor_date = coterm_anchor.get("anchor_date") if coterm_anchor else None
+                if anchor_date and anchor_date >= date.today():
+                    coterm_end_date = anchor_date
+                    coterm_price = calculate_coterm_price(
+                        current_price,
+                        date.today(),
+                        anchor_date,
+                    )
+                else:
+                    desired_coterm_enabled = False
+                    coterm_conflicts = True
+
+        stored_coterm_enabled = _is_truthy(existing.get("coterm_enabled"))
+        stored_coterm_end_date = existing.get("coterm_end_date")
+        stored_coterm_price = (
+            _quantize_money(existing.get("coterm_price"))
+            if existing.get("coterm_price") is not None
+            else None
+        )
+        if (
+            stored_coterm_enabled == desired_coterm_enabled
+            and stored_coterm_end_date == coterm_end_date
+            and stored_coterm_price == coterm_price
+        ):
+            continue
+
+        await main_module.cart_repo.upsert_item(
+            session_id=session.id,
+            product_id=product_id,
+            quantity=int(existing.get("quantity") or 0),
+            unit_price=current_price,
+            name=str(product.get("name") or existing.get("product_name") or ""),
+            sku=str(product.get("sku") or existing.get("product_sku") or ""),
+            vendor_sku=product.get("vendor_sku"),
+            description=product.get("description"),
+            image_url=product.get("image_url"),
+            coterm_enabled=desired_coterm_enabled,
+            coterm_end_date=coterm_end_date,
+            coterm_price=coterm_price,
+        )
+        coterm_updated_count += 1
+
     removed_count = 0
     if removals:
         await main_module.cart_repo.remove_items(session.id, removals)
@@ -768,8 +938,12 @@ async def update_cart_items(request: Request) -> RedirectResponse:
     url = URL(str(request.url_for("cart_page")))
     params: dict[str, str] = {}
 
-    if updated_count:
-        fragments = ["Quantities updated"]
+    if updated_count or coterm_updated_count:
+        fragments = []
+        if updated_count:
+            fragments.append("Quantities updated")
+        if coterm_updated_count:
+            fragments.append("Co-term settings updated")
         if removed_count:
             fragments.append("items removed")
         params["cartMessage"] = ", ".join(fragments) + "."
@@ -778,6 +952,8 @@ async def update_cart_items(request: Request) -> RedirectResponse:
 
     if stock_conflicts:
         params["cartError"] = "Unable to increase some quantities due to limited stock."
+    elif coterm_conflicts:
+        params["cartError"] = "Co-term is unavailable for one or more items."
     elif invalid_entries:
         if "cartMessage" in params:
             params["cartError"] = "Some quantities were adjusted."
@@ -996,7 +1172,7 @@ async def place_order(request: Request) -> RedirectResponse:
                         {
                             "productId": item.get("product_id"),
                             "quantity": item.get("quantity"),
-                            "price": float(item.get("unit_price", 0)),
+                            "price": float(_effective_cart_unit_price(item)),
                             "name": item.get("product_name"),
                             "sku": item.get("product_sku"),
                             "vendorSku": item.get("product_vendor_sku"),
@@ -1055,6 +1231,7 @@ async def place_order(request: Request) -> RedirectResponse:
             order_number=order_number,
             company_id=company_id,
             user_id=int(user["id"]),
+            cart_items=items,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         main_module.log_error(
@@ -1099,9 +1276,12 @@ async def place_order(request: Request) -> RedirectResponse:
         order_total = Decimal("0.00")
         for index, item in enumerate(items, start=1):
             quantity = int(item.get("quantity") or 0)
-            unit_price = _normalize_price(item.get("unit_price"))
+            unit_price = _effective_cart_unit_price(item)
             line_total = (unit_price * quantity).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             order_total += line_total
+            coterm_note = ""
+            if _is_truthy(item.get("coterm_enabled")) and item.get("coterm_end_date"):
+                coterm_note = f" | Co-term renewal: {item.get('coterm_end_date')}"
             line_items.append(
                 (
                     f"{index}. {item.get('product_name') or 'Unnamed product'}"
@@ -1111,6 +1291,7 @@ async def place_order(request: Request) -> RedirectResponse:
                     f" | Quantity: {quantity}"
                     f" | Unit price: ${unit_price}"
                     f" | Line total: ${line_total}"
+                    f"{coterm_note}"
                 )
             )
 

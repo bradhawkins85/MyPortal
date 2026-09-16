@@ -13,6 +13,150 @@ from app.repositories import scheduled_invoices as invoices_repo
 from app.repositories import shop as shop_repo
 
 
+def _as_money(value: Any) -> Decimal:
+    if isinstance(value, Decimal):
+        return value.quantize(Decimal("0.01"))
+    try:
+        return Decimal(str(value or 0)).quantize(Decimal("0.01"))
+    except Exception:  # pragma: no cover - defensive parsing
+        return Decimal("0.00")
+
+
+def build_renewal_forecast(
+    subscriptions: list[dict[str, Any]],
+    *,
+    today: date,
+    reminder_offsets: tuple[int, ...] = (60, 30, 7),
+) -> dict[str, Any]:
+    """Build a lightweight renewal forecast dashboard payload."""
+    active_subscriptions = [
+        sub for sub in subscriptions
+        if sub.get("status") in {"active", "pending_renewal"}
+        and isinstance(sub.get("end_date"), date)
+    ]
+    window_counts = {30: 0, 60: 0, 90: 0}
+    projected_revenue_90 = Decimal("0.00")
+    reminder_campaigns: list[dict[str, Any]] = []
+
+    for window in window_counts:
+        window_counts[window] = sum(
+            1
+            for sub in active_subscriptions
+            if 0 <= (sub["end_date"] - today).days <= window
+        )
+
+    for sub in active_subscriptions:
+        days_until_renewal = (sub["end_date"] - today).days
+        if 0 <= days_until_renewal <= 90:
+            projected_revenue_90 += _as_money(sub.get("unit_price")) * int(sub.get("quantity") or 0)
+
+    for offset in reminder_offsets:
+        due_ids = [
+            sub["id"]
+            for sub in active_subscriptions
+            if (sub["end_date"] - today).days == offset
+        ]
+        reminder_campaigns.append(
+            {
+                "days_before": offset,
+                "subscription_count": len(due_ids),
+                "subscription_ids": due_ids,
+            }
+        )
+
+    return {
+        "renewing_in_30_days": window_counts[30],
+        "renewing_in_60_days": window_counts[60],
+        "renewing_in_90_days": window_counts[90],
+        "projected_revenue_90": projected_revenue_90.quantize(Decimal("0.01")),
+        "reminder_campaigns": reminder_campaigns,
+    }
+
+
+def build_churn_risk_report(
+    subscriptions: list[dict[str, Any]],
+    *,
+    today: date,
+    pending_changes_by_subscription: dict[str, list[dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
+    """Build auditable churn-risk heuristics from renewal, usage, ticket, and payment signals."""
+    pending_changes_by_subscription = pending_changes_by_subscription or {}
+    at_risk: list[dict[str, Any]] = []
+
+    for sub in subscriptions:
+        end_date = sub.get("end_date")
+        if not isinstance(end_date, date):
+            continue
+
+        score = 0
+        reasons: list[str] = []
+        evidence: dict[str, Any] = {}
+        days_until_renewal = (end_date - today).days
+
+        if not bool(sub.get("auto_renew")) and 0 <= days_until_renewal <= 30:
+            score += 3
+            reasons.append("Auto-renew is disabled inside the 30-day renewal window.")
+        elif not bool(sub.get("auto_renew")):
+            score += 1
+            reasons.append("Auto-renew is disabled.")
+
+        pending_decreases = [
+            change for change in pending_changes_by_subscription.get(sub["id"], [])
+            if change.get("change_type") == "decrease"
+        ]
+        if pending_decreases:
+            score += 2
+            reasons.append("Pending decrease requests indicate a planned contraction.")
+            evidence["pending_decrease_count"] = len(pending_decreases)
+
+        usage_ratio = sub.get("usage_ratio")
+        if usage_ratio is not None and Decimal(str(usage_ratio)) < Decimal("0.50"):
+            score += 2
+            reasons.append("Recent usage is below 50% of allocated capacity.")
+            evidence["usage_ratio"] = str(usage_ratio)
+
+        open_ticket_count = int(sub.get("open_ticket_count") or 0)
+        if open_ticket_count >= 3:
+            score += 1
+            reasons.append("Support ticket volume is elevated.")
+            evidence["open_ticket_count"] = open_ticket_count
+
+        payment_health = str(sub.get("payment_health") or "").strip().lower()
+        if payment_health in {"overdue", "failed", "delinquent"}:
+            score += 3
+            reasons.append("Payments are overdue or failing.")
+            evidence["payment_health"] = payment_health
+
+        level = "none"
+        if score >= 5:
+            level = "high"
+        elif score >= 3:
+            level = "medium"
+        elif score > 0:
+            level = "low"
+
+        item = {
+            "subscription_id": sub["id"],
+            "product_name": sub.get("product_name"),
+            "score": score,
+            "level": level,
+            "days_until_renewal": days_until_renewal,
+            "reasons": reasons,
+            "evidence": evidence,
+        }
+        if level != "none":
+            at_risk.append(item)
+
+    at_risk.sort(key=lambda item: (-item["score"], item["days_until_renewal"], str(item.get("product_name") or "")))
+    return {
+        "high": sum(1 for item in at_risk if item["level"] == "high"),
+        "medium": sum(1 for item in at_risk if item["level"] == "medium"),
+        "low": sum(1 for item in at_risk if item["level"] == "low"),
+        "total_at_risk": len(at_risk),
+        "items": at_risk,
+    }
+
+
 async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
     """Create scheduled invoices for subscriptions ending 60 days from target_date.
     

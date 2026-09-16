@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -322,6 +323,70 @@ async def test_get_next_invoice_subscription_not_found(monkeypatch):
 
     result = await renewals_service.get_next_scheduled_invoice_for_subscription("sub-999")
     assert result is None
+
+
+def test_build_renewal_forecast_groups_windows_and_reminders():
+    today = date(2026, 1, 1)
+    subscriptions = [
+        _sub("sub-7", customer_id=10, end_date=today + timedelta(days=7), unit_price="10.00"),
+        _sub("sub-30", customer_id=10, end_date=today + timedelta(days=30), unit_price="20.00"),
+        _sub("sub-60", customer_id=10, end_date=today + timedelta(days=60), unit_price="30.00"),
+        _sub("sub-120", customer_id=10, end_date=today + timedelta(days=120), unit_price="40.00"),
+    ]
+    subscriptions[0]["quantity"] = 1
+    subscriptions[1]["quantity"] = 2
+    subscriptions[2]["quantity"] = 3
+    subscriptions[3]["quantity"] = 4
+
+    result = renewals_service.build_renewal_forecast(
+        subscriptions,
+        today=today,
+        reminder_offsets=(60, 30, 7),
+    )
+
+    assert result["renewing_in_30_days"] == 2
+    assert result["renewing_in_60_days"] == 3
+    assert result["renewing_in_90_days"] == 3
+    assert result["projected_revenue_90"] == Decimal("140.00")
+    assert result["reminder_campaigns"] == [
+        {"days_before": 60, "subscription_count": 1, "subscription_ids": ["sub-60"]},
+        {"days_before": 30, "subscription_count": 1, "subscription_ids": ["sub-30"]},
+        {"days_before": 7, "subscription_count": 1, "subscription_ids": ["sub-7"]},
+    ]
+
+
+def test_build_churn_risk_report_returns_auditable_reasons():
+    today = date(2026, 1, 1)
+    subscriptions = [
+        {
+            "id": "sub-risk",
+            "product_name": "Managed Plan",
+            "end_date": today + timedelta(days=14),
+            "status": "active",
+            "auto_renew": False,
+            "usage_ratio": "0.42",
+            "open_ticket_count": 4,
+            "payment_health": "overdue",
+        }
+    ]
+    pending_changes = {
+        "sub-risk": [
+            {"change_type": "decrease", "quantity_change": 2},
+        ]
+    }
+
+    result = renewals_service.build_churn_risk_report(
+        subscriptions,
+        today=today,
+        pending_changes_by_subscription=pending_changes,
+    )
+
+    assert result["high"] == 1
+    assert result["total_at_risk"] == 1
+    assert result["items"][0]["level"] == "high"
+    assert "Auto-renew is disabled inside the 30-day renewal window." in result["items"][0]["reasons"]
+    assert "Pending decrease requests indicate a planned contraction." in result["items"][0]["reasons"]
+    assert result["items"][0]["evidence"]["payment_health"] == "overdue"
 
 
 @pytest.mark.anyio

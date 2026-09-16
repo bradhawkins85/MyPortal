@@ -8,7 +8,36 @@
 <section class="panel">
   <header class="panel__header">
     <div class="panel__meta">
+      <strong>Renewal forecast</strong>
+    </div>
+  </header>
+  <div class="panel__body">
+    <div class="stat-cards">
+      <div class="stat-card">
+        <div class="stat-label">Renewing in 30 days</div>
+        <div class="stat-value">{{ renewal_forecast.renewing_in_30_days }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Renewing in 60 days</div>
+        <div class="stat-value">{{ renewal_forecast.renewing_in_60_days }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Projected 90-day renewal revenue</div>
+        <div class="stat-value">${{ '%.2f'|format(renewal_forecast.projected_revenue_90) }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Accounts needing attention</div>
+        <div class="stat-value">{{ churn_report.total_at_risk }}</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <header class="panel__header">
+    <div class="panel__meta">
       {% if company %}<span class="tag">{{ company.name }}</span>{% endif %}
+      <span class="text-muted">Active subscriptions</span>
       <input type="search" id="subscription-filter" class="form-input" placeholder="Filter subscriptions" aria-label="Filter subscriptions" />
     </div>
   </header>
@@ -24,6 +53,7 @@
             <th scope="col" data-sort-key="start_date">Start date</th>
             <th scope="col" data-sort-key="end_date">End date</th>
             <th scope="col" data-sort-key="status">Status</th>
+            <th scope="col" data-sort-key="lifecycle">Lifecycle</th>
             <th scope="col" data-sort-key="auto_renew">Auto-renew</th>
             {% if can_request_changes %}<th scope="col">Actions</th>{% endif %}
           </tr>
@@ -42,6 +72,29 @@
                 {{ subscription.status | replace('_', ' ') | title }}
               </span>
             </td>
+            <td data-column="lifecycle" data-value="{{ subscription.churn_risk.level }} {{ subscription.days_until_renewal if subscription.days_until_renewal is not none else '' }}">
+              {% if subscription.days_until_renewal is not none %}
+                <div>Renews in {{ subscription.days_until_renewal }} day{% if subscription.days_until_renewal != 1 %}s{% endif %}</div>
+              {% endif %}
+              {% if subscription.reminder_due_days is not none %}
+                <div class="text-muted">Reminder campaign due now ({{ subscription.reminder_due_days }} days out)</div>
+              {% endif %}
+              {% if subscription.pending_changes_count %}
+                <div class="text-muted">{{ subscription.pending_changes_count }} pending change{% if subscription.pending_changes_count != 1 %}s{% endif %}</div>
+              {% endif %}
+              {% if subscription.churn_risk.level != 'none' %}
+                <div class="tag {% if subscription.churn_risk.level == 'high' %}tag--danger{% elif subscription.churn_risk.level == 'medium' %}tag--warning{% else %}tag--secondary{% endif %}">
+                  Risk: {{ subscription.churn_risk.level | title }}
+                </div>
+                <ul class="text-muted">
+                  {% for reason in subscription.churn_risk.reasons %}
+                    <li>{{ reason }}</li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <span class="text-muted">Stable</span>
+              {% endif %}
+            </td>
             <td data-column="auto_renew" data-value="{{ subscription.auto_renew }}">{{ 'Yes' if subscription.auto_renew else 'No' }}</td>
             {% if can_request_changes %}
             <td>
@@ -57,7 +110,7 @@
           </tr>
           {% else %}
           <tr>
-            <td colspan="{% if can_request_changes %}9{% else %}8{% endif %}" class="text-center">No active subscriptions found.</td>
+            <td colspan="{% if can_request_changes %}10{% else %}9{% endif %}" class="text-center">No active subscriptions found.</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -232,6 +285,8 @@
       
       let html = '<ul class="space-y-1">';
       html += `<li><strong>Current quantity:</strong> ${preview.currentQuantity}</li>`;
+      html += `<li><strong>Current term-end quantity:</strong> ${preview.currentQuantityAtTermEnd}</li>`;
+      html += `<li><strong>Current pending charges:</strong> $${preview.currentTotalCharges}</li>`;
       
       if (currentChangeType === 'addition') {
         html += `<li><strong>Licenses to add:</strong> ${preview.requestedChange}</li>`;
@@ -244,18 +299,14 @@
         html += `<li><em>No charges for decreases</em></li>`;
       }
       
-      if (preview.pendingChangesCount > 0) {
-        html += `<li class="mt-2"><strong>Net change at term end:</strong> ${preview.newNetChange > 0 ? '+' : ''}${preview.newNetChange}</li>`;
-        html += `<li><strong>Quantity at term end:</strong> ${preview.newQuantityAtTermEnd}</li>`;
-        if (preview.newTotalCharges > 0) {
-          html += `<li><strong>Total pending charges:</strong> $${preview.newTotalCharges}</li>`;
-        }
+      html += `<li class="mt-2"><strong>New net change at term end:</strong> ${preview.newNetChange > 0 ? '+' : ''}${preview.newNetChange}</li>`;
+      if (currentChangeType === 'addition' && preview.pendingChangesCount === 0) {
+        html += `<li><strong>New quantity:</strong> ${preview.newQuantityAtTermEnd} (effective immediately)</li>`;
       } else {
-        if (currentChangeType === 'addition') {
-          html += `<li><strong>New quantity:</strong> ${preview.newQuantityAtTermEnd} (effective immediately)</li>`;
-        } else {
-          html += `<li><strong>Quantity at term end:</strong> ${preview.newQuantityAtTermEnd}</li>`;
-        }
+        html += `<li><strong>New quantity at term end:</strong> ${preview.newQuantityAtTermEnd}</li>`;
+      }
+      if (Number(preview.newTotalCharges) > 0) {
+        html += `<li><strong>New pending charges:</strong> $${preview.newTotalCharges}</li>`;
       }
       
       html += `<li class="text-xs text-gray-600 mt-2">Term ends: ${preview.endDate}</li>`;

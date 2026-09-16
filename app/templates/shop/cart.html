@@ -66,7 +66,12 @@
                   </button>
                 </td>
                 <td data-label="SKU">{{ item.product_sku }}</td>
-                <td data-label="Unit price" data-value="{{ item.unit_price }}">${{ '%.2f'|format(item.unit_price) }}</td>
+                <td data-label="Unit price" data-value="{{ item.effective_unit_price }}">
+                  ${{ '%.2f'|format(item.effective_unit_price) }}
+                  {% if item.coterm_enabled and item.coterm_price is not none %}
+                    <div class="text-muted text-small">Co-termed from ${{ '%.2f'|format(item.full_term_unit_price) }}</div>
+                  {% endif %}
+                </td>
                 <td data-label="Quantity" data-value="{{ item.quantity }}">
                   {% set available = item.available_stock | default(0) | int %}
                   {% set is_subscription = item.subscription_category_id is defined and item.subscription_category_id is not none %}
@@ -89,8 +94,36 @@
                       required
                     />
                   </div>
+                  {% if item.coterm_available %}
+                    <div class="cart-coterm">
+                      <label>
+                        <input
+                          type="checkbox"
+                          name="coterm_{{ item.product_id }}"
+                          value="1"
+                          {% if item.coterm_enabled %}checked{% endif %}
+                          data-cart-coterm
+                          data-product-id="{{ item.product_id }}"
+                          aria-label="Co-term {{ item.product_name }}"
+                        />
+                        Co-term to {{ item.coterm_category_name or 'existing renewal' }} on {{ item.coterm_end_date }}
+                      </label>
+                      <div class="text-muted text-small">
+                        {% if item.coterm_enabled %}
+                          Prorated to ${{ '%.2f'|format(item.coterm_price) }} per license for the remaining term.
+                        {% else %}
+                          Enable co-term to use the prorated price of ${{ '%.2f'|format(item.coterm_price) }} per license.
+                        {% endif %}
+                      </div>
+                    </div>
+                  {% endif %}
                 </td>
-                <td data-label="Line total" data-value="{{ item.line_total }}">${{ '%.2f'|format(item.line_total) }}</td>
+                <td data-label="Line total" data-value="{{ item.line_total }}">
+                  ${{ '%.2f'|format(item.line_total) }}
+                  {% if item.coterm_enabled and item.coterm_price is not none %}
+                    <div class="text-muted text-small">Prorated renewal alignment applied</div>
+                  {% endif %}
+                </td>
               </tr>
             {% endfor %}
           </tbody>

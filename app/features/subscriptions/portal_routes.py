@@ -18,8 +18,10 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
+from app.repositories import subscription_change_requests as change_requests_repo
 from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import user_companies as user_company_repo
+from app.services import subscription_renewals
 from app.services.voice_monitor_billing import contract_display, is_voice_monitor_subscription
 
 
@@ -31,6 +33,20 @@ def _main():
     from app import main as main_module
 
     return main_module
+
+
+def _coerce_date(value: Any) -> date | None:
+    """Return *value* as a date when possible."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value[:10])
+        except ValueError:
+            return None
+    return None
 
 
 async def _load_subscription_context(request: Request):
@@ -89,22 +105,68 @@ async def subscriptions_page(request: Request):
     )
 
     formatted: list[dict[str, Any]] = []
+    lifecycle_subscriptions: list[dict[str, Any]] = []
     for sub in subs:
         formatted_sub = dict(sub)
-        if isinstance(sub.get("start_date"), datetime):
-            formatted_sub["start_date"] = sub["start_date"].strftime("%Y-%m-%d")
-        elif isinstance(sub.get("start_date"), date):
-            formatted_sub["start_date"] = sub["start_date"].strftime("%Y-%m-%d")
-
-        if isinstance(sub.get("end_date"), datetime):
-            formatted_sub["end_date"] = sub["end_date"].strftime("%Y-%m-%d")
-        elif isinstance(sub.get("end_date"), date):
-            formatted_sub["end_date"] = sub["end_date"].strftime("%Y-%m-%d")
+        start_date_value = _coerce_date(sub.get("start_date"))
+        end_date_value = _coerce_date(sub.get("end_date"))
+        if start_date_value is not None:
+            formatted_sub["start_date"] = start_date_value.strftime("%Y-%m-%d")
+        if end_date_value is not None:
+            formatted_sub["end_date"] = end_date_value.strftime("%Y-%m-%d")
 
         formatted_sub["contract_term"] = ""
         if is_voice_monitor_subscription(formatted_sub):
             formatted_sub["voice_monitor_contract"] = contract_display(formatted_sub)
+        formatted_sub["days_until_renewal"] = (
+            (end_date_value - date.today()).days if end_date_value is not None else None
+        )
         formatted.append(formatted_sub)
+        lifecycle_subscriptions.append(
+            {
+                **dict(sub),
+                "start_date": start_date_value,
+                "end_date": end_date_value,
+            }
+        )
+
+    pending_changes_by_subscription = (
+        await change_requests_repo.list_pending_changes_for_subscriptions(
+            [sub["id"] for sub in lifecycle_subscriptions]
+        )
+        if lifecycle_subscriptions
+        else {}
+    )
+    renewal_forecast = subscription_renewals.build_renewal_forecast(
+        lifecycle_subscriptions,
+        today=date.today(),
+    )
+    churn_report = subscription_renewals.build_churn_risk_report(
+        lifecycle_subscriptions,
+        today=date.today(),
+        pending_changes_by_subscription=pending_changes_by_subscription,
+    )
+    churn_lookup = {
+        item["subscription_id"]: item
+        for item in churn_report["items"]
+    }
+    reminder_days_lookup = {
+        subscription_id: campaign["days_before"]
+        for campaign in renewal_forecast["reminder_campaigns"]
+        for subscription_id in campaign["subscription_ids"]
+    }
+    for formatted_sub in formatted:
+        churn_item = churn_lookup.get(formatted_sub["id"])
+        formatted_sub["churn_risk"] = churn_item or {
+            "level": "none",
+            "reasons": [],
+            "score": 0,
+            "days_until_renewal": formatted_sub.get("days_until_renewal"),
+        }
+        formatted_sub["pending_changes_count"] = len(
+            pending_changes_by_subscription.get(formatted_sub["id"], [])
+        )
+        formatted_sub["reminder_due_days"] = reminder_days_lookup.get(formatted_sub["id"])
 
     is_super_admin = bool(user.get("is_super_admin"))
     can_request_changes = bool(
@@ -123,6 +185,8 @@ async def subscriptions_page(request: Request):
         "company": company,
         "can_request_changes": can_request_changes,
         "is_super_admin": is_super_admin,
+        "renewal_forecast": renewal_forecast,
+        "churn_report": churn_report,
     }
     return await _main()._render_template("subscriptions/index.html", request, user, extra=extra)
 

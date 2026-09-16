@@ -1,4 +1,6 @@
 """Tests for the subscriptions page view."""
+from datetime import date, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -33,6 +35,9 @@ def mock_startup(monkeypatch):
     async def fake_refresh_automations():
         return None
 
+    async def fake_run_system_update(*, force_restart: bool = False):
+        return None
+
     monkeypatch.setattr(db, "connect", fake_connect)
     monkeypatch.setattr(db, "disconnect", fake_disconnect)
     monkeypatch.setattr(db, "run_migrations", fake_run_migrations)
@@ -41,6 +46,7 @@ def mock_startup(monkeypatch):
     monkeypatch.setattr(main_module.automations_service, "refresh_all_schedules", fake_refresh_automations)
     monkeypatch.setattr(scheduler_service, "start", fake_start)
     monkeypatch.setattr(scheduler_service, "stop", fake_stop)
+    monkeypatch.setattr(scheduler_service, "run_system_update", fake_run_system_update)
 
 
 @pytest.fixture
@@ -73,17 +79,20 @@ def authorized_user_context(monkeypatch):
                 "product_name": "Product A",
                 "subscription_category_id": 1,
                 "category_name": "Software",
-                "start_date": "2025-01-01",
-                "end_date": "2025-12-31",
+                "start_date": date(2025, 1, 1),
+                "end_date": date.today() + timedelta(days=14),
                 "quantity": 5,
                 "unit_price": "10.00",
                 "prorated_price": None,
                 "status": "active",
-                "auto_renew": True,
+                "auto_renew": False,
                 "created_at": None,
                 "updated_at": None,
             }
         ]
+
+    async def fake_pending_changes(subscription_ids):
+        return {"sub-1": [{"id": "chg-1", "change_type": "decrease", "quantity_change": 1}]}
 
     async def fake_build_base_context(request, current_user, *, extra=None):
         context = {
@@ -98,6 +107,8 @@ def authorized_user_context(monkeypatch):
             "csrf_token": "csrf-token",
             "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": 0},
             "notification_unread_count": 0,
+            "plausible_config": {"enabled": False},
+            "module_enabled": {},
         }
         if extra:
             context.update(extra)
@@ -110,7 +121,13 @@ def authorized_user_context(monkeypatch):
 
     # Mock the subscriptions repository
     from app.repositories import subscriptions as subscriptions_repo
+    from app.repositories import subscription_change_requests as change_requests_repo
     monkeypatch.setattr(subscriptions_repo, "list_subscriptions", fake_list_subscriptions)
+    monkeypatch.setattr(
+        change_requests_repo,
+        "list_pending_changes_for_subscriptions",
+        fake_pending_changes,
+    )
 
     yield
 
@@ -145,17 +162,20 @@ def super_admin_user_context(monkeypatch):
                 "product_name": "Product A",
                 "subscription_category_id": 1,
                 "category_name": "Software",
-                "start_date": "2025-01-01",
-                "end_date": "2025-12-31",
+                "start_date": date(2025, 1, 1),
+                "end_date": date.today() + timedelta(days=14),
                 "quantity": 5,
                 "unit_price": "10.00",
                 "prorated_price": None,
                 "status": "active",
-                "auto_renew": True,
+                "auto_renew": False,
                 "created_at": None,
                 "updated_at": None,
             }
         ]
+
+    async def fake_pending_changes(subscription_ids):
+        return {"sub-1": [{"id": "chg-1", "change_type": "decrease", "quantity_change": 1}]}
 
     async def fake_build_base_context(request, current_user, *, extra=None):
         context = {
@@ -170,6 +190,8 @@ def super_admin_user_context(monkeypatch):
             "csrf_token": "csrf-token",
             "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": 0},
             "notification_unread_count": 0,
+            "plausible_config": {"enabled": False},
+            "module_enabled": {},
         }
         if extra:
             context.update(extra)
@@ -182,7 +204,13 @@ def super_admin_user_context(monkeypatch):
 
     # Mock the subscriptions repository
     from app.repositories import subscriptions as subscriptions_repo
+    from app.repositories import subscription_change_requests as change_requests_repo
     monkeypatch.setattr(subscriptions_repo, "list_subscriptions", fake_list_subscriptions)
+    monkeypatch.setattr(
+        change_requests_repo,
+        "list_pending_changes_for_subscriptions",
+        fake_pending_changes,
+    )
 
     yield
 
@@ -217,6 +245,8 @@ def unauthorized_user_context(monkeypatch):
             "csrf_token": "csrf-token",
             "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": 0},
             "notification_unread_count": 0,
+            "plausible_config": {"enabled": False},
+            "module_enabled": {},
         }
         if extra:
             context.update(extra)
@@ -317,3 +347,16 @@ def test_subscriptions_page_hides_delete_button_for_regular_admin(authorized_use
     assert response.status_code == 200
     html = response.text
     assert 'data-subscription-delete=' not in html
+
+
+def test_subscriptions_page_shows_forecast_and_risk_summary(authorized_user_context):
+    with TestClient(app) as client:
+        response = client.get("/subscriptions")
+
+    assert response.status_code == 200
+    html = response.text
+    assert "Renewal forecast" in html
+    assert "Projected 90-day renewal revenue" in html
+    assert "Accounts needing attention" in html
+    assert "Risk: High" in html
+    assert "Pending decrease requests indicate a planned contraction." in html
