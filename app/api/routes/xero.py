@@ -44,7 +44,7 @@ class XeroTenantConnection(BaseModel):
     tenant_id: str | None = Field(default=None, alias="tenantId")
     tenant_name: str | None = Field(default=None, alias="tenantName")
     tenant_type: str | None = Field(default=None, alias="tenantType")
-    created_date_utc: str | None = Field(default=None, alias="createdDateUtc")
+    created_date_utc: datetime | None = Field(default=None, alias="createdDateUtc")
 
 
 class XeroTenantListResponse(BaseModel):
