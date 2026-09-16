@@ -259,7 +259,10 @@ def test_place_order_blocks_out_of_stock_cart_item(monkeypatch, active_session, 
     with TestClient(app, follow_redirects=False) as client:
         response = client.post(
             "/cart/place-order",
-            data={"_csrf": active_session.csrf_token},
+            data={
+                "_csrf": active_session.csrf_token,
+                "shippingOption": "local_pickup",
+            },
         )
 
     assert response.status_code == 303
@@ -272,6 +275,52 @@ def test_place_order_blocks_out_of_stock_cart_item(monkeypatch, active_session, 
         "Cannot place order because Widget is out of stock or exceeds available stock. You can still save the cart as a quote."
     ]
     assert create_order_calls == []
+
+
+def test_place_order_allows_subscription_without_stock(monkeypatch, active_session, cart_context):
+    """Subscription plans are not blocked by their legacy stock value."""
+    create_order_calls: list[int] = []
+
+    async def fake_list_items(session_id):
+        return [
+            {
+                "product_id": 7,
+                "quantity": 1,
+                "unit_price": "49.00",
+                "product_name": "Managed Plan",
+                "product_sku": "SUB-001",
+            }
+        ]
+
+    async def fake_get_product_by_id(product_id, company_id=None):
+        return {
+            "id": product_id,
+            "stock": 0,
+            "name": "Managed Plan",
+            "subscription_category_id": 3,
+        }
+
+    async def fake_create_order(**kwargs):
+        create_order_calls.append(int(kwargs["product_id"]))
+        raise ValueError("order creation reached")
+
+    monkeypatch.setattr(main_module.cart_repo, "list_items", fake_list_items)
+    monkeypatch.setattr(main_module.shop_repo, "get_product_by_id", fake_get_product_by_id)
+    monkeypatch.setattr(main_module.shop_repo, "create_order", fake_create_order)
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/cart/place-order",
+            data={
+                "_csrf": active_session.csrf_token,
+                "shippingOption": "local_pickup",
+            },
+        )
+
+    assert response.status_code == 303
+    params = parse_qs(urlparse(response.headers["location"]).query)
+    assert params.get("orderMessage") == ["order creation reached"]
+    assert create_order_calls == [7]
 
 
 def test_add_to_cart_redirects_to_cart(monkeypatch, active_session, cart_context):

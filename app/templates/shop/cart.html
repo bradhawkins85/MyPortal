@@ -69,9 +69,12 @@
                 <td data-label="Unit price" data-value="{{ item.unit_price }}">${{ '%.2f'|format(item.unit_price) }}</td>
                 <td data-label="Quantity" data-value="{{ item.quantity }}">
                   {% set available = item.available_stock | default(0) | int %}
+                  {% set is_subscription = item.subscription_category_id is defined and item.subscription_category_id is not none %}
                   {% set max_allowed = 9999 %}
                   <div class="cart-quantity">
-                    {{ stock_helpers.stock_status_badge(available, low_stock_threshold) }}
+                    {% if not is_subscription %}
+                      {{ stock_helpers.stock_status_badge(available, low_stock_threshold) }}
+                    {% endif %}
                     <input
                       class="form-input form-input--sm"
                       type="number"

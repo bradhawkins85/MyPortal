@@ -1559,13 +1559,17 @@ async def create_order(
             await conn.begin()
             try:
                 await cursor.execute(
-                    "SELECT stock FROM shop_products WHERE id = %s FOR UPDATE",
+                    "SELECT stock, subscription_category_id "
+                    "FROM shop_products WHERE id = %s FOR UPDATE",
                     (product_id,),
                 )
                 row = await cursor.fetchone()
                 previous_stock: int | None = None
                 new_stock: int | None = None
-                if row and row.get("stock") is not None:
+                is_subscription = bool(
+                    row and row.get("subscription_category_id") is not None
+                )
+                if not is_subscription and row and row.get("stock") is not None:
                     previous_stock = int(row["stock"])
                     if previous_stock < quantity:
                         raise ValueError(
@@ -1608,10 +1612,11 @@ async def create_order(
                         shipping_country,
                     ),
                 )
-                await cursor.execute(
-                    "UPDATE shop_products SET stock = stock - %s WHERE id = %s",
-                    (quantity, product_id),
-                )
+                if not is_subscription:
+                    await cursor.execute(
+                        "UPDATE shop_products SET stock = stock - %s WHERE id = %s",
+                        (quantity, product_id),
+                    )
                 await conn.commit()
                 return previous_stock, new_stock
             except Exception:

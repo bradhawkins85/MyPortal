@@ -431,6 +431,7 @@ async def view_cart(
                 "unit_price": current_price,
                 "line_total": line_total,
                 "available_stock": int(product.get("stock") or 0),
+                "subscription_category_id": product.get("subscription_category_id"),
                 "product_name": name,
                 "product_sku": sku,
                 "product_vendor_sku": vendor_sku,
@@ -954,7 +955,10 @@ async def place_order(request: Request) -> RedirectResponse:
             available_stock = int(product.get("stock") or 0)
         except (TypeError, ValueError):
             available_stock = 0
-        if available_stock <= 0 or quantity > available_stock:
+        is_subscription = product.get("subscription_category_id") is not None
+        if not is_subscription and (
+            available_stock <= 0 or quantity > available_stock
+        ):
             out_of_stock_names.append(str(product.get("name") or item.get("product_name") or "an item"))
 
     if out_of_stock_names:
