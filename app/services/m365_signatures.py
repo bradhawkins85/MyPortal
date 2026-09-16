@@ -173,7 +173,11 @@ async def create_template(
         updated_by_user_id=user_id,
     )
     if bool(is_default):
-        updated = await signatures_repo.set_default_template(company_id, int(created["id"]))
+        updated = await signatures_repo.set_default_template(
+            company_id,
+            int(created["id"]),
+            updated_by_user_id=user_id,
+        )
         if updated:
             return updated
     return created
@@ -224,7 +228,11 @@ async def update_template(
     if not updated:
         return None
     if bool(is_default):
-        return await signatures_repo.set_default_template(company_id, template_id)
+        return await signatures_repo.set_default_template(
+            company_id,
+            template_id,
+            updated_by_user_id=user_id,
+        )
     return updated
 
 

@@ -232,7 +232,17 @@ async def clear_default_template(company_id: int, *, exclude_template_id: int | 
     await db.execute(query, tuple(params))
 
 
-async def set_default_template(company_id: int, template_id: int) -> SignatureTemplateRecord | None:
+async def set_default_template(
+    company_id: int,
+    template_id: int,
+    *,
+    updated_by_user_id: int | None = None,
+) -> SignatureTemplateRecord | None:
     await clear_default_template(company_id, exclude_template_id=template_id)
-    await update_template(company_id, template_id, is_default=True)
+    await update_template(
+        company_id,
+        template_id,
+        is_default=True,
+        updated_by_user_id=updated_by_user_id,
+    )
     return await get_template(company_id, template_id)

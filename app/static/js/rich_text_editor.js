@@ -97,15 +97,22 @@
   function insertHtmlAtSelection(surface, html) {
     surface.focus({ preventScroll: true });
     const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) {
-      document.execCommand('insertHTML', false, html);
-      return;
-    }
-    const range = selection.getRangeAt(0);
+    const range = selection && selection.rangeCount > 0
+      ? selection.getRangeAt(0)
+      : (() => {
+          const fallbackRange = document.createRange();
+          fallbackRange.selectNodeContents(surface);
+          fallbackRange.collapse(false);
+          return fallbackRange;
+        })();
     range.deleteContents();
     const fragment = range.createContextualFragment(html);
     range.insertNode(fragment);
-    selection.collapseToEnd();
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+      selection.collapseToEnd();
+    }
   }
 
   function readFileAsDataUrl(file) {
