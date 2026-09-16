@@ -547,8 +547,7 @@ async def _process_invoice(
         )
         return False
 
-    company_settings = await company_repo.get_company_by_id(company_id) or {}
-    auto_send = bool(company_settings.get("xero_auto_send_subscription_invoices", 1))
+    auto_send = bool(company.get("xero_auto_send_subscription_invoices", 1))
     xero_result = await xero_service.sync_invoice(
         int(result["invoice_id"]),
         auto_send=auto_send,
