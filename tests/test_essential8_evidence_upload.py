@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException, UploadFile, status
@@ -94,7 +95,7 @@ async def test_upload_requirement_evidence_uses_safe_metadata_and_contained_stor
     assert len(add_calls) == 1
     stored_relative_path = add_calls[0]["file_path"]
     assert stored_relative_path.startswith("compliance/essential8/")
-    assert stored_relative_path.endswith(".pdf") or stored_relative_path.endswith(".txt") or stored_relative_path.endswith(".csv")
+    assert stored_relative_path.endswith(Path(expected_name).suffix)
     assert stored_relative_path.rsplit("/", 1)[-1] != expected_name
     stored_path = tmp_path / stored_relative_path.rsplit("/", 1)[-1]
     assert stored_path.parent == tmp_path
