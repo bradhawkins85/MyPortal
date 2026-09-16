@@ -558,11 +558,11 @@ async def test_remediate_internal_phishing_forms_waits_for_graph_consistency():
             return_value={},
         ) as graph_patch,
         patch(
-            "app.services.m365_best_practices._safe_graph_get",
+            "app.services.m365_best_practices._graph_get",
             new_callable=AsyncMock,
             side_effect=[
-                {"internalPhishingProtectionEnabled": False},
-                {"internalPhishingProtectionEnabled": True},
+                {"settings": {"isInOrgFormsPhishingScanEnabled": False}},
+                {"settings": {"isInOrgFormsPhishingScanEnabled": True}},
             ],
         ) as graph_get,
         patch(
@@ -581,8 +581,8 @@ async def test_remediate_internal_phishing_forms_waits_for_graph_consistency():
     assert result["success"] is True
     graph_patch.assert_awaited_once_with(
         "graph-token",
-        bp_service._FORMS_SETTINGS_URL,
-        {"internalPhishingProtectionEnabled": True},
+        bp_service._FORMS_ADMIN_URL,
+        {"settings": {"isInOrgFormsPhishingScanEnabled": True}},
     )
     assert graph_get.await_count == 2
     sleep.assert_awaited_once()
@@ -603,9 +603,9 @@ async def test_remediate_internal_phishing_forms_fails_when_graph_does_not_confi
             return_value={},
         ),
         patch(
-            "app.services.m365_best_practices._safe_graph_get",
+            "app.services.m365_best_practices._graph_get",
             new_callable=AsyncMock,
-            return_value={"internalPhishingProtectionEnabled": False},
+            return_value={"settings": {"isInOrgFormsPhishingScanEnabled": False}},
         ),
         patch(
             "app.services.m365_best_practices.asyncio.sleep",
@@ -623,6 +623,194 @@ async def test_remediate_internal_phishing_forms_fails_when_graph_does_not_confi
     assert result["success"] is False
     assert "did not confirm the updated Forms phishing protection setting" in result["message"]
     assert sleep.await_count == bp_service._FORMS_PHISHING_VERIFICATION_ATTEMPTS - 1
+    assert update_status.await_args.kwargs["remediation_status"] == "failed"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_internal_phishing_forms_passes_with_nested_settings_shape():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"settings": {"isInOrgFormsPhishingScanEnabled": True}},
+    ) as graph_get:
+        result = await bp_service._check_internal_phishing_forms("graph-token")
+
+    assert result["status"] == bp_service.STATUS_PASS
+    graph_get.assert_awaited_once_with("graph-token", bp_service._FORMS_ADMIN_URL)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_internal_phishing_forms_missing_setting_is_unknown():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        return_value={"settings": {"isExternalSendFormEnabled": True}},
+    ):
+        result = await bp_service._check_internal_phishing_forms("graph-token")
+
+    assert result["status"] == bp_service.STATUS_UNKNOWN
+    assert "isInOrgFormsPhishingScanEnabled" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_internal_phishing_forms_403_returns_actionable_message():
+    with patch(
+        "app.services.m365_best_practices._graph_get",
+        new_callable=AsyncMock,
+        side_effect=M365Error("Microsoft Graph request failed (403)", http_status=403),
+    ):
+        result = await bp_service._check_internal_phishing_forms("graph-token")
+
+    assert result["status"] == bp_service.STATUS_UNKNOWN
+    assert "OrgSettings-Forms.ReadWrite.All" in result["details"]
+    assert "Authorise portal access" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_internal_phishing_forms_succeeds_when_already_enabled():
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+            return_value={},
+        ) as graph_patch,
+        patch(
+            "app.services.m365_best_practices._graph_get",
+            new_callable=AsyncMock,
+            return_value={"settings": {"isInOrgFormsPhishingScanEnabled": True}},
+        ) as graph_get,
+        patch(
+            "app.services.m365_best_practices.asyncio.sleep",
+            new_callable=AsyncMock,
+        ) as sleep,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ) as update_status,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_internal_phishing_forms"
+        )
+
+    assert result["success"] is True
+    graph_patch.assert_awaited_once_with(
+        "graph-token",
+        bp_service._FORMS_ADMIN_URL,
+        {"settings": {"isInOrgFormsPhishingScanEnabled": True}},
+    )
+    graph_get.assert_awaited_once_with("graph-token", bp_service._FORMS_ADMIN_URL)
+    sleep.assert_not_awaited()
+    assert update_status.await_args.kwargs["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_check_internal_phishing_forms_retries_after_permission_repair():
+    upserts: list[dict] = []
+    first_exc = M365Error("Microsoft Graph PATCH failed (403): denied", http_status=403)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            side_effect=["graph-token-1", "graph-token-2"],
+        ),
+        patch(
+            "app.services.m365_best_practices._remediate_internal_phishing_forms",
+            new_callable=AsyncMock,
+            side_effect=[first_exc, (True, "")],
+        ) as remediate_forms,
+        patch(
+            "app.services.m365_best_practices.acquire_delegated_token",
+            new_callable=AsyncMock,
+            return_value="delegated-token",
+        ),
+        patch(
+            "app.services.m365_best_practices.try_grant_missing_permissions",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as grant_permissions,
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=10, check_id="bp_internal_phishing_forms"
+        )
+
+    assert result["success"] is True
+    assert remediate_forms.await_count == 2
+    assert remediate_forms.await_args_list[0].args == ("graph-token-1",)
+    assert remediate_forms.await_args_list[1].args == ("graph-token-2",)
+    grant_permissions.assert_awaited_once_with(10, access_token="delegated-token")
+    assert upserts[0]["remediation_status"] == "success"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_check_internal_phishing_forms_permission_denied_is_actionable():
+    upserts: list[dict] = []
+    graph_exc = M365Error("Microsoft Graph PATCH failed (403): denied", http_status=403)
+
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._remediate_internal_phishing_forms",
+            new_callable=AsyncMock,
+            side_effect=graph_exc,
+        ),
+        patch(
+            "app.services.m365_best_practices.acquire_delegated_token",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=10, check_id="bp_internal_phishing_forms"
+        )
+
+    assert result["success"] is False
+    assert "OrgSettings-Forms.ReadWrite.All" in result["message"]
+    assert "Authorise portal access" in result["message"]
+    assert upserts[0]["remediation_status"] == "failed"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_remediate_check_internal_phishing_forms_update_failure_reports_graph_error():
+    with (
+        patch(
+            "app.services.m365_best_practices.acquire_access_token",
+            new_callable=AsyncMock,
+            return_value="graph-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_patch",
+            new_callable=AsyncMock,
+            side_effect=M365Error("Microsoft Graph PATCH failed (500): boom", http_status=500),
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            new_callable=AsyncMock,
+        ) as update_status,
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_internal_phishing_forms"
+        )
+
+    assert result["success"] is False
+    assert result["message"] == "Remediation command failed: Microsoft Graph PATCH failed (500): boom"
     assert update_status.await_args.kwargs["remediation_status"] == "failed"
 
 
