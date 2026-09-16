@@ -101,3 +101,54 @@ def test_create_subscriptions_adopts_existing_recurring_item(monkeypatch):
     assert created_payload["start_date"] == existing["start_date"]
     assert created_payload["end_date"] == existing["end_date"]
     assert synced == {"existing": existing, "preserve_existing_schedule": True}
+
+
+def test_create_subscriptions_from_order_applies_coterm_metadata(monkeypatch):
+    created_payload: dict = {}
+
+    async def order_items(*_args):
+        return [{"product_id": 1, "quantity": 1, "is_vip": 0}]
+
+    async def products(*_args, **_kwargs):
+        return [{
+            "id": 1,
+            "sku": "SUB-1",
+            "name": "Plan",
+            "subscription_category_id": 10,
+            "commitment_type": "annual",
+            "price": "120.00",
+            "vip_price": None,
+        }]
+
+    async def find(*_args):
+        return None
+
+    async def create(**values):
+        created_payload.update(values)
+        return {"id": "sub-1", **values}
+
+    async def sync(subscription, **_values):
+        return {"id": 1}
+
+    monkeypatch.setattr(integration.shop_repo, "list_order_items", order_items)
+    monkeypatch.setattr(integration.shop_repo, "list_products_by_ids", products)
+    monkeypatch.setattr(integration.subscription_billing, "find_existing_item", find)
+    monkeypatch.setattr(integration.subscription_billing, "sync_subscription_recurring_item", sync)
+    monkeypatch.setattr(integration.subscriptions_repo, "create_subscription", create)
+
+    created = asyncio.run(integration.create_subscriptions_from_order(
+        order_number="ORD-3",
+        company_id=99,
+        user_id=42,
+        cart_items=[{
+            "product_id": 1,
+            "coterm_enabled": True,
+            "coterm_end_date": date(2026, 3, 31),
+            "coterm_price": Decimal("64.11"),
+        }],
+    ))
+
+    assert len(created) == 1
+    assert created_payload["unit_price"] == Decimal("120.00")
+    assert created_payload["prorated_price"] == Decimal("64.11")
+    assert created_payload["end_date"] == date(2026, 3, 31)

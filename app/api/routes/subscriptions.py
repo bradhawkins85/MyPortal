@@ -301,6 +301,8 @@ class ChangePreviewResponse(BaseModel):
     """Response model for subscription change preview."""
     
     current_quantity: int = Field(..., alias="currentQuantity")
+    current_quantity_at_term_end: int = Field(..., alias="currentQuantityAtTermEnd")
+    current_total_charges: str = Field(..., alias="currentTotalCharges")
     requested_change: int = Field(..., alias="requestedChange")
     change_type: str = Field(..., alias="changeType")
     new_net_additions: int = Field(..., alias="newNetAdditions")
@@ -370,6 +372,10 @@ async def preview_change(
     
     return ChangePreviewResponse(
         current_quantity=preview["current_quantity"],
+        current_quantity_at_term_end=(
+            preview["current_quantity"] + preview["current_net_impact"]["net_change"]
+        ),
+        current_total_charges=str(preview["current_net_impact"]["total_prorated_charges"]),
         requested_change=preview["requested_change"],
         change_type=preview["change_type"],
         new_net_additions=preview["new_net_additions"],
@@ -378,7 +384,9 @@ async def preview_change(
         new_quantity_at_term_end=preview["new_quantity_at_term_end"],
         new_total_charges=str(preview["new_total_charges"]),
         prorated_charge=(
-            str(preview["prorated_charge"]) if preview.get("prorated_charge") else None
+            str(preview["prorated_charge"])
+            if preview.get("prorated_charge") is not None
+            else None
         ),
         prorated_explanation=prorated_explanation,
         end_date=preview["end_date"].isoformat(),
@@ -571,7 +579,9 @@ async def get_pending_changes(
             quantity_change=change["quantity_change"],
             requested_at=change["requested_at"].isoformat(),
             prorated_charge=(
-                str(change["prorated_charge"]) if change.get("prorated_charge") else None
+                str(change["prorated_charge"])
+                if change.get("prorated_charge") is not None
+                else None
             ),
             notes=change.get("notes"),
         )

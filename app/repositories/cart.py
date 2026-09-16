@@ -25,6 +25,15 @@ def _normalise(row: dict[str, Any]) -> dict[str, Any]:
         normalised["unit_price"] = Decimal("0")
     else:
         normalised["unit_price"] = Decimal(str(unit_price))
+    normalised["coterm_enabled"] = bool(row.get("coterm_enabled"))
+    normalised["coterm_end_date"] = row.get("coterm_end_date")
+    coterm_price = row.get("coterm_price")
+    if isinstance(coterm_price, Decimal):
+        normalised["coterm_price"] = coterm_price
+    elif coterm_price is None:
+        normalised["coterm_price"] = None
+    else:
+        normalised["coterm_price"] = Decimal(str(coterm_price))
     return normalised
 
 
@@ -47,6 +56,9 @@ async def upsert_item(
     vendor_sku: str | None,
     description: str | None,
     image_url: str | None,
+    coterm_enabled: bool = False,
+    coterm_end_date: Any | None = None,
+    coterm_price: Decimal | None = None,
 ) -> None:
     await db.execute(
         """
@@ -59,8 +71,11 @@ async def upsert_item(
             product_sku,
             product_vendor_sku,
             product_description,
-            product_image_url
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            product_image_url,
+            coterm_enabled,
+            coterm_end_date,
+            coterm_price
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             quantity = VALUES(quantity),
             unit_price = VALUES(unit_price),
@@ -68,7 +83,10 @@ async def upsert_item(
             product_sku = VALUES(product_sku),
             product_vendor_sku = VALUES(product_vendor_sku),
             product_description = VALUES(product_description),
-            product_image_url = VALUES(product_image_url)
+            product_image_url = VALUES(product_image_url),
+            coterm_enabled = VALUES(coterm_enabled),
+            coterm_end_date = VALUES(coterm_end_date),
+            coterm_price = VALUES(coterm_price)
         """,
         (
             session_id,
@@ -80,6 +98,9 @@ async def upsert_item(
             vendor_sku,
             description,
             image_url,
+            int(bool(coterm_enabled)),
+            coterm_end_date,
+            coterm_price,
         ),
     )
 

@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -36,6 +37,9 @@ def mock_startup(monkeypatch):
     async def fake_refresh_automations():
         return None
 
+    async def fake_run_system_update(*, force_restart: bool = False):
+        return None
+
     monkeypatch.setattr(db, "connect", fake_connect)
     monkeypatch.setattr(db, "disconnect", fake_disconnect)
     monkeypatch.setattr(db, "run_migrations", fake_run_migrations)
@@ -56,6 +60,7 @@ def mock_startup(monkeypatch):
     )
     monkeypatch.setattr(scheduler_service, "start", fake_start)
     monkeypatch.setattr(scheduler_service, "stop", fake_stop)
+    monkeypatch.setattr(scheduler_service, "run_system_update", fake_run_system_update)
 
 
 @pytest.fixture
@@ -460,6 +465,88 @@ def test_add_to_cart_upgrade_removes_original(monkeypatch, active_session, cart_
     assert recorded_upserts == [(active_session.id, 5, 1)]
     assert recorded_removals == [(active_session.id, {7})]
     assert recorded_sources == [{7}]
+
+
+def test_update_cart_coterm_toggle_persists_prorated_metadata(monkeypatch, active_session, cart_context):
+    from app.services import subscription_pricing
+
+    recorded_upserts: list[dict[str, object]] = []
+
+    async def fake_get_item(session_id, product_id):
+        return {
+            "product_id": product_id,
+            "quantity": 2,
+            "product_name": "Managed Plan",
+            "product_sku": "SUB-001",
+            "unit_price": Decimal("120.00"),
+            "coterm_enabled": False,
+            "coterm_end_date": None,
+            "coterm_price": None,
+        }
+
+    async def fake_get_product_by_id(product_id, company_id=None):
+        return {
+            "id": product_id,
+            "stock": 0,
+            "price": "120.00",
+            "name": "Managed Plan",
+            "sku": "SUB-001",
+            "subscription_category_id": 5,
+        }
+
+    async def fake_upsert_item(**kwargs):
+        recorded_upserts.append(kwargs)
+
+    async def fake_remove_items(session_id, product_ids):
+        return None
+
+    async def fake_anchor(customer_id, product_id, category_id):
+        return {
+            "anchor_date": date.today() + timedelta(days=90),
+            "category_id": category_id,
+            "category_name": "Managed Services",
+        }
+
+    monkeypatch.setattr(main_module.cart_repo, "get_item", fake_get_item)
+    monkeypatch.setattr(main_module.cart_repo, "upsert_item", fake_upsert_item)
+    monkeypatch.setattr(main_module.cart_repo, "remove_items", fake_remove_items)
+    monkeypatch.setattr(main_module.shop_repo, "get_product_by_id", fake_get_product_by_id)
+    monkeypatch.setattr(
+        subscription_pricing,
+        "get_coterm_anchor_for_product",
+        fake_anchor,
+    )
+    monkeypatch.setattr(
+        subscription_pricing,
+        "calculate_coterm_price",
+        lambda item_price, today, end_date: Decimal("64.11"),
+    )
+
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.post(
+            "/cart/update",
+            data={"coterm_7": "1", "_csrf": active_session.csrf_token},
+        )
+
+    assert response.status_code == 303
+    params = parse_qs(urlparse(response.headers["location"]).query)
+    assert params.get("cartMessage") == ["Co-term settings updated."]
+    assert recorded_upserts == [
+        {
+            "session_id": active_session.id,
+            "product_id": 7,
+            "quantity": 2,
+            "unit_price": Decimal("120.00"),
+            "name": "Managed Plan",
+            "sku": "SUB-001",
+            "vendor_sku": None,
+            "description": None,
+            "image_url": None,
+            "coterm_enabled": True,
+            "coterm_end_date": date.today() + timedelta(days=90),
+            "coterm_price": Decimal("64.11"),
+        }
+    ]
 
 
 def test_add_to_cart_upgrade_does_not_remove_other_items(

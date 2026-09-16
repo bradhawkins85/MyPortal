@@ -19,6 +19,7 @@ async def create_subscriptions_from_order(
     order_number: str,
     company_id: int,
     user_id: int,
+    cart_items: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Create subscriptions for all eligible products in an order.
     
@@ -49,6 +50,11 @@ async def create_subscriptions_from_order(
     
     created_subscriptions: list[dict[str, Any]] = []
     today = date.today()
+    cart_item_lookup = {
+        int(item.get("product_id") or 0): item
+        for item in (cart_items or [])
+        if int(item.get("product_id") or 0) > 0
+    }
     
     for item in order_items:
         product_id = int(item["product_id"])
@@ -95,6 +101,7 @@ async def create_subscriptions_from_order(
             adopted_quantity = subscription_billing.recurring_quantity(existing_recurring)
 
         # Calculate subscription dates, preserving an adopted item's term.
+        cart_item = cart_item_lookup.get(product_id)
         start_date = (
             existing_recurring.get("start_date")
             if existing_recurring and existing_recurring.get("start_date")
@@ -103,8 +110,17 @@ async def create_subscriptions_from_order(
         end_date = subscription_pricing.calculate_full_term_end_date(
             start_date, term_days
         )
+        prorated_price = None
         if existing_recurring and existing_recurring.get("end_date"):
             end_date = existing_recurring["end_date"]
+        elif (
+            cart_item
+            and bool(cart_item.get("coterm_enabled"))
+            and cart_item.get("coterm_end_date")
+            and cart_item.get("coterm_price") is not None
+        ):
+            end_date = cart_item["coterm_end_date"]
+            prorated_price = Decimal(str(cart_item["coterm_price"]))
         
         # Create the subscription
         try:
@@ -116,7 +132,7 @@ async def create_subscriptions_from_order(
                 end_date=end_date,
                 quantity=adopted_quantity + quantity,
                 unit_price=unit_price,
-                prorated_price=None,  # Full term in v1
+                prorated_price=prorated_price,
                 status="active",
                 auto_renew=True,
                 created_by=user_id,
