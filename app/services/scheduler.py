@@ -8,6 +8,7 @@ from asyncio.subprocess import PIPE
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -437,7 +438,7 @@ class SchedulerService:
                 log_error("Ticket shipment watch runner failed", error=str(exc))
 
     async def _run_subscription_renewals(self) -> None:
-        """Run subscription renewal invoice creation (T-60 job) with distributed lock."""
+        """Run subscription renewal reminders and invoicing with a distributed lock."""
         async with db.acquire_lock("subscription_renewals", timeout=5) as lock_acquired:
             if not lock_acquired:
                 log_info(
@@ -445,19 +446,23 @@ class SchedulerService:
                 )
                 return
 
-            from datetime import date
-
-            today = date.today()
-            log_info("Starting subscription renewal invoice creation", date=today)
+            settings = get_settings()
+            try:
+                today = datetime.now(
+                    ZoneInfo(str(settings.default_timezone or "UTC"))
+                ).date()
+            except Exception:  # pragma: no cover - defensive fallback
+                today = datetime.now(timezone.utc).date()
+            log_info("Starting subscription renewal processing", date=today)
 
             try:
                 result = await subscription_renewals.create_renewal_invoices_for_date(
                     today
                 )
-                log_info("Subscription renewal invoice creation completed", **result)
+                log_info("Subscription renewal processing completed", **result)
             except Exception as exc:  # pragma: no cover - defensive logging
                 log_error(
-                    "Subscription renewal invoice creation failed",
+                    "Subscription renewal processing failed",
                     date=today,
                     error=str(exc),
                 )
