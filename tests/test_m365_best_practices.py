@@ -7448,7 +7448,7 @@ async def test_check_ews_required_apps_allowed_fails_when_dependency_missing_fro
             "app.services.m365_best_practices._download_graph_csv_report",
             new_callable=AsyncMock,
             return_value=[
-                {"AppId": observed_app, "Usage": "5", "Date": "2026-09-15"},
+                {"AppId": observed_app, "Usage": "5", "Date": "2026-09-15", "Feature": "EWS"},
             ],
         ),
         patch(
@@ -7590,7 +7590,7 @@ async def test_check_ews_required_apps_allowed_passes_with_observed_and_reviewed
             "app.services.m365_best_practices._download_graph_csv_report",
             new_callable=AsyncMock,
             return_value=[
-                {"AppId": observed_app, "Usage": "2", "Date": "2026-09-15"},
+                {"AppId": observed_app, "Usage": "2", "Date": "2026-09-15", "Feature": "EWS"},
             ],
         ),
         patch(
@@ -7693,7 +7693,7 @@ async def test_remediate_ews_required_apps_allowed_preserves_existing_entries():
             "app.services.m365_best_practices._download_graph_csv_report",
             new_callable=AsyncMock,
             return_value=[
-                {"AppId": observed_app, "Usage": "7", "Date": "2026-09-15"},
+            {"AppId": observed_app, "Usage": "7", "Date": "2026-09-15", "Feature": "EWS"},
             ],
         ),
         patch(
@@ -7787,7 +7787,7 @@ async def test_remediate_ews_required_apps_allowed_is_idempotent():
             "app.services.m365_best_practices._download_graph_csv_report",
             new_callable=AsyncMock,
             return_value=[
-                {"AppId": observed_app, "Usage": "3", "Date": "2026-09-15"},
+            {"AppId": observed_app, "Usage": "3", "Date": "2026-09-15", "Feature": "EWS"},
             ],
         ),
         patch(

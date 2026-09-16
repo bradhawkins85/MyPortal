@@ -996,8 +996,20 @@ async def _get_ews_usage_apps(
     rows = await _download_graph_csv_report(delegated_token, _EWS_USAGE_REPORT_URL)
     usage_by_app: dict[str, dict[str, str | int]] = {}
     for row in rows:
-        protocol = _csv_row_value(row, "Protocol", "API", "API Family", "Feature")
-        if protocol and "ews" not in protocol.lower():
+        protocol = _csv_row_value(
+            row,
+            "Protocol",
+            "Protocol Name",
+            "API",
+            "Api",
+            "API Family",
+            "Feature",
+            "Workload",
+        )
+        if protocol:
+            if "ews" not in protocol.lower():
+                continue
+        elif not any("ews" in str(key or "").lower() for key in row):
             continue
         app_ids = _extract_app_ids(
             _csv_row_value(row, "AppId", "Application Id", "ApplicationID", "Client Id")
@@ -8166,7 +8178,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     source_type = bp.get("source_type", "graph")
     remediated_at = datetime.now(timezone.utc).replace(tzinfo=None)
     generic_failure_reason = "Check that the app has the required permissions."
-    failure_message = ""
+    outcome_message = ""
 
     if source_type == "exo":
         token_error_message = (
@@ -8200,31 +8212,31 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 exo_token, tenant_id, company_id, check_id, mailbox_params
             )
             if not success:
-                failure_message = "One or more mailbox remediation updates failed."
+                outcome_message = "One or more mailbox remediation updates failed."
         elif bp.get("remediation_type") == "it_contact_baseline_exo":
             try:
-                success, failure_message = await _remediate_it_contact_baseline(
+                success, outcome_message = await _remediate_it_contact_baseline(
                     exo_token, tenant_id
                 )
             except M365Error as exc:
                 success = False
-                failure_message = str(exc)
+                outcome_message = str(exc)
         elif bp.get("remediation_type") == "foreach_owa_mailbox_policy_exo":
             params = bp.get("remediation_params") or {}
             success = await _remediate_foreach_owa_mailbox_policy(
                 exo_token, tenant_id, company_id, check_id, params
             )
             if not success:
-                failure_message = "One or more OWA mailbox policy remediation updates failed."
+                outcome_message = "One or more OWA mailbox policy remediation updates failed."
         elif bp.get("remediation_type") == "matching_antiphish_policy_exo":
             cmdlet = bp.get("remediation_cmdlet", "")
             params = bp.get("remediation_params") or {}
             try:
-                success, failure_message = await _remediate_matching_antiphish_policies(
+                success, outcome_message = await _remediate_matching_antiphish_policies(
                     exo_token, tenant_id, check_id, cmdlet, params
                 )
             except M365Error as exc:
-                failure_message = str(exc)
+                outcome_message = str(exc)
                 log_error(
                     "M365 best practice remediation command failed",
                     company_id=company_id,
@@ -8236,7 +8248,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
         elif bp.get("remediation_type") == "global_quarantine_policy_exo":
             cmdlet = bp.get("remediation_cmdlet", "")
             params = bp.get("remediation_params") or {}
-            success, failure_message = await _remediate_global_quarantine_policy(
+            success, outcome_message = await _remediate_global_quarantine_policy(
                 exo_token, tenant_id, cmdlet, params
             )
         else:
@@ -8282,7 +8294,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                     success = False
 
                 if not success:
-                    failure_message = str(exc)
+                    outcome_message = str(exc)
                     log_error(
                         "M365 best practice remediation command failed",
                         company_id=company_id,
@@ -8326,7 +8338,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             }
         if bp.get("remediation_type") == "ews_dependency_allow_list":
             try:
-                success, failure_message = await _remediate_ews_dependency_allow_list(
+                success, outcome_message = await _remediate_ews_dependency_allow_list(
                     graph_token, company_id
                 )
             except M365Error as exc:
@@ -8337,24 +8349,24 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                     error=str(exc),
                 )
                 success = False
-                failure_message = str(exc)
+                outcome_message = str(exc)
         elif bp.get("remediation_type") == "global_admin_accounts":
             try:
-                success, failure_message = await _remediate_global_admin_count(graph_token, company_id)
+                success, outcome_message = await _remediate_global_admin_count(graph_token, company_id)
             except Exception as exc:
                 log_error("M365 Global Administrator remediation failed", company_id=company_id,
                           check_id=check_id, error=str(exc))
                 success = False
-                failure_message = ("Account creation or secure Hudu synchronization failed; "
+                outcome_message = ("Account creation or secure Hudu synchronization failed; "
                                    "the affected new account was rolled back.")
         elif bp.get("remediation_type") == "disable_per_user_mfa":
-            success, failure_message = await _remediate_disable_per_user_mfa(
+            success, outcome_message = await _remediate_disable_per_user_mfa(
                 graph_token, company_id, check_id
             )
         elif bp.get("remediation_type") == "foreach_user_graph":
             success = await _remediate_foreach_user_graph(graph_token, company_id, check_id)
             if not success:
-                failure_message = "One or more user remediation updates failed."
+                outcome_message = "One or more user remediation updates failed."
         elif bp.get("remediation_type") == "create_dynamic_guest_group":
             try:
                 success = await _remediate_create_dynamic_guest_group(graph_token)
@@ -8398,19 +8410,19 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                         check_id=check_id,
                         error=str(exc),
                     )
-                    failure_message = str(exc)
-            if not success and not failure_message:
-                failure_message = "Unable to confirm whether the guest group remediation succeeded."
+                    outcome_message = str(exc)
+            if not success and not outcome_message:
+                outcome_message = "Unable to confirm whether the guest group remediation succeeded."
         elif bp.get("remediation_type") == "foreach_public_group_graph":
             success = await _remediate_foreach_public_group_graph(
                 graph_token, company_id, check_id
             )
             if not success:
-                failure_message = "One or more public group remediation updates failed."
+                outcome_message = "One or more public group remediation updates failed."
             # Remediation status is persisted by the shared epilogue below.
         elif check_id == "bp_authenticator_mfa_fatigue":
             try:
-                success, failure_message = await _remediate_authenticator_mfa_fatigue(
+                success, outcome_message = await _remediate_authenticator_mfa_fatigue(
                     graph_token
                 )
             except M365Error as exc:
@@ -8421,10 +8433,10 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                     error=str(exc),
                 )
                 success = False
-                failure_message = str(exc)
+                outcome_message = str(exc)
         elif check_id == "bp_internal_phishing_forms":
             try:
-                success, failure_message = await _remediate_internal_phishing_forms(
+                success, outcome_message = await _remediate_internal_phishing_forms(
                     graph_token
                 )
             except M365Error as exc:
@@ -8435,10 +8447,10 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                     error=str(exc),
                 )
                 success = False
-                failure_message = str(exc)
+                outcome_message = str(exc)
         elif check_id == "bp_weak_auth_methods_disabled":
             try:
-                success, failure_message = await _remediate_weak_auth_methods_disabled(
+                success, outcome_message = await _remediate_weak_auth_methods_disabled(
                     graph_token
                 )
             except M365Error as exc:
@@ -8449,7 +8461,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                     error=str(exc),
                 )
                 success = False
-                failure_message = str(exc)
+                outcome_message = str(exc)
         else:
             remediation_url = bp.get("remediation_url", "")
             remediation_payload = bp.get("remediation_payload") or {}
@@ -8465,7 +8477,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                     error=str(exc),
                 )
                 success = False
-                failure_message = str(exc)
+                outcome_message = str(exc)
     elif source_type == "scc":
         scc_token_error_message = (
             "Unable to acquire Security & Compliance token. "
@@ -8496,7 +8508,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                 graph_token_scc = await acquire_access_token(
                     company_id, force_client_credentials=True
                 )
-                success, failure_message = await _remediate_break_glass_alert_policy(
+                success, outcome_message = await _remediate_break_glass_alert_policy(
                     graph_token_scc, scc_tok, scc_tid
                 )
             except Exception as exc:
@@ -8507,18 +8519,18 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                     error=str(exc),
                 )
                 success = False
-                failure_message = str(exc)
+                outcome_message = str(exc)
         else:
             success = False
-            failure_message = "Unknown SCC remediation type."
+            outcome_message = "Unknown SCC remediation type."
     else:
         success = False
-        failure_message = "Unknown remediation source type."
+        outcome_message = "Unknown remediation source type."
 
     remediation_status = "success" if success else "failed"
     remediation_failure_reason = (
         None if remediation_status == "success"
-        else failure_message or generic_failure_reason
+        else outcome_message or generic_failure_reason
     )
     await bp_repo.update_remediation_status(
         company_id=company_id,
@@ -8539,7 +8551,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
         return {
             "success": True,
             "message": (
-                failure_message
+                outcome_message
                 or "Remediation command executed successfully. "
                 "Re-evaluate the check to confirm the change took effect."
             ),
@@ -8547,8 +8559,8 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     return {
         "success": False,
         "message": (
-            f"Remediation command failed: {failure_message}"
-            if failure_message
+            f"Remediation command failed: {outcome_message}"
+            if outcome_message
             else f"Remediation command failed. {generic_failure_reason}"
         ),
     }
