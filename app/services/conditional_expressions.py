@@ -127,7 +127,7 @@ def _iter_conditional_matches(
 
         parsed = _parse_conditional_body(text[after_if:close_index].strip())
         if parsed is None:
-            search_from = start + 2
+            search_from = close_index + 2
             continue
 
         condition, then_value, else_value = parsed
