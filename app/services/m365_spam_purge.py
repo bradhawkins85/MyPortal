@@ -166,26 +166,25 @@ async def _run_search(request_id: int, *, retry: bool = False) -> None:
     try:
         await purge_repo.update_request(request_id, {"search_status": "starting"})
         company_id = int(request["company_id"])
-        token, _tenant_id = await m365_service._acquire_scc_access_token(company_id)
-        tenant = await _scc_organization(company_id)
+        token, tenant_id = await m365_service._acquire_scc_access_token(company_id)
         if retry:
             # A prior attempt can fail after Purview persisted the object. Remove
             # only this request's unique, non-destructive search before recreating it.
             try:
-                await m365_service._scc_invoke_command(token, tenant, "Remove-ComplianceSearch", {
+                await m365_service._scc_invoke_command(token, tenant_id, "Remove-ComplianceSearch", {
                     "Identity": request["search_name"], "Confirm": False,
                 })
             except Exception:  # noqa: BLE001 - absence is expected on an early failure
                 pass
-        await m365_service._scc_invoke_command(token, tenant, "New-ComplianceSearch", {
+        await m365_service._scc_invoke_command(token, tenant_id, "New-ComplianceSearch", {
             "Name": request["search_name"], "ExchangeLocation": "All",
             "ContentMatchQuery": request["content_match_query"],
         })
-        await m365_service._scc_invoke_command(token, tenant, "Start-ComplianceSearch", {
+        await m365_service._scc_invoke_command(token, tenant_id, "Start-ComplianceSearch", {
             "Identity": request["search_name"],
         })
         await purge_repo.update_request(request_id, {"search_status": "running"})
-        result = await _poll_command(token, tenant, "Get-ComplianceSearch", request["search_name"])
+        result = await _poll_command(token, tenant_id, "Get-ComplianceSearch", request["search_name"])
         status = str(result.get("Status") or "failed").lower()
         updates = {
             "search_status": status, "matched_items": _int_value(result, "Items", "ItemCount"),
@@ -203,31 +202,6 @@ async def _run_search(request_id: int, *, retry: bool = False) -> None:
         })
 
 
-async def _scc_organization(company_id: int) -> str:
-    """Return the tenant's initial domain required by Purview InvokeCommand.
-
-    Purview's compliance-search backend does not reliably resolve a tenant GUID
-    to its Exchange organization container. The initial ``onmicrosoft.com``
-    domain is the stable organization identifier accepted by the endpoint.
-    """
-    graph_token = await m365_service.acquire_access_token(company_id)
-    payload = await m365_service._graph_get(
-        graph_token,
-        "https://graph.microsoft.com/v1.0/domains?$select=id,isInitial",
-    )
-    domains = payload.get("value") or []
-    for domain in domains if isinstance(domains, list) else []:
-        if not isinstance(domain, dict) or not domain.get("isInitial"):
-            continue
-        name = str(domain.get("id") or "").strip().lower()
-        if name.endswith(".onmicrosoft.com"):
-            return name
-    raise ValueError(
-        "Microsoft 365 initial domain could not be resolved; grant the app "
-        "Domain.Read.All and reconnect the tenant"
-    )
-
-
 async def _run_purge(request_id: int) -> None:
     request = await purge_repo.get_request(request_id)
     if not request:
@@ -235,14 +209,13 @@ async def _run_purge(request_id: int) -> None:
     try:
         await purge_repo.update_request(request_id, {"purge_status": "starting"})
         company_id = int(request["company_id"])
-        token, _tenant_id = await m365_service._acquire_scc_access_token(company_id)
-        tenant = await _scc_organization(company_id)
-        await m365_service._scc_invoke_command(token, tenant, "New-ComplianceSearchAction", {
+        token, tenant_id = await m365_service._acquire_scc_access_token(company_id)
+        await m365_service._scc_invoke_command(token, tenant_id, "New-ComplianceSearchAction", {
             "SearchName": request["search_name"], "Purge": True,
             "PurgeType": "HardDelete", "Confirm": False,
         })
         await purge_repo.update_request(request_id, {"purge_status": "running"})
-        result = await _poll_command(token, tenant, "Get-ComplianceSearchAction", request["action_name"])
+        result = await _poll_command(token, tenant_id, "Get-ComplianceSearchAction", request["action_name"])
         status = str(result.get("Status") or "failed").lower()
         removed = _removed_item_count(result)
         updates = {
@@ -253,7 +226,7 @@ async def _run_purge(request_id: int) -> None:
             updates["error_message"] = str(result.get("Errors") or "Purge did not complete")[:2000]
         await purge_repo.update_request(request_id, updates)
         if status == "completed":
-            await _run_managed_folder_assistant(token, tenant, request_id)
+            await _run_managed_folder_assistant(token, tenant_id, request_id)
     except Exception as exc:  # noqa: BLE001 - background boundary records safe error
         log_error("M365 spam purge failed", request_id=request_id, error=str(exc))
         await purge_repo.update_request(request_id, {
