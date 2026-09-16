@@ -7,7 +7,9 @@ from datetime import date
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import httpx
 
+from app.services import m365 as m365_service
 from app.services import m365_spam_purge as service
 from app.services.m365 import M365Error, _jwt_appid
 
@@ -100,6 +102,54 @@ def test_scc_organization_requires_initial_domain(monkeypatch):
 
     with pytest.raises(ValueError, match="Domain.Read.All"):
         asyncio.run(service._scc_organization(7))
+
+
+def test_domain_read_all_is_provisioned_and_visible_in_diagnostics():
+    domain_read_all = "dbb9058a-0e50-45d7-ae91-66909b5d4664"
+
+    assert domain_read_all in m365_service.get_required_app_role_ids()
+    graph = next(
+        app for app in m365_service.ENTERPRISE_APP_CATALOG
+        if app["name"] == "Microsoft Graph"
+    )
+    assert {item["id"]: item["name"] for item in graph["permissions"]}[domain_read_all] == (
+        "Domain.Read.All"
+    )
+
+
+@pytest.mark.anyio("asyncio")
+async def test_scc_invoke_uses_initial_domain_in_route_and_anchor(monkeypatch):
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "RS256"}).encode()).rstrip(b"=").decode()
+    payload = base64.urlsafe_b64encode(json.dumps({"appid": "client-id"}).encode()).rstrip(b"=").decode()
+    token = f"{header}.{payload}.signature"
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, *, headers, json):
+            captured.update(url=url, headers=headers, json=json)
+            return httpx.Response(200, json={"value": []})
+
+    monkeypatch.setattr(m365_service.httpx, "AsyncClient", FakeClient)
+
+    await m365_service._scc_invoke_command(
+        token, "08fa9092-c049-429b-bd82-28119ef5dd7f", "Get-ComplianceSearch",
+        organization="contoso.onmicrosoft.com",
+    )
+
+    assert "/contoso.onmicrosoft.com/InvokeCommand" in captured["url"]
+    assert "08fa9092-c049-429b-bd82-28119ef5dd7f" not in captured["url"]
+    assert captured["headers"]["X-AnchorMailbox"] == (
+        "app:client-id@contoso.onmicrosoft.com"
+    )
 
 
 def test_spam_purge_template_has_review_confirmation_and_live_refresh():

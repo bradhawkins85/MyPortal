@@ -95,6 +95,9 @@ _SITES_READWRITE_ALL_ROLE = "9492366f-7969-46a4-8d15-ed1a20078fff"
 # Microsoft Graph application permission required to create the backing Microsoft
 # 365 group for the default Offboarded Staff SharePoint export site.
 _GROUP_READWRITE_ALL_ROLE = "62a82d76-70ea-41e2-9197-370581804d09"
+# Microsoft Graph application permission required to resolve the tenant's
+# initial *.onmicrosoft.com domain for Purview app-only connections.
+_DOMAIN_READ_ALL_ROLE = "dbb9058a-0e50-45d7-ae91-66909b5d4664"
 
 # Pattern matching auto-generated package mailbox names, e.g. package_9024cbae-6e9a-4cee-934e-5f05143cd7ae
 PACKAGE_MAILBOX_RE = re.compile(
@@ -123,6 +126,7 @@ _PROVISION_APP_ROLES: list[str] = [
     "29c18626-4985-4dcd-85c0-193eef327366",  # Policy.ReadWrite.AuthenticationMethod (Authenticator MFA-fatigue remediation)
     "fb221be6-99f2-473f-bd32-01c6a0e9ca3b",  # Policy.ReadWrite.Authorization (required to PATCH /policies/authorizationPolicy for guest access remediation)
     "498476ce-e0fe-48b0-b801-37ba7e2685c6",  # Organization.Read.All
+    _DOMAIN_READ_ALL_ROLE,  # Domain.Read.All (Purview organization routing)
     "dc377aa6-52d8-4e23-b271-2a7ae04cedf3",  # DeviceManagementConfiguration.Read.All
     "2f51be20-0bb4-4fed-bf7b-db946066c75e",  # DeviceManagementManagedDevices.Read.All
     "b0afded3-3588-46d8-8b3d-9842eff778da",  # AuditLog.Read.All
@@ -235,6 +239,7 @@ _GRAPH_ROLE_NAMES: dict[str, str] = {
     "29c18626-4985-4dcd-85c0-193eef327366": "Policy.ReadWrite.AuthenticationMethod",
     "fb221be6-99f2-473f-bd32-01c6a0e9ca3b": "Policy.ReadWrite.Authorization",
     "498476ce-e0fe-48b0-b801-37ba7e2685c6": "Organization.Read.All",
+    _DOMAIN_READ_ALL_ROLE: "Domain.Read.All",
     "dc377aa6-52d8-4e23-b271-2a7ae04cedf3": "DeviceManagementConfiguration.Read.All",
     "2f51be20-0bb4-4fed-bf7b-db946066c75e": "DeviceManagementManagedDevices.Read.All",
     "b0afded3-3588-46d8-8b3d-9842eff778da": "AuditLog.Read.All",
@@ -1176,23 +1181,30 @@ async def _scc_invoke_command(
 ) -> dict[str, Any]:
     """Call a Security & Compliance PowerShell cmdlet via the Purview REST InvokeCommand API.
 
-    POSTs to
-    ``https://ps.compliance.protection.outlook.com/adminapi/beta/{tenant_id}/InvokeCommand``
-    using an app-only Security & Compliance access token.  The app must have a
+    POSTs to the Security & Compliance admin API. When *organization* is
+    supplied, its initial ``*.onmicrosoft.com`` domain is used in both the URL
+    route and the routing header, matching ``Connect-IPPSSession -Organization``.
+    Other callers continue to use *tenant_id*. The request uses an app-only
+    Security & Compliance access token. The app must have a
     Compliance Administrator (or Global Administrator) role assigned so that
     cmdlets such as ``Get-ProtectionAlert`` and ``New-ProtectionAlert`` succeed.
 
     An ``X-AnchorMailbox`` header is included when the ``appid`` claim can be
-    decoded from *scc_token*. Compliance-search callers should supply the
-    tenant's initial ``*.onmicrosoft.com`` *organization* because a tenant GUID
-    can be interpreted as an Exchange organization name and routed to the FFO
-    test forest. Other callers retain the tenant ID as their routing hint.
+    decoded from *scc_token*. Compliance-search callers must supply the tenant's
+    initial domain because using the tenant GUID in the route can make Purview
+    look for ``CN={tenant GUID}`` in the FFO test forest.
 
     Returns the raw JSON response body on success.  Raises :exc:`M365Error` on any
     non-200 HTTP status.
     """
-    safe_tenant = quote(str(tenant_id or "").strip(), safe="")
-    url = f"https://ps.compliance.protection.outlook.com/adminapi/beta/{safe_tenant}/InvokeCommand"
+    route_organization = str(organization or tenant_id or "").strip().lower()
+    if organization and not _SCC_ORGANIZATION_PATTERN.fullmatch(route_organization):
+        raise M365Error("Invalid Security & Compliance organization identifier")
+    safe_organization = quote(route_organization, safe="")
+    url = (
+        "https://ps.compliance.protection.outlook.com/adminapi/beta/"
+        f"{safe_organization}/InvokeCommand"
+    )
     payload: dict[str, Any] = {
         "CmdletInput": {
             "CmdletName": cmdlet_name,
@@ -1205,11 +1217,8 @@ async def _scc_invoke_command(
         "Content-Type": "application/json; charset=utf-8",
     }
     appid = _jwt_appid(scc_token)
-    anchor = str(organization or tenant_id or "").strip().lower()
-    if organization and not _SCC_ORGANIZATION_PATTERN.fullmatch(anchor):
-        raise M365Error("Invalid Security & Compliance organization identifier")
-    if appid and anchor:
-        headers["X-AnchorMailbox"] = f"app:{appid}@{anchor}"
+    if appid and route_organization:
+        headers["X-AnchorMailbox"] = f"app:{appid}@{route_organization}"
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(url, headers=headers, json=payload)
