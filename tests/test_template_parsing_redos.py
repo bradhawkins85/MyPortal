@@ -7,6 +7,7 @@ import pytest
 
 from app.services import conditional_expressions, value_templates
 
+_HAS_SIGALRM_TIMEOUT = hasattr(signal, "SIGALRM") and hasattr(signal, "setitimer")
 
 @contextmanager
 def _time_limit(seconds: float):
@@ -23,7 +24,7 @@ def _time_limit(seconds: float):
 
 
 @pytest.mark.skipif(
-    not hasattr(signal, "SIGALRM") or not hasattr(signal, "setitimer"),
+    not _HAS_SIGALRM_TIMEOUT,
     reason="SIGALRM-based timeout is only available on Unix-like platforms",
 )
 @pytest.mark.parametrize("size", [1000, 5000, 20000])
@@ -40,7 +41,7 @@ def test_unterminated_whitespace_heavy_tokens_complete_within_time_limit(size):
 
 
 @pytest.mark.skipif(
-    not hasattr(signal, "SIGALRM") or not hasattr(signal, "setitimer"),
+    not _HAS_SIGALRM_TIMEOUT,
     reason="SIGALRM-based timeout is only available on Unix-like platforms",
 )
 @pytest.mark.parametrize("size", [250, 1000, 4000])
