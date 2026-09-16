@@ -73,6 +73,63 @@
       <p class="empty-state__subtitle">This invoice has no line item details stored.</p>
     </div>
     {% endif %}
+
+    {% if can_sync_invoices_to_xero and module_enabled.get('xero', false) %}
+    <section class="card card--panel" style="margin-top: 1rem;">
+      <header class="card__header">
+        <div>
+          <h3 class="card__title">Xero billing controls</h3>
+          <p class="card__subtitle">
+            {% if invoice.approval_required and not invoice.approved_at %}
+              Approval required before pushing this invoice to Xero.
+            {% elif invoice.approved_at %}
+              Approved for Xero sync.
+            {% else %}
+              Preview and approve this invoice before syncing it to Xero.
+            {% endif %}
+          </p>
+        </div>
+      </header>
+      <div class="card__body">
+        {% if invoice.xero_sync_error %}
+          <div class="alert alert--warning">{{ invoice.xero_sync_error }}</div>
+        {% endif %}
+        <div class="form-grid">
+          <label>
+            Adjustment type
+            <select class="form-input" data-invoice-adjustment-type>
+              <option value="">None</option>
+              <option value="discount" {% if invoice.billing_adjustment_type == 'discount' %}selected{% endif %}>Discount</option>
+              <option value="credit" {% if invoice.billing_adjustment_type == 'credit' %}selected{% endif %}>Credit</option>
+              <option value="override" {% if invoice.billing_adjustment_type == 'override' %}selected{% endif %}>Override</option>
+            </select>
+          </label>
+          <label>
+            Adjustment amount
+            <input class="form-input" type="number" step="0.01" data-invoice-adjustment-amount value="{{ invoice.billing_adjustment_amount if invoice.billing_adjustment_amount is not none else '' }}" />
+          </label>
+          <label style="grid-column: 1 / -1;">
+            Adjustment reason
+            <input class="form-input" type="text" maxlength="255" data-invoice-adjustment-reason value="{{ invoice.billing_adjustment_reason or '' }}" />
+          </label>
+        </div>
+        <div class="card__controls" style="margin-top: 1rem;">
+          <button type="button" class="button button--secondary button--small" data-invoice-preview="{{ invoice.id }}">Preview Xero payload</button>
+          <button type="button" class="button button--secondary button--small" data-invoice-adjustment-save="{{ invoice.id }}">Save adjustment</button>
+          <button type="button" class="button button--secondary button--small" data-invoice-approve="{{ invoice.id }}">Approve for Xero</button>
+          <button
+            type="button"
+            class="button button--primary button--small"
+            data-invoice-sync="{{ invoice.id }}"
+            {% if invoice.xero_invoice_id %}disabled aria-disabled="true"{% endif %}
+          >
+            Push to Xero
+          </button>
+        </div>
+        <pre class="code-block" data-invoice-preview-output hidden style="margin-top: 1rem; white-space: pre-wrap;"></pre>
+      </div>
+    </section>
+    {% endif %}
   </section>
 </div>
 {% endblock %}
@@ -83,6 +140,11 @@
   (function () {
     document.addEventListener('DOMContentLoaded', () => {
       const deleteBtn = document.querySelector('[data-invoice-delete]');
+      const previewBtn = document.querySelector('[data-invoice-preview]');
+      const approveBtn = document.querySelector('[data-invoice-approve]');
+      const syncBtn = document.querySelector('[data-invoice-sync]');
+      const saveAdjustmentBtn = document.querySelector('[data-invoice-adjustment-save]');
+      const previewOutput = document.querySelector('[data-invoice-preview-output]');
       if (deleteBtn) {
         deleteBtn.addEventListener('click', async () => {
           const invoiceId = deleteBtn.getAttribute('data-invoice-delete');
@@ -96,6 +158,69 @@
             console.error(error);
             window.alert('Unable to delete invoice. Please try again.');
           }
+        });
+      }
+      if (previewBtn && previewOutput) {
+        previewBtn.addEventListener('click', async () => {
+          const invoiceId = previewBtn.getAttribute('data-invoice-preview');
+          if (!invoiceId) return;
+          const response = await fetch(`/api/invoices/${invoiceId}/xero/preview`);
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            window.alert(payload.detail?.reason || 'Unable to preview invoice for Xero.');
+            return;
+          }
+          previewOutput.hidden = false;
+          previewOutput.textContent = JSON.stringify(payload, null, 2);
+        });
+      }
+      if (saveAdjustmentBtn) {
+        saveAdjustmentBtn.addEventListener('click', async () => {
+          const invoiceId = saveAdjustmentBtn.getAttribute('data-invoice-adjustment-save');
+          if (!invoiceId) return;
+          const amount = document.querySelector('[data-invoice-adjustment-amount]')?.value ?? '';
+          const adjustmentType = document.querySelector('[data-invoice-adjustment-type]')?.value ?? '';
+          const reason = document.querySelector('[data-invoice-adjustment-reason]')?.value ?? '';
+          const response = await fetch(`/api/invoices/${invoiceId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              billingAdjustmentType: adjustmentType || null,
+              billingAdjustmentAmount: amount === '' ? null : amount,
+              billingAdjustmentReason: reason || null
+            })
+          });
+          if (!response.ok) {
+            window.alert('Unable to save the billing adjustment.');
+            return;
+          }
+          window.location.reload();
+        });
+      }
+      if (approveBtn) {
+        approveBtn.addEventListener('click', async () => {
+          const invoiceId = approveBtn.getAttribute('data-invoice-approve');
+          if (!invoiceId) return;
+          const response = await fetch(`/api/invoices/${invoiceId}/xero/approve`, { method: 'POST' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            window.alert(payload.detail || 'Unable to approve invoice.');
+            return;
+          }
+          window.location.reload();
+        });
+      }
+      if (syncBtn) {
+        syncBtn.addEventListener('click', async () => {
+          const invoiceId = syncBtn.getAttribute('data-invoice-sync');
+          if (!invoiceId) return;
+          const response = await fetch(`/api/invoices/${invoiceId}/xero/sync`, { method: 'POST' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            window.alert(payload.detail?.reason || payload.detail || 'Unable to push invoice to Xero.');
+            return;
+          }
+          window.location.reload();
         });
       }
     });

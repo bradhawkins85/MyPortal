@@ -428,6 +428,131 @@ async def _resolve_xero_contact_payload(
     return contact_payload
 
 
+async def _resolve_company_contact_payload(
+    company: Mapping[str, Any],
+    company_id: int,
+    *,
+    tenant_id: str,
+    access_token: str | None,
+    persist_lookup: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    contact_payload = _build_xero_contact_payload(company, company_id)
+    lookup_status = "cached" if contact_payload.get("ContactID") else "unresolved"
+    if not contact_payload.get("ContactID") and tenant_id and access_token:
+        async with httpx.AsyncClient(timeout=30.0) as resolve_client:
+            contact_payload = await _resolve_xero_contact_payload(
+                contact_payload,
+                client=resolve_client,
+                tenant_id=tenant_id,
+                access_token=access_token,
+            )
+        if contact_payload.get("ContactID"):
+            lookup_status = "resolved"
+            if persist_lookup:
+                await company_repo.update_company(company_id, xero_id=contact_payload["ContactID"])
+                logger.info(
+                    "Resolved and stored Xero contact ID for company",
+                    company_id=company_id,
+                    xero_contact_id=contact_payload["ContactID"],
+                )
+
+    lookup = {
+        "company_id": company_id,
+        "status": lookup_status,
+        "contact_id": str(contact_payload.get("ContactID") or "").strip() or None,
+        "contact_name": str(contact_payload.get("Name") or "").strip() or None,
+    }
+    return contact_payload, lookup
+
+
+def _line_amount_from_local_invoice_line(stored_line: Mapping[str, Any]) -> Decimal:
+    explicit_amount = _to_decimal(stored_line.get("amount"))
+    if explicit_amount is not None:
+        return _quantize(explicit_amount)
+    quantity = _to_decimal(stored_line.get("quantity")) or Decimal("1")
+    unit_amount = _to_decimal(stored_line.get("unit_amount")) or Decimal("0")
+    return _quantize(quantity * unit_amount)
+
+
+def _build_invoice_adjustment_line(
+    invoice: Mapping[str, Any],
+    *,
+    account_code: str,
+    tax_type: str | None,
+) -> dict[str, Any] | None:
+    adjustment_amount = _to_decimal(invoice.get("billing_adjustment_amount"))
+    if adjustment_amount is None or adjustment_amount == Decimal("0"):
+        return None
+    adjustment_amount = _quantize(adjustment_amount)
+    adjustment_type = str(invoice.get("billing_adjustment_type") or "").strip().lower()
+    reason = str(invoice.get("billing_adjustment_reason") or "").strip()
+    adjustment_label = {
+        "discount": "Discount",
+        "credit": "Credit",
+        "override": "Override",
+    }.get(adjustment_type, "Adjustment")
+    description = (
+        f"{adjustment_label}: {reason}" if reason else f"MyPortal {adjustment_label}"
+    )
+    line_item: dict[str, Any] = {
+        "Description": description,
+        "Quantity": 1.0,
+        "UnitAmount": float(adjustment_amount),
+        "AccountCode": account_code,
+    }
+    if tax_type:
+        line_item["TaxType"] = tax_type
+    return line_item
+
+
+def _build_invoice_payload_from_local_invoice(
+    invoice: Mapping[str, Any],
+    invoice_lines: Sequence[Mapping[str, Any]],
+    *,
+    company: Mapping[str, Any],
+    account_code: str,
+    tax_type: str | None,
+    line_amount_type: str,
+    auto_send: bool,
+    contact_payload: Mapping[str, Any],
+) -> tuple[dict[str, Any], Decimal, Decimal]:
+    xero_line_items = _build_xero_line_items_from_local_invoice(
+        invoice_lines,
+        account_code=account_code,
+        tax_type=tax_type,
+    )
+    base_amount = sum(
+        (_line_amount_from_local_invoice_line(line) for line in invoice_lines),
+        Decimal("0.00"),
+    )
+    adjustment_line = _build_invoice_adjustment_line(
+        invoice,
+        account_code=account_code,
+        tax_type=tax_type,
+    )
+    adjustment_amount = Decimal("0.00")
+    if adjustment_line:
+        xero_line_items.append(adjustment_line)
+        adjustment_amount = _to_decimal(invoice.get("billing_adjustment_amount")) or Decimal("0.00")
+    due_date = date.today() + timedelta(days=resolve_invoice_due_days(company))
+    created_at = invoice.get("created_at")
+    invoice_date = date.today()
+    if isinstance(created_at, datetime):
+        invoice_date = created_at.date()
+    payload: dict[str, Any] = {
+        "Type": "ACCREC",
+        "Contact": dict(contact_payload),
+        "LineItems": xero_line_items,
+        "LineAmountTypes": line_amount_type,
+        "Date": invoice_date.isoformat(),
+        "DueDate": due_date.isoformat(),
+        "Status": "AUTHORISED" if auto_send else "DRAFT",
+    }
+    if auto_send:
+        payload["SentToContact"] = True
+    return payload, _quantize(base_amount), _quantize(base_amount + adjustment_amount)
+
+
 async def _apply_xero_invoice_totals_to_local_invoice(
     invoice_id: int,
     invoice_lines: Sequence[Mapping[str, Any]],
@@ -569,6 +694,76 @@ def _extract_xero_error_detail(response_body: str | None) -> str | None:
     # Fall back to the raw body (truncated) if no structured messages were found
     text = (response_body or "").strip()
     return text[:_XERO_ERROR_DETAIL_MAX_LENGTH] if text else None
+
+
+async def preview_invoice_sync(invoice_id: int, auto_send: bool = False) -> dict[str, Any]:
+    invoice = await invoice_repo.get_invoice_by_id(invoice_id)
+    if not invoice:
+        return {
+            "status": "skipped",
+            "reason": "Invoice not found",
+            "invoice_id": invoice_id,
+        }
+
+    company_id = int(invoice["company_id"])
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        return {
+            "status": "skipped",
+            "reason": "Company not found",
+            "invoice_id": invoice_id,
+            "company_id": company_id,
+        }
+
+    module = await modules_service.get_module("xero", redact=False)
+    settings = dict((module or {}).get("settings") or {})
+    credentials = await modules_service.get_xero_credentials() or {}
+    tenant_id = str(credentials.get("tenant_id") or settings.get("tenant_id") or "").strip()
+    access_token: str | None = None
+    if tenant_id:
+        try:
+            access_token = await modules_service.acquire_xero_access_token()
+        except Exception as exc:
+            logger.warning(
+                "Unable to acquire Xero access token for invoice preview",
+                invoice_id=invoice_id,
+                error=str(exc),
+            )
+
+    invoice_lines = await invoice_lines_repo.list_invoice_lines(invoice_id)
+    account_code = str(settings.get("account_code", "")).strip() or "400"
+    tax_type = str(settings.get("tax_type", "")).strip() or None
+    line_amount_type = str(settings.get("line_amount_type", "")).strip() or "Exclusive"
+    contact_payload, contact_lookup = await _resolve_company_contact_payload(
+        company,
+        company_id,
+        tenant_id=tenant_id,
+        access_token=access_token,
+        persist_lookup=False,
+    )
+    payload, base_amount, total_amount = _build_invoice_payload_from_local_invoice(
+        invoice,
+        invoice_lines,
+        company=company,
+        account_code=account_code,
+        tax_type=tax_type,
+        line_amount_type=line_amount_type,
+        auto_send=auto_send,
+        contact_payload=contact_payload,
+    )
+    return {
+        "status": "ready",
+        "invoice_id": invoice_id,
+        "invoice_number": invoice.get("invoice_number"),
+        "company_id": company_id,
+        "approval_required": bool(invoice.get("approval_required")),
+        "approved_at": invoice.get("approved_at"),
+        "approved_by": invoice.get("approved_by"),
+        "contact_lookup": contact_lookup,
+        "base_amount": str(base_amount),
+        "total_amount": str(total_amount),
+        "payload": payload,
+    }
 
 
 def _calculate_next_invoice_number(current_invoice_number: str | None) -> str | None:
@@ -2389,15 +2584,13 @@ async def sync_company(
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-    contact_payload = _build_xero_contact_payload(company, company_id)
-    if not contact_payload.get("ContactID"):
-        async with httpx.AsyncClient(timeout=30.0) as resolve_client:
-            contact_payload = await _resolve_xero_contact_payload(
-                contact_payload,
-                client=resolve_client,
-                tenant_id=tenant_id,
-                access_token=access_token,
-            )
+    contact_payload, contact_lookup = await _resolve_company_contact_payload(
+        company,
+        company_id,
+        tenant_id=tenant_id,
+        access_token=access_token,
+        persist_lookup=True,
+    )
 
     synced_results: list[dict[str, Any]] = []
     failed_results: list[dict[str, Any]] = []
@@ -2407,8 +2600,30 @@ async def sync_company(
         invoice_id = int(invoice["id"])
         original_invoice_number = str(invoice.get("invoice_number") or "").strip()
         working_invoice_number = original_invoice_number
+        attempted_at = datetime.now(timezone.utc)
+        if bool(invoice.get("approval_required")) and not invoice.get("approved_at"):
+            reason = "Invoice requires approval before Xero sync"
+            await invoice_repo.patch_invoice(
+                invoice_id,
+                xero_sync_attempted_at=attempted_at,
+                xero_sync_error=reason,
+            )
+            skipped_results.append(
+                {
+                    "invoice_id": invoice_id,
+                    "invoice_number": working_invoice_number,
+                    "skip_code": "approval_required",
+                    "reason": reason,
+                }
+            )
+            continue
         invoice_lines = await invoice_lines_repo.list_invoice_lines(invoice_id)
         if not invoice_lines:
+            await invoice_repo.patch_invoice(
+                invoice_id,
+                xero_sync_attempted_at=attempted_at,
+                xero_sync_error="Invoice has no line items",
+            )
             skipped_results.append(
                 {
                     "invoice_id": invoice_id,
@@ -2418,24 +2633,16 @@ async def sync_company(
             )
             continue
 
-        xero_line_items = _build_xero_line_items_from_local_invoice(
+        invoice_payload, _base_amount, _total_amount = _build_invoice_payload_from_local_invoice(
+            invoice,
             invoice_lines,
+            company=company,
             account_code=account_code,
             tax_type=tax_type,
+            line_amount_type=line_amount_type,
+            auto_send=auto_send,
+            contact_payload=contact_payload,
         )
-        invoice_payload: dict[str, Any] = {
-            "Type": "ACCREC",
-            "Contact": dict(contact_payload),
-            "LineItems": xero_line_items,
-            "LineAmountTypes": line_amount_type,
-            "Date": date.today().isoformat(),
-            "DueDate": (
-                date.today() + timedelta(days=resolve_invoice_due_days(company))
-            ).isoformat(),
-            "Status": "AUTHORISED" if auto_send else "DRAFT",
-        }
-        if auto_send:
-            invoice_payload["SentToContact"] = True
 
         webhook_payload = {"Invoices": [invoice_payload]}
         event_id: int | None = None
@@ -2512,6 +2719,11 @@ async def sync_company(
 
             if not success:
                 xero_error_detail = _extract_xero_error_detail(response_body)
+                await invoice_repo.patch_invoice(
+                    invoice_id,
+                    xero_sync_attempted_at=attempted_at,
+                    xero_sync_error=xero_error_detail or f"HTTP {response_status}",
+                )
                 failed_results.append(
                     {
                         "invoice_id": invoice_id,
@@ -2539,6 +2751,8 @@ async def sync_company(
                 "status": xero_status.lower(),
                 "xero_invoice_id": xero_invoice_id,
                 "synced_to_xero_at": datetime.now(timezone.utc),
+                "xero_sync_error": None,
+                "xero_sync_attempted_at": attempted_at,
             }
             if xero_total_amount is not None:
                 invoice_updates["amount"] = xero_total_amount
@@ -2575,6 +2789,11 @@ async def sync_company(
                     request_body=webhook_payload,
                     response_headers=response_headers,
                 )
+            await invoice_repo.patch_invoice(
+                invoice_id,
+                xero_sync_attempted_at=attempted_at,
+                xero_sync_error=str(exc)[:500],
+            )
             failed_results.append(
                 {
                     "invoice_id": invoice_id,
@@ -2602,6 +2821,11 @@ async def sync_company(
                     request_body=webhook_payload,
                     response_headers=response_headers,
                 )
+            await invoice_repo.patch_invoice(
+                invoice_id,
+                xero_sync_attempted_at=attempted_at,
+                xero_sync_error=str(exc)[:500],
+            )
             failed_results.append(
                 {
                     "invoice_id": invoice_id,
@@ -2632,6 +2856,7 @@ async def sync_company(
         "failed_invoices": failed_results,
         "skipped_invoices": skipped_results,
         "auto_send": auto_send,
+        "contact_lookup": contact_lookup,
     }
 
 

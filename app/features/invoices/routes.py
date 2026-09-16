@@ -23,6 +23,8 @@ _STATUS_CLASS_MAP = {
     "paid": "status--active",
     "sent": "status--invited",
     "pending": "status--invited",
+    "pending_approval": "status--warning",
+    "approved": "status--active",
     "issued": "status--invited",
     "draft": "status--invited",
     "overdue": "status--suspended",
@@ -125,10 +127,27 @@ def _format_invoice_records(
                 "status_slug": status_slug,
                 "is_overdue": is_overdue,
                 "xero_invoice_id": xero_invoice_id,
+                "approved_at": record.get("approved_at"),
+                "approval_required": bool(record.get("approval_required")),
+                "xero_sync_error": str(record.get("xero_sync_error") or "").strip() or None,
+                "needs_approval": bool(record.get("approval_required")) and not record.get("approved_at") and not xero_invoice_id,
+                "has_sync_exception": bool(str(record.get("xero_sync_error") or "").strip() and not xero_invoice_id),
                 "can_sync_to_xero": is_super_admin and not xero_invoice_id,
             }
         )
     return formatted, total_amount, paid_count
+
+
+def _build_xero_queue_context(invoices: list[dict[str, Any]]) -> dict[str, Any]:
+    unsynced_invoices = [invoice for invoice in invoices if not invoice["xero_invoice_id"]]
+    approval_queue = [invoice for invoice in unsynced_invoices if invoice["needs_approval"]]
+    exception_queue = [invoice for invoice in unsynced_invoices if invoice["has_sync_exception"]]
+    return {
+        "unsynced_invoice_count": len(unsynced_invoices),
+        "approval_queue_count": len(approval_queue),
+        "exception_queue_count": len(exception_queue),
+        "exception_queue": exception_queue[:10],
+    }
 
 
 @router.api_route("/invoices", methods=["GET", "HEAD"], response_class=HTMLResponse)
@@ -157,6 +176,7 @@ async def invoices_page(request: Request):
         "is_global_invoices": False,
         "invoice_table_id": "invoice",
         "can_sync_invoices_to_xero": bool(user.get("is_super_admin")),
+        **_build_xero_queue_context(formatted),
     }
     return await main_module._render_template("invoices/index.html", request, user, extra=extra)
 
@@ -190,6 +210,7 @@ async def global_invoices_page(request: Request):
         "is_global_invoices": True,
         "invoice_table_id": "invoice-global",
         "can_sync_invoices_to_xero": bool(user.get("is_super_admin")),
+        **_build_xero_queue_context(formatted),
     }
     return await main_module._render_template("invoices/index.html", request, user, extra=extra)
 
@@ -273,12 +294,15 @@ async def invoice_detail_page(request: Request, invoice_id: int):
             "status_display": status_text_raw.title() if status_text_raw else "—",
             "status_class": status_class,
             "status_slug": status_slug,
+            "approval_required": bool(invoice.get("approval_required")),
+            "xero_sync_error": str(invoice.get("xero_sync_error") or "").strip() or None,
         },
         "lines": formatted_lines,
         "company": company,
         "has_lines": bool(formatted_lines),
         "can_delete_invoices": bool(user.get("is_super_admin")),
         "can_sync_invoices_to_xero": bool(user.get("is_super_admin")),
+        "adjustment_amount_display": invoice.get("billing_adjustment_amount"),
     }
     return await main_module._render_template("invoices/detail.html", request, user, extra=extra)
 

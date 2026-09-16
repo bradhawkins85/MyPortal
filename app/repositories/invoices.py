@@ -9,6 +9,9 @@ from app.core.database import db
 _ALLOWED_PATCH_COLUMNS = frozenset({
     "company_id", "invoice_number", "amount", "due_date", "status",
     "xero_invoice_id", "xero_invoice_number", "synced_to_xero_at",
+    "approval_required", "approved_by", "approved_at",
+    "billing_adjustment_type", "billing_adjustment_amount", "billing_adjustment_reason",
+    "xero_sync_error", "xero_sync_attempted_at",
 })
 
 
@@ -21,18 +24,27 @@ def _normalise_invoice(row: dict[str, Any]) -> dict[str, Any]:
     amount = invoice.get("amount")
     if amount is not None:
         invoice["amount"] = Decimal(str(amount))
+    adjustment_amount = invoice.get("billing_adjustment_amount")
+    if adjustment_amount is not None:
+        invoice["billing_adjustment_amount"] = Decimal(str(adjustment_amount))
     due_date = invoice.get("due_date")
     if isinstance(due_date, datetime):
         invoice["due_date"] = due_date.date()
     elif due_date is None or isinstance(due_date, date):
         invoice["due_date"] = due_date
-    for key in ("created_at", "synced_to_xero_at"):
+    approval_required = invoice.get("approval_required")
+    if approval_required is not None:
+        invoice["approval_required"] = bool(approval_required)
+    for key in ("created_at", "synced_to_xero_at", "approved_at", "xero_sync_attempted_at"):
         value = invoice.get(key)
         if value is not None and not isinstance(value, datetime):
             parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
             invoice[key] = parsed
         if isinstance(invoice.get(key), datetime) and invoice[key].tzinfo is None:
             invoice[key] = invoice[key].replace(tzinfo=timezone.utc)
+    approved_by = invoice.get("approved_by")
+    if approved_by is not None:
+        invoice["approved_by"] = int(approved_by)
     return invoice
 
 
@@ -40,6 +52,27 @@ async def list_company_invoices(company_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         "SELECT * FROM invoices WHERE company_id = %s ORDER BY due_date DESC, invoice_number",
         (company_id,),
+    )
+    return [_normalise_invoice(row) for row in rows]
+
+
+async def list_xero_sync_exceptions(company_id: int | None = None) -> list[dict[str, Any]]:
+    params: list[Any] = []
+    where_clauses = [
+        "COALESCE(TRIM(xero_invoice_id), '') = ''",
+        "COALESCE(TRIM(xero_sync_error), '') <> ''",
+    ]
+    if company_id is not None:
+        where_clauses.append("company_id = %s")
+        params.append(company_id)
+    rows = await db.fetch_all(
+        f"""
+        SELECT *
+        FROM invoices
+        WHERE {' AND '.join(where_clauses)}
+        ORDER BY xero_sync_attempted_at DESC, id DESC
+        """,
+        tuple(params),
     )
     return [_normalise_invoice(row) for row in rows]
 
@@ -98,13 +131,51 @@ async def create_invoice(
     amount: Decimal,
     due_date: date | None,
     status: str | None,
+    approval_required: bool = False,
+    approved_by: int | None = None,
+    approved_at: datetime | None = None,
+    billing_adjustment_type: str | None = None,
+    billing_adjustment_amount: Decimal | None = None,
+    billing_adjustment_reason: str | None = None,
+    xero_sync_error: str | None = None,
+    xero_sync_attempted_at: datetime | None = None,
 ) -> dict[str, Any]:
     invoice_id = await db.execute_returning_lastrowid(
         """
-        INSERT INTO invoices (company_id, invoice_number, amount, due_date, status, created_at)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO invoices (
+            company_id,
+            invoice_number,
+            amount,
+            due_date,
+            status,
+            approval_required,
+            approved_by,
+            approved_at,
+            billing_adjustment_type,
+            billing_adjustment_amount,
+            billing_adjustment_reason,
+            xero_sync_error,
+            xero_sync_attempted_at,
+            created_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
-        (company_id, invoice_number, amount, due_date, status, datetime.now(timezone.utc)),
+        (
+            company_id,
+            invoice_number,
+            amount,
+            due_date,
+            status,
+            int(bool(approval_required)),
+            approved_by,
+            approved_at,
+            billing_adjustment_type,
+            billing_adjustment_amount,
+            billing_adjustment_reason,
+            xero_sync_error,
+            xero_sync_attempted_at,
+            datetime.now(timezone.utc),
+        ),
     )
     if not invoice_id:
         raise RuntimeError("Failed to create invoice")

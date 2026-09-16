@@ -53,6 +53,42 @@
         <span class="invoice-summary__value invoice-summary__value--warning" data-invoice-open>{{ unpaid_count }}</span>
       </div>
     </div>
+    {% if is_global_invoices and can_sync_invoices_to_xero and module_enabled.get('xero', false) %}
+    <div class="card card--panel" style="margin-bottom: 1rem;">
+      <header class="card__header">
+        <div>
+          <h3 class="card__title">Batch billing dashboard</h3>
+          <p class="card__subtitle">{{ unsynced_invoice_count }} unsynced invoices · {{ approval_queue_count }} awaiting approval · {{ exception_queue_count }} exceptions</p>
+        </div>
+        <div class="card__controls">
+          <button type="button" class="button button--secondary button--small" data-xero-batch-sync>Push pending invoices</button>
+          <button type="button" class="button button--secondary button--small" data-xero-batch-retry {% if not exception_queue_count %}disabled aria-disabled="true"{% endif %}>Retry exceptions</button>
+        </div>
+      </header>
+      {% if exception_queue %}
+      <div class="table-wrapper">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Invoice #</th>
+              <th scope="col">Company</th>
+              <th scope="col">Exception</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for invoice in exception_queue %}
+            <tr>
+              <td><a href="/invoices/{{ invoice.id }}" class="link">{{ invoice.invoice_number }}</a></td>
+              <td>{{ invoice.company_name or 'Unknown company' }}</td>
+              <td>{{ invoice.xero_sync_error }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
     {% if has_invoices %}
     <div class="table-wrapper">
       <table class="table table--stack-mobile" id="{{ invoice_table_id }}-table" data-table data-table-id="{{ invoice_table_id }}" data-invoice-table>
@@ -233,6 +269,34 @@
           }
         });
       });
+
+      async function runBatchSync(exceptionOnly) {
+        const response = await fetch('/api/invoices/xero/batch-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ exceptionOnly: exceptionOnly })
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          window.alert(payload.detail || 'Unable to run the Xero batch sync.');
+          return;
+        }
+        window.alert(`Batch sync complete: ${payload.syncedCount || 0} synced, ${payload.failedCount || 0} failed.`);
+        window.location.reload();
+      }
+
+      const batchSyncButton = document.querySelector('[data-xero-batch-sync]');
+      if (batchSyncButton) {
+        batchSyncButton.addEventListener('click', async () => {
+          await runBatchSync(false);
+        });
+      }
+      const batchRetryButton = document.querySelector('[data-xero-batch-retry]');
+      if (batchRetryButton) {
+        batchRetryButton.addEventListener('click', async () => {
+          await runBatchSync(true);
+        });
+      }
 
       document.querySelectorAll('[data-invoice-delete]').forEach((button) => {
         button.addEventListener('click', async () => {

@@ -666,6 +666,18 @@
                 </p>
               </div>
             </article>
+          {% elif is_super_admin and module_enabled.get('xero', false) %}
+            <article class="card card--panel">
+              <header class="card__header">
+                <h2 class="card__title">Bill Now</h2>
+              </header>
+              <div class="card__body">
+                <p class="card__subtitle">Create a ticket-only invoice draft and require approval before it is pushed to Xero.</p>
+                <button type="button" class="button button--primary button--small" data-ticket-bill-now="{{ ticket.id }}">
+                  Bill Now
+                </button>
+              </div>
+            </article>
           {% endif %}
 
           {% if relevant_kb_articles %}
@@ -1887,6 +1899,38 @@
         const html = event && event.detail && typeof event.detail.html === 'string' ? event.detail.html : '';
         descriptionEditor.setContents(html);
         syncDescriptionField();
+      });
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const billNowButton = document.querySelector('[data-ticket-bill-now]');
+      if (!billNowButton) {
+        return;
+      }
+      billNowButton.addEventListener('click', async () => {
+        const ticketId = billNowButton.getAttribute('data-ticket-bill-now');
+        if (!ticketId) {
+          return;
+        }
+        if (!window.confirm('Create a manual invoice draft for this ticket now?')) {
+          return;
+        }
+        billNowButton.disabled = true;
+        try {
+          const response = await fetch('/api/invoices/bill-now', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticketId: Number(ticketId), approvalRequired: true })
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(payload.detail?.reason || payload.detail || 'Unable to create manual invoice draft.');
+          }
+          window.location.href = payload.redirectUrl || `/invoices/${payload.invoice_id}`;
+        } catch (error) {
+          window.alert(error.message || 'Unable to create manual invoice draft.');
+          billNowButton.disabled = false;
+        }
       });
     });
 
