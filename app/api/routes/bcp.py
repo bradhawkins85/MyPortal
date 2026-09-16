@@ -23,8 +23,7 @@ router = APIRouter(prefix="/bcp", tags=["Business Continuity Planning"])
 
 settings = get_settings()
 
-_build_page_base_context: Callable[..., Awaitable[dict[str, Any]]] | None = None
-_page_templates: Any | None = None
+_page_rendering: tuple[Callable[..., Awaitable[dict[str, Any]]], Any] | None = None
 
 
 def configure_page_rendering(
@@ -34,15 +33,14 @@ def configure_page_rendering(
 ) -> None:
     """Bind shared page-rendering dependencies during application assembly."""
 
-    global _build_page_base_context, _page_templates
-    _build_page_base_context = build_base_context
-    _page_templates = templates
+    global _page_rendering
+    _page_rendering = (build_base_context, templates)
 
 
 def _get_page_rendering() -> tuple[Callable[..., Awaitable[dict[str, Any]]], Any]:
-    if _build_page_base_context is None or _page_templates is None:
+    if _page_rendering is None:
         raise RuntimeError("BCP page rendering has not been configured")
-    return _build_page_base_context, _page_templates
+    return _page_rendering
 
 
 def _display_user_name(user: dict[str, Any] | None) -> str:

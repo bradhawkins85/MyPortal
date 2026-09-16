@@ -81,11 +81,10 @@ async def test_bcp_glossary_uses_configured_rendering_seam(monkeypatch):
             return {"template_name": template_name, "context": context}
 
     monkeypatch.setattr(bcp, "_require_bcp_view", fake_require_bcp_view)
-    monkeypatch.setattr(bcp, "_build_page_base_context", bcp._build_page_base_context)
-    monkeypatch.setattr(bcp, "_page_templates", bcp._page_templates)
-    bcp.configure_page_rendering(
-        build_base_context=fake_build_base_context,
-        templates=FakeTemplates(),
+    monkeypatch.setattr(
+        bcp,
+        "_page_rendering",
+        (fake_build_base_context, FakeTemplates()),
     )
 
     response = await bcp.bcp_glossary(request)
