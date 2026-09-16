@@ -8505,7 +8505,11 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             except M365Error as exc:
                 granted = False
                 success = False
-                outcome_message = str(exc)
+                outcome_message = (
+                    _forms_permission_guidance("update Microsoft Forms settings")
+                    if exc.http_status == 403
+                    else f"Microsoft Graph failed to update Microsoft Forms settings: {exc}"
+                )
                 permission_repair_error = ""
                 if exc.http_status == 403:
                     try:
@@ -8532,7 +8536,15 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                         )
                     except Exception as retry_exc:  # noqa: BLE001 – normalize retry errors into remediation failure
                         success = False
-                        outcome_message = str(retry_exc)
+                        if (
+                            isinstance(retry_exc, M365Error)
+                            and retry_exc.http_status == 403
+                        ):
+                            outcome_message = _forms_permission_guidance(
+                                "update Microsoft Forms settings"
+                            )
+                        else:
+                            outcome_message = str(retry_exc)
                         log_error(
                             "M365 internal phishing Forms remediation failed after permission repair",
                             company_id=company_id,
@@ -8540,15 +8552,11 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                             error=outcome_message,
                         )
                 else:
-                    if exc.http_status == 403:
-                        outcome_message = _forms_permission_guidance(
-                            "update Microsoft Forms settings"
+                    if exc.http_status == 403 and permission_repair_error:
+                        outcome_message = (
+                            f"{outcome_message} Automatic permission repair also failed: "
+                            f"{permission_repair_error}"
                         )
-                        if permission_repair_error:
-                            outcome_message = (
-                                f"{outcome_message} Automatic permission repair also failed: "
-                                f"{permission_repair_error}"
-                            )
                 if not success:
                     log_error(
                         "M365 internal phishing Forms remediation failed",

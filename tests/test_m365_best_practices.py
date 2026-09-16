@@ -863,7 +863,10 @@ async def test_remediate_check_internal_phishing_forms_update_failure_reports_gr
         )
 
     assert result["success"] is False
-    assert result["message"] == "Remediation command failed: Microsoft Graph PATCH failed (500): boom"
+    assert result["message"] == (
+        "Remediation command failed: Microsoft Graph failed to update Microsoft Forms "
+        "settings: Microsoft Graph PATCH failed (500): boom"
+    )
     assert update_status.await_args.kwargs["remediation_status"] == "failed"
 
 
