@@ -9,18 +9,24 @@ from app.services import conditional_expressions, value_templates
 
 _HAS_SIGALRM_TIMEOUT = hasattr(signal, "SIGALRM") and hasattr(signal, "setitimer")
 
-@contextmanager
-def _time_limit(seconds: float):
-    def _raise_timeout(signum, frame):
-        raise TimeoutError(f"parser exceeded {seconds} second limit")
+if _HAS_SIGALRM_TIMEOUT:
+    @contextmanager
+    def _time_limit(seconds: float):
+        def _raise_timeout(signum, frame):
+            raise TimeoutError(f"parser exceeded {seconds} second limit")
 
-    previous_handler = signal.signal(signal.SIGALRM, _raise_timeout)
-    signal.setitimer(signal.ITIMER_REAL, seconds)
-    try:
+        previous_handler = signal.signal(signal.SIGALRM, _raise_timeout)
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+        try:
+            yield
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous_handler)
+else:
+    @contextmanager
+    def _time_limit(seconds: float):
+        raise RuntimeError("SIGALRM-based timeout is only available on Unix-like platforms")
         yield
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous_handler)
 
 
 @pytest.mark.skipif(

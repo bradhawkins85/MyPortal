@@ -116,7 +116,7 @@ def _iter_conditional_matches(
             continue
 
         after_if = cursor + 2
-        if after_if >= text_length or not text[after_if].isspace():
+        if after_if >= parse_limit or not text[after_if].isspace():
             search_from = start + 2
             continue
 
