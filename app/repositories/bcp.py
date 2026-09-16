@@ -3,7 +3,7 @@ Repository for BCP (Business Continuity Planning) operations.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.core.database import db
@@ -1515,7 +1515,7 @@ async def close_incident(incident_id: int) -> dict[str, Any] | None:
     """
     async with db.connection() as conn:
         async with conn.cursor() as cursor:
-            await cursor.execute(query, (datetime.utcnow(), incident_id))
+            await cursor.execute(query, (datetime.now(timezone.utc), incident_id))
             await conn.commit()
     
     return await get_incident_by_id(incident_id)
@@ -2659,7 +2659,7 @@ async def list_recovery_actions(
         from datetime import datetime
         conditions.append("ra.due_date < %s")
         conditions.append("ra.completed_at IS NULL")
-        params.append(datetime.utcnow())
+        params.append(datetime.now(timezone.utc))
     
     where_clause = " AND ".join(conditions)
     

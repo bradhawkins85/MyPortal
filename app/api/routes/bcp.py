@@ -3,7 +3,7 @@ BCP (Business Continuity Planning) routes and page handlers.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request, status
@@ -56,7 +56,7 @@ def _build_bcp_kpi_items(
     )
     rto_pct = int((rto_covered / total_activities) * 100) if total_activities else 0
 
-    recent_window = datetime.utcnow() - timedelta(days=365)
+    recent_window = datetime.now(timezone.utc) - timedelta(days=365)
     completed_exercises = sum(
         1
         for item in training_items
@@ -722,7 +722,7 @@ async def bcp_recovery(
             "status_filter": status_filter,
             "activity_filter": activity_filter,
             "can_edit": user.get("is_super_admin") or await membership_repo.user_has_permission(user["id"], "bcp:edit"),
-            "now": datetime.utcnow(),
+            "now": datetime.now(timezone.utc),
         },
     )
     
@@ -1184,7 +1184,7 @@ async def bcp_roles(request: Request):
     # Get all users for assignment dropdown
     all_users = await user_repo.list_users()
     collaboration_audit = await audit_log_repo.list_audit_logs(
-        action="bcp.role_assignment",
+        entity_type="bcp_role_assignment",
         limit=10,
     )
     collaboration_audit = [
@@ -2622,7 +2622,7 @@ async def start_incident(request: Request):
         return flash_redirect("/bcp/incident", "An incident is already active", "error")
     
     # Create new incident
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     incident = await bcp_repo.create_incident(plan["id"], now, source="Manual")
     
     # Initialize checklist ticks
@@ -2680,7 +2680,7 @@ async def close_incident_endpoint(request: Request):
     await bcp_repo.close_incident(active_incident["id"])
     
     # Add event log entry
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     user_name = user.get("name", "")
     initials = "".join([part[0].upper() for part in user_name.split()[:2]]) if user_name else "SYS"
     
@@ -2728,7 +2728,7 @@ async def update_incident_after_action_endpoint(
         incident_id,
         after_action_summary=after_action_summary if after_action_summary else None,
         after_action_improvements=after_action_improvements if after_action_improvements else None,
-        after_action_reviewed_at=datetime.utcnow(),
+        after_action_reviewed_at=datetime.now(timezone.utc),
     )
     await audit.record(
         action="bcp.incident.after_action.update",
@@ -2761,7 +2761,7 @@ async def toggle_checklist_item(
     
     # Toggle the tick
     new_state = not tick["is_done"]
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     
     await bcp_repo.toggle_checklist_tick(tick_id, new_state, user["id"], now)
     
@@ -2880,9 +2880,9 @@ async def create_event_log_entry_endpoint(
         try:
             event_time = datetime.fromisoformat(happened_at.replace('Z', '+00:00'))
         except ValueError:
-            event_time = datetime.utcnow()
+            event_time = datetime.now(timezone.utc)
     else:
-        event_time = datetime.utcnow()
+        event_time = datetime.now(timezone.utc)
     
     # Get user initials
     user_name = user.get("name", "")
@@ -3083,7 +3083,7 @@ async def webhook_start_incident(request: Request):
         return response_data
     
     # Create new incident
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     incident = await bcp_repo.create_incident(plan["id"], now, source=source)
     
     # Initialize checklist ticks
@@ -3301,7 +3301,7 @@ async def mark_emergency_kit_item_checked_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     
     # Mark as checked
-    await bcp_repo.mark_emergency_kit_item_checked(item_id, datetime.utcnow())
+    await bcp_repo.mark_emergency_kit_item_checked(item_id, datetime.now(timezone.utc))
     
     # Redirect to the appropriate tab
     tab = "documents" if item["category"] == "Document" else "equipment"
@@ -3459,7 +3459,7 @@ async def mark_recovery_action_complete_endpoint(
     
     from datetime import datetime
     
-    updated = await bcp_repo.mark_recovery_action_complete(action_id, datetime.utcnow())
+    updated = await bcp_repo.mark_recovery_action_complete(action_id, datetime.now(timezone.utc))
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recovery action not found")
     
