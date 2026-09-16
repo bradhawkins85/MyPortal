@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.database import require_database
+from app.core.logging import log_error
 from app.core.config import get_templates_config
 from app.repositories import port_documents as port_documents_repo
 from app.repositories import port_pricing as port_pricing_repo
@@ -193,9 +194,13 @@ async def delete_port_document(
     await port_documents_repo.delete_document(document_id)
     try:
         delete_stored_file(document["storage_path"], _uploads_root)
-    except HTTPException:
+    except HTTPException as exc:
         # If the path is invalid we still consider the DB delete authoritative.
-        pass
+        log_error(
+            "Port document file cleanup skipped after delete",
+            document_id=document_id,
+            error=str(exc),
+        )
     await emit_notification(
         event_type="port.document_deleted",
         message=f"Document {document['file_name']} removed from {port['name']}",

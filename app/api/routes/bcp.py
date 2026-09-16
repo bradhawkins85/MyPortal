@@ -472,7 +472,7 @@ async def bcp_risks(request: Request, severity: str = Query(None), heatmap_filte
             likelihood, impact = map(int, heatmap_filter.split(","))
             risks = [r for r in risks if r.get("likelihood") == likelihood and r.get("impact") == impact]
         except (ValueError, AttributeError):
-            pass
+            heatmap_filter = ""
     
     # Get heatmap data
     heatmap_data = await bcp_repo.get_risk_heatmap_data(plan["id"])
@@ -1949,7 +1949,7 @@ async def create_insurance_policy(
             from datetime import datetime
             review_date = datetime.fromisoformat(last_review_date)
         except ValueError:
-            pass
+            review_date = None
     
     await bcp_repo.create_insurance_policy(
         plan["id"],
@@ -1987,7 +1987,7 @@ async def update_insurance_policy(
             from datetime import datetime
             review_date = datetime.fromisoformat(last_review_date)
         except ValueError:
-            pass
+            review_date = None
     
     updated = await bcp_repo.update_insurance_policy(
         policy_id,
@@ -3370,7 +3370,7 @@ async def create_recovery_action_endpoint(
             from datetime import datetime
             due_date_obj = datetime.fromisoformat(due_date)
         except ValueError:
-            pass
+            due_date_obj = None
     
     # Validate RTO if provided
     if rto_hours is not None and rto_hours < 0:
@@ -3424,7 +3424,7 @@ async def update_recovery_action_endpoint(
             from datetime import datetime
             due_date_obj = datetime.fromisoformat(due_date)
         except ValueError:
-            pass
+            due_date_obj = None
     
     # Validate RTO if provided
     if rto_hours is not None and rto_hours < 0:
@@ -3880,7 +3880,7 @@ async def create_insurance_claim_endpoint(
             from datetime import datetime
             claim_date_obj = datetime.fromisoformat(claim_date)
         except ValueError:
-            pass
+            claim_date_obj = None
     
     await bcp_repo.create_insurance_claim(
         plan["id"],
@@ -3912,7 +3912,7 @@ async def update_insurance_claim_endpoint(
             from datetime import datetime
             claim_date_obj = datetime.fromisoformat(claim_date)
         except ValueError:
-            pass
+            claim_date_obj = None
     
     updated = await bcp_repo.update_insurance_claim(
         claim_id,

@@ -258,7 +258,7 @@ def ensure_datetime(value: Any) -> datetime:
         try:
             return datetime.fromisoformat(value)
         except ValueError:
-            pass
+            return datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S")
     return datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S")
 
 

@@ -1080,7 +1080,7 @@ async def send_email_via_api(
             try:
                 response_text = exc.response.text
             except Exception:
-                pass
+                response_text = None
         
         logger.error(
             "SMTP2Go API HTTP error",

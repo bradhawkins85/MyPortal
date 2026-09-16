@@ -262,7 +262,7 @@ def _extract_json_object(text: str) -> dict[str, Any]:
         parsed = json.loads(text)
         return parsed if isinstance(parsed, dict) else {}
     except json.JSONDecodeError:
-        pass
+        parsed = {}
     start = text.find("{")
     end = text.rfind("}")
     if start >= 0 and end > start:

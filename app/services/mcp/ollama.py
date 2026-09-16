@@ -936,7 +936,7 @@ async def _get_application_logs(
                     if entry_ts < since_filter:
                         continue
                 except ValueError:
-                    pass
+                    entry_ts = since_filter
             parsed.append(
                 {
                     "timestamp": m.group("ts"),

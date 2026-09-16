@@ -131,7 +131,7 @@ async def portal_tickets_page(request: Request):
                     search_term = str(filters["search"])
         except (TypeError, ValueError, RuntimeError):
             # If we can't load the default view, just continue without it
-            pass
+            filters = {}
 
     return await _main()._render_portal_tickets_page(
         request,
@@ -232,8 +232,12 @@ async def portal_create_ticket(request: Request):
 
         try:
             await tickets_service.refresh_ticket_ai_summary(ticket["id"])
-        except RuntimeError:
-            pass
+        except RuntimeError as exc:
+            log_error(
+                "Portal ticket AI summary refresh skipped after create",
+                ticket_id=ticket["id"],
+                error=str(exc),
+            )
         await tickets_service.refresh_ticket_ai_tags(ticket["id"])
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to create portal ticket", error=str(exc))
@@ -307,7 +311,7 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
                 try:
                     allowed_company_ids.add(int(active_company_id))
                 except (TypeError, ValueError):
-                    pass
+                    active_company_id = None
             if not allowed_company_ids:
                 for entry in available_companies:
                     try:
@@ -430,8 +434,12 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
 
     try:
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
-    except RuntimeError:
-        pass
+    except RuntimeError as exc:
+        log_error(
+            "Portal ticket AI summary refresh skipped after reply",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
     actor_type = "technician" if has_helpdesk_access or is_super_admin else "requester"
     reply_event_payload = dict(created_reply)

@@ -1739,7 +1739,7 @@ class SchedulerService:
             try:
                 _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
             except OSError:
-                pass
+                return
             return
 
         try:
@@ -1795,7 +1795,7 @@ class SchedulerService:
             try:
                 _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
             except FileNotFoundError:
-                pass
+                return
             except OSError as exc:
                 log_error(
                     "Failed to clear feature pack reload flag",
@@ -1929,7 +1929,7 @@ class SchedulerService:
             os.chmod(_SYSTEM_UPDATE_FLAG_PATH.parent, 0o700)
         except OSError:
             # Best-effort permission hardening; failures are non-fatal for scheduling.
-            pass
+            return
 
     async def _get_git_ref(self, ref: str) -> str | None:
         process = await asyncio.create_subprocess_exec(

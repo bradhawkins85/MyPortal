@@ -108,7 +108,7 @@ def _count_tokens(text: str) -> int:
             encoding = tiktoken.get_encoding("cl100k_base")
             return len(encoding.encode(text))
         except Exception:  # pragma: no cover - defensive fallback for model data issues
-            pass
+            return max(1, (len(text) + 3) // 4)
     return max(1, (len(text) + 3) // 4)
 
 
@@ -1642,13 +1642,14 @@ async def execute_agent_query(
                 ticket_company_id = ticket.get("company_id")
                 requester_id = ticket.get("requester_id")
                 can_access_ticket = is_super_admin or requester_id == user_id
-                try:
-                    can_access_ticket = (
-                        can_access_ticket
-                        or int(ticket_company_id or 0) in accessible_company_ids
-                    )
-                except (TypeError, ValueError):
-                    pass
+                if ticket_company_id is not None:
+                    try:
+                        can_access_ticket = (
+                            can_access_ticket
+                            or int(ticket_company_id or 0) in accessible_company_ids
+                        )
+                    except (TypeError, ValueError):
+                        ticket_company_id = None
                 if not can_access_ticket:
                     can_access_ticket = await tickets_repo.is_ticket_watcher(
                         explicit_ticket_id, user_id

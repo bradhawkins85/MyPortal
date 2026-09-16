@@ -156,7 +156,7 @@ async def company_overview_report_pdf(request: Request):
                 encoded = base64.b64encode(cover_file.read_bytes()).decode("ascii")
                 pdf_cover_image_data_uri = f"data:{mime};base64,{encoded}"
         except (ValueError, OSError):
-            pass
+            pdf_cover_image_data_uri = None
 
     report = await company_report_layout.build(company_id, company)
     base_context = await _main()._build_base_context(

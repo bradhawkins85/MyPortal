@@ -452,8 +452,13 @@ async def _remediate_global_admin_count(graph_token: str, company_id: int) -> tu
                 if resource:
                     try:
                         await _graph_delete(graph_token, f"https://graph.microsoft.com/v1.0/{resource}")
-                    except Exception:
-                        pass
+                    except Exception as cleanup_exc:
+                        log_error(
+                            "Failed to clean up partially provisioned M365 emergency admin",
+                            company_id=company_id,
+                            resource=resource,
+                            error=str(cleanup_exc),
+                        )
             raise
     return True, f"Created {created} Global Administrator account(s) and stored each password separately in Hudu."
 

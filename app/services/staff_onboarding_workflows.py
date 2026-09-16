@@ -3210,7 +3210,7 @@ async def _execute_policy_steps(
                 if isinstance(parsed_grant, list):
                     grant_emails = [str(e) for e in parsed_grant if e]
             except (json.JSONDecodeError, TypeError):
-                pass
+                grant_emails = []
         vars_map["offboarding.out_of_office_message"] = ooo_message
         vars_map["offboarding.email_forward_to"] = forward_to
         vars_map["offboarding.mailbox_grant_emails"] = grant_emails

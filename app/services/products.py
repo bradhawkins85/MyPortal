@@ -396,7 +396,7 @@ def _extract_stock_code_from_item_xml(item_xml: str) -> str | None:
     try:
         cleaned = html.unescape(cleaned)
     except Exception:
-        pass
+        return cleaned.strip() or None
     return cleaned.strip() or None
 
 

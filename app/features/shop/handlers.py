@@ -1649,7 +1649,7 @@ async def admin_bulk_dismiss_optional_accessories(request: Request):
         try:
             ids.append(int(raw))
         except (ValueError, TypeError):
-            pass
+            continue
 
     if ids:
         await shop_repo.bulk_dismiss_pending_optional_accessories(ids)
@@ -2715,7 +2715,7 @@ async def admin_update_shop_product(
         if page_size_str.isdigit() and int(page_size_str) > 0:
             redirect_params["pageSize"] = page_size_str
     except KeyError:
-        pass
+        redirect_params = dict(redirect_params)
     redirect_url = f"/admin/shop?{urlencode(redirect_params)}" if redirect_params else "/admin/shop"
     return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 

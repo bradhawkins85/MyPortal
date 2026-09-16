@@ -142,3 +142,59 @@ def test_generated_admin_password_has_required_character_classes():
     assert any(char.islower() for char in password)
     assert any(char.isdigit() for char in password)
     assert any(char in "!@#$%^&*-_=+" for char in password)
+
+
+def test_global_admin_remediation_preserves_original_failure_when_cleanup_fails():
+    async def run():
+        delete_calls = []
+
+        async def graph_get(_token, url):
+            if "directoryRoles" in url:
+                return {"value": [{"id": "role-1"}]}
+            return {
+                "value": [{"id": "example.com", "isDefault": True, "isVerified": True}]
+            }
+
+        async def graph_post(_token, url, payload):
+            if url.endswith("/users"):
+                return {"id": "user-1"}
+            return {"id": "assignment-1"}
+
+        async def graph_delete(_token, url):
+            delete_calls.append(url)
+            raise RuntimeError("cleanup failed")
+
+        with (
+            patch.object(
+                service.companies_repo,
+                "get_company_by_id",
+                new=AsyncMock(return_value={"hudu_id": "42"}),
+            ),
+            patch.object(service.hudu_service, "validate_configuration", new=AsyncMock()),
+            patch.object(
+                service.hudu_service,
+                "create_asset_password",
+                new=AsyncMock(side_effect=RuntimeError("primary failure")),
+            ),
+            patch.object(service, "_graph_get", side_effect=graph_get),
+            patch.object(service, "_graph_get_all", new=AsyncMock(return_value=[])),
+            patch.object(service, "_graph_post", side_effect=graph_post),
+            patch.object(
+                service,
+                "_post_app_role_assignment_with_retry",
+                new=AsyncMock(return_value={"id": "assignment-1"}),
+            ),
+            patch.object(service, "_graph_delete", side_effect=graph_delete),
+            patch.object(service, "log_error") as log_error,
+        ):
+            try:
+                await service._remediate_global_admin_count("token", 7)
+            except RuntimeError as exc:
+                assert str(exc) == "primary failure"
+            else:
+                raise AssertionError("Expected remediation to re-raise the primary failure")
+
+        assert len(delete_calls) == 2
+        assert log_error.call_count == 2
+
+    asyncio.run(run())

@@ -313,7 +313,7 @@ if _version_file.is_file():
     try:
         _APP_VERSION = _version_file.read_text().strip()
     except Exception:
-        pass
+        _APP_VERSION = ""
 
 _PWA_SERVICE_WORKER_PATH = templates_config.static_path / "service-worker.js"
 _PWA_ICON_SOURCES = [
@@ -600,7 +600,7 @@ async def _get_extra_csp_script_sources() -> list[str]:
     except Exception:
         # If we fail to get module config, return empty list
         # The CSP will still work with default sources
-        pass
+        sources = []
     
     return sources
 
@@ -1012,7 +1012,7 @@ async def refresh_updates(websocket: WebSocket) -> None:
             # detect client disconnects promptly.
             await websocket.receive_text()
     except WebSocketDisconnect:
-        pass
+        return
     finally:
         await refresh_notifier.disconnect(websocket)
 
@@ -2202,7 +2202,7 @@ async def _build_base_context(
                 if parsed.scheme in ("https", "http") and parsed.netloc and not any(c in base_url for c in ["<", ">", '"', "'"]):
                     valid_base_url = True
             except Exception:
-                pass
+                valid_base_url = False
         
         if site_domain:
             # Domain must only contain alphanumeric, dots, hyphens, underscores and optional port
@@ -4686,8 +4686,12 @@ async def sync_m365(request: Request):
     mailboxes_synced = 0
     try:
         mailboxes_synced = await m365_service.sync_mailboxes(company_id)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_error(
+            "Microsoft 365 mailbox sync failed after license sync",
+            company_id=company_id,
+            error=str(exc),
+        )
     log_info("Microsoft 365 license sync triggered", company_id=company_id, user_id=user.get("id"))
     return JSONResponse({"success": True, "mailboxes_synced": mailboxes_synced})
 
@@ -4980,7 +4984,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 elif state_data.get("flow") == "user_m365_contacts":
                     error_redirect = "/admin/profile"
             except Exception:
-                pass
+                state_data = {}
         # AADSTS700016 means the PKCE app registration no longer exists in the
         # tenant (it was deleted). Clear the stale pkce_client_id (including
         # any company-specific value) so that the next sign-in attempt falls
@@ -5586,8 +5590,12 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # Re-run the diagnostics check so the page shows fresh results after repair.
         try:
             await m365_service.check_enterprise_app_permissions(company_id)
-        except m365_service.M365Error:
-            pass
+        except m365_service.M365Error as exc:
+            log_error(
+                "M365 diagnostics re-check failed after permission repair",
+                company_id=company_id,
+                error=str(exc),
+            )
         return flash_redirect("/m365/diagnostics", "Permissions repaired and re-checked", "success")
     return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -7822,8 +7830,11 @@ async def admin_tray_branding_delete(request: Request):
                 or uploads_root_resolved in candidate.parents
             ) and candidate.is_file():
                 candidate.unlink()
-        except OSError:
-            pass
+        except OSError as exc:
+            log_error(
+                "Tray icon file cleanup skipped during reset",
+                error=str(exc),
+            )
     await site_settings_repo.set_tray_icon_path(None)
     await audit_service.log_action(
         action="admin.tray.icon.delete",
@@ -8898,7 +8909,7 @@ async def _render_portal_ticket_detail(
                 try:
                     allowed_company_ids.add(int(active_company_id))
                 except (TypeError, ValueError):
-                    pass
+                    active_company_id = None
             if not allowed_company_ids:
                 for entry in available_companies:
                     try:
@@ -9582,7 +9593,7 @@ async def _load_ticket_stored_related_items(ticket_id: int, *, limit: int = 12) 
                 if int(source_id) == ticket_id:
                     continue
             except (TypeError, ValueError):
-                pass
+                source_id = None
         url = _ticket_related_safe_url(row.get("url")) or _ticket_related_fallback_url(source_type, source_id)
         if not url or url in seen_urls:
             continue
