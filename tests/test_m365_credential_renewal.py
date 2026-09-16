@@ -333,6 +333,8 @@ async def test_renew_admin_client_secret_403_requires_reprovision():
         "Microsoft Graph POST failed (403): denied",
         http_status=403,
     )
+    mock_settings = MagicMock()
+    mock_settings.m365_client_secret_lifetime_days = 730
 
     with (
         patch.object(
@@ -344,7 +346,7 @@ async def test_renew_admin_client_secret_403_requires_reprovision():
             AsyncMock(return_value=("old-token", None, None)),
         ),
         patch.object(m365_service, "_graph_post", AsyncMock(side_effect=graph_exc)),
-        patch("app.services.m365.get_settings", return_value=MagicMock()),
+        patch("app.services.m365.get_settings", return_value=mock_settings),
     ):
         with pytest.raises(
             m365_service.M365ReprovisionRequiredError,

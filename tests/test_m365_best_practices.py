@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, call, patch
 import pytest
 
 from app.services import m365_best_practices as bp_service
-from app.services.m365 import M365Error
+from app.services.m365 import M365Error, M365ReprovisionRequiredError
 
 
 def test_get_secure_score_summary_returns_numeric_values():
@@ -2848,7 +2848,7 @@ async def test_remediate_app_credential_expiry_surfaces_reprovision_guidance():
         patch(
             "app.services.m365_best_practices.renew_admin_client_secret",
             new_callable=AsyncMock,
-            side_effect=m365_service.M365ReprovisionRequiredError(
+            side_effect=M365ReprovisionRequiredError(
                 "Automatic MyPortal PKCE/bootstrap admin credential renewal requires "
                 "Application.ReadWrite.OwnedBy and the app to be registered as an owner "
                 "of its own app registration. Re-provision the managed admin app and retry."

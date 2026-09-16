@@ -2227,9 +2227,9 @@ async def renew_client_secret(company_id: int) -> None:
     except M365Error as exc:
         if exc.http_status == 403:
             raise M365ReprovisionRequiredError(
-                "Automatic MyPortal PKCE/bootstrap admin credential renewal requires "
+                "Automatic Microsoft 365 client credential renewal requires "
                 "Application.ReadWrite.OwnedBy and the app to be registered as an owner "
-                "of its own app registration. Re-provision the managed admin app and retry."
+                "of its own app registration. Re-provision the managed app and retry."
             ) from exc
         raise
     new_secret: str = secret_data["secretText"]
@@ -2325,16 +2325,25 @@ async def renew_admin_client_secret(company_id: int | None = None) -> dict[str, 
     new_expiry_date = date.today() + timedelta(days=secret_lifetime_days)
     new_expiry_str = new_expiry_date.isoformat() + "T00:00:00Z"
 
-    secret_data = await _graph_post(
-        access_token,
-        f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/addPassword",
-        {
-            "passwordCredential": {
-                "displayName": _M365_SECRET_DISPLAY_NAME,
-                "endDateTime": new_expiry_str,
-            }
-        },
-    )
+    try:
+        secret_data = await _graph_post(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/addPassword",
+            {
+                "passwordCredential": {
+                    "displayName": _M365_SECRET_DISPLAY_NAME,
+                    "endDateTime": new_expiry_str,
+                }
+            },
+        )
+    except M365Error as exc:
+        if exc.http_status == 403:
+            raise M365ReprovisionRequiredError(
+                "Automatic MyPortal PKCE/bootstrap admin credential renewal requires "
+                "Application.ReadWrite.OwnedBy and the app to be registered as an owner "
+                "of its own app registration. Re-provision the managed admin app and retry."
+            ) from exc
+        raise
     new_secret: str = secret_data["secretText"]
     new_key_id: str | None = secret_data.get("keyId")
     new_expires_at = datetime(
