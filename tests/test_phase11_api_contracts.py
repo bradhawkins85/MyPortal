@@ -18,6 +18,7 @@ from app.main import app, automations_service, change_log_service, modules_servi
 from app.schemas.auth import LoginResponse, RegistrationPendingResponse
 from app.schemas.knowledge_base import KnowledgeBaseFeedbackCreateResponse
 from app.schemas.tickets import TicketStatusListResponse
+from app.schemas.xero import XeroTenantListResponse
 from app.security.session import SessionData, session_manager
 from app.services import tickets as tickets_service
 
@@ -299,6 +300,6 @@ def test_feedback_ticket_status_and_xero_tenant_flows_match_documented_models(mo
         TicketStatusListResponse.model_validate(ticket_statuses_response.json())
 
         assert xero_tenants_response.status_code == 200
-        xero_routes.XeroTenantListResponse.model_validate(xero_tenants_response.json())
+        XeroTenantListResponse.model_validate(xero_tenants_response.json())
     finally:
         app.dependency_overrides.clear()

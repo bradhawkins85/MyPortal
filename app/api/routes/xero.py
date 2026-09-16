@@ -15,7 +15,6 @@ from fastapi.responses import RedirectResponse
 from itsdangerous import URLSafeSerializer
 from itsdangerous import BadSignature
 from loguru import logger
-from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.dependencies.modules import require_module_enabled
 from app.core.config import Settings, get_settings
@@ -23,6 +22,7 @@ from app.security.flash import flash_redirect
 from app.core.logging import log_error, log_info
 from app.repositories import invoices as invoice_repo
 from app.repositories import users as user_repo
+from app.schemas.xero import XeroCallbackResponse, XeroTenantConnection, XeroTenantListResponse
 from app.security.session import session_manager
 from app.services import modules as modules_service
 from app.services import audit as audit_service
@@ -32,28 +32,6 @@ router = APIRouter(prefix="/api/integration-modules/xero", tags=["Xero"], depend
 oauth_router = APIRouter(prefix="/xero", tags=["Xero OAuth"], dependencies=[Depends(_require_xero_enabled)])
 
 _settings: Settings | None = None
-
-
-class XeroCallbackResponse(BaseModel):
-    status: str
-
-
-class XeroTenantConnection(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    tenant_id: str | None = Field(default=None, alias="tenantId", description="Xero tenant identifier.")
-    tenant_name: str | None = Field(default=None, alias="tenantName", description="Display name of the Xero tenant.")
-    tenant_type: str | None = Field(default=None, alias="tenantType", description="Xero tenant type, such as ORGANISATION.")
-    created_date_utc: datetime | None = Field(
-        default=None,
-        alias="createdDateUtc",
-        description="Tenant creation timestamp returned by Xero in UTC.",
-    )
-
-
-class XeroTenantListResponse(BaseModel):
-    tenants: list[XeroTenantConnection]
-    current_tenant_id: str | None = None
 
 
 def _get_settings() -> Settings:
