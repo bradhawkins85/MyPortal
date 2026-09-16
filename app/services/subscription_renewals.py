@@ -239,6 +239,16 @@ async def _build_group_renewal_items(
     )
     company_licenses = await license_repo.list_company_licenses(company_id)
     staff_by_license = await license_repo.list_staff_by_license_for_company(company_id)
+    product_ids = sorted(
+        {
+            int(subscription["product_id"])
+            for subscription in subscriptions
+            if subscription.get("product_id") is not None
+        }
+    )
+    products_by_id: dict[int, dict[str, Any]] = {}
+    for product_id in product_ids:
+        products_by_id[product_id] = await shop_repo.get_product_by_id(product_id) or {}
 
     licenses_by_key: dict[str, dict[str, Any]] = {}
     for record in company_licenses:
@@ -253,7 +263,7 @@ async def _build_group_renewal_items(
 
     renewal_items: list[dict[str, Any]] = []
     for subscription in subscriptions:
-        product = await shop_repo.get_product_by_id(int(subscription["product_id"])) or {}
+        product = products_by_id.get(int(subscription["product_id"]), {})
         renewal_quantity = _calculate_renewal_quantity(
             subscription,
             pending_changes.get(str(subscription["id"]), []),
@@ -724,7 +734,22 @@ def build_churn_risk_report(
 
 
 async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
-    """Process 60-day renewal reminders and 30-day automated renewal invoices."""
+    """Process subscription renewals due within the configured 60/30 day windows.
+
+    Args:
+        target_date: The application-local date for the scheduler run.
+
+    Returns:
+        Summary dict containing:
+        - processed_count: Unique subscriptions evaluated in the renewal window.
+        - reminder_count: Renewal groups for which reminder work ran.
+        - invoice_count: Renewal groups for which an invoice was generated.
+        - customer_count: Unique customers with eligible subscriptions in scope.
+        - skipped_count: Renewal groups that required no new reminder/invoice work.
+        - error_count: Number of reminder or invoice issues recorded for follow-up.
+        - processed_subscription_ids: Unique subscription IDs evaluated.
+        - issues: Structured reminder/invoice issues for staff follow-up.
+    """
     logger.info("Starting subscription renewal processing", target_date=target_date)
     subscriptions = await subscriptions_repo.list_subscriptions(
         end_before=target_date + timedelta(days=_REMINDER_WINDOW_DAYS + 1),
