@@ -12,7 +12,9 @@
           <tr>
             <th>Check</th>
             <th>Status</th>
+            <th>Priority</th>
             <th>Details</th>
+            <th>Business impact</th>
             <th>Notes</th>
             <th>Remediation</th>
             <th>Last run</th>
@@ -26,7 +28,16 @@
               <td>
                 <span class="status status--{{ status_map.get(check.status, 'neutral') }}">{{ check.status or '—' }}</span>
               </td>
+              <td>
+                {% if check.risk_severity %}
+                  <strong>{{ check.risk_severity|title }}</strong>
+                  <br /><small class="text-muted">{{ check.risk_score or 0 }}/100</small>
+                {% else %}
+                  —
+                {% endif %}
+              </td>
               <td>{{ check.details or '—' }}</td>
+              <td>{{ check.business_impact or check.benchmark_category or '—' }}</td>
               <td>{{ check.notes or '—' }}</td>
               <td>{{ check.remediation_status or '—' }}</td>
               <td>

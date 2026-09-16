@@ -5699,12 +5699,167 @@ _CIS_GROUP_RUNNERS: dict[str, Callable[..., Any]] = {
     "intune_macos": run_intune_macos_benchmarks,
 }
 
+_BATCH_REMEDIATION_SCOPES: dict[str, str] = {
+    "m365": "Microsoft 365",
+    "intune_windows": "CIS Intune Benchmark – Windows",
+    "intune_ios": "CIS Intune Benchmark – iOS / iPadOS",
+    "intune_macos": "CIS Intune Benchmark – macOS",
+}
+
+_CRITICAL_RISK_CHECK_IDS = frozenset(
+    {
+        "bp_block_legacy_auth",
+        "bp_disable_direct_send",
+        "bp_per_user_mfa_disabled",
+        "bp_smtp_auth_disabled",
+        "bp_automatic_email_forwarding",
+        "bp_weak_auth_methods_disabled",
+        "bp_authenticator_mfa_fatigue",
+        "bp_internal_phishing_forms",
+    }
+)
+_RISK_SCORE_BY_SEVERITY = {
+    "low": 20,
+    "medium": 45,
+    "high": 70,
+    "critical": 90,
+}
+_STATUS_PRIORITY_ORDER = {
+    STATUS_FAIL: 0,
+    STATUS_UNKNOWN: 1,
+    STATUS_PASS: 2,
+    STATUS_NOT_APPLICABLE: 3,
+}
+_REGRESSION_NOTICE = (
+    "Regression detected: this check changed from pass to fail since the last successful evaluation."
+)
+
+
+def _benchmark_category_label(bp: Mapping[str, Any]) -> str:
+    return _BATCH_REMEDIATION_SCOPES.get(str(bp.get("cis_group") or "").strip(), "Microsoft 365")
+
+
+def _batch_scope_for_bp(bp: Mapping[str, Any]) -> str:
+    cis_group = str(bp.get("cis_group") or "").strip()
+    return cis_group if cis_group in _BATCH_REMEDIATION_SCOPES else "m365"
+
+
+def _risk_severity_for_bp(bp: Mapping[str, Any]) -> str:
+    check_id = str(bp.get("id") or "")
+    if check_id in _CRITICAL_RISK_CHECK_IDS:
+        return "critical"
+    if check_id.startswith("bp_monitor_"):
+        return "low"
+    if str(bp.get("cis_group") or "").startswith("intune_"):
+        return "medium"
+    if bp.get("has_remediation"):
+        return "high"
+    return "medium"
+
+
+def _business_impact_for_bp(bp: Mapping[str, Any], severity: str) -> str:
+    check_id = str(bp.get("id") or "")
+    if check_id.startswith("bp_monitor_"):
+        return "Monitoring gap can delay detection, escalation, and executive reporting."
+    if str(bp.get("cis_group") or "").startswith("intune_"):
+        return "Endpoint compliance drift can expand device access and policy exposure."
+    if severity == "critical":
+        return "Control failure can enable tenant compromise, account takeover, or high-impact email abuse."
+    if severity == "high":
+        return "Control gap weakens identity, messaging, or data-protection safeguards across the tenant."
+    return "Configuration drift increases operational risk and should be prioritised during the next change window."
+
+
+def _remediation_runbook_for_bp(bp: Mapping[str, Any]) -> list[str]:
+    runbook = [
+        f"Confirm the failure is in scope for this company and {_benchmark_category_label(bp)}.",
+    ]
+    if bp.get("has_remediation"):
+        runbook.append(
+            "Review prerequisites, approvals, and any maintenance-window impact before using automated remediation."
+        )
+    remediation = str(bp.get("remediation") or "").strip()
+    if remediation:
+        runbook.append(remediation)
+    runbook.append(
+        "Re-run the check after the change and document the outcome in the related ticket or note."
+    )
+    return runbook
+
+
+def _rollback_guidance_for_bp(bp: Mapping[str, Any]) -> str:
+    if str(bp.get("cis_group") or "").startswith("intune_"):
+        target = "Intune policy or compliance profile"
+    elif bp.get("source_type") == "exo":
+        target = "Exchange Online setting or policy"
+    elif bp.get("source_type") == "scc":
+        target = "Purview / Compliance policy"
+    else:
+        target = "Microsoft 365 or Entra policy"
+    return (
+        f"Capture the current {target} values before remediation. If the change causes user impact, "
+        "restore the prior configuration from the recorded baseline or change ticket, then re-run the "
+        "check to confirm the rollback."
+    )
+
+
+def _posture_metadata_for_bp(bp: Mapping[str, Any]) -> dict[str, Any]:
+    severity = _risk_severity_for_bp(bp)
+    return {
+        "risk_severity": severity,
+        "risk_score": _RISK_SCORE_BY_SEVERITY[severity],
+        "business_impact": _business_impact_for_bp(bp, severity),
+        "benchmark_category": _benchmark_category_label(bp),
+        "batch_scope": _batch_scope_for_bp(bp),
+        "remediation_runbook": _remediation_runbook_for_bp(bp),
+        "rollback_guidance": _rollback_guidance_for_bp(bp),
+    }
+
+
+def _is_regression(previous_status: str | None, status: str) -> bool:
+    return previous_status == STATUS_PASS and status == STATUS_FAIL
+
+
+def _with_regression_notice(details: str, *, previous_status: str | None, status: str) -> str:
+    if not _is_regression(previous_status, status):
+        return details
+    if _REGRESSION_NOTICE in details:
+        return details
+    return f"{_REGRESSION_NOTICE} {details}".strip()
+
+
+def _sort_results_by_priority(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        results,
+        key=lambda item: (
+            _STATUS_PRIORITY_ORDER.get(str(item.get("status") or ""), 4),
+            -int(item.get("risk_score") or 0),
+            str(item.get("check_name") or ""),
+        ),
+    )
+
+
+def get_batch_remediation_scopes(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    scopes: list[dict[str, Any]] = []
+    for scope_id, label in _BATCH_REMEDIATION_SCOPES.items():
+        pending = sum(
+            1
+            for result in results
+            if str(result.get("batch_scope") or "m365") == scope_id
+            and result.get("status") == STATUS_FAIL
+            and result.get("has_remediation")
+        )
+        if pending:
+            scopes.append({"id": scope_id, "label": label, "pending_count": pending})
+    return scopes
+
 
 def _enrich_catalog_entry(bp: dict[str, Any]) -> dict[str, Any]:
     """Return a public-facing copy of a catalog entry with internal keys
     stripped and license requirements rendered as a human-friendly string.
     """
     entry = {k: v for k, v in bp.items() if k not in _INTERNAL_KEYS}
+    entry.update(_posture_metadata_for_bp(bp))
     requires = bp.get("requires_licenses") or []
     if requires:
         entry["requires_licenses_display"] = _format_missing_licenses(requires)
@@ -5894,8 +6049,11 @@ def build_failure_ticket_external_reference(company_id: int, check_id: str) -> s
     return f"m365-best-practice:{company_id}:{check_id}"
 
 
-def build_failure_ticket_subject(check_name: str) -> str:
-    return f"M365 best practice failed: {check_name}"[:255]
+def build_failure_ticket_subject(
+    check_name: str, *, regression_detected: bool = False
+) -> str:
+    prefix = "M365 posture regression" if regression_detected else "M365 best practice failed"
+    return f"{prefix}: {check_name}"[:255]
 
 
 def _format_run_timestamp(run_at: datetime) -> str:
@@ -5910,16 +6068,24 @@ def build_failure_ticket_description(
     details: str,
     run_at: datetime | None,
     created_automatically: bool,
+    regression_detected: bool = False,
     requester_name: str | None = None,
     requester_email: str | None = None,
 ) -> str:
-    intro = (
-        "This ticket was created automatically because an M365 best-practice "
-        "check changed from <strong>Pass</strong> to <strong>Fail</strong>."
-        if created_automatically
-        else "A portal user requested technician assistance for a failed "
-        "M365 best-practice check."
-    )
+    bp = _catalog_map().get(check_id, {"id": check_id})
+    posture = _posture_metadata_for_bp(bp)
+    if regression_detected:
+        intro = (
+            "This ticket was created automatically because an M365 best-practice "
+            "check regressed from <strong>Pass</strong> to <strong>Fail</strong>."
+        )
+    elif created_automatically:
+        intro = (
+            "This ticket was created automatically because an M365 best-practice "
+            "check failed and requires review."
+        )
+    else:
+        intro = "A portal user requested technician assistance for a failed M365 best-practice check."
     metadata_lines = [f"<strong>Company:</strong> {escape(company_name)}"]
     if requester_name:
         metadata_lines.append(f"<strong>Requester:</strong> {escape(requester_name)}")
@@ -5931,14 +6097,39 @@ def build_failure_ticket_description(
             f"<strong>Check ID:</strong> {escape(check_id)}",
         ]
     )
+    if posture:
+        metadata_lines.extend(
+            [
+                f"<strong>Benchmark category:</strong> {escape(str(posture.get('benchmark_category') or 'Microsoft 365'))}",
+                (
+                    "<strong>Risk priority:</strong> "
+                    f"{escape(str(posture.get('risk_severity') or 'medium').title())} "
+                    f"({escape(str(posture.get('risk_score') or 0))}/100)"
+                ),
+                f"<strong>Business impact:</strong> {escape(str(posture.get('business_impact') or ''))}",
+            ]
+        )
     if run_at is not None:
         metadata_lines.append(
             f"<strong>Evaluated at:</strong> {escape(_format_run_timestamp(run_at))}"
         )
+    runbook = posture.get("remediation_runbook") or []
     return (
         f"<p>{intro}</p>"
         f"<p>{'<br />'.join(metadata_lines)}</p>"
         f"<h3>Failure details</h3><p>{escape(details or 'No details provided.')}</p>"
+        + (
+            "<h3>Recommended runbook</h3><ol>"
+            + "".join(f"<li>{escape(str(step))}</li>" for step in runbook)
+            + "</ol>"
+            if runbook
+            else ""
+        )
+        + (
+            f"<h3>Rollback guidance</h3><p>{escape(str(posture.get('rollback_guidance') or ''))}</p>"
+            if posture.get("rollback_guidance")
+            else ""
+        )
     )
 
 
@@ -5986,10 +6177,14 @@ async def _maybe_create_ticket_on_fail(
         details=details,
         run_at=run_at,
         created_automatically=True,
+        regression_detected=_is_regression(previous_status, status),
     )
     try:
         ticket = await tickets_service.create_ticket(
-            subject=build_failure_ticket_subject(check_name),
+            subject=build_failure_ticket_subject(
+                check_name,
+                regression_detected=_is_regression(previous_status, status),
+            ),
             description=description,
             requester_id=None,
             company_id=company_id,
@@ -6423,6 +6618,11 @@ async def run_best_practices(
             status, details, affected_accounts = await _apply_account_exclusions(
                 company_id, check_id, status, details, affected_accounts
             )
+        details = _with_regression_notice(
+            details,
+            previous_status=previous_status,
+            status=status,
+        )
         await bp_repo.upsert_result(
             company_id=company_id,
             check_id=check_id,
@@ -6467,7 +6667,7 @@ async def run_best_practices(
             create_ticket_on_fail_ids=create_ticket_on_fail_ids,
         )
 
-        results.append({
+        result = {
             "check_id": check_id,
             "check_name": check_name,
             "status": status,
@@ -6476,14 +6676,17 @@ async def run_best_practices(
             "remediation": get_remediation(check_id) if status == STATUS_FAIL else None,
             "has_remediation": bool(bp.get("has_remediation")),
             "affected_accounts": affected_accounts,
-        })
+            "regression_detected": _is_regression(previous_status, status),
+        }
+        result.update(_posture_metadata_for_bp(bp))
+        results.append(result)
 
     log_info(
         "M365 best practices run",
         company_id=company_id,
         check_count=len(results),
     )
-    return results
+    return _sort_results_by_priority(results)
 
 
 async def run_single_check(
@@ -6653,6 +6856,11 @@ async def run_single_check(
         status, details, affected_accounts = await _apply_account_exclusions(
             company_id, check_id, status, details, affected_accounts
         )
+    details = _with_regression_notice(
+        details,
+        previous_status=previous_status,
+        status=status,
+    )
     await bp_repo.upsert_result(
         company_id=company_id,
         check_id=check_id,
@@ -6698,7 +6906,7 @@ async def run_single_check(
         company_id=company_id,
         check_id=check_id,
     )
-    return {
+    result = {
         "check_id": check_id,
         "check_name": check_name,
         "status": status,
@@ -6707,7 +6915,10 @@ async def run_single_check(
         "remediation": get_remediation(check_id) if status == STATUS_FAIL else None,
         "has_remediation": bool(bp.get("has_remediation")),
         "affected_accounts": affected_accounts,
+        "regression_detected": _is_regression(previous_status, status),
     }
+    result.update(_posture_metadata_for_bp(bp))
+    return result
 
 
 async def get_last_results(company_id: int) -> list[dict[str, Any]]:
@@ -6728,9 +6939,9 @@ async def get_last_results(company_id: int) -> list[dict[str, Any]]:
         check_id = row["check_id"]
         if check_id not in enabled or check_id in excluded:
             continue
-        bp_meta = catalog.get(check_id, {})
+        bp_meta = catalog.get(check_id, {"id": check_id})
         status = row.get("status") or STATUS_UNKNOWN
-        out.append({
+        result = {
             "check_id": check_id,
             "check_name": row.get("check_name") or bp_meta.get("name", check_id),
             "description": bp_meta.get("description", ""),
@@ -6746,8 +6957,109 @@ async def get_last_results(company_id: int) -> list[dict[str, Any]]:
             "is_cis_benchmark": bool(bp_meta.get("is_cis_benchmark")),
             "cis_group": bp_meta.get("cis_group", ""),
             "affected_accounts": row.get("affected_accounts") or [],
-        })
-    return out
+        }
+        result.update(_posture_metadata_for_bp(bp_meta))
+        result["regression_detected"] = str(result.get("details") or "").startswith(
+            _REGRESSION_NOTICE
+        )
+        out.append(result)
+    return _sort_results_by_priority(out)
+
+
+def _normalise_batch_scope(scope: str | None) -> str | None:
+    value = str(scope or "").strip().lower()
+    return value if value in _BATCH_REMEDIATION_SCOPES else None
+
+
+async def remediate_failed_checks_batch(company_id: int, *, scope: str) -> dict[str, Any]:
+    normalised_scope = _normalise_batch_scope(scope)
+    if normalised_scope is None:
+        raise ValueError("Invalid remediation batch scope")
+    results = await get_last_results(company_id)
+    candidates = [
+        result
+        for result in results
+        if str(result.get("batch_scope") or "m365") == normalised_scope
+        and result.get("status") == STATUS_FAIL
+        and result.get("has_remediation")
+    ]
+    if not candidates:
+        return {
+            "success": True,
+            "message": f"No failed remediations are pending in {_BATCH_REMEDIATION_SCOPES[normalised_scope]}.",
+            "scope": normalised_scope,
+            "scope_label": _BATCH_REMEDIATION_SCOPES[normalised_scope],
+            "total": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "failures": [],
+        }
+    failures: list[str] = []
+    refresh_issues: list[str] = []
+    succeeded = 0
+    for candidate in candidates:
+        check_id = str(candidate.get("check_id") or "")
+        try:
+            outcome = await remediate_check(company_id=company_id, check_id=check_id)
+        except (ValueError, M365Error) as exc:
+            failures.append(f"{candidate.get('check_name') or check_id}: remediation failed ({exc})")
+            continue
+        remediation_succeeded = bool(outcome.get("success"))
+        try:
+            await run_single_check(
+                company_id=company_id,
+                check_id=check_id,
+                allow_auto_remediation=False,
+                previous_status=STATUS_FAIL,
+                emit_ticket_on_fail=False,
+            )
+        except (ValueError, M365Error) as exc:
+            if remediation_succeeded:
+                succeeded += 1
+                refresh_issues.append(
+                    f"{candidate.get('check_name') or check_id}: unable to refresh check ({exc})"
+                )
+            else:
+                failures.append(
+                    f"{candidate.get('check_name') or check_id}: unable to refresh check ({exc})"
+                )
+            continue
+        if remediation_succeeded:
+            succeeded += 1
+        else:
+            failures.append(f"{candidate.get('check_name') or check_id}: {outcome.get('message') or 'Remediation failed'}")
+    failed = len(failures)
+    scope_label = _BATCH_REMEDIATION_SCOPES[normalised_scope]
+    message = (
+        f"Batch remediation finished for {scope_label}: {succeeded} succeeded, {failed} failed."
+    )
+    if failed:
+        message = f"{message} Review per-check remediation status below for details."
+    elif refresh_issues:
+        message = (
+            f"{message} Verification warnings were recorded for {len(refresh_issues)} check(s); "
+            "review the latest evaluation details below."
+        )
+    log_info(
+        "M365 best practice batch remediation finished",
+        company_id=company_id,
+        scope=normalised_scope,
+        total=len(candidates),
+        succeeded=succeeded,
+        failed=failed,
+        refresh_warnings=len(refresh_issues),
+    )
+    return {
+        "success": failed == 0 and not refresh_issues,
+        "message": message,
+        "scope": normalised_scope,
+        "scope_label": scope_label,
+        "total": len(candidates),
+        "succeeded": succeeded,
+        "failed": failed,
+        "failures": failures,
+        "refresh_issues": refresh_issues,
+    }
 
 
 def get_secure_score_summary(results: list[dict[str, Any]]) -> dict[str, float] | None:

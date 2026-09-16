@@ -67,6 +67,18 @@
   .bp-saved-note {
     margin-top: 0.5rem;
   }
+  .bp-priority {
+    border-radius: 999px;
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    text-transform: uppercase;
+  }
+  .bp-priority--critical { background: rgba(220, 38, 38, 0.12); color: var(--color-error, #dc2626); }
+  .bp-priority--high { background: rgba(234, 88, 12, 0.12); color: #c2410c; }
+  .bp-priority--medium { background: rgba(217, 119, 6, 0.12); color: var(--color-warning, #d97706); }
+  .bp-priority--low { background: rgba(37, 99, 235, 0.12); color: var(--color-primary, #2563eb); }
 </style>
 {% endblock %}
 
@@ -135,6 +147,7 @@
       <thead>
         <tr>
           <th style="width:3rem" data-column-key="status" data-sort="string">Status</th>
+          <th style="width:8rem" data-column-key="priority" data-sort="number">Priority</th>
           <th data-column-key="check" data-sort="string">Check</th>
           <th data-column-key="details" data-sort="string">Details</th>
           <th data-column-key="evaluated" data-sort="date" style="white-space:nowrap">Last evaluated</th>
@@ -155,17 +168,32 @@
               <span title="Unknown" style="color:var(--color-warning,#d97706);font-size:1.25rem">?</span>
             {% endif %}
           </td>
+          <td data-column-key="priority" data-value="{{ check.risk_score or 0 }}">
+            <span class="bp-priority bp-priority--{{ check.risk_severity or 'medium' }}">
+              {{ check.risk_severity or 'medium' }}
+            </span>
+            <br /><small class="text-muted">{{ check.risk_score or 0 }}/100</small>
+          </td>
           <td data-column-key="check">
             <strong>{{ check.check_name }}</strong>
             {% if check.is_cis_benchmark %}
             <span class="badge badge--info badge--cis" style="margin-left:0.4rem" title="CIS Benchmark check">CIS</span>
             {% endif %}
+            {% if check.regression_detected %}
+            <span class="badge badge--warning" style="margin-left:0.4rem" title="This check regressed from pass to fail on the latest evaluation">Regression</span>
+            {% endif %}
             {% if check.description %}
             <br /><small class="text-muted">{{ check.description }}</small>
+            {% endif %}
+            {% if check.benchmark_category %}
+            <br /><small class="text-muted">{{ check.benchmark_category }}</small>
             {% endif %}
           </td>
           <td data-column-key="details">
             <span>{{ check.details or '' }}</span>
+            {% if check.business_impact %}
+            <div style="margin-top:0.5rem"><strong>Business impact:</strong> {{ check.business_impact }}</div>
+            {% endif %}
             {% if check.affected_accounts %}
             <details class="bp-account-findings" style="margin-top:0.5rem">
               <summary>Listed accounts ({{ check.affected_accounts | length }})</summary>
@@ -192,6 +220,17 @@
             <details style="margin-top:0.5rem">
               <summary style="cursor:pointer;color:var(--color-primary,#2563eb);font-size:0.875rem">Remediation guidance</summary>
               <p style="margin-top:0.5rem;font-size:0.875rem">{{ check.remediation }}</p>
+              {% if check.remediation_runbook %}
+              <strong style="display:block;margin-top:0.5rem;font-size:0.875rem">Runbook</strong>
+              <ol style="margin:0.35rem 0 0 1.25rem;font-size:0.875rem">
+                {% for step in check.remediation_runbook %}
+                <li>{{ step }}</li>
+                {% endfor %}
+              </ol>
+              {% endif %}
+              {% if check.rollback_guidance %}
+              <p style="margin-top:0.5rem;font-size:0.875rem"><strong>Rollback:</strong> {{ check.rollback_guidance }}</p>
+              {% endif %}
             </details>
             {% endif %}
             {% if check.remediation_status %}
@@ -294,6 +333,28 @@
   <section class="panel">
     <div class="panel__body" style="padding-bottom:0">
       {{ filter_strip(results, secure_score) }}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if is_super_admin and batch_scopes %}
+  <section class="panel">
+    <header class="panel__header">
+      <div>
+        <h3 class="panel__title">Batch remediation</h3>
+        <p class="text-muted" style="margin:var(--space-1) 0 0">Run controlled remediation only for failed checks in the selected benchmark scope for this company. Per-check remediation status is tracked in the results below.</p>
+      </div>
+    </header>
+    <div class="panel__body" style="display:flex;flex-wrap:wrap;gap:0.75rem">
+      {% for scope in batch_scopes %}
+      <form method="post" action="/m365/best-practices/remediate-batch">
+        {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+        <input type="hidden" name="scope" value="{{ scope.id }}" />
+        <button type="submit" class="button button--warning">
+          Remediate {{ scope.label }} ({{ scope.pending_count }})
+        </button>
+      </form>
+      {% endfor %}
     </div>
   </section>
   {% endif %}

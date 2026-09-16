@@ -11,6 +11,8 @@ def _render_best_practices(
     can_manage_account_exclusions=False,
     can_edit_notes=False,
     can_submit_tickets=True,
+    is_super_admin=False,
+    batch_scopes=None,
 ):
     templates = Path(__file__).parents[1] / "app" / "templates"
     loader = ChoiceLoader(
@@ -37,11 +39,12 @@ def _render_best_practices(
         results=results,
         catalog=catalog or [],
         has_credentials=True,
-        is_super_admin=False,
+        is_super_admin=is_super_admin,
         can_manage_account_exclusions=can_manage_account_exclusions,
         secure_score=secure_score,
         can_edit_notes=can_edit_notes,
         can_submit_tickets=can_submit_tickets,
+        batch_scopes=batch_scopes or [],
     )
 
 
@@ -219,6 +222,34 @@ def test_failed_checks_show_manual_support_ticket_action():
     assert "Create ticket" in html
 
 
+def test_failed_checks_show_priority_regression_and_runbook_details():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Regression detected: this check changed from pass to fail since the last successful evaluation.",
+                "risk_severity": "critical",
+                "risk_score": 90,
+                "business_impact": "Control failure can enable tenant compromise.",
+                "regression_detected": True,
+                "remediation": "Disable the unsafe setting.",
+                "remediation_runbook": ["Confirm scope.", "Disable the unsafe setting.", "Re-run the check."],
+                "rollback_guidance": "Restore the prior configuration if users are impacted.",
+            }
+        ]
+    )
+
+    assert "Priority" in html
+    assert "critical" in html
+    assert "90/100" in html
+    assert "Regression" in html
+    assert "Runbook" in html
+    assert "Rollback:" in html
+
+
 def test_account_findings_show_per_account_exclude_and_restore_controls_when_permitted():
     html = _render_best_practices(
         [
@@ -240,6 +271,28 @@ def test_account_findings_show_per_account_exclude_and_restore_controls_when_per
     assert "/m365/best-practices/account-exclusion/bp_test" in html
     assert "Exclude" in html
     assert "Restore" in html
+
+
+def test_super_admins_see_batch_remediation_controls():
+    html = _render_best_practices(
+        [
+            {
+                "cis_group": "",
+                "status": "fail",
+                "check_id": "bp_test",
+                "check_name": "Account check",
+                "details": "Review accounts",
+                "has_remediation": True,
+                "batch_scope": "m365",
+            }
+        ],
+        is_super_admin=True,
+        batch_scopes=[{"id": "m365", "label": "Microsoft 365", "pending_count": 1}],
+    )
+
+    assert "Batch remediation" in html
+    assert 'action="/m365/best-practices/remediate-batch"' in html
+    assert 'name="scope" value="m365"' in html
 
 
 def test_notes_are_shown_and_editable_for_techs():
