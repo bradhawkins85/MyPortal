@@ -1166,7 +1166,12 @@ def _jwt_appid(token: str) -> str | None:
         padding = 4 - len(parts[1]) % 4
         payload_bytes = base64.urlsafe_b64decode(parts[1] + "=" * padding)
         claims = json.loads(payload_bytes)
-        return str(claims["appid"]) if "appid" in claims else None
+        # Entra v1 access tokens expose the client application as ``appid``;
+        # v2 tokens use ``azp``.  Supporting both is important because the SCC
+        # endpoint requires this value in X-AnchorMailbox to establish the
+        # organization context before it runs a cmdlet.
+        app_id = str(claims.get("appid") or claims.get("azp") or "").strip()
+        return app_id or None
     except Exception:  # noqa: BLE001 - best-effort; absence is non-fatal
         return None
 
