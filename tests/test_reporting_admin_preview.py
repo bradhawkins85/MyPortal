@@ -9,6 +9,7 @@ from starlette.datastructures import FormData
 
 from app.features.reporting import handlers as reporting_handlers
 from app.repositories import reporting as reporting_repo
+from app.services import report_query_builder
 from app.services import reporting as reporting_service
 
 
@@ -71,10 +72,15 @@ def test_admin_reporting_test_renders_unsaved_query_without_updating(monkeypatch
             _render_template=fake_render_template,
         ),
     )
-    monkeypatch.setattr(reporting_handlers, "_list_reporting_eligible_users", lambda: _empty_users())
+    monkeypatch.setattr(
+        reporting_handlers, "_list_reporting_eligible_users", lambda: _empty_users()
+    )
     monkeypatch.setattr(reporting_repo, "get_query", fake_get_query)
     monkeypatch.setattr(reporting_repo, "update_query", fail_update)
     monkeypatch.setattr(reporting_service, "run_query_with_context", fake_run_query)
+    monkeypatch.setattr(
+        report_query_builder, "describe_schema", lambda: _empty_schema()
+    )
 
     response = asyncio.run(reporting_handlers.admin_reporting_update(request, 12))
 
@@ -86,7 +92,79 @@ def test_admin_reporting_test_renders_unsaved_query_without_updating(monkeypatch
     assert extra["granted_user_ids"] == {7}
     assert extra["test_result"]["rows"] == [{"changed": 2}]
     assert extra["test_error"] is None
+    assert extra["builder_schema"] == {"tables": [], "relations": []}
+
+
+def test_admin_reporting_create_previews_unsaved_query_without_creating(monkeypatch):
+    captured: dict[str, object] = {}
+    request = SimpleNamespace(
+        state=SimpleNamespace(active_company_id=42), form=lambda: None
+    )
+
+    async def fake_form():
+        return FormData(
+            [
+                ("name", "Unsaved report"),
+                ("slug", "ignored-client-slug"),
+                ("description", "Preview before creating"),
+                ("sql_query", "SELECT 3 AS preview_value"),
+                ("permission_user_ids", "8"),
+                ("action", "preview"),
+            ]
+        )
+
+    request.form = fake_form
+
+    async def fake_require_super_admin_page(_request):
+        return {"id": 1, "is_super_admin": True}, None
+
+    async def fake_run_query(sql_query, *, company_id):
+        assert sql_query == "SELECT 3 AS preview_value"
+        assert company_id == 42
+        return {
+            "columns": ["preview_value"],
+            "rows": [{"preview_value": 3}],
+            "row_count": 1,
+            "truncated": False,
+        }
+
+    async def fake_render_template(template, _request, user, *, extra):
+        captured.update(template=template, user=user, extra=extra)
+        return SimpleNamespace(status_code=200)
+
+    async def fail_create(*args, **kwargs):
+        raise AssertionError("Previewing must not create the report")
+
+    monkeypatch.setattr(
+        reporting_handlers,
+        "_main",
+        lambda: SimpleNamespace(
+            _require_super_admin_page=fake_require_super_admin_page,
+            _render_template=fake_render_template,
+        ),
+    )
+    monkeypatch.setattr(
+        reporting_handlers, "_list_reporting_eligible_users", lambda: _empty_users()
+    )
+    monkeypatch.setattr(reporting_repo, "create_query", fail_create)
+    monkeypatch.setattr(reporting_service, "run_query_with_context", fake_run_query)
+    monkeypatch.setattr(
+        report_query_builder, "describe_schema", lambda: _empty_schema()
+    )
+
+    response = asyncio.run(reporting_handlers.admin_reporting_create(request))
+
+    assert response.status_code == 200
+    extra = captured["extra"]
+    assert extra["report"]["slug"] == "unsaved-report"
+    assert extra["granted_user_ids"] == {8}
+    assert extra["test_result"]["rows"] == [{"preview_value": 3}]
+    assert extra["test_error"] is None
 
 
 async def _empty_users():
     return []
+
+
+async def _empty_schema():
+    return {"tables": [], "relations": []}

@@ -380,6 +380,7 @@ async def admin_reporting_new(request: Request):
         "eligible_users": eligible,
         "granted_user_ids": set(),
         "max_rows": reporting_service.MAX_RESULT_ROWS,
+        "test_action": "/admin/reporting",
         "builder_schema": await report_query_builder.describe_schema(),
     }
     return await _main()._render_template(
@@ -449,6 +450,7 @@ async def admin_reporting_ai_query(request: Request):
 
 async def admin_reporting_edit(request: Request, report_id: int):
     from app.repositories import reporting as reporting_repo
+    from app.services import report_query_builder
     from app.services import reporting as reporting_service
 
     user, redirect = await _main()._require_super_admin_page(request)
@@ -469,6 +471,7 @@ async def admin_reporting_edit(request: Request, report_id: int):
         "granted_user_ids": granted_ids,
         "max_rows": reporting_service.MAX_RESULT_ROWS,
         "test_action": f"/admin/reporting/{int(report_id)}",
+        "builder_schema": await report_query_builder.describe_schema(),
     }
     return await _main()._render_template(
         "admin/reporting_form.html", request, user, extra=extra
@@ -477,6 +480,7 @@ async def admin_reporting_edit(request: Request, report_id: int):
 
 async def admin_reporting_clone(request: Request, report_id: int):
     from app.repositories import reporting as reporting_repo
+    from app.services import report_query_builder
     from app.services import reporting as reporting_service
 
     user, redirect = await _main()._require_super_admin_page(request)
@@ -504,6 +508,8 @@ async def admin_reporting_clone(request: Request, report_id: int):
         "eligible_users": eligible,
         "granted_user_ids": granted_ids,
         "max_rows": reporting_service.MAX_RESULT_ROWS,
+        "test_action": "/admin/reporting",
+        "builder_schema": await report_query_builder.describe_schema(),
     }
     return await _main()._render_template(
         "admin/reporting_form.html", request, user, extra=extra
@@ -513,6 +519,8 @@ async def admin_reporting_clone(request: Request, report_id: int):
 async def admin_reporting_create(request: Request):
     from app.repositories import reporting as reporting_repo
     from app.services import audit as audit_service
+    from app.services import report_query_builder
+    from app.services import reporting as reporting_service
 
     user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
@@ -521,6 +529,40 @@ async def admin_reporting_create(request: Request):
     payload = _parse_reporting_form(form)
     payload["slug"] = _reporting_slug(payload["name"])
     error = _validate_reporting_input(payload)
+    if form.get("action") in {"preview", "test"}:
+        preview_result = None
+        preview_error = error
+        if not preview_error:
+            try:
+                preview_result = await reporting_service.run_query_with_context(
+                    payload["sql_query"],
+                    company_id=getattr(request.state, "active_company_id", None),
+                )
+            except reporting_service.ReportingQueryError as exc:
+                preview_error = f"Report query is invalid: {exc}"
+            except Exception as exc:  # pragma: no cover - defensive
+                from app.core.logging import log_error
+
+                log_error("Reporting preview query execution failed", error=str(exc))
+                preview_error = f"Report failed to execute: {exc}"
+
+        extra = {
+            "title": "New report",
+            "form_heading": "New report",
+            "submit_label": "Create report",
+            "form_action": "/admin/reporting",
+            "test_action": "/admin/reporting",
+            "report": payload,
+            "eligible_users": await _list_reporting_eligible_users(),
+            "granted_user_ids": set(payload["user_ids"]),
+            "max_rows": reporting_service.MAX_RESULT_ROWS,
+            "builder_schema": await report_query_builder.describe_schema(),
+            "test_result": preview_result,
+            "test_error": preview_error,
+        }
+        return await _main()._render_template(
+            "admin/reporting_form.html", request, user, extra=extra
+        )
     if error:
         return flash_redirect("/admin/reporting/new", error, "error")
     existing = await reporting_repo.get_query_by_slug(payload["slug"])
@@ -568,7 +610,8 @@ async def admin_reporting_update(request: Request, report_id: int):
     # value so existing integrations cannot be broken by an edit.
     payload["slug"] = record["slug"]
     error = _validate_reporting_input(payload)
-    if form.get("action") == "test":
+    if form.get("action") in {"preview", "test"}:
+        from app.services import report_query_builder
         from app.services import reporting as reporting_service
 
         test_result = None
@@ -599,6 +642,7 @@ async def admin_reporting_update(request: Request, report_id: int):
             "eligible_users": eligible,
             "granted_user_ids": set(payload["user_ids"]),
             "max_rows": reporting_service.MAX_RESULT_ROWS,
+            "builder_schema": await report_query_builder.describe_schema(),
             "test_result": test_result,
             "test_error": test_error,
         }

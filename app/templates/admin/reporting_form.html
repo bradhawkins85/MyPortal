@@ -84,7 +84,7 @@
       <div class="form-actions">
         <button type="submit" class="button button--primary">{{ submit_label }}</button>
         {% if test_action %}
-          <button type="submit" class="button button--ghost" name="action" value="test">Test changes</button>
+          <button type="submit" class="button button--ghost" name="action" value="preview">Preview report</button>
         {% endif %}
         <a class="button button--ghost" href="/admin/reporting">Cancel</a>
       </div>
@@ -94,14 +94,14 @@
   {% if test_error %}
     <section class="card card--panel" aria-labelledby="test-results-heading">
       <header class="card__header">
-        <h2 class="card__title" id="test-results-heading">Test results</h2>
+        <h2 class="card__title" id="test-results-heading">Report preview</h2>
       </header>
       <p class="form-error">{{ test_error }}</p>
     </section>
   {% elif test_result %}
     <section class="card card--panel" aria-labelledby="test-results-heading">
       <header class="card__header">
-        <h2 class="card__title" id="test-results-heading">Test results</h2>
+        <h2 class="card__title" id="test-results-heading">Report preview</h2>
         <p class="card__description">{{ test_result.row_count }} row(s){% if test_result.truncated %} (capped at {{ max_rows }}){% endif %}. These unsaved changes have not been applied.</p>
       </header>
       <div class="table-container">
