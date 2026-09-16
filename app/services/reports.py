@@ -1146,8 +1146,6 @@ async def _huntress_company_linked(company_id: int) -> bool:
     """True when Huntress is enabled and the company has an organisation ID."""
     # Local import to avoid a circular dependency between reports/modules/huntress.
     from app.services import huntress as huntress_service
-
-
     try:
         if not await huntress_service.is_module_enabled():
             return False

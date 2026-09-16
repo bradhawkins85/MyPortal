@@ -45,7 +45,6 @@ from app.services import ticket_shipment_tracking as shipment_watch_service
 from app.services import backup_jobs as backup_jobs_service
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import rag_relationships as rag_relationship_repo
-from app.core.module_capabilities import modules_for_command
 from app.repositories import integration_modules as module_repo
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -610,7 +609,7 @@ class SchedulerService:
             # Admission is deliberately inside the execution lock.  A module
             # can be toggled after scheduler refresh but must never race into
             # dispatch.
-            for module_slug in modules_for_command(str(command or "")):
+            for module_slug in module_capabilities.modules_for_command(str(command or "")):
                 module = await module_repo.get_module(module_slug)
                 if not module or not module.get("enabled"):
                     now = datetime.now(timezone.utc)
