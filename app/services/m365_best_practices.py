@@ -40,6 +40,7 @@ from typing import Any, Awaitable, Callable, Mapping, Union
 import httpx
 
 from app.core.logging import log_error, log_info
+from app.core.config import get_settings
 from app.repositories import companies as companies_repo
 from app.repositories import m365_best_practices as bp_repo
 from app.repositories import tickets as tickets_repo
@@ -410,6 +411,140 @@ async def _run_direct_send_remediation(exo_token: str, tenant_id: str) -> bool:
         return True
     except M365Error:
         return False
+
+
+_IT_BASELINE_RULE_NAME = "Allow External Forward - IT Contacts"
+
+
+def _it_baseline_config() -> tuple[list[dict[str, str]], str]:
+    settings = get_settings()
+    profiles = [
+        {"contact": "Hawkins IT", "group": "IT", "alias": "it",
+         "external": settings.m365_it_external_email_address.strip()},
+        {"contact": "Hawkins IT Support", "group": "IT Support", "alias": "itsupport",
+         "external": settings.m365_it_support_external_email_address.strip()},
+    ]
+    return profiles, settings.m365_it_recipient_address_contains_words.strip()
+
+
+def _exo_rows(response: dict[str, Any]) -> list[dict[str, Any]]:
+    return [row for row in (response.get("value") or []) if isinstance(row, dict)]
+
+
+def _smtp_value(value: Any) -> str:
+    return str(value or "").removeprefix("SMTP:").removeprefix("smtp:").strip().lower()
+
+
+async def _inspect_it_contact_baseline(exo_token: str, tenant_id: str) -> dict[str, Any]:
+    """Return desired baseline state, missing objects, and non-destructive conflicts."""
+    profiles, recipient_words = _it_baseline_config()
+    if not recipient_words or any(not profile["external"] for profile in profiles):
+        return {"error": "Configure both M365 IT external addresses and the recipient match value."}
+    if profiles[0]["external"].lower() == profiles[1]["external"].lower():
+        return {"error": "The IT and IT Support external email addresses must be different."}
+
+    domains = _exo_rows(await _exo_invoke_command(exo_token, tenant_id, "Get-AcceptedDomain"))
+    default = next((row for row in domains if _coerce_exo_bool(row.get("Default"))
+                    and str(row.get("DomainType") or "").lower() == "authoritative"), None)
+    domain = str((default or {}).get("DomainName") or (default or {}).get("Name") or "").strip()
+    if not domain or domain.lower().endswith(".onmicrosoft.com"):
+        return {"error": "The default authoritative domain is missing or is an onmicrosoft.com domain."}
+
+    contacts = _exo_rows(await _exo_invoke_command(exo_token, tenant_id, "Get-MailContact"))
+    groups = _exo_rows(await _exo_invoke_command(exo_token, tenant_id, "Get-DistributionGroup"))
+    rules = _exo_rows(await _exo_invoke_command(exo_token, tenant_id, "Get-TransportRule"))
+    missing: list[tuple[str, dict[str, str]]] = []
+    conflicts: list[str] = []
+    for profile in profiles:
+        contact = next((row for row in contacts if str(row.get("Name") or "").casefold() == profile["contact"].casefold()), None)
+        if contact is None:
+            missing.append(("contact", profile))
+        elif (_smtp_value(contact.get("ExternalEmailAddress")) != profile["external"].lower()
+              or not _coerce_exo_bool(contact.get("HiddenFromAddressListsEnabled"))):
+            conflicts.append(f'{profile["contact"]} mail contact differs from the configured baseline')
+        group = next((row for row in groups if str(row.get("Name") or "").casefold() == profile["group"].casefold()), None)
+        desired_smtp = f'{profile["alias"]}@{domain}'.lower()
+        if group is None:
+            missing.append(("group", profile))
+        elif (_smtp_value(group.get("PrimarySmtpAddress")) != desired_smtp
+              or not _coerce_exo_bool(group.get("HiddenFromAddressListsEnabled"))
+              or _coerce_exo_bool(group.get("RequireSenderAuthenticationEnabled"))):
+            conflicts.append(f'{profile["group"]} distribution group differs from the configured baseline')
+        else:
+            members = _exo_rows(await _exo_invoke_command(
+                exo_token, tenant_id, "Get-DistributionGroupMember", {"Identity": profile["group"]}
+            ))
+            member_addresses = {
+                _smtp_value(row.get("PrimarySmtpAddress") or row.get("ExternalEmailAddress"))
+                for row in members
+            }
+            if member_addresses != {profile["external"].lower()}:
+                conflicts.append(f'{profile["group"]} distribution group membership differs from the configured baseline')
+
+    rule = next((row for row in rules if str(row.get("Name") or "").casefold() == _IT_BASELINE_RULE_NAME.casefold()), None)
+    desired_words = {recipient_words.casefold()}
+    if rule is None:
+        missing.append(("rule", {}))
+    else:
+        actual_words = rule.get("RecipientAddressContainsWords") or []
+        if isinstance(actual_words, str):
+            actual_words = [actual_words]
+        if ({str(word).casefold() for word in actual_words} != desired_words
+                or not _coerce_exo_bool(rule.get("StopRuleProcessing"))
+                or not _coerce_exo_bool(rule.get("Enabled"))):
+            conflicts.append(f'{_IT_BASELINE_RULE_NAME} transport rule differs from the configured baseline')
+    return {"profiles": profiles, "recipient_words": recipient_words, "domain": domain,
+            "missing": missing, "conflicts": conflicts}
+
+
+async def _check_it_contact_baseline(exo_token: str, tenant_id: str) -> dict[str, Any]:
+    check_id, check_name = "bp_it_contact_baseline", "IT contact forwarding baseline is configured"
+    try:
+        state = await _inspect_it_contact_baseline(exo_token, tenant_id)
+    except M365Error as exc:
+        return _result(check_id, check_name, STATUS_UNKNOWN, f"Unable to inspect Exchange Online: {exc}")
+    if state.get("error"):
+        return _result(check_id, check_name, STATUS_FAIL, state["error"])
+    if state["conflicts"]:
+        return _result(check_id, check_name, STATUS_FAIL, "; ".join(state["conflicts"]) + ". Existing objects are never overwritten.")
+    if state["missing"]:
+        labels = [kind for kind, _ in state["missing"]]
+        return _result(check_id, check_name, STATUS_FAIL, f"The baseline is incomplete ({', '.join(labels)} missing). Run remediation to create only missing objects.")
+    return _result(check_id, check_name, STATUS_PASS, "IT and IT Support contacts, groups, and external-forward transport rule match the configured baseline.")
+
+
+async def _remediate_it_contact_baseline(exo_token: str, tenant_id: str) -> tuple[bool, str]:
+    """Create missing baseline objects, refusing to modify any existing conflict."""
+    state = await _inspect_it_contact_baseline(exo_token, tenant_id)
+    if state.get("error"):
+        return False, state["error"]
+    if state["conflicts"]:
+        return False, "; ".join(state["conflicts"]) + ". Resolve the conflict manually; no changes were made."
+
+    for kind, profile in state["missing"]:
+        if kind == "contact":
+            await _exo_invoke_command(exo_token, tenant_id, "New-MailContact", {
+                "Name": profile["contact"], "ExternalEmailAddress": profile["external"]
+            })
+            await _exo_invoke_command(exo_token, tenant_id, "Set-MailContact", {
+                "Identity": profile["contact"], "HiddenFromAddressListsEnabled": True
+            })
+        elif kind == "group":
+            await _exo_invoke_command(exo_token, tenant_id, "New-DistributionGroup", {
+                "Name": profile["group"], "Members": profile["external"],
+                "PrimarySmtpAddress": f'{profile["alias"]}@{state["domain"]}',
+                "RequireSenderAuthenticationEnabled": False,
+            })
+            await _exo_invoke_command(exo_token, tenant_id, "Set-DistributionGroup", {
+                "Identity": profile["group"], "HiddenFromAddressListsEnabled": True
+            })
+        elif kind == "rule":
+            await _exo_invoke_command(exo_token, tenant_id, "New-TransportRule", {
+                "Name": _IT_BASELINE_RULE_NAME, "Priority": 0, "Enabled": True,
+                "RecipientAddressContainsWords": state["recipient_words"],
+                "StopRuleProcessing": True,
+            })
+    return True, "Created the missing IT contact forwarding baseline objects."
 
 
 _REPORT_SETTINGS_URL = "https://graph.microsoft.com/v1.0/admin/reportSettings"
@@ -3517,6 +3652,25 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "has_remediation": True,
         "remediation_cmdlet": "Set-OrganizationConfig",
         "remediation_params": {"RejectDirectSend": True},
+        "default_enabled": True,
+        "requires_licenses": [CAP_EXCHANGE_ONLINE],
+    },
+    {
+        "id": "bp_it_contact_baseline",
+        "name": "Configure IT contact forwarding baseline",
+        "description": (
+            "Provide IT and IT Support contacts in the GAL that forward to the "
+            "separate MSP addresses configured globally for MyPortal."
+        ),
+        "remediation": (
+            "Create the two hidden mail contacts and distribution groups, plus "
+            "the external-forward transport rule. Existing objects with different "
+            "values must be corrected manually and are never overwritten."
+        ),
+        "source": _check_it_contact_baseline,
+        "source_type": "exo",
+        "has_remediation": True,
+        "remediation_type": "it_contact_baseline_exo",
         "default_enabled": True,
         "requires_licenses": [CAP_EXCHANGE_ONLINE],
     },
@@ -7177,6 +7331,14 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
             )
             if not success:
                 failure_message = "One or more mailbox remediation updates failed."
+        elif bp.get("remediation_type") == "it_contact_baseline_exo":
+            try:
+                success, failure_message = await _remediate_it_contact_baseline(
+                    exo_token, tenant_id
+                )
+            except M365Error as exc:
+                success = False
+                failure_message = str(exc)
         elif bp.get("remediation_type") == "foreach_owa_mailbox_policy_exo":
             params = bp.get("remediation_params") or {}
             success = await _remediate_foreach_owa_mailbox_policy(

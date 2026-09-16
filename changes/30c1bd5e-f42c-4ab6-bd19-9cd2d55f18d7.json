@@ -1,0 +1,7 @@
+{
+  "guid": "30c1bd5e-f42c-4ab6-bd19-9cd2d55f18d7",
+  "occurred_at": "2026-09-16T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added an M365 IT and IT Support contact forwarding baseline check with safe remediation.",
+  "content_hash": "m365-it-contact-forwarding-baseline"
+}
