@@ -18,11 +18,15 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
+from app.repositories import shop as shop_repo
 from app.repositories import subscription_change_requests as change_requests_repo
 from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import user_companies as user_company_repo
 from app.services import subscription_renewals
-from app.services.voice_monitor_billing import contract_display, is_voice_monitor_subscription
+from app.services.voice_monitor_billing import (
+    contract_display,
+    is_voice_monitor_subscription,
+)
 
 
 router = APIRouter(tags=["Subscriptions"])
@@ -77,7 +81,9 @@ async def _load_subscription_context(request: Request):
     membership = await user_company_repo.get_user_company(user["id"], company_id)
     has_license = bool(membership and membership.get("can_manage_licenses"))
     has_cart = bool(membership and membership.get("can_access_cart"))
-    can_view_subscriptions = _main()._membership_menu_can(user, membership, "menu.subscriptions")
+    can_view_subscriptions = _main()._membership_menu_can(
+        user, membership, "menu.subscriptions"
+    )
 
     if not (is_super_admin or (has_license and has_cart) or can_view_subscriptions):
         return (
@@ -95,7 +101,9 @@ async def _load_subscription_context(request: Request):
 @router.get("/subscriptions", response_class=HTMLResponse)
 async def subscriptions_page(request: Request):
     """Display active subscriptions for the current company."""
-    user, membership, company, company_id, redirect = await _load_subscription_context(request)
+    user, membership, company, company_id, redirect = await _load_subscription_context(
+        request
+    )
     if redirect:
         return redirect
 
@@ -146,10 +154,7 @@ async def subscriptions_page(request: Request):
         today=date.today(),
         pending_changes_by_subscription=pending_changes_by_subscription,
     )
-    churn_lookup = {
-        item["subscription_id"]: item
-        for item in churn_report["items"]
-    }
+    churn_lookup = {item["subscription_id"]: item for item in churn_report["items"]}
     reminder_days_lookup = {
         subscription_id: campaign["days_before"]
         for campaign in renewal_forecast["reminder_campaigns"]
@@ -166,12 +171,28 @@ async def subscriptions_page(request: Request):
         formatted_sub["pending_changes_count"] = len(
             pending_changes_by_subscription.get(formatted_sub["id"], [])
         )
-        formatted_sub["reminder_due_days"] = reminder_days_lookup.get(formatted_sub["id"])
+        formatted_sub["reminder_due_days"] = reminder_days_lookup.get(
+            formatted_sub["id"]
+        )
 
     is_super_admin = bool(user.get("is_super_admin"))
+    creation_companies: list[dict[str, Any]] = []
+    creation_products: list[dict[str, Any]] = []
+    if is_super_admin:
+        creation_companies = await company_repo.list_companies()
+        products = await shop_repo.list_products_summary(
+            shop_repo.ProductFilters(include_archived=False, sort="name_asc")
+        )
+        creation_products = [
+            product
+            for product in products
+            if product.get("subscription_category_id") is not None
+        ]
     can_request_changes = bool(
         is_super_admin
-        or _main()._membership_menu_can(user, membership, "menu.subscriptions", write=True)
+        or _main()._membership_menu_can(
+            user, membership, "menu.subscriptions", write=True
+        )
         or (
             membership
             and membership.get("can_manage_licenses")
@@ -185,23 +206,39 @@ async def subscriptions_page(request: Request):
         "company": company,
         "can_request_changes": can_request_changes,
         "is_super_admin": is_super_admin,
+        "creation_companies": creation_companies,
+        "creation_products": creation_products,
+        "creation_default_start_date": date.today().isoformat(),
         "renewal_forecast": renewal_forecast,
         "churn_report": churn_report,
     }
-    return await _main()._render_template("subscriptions/index.html", request, user, extra=extra)
+    return await _main()._render_template(
+        "subscriptions/index.html", request, user, extra=extra
+    )
 
 
-@router.post("/subscriptions/{subscription_id}/request-change", response_class=JSONResponse)
+@router.post(
+    "/subscriptions/{subscription_id}/request-change", response_class=JSONResponse
+)
 async def request_subscription_change(request: Request, subscription_id: str):
     """Request a quantity change for a subscription."""
-    user, membership, _, company_id, redirect = await _load_subscription_context(request)
+    user, membership, _, company_id, redirect = await _load_subscription_context(
+        request
+    )
     if redirect:
         return redirect
     if not (
         _main()._membership_menu_can(user, membership, "menu.subscriptions", write=True)
-        or bool(membership and membership.get("can_manage_licenses") and membership.get("can_access_cart"))
+        or bool(
+            membership
+            and membership.get("can_manage_licenses")
+            and membership.get("can_access_cart")
+        )
     ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Subscription read/write permission required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Subscription read/write permission required",
+        )
 
     subscription = await subscriptions_repo.get_subscription(subscription_id)
     if not subscription or int(subscription.get("customer_id", 0)) != company_id:

@@ -15,6 +15,7 @@ from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import shop as shop_repo
 from app.repositories import user_companies as user_company_repo
 from app.services import subscription_changes as subscription_changes_service
+from app.services import subscription_billing
 from app.services import shop as shop_service
 
 router = APIRouter(prefix="/api/v1/subscriptions", tags=["Subscriptions"])
@@ -82,8 +83,10 @@ async def create_existing_subscription(
 ) -> SubscriptionResponse:
     """Register an existing external subscription without issuing an initial invoice.
 
-    The subscription enters the standard renewal workflow. Only a super admin can
-    use this operation because it creates an active billing entitlement directly.
+    The subscription enters the standard renewal workflow. When auto-renewal is
+    enabled, its recurring invoice item starts at the next commitment boundary,
+    so the externally billed current term is not charged again. Only a super admin
+    can use this operation because it creates an active billing entitlement directly.
     """
     if not current_user.get("is_super_admin"):
         raise HTTPException(
@@ -125,8 +128,18 @@ async def create_existing_subscription(
         auto_renew=payload.auto_renew,
         created_by=int(current_user["id"]),
     )
-    # Deliberately do not create an invoice or immediately-due recurring invoice
-    # item. The normal T-60 renewal service discovers this active subscription.
+    if payload.auto_renew:
+        # This term was already billed externally. Schedule the recurring item
+        # at the next commitment boundary rather than billing the current term.
+        renewal_subscription = {
+            **subscription,
+            "start_date": subscription["end_date"],
+        }
+        await subscription_billing.sync_subscription_recurring_item(
+            renewal_subscription
+        )
+    # Deliberately do not create an invoice for the externally billed current
+    # term. The recurring item becomes eligible at the next commitment boundary.
     return _subscription_response(subscription)
 
 
