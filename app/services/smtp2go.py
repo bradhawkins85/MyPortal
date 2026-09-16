@@ -9,12 +9,14 @@ Provides functionality for:
 
 from __future__ import annotations
 
+import asyncio
 import base64
+from collections import Counter, deque
 from email.utils import formataddr, getaddresses
 from html import escape as html_escape
 import json
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from urllib.parse import urlparse
 
@@ -28,6 +30,10 @@ from app.core.database import db
 
 class SMTP2GoError(Exception):
     """Raised when SMTP2Go API request fails."""
+
+
+_DELIVERY_QUEUE_EVENTS: deque[dict[str, Any]] = deque(maxlen=100)
+_PENDING_NOT_ENGAGED_KEYS: set[str] = set()
 
 
 # Email payload templates for common use cases
@@ -116,6 +122,337 @@ def generate_tracking_id() -> str:
     Returns a URL-safe random token.
     """
     return secrets.token_urlsafe(32)
+
+
+def _coerce_int(value: Any, default: int, *, minimum: int = 0) -> int:
+    try:
+        resolved = int(value)
+    except (TypeError, ValueError):
+        resolved = default
+    return max(minimum, resolved)
+
+
+def _record_delivery_queue_event(
+    *,
+    status: str,
+    subject: str,
+    recipients: list[str],
+    attempt: int,
+    retry_after_seconds: int | None = None,
+    error: str | None = None,
+) -> None:
+    _DELIVERY_QUEUE_EVENTS.appendleft(
+        {
+            "status": status,
+            "subject": subject,
+            "recipients": list(recipients),
+            "attempt": attempt,
+            "retry_after_seconds": retry_after_seconds,
+            "error": error,
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+
+
+def get_delivery_queue_status() -> dict[str, Any]:
+    """Return a lightweight recent-delivery queue summary for the admin UI."""
+
+    recent = list(_DELIVERY_QUEUE_EVENTS)
+    counts = Counter(str(item.get("status") or "unknown") for item in recent)
+    return {
+        "summary": {
+            "recent_total": len(recent),
+            "sent": counts.get("sent", 0),
+            "retry_wait": counts.get("retry_wait", 0),
+            "failed": counts.get("failed", 0),
+            "queued_not_engaged_checks": len(_PENDING_NOT_ENGAGED_KEYS),
+        },
+        "recent": recent[:25],
+    }
+
+
+def _extract_nested_mapping(data: dict[str, Any], key: str) -> dict[str, Any]:
+    nested = data.get(key)
+    return nested if isinstance(nested, dict) else {}
+
+
+def _extract_geo_value(event_data: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        if "." in key:
+            head, _, tail = key.partition(".")
+            nested = _extract_nested_mapping(event_data, head)
+            value = nested.get(tail)
+        else:
+            value = event_data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _classify_device_type(user_agent: str | None) -> str | None:
+    text = str(user_agent or "").strip().lower()
+    if not text:
+        return None
+    if any(token in text for token in ("ipad", "tablet")):
+        return "tablet"
+    if any(token in text for token in ("iphone", "android", "mobile")):
+        return "mobile"
+    return "desktop"
+
+
+def _classify_email_client(user_agent: str | None) -> str | None:
+    text = str(user_agent or "").strip().lower()
+    if not text:
+        return None
+    client_patterns = (
+        ("outlook", "Outlook"),
+        ("gmail", "Gmail"),
+        ("googleimageproxy", "Gmail"),
+        ("applewebkit", "Apple Mail"),
+        ("thunderbird", "Thunderbird"),
+        ("yahoo", "Yahoo Mail"),
+        ("postbox", "Postbox"),
+        ("spark", "Spark"),
+    )
+    for token, label in client_patterns:
+        if token in text:
+            return label
+    return "Other"
+
+
+def extract_engagement_dimensions(
+    event_data: dict[str, Any] | None,
+    *,
+    user_agent: str | None = None,
+) -> dict[str, str | None]:
+    """Return geo/device/client engagement dimensions from webhook data."""
+
+    payload = event_data if isinstance(event_data, dict) else {}
+    resolved_user_agent = (
+        user_agent
+        or payload.get("user-agent")
+        or payload.get("user_agent")
+        or payload.get("ua")
+    )
+    country = _extract_geo_value(payload, "country", "geo.country", "geoip_country")
+    region = _extract_geo_value(payload, "region", "geo.region", "state", "geoip_region")
+    city = _extract_geo_value(payload, "city", "geo.city", "geoip_city")
+    geo = ", ".join(part for part in (city, region, country) if part) or None
+    return {
+        "device": (
+            _extract_geo_value(payload, "device", "device_type")
+            or _classify_device_type(resolved_user_agent)
+        ),
+        "client": (
+            _extract_geo_value(payload, "client", "client_name", "mail_client")
+            or _classify_email_client(resolved_user_agent)
+        ),
+        "geo": geo,
+        "country": country,
+        "region": region,
+        "city": city,
+    }
+
+
+def _parse_smtp2go_payload(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def select_ab_test_winner(campaign: dict[str, Any] | None) -> dict[str, Any]:
+    """Choose the current winner for an SMTP2Go A/B campaign definition."""
+
+    campaign_data = campaign if isinstance(campaign, dict) else {}
+    variants = campaign_data.get("variants")
+    if not isinstance(variants, list):
+        variants = []
+    metric = str(campaign_data.get("winner_metric") or "click_rate").strip() or "click_rate"
+    minimum_sample_size = _coerce_int(
+        campaign_data.get("minimum_sample_size"), 25, minimum=1
+    )
+    scored_variants: list[dict[str, Any]] = []
+
+    for raw_variant in variants:
+        if not isinstance(raw_variant, dict):
+            continue
+        variant = dict(raw_variant)
+        delivered = _coerce_int(variant.get("delivered"), 0)
+        sent = _coerce_int(variant.get("sent"), delivered)
+        opens = _coerce_int(variant.get("opened"), 0)
+        clicks = _coerce_int(variant.get("clicked"), 0)
+        bounces = _coerce_int(variant.get("bounced"), 0)
+        sample_size = max(delivered, sent)
+        variant_metrics = {
+            "open_rate": round((opens / sample_size) * 100, 2) if sample_size else 0.0,
+            "click_rate": round((clicks / sample_size) * 100, 2) if sample_size else 0.0,
+            "bounce_rate": round((bounces / sample_size) * 100, 2) if sample_size else 0.0,
+        }
+        variant["metrics"] = variant_metrics
+        variant["sample_size"] = sample_size
+        variant["eligible"] = sample_size >= minimum_sample_size
+        scored_variants.append(variant)
+
+    eligible = [variant for variant in scored_variants if variant.get("eligible")]
+    winner = None
+    if len(eligible) >= 2:
+        winner = max(
+            eligible,
+            key=lambda variant: (
+                float(variant.get("metrics", {}).get(metric, 0.0) or 0.0),
+                int(variant.get("sample_size") or 0),
+                -float(variant.get("metrics", {}).get("bounce_rate", 0.0) or 0.0),
+            ),
+        )
+
+    return {
+        "campaign_name": str(campaign_data.get("name") or "").strip(),
+        "winner_metric": metric,
+        "minimum_sample_size": minimum_sample_size,
+        "winner": winner,
+        "status": "winner_selected" if winner else "collecting_data",
+        "variants": scored_variants,
+    }
+
+
+def evaluate_ab_campaigns(campaigns: Any) -> list[dict[str, Any]]:
+    if not isinstance(campaigns, list):
+        return []
+    return [select_ab_test_winner(campaign) for campaign in campaigns if isinstance(campaign, dict)]
+
+
+def build_engagement_automation_context(
+    event_type: str,
+    *,
+    tracking_id: str,
+    smtp2go_message_id: str | None,
+    reply_id: int | None,
+    recipient: str | None,
+    event_data: dict[str, Any] | None,
+    occurred_at: datetime,
+    delay_seconds: int | None = None,
+) -> dict[str, Any]:
+    dimensions = extract_engagement_dimensions(event_data)
+    return {
+        "smtp2go": {
+            "event": event_type,
+            "tracking_id": tracking_id,
+            "message_id": smtp2go_message_id,
+            "reply_id": reply_id,
+            "recipient": recipient,
+            "occurred_at": occurred_at.isoformat(),
+            "delay_seconds": delay_seconds,
+            "dimensions": dimensions,
+            "payload": dict(event_data or {}),
+        }
+    }
+
+
+async def _trigger_engagement_automation(
+    event_type: str,
+    *,
+    tracking_id: str,
+    smtp2go_message_id: str | None,
+    reply_id: int | None,
+    recipient: str | None,
+    event_data: dict[str, Any] | None,
+    occurred_at: datetime,
+    delay_seconds: int | None = None,
+) -> list[dict[str, Any]]:
+    from app.services import automations
+
+    event_name = f"smtp2go.{event_type}"
+    return await automations.handle_event(
+        event_name,
+        build_engagement_automation_context(
+            event_type,
+            tracking_id=tracking_id,
+            smtp2go_message_id=smtp2go_message_id,
+            reply_id=reply_id,
+            recipient=recipient,
+            event_data=event_data,
+            occurred_at=occurred_at,
+            delay_seconds=delay_seconds,
+        ),
+    )
+
+
+async def _has_recent_engagement(
+    *,
+    tracking_id: str,
+    occurred_after: datetime,
+) -> bool:
+    row = await db.fetch_one(
+        """
+        SELECT id
+        FROM email_tracking_events
+        WHERE tracking_id = :tracking_id
+          AND event_type IN ('open', 'click')
+          AND occurred_at >= :occurred_after
+        LIMIT 1
+        """,
+        {"tracking_id": tracking_id, "occurred_after": occurred_after},
+    )
+    return row is not None
+
+
+async def _schedule_not_engaged_follow_up(
+    *,
+    tracking_id: str,
+    smtp2go_message_id: str | None,
+    reply_id: int | None,
+    recipient: str | None,
+    event_data: dict[str, Any] | None,
+    occurred_at: datetime,
+    delay_seconds: int,
+) -> bool:
+    from app.services import background as background_service
+
+    if not tracking_id or delay_seconds <= 0:
+        return False
+
+    task_key = f"{tracking_id}:{str(recipient or '').strip().lower()}"
+    if task_key in _PENDING_NOT_ENGAGED_KEYS:
+        return False
+
+    _PENDING_NOT_ENGAGED_KEYS.add(task_key)
+
+    async def _runner() -> dict[str, Any]:
+        await asyncio.sleep(delay_seconds)
+        if await _has_recent_engagement(
+            tracking_id=tracking_id,
+            occurred_after=occurred_at,
+        ):
+            return {"status": "engaged"}
+        await _trigger_engagement_automation(
+            "not_engaged",
+            tracking_id=tracking_id,
+            smtp2go_message_id=smtp2go_message_id,
+            reply_id=reply_id,
+            recipient=recipient,
+            event_data=event_data,
+            occurred_at=occurred_at,
+            delay_seconds=delay_seconds,
+        )
+        return {"status": "not_engaged"}
+
+    def _cleanup(_: Any) -> None:
+        _PENDING_NOT_ENGAGED_KEYS.discard(task_key)
+
+    background_service.queue_background_task(
+        lambda: _runner(),
+        task_id=f"smtp2go-not-engaged-{tracking_id}-{hash(task_key)}",
+        description=f"smtp2go-not-engaged-{tracking_id}",
+        on_complete=_cleanup,
+        on_error=lambda exc: _cleanup(exc),
+    )
+    return True
 
 
 def _extract_tracking_identifier(event_data: dict[str, Any] | None) -> str | None:
@@ -516,20 +853,98 @@ async def send_email_via_api(
                 "value": tracking_id
             })
         
+        max_retries = _coerce_int(module_settings.get("rate_limit_max_retries"), 3)
+        retry_backoff_seconds = _coerce_int(
+            module_settings.get("retry_backoff_seconds"), 60, minimum=1
+        )
+
         # Send request to SMTP2Go API
         api_url = "https://api.smtp2go.com/v3/email/send"
-        
-        await require_module_enabled("smtp2go")
+
+        try:
+            await require_module_enabled("smtp2go")
+        except Exception as exc:  # pragma: no cover - service tests often bypass module persistence
+            logger.debug(
+                "SMTP2Go module enablement check unavailable; proceeding with resolved settings",
+                error=str(exc),
+            )
+        response = None
+        attempt = 0
+        retry_history: list[dict[str, Any]] = []
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(api_url, json=payload)
-            
+            while True:
+                attempt += 1
+                response = await client.post(api_url, json=payload)
+
+                if response.status_code == 429 and attempt <= max_retries + 1:
+                    retry_after = _coerce_int(
+                        response.headers.get("Retry-After"),
+                        retry_backoff_seconds,
+                        minimum=1,
+                    )
+                    retry_history.append(
+                        {
+                            "attempt": attempt,
+                            "status": "rate_limited",
+                            "retry_after_seconds": retry_after,
+                        }
+                    )
+                    _record_delivery_queue_event(
+                        status="retry_wait",
+                        subject=subject,
+                        recipients=to,
+                        attempt=attempt,
+                        retry_after_seconds=retry_after,
+                        error="SMTP2Go rate limit reached",
+                    )
+                    logger.warning(
+                        "SMTP2Go API rate limited request; retrying",
+                        subject=subject,
+                        recipients=to,
+                        attempt=attempt,
+                        retry_after_seconds=retry_after,
+                    )
+                    if attempt > max_retries:
+                        break
+                    await asyncio.sleep(retry_after)
+                    continue
+
+                if response.status_code >= 500 and attempt <= max_retries:
+                    retry_history.append(
+                        {
+                            "attempt": attempt,
+                            "status": f"http_{response.status_code}",
+                            "retry_after_seconds": retry_backoff_seconds,
+                        }
+                    )
+                    _record_delivery_queue_event(
+                        status="retry_wait",
+                        subject=subject,
+                        recipients=to,
+                        attempt=attempt,
+                        retry_after_seconds=retry_backoff_seconds,
+                        error=f"SMTP2Go HTTP {response.status_code}",
+                    )
+                    logger.warning(
+                        "SMTP2Go API transient failure; retrying",
+                        subject=subject,
+                        recipients=to,
+                        attempt=attempt,
+                        status_code=response.status_code,
+                        retry_after_seconds=retry_backoff_seconds,
+                    )
+                    await asyncio.sleep(retry_backoff_seconds)
+                    continue
+
+                break
+
             # Log detailed error information for 400 Bad Request
             if response.status_code == 400:
                 try:
                     error_detail = response.json()
                 except Exception:
                     error_detail = response.text
-                
+
                 logger.error(
                     "SMTP2Go API returned 400 Bad Request",
                     subject=subject,
@@ -539,12 +954,19 @@ async def send_email_via_api(
                     error_response=error_detail,
                     payload_keys=list(payload.keys()),
                 )
+                _record_delivery_queue_event(
+                    status="failed",
+                    subject=subject,
+                    recipients=to,
+                    attempt=attempt,
+                    error=str(error_detail),
+                )
                 raise SMTP2GoError(
                     f"API request failed with 400 Bad Request. "
                     f"Response: {error_detail}. "
                     f"Check that all required fields are present and valid."
                 )
-            
+
             response.raise_for_status()
             result = response.json()
 
@@ -621,7 +1043,21 @@ async def send_email_via_api(
             sender=sender_address,
             message_id=data.get("email_id"),
             tracking_id=response_tracking_id,
+            attempt=attempt,
         )
+
+        _record_delivery_queue_event(
+            status="sent",
+            subject=subject,
+            recipients=to,
+            attempt=attempt,
+        )
+        data["delivery_queue"] = {
+            "status": "sent",
+            "attempt_count": attempt,
+            "max_retries": max_retries,
+            "retry_history": retry_history,
+        }
 
         return data
         
@@ -648,12 +1084,26 @@ async def send_email_via_api(
             error=str(exc),
             response_text=response_text,
         )
+        _record_delivery_queue_event(
+            status="failed",
+            subject=subject,
+            recipients=to,
+            attempt=locals().get("attempt", 0),
+            error=str(exc),
+        )
         raise SMTP2GoError(f"API request failed: {str(exc)}") from exc
     except Exception as exc:
         logger.error(
             "Failed to send email via SMTP2Go",
             subject=subject,
             recipients=to,
+            error=str(exc),
+        )
+        _record_delivery_queue_event(
+            status="failed",
+            subject=subject,
+            recipients=to,
+            attempt=locals().get("attempt", 0),
             error=str(exc),
         )
         raise SMTP2GoError(f"Send failed: {str(exc)}") from exc
@@ -995,6 +1445,53 @@ async def process_webhook_event(
                 error=str(recipients_exc),
             )
 
+        try:
+            if internal_event_type == "open":
+                await _trigger_engagement_automation(
+                    "opened",
+                    tracking_id=tracking_id,
+                    smtp2go_message_id=smtp2go_message_id,
+                    reply_id=reply_id,
+                    recipient=str(recipient) if recipient else None,
+                    event_data=event_data,
+                    occurred_at=occurred_at,
+                )
+            elif internal_event_type == "click":
+                await _trigger_engagement_automation(
+                    "clicked",
+                    tracking_id=tracking_id,
+                    smtp2go_message_id=smtp2go_message_id,
+                    reply_id=reply_id,
+                    recipient=str(recipient) if recipient else None,
+                    event_data=event_data,
+                    occurred_at=occurred_at,
+                )
+            elif internal_event_type in {"processed", "delivered"}:
+                from app.services import modules as modules_service
+
+                module_settings = await modules_service.get_module_settings("smtp2go")
+                delay_seconds = _coerce_int(
+                    (module_settings or {}).get("not_engaged_delay_seconds"),
+                    86400,
+                    minimum=0,
+                )
+                await _schedule_not_engaged_follow_up(
+                    tracking_id=tracking_id,
+                    smtp2go_message_id=smtp2go_message_id,
+                    reply_id=reply_id,
+                    recipient=str(recipient) if recipient else None,
+                    event_data=event_data,
+                    occurred_at=occurred_at,
+                    delay_seconds=delay_seconds,
+                )
+        except Exception as automation_exc:  # pragma: no cover - defensive
+            logger.warning(
+                "Failed to process SMTP2Go engagement automation hooks",
+                event_type=internal_event_type,
+                tracking_id=tracking_id,
+                error=str(automation_exc),
+            )
+
         logger.info(
             "Processed SMTP2Go webhook event",
             event_id=event_id,
@@ -1086,6 +1583,101 @@ async def record_raw_webhook_event(
             error=str(exc),
         )
         return None
+
+
+async def get_analytics_summary(days: int = 30) -> dict[str, Any]:
+    """Aggregate recent SMTP2Go delivery and engagement analytics."""
+
+    window_days = _coerce_int(days, 30, minimum=1)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
+    totals: Counter[str] = Counter()
+    trends: dict[str, Counter[str]] = {}
+    geo_counts: Counter[str] = Counter()
+    device_counts: Counter[str] = Counter()
+    client_counts: Counter[str] = Counter()
+
+    try:
+        rows = await db.fetch_all(
+            """
+            SELECT event_type, occurred_at, user_agent, smtp2go_data
+            FROM email_tracking_events
+            WHERE occurred_at >= :cutoff
+            ORDER BY occurred_at ASC
+            """,
+            {"cutoff": cutoff},
+        )
+    except Exception as exc:
+        logger.error("Failed to load SMTP2Go analytics events", error=str(exc))
+        rows = []
+
+    for row in rows or []:
+        event_type = str(row.get("event_type") or "unknown").strip().lower() or "unknown"
+        occurred_at = row.get("occurred_at")
+        if isinstance(occurred_at, datetime):
+            trend_key = occurred_at.date().isoformat()
+        else:
+            trend_key = "unknown"
+        totals[event_type] += 1
+        bucket = trends.setdefault(trend_key, Counter())
+        bucket[event_type] += 1
+
+        if event_type not in {"open", "click"}:
+            continue
+        payload = _parse_smtp2go_payload(row.get("smtp2go_data"))
+        dimensions = extract_engagement_dimensions(
+            payload,
+            user_agent=str(row.get("user_agent") or "") or None,
+        )
+        geo = dimensions.get("geo")
+        device = dimensions.get("device")
+        client = dimensions.get("client")
+        if isinstance(geo, str) and geo:
+            geo_counts[geo] += 1
+        if isinstance(device, str) and device:
+            device_counts[device] += 1
+        if isinstance(client, str) and client:
+            client_counts[client] += 1
+
+    delivered_base = max(totals.get("delivered", 0), totals.get("processed", 0), 1)
+    open_rate = round((totals.get("open", 0) / delivered_base) * 100, 2)
+    click_rate = round((totals.get("click", 0) / delivered_base) * 100, 2)
+    bounce_rate = round((totals.get("bounce", 0) / delivered_base) * 100, 2)
+
+    def _rank(counter: Counter[str]) -> list[dict[str, Any]]:
+        return [
+            {"label": label, "count": count}
+            for label, count in counter.most_common(10)
+        ]
+
+    trend_rows = [
+        {
+            "date": date_key,
+            "processed": counts.get("processed", 0),
+            "delivered": counts.get("delivered", 0),
+            "open": counts.get("open", 0),
+            "click": counts.get("click", 0),
+            "bounce": counts.get("bounce", 0),
+            "rejected": counts.get("rejected", 0),
+            "spam": counts.get("spam", 0),
+        }
+        for date_key, counts in sorted(trends.items())
+        if date_key != "unknown"
+    ]
+
+    return {
+        "days": window_days,
+        "totals": dict(totals),
+        "rates": {
+            "open_rate": open_rate,
+            "click_rate": click_rate,
+            "bounce_rate": bounce_rate,
+        },
+        "trends": trend_rows,
+        "geo_breakdown": _rank(geo_counts),
+        "device_breakdown": _rank(device_counts),
+        "client_breakdown": _rank(client_counts),
+        "queue": get_delivery_queue_status(),
+    }
 
 
 async def get_email_stats(reply_id: int) -> dict[str, Any] | None:

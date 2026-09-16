@@ -16,6 +16,8 @@ from app.features.smtp import PACK
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 EXPECTED = {
+    ("GET", "/admin/modules/smtp2go"),
+    ("POST", "/admin/modules/smtp2go/settings"),
     ("POST", "/api/webhooks/smtp2go/events"),
 }
 
