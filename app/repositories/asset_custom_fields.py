@@ -81,8 +81,9 @@ async def update_field_definition(
         return
     
     params.append(definition_id)
-    await db.execute(
-        f"UPDATE asset_custom_field_definitions SET {', '.join(updates)} WHERE id = %s",
+    # The SET fragment is assembled only from fixed function arguments above; values remain bound.
+    await db.execute(  # nosec B608
+        f"UPDATE asset_custom_field_definitions SET {', '.join(updates)} WHERE id = %s",  # nosec B608
         tuple(params),
     )
 

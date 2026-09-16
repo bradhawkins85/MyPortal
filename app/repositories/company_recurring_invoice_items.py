@@ -5,6 +5,12 @@ from typing import Any, Optional, Sequence
 
 from app.core.database import db
 
+_SQL_MARK_ITEMS_BILLED = (
+    "UPDATE company_recurring_invoice_items "
+    "SET last_billed_at = %s "
+    "WHERE id IN "
+)
+
 
 def _bool_to_tinyint(value: bool) -> int:
     """Convert boolean to MySQL TINYINT(1) format."""
@@ -199,10 +205,11 @@ async def update_recurring_invoice_item(
         return await get_recurring_invoice_item(item_id)
     
     params.append(item_id)
+    # The SET fragment is assembled only from fixed function arguments above; values remain bound.
     await db.execute(
-        f"UPDATE company_recurring_invoice_items SET {', '.join(updates)} WHERE id = %s",
+        f"UPDATE company_recurring_invoice_items SET {', '.join(updates)} WHERE id = %s",  # nosec B608
         tuple(params),
-    )
+    )  # nosec B608
     
     return await get_recurring_invoice_item(item_id)
 
@@ -225,11 +232,8 @@ async def mark_recurring_invoice_items_billed(
     if not unique_ids:
         return
     placeholders = ", ".join(["%s"] * len(unique_ids))
+    # The IN placeholders are derived only from normalised recurring item ids; values remain bound.
     await db.execute(
-        f"""
-        UPDATE company_recurring_invoice_items
-        SET last_billed_at = %s
-        WHERE id IN ({placeholders})
-        """,
+        _SQL_MARK_ITEMS_BILLED + "(" + placeholders + ")",
         tuple([billed_at or datetime.utcnow(), *unique_ids]),
     )

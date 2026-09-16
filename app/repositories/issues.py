@@ -356,8 +356,9 @@ async def update_issue(
     if updates:
         params.append(issue_id)
         set_clause = ", ".join(updates)
-        await db.execute(
-            f"UPDATE issue_definitions SET {set_clause}, updated_at_utc = CURRENT_TIMESTAMP(6) WHERE id = %s",
+        # The SET fragment is assembled only from fixed local update clauses; values remain bound.
+        await db.execute(  # nosec B608
+            f"UPDATE issue_definitions SET {set_clause}, updated_at_utc = CURRENT_TIMESTAMP(6) WHERE id = %s",  # nosec B608
             tuple(params),
         )
     issue = await get_issue_by_id(issue_id)

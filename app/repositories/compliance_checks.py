@@ -135,12 +135,18 @@ async def create_category(*, code: str, name: str, description: Optional[str] = 
 
 async def update_category(category_id: int, **kwargs: Any) -> Optional[dict[str, Any]]:
     allowed = {"name", "description"}
+    unknown = set(kwargs) - allowed
+    if unknown:
+        raise ValueError(f"Unsupported compliance category fields: {', '.join(sorted(unknown))}")
     updates = {k: v for k, v in kwargs.items() if k in allowed}
     if not updates:
         return await get_category(category_id)
     columns = ", ".join(f"{k} = %({k})s" for k in updates)
     params = {**updates, "id": category_id}
-    await db.execute(f"UPDATE compliance_check_categories SET {columns} WHERE id = %(id)s", params)
+    await db.execute(  # nosec B608
+        f"UPDATE compliance_check_categories SET {columns} WHERE id = %(id)s",  # nosec B608
+        params,
+    )
     return await get_category(category_id)
 
 
@@ -276,12 +282,18 @@ async def create_check(
 async def update_check(check_id: int, **kwargs: Any) -> Optional[dict[str, Any]]:
     allowed = {"title", "description", "guidance", "default_review_interval_days",
                "default_evidence_required", "is_active", "sort_order"}
+    unknown = set(kwargs) - allowed
+    if unknown:
+        raise ValueError(f"Unsupported compliance check fields: {', '.join(sorted(unknown))}")
     updates = {k: v for k, v in kwargs.items() if k in allowed}
     if not updates:
         return await get_check(check_id)
     columns = ", ".join(f"{k} = %({k})s" for k in updates)
     params = {**updates, "id": check_id}
-    await db.execute(f"UPDATE compliance_checks SET {columns} WHERE id = %(id)s", params)
+    await db.execute(  # nosec B608
+        f"UPDATE compliance_checks SET {columns} WHERE id = %(id)s",  # nosec B608
+        params,
+    )
     return await get_check(check_id)
 
 
@@ -390,8 +402,9 @@ async def create_assignment(
             updates["owner_user_id"] = owner_user_id
         columns = ", ".join(f"{k} = %({k})s" for k in updates)
         params: dict[str, Any] = {**updates, "id": existing["id"], "company_id": company_id}
+        # Columns are derived only from the fixed reactivation update map above; values remain bound.
         await db.execute(
-            f"UPDATE company_compliance_check_assignments SET {columns}"
+            f"UPDATE company_compliance_check_assignments SET {columns}"  # nosec B608
             f" WHERE id = %(id)s AND company_id = %(company_id)s",
             params,
         )
@@ -446,6 +459,9 @@ async def update_assignment(
 
     allowed = {"status", "review_interval_days", "last_checked_at", "notes",
                "evidence_summary", "owner_user_id", "archived"}
+    unknown = set(kwargs) - allowed
+    if unknown:
+        raise ValueError(f"Unsupported assignment fields: {', '.join(sorted(unknown))}")
     updates: dict[str, Any] = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
 
     old_status = existing.get("status")
@@ -481,8 +497,9 @@ async def update_assignment(
 
     columns = ", ".join(f"{k} = %({k})s" for k in updates)
     params = {**updates, "id": assignment_id, "company_id": company_id}
-    await db.execute(
-        f"UPDATE company_compliance_check_assignments SET {columns} WHERE id = %(id)s AND company_id = %(company_id)s",
+    # Assignment columns are constrained by the explicit allowlist above and company scoping stays bound.
+    await db.execute(  # nosec B608
+        f"UPDATE company_compliance_check_assignments SET {columns} WHERE id = %(id)s AND company_id = %(company_id)s",  # nosec B608
         params,
     )
 

@@ -536,8 +536,9 @@ async def update_permission(
 ) -> None:
     if field not in _PERMISSION_FIELDS:
         raise ValueError(f"Unsupported permission field: {field}")
-    await db.execute(
-        f"UPDATE user_companies SET {field} = %s WHERE user_id = %s AND company_id = %s",
+    # `field` is validated against the explicit permission-field allowlist above; values remain bound.
+    await db.execute(  # nosec B608
+        f"UPDATE user_companies SET {field} = %s WHERE user_id = %s AND company_id = %s",  # nosec B608
         (1 if value else 0, user_id, company_id),
     )
 

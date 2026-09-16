@@ -1938,8 +1938,9 @@ async def _attach_room_to_device(room_id: int, device_id: int) -> None:
 
     placeholder = "?" if db.is_sqlite() else "%s"
     try:
+        # Backend placeholder token is selected from the active DB adapter; both values stay bound.
         await db.execute(
-            f"UPDATE chat_rooms SET tray_device_id = {placeholder} "
+            f"UPDATE chat_rooms SET tray_device_id = {placeholder} "  # nosec B608
             f"WHERE id = {placeholder}",
             (device_id, room_id),
         )

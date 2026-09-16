@@ -210,8 +210,9 @@ async def mark_read_bulk(notification_ids: Sequence[int]) -> list[dict[str, Any]
         return []
 
     placeholders = ", ".join(["%s"] * len(unique_ids))
-    await db.execute(
-        f"UPDATE notifications SET read_at = %s WHERE id IN ({placeholders})",
+    # The IN placeholders are derived only from normalised notification ids; values remain bound.
+    await db.execute(  # nosec B608
+        f"UPDATE notifications SET read_at = %s WHERE id IN ({placeholders})",  # nosec B608
         tuple([now] + unique_ids),
     )
     rows = await db.fetch_all(

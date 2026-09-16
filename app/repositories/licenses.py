@@ -302,8 +302,9 @@ async def bulk_unlink_staff(license_id: int, staff_ids: Iterable[int]) -> None:
     if not ids:
         return
     placeholders = ", ".join(["%s"] * len(ids))
+    # The IN placeholders are derived only from caller-supplied staff id count; values remain bound.
     await db.execute(
-        f"DELETE FROM staff_licenses WHERE license_id = %s AND staff_id IN ({placeholders})",
+        f"DELETE FROM staff_licenses WHERE license_id = %s AND staff_id IN ({placeholders})",  # nosec B608
         tuple([license_id, *ids]),
     )
 

@@ -83,8 +83,9 @@ async def get_install_token_by_hash(token_hash: str) -> dict[str, Any] | None:
 async def mark_install_token_used(token_id: int) -> None:
     placeholder = "?" if db.is_sqlite() else "%s"
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # Backend placeholder token is selected from the active DB adapter; values remain bound.
     await db.execute(
-        f"UPDATE tray_install_tokens SET last_used_at = {placeholder}, "
+        f"UPDATE tray_install_tokens SET last_used_at = {placeholder}, "  # nosec B608
         f"use_count = use_count + 1 WHERE id = {placeholder}",
         (now, token_id),
     )
@@ -93,8 +94,9 @@ async def mark_install_token_used(token_id: int) -> None:
 async def revoke_install_token(token_id: int) -> None:
     placeholder = "?" if db.is_sqlite() else "%s"
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # Backend placeholder token is selected from the active DB adapter; values remain bound.
     await db.execute(
-        f"UPDATE tray_install_tokens SET revoked_at = {placeholder} "
+        f"UPDATE tray_install_tokens SET revoked_at = {placeholder} "  # nosec B608
         f"WHERE id = {placeholder}",
         (now, token_id),
     )
@@ -138,8 +140,9 @@ async def create_device(
         "agent_version, console_user, status"
     )
     values = ", ".join([placeholder] * 13)
+    # The column list is hardcoded and the VALUES placeholders come only from the fixed value count.
     await db.execute(
-        f"INSERT INTO tray_devices ({columns}) VALUES ({values})",
+        f"INSERT INTO tray_devices ({columns}) VALUES ({values})",  # nosec B608
         (
             company_id,
             asset_id,
@@ -167,8 +170,9 @@ async def update_device_auth(
 ) -> None:
     placeholder = "?" if db.is_sqlite() else "%s"
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # Backend placeholder token is selected from the active DB adapter; values remain bound.
     await db.execute(
-        f"UPDATE tray_devices SET auth_token_hash = {placeholder}, "
+        f"UPDATE tray_devices SET auth_token_hash = {placeholder}, "  # nosec B608
         f"auth_token_prefix = {placeholder}, status = 'active', "
         f"updated_at = {placeholder} WHERE id = {placeholder}",
         (auth_token_hash, auth_token_prefix, now, device_id),
@@ -264,8 +268,9 @@ async def update_device_heartbeat(
 ) -> None:
     placeholder = "?" if db.is_sqlite() else "%s"
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # Backend placeholder token is selected from the active DB adapter; values remain bound.
     await db.execute(
-        f"UPDATE tray_devices SET last_seen_utc = {placeholder}, "
+        f"UPDATE tray_devices SET last_seen_utc = {placeholder}, "  # nosec B608
         f"console_user = COALESCE({placeholder}, console_user), "
         f"last_ip = COALESCE({placeholder}, last_ip), "
         f"agent_version = COALESCE({placeholder}, agent_version), "
@@ -276,24 +281,27 @@ async def update_device_heartbeat(
 
 async def link_device_to_asset(device_id: int, asset_id: int | None) -> None:
     placeholder = "?" if db.is_sqlite() else "%s"
+    # Backend placeholder token is selected from the active DB adapter; values remain bound.
     await db.execute(
-        f"UPDATE tray_devices SET asset_id = {placeholder} WHERE id = {placeholder}",
+        f"UPDATE tray_devices SET asset_id = {placeholder} WHERE id = {placeholder}",  # nosec B608
         (asset_id, device_id),
     )
 
 
 async def revoke_device(device_id: int) -> None:
     placeholder = "?" if db.is_sqlite() else "%s"
+    # Backend placeholder token is selected from the active DB adapter; values remain bound.
     await db.execute(
-        f"UPDATE tray_devices SET status = 'revoked' WHERE id = {placeholder}",
+        f"UPDATE tray_devices SET status = 'revoked' WHERE id = {placeholder}",  # nosec B608
         (device_id,),
     )
 
 
 async def reactivate_device(device_id: int) -> None:
     placeholder = "?" if db.is_sqlite() else "%s"
+    # Backend placeholder token is selected from the active DB adapter; values remain bound.
     await db.execute(
-        f"UPDATE tray_devices SET status = 'active' "
+        f"UPDATE tray_devices SET status = 'active' "  # nosec B608
         f"WHERE id = {placeholder} AND status = 'revoked'",
         (device_id,),
     )
@@ -301,8 +309,9 @@ async def reactivate_device(device_id: int) -> None:
 
 async def delete_device(device_id: int) -> None:
     placeholder = "?" if db.is_sqlite() else "%s"
+    # Backend placeholder token is selected from the active DB adapter; values remain bound.
     await db.execute(
-        f"DELETE FROM tray_devices WHERE id = {placeholder}",
+        f"DELETE FROM tray_devices WHERE id = {placeholder}",  # nosec B608
         (device_id,),
     )
 
@@ -338,8 +347,9 @@ async def create_menu_config(
         "branding_icon_url, enabled, created_by_user_id, updated_by_user_id"
     )
     values = ", ".join([placeholder] * 10)
+    # The column list is hardcoded and the VALUES placeholders come only from the fixed value count.
     await db.execute(
-        f"INSERT INTO tray_menu_configs ({columns}) VALUES ({values})",
+        f"INSERT INTO tray_menu_configs ({columns}) VALUES ({values})",  # nosec B608
         (
             name,
             scope,
@@ -416,16 +426,18 @@ async def update_menu_config(
     sets.append(f"updated_at = {placeholder}")
     params.append(datetime.now(timezone.utc).replace(tzinfo=None))
     params.append(config_id)
+    # Updated columns are selected only from the fixed function arguments above; values remain bound.
     await db.execute(
-        f"UPDATE tray_menu_configs SET {', '.join(sets)} WHERE id = {placeholder}",
+        f"UPDATE tray_menu_configs SET {', '.join(sets)} WHERE id = {placeholder}",  # nosec B608
         tuple(params),
     )
 
 
 async def delete_menu_config(config_id: int) -> None:
     placeholder = "?" if db.is_sqlite() else "%s"
+    # Backend placeholder token is selected from the active DB adapter; values remain bound.
     await db.execute(
-        f"DELETE FROM tray_menu_configs WHERE id = {placeholder}",
+        f"DELETE FROM tray_menu_configs WHERE id = {placeholder}",  # nosec B608
         (config_id,),
     )
 
@@ -476,8 +488,9 @@ async def mark_command_delivered(command_id: int, *, error: str | None = None) -
     placeholder = "?" if db.is_sqlite() else "%s"
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     new_status = "error" if error else "delivered"
+    # Backend placeholder token is selected from the active DB adapter; values remain bound.
     await db.execute(
-        f"UPDATE tray_command_log SET status = {placeholder}, error = {placeholder}, "
+        f"UPDATE tray_command_log SET status = {placeholder}, error = {placeholder}, "  # nosec B608
         f"delivered_at = {placeholder} WHERE id = {placeholder}",
         (new_status, error, now, command_id),
     )
@@ -656,8 +669,9 @@ async def update_tray_version_rollout(
     (e.g. 10 % → 25 % → 50 % → 100 %).
     """
     p = "?" if db.is_sqlite() else "%s"
+    # Backend placeholder token is selected from the active DB adapter; values remain bound.
     await db.execute(
-        f"UPDATE tray_versions SET rollout_percent = {p} WHERE id = {p}",
+        f"UPDATE tray_versions SET rollout_percent = {p} WHERE id = {p}",  # nosec B608
         (rollout_percent, version_id),
     )
 
@@ -675,8 +689,9 @@ async def create_chat_token(
     expires_at: datetime,
 ) -> dict[str, Any]:
     p = "?" if db.is_sqlite() else "%s"
+    # Backend placeholder token is selected from the active DB adapter; values remain bound.
     await db.execute(
-        f"INSERT INTO tray_chat_tokens (device_id, token_hash, room_id, expires_at) "
+        f"INSERT INTO tray_chat_tokens (device_id, token_hash, room_id, expires_at) "  # nosec B608
         f"VALUES ({p}, {p}, {p}, {p})",
         (device_id, token_hash, room_id, expires_at),
     )

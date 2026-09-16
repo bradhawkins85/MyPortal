@@ -204,8 +204,9 @@ async def update_job(
     if not sets:
         return await get_job(job_id)
     params.append(int(job_id))
-    await db.execute(
-        f"UPDATE backup_jobs SET {', '.join(sets)} WHERE id = %s",
+    # The SET fragment is assembled only from fixed function arguments above; values remain bound.
+    await db.execute(  # nosec B608
+        f"UPDATE backup_jobs SET {', '.join(sets)} WHERE id = %s",  # nosec B608
         tuple(params),
     )
     return await get_job(job_id)

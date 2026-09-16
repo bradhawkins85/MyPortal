@@ -207,8 +207,9 @@ async def update_subscription(
         return
     
     params.append(subscription_id)
-    await db.execute(
-        "UPDATE subscriptions SET " + ", ".join(updates) + " WHERE id = %s",
+    # The SET fragment is assembled only from fixed function arguments above; values remain bound.
+    await db.execute(  # nosec B608
+        "UPDATE subscriptions SET " + ", ".join(updates) + " WHERE id = %s",  # nosec B608
         tuple(params),
     )
 

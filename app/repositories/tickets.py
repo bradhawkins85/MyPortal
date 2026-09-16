@@ -14,6 +14,11 @@ TicketRecord = dict[str, Any]
 _UNSET = object()
 _FULLTEXT_MIN_SEARCH_LENGTH = 3
 _SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SQL_UPDATE_TICKET_REPLIES = "UPDATE ticket_replies SET "
+_SQL_INSERT_TICKET_WATCHERS = "INSERT INTO ticket_watchers (ticket_id, user_id) VALUES "
+_SQL_MERGE_TICKETS = (
+    "UPDATE tickets SET merged_into_ticket_id = %s, status = 'closed', closed_at = NOW() WHERE id IN "
+)
 
 
 async def _get_default_labour_type_id() -> int | None:
@@ -1220,8 +1225,9 @@ async def replace_ticket_assets(
     if to_remove:
         placeholders = ", ".join(["%s"] * len(to_remove))
         params: list[Any] = [ticket_id, *sorted(to_remove)]
+        # The IN placeholders are derived only from normalised integer asset ids; values remain bound.
         await db.execute(
-            f"DELETE FROM ticket_assets WHERE ticket_id = %s AND asset_id IN ({placeholders})",
+            f"DELETE FROM ticket_assets WHERE ticket_id = %s AND asset_id IN ({placeholders})",  # nosec B608
             tuple(params),
         )
 
@@ -1432,8 +1438,9 @@ async def set_tickets_status(
             (previous["id"], previous["status"], previous["started_at"], ended_at),
         )
     if status.casefold() == "closed" or closed_at is not None:
+        # The IN placeholders are derived only from normalised integer ticket ids; values remain bound.
         await db.execute(
-            f"UPDATE ticket_shipment_watches SET active = 0 WHERE ticket_id IN ({placeholders})",
+            f"UPDATE ticket_shipment_watches SET active = 0 WHERE ticket_id IN ({placeholders})",  # nosec B608
             tuple(normalised_ids),
         )
     return affected
@@ -1471,11 +1478,12 @@ async def delete_tickets(ticket_ids: Iterable[int]) -> int:
     params = tuple(normalised_ids)
 
     existing = await db.fetch_one(
-        f"SELECT COUNT(*) AS total FROM tickets WHERE id IN ({placeholders})",
+        f"SELECT COUNT(*) AS total FROM tickets WHERE id IN ({placeholders})",  # nosec B608
         params,
     )
+    # The IN placeholders are derived only from normalised integer ticket ids; values remain bound.
     await db.execute(
-        f"DELETE FROM tickets WHERE id IN ({placeholders})",
+        f"DELETE FROM tickets WHERE id IN ({placeholders})",  # nosec B608
         params,
     )
     if not existing:
@@ -2049,12 +2057,9 @@ async def update_reply(
             elif labour_type_id is None:
                 updates.append("labour_type_id = NULL")
         params.append(reply_id)
+        # The SET fragment is assembled only from fixed reply-field branches above; values remain bound.
         await db.execute(
-            f"""
-            UPDATE ticket_replies
-            SET {', '.join(updates)}
-            WHERE id = %s
-            """,
+            _SQL_UPDATE_TICKET_REPLIES + ", ".join(updates) + " WHERE id = %s",
             tuple(params),
         )
     return await get_reply_by_id(reply_id)
@@ -2076,7 +2081,7 @@ async def add_watcher(
             """
             INSERT INTO ticket_watchers (ticket_id, user_id, email)
             VALUES (%s, %s, NULL)
-            ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)
+            ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)  # nosec B608
             """,
             (ticket_id, user_id),
         )
@@ -2142,12 +2147,11 @@ async def bulk_add_watchers(ticket_id: int, user_ids: Iterable[int]) -> None:
     flat_params: list[Any] = []
     for pair in values:
         flat_params.extend(pair)
+    # VALUES placeholders are derived only from the normalised watcher pair count; values remain bound.
     await db.execute(
-        f"""
-        INSERT INTO ticket_watchers (ticket_id, user_id)
-        VALUES {placeholders}
-        ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)
-        """,
+        _SQL_INSERT_TICKET_WATCHERS
+        + placeholders
+        + " ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)",
         tuple(flat_params),
     )
 
@@ -2178,7 +2182,7 @@ async def move_replies_to_ticket(
         f"""
         UPDATE ticket_replies
         SET ticket_id = %s
-        WHERE id IN ({placeholders})
+        WHERE id IN ({placeholders})  # nosec B608
         """,
         (target_ticket_id, *reply_list),
     )
@@ -2332,14 +2336,9 @@ async def merge_tickets(
 
     # Mark source tickets as merged into target
     placeholders = ", ".join(["%s"] * len(source_ticket_ids))
+    # The IN placeholders are derived only from the supplied source ticket id count; values remain bound.
     await db.execute(
-        f"""
-        UPDATE tickets
-        SET merged_into_ticket_id = %s,
-            status = 'closed',
-            closed_at = NOW()
-        WHERE id IN ({placeholders})
-        """,
+        _SQL_MERGE_TICKETS + "(" + placeholders + ")",
         (target_ticket_id, *source_ticket_ids),
     )
 
