@@ -62,11 +62,11 @@ def _default_settings_for_slug(slug: str) -> dict[str, Any]:
         }
     if slug == "smtp2go":
         return {
-            "api_key": str(os.getenv("SMTP2GO_API_KEY", "")),
+            "api_key": "",
             "enable_tracking": True,
             "track_opens": True,
             "track_clicks": True,
-            "webhook_secret": str(os.getenv("SMTP2GO_WEBHOOK_SECRET", "")),
+            "webhook_secret": "",
             "disable_webhook_signature_verification": False,
             "manage_url": "/admin/modules/smtp2go",
             "rate_limit_max_retries": 3,

@@ -68,8 +68,6 @@ async def test_bcp_glossary_uses_configured_rendering_seam(monkeypatch):
 
     request = MagicMock(spec=Request)
     templates_calls: list[tuple[str, dict[str, object]]] = []
-    original_builder = bcp._build_page_base_context
-    original_templates = bcp._page_templates
 
     async def fake_require_bcp_view(_request: Request):
         return {"id": 7, "is_super_admin": True}, 101
@@ -83,20 +81,18 @@ async def test_bcp_glossary_uses_configured_rendering_seam(monkeypatch):
             return {"template_name": template_name, "context": context}
 
     monkeypatch.setattr(bcp, "_require_bcp_view", fake_require_bcp_view)
-    try:
-        bcp.configure_page_rendering(
-            build_base_context=fake_build_base_context,
-            templates=FakeTemplates(),
-        )
+    monkeypatch.setattr(bcp, "_build_page_base_context", bcp._build_page_base_context)
+    monkeypatch.setattr(bcp, "_page_templates", bcp._page_templates)
+    bcp.configure_page_rendering(
+        build_base_context=fake_build_base_context,
+        templates=FakeTemplates(),
+    )
 
-        response = await bcp.bcp_glossary(request)
+    response = await bcp.bcp_glossary(request)
 
-        assert response["template_name"] == "bcp/glossary.html"
-        assert templates_calls[0][1]["title"] == "BCP Glossary"
-        assert templates_calls[0][1]["current_user"]["id"] == 7
-    finally:
-        bcp._build_page_base_context = original_builder
-        bcp._page_templates = original_templates
+    assert response["template_name"] == "bcp/glossary.html"
+    assert templates_calls[0][1]["title"] == "BCP Glossary"
+    assert templates_calls[0][1]["current_user"]["id"] == 7
 
 
 @pytest.mark.asyncio
