@@ -12,7 +12,6 @@ from app.schemas.m365_out_of_office import OutOfOfficeCreate, OutOfOfficeResult
 from app.security.session import session_manager
 from app.services import m365_spam_purge as purge_service
 from app.services import m365_out_of_office as oof_service
-from app.repositories import m365 as m365_repo
 
 
 router = APIRouter(
@@ -45,7 +44,7 @@ async def _require_oof_access(request: Request, user: dict, *, write: bool = Fal
 @oof_router.get("/mailboxes", summary="List selectable user mailboxes")
 async def list_out_of_office_mailboxes(request: Request, user: dict = Depends(get_current_user)):
     await _require_oof_access(request, user)
-    rows = await m365_repo.get_mailboxes(await _company_id(request), "UserMailbox")
+    rows = await oof_service.get_selectable_mailboxes(await _company_id(request))
     return [{"display_name": row["display_name"], "user_principal_name": row["user_principal_name"]} for row in rows]
 
 

@@ -15,7 +15,6 @@ from app.security.flash import flash_redirect
 from app.services import audit as audit_service
 from app.services import m365_spam_purge as purge_service
 from app.services import m365_out_of_office as oof_service
-from app.repositories import m365 as m365_repo
 
 
 router = APIRouter(tags=["Office365 Spam Purge"])
@@ -56,7 +55,7 @@ async def out_of_office_page(request: Request):
     user, company_id, redirect = await _oof_context(request)
     if redirect:
         return redirect
-    mailboxes = await m365_repo.get_mailboxes(company_id, "UserMailbox")
+    mailboxes = await oof_service.get_selectable_mailboxes(company_id)
     can_write = await _main()._has_menu_page_access(
         request, user, "menu.m365.out_of_office", write=True
     )
