@@ -167,8 +167,10 @@ async def invoices_page(request: Request):
         "is_global_invoices": False,
         "invoice_table_id": "invoice",
         "can_sync_invoices_to_xero": bool(user.get("is_super_admin")),
+        "unsynced_invoice_count": len(unsynced_invoices),
         "approval_queue_count": len(approval_queue),
         "exception_queue_count": len(exception_queue),
+        "exception_queue": [],
     }
     return await main_module._render_template("invoices/index.html", request, user, extra=extra)
 

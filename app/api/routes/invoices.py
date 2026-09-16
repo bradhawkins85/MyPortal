@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.database import require_database
 from app.repositories import companies as company_repo
+from app.repositories import ticket_billed_time_entries as billed_time_repo
 from app.repositories import invoices as invoice_repo
 from app.repositories import invoice_lines as invoice_lines_repo
 from app.repositories import tickets as tickets_repo
@@ -216,7 +217,7 @@ async def update_invoice(
         status=merged.get("status"),
     )
     adjustment_updates = {
-        key: merged.get(key)
+        key: data[key]
         for key in (
             "approval_required",
             "approved_by",
@@ -227,8 +228,10 @@ async def update_invoice(
             "xero_sync_error",
             "xero_sync_attempted_at",
         )
+        if key in data
     }
-    updated = await invoice_repo.patch_invoice(invoice_id, **adjustment_updates)
+    if adjustment_updates:
+        updated = await invoice_repo.patch_invoice(invoice_id, **adjustment_updates)
     await audit_service.record(
         action="invoice.update",
         request=request,
@@ -357,6 +360,11 @@ async def bill_ticket_now(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Ticket is already billed",
+        )
+    if ticket.get("billed_at") or await billed_time_repo.get_billed_entries_by_ticket(payload.ticket_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Ticket already has billed time recorded",
         )
     company_id = ticket.get("company_id")
     try:
