@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
-from math import ceil
+from math import ceil, floor
 import json
 from typing import Any, Mapping, Sequence
 
@@ -111,7 +111,7 @@ def _credential_warnings(
                 "label": label,
                 "expires_at": expires_at,
                 "expires_at_iso": expires_at.isoformat(),
-                "days_remaining": int(delta_days),
+                "days_remaining": ceil(delta_days) if delta_days >= 0 else floor(delta_days),
                 "severity": "danger" if delta_days <= 0 else "warning",
                 "message": (
                     f"{label} expired"
@@ -279,7 +279,17 @@ async def build_operations_center(
     webhook_events = await webhook_events_repo.list_events(limit=500)
     now = datetime.now(timezone.utc)
     app_settings = get_settings()
-    warning_window_days = _DEFAULT_CREDENTIAL_WARNING_DAYS
+    warning_window_days = max(
+        1,
+        int(
+            getattr(
+                app_settings,
+                "integration_credential_warning_days",
+                _DEFAULT_CREDENTIAL_WARNING_DAYS,
+            )
+            or _DEFAULT_CREDENTIAL_WARNING_DAYS
+        ),
+    )
 
     task_ids_by_module: dict[str, set[int]] = defaultdict(set)
     for task in tasks:

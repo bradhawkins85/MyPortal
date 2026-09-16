@@ -15,6 +15,10 @@ def anyio_backend() -> str:
 
 @pytest.mark.anyio
 async def test_build_operations_center_aggregates_health_and_conflicts(monkeypatch):
+    command_map = {
+        "sync_to_xero": frozenset({"xero"}),
+        "sync_m365_data": frozenset({"m365-admin"}),
+    }
     modules = [
         {
             "slug": "xero",
@@ -99,7 +103,18 @@ async def test_build_operations_center_aggregates_health_and_conflicts(monkeypat
         return webhook_events
 
     monkeypatch.setattr(
-        integration_operations, "get_settings", lambda: SimpleNamespace(default_timezone="UTC", m365_client_secret_renewal_days=30)
+        integration_operations,
+        "get_settings",
+        lambda: SimpleNamespace(
+            default_timezone="UTC",
+            m365_client_secret_renewal_days=30,
+            integration_credential_warning_days=30,
+        ),
+    )
+    monkeypatch.setattr(
+        integration_operations,
+        "modules_for_command",
+        lambda command: command_map.get(command, frozenset()),
     )
     monkeypatch.setattr(
         integration_operations.scheduled_tasks_repo, "list_tasks", fake_list_tasks
@@ -164,7 +179,18 @@ async def test_build_operations_center_flags_missing_scheduled_task_for_enabled_
         return []
 
     monkeypatch.setattr(
-        integration_operations, "get_settings", lambda: SimpleNamespace(default_timezone="UTC", m365_client_secret_renewal_days=30)
+        integration_operations,
+        "get_settings",
+        lambda: SimpleNamespace(
+            default_timezone="UTC",
+            m365_client_secret_renewal_days=30,
+            integration_credential_warning_days=30,
+        ),
+    )
+    monkeypatch.setattr(
+        integration_operations,
+        "modules_for_command",
+        lambda command: frozenset({"huntress"}) if command == "sync_huntress" else frozenset(),
     )
     monkeypatch.setattr(
         integration_operations.scheduled_tasks_repo, "list_tasks", fake_list_tasks
