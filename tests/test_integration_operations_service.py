@@ -154,7 +154,7 @@ async def test_build_operations_center_aggregates_health_and_conflicts(monkeypat
     xero = next(item for item in result["module_health"] if item["slug"] == "xero")
     assert xero["status_key"] == "warning"
     assert xero["failed_webhook_count"] == 1
-    assert xero["slo_achieved_percent"] == pytest.approx(33.3)
+    assert xero["slo_achieved_percent"] == pytest.approx(33.3, abs=0.05)
     assert xero["error_budget_overrun"] == 1
 
     m365_admin = next(

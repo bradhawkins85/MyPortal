@@ -145,19 +145,20 @@ def _event_belongs_to_module(event: Mapping[str, Any], module_slug: str) -> bool
 
 
 def _telemetry_summary(total: int, failures: int) -> dict[str, Any]:
+    target_percent = 99
     if total <= 0:
         return {
-            "target_percent": 99,
+            "target_percent": target_percent,
             "achieved_percent": None,
             "error_budget_total": 0,
             "error_budget_used": 0,
             "error_budget_overrun": 0,
             "error_budget_remaining": 0,
         }
-    budget_total = max(1, ceil(total * 0.01))
+    budget_total = max(1, ceil(total * (1 - (target_percent / 100))))
     achieved_percent = max(0.0, round(((total - failures) / total) * 100, 1))
     return {
-        "target_percent": 99,
+        "target_percent": target_percent,
         "achieved_percent": achieved_percent,
         "error_budget_total": budget_total,
         "error_budget_used": min(failures, budget_total),
@@ -293,6 +294,11 @@ def _build_task_conflicts(
 async def build_operations_center(
     modules: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    """Aggregate integration telemetry for the admin operations center.
+
+    When *modules* is omitted this falls back to the runtime module registry so
+    callers can either reuse a preloaded module list or request a fresh snapshot.
+    """
     module_rows = list(modules) if modules is not None else await modules_service.list_modules()
     tasks = await scheduled_tasks_repo.list_tasks(include_inactive=True)
     recent_runs = await scheduled_tasks_repo.list_recent_runs(limit=200)
@@ -384,7 +390,7 @@ async def build_operations_center(
             issues.append("Add " + ", ".join(missing_fields))
         if enabled and COMMANDS_BY_MODULE.get(slug) and not task_ids:
             issues.append("Create at least one scheduled task")
-        if warnings:
+        if warnings and status_key == "setup":
             issues.append(warnings[0]["message"])
         if issues:
             settings = _module_settings(module)
