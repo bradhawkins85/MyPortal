@@ -105,3 +105,36 @@ def test_annual_payment_creates_yearly_recurring_item_without_end_date(monkeypat
     assert captured["billing_frequency"] == "yearly"
     assert "billing_interval" not in captured
     assert "end_date" not in captured
+
+
+def test_deactivate_subscription_recurring_item_keeps_history(monkeypatch):
+    captured = {}
+
+    async def product(_product_id):
+        return {"id": 3, "sku": "SUB-1"}
+
+    async def find(_company_id, _product):
+        return {"id": 42, "active": True}
+
+    async def update(item_id, **values):
+        captured.update({"item_id": item_id, **values})
+        return {"id": item_id, **values}
+
+    monkeypatch.setattr(subscription_billing.shop_repo, "get_product_by_id", product)
+    monkeypatch.setattr(subscription_billing, "find_existing_item", find)
+    monkeypatch.setattr(
+        subscription_billing.recurring_items_repo,
+        "update_recurring_invoice_item",
+        update,
+    )
+
+    asyncio.run(subscription_billing.deactivate_subscription_recurring_item(
+        {"customer_id": 4, "product_id": 3},
+        cancellation_date=date(2026, 9, 16),
+    ))
+
+    assert captured == {
+        "item_id": 42,
+        "active": False,
+        "end_date": date(2026, 9, 16),
+    }

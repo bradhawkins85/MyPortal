@@ -1,7 +1,8 @@
 """API routes for managing subscriptions."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -11,8 +12,10 @@ from app.api.dependencies.auth import get_current_user
 from app.api.dependencies.database import require_database
 from app.repositories import subscription_change_requests as change_requests_repo
 from app.repositories import subscriptions as subscriptions_repo
+from app.repositories import shop as shop_repo
 from app.repositories import user_companies as user_company_repo
 from app.services import subscription_changes as subscription_changes_service
+from app.services import shop as shop_service
 
 router = APIRouter(prefix="/api/v1/subscriptions", tags=["Subscriptions"])
 
@@ -38,6 +41,93 @@ class SubscriptionResponse(BaseModel):
     
     class Config:
         populate_by_name = True
+
+
+class CreateExistingSubscriptionRequest(BaseModel):
+    """An externally billed subscription to begin managing in MyPortal."""
+
+    customer_id: int = Field(..., alias="customerId", gt=0)
+    product_id: int = Field(..., alias="productId", gt=0)
+    start_date: date = Field(..., alias="startDate")
+    quantity: int = Field(default=1, ge=1, le=9999)
+    auto_renew: bool = Field(default=True, alias="autoRenew")
+
+    class Config:
+        populate_by_name = True
+
+
+def _subscription_response(subscription: dict[str, Any]) -> SubscriptionResponse:
+    """Serialise repository values consistently for API responses."""
+    value = dict(subscription)
+    value["unit_price"] = str(subscription["unit_price"])
+    value["prorated_price"] = (
+        str(subscription["prorated_price"])
+        if subscription.get("prorated_price") is not None
+        else None
+    )
+    value["created_at"] = (
+        subscription["created_at"].isoformat() if subscription.get("created_at") else None
+    )
+    value["updated_at"] = (
+        subscription["updated_at"].isoformat() if subscription.get("updated_at") else None
+    )
+    return SubscriptionResponse.model_validate(value)
+
+
+@router.post("", response_model=SubscriptionResponse, status_code=status.HTTP_201_CREATED)
+async def create_existing_subscription(
+    payload: CreateExistingSubscriptionRequest,
+    _: None = Depends(require_database),
+    current_user: dict = Depends(get_current_user),
+) -> SubscriptionResponse:
+    """Register an existing external subscription without issuing an initial invoice.
+
+    The subscription enters the standard renewal workflow. Only a super admin can
+    use this operation because it creates an active billing entitlement directly.
+    """
+    if not current_user.get("is_super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super admin privileges required to create existing subscriptions",
+        )
+
+    product = await shop_repo.get_product_by_id(payload.product_id)
+    if not product or product.get("subscription_category_id") is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A valid subscription product is required",
+        )
+    existing = await subscriptions_repo.list_subscriptions(
+        customer_id=payload.customer_id,
+        product_id=payload.product_id,
+        limit=1,
+    )
+    if any(item.get("status") in {"active", "pending_renewal"} for item in existing):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The customer already has an active subscription for this product",
+        )
+
+    commitment, _payment_frequency = (
+        shop_service.get_subscription_billing_plan(product) or ("annual", "annual")
+    )
+    term_days = 30 if commitment == "monthly" else 365
+    unit_price = Decimal(str(shop_service.get_product_price(product, is_vip=False)))
+    subscription = await subscriptions_repo.create_subscription(
+        customer_id=payload.customer_id,
+        product_id=payload.product_id,
+        subscription_category_id=int(product["subscription_category_id"]),
+        start_date=payload.start_date,
+        end_date=payload.start_date + timedelta(days=term_days),
+        quantity=payload.quantity,
+        unit_price=unit_price,
+        status="active",
+        auto_renew=payload.auto_renew,
+        created_by=int(current_user["id"]),
+    )
+    # Deliberately do not create an invoice or immediately-due recurring invoice
+    # item. The normal T-60 renewal service discovers this active subscription.
+    return _subscription_response(subscription)
 
 
 async def _ensure_subscription_access(user: dict, customer_id: int) -> None:
@@ -279,9 +369,9 @@ async def delete_subscription(
     
     # End billing before removing the portal record. The recurring row is kept
     # for audit/history and must never be deleted with the subscription.
-    from app.services.subscription_billing import sync_subscription_recurring_item
+    from app.services.subscription_billing import deactivate_subscription_recurring_item
 
-    await sync_subscription_recurring_item(subscription, cancellation_date=date.today())
+    await deactivate_subscription_recurring_item(subscription, cancellation_date=date.today())
 
     # Delete the subscription
     await subscriptions_repo.delete_subscription(subscription_id)

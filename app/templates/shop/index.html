@@ -217,7 +217,7 @@
               {% endif %}
               {% set has_active_subscription = is_subscription and product.id in active_subscription_product_ids %}
               {% if has_active_subscription %}
-                <a href="/subscriptions" class="button button--primary">Manage</a>
+                <a href="/subscriptions#subscription-{{ product.active_subscription_id }}" class="button button--primary">Manage</a>
               {% elif cart_allowed %}
                 <form action="{{ '/cart/add-package' if product.is_package else '/cart/add' }}" method="post" class="inline-form shop-product-card__cart">
                   {% include "partials/csrf.html" %}

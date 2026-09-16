@@ -1,0 +1,7 @@
+{
+  "guid": "f1945275-d86a-4cc8-a42c-b2ea29bb4446",
+  "occurred_at": "2026-09-16T00:00Z",
+  "change_type": "Feature",
+  "summary": "Improved subscription lifecycle management for external subscriptions, recurring billing cleanup, and customer shop actions.",
+  "content_hash": "a444e7975f20812ff198da9968d85cd277fe9cfee0c8b29505071907f3cd1831"
+}

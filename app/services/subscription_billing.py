@@ -81,3 +81,23 @@ async def sync_subscription_recurring_item(
             raise RuntimeError("Failed to update subscription recurring invoice item")
         return updated
     return await recurring_items_repo.create_recurring_invoice_item(company_id=company_id, **values)
+
+
+async def deactivate_subscription_recurring_item(
+    subscription: Mapping[str, Any], *, cancellation_date: date
+) -> dict[str, Any] | None:
+    """Deactivate an existing SKU-linked recurring item without creating one."""
+    product = await shop_repo.get_product_by_id(int(subscription["product_id"]))
+    if not product:
+        raise ValueError("Subscription shop product was not found")
+    existing = await find_existing_item(int(subscription["customer_id"]), product)
+    if not existing:
+        return None
+    updated = await recurring_items_repo.update_recurring_invoice_item(
+        int(existing["id"]),
+        active=False,
+        end_date=cancellation_date,
+    )
+    if not updated:
+        raise RuntimeError("Failed to deactivate subscription recurring invoice item")
+    return updated

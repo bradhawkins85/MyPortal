@@ -78,16 +78,14 @@ async def list_subscriptions(
         conditions.append("end_date > %s")
         params.append(end_after)
     
-    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
     
-    query = f"""
+    query = """
         SELECT s.*, p.name as product_name, p.sku as product_sku, c.name as category_name
         FROM subscriptions s
         LEFT JOIN shop_products p ON s.product_id = p.id
         LEFT JOIN subscription_categories c ON s.subscription_category_id = c.id
-        {where_clause}
-        ORDER BY s.end_date DESC, s.created_at DESC
-    """
+        """ + where_clause + " ORDER BY s.end_date DESC, s.created_at DESC"
     
     if limit is not None:
         query += " LIMIT %s"
@@ -210,7 +208,7 @@ async def update_subscription(
     
     params.append(subscription_id)
     await db.execute(
-        f"UPDATE subscriptions SET {', '.join(updates)} WHERE id = %s",
+        "UPDATE subscriptions SET " + ", ".join(updates) + " WHERE id = %s",
         tuple(params),
     )
 
@@ -261,10 +259,10 @@ async def count_subscriptions(
         conditions.append("status = %s")
         params.append(status)
     
-    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
     
     row = await db.fetch_one(
-        f"SELECT COUNT(*) as count FROM subscriptions {where_clause}",
+        "SELECT COUNT(*) as count FROM subscriptions " + where_clause,
         tuple(params),
     )
     
@@ -299,3 +297,16 @@ async def get_active_subscription_product_ids(customer_id: int) -> set[int]:
     )
     
     return {int(row["product_id"]) for row in rows}
+
+
+async def get_active_subscriptions_by_product_id(
+    customer_id: int,
+) -> dict[int, dict[str, Any]]:
+    """Return one manageable active subscription for each subscribed product."""
+    subscriptions = await list_subscriptions(customer_id=customer_id, limit=500)
+    result: dict[int, dict[str, Any]] = {}
+    for subscription in subscriptions:
+        if subscription.get("status") not in {"active", "pending_renewal"}:
+            continue
+        result.setdefault(int(subscription["product_id"]), subscription)
+    return result

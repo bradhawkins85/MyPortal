@@ -59,7 +59,7 @@
         </thead>
         <tbody>
           {% for subscription in subscriptions %}
-          <tr>
+          <tr id="subscription-{{ subscription.id }}">
             <td data-column="product_name" data-value="{{ subscription.product_name or '' }}">{{ subscription.product_name or '—' }}</td>
             <td data-column="category_name" data-value="{{ subscription.category_name or '' }}">{{ subscription.category_name or '—' }}</td>
             <td data-column="quantity" data-value="{{ subscription.quantity }}">{{ subscription.quantity }}{% if subscription.voice_monitor_contract %} monitored number{% if subscription.quantity != 1 %}s{% endif %}{% endif %}</td>

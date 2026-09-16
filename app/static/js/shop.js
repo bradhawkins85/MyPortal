@@ -203,6 +203,13 @@
   }
 
   function buildModalAddToCart(product) {
+    if (product && product.active_subscription_id) {
+      const manage = document.createElement('a');
+      manage.className = 'button button--primary';
+      manage.href = `/subscriptions#subscription-${encodeURIComponent(product.active_subscription_id)}`;
+      manage.textContent = 'Manage';
+      return manage;
+    }
     const stock = Number(product && product.stock);
     const modal = document.getElementById('product-details-modal');
     const cartAllowed = modal && modal.getAttribute('data-cart-allowed') === 'true';
