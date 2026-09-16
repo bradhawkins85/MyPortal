@@ -338,7 +338,9 @@ async def test_send_order_to_xero_success():
         invoice_payload = request_payload["Invoices"][0]
         assert invoice_payload["Type"] == "ACCREC"
         assert invoice_payload["Reference"] == "PO-12345"
-        assert invoice_payload["Status"] == "DRAFT"
+        assert invoice_payload["Status"] == "AUTHORISED"
+        assert invoice_payload["SentToContact"] is True
+        assert "DueDate" in invoice_payload
         assert len(invoice_payload["LineItems"]) == 2
 
         # Check that user info line was included

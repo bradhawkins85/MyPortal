@@ -1495,6 +1495,7 @@ async def build_order_invoice(
     fetch_items: OrderItemsFetcher,
     fetch_company: CompanyFetcher,
     user_name: str | None = None,
+    freight_amount: Decimal | None = None,
 ) -> dict[str, Any] | None:
     """Prepare a Xero invoice payload for a shop order.
     
@@ -1527,10 +1528,22 @@ async def build_order_invoice(
 
     line_items: list[dict[str, Any]] = []
     context_items: list[dict[str, Any]] = []
+    from app.services import shop as shop_service
+
     for item in items:
         quantity_decimal = _to_decimal(item.get("quantity")) or Decimal("0")
         quantity = float(_quantize(quantity_decimal, "0.01"))
-        price_decimal = _to_decimal(item.get("price"))
+        is_subscription = item.get("subscription_category_id") is not None
+        if is_subscription:
+            # Commitment-specific subscription pricing is authoritative. A
+            # missing/zero configured price is omitted so Xero can apply the
+            # sales price belonging to ItemCode.
+            configured_price = shop_service.get_product_price(
+                item, is_vip=bool(int(item.get("is_vip") or 0))
+            )
+            price_decimal = configured_price if configured_price > 0 else None
+        else:
+            price_decimal = _to_decimal(item.get("price"))
         unit_amount = float(_quantize(price_decimal, "0.01")) if price_decimal is not None else None
         sku = item.get("sku")
         line_item: dict[str, Any] = {
@@ -1554,8 +1567,21 @@ async def build_order_invoice(
                 "price": unit_amount,
                 "product_name": item.get("product_name"),
                 "sku": sku,
+                "is_subscription": is_subscription,
             }
         )
+
+    freight_decimal = _to_decimal(freight_amount)
+    if freight_decimal is not None and freight_decimal > 0:
+        freight_line: dict[str, Any] = {
+            "Description": "Freight",
+            "Quantity": 1,
+            "UnitAmount": float(_quantize(freight_decimal)),
+            "AccountCode": str(account_code or "").strip(),
+        }
+        if tax_type:
+            freight_line["TaxType"] = str(tax_type).strip()
+        line_items.append(freight_line)
 
     # Add line item with user information and order number
     if user_name:
@@ -2888,6 +2914,7 @@ async def send_order_to_xero(
     order_number: str,
     company_id: int,
     user_name: str | None = None,
+    freight_amount: Decimal | None = None,
 ) -> dict[str, Any]:
     """Send a shop order to Xero for invoicing.
     
@@ -2959,6 +2986,7 @@ async def send_order_to_xero(
         fetch_items=shop_repo.list_order_items,
         fetch_company=company_repo.get_company_by_id,
         user_name=user_name,
+        freight_amount=freight_amount,
     )
     
     if not invoice_data:
@@ -2988,6 +3016,23 @@ async def send_order_to_xero(
                 access_token=access_token,
             )
 
+    has_subscriptions = any(
+        item.get("is_subscription") for item in invoice_data["context"].get("items", [])
+    )
+    has_products = any(
+        not item.get("is_subscription") for item in invoice_data["context"].get("items", [])
+    )
+    subscription_auto_send = bool(company.get("xero_auto_send_subscription_invoices", 1))
+    product_auto_send = bool(company.get("xero_auto_send_product_invoices", 1))
+    # A mixed cart remains one invoice when both policies agree. If they differ,
+    # split it so each purchase type independently honours its delivery policy.
+    auto_send = (
+        subscription_auto_send if has_subscriptions and not has_products
+        else product_auto_send if has_products and not has_subscriptions
+        else subscription_auto_send and product_auto_send
+    )
+
+    due_date = date.today() + timedelta(days=resolve_invoice_due_days(company))
     xero_payload = {
         "Type": "ACCREC",
         "Contact": invoice_data["contact"],
@@ -2995,8 +3040,41 @@ async def send_order_to_xero(
         "LineAmountTypes": invoice_data["line_amount_type"],
         "Reference": invoice_data["reference"],
         "Date": date.today().isoformat(),
-        "Status": "DRAFT",
+        "DueDate": due_date.isoformat(),
+        "Status": "AUTHORISED" if auto_send else "DRAFT",
     }
+    if auto_send:
+        xero_payload["SentToContact"] = True
+
+    xero_payloads = [xero_payload]
+    if has_subscriptions and has_products and subscription_auto_send != product_auto_send:
+        item_context = invoice_data["context"]["items"]
+        product_lines = invoice_data["line_items"][:len(item_context)]
+        informational_lines = invoice_data["line_items"][len(item_context):]
+        xero_payloads = []
+        for is_subscription, should_send, label in (
+            (True, subscription_auto_send, "Subscriptions"),
+            (False, product_auto_send, "Products"),
+        ):
+            selected_lines = [
+                line for line, context_item in zip(product_lines, item_context)
+                if bool(context_item.get("is_subscription")) is is_subscription
+            ]
+            split_payload = dict(xero_payload)
+            shared_lines = informational_lines
+            if is_subscription:
+                shared_lines = [
+                    line for line in informational_lines
+                    if line.get("Description") != "Freight"
+                ]
+            split_payload["LineItems"] = selected_lines + shared_lines
+            split_payload["Reference"] = f'{invoice_data["reference"]} - {label}'
+            split_payload["Status"] = "AUTHORISED" if should_send else "DRAFT"
+            if should_send:
+                split_payload["SentToContact"] = True
+            else:
+                split_payload.pop("SentToContact", None)
+            xero_payloads.append(split_payload)
 
     # Make API call to Xero
     api_url = "https://api.xero.com/api.xro/2.0/Invoices"
@@ -3008,7 +3086,7 @@ async def send_order_to_xero(
     }
 
     # Persist the exact request payload for webhook retries
-    webhook_payload = {"Invoices": [xero_payload]}
+    webhook_payload = {"Invoices": xero_payloads}
 
     try:
         event = await webhook_monitor.create_manual_event(
@@ -3036,7 +3114,7 @@ async def send_order_to_xero(
     response_headers: dict[str, Any] | None = None
     xero_invoice_number: str | None = None
     
-    xero_request_payload = {"Invoices": [xero_payload]}
+    xero_request_payload = {"Invoices": xero_payloads}
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -3482,6 +3560,7 @@ async def send_subscription_charge_to_xero(
     change_request_id: str,
     customer_id: int,
     product_name: str,
+    product_code: str | None,
     quantity_change: int,
     prorated_charge: Decimal,
     end_date: date,
@@ -3568,6 +3647,8 @@ async def send_subscription_charge_to_xero(
     
     if tax_type:
         line_item["TaxType"] = str(tax_type).strip()
+    if str(product_code or "").strip():
+        line_item["ItemCode"] = str(product_code).strip()
     
     line_items.append(line_item)
     
@@ -3591,6 +3672,8 @@ async def send_subscription_charge_to_xero(
     reference = f"{reference_prefix} - Subscription {subscription_id[:8]}"
     
     # Build Xero invoice payload
+    auto_send = bool(company.get("xero_auto_send_subscription_invoices", 1))
+    due_date = date.today() + timedelta(days=resolve_invoice_due_days(company))
     xero_payload = {
         "Type": "ACCREC",
         "Contact": contact_payload,
@@ -3598,8 +3681,11 @@ async def send_subscription_charge_to_xero(
         "LineAmountTypes": line_amount_type,
         "Reference": reference,
         "Date": date.today().isoformat(),
-        "Status": "DRAFT",
+        "DueDate": due_date.isoformat(),
+        "Status": "AUTHORISED" if auto_send else "DRAFT",
     }
+    if auto_send:
+        xero_payload["SentToContact"] = True
     
     # Make API call to Xero
     api_url = "https://api.xero.com/api.xro/2.0/Invoices"

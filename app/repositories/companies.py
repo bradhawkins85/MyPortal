@@ -12,6 +12,7 @@ _ALLOWED_COMPANY_COLUMNS = frozenset({
     "name", "address", "phone", "is_vip", "syncro_company_id", "xero_id",
     "tacticalrmm_client_id", "hudu_id", "huntress_organization_id",
     "huntress_sat_account_id", "invoice_due_days", "payment_method", "require_po",
+    "xero_auto_send_subscription_invoices", "xero_auto_send_product_invoices",
     "offboarding_email_forwarding_enabled", "default_ticket_replies_billable",
     "onedrive_export_site_id", "onedrive_export_site_name", "onedrive_export_drive_id",
     "trello_board_id", "trello_api_key", "trello_token", "csp_tenant_id", "archived",
@@ -41,6 +42,12 @@ def _normalise_company(row: dict[str, Any]) -> dict[str, Any]:
         normalised["archived"] = int(normalised["archived"])
     if "invoice_due_days" in normalised and normalised["invoice_due_days"] is not None:
         normalised["invoice_due_days"] = int(normalised["invoice_due_days"])
+    for field in (
+        "xero_auto_send_subscription_invoices",
+        "xero_auto_send_product_invoices",
+    ):
+        if field in normalised and normalised[field] is not None:
+            normalised[field] = int(normalised[field])
     if (
         "default_ticket_replies_billable" in normalised
         and normalised["default_ticket_replies_billable"] is not None

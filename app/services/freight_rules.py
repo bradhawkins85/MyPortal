@@ -263,8 +263,18 @@ def calculate_cart_freight(
     product_lookup: Mapping[int, Mapping[str, Any]],
     rules: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    cart_subtotal = Decimal("0")
+    # Subscriptions are delivered electronically. Exclude them before both the
+    # shipment and threshold calculations, while leaving physical items in a
+    # mixed cart eligible for their normal freight rules.
+    freight_items = []
     for item in cart_items:
+        product_id = _to_int(item.get("product_id"), default=0)
+        product = product_lookup.get(product_id) or {}
+        if product.get("subscription_category_id") is None:
+            freight_items.append(item)
+
+    cart_subtotal = Decimal("0")
+    for item in freight_items:
         line_total = _to_decimal(item.get("line_total"))
         if line_total == Decimal("0"):
             line_total = _to_decimal(item.get("unit_price")) * Decimal(
@@ -273,7 +283,7 @@ def calculate_cart_freight(
         cart_subtotal += line_total
     cart_subtotal = _quantize_money(cart_subtotal)
 
-    shipments = build_cart_shipments(cart_items, product_lookup)
+    shipments = build_cart_shipments(freight_items, product_lookup)
     freight_total = Decimal("0")
     breakdown: list[dict[str, Any]] = []
     for shipment in shipments:

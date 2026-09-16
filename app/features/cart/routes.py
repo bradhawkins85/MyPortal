@@ -1252,10 +1252,33 @@ async def place_order(request: Request) -> RedirectResponse:
             elif user_record.get("email"):
                 user_name = str(user_record["email"])
 
+        # Recalculate from current catalog data at checkout. The freight
+        # service excludes subscriptions while retaining physical products in
+        # mixed carts.
+        from app.repositories import freight_rules as freight_rules_repo
+        from app.services import freight_rules as freight_rules_service
+
+        product_ids = [int(item.get("product_id") or 0) for item in items]
+        products = await main_module.shop_repo.list_products_by_ids(
+            product_ids, company_id=company_id
+        )
+        product_lookup = {int(product["id"]): product for product in products}
+        freight_summary = freight_rules_service.calculate_cart_freight(
+            items,
+            product_lookup,
+            await freight_rules_repo.list_rules(active_only=True),
+        )
+        freight_amount = (
+            Decimal("0.00")
+            if shipping_option == "local_pickup"
+            else _quantize_money(freight_summary["freight_total"])
+        )
+
         await main_module.xero_service.send_order_to_xero(
             order_number=order_number,
             company_id=company_id,
             user_name=user_name,
+            freight_amount=freight_amount,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         main_module.log_error(

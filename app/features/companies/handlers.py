@@ -577,6 +577,14 @@ async def _render_company_edit_page(
             "payment_method",
             (company_record.get("payment_method") or "invoice_prepay").strip(),
         ),
+        "xero_auto_send_subscription_invoices": _bool_value(
+            "xero_auto_send_subscription_invoices",
+            bool(company_record.get("xero_auto_send_subscription_invoices", 1)),
+        ),
+        "xero_auto_send_product_invoices": _bool_value(
+            "xero_auto_send_product_invoices",
+            bool(company_record.get("xero_auto_send_product_invoices", 1)),
+        ),
         "require_po": _bool_value("require_po", bool(company_record.get("require_po"))),
         "offboarding_email_forwarding_enabled": _bool_value(
             "offboarding_email_forwarding_enabled",
@@ -1615,6 +1623,8 @@ async def admin_update_company(company_id: int, request: Request):
     invoice_prepay_enabled = bool(form.get("invoicePrepay"))
     invoice_postpay_enabled = bool(form.get("invoicePostpay"))
     stripe_enabled = bool(form.get("stripeEnabled"))
+    xero_auto_send_subscription_invoices = bool(form.get("xeroAutoSendSubscriptionInvoices"))
+    xero_auto_send_product_invoices = bool(form.get("xeroAutoSendProductInvoices"))
     require_po = bool(form.get("requirePo"))
     offboarding_email_forwarding_enabled = bool(
         form.get("offboardingEmailForwardingEnabled")
@@ -1685,6 +1695,8 @@ async def admin_update_company(company_id: int, request: Request):
         "phone": phone_raw,
         "is_vip": is_vip,
         "payment_method": payment_method,
+        "xero_auto_send_subscription_invoices": xero_auto_send_subscription_invoices,
+        "xero_auto_send_product_invoices": xero_auto_send_product_invoices,
         "require_po": require_po,
         "offboarding_email_forwarding_enabled": offboarding_email_forwarding_enabled,
         "default_ticket_replies_billable": default_ticket_replies_billable,
@@ -1769,6 +1781,8 @@ async def admin_update_company(company_id: int, request: Request):
         "email_domains": email_domains,
         "phone": phone_raw or None,
         "payment_method": payment_method,
+        "xero_auto_send_subscription_invoices": 1 if xero_auto_send_subscription_invoices else 0,
+        "xero_auto_send_product_invoices": 1 if xero_auto_send_product_invoices else 0,
         "require_po": 1 if require_po else 0,
         "offboarding_email_forwarding_enabled": (
             1 if offboarding_email_forwarding_enabled else 0

@@ -313,6 +313,7 @@ async def apply_subscription_addition(
                 change_request_id=change_request["id"],
                 customer_id=subscription["customer_id"],
                 product_name=product_name,
+                product_code=subscription.get("product_sku") or subscription.get("sku"),
                 quantity_change=quantity_to_add,
                 prorated_charge=prorated_charge,
                 end_date=subscription["end_date"],

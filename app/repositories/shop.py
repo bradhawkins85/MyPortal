@@ -1741,6 +1741,13 @@ async def list_order_items(order_number: str, company_id: int) -> list[dict[str,
             p.stock_vic,
             p.stock_sa,
             p.stock_wa,
+            p.subscription_category_id,
+            p.commitment_type,
+            p.payment_frequency,
+            p.price_monthly_commitment,
+            p.price_annual_monthly_payment,
+            p.price_annual_annual_payment,
+            p.vip_price,
             c.is_vip AS is_vip,
             IF(c.is_vip = 1 AND p.vip_price IS NOT NULL, p.vip_price, p.price) AS price
         FROM shop_orders AS o
