@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 import pytest
 
@@ -241,7 +241,7 @@ def test_catalog_entries_have_required_fields():
     catalog = bp_service.list_best_practices()
     assert catalog, "best-practice catalog must not be empty"
     for entry in catalog:
-        assert entry["id"].startswith("bp_")
+        assert entry["id"].startswith(("bp_", "intune_"))
         assert entry["name"]
         assert entry["description"]
         assert entry["remediation"]
@@ -1753,6 +1753,7 @@ async def test_get_auto_remediate_check_ids_returns_only_enabled_remediable():
 
 @pytest.mark.anyio("asyncio")
 async def test_get_auto_remediate_check_ids_empty_when_none_set():
+    """Checks without saved settings only auto-remediate when the catalog defaults them on."""
     with patch(
         "app.services.m365_best_practices.bp_repo.get_settings_map",
         new_callable=AsyncMock,
