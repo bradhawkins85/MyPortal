@@ -35,7 +35,7 @@ import io
 import re
 import secrets
 import string
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Any, Awaitable, Callable, Mapping, Union
 
@@ -53,13 +53,13 @@ from app.services.cis_benchmark import (
     STATUS_PASS,
     STATUS_UNKNOWN,
     STATUS_NOT_APPLICABLE,
+    _fail,
     _check_admin_mfa,
     _check_audit_log_enabled,
     _check_global_admin_count,
     _check_guest_access_restricted,
     _check_legacy_auth_blocked,
     _check_mfa_conditional_access,
-    _check_monitor_app_credential_expiry,
     _check_monitor_ca_report_only_policies,
     _check_monitor_cloud_admin_accounts,
     _check_monitor_mfa_registration_policy,
@@ -72,6 +72,8 @@ from app.services.cis_benchmark import (
     _check_password_never_expires,
     _check_security_defaults,
     _check_sspr_enabled,
+    _pass,
+    _unknown,
     run_intune_ios_benchmarks,
     run_intune_macos_benchmarks,
     run_intune_windows_benchmarks,
@@ -82,15 +84,20 @@ from app.services.m365 import (
     _acquire_scc_access_token,
     _coerce_exo_bool,
     _exo_invoke_command,
-    _scc_invoke_command,
+    _graph_delete,
     _graph_get,
     _graph_get_all,
-    _graph_delete,
     _graph_patch,
     _graph_post,
+    _parse_client_secret_expires,
     _post_app_role_assignment_with_retry,
+    _scc_invoke_command,
     acquire_access_token,
     acquire_delegated_token,
+    get_admin_m365_credentials,
+    get_company_admin_credentials,
+    get_effective_admin_credentials,
+    renew_admin_client_secret,
     try_grant_missing_permissions,
 )
 
@@ -281,7 +288,7 @@ ExoRunner = Callable[[str, str], Awaitable[dict[str, Any]]]
 BestPracticeRunner = Union[GraphRunner, ExoRunner]
 
 # Keys that are implementation details and must not be exposed in the public catalog
-_INTERNAL_KEYS = frozenset({"source", "source_type", "remediation_cmdlet", "remediation_params", "remediation_url", "remediation_payload", "remediation_type", "remediation_mailbox_params"})
+_INTERNAL_KEYS = frozenset({"source", "source_type", "remediation_cmdlet", "remediation_params", "remediation_url", "remediation_payload", "remediation_type", "remediation_mailbox_params", "default_auto_remediate", "uses_company_id"})
 
 _GLOBAL_ADMIN_ROLE_DEFINITION_ID = "62e90394-69f5-4237-9190-012177145e10"
 
@@ -293,6 +300,110 @@ def _generate_emergency_admin_password(length: int = 32) -> str:
     chars.extend(secrets.choice(alphabet) for _ in range(length - len(chars)))
     secrets.SystemRandom().shuffle(chars)
     return "".join(chars)
+
+
+async def _resolve_myportal_pkce_credential_target(company_id: int) -> dict[str, Any] | None:
+    """Return the credential record MyPortal currently uses for PKCE/bootstrap flows."""
+    company_creds = await get_company_admin_credentials(company_id)
+    if company_creds and company_creds.get("client_id") and company_creds.get("client_secret"):
+        return {"scope": "company", "credentials": company_creds}
+
+    global_creds = await get_admin_m365_credentials()
+    if global_creds and global_creds.get("client_id") and global_creds.get("client_secret"):
+        return {"scope": "global", "credentials": global_creds}
+
+    effective = await get_effective_admin_credentials(company_id)
+    if effective and effective.get("client_id") and effective.get("client_secret"):
+        return {"scope": "environment", "credentials": effective}
+    return None
+
+
+async def _check_myportal_pkce_app_credential_expiry(
+    token: str, company_id: int
+) -> dict[str, Any]:
+    check_id = "bp_monitor_app_credential_expiry"
+    check_name = "No app registration credentials expiring within 30 days"
+    target = await _resolve_myportal_pkce_credential_target(company_id)
+    if not target:
+        return _unknown(
+            check_id,
+            check_name,
+            "MyPortal PKCE/bootstrap admin credentials are not configured.",
+        )
+
+    creds = target["credentials"]
+    client_id = str(creds.get("client_id") or "").strip()
+    if not client_id:
+        return _unknown(
+            check_id,
+            check_name,
+            "MyPortal PKCE/bootstrap app ID is not configured.",
+        )
+
+    app_id_filter = client_id.replace("'", "''")
+    try:
+        data = await _graph_get(
+            token,
+            "https://graph.microsoft.com/v1.0/applications"
+            f"?$filter=appId eq '{app_id_filter}'"
+            "&$select=id,appId,displayName,passwordCredentials,keyCredentials",
+        )
+    except M365Error as exc:
+        return _unknown(
+            check_id,
+            check_name,
+            f"Unable to retrieve the configured MyPortal PKCE app registration: {exc}",
+        )
+
+    app = next(iter(data.get("value") or []), None)
+    if not app:
+        return _unknown(
+            check_id,
+            check_name,
+            f"The configured MyPortal PKCE app registration ({client_id}) was not found.",
+        )
+
+    now = datetime.now(timezone.utc)
+    threshold = now + timedelta(days=30)
+    expiring: list[tuple[str, datetime]] = []
+    for cred_type, credentials in (
+        ("secret", app.get("passwordCredentials") or []),
+        ("certificate", app.get("keyCredentials") or []),
+    ):
+        for cred in credentials:
+            end_raw = cred.get("endDateTime")
+            if not end_raw:
+                continue
+            try:
+                end_dt = datetime.fromisoformat(str(end_raw).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                continue
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone.utc)
+            if now <= end_dt <= threshold:
+                expiring.append((cred_type, end_dt))
+
+    app_name = str(app.get("displayName") or client_id)
+    if not expiring:
+        return _pass(
+            check_id,
+            check_name,
+            f"MyPortal PKCE app '{app_name}' ({client_id}) has no active credentials expiring within 30 days.",
+        )
+
+    earliest_type, earliest_expiry = min(expiring, key=lambda item: item[1])
+    active_expiry = _parse_client_secret_expires(creds.get("client_secret_expires_at"))
+    active_hint = (
+        f" Stored active credential expiry: {active_expiry.date().isoformat()}."
+        if active_expiry
+        else ""
+    )
+    return _fail(
+        check_id,
+        check_name,
+        f"MyPortal PKCE app '{app_name}' ({client_id}) has an expiring {earliest_type} "
+        f"credential on {earliest_expiry.date().isoformat()}.{active_hint}",
+    )
 
 async def _remediate_global_admin_count(graph_token: str, company_id: int) -> tuple[bool, str]:
     """Create and document enough emergency administrators to reach the target of three."""
@@ -4267,9 +4378,12 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "secrets → create a new secret/certificate and update dependent "
             "services before the existing one expires."
         ),
-        "source": _check_monitor_app_credential_expiry,
+        "source": _check_myportal_pkce_app_credential_expiry,
         "default_enabled": True,
-        "has_remediation": False,
+        "default_auto_remediate": True,
+        "has_remediation": True,
+        "uses_company_id": True,
+        "remediation_type": "renew_myportal_pkce_admin_secret",
     },
     {
         "id": "bp_monitor_cloud_admin_accounts",
@@ -6417,11 +6531,12 @@ async def get_auto_remediate_check_ids() -> set[str]:
     auto_remediate: set[str] = set()
     for bp in _BEST_PRACTICES:
         check_id = bp["id"]
-        if (
-            bp.get("has_remediation")
-            and check_id in settings
-            and settings[check_id].get("auto_remediate")
-        ):
+        auto_remediate_enabled = (
+            settings[check_id].get("auto_remediate")
+            if check_id in settings
+            else bool(bp.get("default_auto_remediate", False))
+        )
+        if bp.get("has_remediation") and auto_remediate_enabled:
             auto_remediate.add(check_id)
     return auto_remediate
 
@@ -6477,7 +6592,11 @@ async def list_settings_with_catalog(company_id: int | None = None) -> list[dict
         entry = _enrich_catalog_entry(bp)
         row = settings.get(bp["id"])
         entry["enabled"] = row.get("enabled") if row else bool(bp.get("default_enabled", True))
-        entry["auto_remediate"] = row.get("auto_remediate", False) if row else False
+        entry["auto_remediate"] = (
+            row.get("auto_remediate", False)
+            if row
+            else bool(bp.get("default_auto_remediate", False))
+        )
         entry["create_ticket_on_fail"] = (
             row.get("create_ticket_on_fail", False) if row else False
         )
@@ -8184,6 +8303,59 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
     remediated_at = datetime.now(timezone.utc).replace(tzinfo=None)
     generic_failure_reason = "Check that the app has the required permissions."
     outcome_message = ""
+
+    if bp.get("remediation_type") == "renew_myportal_pkce_admin_secret":
+        target = await _resolve_myportal_pkce_credential_target(company_id)
+        if not target:
+            outcome_message = "MyPortal PKCE/bootstrap admin credentials are not configured."
+            success = False
+        elif target["scope"] == "environment":
+            outcome_message = (
+                "MyPortal PKCE/bootstrap credentials are configured from environment variables, "
+                "so MyPortal cannot persist a rotated secret automatically. Store managed admin "
+                "credentials in MyPortal and retry."
+            )
+            success = False
+        else:
+            try:
+                renewal_result = await renew_admin_client_secret(
+                    company_id if target["scope"] == "company" else None
+                )
+                had_previous_key = bool(renewal_result.get("had_previous_key", False))
+                revoked_previous = bool(renewal_result.get("revoked_previous", False))
+                expires_at = renewal_result.get("expires_at")
+                expires_text = (
+                    expires_at.date().isoformat()
+                    if isinstance(expires_at, datetime)
+                    else "the configured lifetime window"
+                )
+                if not had_previous_key or revoked_previous:
+                    success = True
+                    outcome_message = (
+                        "Rotated the MyPortal PKCE/bootstrap credential and validated the replacement. "
+                        f"The new credential expires on {expires_text}."
+                    )
+                else:
+                    success = False
+                    outcome_message = (
+                        "MyPortal validated and activated a replacement PKCE/bootstrap credential, "
+                        "but could not retire the previous expiring credential. Authentication should "
+                        "continue to work; retry remediation after reviewing the logged Graph error."
+                    )
+            except M365Error as exc:
+                success = False
+                outcome_message = str(exc)
+
+        remediation_status = "success" if success else "failed"
+        remediation_failure_reason = None if success else outcome_message
+        await bp_repo.update_remediation_status(
+            company_id=company_id,
+            check_id=check_id,
+            remediation_status=remediation_status,
+            remediated_at=remediated_at,
+            remediation_failure_reason=remediation_failure_reason,
+        )
+        return {"success": success, "message": outcome_message}
 
     if source_type == "exo":
         token_error_message = (

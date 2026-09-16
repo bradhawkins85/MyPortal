@@ -9,6 +9,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.services import m365 as m365_service
 from tests.conftest import drain_provision_background_tasks
 
+APP_OBJECT_ID = "11111111-1111-1111-1111-111111111111"
+SERVICE_PRINCIPAL_ID = "22222222-2222-2222-2222-222222222222"
+GRAPH_SP_ID = "33333333-3333-3333-3333-333333333333"
+OLD_KEY_ID = "44444444-4444-4444-4444-444444444444"
+NEW_KEY_ID = "55555555-5555-5555-5555-555555555555"
+
 
 @pytest.fixture
 def anyio_backend() -> str:
@@ -21,10 +27,10 @@ def anyio_backend() -> str:
 
 def _make_provision_mocks(
     client_id: str = "prov-client-id",
-    sp_id: str = "prov-sp-id",
-    app_obj_id: str = "prov-app-obj-id",
+    sp_id: str = SERVICE_PRINCIPAL_ID,
+    app_obj_id: str = APP_OBJECT_ID,
     secret: str = "plain-secret",
-    key_id: str = "key-id-abc",
+    key_id: str = NEW_KEY_ID,
 ) -> tuple[Any, Any]:
     """Return (mock_graph_post, mock_graph_get) for a successful provision flow."""
     async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
@@ -42,7 +48,7 @@ def _make_provision_mocks(
 
     async def mock_graph_get(token: str, url: str) -> dict:
         if "servicePrincipals" in url:
-            return {"value": [{"id": "graph-sp-id"}]}
+            return {"value": [{"id": GRAPH_SP_ID}]}
         return {}
 
     return mock_graph_post, mock_graph_get
@@ -66,8 +72,8 @@ async def test_provision_returns_dict_with_required_keys():
     assert isinstance(result, dict)
     assert result["client_id"] == "prov-client-id"
     assert result["client_secret"] == "plain-secret"
-    assert result["app_object_id"] == "prov-app-obj-id"
-    assert result["client_secret_key_id"] == "key-id-abc"
+    assert result["app_object_id"] == APP_OBJECT_ID
+    assert result["client_secret_key_id"] == NEW_KEY_ID
     assert isinstance(result["client_secret_expires_at"], datetime)
 
 
@@ -79,9 +85,9 @@ async def test_provision_uses_configurable_lifetime():
     async def mock_post(token: str, url: str, payload: dict) -> dict:
         captured_payloads.append({"url": url, "payload": payload})
         if "/applications" in url and "addPassword" not in url and "owners" not in url:
-            return {"id": "obj-id", "appId": "cid"}
+            return {"id": APP_OBJECT_ID, "appId": "cid"}
         if "/servicePrincipals" in url and "appRoleAssignments" not in url:
-            return {"id": "sp-id"}
+            return {"id": SERVICE_PRINCIPAL_ID}
         if "appRoleAssignments" in url:
             return {"id": "x"}
         if "owners/$ref" in url:
@@ -91,7 +97,7 @@ async def test_provision_uses_configurable_lifetime():
         return {}
 
     async def mock_get(token: str, url: str) -> dict:
-        return {"value": [{"id": "graph-sp-id"}]}
+        return {"value": [{"id": GRAPH_SP_ID}]}
 
     mock_settings = MagicMock()
     mock_settings.m365_client_secret_lifetime_days = 365  # 1 year instead of default 2
@@ -129,9 +135,9 @@ async def test_provision_adds_sp_as_owner():
             owner_calls.append({"url": url, "payload": payload})
             return {}
         if "/applications" in url and "addPassword" not in url:
-            return {"id": "app-obj", "appId": "cid"}
+            return {"id": APP_OBJECT_ID, "appId": "cid"}
         if "/servicePrincipals" in url and "appRoleAssignments" not in url:
-            return {"id": "sp-obj"}
+            return {"id": SERVICE_PRINCIPAL_ID}
         if "appRoleAssignments" in url:
             return {"id": "x"}
         if "addPassword" in url:
@@ -139,7 +145,7 @@ async def test_provision_adds_sp_as_owner():
         return {}
 
     async def mock_get(token: str, url: str) -> dict:
-        return {"value": [{"id": "graph-sp-id"}]}
+        return {"value": [{"id": GRAPH_SP_ID}]}
 
     with (
         patch.object(m365_service, "_graph_post", side_effect=mock_post),
@@ -151,7 +157,7 @@ async def test_provision_adds_sp_as_owner():
     assert len(owner_calls) == 1
     owner_payload = owner_calls[0]["payload"]
     assert "@odata.id" in owner_payload
-    assert "sp-obj" in owner_payload["@odata.id"]
+    assert SERVICE_PRINCIPAL_ID in owner_payload["@odata.id"]
 
 
 @pytest.mark.anyio("asyncio")
@@ -185,6 +191,72 @@ async def test_graph_post_handles_204_no_content():
 
 
 # ---------------------------------------------------------------------------
+# Tests: renew_admin_client_secret
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio("asyncio")
+async def test_renew_admin_client_secret_validation_failure_restores_previous_secret():
+    """Validation failure restores the previous admin credential and removes the new secret."""
+    stored_creds = {
+        "tenant_id": "tenant-1",
+        "client_id": "admin-client-id",
+        "client_secret": "old-secret",
+        "app_object_id": APP_OBJECT_ID,
+        "client_secret_key_id": OLD_KEY_ID,
+        "client_secret_expires_at": datetime.utcnow() + timedelta(days=4),
+        "pkce_client_id": "pkce-client-id",
+    }
+    posted_calls: list[dict[str, Any]] = []
+    persisted: list[dict[str, Any]] = []
+
+    async def mock_post(token: str, url: str, payload: dict) -> dict:
+        posted_calls.append({"url": url, "payload": payload})
+        if "addPassword" in url:
+            return {"secretText": "new-secret", "keyId": NEW_KEY_ID}
+        if "removePassword" in url:
+            return {}
+        return {}
+
+    exchange_mock = AsyncMock(
+        side_effect=[
+            ("old-token", None, None),
+            m365_service.M365Error("new secret rejected"),
+        ]
+    )
+    mock_settings = MagicMock()
+    mock_settings.m365_client_secret_lifetime_days = 730
+
+    with (
+        patch.object(
+            m365_service, "get_admin_m365_credentials", AsyncMock(return_value=stored_creds)
+        ),
+        patch.object(m365_service, "_exchange_token", exchange_mock),
+        patch.object(m365_service, "_graph_post", side_effect=mock_post),
+        patch.object(
+            m365_service,
+            "update_admin_m365_credentials",
+            side_effect=lambda **kwargs: persisted.append(kwargs) or None,
+        ),
+        patch("app.services.m365.get_settings", return_value=mock_settings),
+    ):
+        with pytest.raises(
+            m365_service.M365Error,
+            match="previous credential restored",
+        ):
+            await m365_service.renew_admin_client_secret()
+
+    assert len(persisted) == 2
+    assert persisted[0]["client_secret"] == "new-secret"
+    assert persisted[0]["client_secret_key_id"] == NEW_KEY_ID
+    assert persisted[1]["client_secret"] == "old-secret"
+    assert persisted[1]["client_secret_key_id"] == OLD_KEY_ID
+    remove_call = next(c for c in posted_calls if "removePassword" in c["url"])
+    assert remove_call["payload"]["keyId"] == NEW_KEY_ID
+    assert exchange_mock.await_count == 2
+
+
+# ---------------------------------------------------------------------------
 # Tests: renew_client_secret
 # ---------------------------------------------------------------------------
 
@@ -197,8 +269,8 @@ async def test_renew_client_secret_success():
         "tenant_id": "tenant-1",
         "client_id": "app-client-id",
         "client_secret": "encrypted-old-secret",
-        "app_object_id": "app-obj-id",
-        "client_secret_key_id": "old-key-id",
+        "app_object_id": APP_OBJECT_ID,
+        "client_secret_key_id": OLD_KEY_ID,
         "client_secret_expires_at": datetime.utcnow() + timedelta(days=5),
     }
 
@@ -207,7 +279,7 @@ async def test_renew_client_secret_success():
     async def mock_post(token: str, url: str, payload: dict) -> dict:
         posted_calls.append({"url": url, "payload": payload})
         if "addPassword" in url:
-            return {"secretText": "new-secret", "keyId": "new-key-id"}
+            return {"secretText": "new-secret", "keyId": NEW_KEY_ID}
         if "removePassword" in url:
             return {}
         return {}
@@ -228,17 +300,17 @@ async def test_renew_client_secret_success():
 
     # addPassword was called
     add_pw = next(c for c in posted_calls if "addPassword" in c["url"])
-    assert "app-obj-id" in add_pw["url"]
+    assert APP_OBJECT_ID in add_pw["url"]
 
     # DB was updated with encrypted new secret
     mock_update.assert_awaited_once()
     call_kwargs = mock_update.call_args.kwargs
     assert call_kwargs["company_id"] == company_id
-    assert call_kwargs["key_id"] == "new-key-id"
+    assert call_kwargs["key_id"] == NEW_KEY_ID
 
     # Old key was revoked
     remove_pw = next(c for c in posted_calls if "removePassword" in c["url"])
-    assert remove_pw["payload"]["keyId"] == "old-key-id"
+    assert remove_pw["payload"]["keyId"] == OLD_KEY_ID
 
 
 @pytest.mark.anyio("asyncio")
@@ -275,7 +347,7 @@ async def test_renew_client_secret_revoke_failure_is_nonfatal():
         "tenant_id": "tenant",
         "client_id": "cid",
         "client_secret": "enc",
-        "app_object_id": "obj-id",
+        "app_object_id": APP_OBJECT_ID,
         "client_secret_key_id": "old-key",
         "client_secret_expires_at": datetime.utcnow() + timedelta(days=3),
     }
@@ -315,7 +387,7 @@ async def test_renew_client_secret_no_old_key_id_skips_revoke():
         "tenant_id": "tenant",
         "client_id": "cid",
         "client_secret": "enc",
-        "app_object_id": "obj-id",
+        "app_object_id": APP_OBJECT_ID,
         "client_secret_key_id": None,  # no old key_id
         "client_secret_expires_at": datetime.utcnow() + timedelta(days=2),
     }
