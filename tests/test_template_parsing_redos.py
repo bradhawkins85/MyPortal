@@ -11,6 +11,9 @@ _HAS_SIGALRM_TIMEOUT = hasattr(signal, "SIGALRM") and hasattr(signal, "setitimer
 
 @contextmanager
 def _time_limit(seconds: float):
+    if not _HAS_SIGALRM_TIMEOUT:
+        pytest.skip("SIGALRM-based timeout is only available on Unix-like platforms")
+
     def _raise_timeout(signum, frame):
         raise TimeoutError(f"parser exceeded {seconds} second limit")
 
@@ -25,9 +28,6 @@ def _time_limit(seconds: float):
 
 @pytest.mark.parametrize("size", [1000, 5000, 20000])
 def test_unterminated_whitespace_heavy_tokens_complete_within_time_limit(size):
-    if not _HAS_SIGALRM_TIMEOUT:
-        pytest.skip("SIGALRM-based timeout is only available on Unix-like platforms")
-
     conditional_input = "{{if" + (" " * size)
     variable_input = "${" + (" " * size)
 
@@ -41,9 +41,6 @@ def test_unterminated_whitespace_heavy_tokens_complete_within_time_limit(size):
 
 @pytest.mark.parametrize("size", [250, 1000, 4000])
 def test_repeated_opening_delimiters_complete_within_time_limit(size):
-    if not _HAS_SIGALRM_TIMEOUT:
-        pytest.skip("SIGALRM-based timeout is only available on Unix-like platforms")
-
     conditional_input = ("{{" * size) + "if" + (" " * size)
     variable_input = ("${" * size) + "vars.now.local.date"
 

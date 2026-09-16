@@ -67,7 +67,7 @@ def _find_clause_keyword(text: str, keyword: str) -> int:
 def _parse_conditional_body(body: str) -> tuple[str, str, str | None] | None:
     then_keyword = "then"
     else_keyword = "else"
-    then_index = _find_clause_keyword(body, "then")
+    then_index = _find_clause_keyword(body, then_keyword)
     if then_index < 0:
         return None
 
@@ -76,7 +76,7 @@ def _parse_conditional_body(body: str) -> tuple[str, str, str | None] | None:
     if not condition or not remainder:
         return None
 
-    else_index = _find_clause_keyword(remainder, "else")
+    else_index = _find_clause_keyword(remainder, else_keyword)
     if else_index < 0:
         return condition, remainder, None
 
