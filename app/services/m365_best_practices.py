@@ -548,6 +548,47 @@ def _smtp_value(value: Any) -> str:
     return str(value or "").removeprefix("SMTP:").removeprefix("smtp:").strip().lower()
 
 
+def _exo_recipient_addresses(row: Mapping[str, Any]) -> set[str]:
+    """Return the normalized SMTP-style addresses present on an EXO recipient row."""
+    addresses = {
+        _smtp_value(row.get("PrimarySmtpAddress")),
+        _smtp_value(row.get("WindowsEmailAddress")),
+        _smtp_value(row.get("ExternalEmailAddress")),
+    }
+    raw_addresses = row.get("EmailAddresses")
+    if isinstance(raw_addresses, str):
+        addresses.add(_smtp_value(raw_addresses))
+    elif isinstance(raw_addresses, list):
+        addresses.update(_smtp_value(address) for address in raw_addresses)
+    return {address for address in addresses if address}
+
+
+def _find_conflicting_recipient(
+    recipients: list[dict[str, Any]],
+    *,
+    expected_name: str,
+    expected_addresses: set[str],
+    allowed_types: set[str],
+) -> dict[str, Any] | None:
+    """Find a non-baseline recipient that already owns the target name or address."""
+    expected_name_folded = expected_name.casefold()
+    expected_addresses_folded = {address.casefold() for address in expected_addresses if address}
+    for row in recipients:
+        recipient_type = str(row.get("RecipientTypeDetails") or row.get("RecipientType") or "").casefold()
+        if recipient_type in allowed_types:
+            continue
+        candidate_names = {
+            str(row.get("Name") or "").casefold(),
+            str(row.get("DisplayName") or "").casefold(),
+            str(row.get("Alias") or "").casefold(),
+        }
+        if expected_name_folded and expected_name_folded in candidate_names:
+            return row
+        if expected_addresses_folded and _exo_recipient_addresses(row) & expected_addresses_folded:
+            return row
+    return None
+
+
 async def _inspect_it_contact_baseline(exo_token: str, tenant_id: str) -> dict[str, Any]:
     """Return desired baseline state, missing objects, and non-destructive conflicts."""
     profiles, recipient_words = _it_baseline_config()
@@ -565,20 +606,39 @@ async def _inspect_it_contact_baseline(exo_token: str, tenant_id: str) -> dict[s
 
     contacts = _exo_rows(await _exo_invoke_command(exo_token, tenant_id, "Get-MailContact"))
     groups = _exo_rows(await _exo_invoke_command(exo_token, tenant_id, "Get-DistributionGroup"))
+    recipients = _exo_rows(await _exo_invoke_command(exo_token, tenant_id, "Get-Recipient"))
     rules = _exo_rows(await _exo_invoke_command(exo_token, tenant_id, "Get-TransportRule"))
     missing: list[tuple[str, dict[str, str]]] = []
     conflicts: list[str] = []
     for profile in profiles:
         contact = next((row for row in contacts if str(row.get("Name") or "").casefold() == profile["contact"].casefold()), None)
         if contact is None:
-            missing.append(("contact", profile))
+            conflict = _find_conflicting_recipient(
+                recipients,
+                expected_name=profile["contact"],
+                expected_addresses={profile["external"]},
+                allowed_types={"mailcontact"},
+            )
+            if conflict is not None:
+                conflicts.append(f'{profile["contact"]} mail contact conflicts with an existing Exchange recipient')
+            else:
+                missing.append(("contact", profile))
         elif (_smtp_value(contact.get("ExternalEmailAddress")) != profile["external"].lower()
               or not _coerce_exo_bool(contact.get("HiddenFromAddressListsEnabled"))):
             conflicts.append(f'{profile["contact"]} mail contact differs from the configured baseline')
         group = next((row for row in groups if str(row.get("Name") or "").casefold() == profile["group"].casefold()), None)
         desired_smtp = f'{profile["alias"]}@{domain}'.lower()
         if group is None:
-            missing.append(("group", profile))
+            conflict = _find_conflicting_recipient(
+                recipients,
+                expected_name=profile["group"],
+                expected_addresses={desired_smtp},
+                allowed_types={"mailuniversalsecuritygroup", "mailuniversaldistributiongroup", "groupmailbox"},
+            )
+            if conflict is not None:
+                conflicts.append(f'{profile["group"]} distribution group conflicts with an existing Exchange recipient')
+            else:
+                missing.append(("group", profile))
         elif (_smtp_value(group.get("PrimarySmtpAddress")) != desired_smtp
               or not _coerce_exo_bool(group.get("HiddenFromAddressListsEnabled"))
               or _coerce_exo_bool(group.get("RequireSenderAuthenticationEnabled"))):
@@ -634,29 +694,69 @@ async def _remediate_it_contact_baseline(exo_token: str, tenant_id: str) -> tupl
     if state["conflicts"]:
         return False, "; ".join(state["conflicts"]) + ". Resolve the conflict manually; no changes were made."
 
+    async def _confirm_create_conflict(kind: str, profile: dict[str, str]) -> tuple[bool, str | None]:
+        refreshed_state = await _inspect_it_contact_baseline(exo_token, tenant_id)
+        if refreshed_state.get("error"):
+            return False, refreshed_state["error"]
+        if refreshed_state["conflicts"]:
+            return False, "; ".join(refreshed_state["conflicts"]) + ". Resolve the conflict manually; no changes were made."
+        if (kind, profile) in refreshed_state["missing"]:
+            label = (
+                profile.get("contact")
+                or profile.get("group")
+                or _IT_BASELINE_RULE_NAME
+            )
+            return False, (
+                f"Exchange Online reported a conflict while creating {label}, "
+                "but the baseline object is still missing. Resolve the conflict "
+                "manually; no changes were made."
+            )
+        return True, None
+
     for kind, profile in state["missing"]:
         if kind == "contact":
-            await _exo_invoke_command(exo_token, tenant_id, "New-MailContact", {
-                "Name": profile["contact"], "ExternalEmailAddress": profile["external"]
-            })
+            try:
+                await _exo_invoke_command(exo_token, tenant_id, "New-MailContact", {
+                    "Name": profile["contact"], "ExternalEmailAddress": profile["external"]
+                })
+            except M365Error as exc:
+                if exc.http_status != 409:
+                    raise
+                okay, message = await _confirm_create_conflict(kind, profile)
+                if not okay:
+                    return False, message
             await _exo_invoke_command(exo_token, tenant_id, "Set-MailContact", {
                 "Identity": profile["contact"], "HiddenFromAddressListsEnabled": True
             })
         elif kind == "group":
-            await _exo_invoke_command(exo_token, tenant_id, "New-DistributionGroup", {
-                "Name": profile["group"], "Members": profile["external"],
-                "PrimarySmtpAddress": f'{profile["alias"]}@{state["domain"]}',
-                "RequireSenderAuthenticationEnabled": False,
-            })
+            try:
+                await _exo_invoke_command(exo_token, tenant_id, "New-DistributionGroup", {
+                    "Name": profile["group"], "Members": profile["external"],
+                    "PrimarySmtpAddress": f'{profile["alias"]}@{state["domain"]}',
+                    "RequireSenderAuthenticationEnabled": False,
+                })
+            except M365Error as exc:
+                if exc.http_status != 409:
+                    raise
+                okay, message = await _confirm_create_conflict(kind, profile)
+                if not okay:
+                    return False, message
             await _exo_invoke_command(exo_token, tenant_id, "Set-DistributionGroup", {
                 "Identity": profile["group"], "HiddenFromAddressListsEnabled": True
             })
         elif kind == "rule":
-            await _exo_invoke_command(exo_token, tenant_id, "New-TransportRule", {
-                "Name": _IT_BASELINE_RULE_NAME, "Priority": 0, "Enabled": True,
-                "RecipientAddressContainsWords": state["recipient_words"],
-                "StopRuleProcessing": True,
-            })
+            try:
+                await _exo_invoke_command(exo_token, tenant_id, "New-TransportRule", {
+                    "Name": _IT_BASELINE_RULE_NAME, "Priority": 0, "Enabled": True,
+                    "RecipientAddressContainsWords": state["recipient_words"],
+                    "StopRuleProcessing": True,
+                })
+            except M365Error as exc:
+                if exc.http_status != 409:
+                    raise
+                okay, message = await _confirm_create_conflict(kind, profile)
+                if not okay:
+                    return False, message
     return True, "Created the missing IT contact forwarding baseline objects."
 
 
