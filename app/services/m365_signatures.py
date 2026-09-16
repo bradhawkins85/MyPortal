@@ -176,6 +176,14 @@ async def build_preview_context(company_id: int, staff_id: int) -> dict[str, Any
         raise ValueError("Selected staff member was not found for this company")
     company = await companies_repo.get_company_by_id(company_id) or {}
     company_variables = await company_variables_repo.value_map(company_id)
+    full_name = " ".join(
+        part
+        for part in [
+            str(staff.get("first_name") or "").strip(),
+            str(staff.get("last_name") or "").strip(),
+        ]
+        if part
+    ).strip()
     return {
         "staff": {
             **staff,
@@ -188,12 +196,8 @@ async def build_preview_context(company_id: int, staff_id: int) -> dict[str, Any
             "firstName": staff.get("first_name"),
             "last_name": staff.get("last_name"),
             "lastName": staff.get("last_name"),
-            "full_name": " ".join(
-                part for part in [str(staff.get("first_name") or "").strip(), str(staff.get("last_name") or "").strip()] if part
-            ).strip(),
-            "fullName": " ".join(
-                part for part in [str(staff.get("first_name") or "").strip(), str(staff.get("last_name") or "").strip()] if part
-            ).strip(),
+            "full_name": full_name,
+            "fullName": full_name,
         },
         "company": {
             **company,

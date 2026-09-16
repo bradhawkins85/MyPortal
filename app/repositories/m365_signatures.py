@@ -187,4 +187,4 @@ async def delete_template(company_id: int, template_id: int) -> bool:
         "DELETE FROM m365_signature_templates WHERE company_id = %s AND id = %s",
         (company_id, template_id),
     )
-    return bool(result or result == 0)
+    return bool(result)
