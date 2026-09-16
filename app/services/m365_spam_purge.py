@@ -100,24 +100,29 @@ async def create_request(company_id: int, user_id: int, data: dict[str, Any]) ->
     })
 
 
-def _start_task(request_id: int, action: str) -> None:
+def _start_task(request_id: int, action: str, *, retry: bool = False) -> None:
     key = (request_id, action)
     current = _tasks.get(key)
     if current and not current.done():
         raise ValueError(f"{action.capitalize()} is already running")
-    task = asyncio.create_task(_run_search(request_id) if action == "search" else _run_purge(request_id))
+    task = asyncio.create_task(
+        _run_search(request_id, retry=retry) if action == "search" else _run_purge(request_id)
+    )
     _tasks[key] = task
     task.add_done_callback(lambda _task: _tasks.pop(key, None))
 
 
 async def start_search(request_id: int, company_id: int) -> dict[str, Any]:
     request = await _owned_request(request_id, company_id)
-    if str(request["search_status"]).lower() not in {"draft", "failed"}:
+    previous_status = str(request["search_status"]).lower()
+    if previous_status not in {"draft", "failed"}:
         raise ValueError("Only draft or failed searches can be started")
     await purge_repo.update_request(request_id, {
-        "search_status": "queued", "error_message": None, "search_started_at": _utcnow(),
+        "search_status": "queued", "error_message": None, "search_details": None,
+        "matched_items": 0, "matched_size": 0, "search_started_at": _utcnow(),
+        "search_completed_at": None,
     })
-    _start_task(request_id, "search")
+    _start_task(request_id, "search", retry=previous_status == "failed")
     return (await purge_repo.get_request(request_id)) or request
 
 
@@ -154,13 +159,24 @@ async def _poll_command(token: str, tenant: str, cmdlet: str, identity: str) -> 
     raise TimeoutError(f"{cmdlet} did not finish before the polling timeout")
 
 
-async def _run_search(request_id: int) -> None:
+async def _run_search(request_id: int, *, retry: bool = False) -> None:
     request = await purge_repo.get_request(request_id)
     if not request:
         return
     try:
         await purge_repo.update_request(request_id, {"search_status": "starting"})
-        token, tenant = await m365_service._acquire_scc_access_token(int(request["company_id"]))
+        company_id = int(request["company_id"])
+        token, _tenant_id = await m365_service._acquire_scc_access_token(company_id)
+        tenant = await _scc_organization(company_id)
+        if retry:
+            # A prior attempt can fail after Purview persisted the object. Remove
+            # only this request's unique, non-destructive search before recreating it.
+            try:
+                await m365_service._scc_invoke_command(token, tenant, "Remove-ComplianceSearch", {
+                    "Identity": request["search_name"], "Confirm": False,
+                })
+            except Exception:  # noqa: BLE001 - absence is expected on an early failure
+                pass
         await m365_service._scc_invoke_command(token, tenant, "New-ComplianceSearch", {
             "Name": request["search_name"], "ExchangeLocation": "All",
             "ContentMatchQuery": request["content_match_query"],
@@ -187,13 +203,40 @@ async def _run_search(request_id: int) -> None:
         })
 
 
+async def _scc_organization(company_id: int) -> str:
+    """Return the tenant's initial domain required by Purview InvokeCommand.
+
+    Purview's compliance-search backend does not reliably resolve a tenant GUID
+    to its Exchange organization container. The initial ``onmicrosoft.com``
+    domain is the stable organization identifier accepted by the endpoint.
+    """
+    graph_token = await m365_service.acquire_access_token(company_id)
+    payload = await m365_service._graph_get(
+        graph_token,
+        "https://graph.microsoft.com/v1.0/domains?$select=id,isInitial",
+    )
+    domains = payload.get("value") or []
+    for domain in domains if isinstance(domains, list) else []:
+        if not isinstance(domain, dict) or not domain.get("isInitial"):
+            continue
+        name = str(domain.get("id") or "").strip().lower()
+        if name.endswith(".onmicrosoft.com"):
+            return name
+    raise ValueError(
+        "Microsoft 365 initial domain could not be resolved; grant the app "
+        "Domain.Read.All and reconnect the tenant"
+    )
+
+
 async def _run_purge(request_id: int) -> None:
     request = await purge_repo.get_request(request_id)
     if not request:
         return
     try:
         await purge_repo.update_request(request_id, {"purge_status": "starting"})
-        token, tenant = await m365_service._acquire_scc_access_token(int(request["company_id"]))
+        company_id = int(request["company_id"])
+        token, _tenant_id = await m365_service._acquire_scc_access_token(company_id)
+        tenant = await _scc_organization(company_id)
         await m365_service._scc_invoke_command(token, tenant, "New-ComplianceSearchAction", {
             "SearchName": request["search_name"], "Purge": True,
             "PurgeType": "HardDelete", "Confirm": False,

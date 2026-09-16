@@ -38,6 +38,7 @@
     </header>
     <div class="card__body">
       <form method="post" action="/m365/spam-purge/search" class="purge-form-grid" autocomplete="off">
+        {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
         <div class="form-field"><label for="sender">Sender address</label><input class="input" type="email" id="sender" name="sender" maxlength="320" placeholder="sender@example.com"></div>
         <div class="form-field"><label for="subject">Subject contains</label><input class="input" type="text" id="subject" name="subject" maxlength="500" placeholder="Urgent invoice"></div>
         <div class="form-field"><label for="receivedFrom">Received from</label><input class="input" type="date" id="receivedFrom" name="receivedFrom"></div>
@@ -100,8 +101,15 @@
               {% if item.error_message %}<span class="status status--danger">Error</span> {{ item.error_message }}<br><br>{% endif %}
               {% if item.search_details %}<strong>Search details</strong><br>{{ item.search_details|tojson(indent=2) }}<br><br>{% endif %}
               {% if item.purge_details %}<strong>Purge details</strong><br>{{ item.purge_details|tojson(indent=2) }}<br><br>{% endif %}
+              {% if item.search_status == 'failed' %}
+              <form method="post" action="/m365/spam-purge/{{ item.id }}/retry" class="purge-actions">
+                {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
+                <button class="button button--primary button--small" type="submit">Retry search</button>
+              </form>
+              {% endif %}
               {% if item.search_status == 'completed' and item.matched_items > 0 and item.purge_status in ['not_started','failed'] %}
               <form method="post" action="/m365/spam-purge/{{ item.id }}/purge" class="purge-actions">
+                {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
                 <label class="visually-hidden" for="confirmation-{{ item.id }}">Type PURGE</label>
                 <input class="input" id="confirmation-{{ item.id }}" name="confirmation" required pattern="PURGE" autocomplete="off" placeholder="PURGE">
                 <button class="button button--danger button--small" type="submit">Hard delete {{ item.matched_items }}</button>

@@ -35,4 +35,10 @@ The authenticated endpoints are documented interactively at `/docs` under the
 
 Creating an API request produces a draft. Search and purge remain explicit,
 separate API calls so an operator can review the completed result before any
-destructive action.
+destructive action. Calling the search endpoint again retries a failed search;
+the web history also presents a **Retry search** action for failed requests.
+
+Compliance commands resolve and use the tenant's initial
+`*.onmicrosoft.com` domain as the Purview organization identifier. The app
+registration therefore needs Microsoft Graph `Domain.Read.All` application
+permission in addition to the Purview roles above.

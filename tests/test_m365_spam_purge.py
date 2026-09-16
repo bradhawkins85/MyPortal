@@ -61,9 +61,41 @@ def test_start_purge_is_company_scoped(monkeypatch):
         asyncio.run(service.start_purge(7, 2))
 
 
+def test_scc_organization_uses_initial_onmicrosoft_domain(monkeypatch):
+    async def fake_token(_company_id):
+        return "graph-token"
+
+    async def fake_graph(token, url):
+        assert token == "graph-token"
+        assert "$select=id,isInitial" in url
+        return {"value": [
+            {"id": "contoso.com", "isInitial": False},
+            {"id": "ContosoTenant.onmicrosoft.com", "isInitial": True},
+        ]}
+
+    monkeypatch.setattr(service.m365_service, "acquire_access_token", fake_token)
+    monkeypatch.setattr(service.m365_service, "_graph_get", fake_graph)
+    assert asyncio.run(service._scc_organization(7)) == "contosotenant.onmicrosoft.com"
+
+
+def test_scc_organization_requires_initial_domain(monkeypatch):
+    async def fake_token(_company_id):
+        return "graph-token"
+
+    async def fake_graph(_token, _url):
+        return {"value": [{"id": "contoso.com", "isInitial": False}]}
+
+    monkeypatch.setattr(service.m365_service, "acquire_access_token", fake_token)
+    monkeypatch.setattr(service.m365_service, "_graph_get", fake_graph)
+    with pytest.raises(ValueError, match="Domain.Read.All"):
+        asyncio.run(service._scc_organization(7))
+
+
 def test_spam_purge_template_has_review_confirmation_and_live_refresh():
     source = open("app/templates/m365/spam_purge.html", encoding="utf-8").read()
     assert 'name="confirmation"' in source
     assert 'pattern="PURGE"' in source
+    assert 'action="/m365/spam-purge/{{ item.id }}/retry"' in source
+    assert "Retry search" in source
     assert "active_jobs" in source
     assert 'data-utc="{{ item.created_at }}"' in source
