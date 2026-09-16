@@ -674,7 +674,6 @@ async def get_requirement_trends(
 
 @router.get(
     "/companies/{company_id}/requirements/export-bundle",
-    response_model=dict,
 )
 async def export_requirement_bundle(
     company_id: int,

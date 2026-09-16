@@ -957,16 +957,24 @@ async def add_requirement_evidence(
         {"company_id": company_id, "requirement_id": requirement_id},
     )
     next_version = int((version_row or {}).get("latest_version") or 0) + 1
-    await db.execute(
-        """
+    params = {
+        "company_id": company_id,
+        "requirement_id": requirement_id,
+        "version_number": next_version,
+        "title": title,
+        "description": description,
+        "file_name": file_name,
+        "content_type": content_type,
+        "file_path": file_path,
+        "file_size_bytes": file_size_bytes,
+        "uploaded_by": uploaded_by,
+    }
+    update_sql = """
         UPDATE company_essential8_requirement_evidence
         SET is_current = 0
-        WHERE company_id = %(company_id)s AND requirement_id = %(requirement_id)s
-        """,
-        {"company_id": company_id, "requirement_id": requirement_id},
-    )
-    evidence_id = await db.execute(
-        """
+        WHERE company_id = :company_id AND requirement_id = :requirement_id
+    """
+    insert_sql = """
         INSERT INTO company_essential8_requirement_evidence
         (
             company_id, requirement_id, version_number, title, description,
@@ -974,23 +982,30 @@ async def add_requirement_evidence(
         )
         VALUES
         (
-            %(company_id)s, %(requirement_id)s, %(version_number)s, %(title)s, %(description)s,
-            %(file_name)s, %(content_type)s, %(file_path)s, %(file_size_bytes)s, %(uploaded_by)s, 1
+            :company_id, :requirement_id, :version_number, :title, :description,
+            :file_name, :content_type, :file_path, :file_size_bytes, :uploaded_by, 1
         )
-        """,
-        {
-            "company_id": company_id,
-            "requirement_id": requirement_id,
-            "version_number": next_version,
-            "title": title,
-            "description": description,
-            "file_name": file_name,
-            "content_type": content_type,
-            "file_path": file_path,
-            "file_size_bytes": file_size_bytes,
-            "uploaded_by": uploaded_by,
-        },
-    )
+    """
+    async with db.acquire() as conn:
+        try:
+            if db.is_sqlite():
+                await conn.execute("BEGIN")
+                await conn.execute(update_sql, params)
+                cursor = await conn.execute(insert_sql, params)
+                evidence_id = int(cursor.lastrowid or 0)
+                await conn.commit()
+            else:
+                await conn.begin()
+                async with conn.cursor() as cursor:
+                    adapted_update_sql, update_params = db._adapt_params_for_mysql(update_sql, params)
+                    await cursor.execute(adapted_update_sql, update_params)
+                    adapted_insert_sql, insert_params = db._adapt_params_for_mysql(insert_sql, params)
+                    await cursor.execute(adapted_insert_sql, insert_params)
+                    evidence_id = int(cursor.lastrowid or 0)
+                await conn.commit()
+        except Exception:
+            await conn.rollback()
+            raise
     row = await db.fetch_one(
         """
         SELECT
