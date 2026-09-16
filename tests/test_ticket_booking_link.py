@@ -4,6 +4,7 @@ Test that ticket detail page includes Cal.com booking link for assigned technici
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlsplit
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -13,6 +14,7 @@ from fastapi.responses import HTMLResponse
 from starlette.requests import Request
 
 from app import main
+from app.services import tickets as tickets_service
 from app.services.tickets import TicketStatusDefinition
 
 
@@ -57,8 +59,10 @@ async def _setup_ticket_detail_mocks(monkeypatch, ticket, user_lookup_override=N
     monkeypatch.setattr(main, "sanitize_rich_text", fake_sanitize)
     monkeypatch.setattr(main.tickets_repo, "get_ticket", AsyncMock(return_value=ticket))
     monkeypatch.setattr(main.tickets_repo, "list_replies", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.tickets_repo, "list_split_replies_for_original", AsyncMock(return_value=[]))
     monkeypatch.setattr(main.tickets_repo, "list_watchers", AsyncMock(return_value=[]))
     monkeypatch.setattr(main.tickets_repo, "list_ticket_assets", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.tickets_repo, "list_ticket_suggested_assets", AsyncMock(return_value=[]))
     monkeypatch.setattr(main.user_repo, "get_user_by_id", mock_get_user_by_id)
     monkeypatch.setattr(main.company_repo, "get_company_by_id", AsyncMock(return_value={"id": 1, "name": "Test Company"}))
     monkeypatch.setattr(main.modules_service, "list_modules", AsyncMock(return_value=[]))
@@ -83,7 +87,18 @@ async def _setup_ticket_detail_mocks(monkeypatch, ticket, user_lookup_override=N
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
-        main.call_recordings_repo,
+        main,
+        "_load_ticket_stored_related_items",
+        AsyncMock(return_value=[]),
+    )
+    from app.repositories import call_recordings as call_recordings_repo
+    from app.repositories import ticket_canned_responses as canned_responses_repo
+    from app.repositories import ticket_expenses as expenses_repo
+    from app.services import slas as sla_service
+    from app.services import ticket_shipment_tracking as shipment_watch_service
+
+    monkeypatch.setattr(
+        call_recordings_repo,
         "list_ticket_call_recordings",
         AsyncMock(return_value=[]),
     )
@@ -92,13 +107,33 @@ async def _setup_ticket_detail_mocks(monkeypatch, ticket, user_lookup_override=N
         "list_attachments",
         AsyncMock(return_value=[]),
     )
+    monkeypatch.setattr(
+        shipment_watch_service,
+        "get_watch_for_ticket",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        sla_service,
+        "statuses_for_tickets",
+        AsyncMock(return_value={ticket["id"]: {"state": "not_applicable", "label": "No SLA"}}),
+    )
+    monkeypatch.setattr(
+        expenses_repo,
+        "list_expenses",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        canned_responses_repo,
+        "list_responses",
+        AsyncMock(return_value=[]),
+    )
 
 
 @pytest.mark.anyio("asyncio")
 async def test_ticket_detail_includes_booking_link_when_assigned_user_has_url(monkeypatch):
     """Test that booking link appears when assigned user has booking_link_url configured."""
     request = _make_request("/admin/tickets/1")
-    user = {"id": 1, "is_super_admin": True}
+    user = {"id": 1, "is_super_admin": True, "email": "requester@example.com"}
 
     ticket = {
         "id": 1,
@@ -141,13 +176,17 @@ async def test_ticket_detail_includes_booking_link_when_assigned_user_has_url(mo
     # Verify that the assigned user with booking link is in context
     assert captured["extra"]["ticket_assigned_user"] == assigned_user
     assert captured["extra"]["ticket_assigned_user"]["booking_link_url"] == "https://cal.com/technician"
+    assert captured["extra"]["ticket_booking_link_url"].startswith("https://cal.com/technician?")
+    booking_query = parse_qs(urlsplit(captured["extra"]["ticket_booking_link_url"]).query)
+    assert booking_query["email"] == ["requester@example.com"]
+    assert booking_query["TicketNumber"] == ["1"]
 
 
 @pytest.mark.anyio("asyncio")
 async def test_ticket_detail_without_booking_link_when_no_assigned_user(monkeypatch):
     """Test that booking link section is not shown when ticket has no assigned user."""
     request = _make_request("/admin/tickets/1")
-    user = {"id": 1, "is_super_admin": True}
+    user = {"id": 1, "is_super_admin": True, "email": "requester@example.com"}
 
     ticket = {
         "id": 1,
@@ -181,3 +220,42 @@ async def test_ticket_detail_without_booking_link_when_no_assigned_user(monkeypa
     
     # Verify that ticket_assigned_user is None when no user is assigned
     assert captured["extra"]["ticket_assigned_user"] is None
+    assert captured["extra"]["ticket_booking_link_url"] is None
+
+
+def test_build_booking_link_url_supports_calendly_prefill():
+    result = tickets_service.build_booking_link_url(
+        "https://calendly.com/example-team/discovery",
+        ticket_id=42,
+        ticket_number="TKT-42",
+        ticket_subject="Printer offline",
+        user_name="Pat Requester",
+        user_email="pat@example.com",
+        user_phone="0412345678",
+        ticket_url="https://portal.example.com/tickets/42",
+    )
+
+    assert result is not None
+    parsed = urlsplit(result)
+    params = parse_qs(parsed.query)
+    assert params["name"] == ["Pat Requester"]
+    assert params["email"] == ["pat@example.com"]
+    assert params["a1"] == ["Ticket #TKT-42 - Printer offline"]
+    assert params["a2"] == ["https://portal.example.com/tickets/42"]
+
+
+def test_build_booking_link_url_preserves_google_booking_links():
+    base_url = "https://calendar.app.google/abc123"
+
+    result = tickets_service.build_booking_link_url(
+        base_url,
+        ticket_id=42,
+        ticket_number="42",
+        ticket_subject="Printer offline",
+        user_name="Pat Requester",
+        user_email="pat@example.com",
+        user_phone="0412345678",
+        ticket_url="https://portal.example.com/tickets/42",
+    )
+
+    assert result == base_url

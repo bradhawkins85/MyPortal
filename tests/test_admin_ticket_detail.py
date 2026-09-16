@@ -292,6 +292,142 @@ async def test_render_ticket_detail_includes_attachments(monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
+async def test_render_ticket_detail_unifies_timeline_entries(monkeypatch):
+    request = _make_request("/admin/tickets/3")
+    user = {"id": 1, "is_super_admin": True, "email": "tech@example.com"}
+
+    ticket = {
+        "id": 3,
+        "subject": "Timeline ticket",
+        "description": "Details",
+        "status": "open",
+        "priority": "normal",
+        "company_id": 1,
+        "requester_id": 1,
+        "assigned_user_id": 2,
+        "created_at": datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc),
+        "updated_at": datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc),
+    }
+    replies = [
+        {
+            "id": 10,
+            "author_id": 2,
+            "body": "Investigating",
+            "is_internal": False,
+            "is_billable": True,
+            "minutes_spent": 15,
+            "labour_type_id": None,
+            "external_reference": None,
+            "created_at": datetime(2025, 1, 1, 10, 0, tzinfo=timezone.utc),
+        }
+    ]
+    recordings = [
+        {
+            "id": 99,
+            "file_name": "call.mp3",
+            "call_date": datetime(2025, 1, 1, 11, 0, tzinfo=timezone.utc),
+            "duration_seconds": 90,
+            "minutes_spent": 5,
+            "is_billable": False,
+            "labour_type_id": None,
+            "transcription": "Call summary",
+            "caller_number": "1000",
+            "callee_number": "2000",
+        }
+    ]
+
+    class DummySanitized:
+        def __init__(self, html: str):
+            self.html = html
+            self.text_content = html.strip()
+
+    def fake_sanitize(value: str | None) -> DummySanitized:
+        return DummySanitized(f"<p>{value or ''}</p>")
+
+    statuses = [
+        TicketStatusDefinition(tech_status="open", tech_label="Open", public_status="Open"),
+    ]
+
+    monkeypatch.setattr(main, "sanitize_rich_text", fake_sanitize)
+    monkeypatch.setattr(main.tickets_repo, "get_ticket", AsyncMock(return_value=ticket))
+    monkeypatch.setattr(main.tickets_repo, "list_replies", AsyncMock(return_value=replies))
+    monkeypatch.setattr(
+        main.tickets_repo,
+        "list_split_replies_for_original",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(main.tickets_repo, "list_watchers", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.attachments_repo, "list_attachments", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.tickets_repo, "list_ticket_assets", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.tickets_repo, "list_ticket_suggested_assets", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        main.user_repo,
+        "get_user_by_id",
+        AsyncMock(
+            side_effect=[
+                {"id": 1, "email": "requester@example.com"},
+                {"id": 2, "email": "assigned@example.com", "booking_link_url": "https://cal.com/assigned"},
+            ]
+        ),
+    )
+    monkeypatch.setattr(main.company_repo, "get_company_by_id", AsyncMock(return_value={"id": 1, "name": "Test Company"}))
+    monkeypatch.setattr(main.modules_service, "list_modules", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.labour_types_service, "list_labour_types", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.tickets_service, "list_status_definitions", AsyncMock(return_value=statuses))
+    monkeypatch.setattr(main.company_repo, "list_companies", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.membership_repo, "list_users_with_permission", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.staff_repo, "list_enabled_staff_users", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.assets_repo, "list_company_assets", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.knowledge_base_repo, "find_relevant_articles_for_ticket", AsyncMock(return_value=[]))
+
+    captured: dict[str, Any] = {}
+
+    async def fake_render_template(template_name, request_obj, user_obj, *, extra):
+        captured["extra"] = extra
+        return HTMLResponse("OK")
+
+    monkeypatch.setattr(main, "_render_template", fake_render_template)
+
+    with (
+        patch(
+            "app.repositories.call_recordings.list_ticket_call_recordings",
+            new=AsyncMock(return_value=recordings),
+        ),
+        patch(
+            "app.services.service_status.find_relevant_services_for_ticket",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.repositories.ticket_expenses.list_expenses",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.repositories.ticket_canned_responses.list_responses",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.services.ticket_shipment_tracking.get_watch_for_ticket",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "app.repositories.chat.get_room_by_ticket_id",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "app.services.slas.statuses_for_tickets",
+            new=AsyncMock(return_value={3: {"state": "on_track", "label": "On track"}}),
+        ),
+    ):
+        response = await main._render_ticket_detail(request, user, ticket_id=3)
+
+    assert isinstance(response, HTMLResponse)
+    timeline = captured["extra"]["ticket_timeline_entries"]
+    assert [entry["type"] for entry in timeline] == ["call_recording", "reply"]
+    assert timeline[0]["id"] == 99
+    assert timeline[1]["id"] == 10
+
+
+@pytest.mark.anyio("asyncio")
 async def test_admin_reply_saves_attachments(monkeypatch):
     """Posting an admin reply should persist uploaded attachments."""
 

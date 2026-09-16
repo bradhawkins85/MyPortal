@@ -553,17 +553,14 @@
                 <p class="text-muted" style="margin-bottom: 1rem;">
                   Schedule a call with {{ ticket_assigned_user.email }} to discuss this ticket.
                 </p>
-                <button
-                  data-cal-link="{{ ticket_assigned_user.booking_link_url }}"
-                  data-ticket-id="{{ ticket.id }}"
-                  data-ticket-subject="{{ ticket.subject | e }}"
-                  data-user-name="{{ ([user.first_name, user.last_name] | select | join(' ')) | e }}"
-                  data-user-email="{{ (user.email or '') | e }}"
-                  data-user-phone="{{ (user.mobile_phone or '') | e }}"
+                <a
+                  href="{{ ticket_booking_link_url or ticket_assigned_user.booking_link_url }}"
+                  target="_blank"
+                  rel="noreferrer noopener"
                   class="button button--primary"
                 >
                   Book a Call
-                </button>
+                </a>
               </div>
             </article>
           {% endif %}
@@ -1454,229 +1451,230 @@
                 <button type="button" data-history-filter="internal" aria-pressed="false">Internal</button>
                 <button type="button" data-history-filter="automation" aria-pressed="false">Automation</button>
               </div>
-              {% if ticket_replies or ticket_call_recordings %}
+              {% if ticket_timeline_entries %}
                 <div class="timeline timeline--conversation" data-ticket-timeline data-ticket-id="{{ ticket.id }}">
-                  {% for reply in ticket_replies %}
-                    {% set reply_is_automation = reply.external_reference and reply.external_reference.startswith('shipment-watch:') %}
-                    <article
-                      class="timeline__event timeline__event--{{ 'internal' if reply.is_internal else ('automation' if reply_is_automation else ('technician' if reply.author_id and reply.author_id != ticket.requester_id else 'customer')) }}{% if reply.is_split_hidden %} timeline__event--split-hidden{% endif %}"
-                      data-ticket-reply
-                      data-message-kind="{{ 'internal' if reply.is_internal else ('automation' if reply_is_automation else ('technician' if reply.author_id and reply.author_id != ticket.requester_id else 'customer')) }}"
-                      {% if reply.is_split_hidden %}data-split-hidden="true" hidden{% endif %}
-                  data-reply-id="{{ reply.id }}"
-                  data-reply-minutes="{{ reply.minutes_spent if reply.minutes_spent is not none else '' }}"
-                  data-reply-billable="{{ 'true' if reply.is_billable else 'false' }}"
-                  data-reply-labour="{{ reply.labour_type_id if reply.labour_type_id is not none else '' }}"
-                >
-                      <header class="timeline__header">
-                        <div class="timeline__header-main">
-                          {% if not reply.is_split_hidden %}
-                            <label class="ticket-split-select">
-                              <input type="checkbox" data-split-reply-checkbox value="{{ reply.id }}" aria-label="Select reply {{ reply.id }} for ticket split" />
-                            </label>
-                          {% endif %}
-                          <span class="timeline__timestamp">
-                            {{ reply.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.created_at else '—' }}
-                          </span>
-                          <span class="timeline__action">
-                            {{ reply.author.email if reply.author else (reply.author_display_name or reply.author_email or 'System') }}
-                            <span class="timeline__direction">{{ 'Internal note' if reply.is_internal else ('Automation' if reply_is_automation else ('Technician reply' if reply.author_id and reply.author_id != ticket.requester_id else 'Customer message')) }}</span>
-                            {% if reply.is_internal %}
-                              <span class="badge badge--muted">Internal</span>
-                            {% endif %}
-                            {% if reply.is_split_hidden %}
-                              <span class="badge badge--warning">Split to #{{ reply.split_to_ticket_number or reply.split_to_ticket_id }}</span>
-                            {% endif %}
-                            {% if reply.has_email_tracking %}
-                              {% set _reply_recipient_count = reply.recipient_count|default(0) %}
-                              {% set _is_multi_recipient = _reply_recipient_count and _reply_recipient_count > 1 %}
-                              {% if reply.is_email_bounced %}
-                                {% set bounce_time = reply.email_bounced_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_bounced_at else 'unknown' %}
-                                {% set _badge_html %}<span class="badge badge--danger" title="Email bounced on {{ bounce_time }}">✗ Bounced</span>{% endset %}
-                              {% elif reply.is_email_opened %}
-                                {% set open_count_text = reply.email_open_count ~ (' time' if reply.email_open_count == 1 else ' times') %}
-                                {% set first_open = reply.email_opened_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_opened_at else '' %}
-                                {% set tooltip = 'Email opened ' ~ open_count_text %}
-                                {% if first_open %}
-                                  {% set tooltip = tooltip ~ ' · First opened: ' ~ first_open %}
-                                {% endif %}
-                                {% set _badge_html %}<span class="badge badge--success" title="{{ tooltip }}">✓ Read</span>{% endset %}
-                              {% elif reply.is_email_delivered %}
-                                {% set delivery_time = reply.email_delivered_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_delivered_at else 'unknown' %}
-                                {% set _badge_html %}<span class="badge badge--info" title="Email delivered on {{ delivery_time }}">✓ Delivered</span>{% endset %}
-                              {% else %}
-                                {% set sent_time = reply.email_sent_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_sent_at else '' %}
-                                {% set tooltip = 'Email sent' ~ (' on ' ~ sent_time if sent_time else '') ~ ', not yet delivered' %}
-                                {% set _badge_html %}<span class="badge badge--muted" title="{{ tooltip }}">📧 Sent</span>{% endset %}
-                              {% endif %}
-                              {% if _is_multi_recipient %}
-                                <button
-                                  type="button"
-                                  class="badge-trigger"
-                                  data-email-recipients-trigger
-                                  data-reply-id="{{ reply.id }}"
-                                  data-recipient-count="{{ _reply_recipient_count }}"
-                                  aria-haspopup="dialog"
-                                  aria-controls="email-recipients-modal"
-                                  title="Show per-recipient delivery status ({{ _reply_recipient_count }} recipients)"
-                                >{{ _badge_html|safe }}</button>
-                              {% else %}
-                                {{ _badge_html|safe }}
-                              {% endif %}
-                            {% endif %}
-                          </span>
-                          <span
-                            class="timeline__meta timeline__meta-group"
-                            data-reply-time-summary
-                            {% if not reply.time_summary %}hidden{% endif %}
-                            aria-label="Time spent details"
-                          >
-                            {% if reply.minutes_spent is not none %}
-                              <span class="timeline__chip timeline__chip--time">
-                                ⏱️ {{ reply.minutes_spent }} minute{{ 's' if reply.minutes_spent != 1 else '' }}
-                              </span>
-                            {% endif %}
-                            {% if not reply.external_reference %}
-                              <span class="timeline__chip {{ 'timeline__chip--billable' if reply.is_billable else 'timeline__chip--nonbillable' }}">
-                                {{ 'Billable' if reply.is_billable else 'Non-billable' }}
-                              </span>
-                            {% endif %}
-                            {% if reply.labour_type_name %}
-                              <span class="timeline__chip timeline__chip--labour">{{ reply.labour_type_name }}</span>
-                            {% endif %}
-                          </span>
-                        </div>
-                        <div class="timeline__header-controls">
-                          <button
-                            type="button"
-                            class="button button--ghost button--icon timeline__edit-button"
-                            {% if reply.is_split_hidden %}hidden disabled{% endif %}
-                            data-reply-edit
-                            aria-label="Edit time entry"
-                            aria-controls="reply-time-modal"
-                            aria-haspopup="dialog"
-                            title="Edit time entry"
-                          >
-                            <span class="visually-hidden">Edit time entry</span>
-                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                              <path d="M20.71 7.04a1 1 0 0 0 0-1.41L18.37 3.3a1 1 0 0 0-1.41 0L6 14.25V18h3.75l10.96-10.96Z" />
-                              <path d="M5 20h14a1 1 0 1 0 0-2H5a1 1 0 1 0 0 2Z" />
-                            </svg>
-                          </button>
-                        </div>
-                      </header>
-                      <div class="timeline__body">
-                        <div
-                          class="timeline__message"
-                          data-timeline-message
-                        >
-                          <div
-                            class="rich-text-viewer timeline__message-content"
-                            data-timeline-message-content
-                          >
-                            {{ reply.body | safe }}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          class="button button--ghost button--small timeline__message-toggle"
-                          data-timeline-message-toggle
-                          data-more-label="Show more"
-                          data-less-label="Show less"
-                          hidden
-                          aria-expanded="false"
-                        >
-                          Expand message
-                        </button>
-                      </div>
-                    </article>
-                  {% endfor %}
-                  <button type="button" class="button button--secondary ticket-history-load" data-history-load-earlier hidden>Load earlier messages</button>
-                  
-                  {% for recording in ticket_call_recordings %}
-                    <article
-                      class="timeline__event timeline__event--call-recording"
-                      data-call-recording
-                      data-recording-id="{{ recording.id }}"
-                      data-recording-minutes="{{ recording.minutes_spent if recording.minutes_spent is not none else '' }}"
-                      data-recording-billable="{{ 'true' if recording.is_billable else 'false' }}"
-                      data-recording-labour="{{ recording.labour_type_id if recording.labour_type_id is not none else '' }}"
-                    >
-                      <header class="timeline__header">
-                        <div class="timeline__header-main">
-                          <span class="timeline__timestamp">
-                            {{ recording.call_date.astimezone().strftime('%Y-%m-%d %H:%M') if recording.call_date else '—' }}
-                          </span>
-                          <span class="timeline__action">
-                            <strong>📞 Call Recording:</strong> {{ recording.caller_name or 'Unknown' }} → {{ recording.callee_name or 'Unknown' }}
-                          </span>
-                          <span
-                            class="timeline__meta timeline__meta-group"
-                            data-recording-time-summary
-                            {% if not recording.time_summary %}hidden{% endif %}
-                            aria-label="Time spent details"
-                          >
-                            {% if recording.minutes_spent is not none %}
-                              <span class="timeline__chip timeline__chip--time">
-                                ⏱️ {{ recording.minutes_spent }} minute{{ 's' if recording.minutes_spent != 1 else '' }}
-                              </span>
-                            {% endif %}
-                            <span class="timeline__chip {{ 'timeline__chip--billable' if recording.is_billable else 'timeline__chip--nonbillable' }}">
-                              {{ 'Billable' if recording.is_billable else 'Non-billable' }}
+                  {% for timeline_entry in ticket_timeline_entries %}
+                    {% if timeline_entry.type == 'call_recording' %}
+                      {% set recording = timeline_entry %}
+                      <article
+                        class="timeline__event timeline__event--call-recording"
+                        data-call-recording
+                        data-recording-id="{{ recording.id }}"
+                        data-recording-minutes="{{ recording.minutes_spent if recording.minutes_spent is not none else '' }}"
+                        data-recording-billable="{{ 'true' if recording.is_billable else 'false' }}"
+                        data-recording-labour="{{ recording.labour_type_id if recording.labour_type_id is not none else '' }}"
+                      >
+                        <header class="timeline__header">
+                          <div class="timeline__header-main">
+                            <span class="timeline__timestamp">
+                              {{ recording.call_date.astimezone().strftime('%Y-%m-%d %H:%M') if recording.call_date else '—' }}
                             </span>
-                            {% if recording.labour_type_name %}
-                              <span class="timeline__chip timeline__chip--labour">{{ recording.labour_type_name }}</span>
-                            {% endif %}
-                          </span>
-                        </div>
-                        <div class="timeline__header-controls">
-                          <button
-                            type="button"
-                            class="button button--ghost button--icon timeline__edit-button"
-                            {% if reply.is_split_hidden %}hidden disabled{% endif %}
-                            data-recording-edit
-                            aria-label="Edit time entry"
-                            aria-controls="recording-time-modal"
-                            aria-haspopup="dialog"
-                            title="Edit time entry"
-                          >
-                            <span class="visually-hidden">Edit time entry</span>
-                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                              <path d="M20.71 7.04a1 1 0 0 0 0-1.41L18.37 3.3a1 1 0 0 0-1.41 0L6 14.25V18h3.75l10.96-10.96Z" />
-                              <path d="M5 20h14a1 1 0 1 0 0-2H5a1 1 0 1 0 0 2Z" />
-                            </svg>
-                          </button>
-                        </div>
-                      </header>
-                      <div class="timeline__body">
-                        <div class="timeline__message" data-timeline-message>
-                          <p><strong>File:</strong> {{ recording.file_name }}</p>
-                          {% if recording.duration_seconds %}
-                            <p><strong>Duration:</strong> {{ recording.duration_seconds }} seconds</p>
-                          {% endif %}
-                          {% if recording.transcription %}
-                            <div class="timeline__message-content" data-timeline-message-content>
-                              <p><strong>Transcription:</strong></p>
-                              <div class="rich-text-viewer">{{ recording.transcription }}</div>
-                            </div>
+                            <span class="timeline__action">
+                              <strong>📞 Call Recording:</strong> {{ recording.caller_name or 'Unknown' }} → {{ recording.callee_name or 'Unknown' }}
+                            </span>
+                            <span
+                              class="timeline__meta timeline__meta-group"
+                              data-recording-time-summary
+                              {% if not recording.time_summary %}hidden{% endif %}
+                              aria-label="Time spent details"
+                            >
+                              {% if recording.minutes_spent is not none %}
+                                <span class="timeline__chip timeline__chip--time">
+                                  ⏱️ {{ recording.minutes_spent }} minute{{ 's' if recording.minutes_spent != 1 else '' }}
+                                </span>
+                              {% endif %}
+                              <span class="timeline__chip {{ 'timeline__chip--billable' if recording.is_billable else 'timeline__chip--nonbillable' }}">
+                                {{ 'Billable' if recording.is_billable else 'Non-billable' }}
+                              </span>
+                              {% if recording.labour_type_name %}
+                                <span class="timeline__chip timeline__chip--labour">{{ recording.labour_type_name }}</span>
+                              {% endif %}
+                            </span>
+                          </div>
+                          <div class="timeline__header-controls">
                             <button
                               type="button"
-                              class="button button--ghost button--small timeline__message-toggle"
-                              data-timeline-message-toggle
-                              data-more-label="Show transcription"
-                              data-less-label="Hide transcription"
-                              hidden
-                              aria-expanded="false"
+                              class="button button--ghost button--icon timeline__edit-button"
+                              data-recording-edit
+                              aria-label="Edit time entry"
+                              aria-controls="recording-time-modal"
+                              aria-haspopup="dialog"
+                              title="Edit time entry"
                             >
-                              Show transcription
+                              <span class="visually-hidden">Edit time entry</span>
+                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <path d="M20.71 7.04a1 1 0 0 0 0-1.41L18.37 3.3a1 1 0 0 0-1.41 0L6 14.25V18h3.75l10.96-10.96Z" />
+                                <path d="M5 20h14a1 1 0 1 0 0-2H5a1 1 0 1 0 0 2Z" />
+                              </svg>
                             </button>
-                          {% else %}
-                            <p class="text-muted">No transcription available.</p>
-                          {% endif %}
+                          </div>
+                        </header>
+                        <div class="timeline__body">
+                          <div class="timeline__message" data-timeline-message>
+                            <p><strong>File:</strong> {{ recording.file_name }}</p>
+                            {% if recording.duration_seconds %}
+                              <p><strong>Duration:</strong> {{ recording.duration_seconds }} seconds</p>
+                            {% endif %}
+                            {% if recording.transcription %}
+                              <div class="timeline__message-content" data-timeline-message-content>
+                                <p><strong>Transcription:</strong></p>
+                                <div class="rich-text-viewer">{{ recording.transcription }}</div>
+                              </div>
+                              <button
+                                type="button"
+                                class="button button--ghost button--small timeline__message-toggle"
+                                data-timeline-message-toggle
+                                data-more-label="Show transcription"
+                                data-less-label="Hide transcription"
+                                hidden
+                                aria-expanded="false"
+                              >
+                                Show transcription
+                              </button>
+                            {% else %}
+                              <p class="text-muted">No transcription available.</p>
+                            {% endif %}
+                          </div>
                         </div>
-                      </div>
-                    </article>
+                      </article>
+                    {% else %}
+                      {% set reply = timeline_entry %}
+                      {% set reply_is_automation = reply.external_reference and reply.external_reference.startswith('shipment-watch:') %}
+                      <article
+                        class="timeline__event timeline__event--{{ 'internal' if reply.is_internal else ('automation' if reply_is_automation else ('technician' if reply.author_id and reply.author_id != ticket.requester_id else 'customer')) }}{% if reply.is_split_hidden %} timeline__event--split-hidden{% endif %}"
+                        data-ticket-reply
+                        data-message-kind="{{ 'internal' if reply.is_internal else ('automation' if reply_is_automation else ('technician' if reply.author_id and reply.author_id != ticket.requester_id else 'customer')) }}"
+                        {% if reply.is_split_hidden %}data-split-hidden="true" hidden{% endif %}
+                        data-reply-id="{{ reply.id }}"
+                        data-reply-minutes="{{ reply.minutes_spent if reply.minutes_spent is not none else '' }}"
+                        data-reply-billable="{{ 'true' if reply.is_billable else 'false' }}"
+                        data-reply-labour="{{ reply.labour_type_id if reply.labour_type_id is not none else '' }}"
+                      >
+                        <header class="timeline__header">
+                          <div class="timeline__header-main">
+                            {% if not reply.is_split_hidden %}
+                              <label class="ticket-split-select">
+                                <input type="checkbox" data-split-reply-checkbox value="{{ reply.id }}" aria-label="Select reply {{ reply.id }} for ticket split" />
+                              </label>
+                            {% endif %}
+                            <span class="timeline__timestamp">
+                              {{ reply.created_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.created_at else '—' }}
+                            </span>
+                            <span class="timeline__action">
+                              {{ reply.author.email if reply.author else (reply.author_display_name or reply.author_email or 'System') }}
+                              <span class="timeline__direction">{{ 'Internal note' if reply.is_internal else ('Automation' if reply_is_automation else ('Technician reply' if reply.author_id and reply.author_id != ticket.requester_id else 'Customer message')) }}</span>
+                              {% if reply.is_internal %}
+                                <span class="badge badge--muted">Internal</span>
+                              {% endif %}
+                              {% if reply.is_split_hidden %}
+                                <span class="badge badge--warning">Split to #{{ reply.split_to_ticket_number or reply.split_to_ticket_id }}</span>
+                              {% endif %}
+                              {% if reply.has_email_tracking %}
+                                {% set _reply_recipient_count = reply.recipient_count|default(0) %}
+                                {% set _is_multi_recipient = _reply_recipient_count and _reply_recipient_count > 1 %}
+                                {% if reply.is_email_bounced %}
+                                  {% set bounce_time = reply.email_bounced_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_bounced_at else 'unknown' %}
+                                  {% set _badge_html %}<span class="badge badge--danger" title="Email bounced on {{ bounce_time }}">✗ Bounced</span>{% endset %}
+                                {% elif reply.is_email_opened %}
+                                  {% set open_count_text = reply.email_open_count ~ (' time' if reply.email_open_count == 1 else ' times') %}
+                                  {% set first_open = reply.email_opened_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_opened_at else '' %}
+                                  {% set tooltip = 'Email opened ' ~ open_count_text %}
+                                  {% if first_open %}
+                                    {% set tooltip = tooltip ~ ' · First opened: ' ~ first_open %}
+                                  {% endif %}
+                                  {% set _badge_html %}<span class="badge badge--success" title="{{ tooltip }}">✓ Read</span>{% endset %}
+                                {% elif reply.is_email_delivered %}
+                                  {% set delivery_time = reply.email_delivered_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_delivered_at else 'unknown' %}
+                                  {% set _badge_html %}<span class="badge badge--info" title="Email delivered on {{ delivery_time }}">✓ Delivered</span>{% endset %}
+                                {% else %}
+                                  {% set sent_time = reply.email_sent_at.astimezone().strftime('%Y-%m-%d %H:%M') if reply.email_sent_at else '' %}
+                                  {% set tooltip = 'Email sent' ~ (' on ' ~ sent_time if sent_time else '') ~ ', not yet delivered' %}
+                                  {% set _badge_html %}<span class="badge badge--muted" title="{{ tooltip }}">📧 Sent</span>{% endset %}
+                                {% endif %}
+                                {% if _is_multi_recipient %}
+                                  <button
+                                    type="button"
+                                    class="badge-trigger"
+                                    data-email-recipients-trigger
+                                    data-reply-id="{{ reply.id }}"
+                                    data-recipient-count="{{ _reply_recipient_count }}"
+                                    aria-haspopup="dialog"
+                                    aria-controls="email-recipients-modal"
+                                    title="Show per-recipient delivery status ({{ _reply_recipient_count }} recipients)"
+                                  >{{ _badge_html|safe }}</button>
+                                {% else %}
+                                  {{ _badge_html|safe }}
+                                {% endif %}
+                              {% endif %}
+                            </span>
+                            <span
+                              class="timeline__meta timeline__meta-group"
+                              data-reply-time-summary
+                              {% if not reply.time_summary %}hidden{% endif %}
+                              aria-label="Time spent details"
+                            >
+                              {% if reply.minutes_spent is not none %}
+                                <span class="timeline__chip timeline__chip--time">
+                                  ⏱️ {{ reply.minutes_spent }} minute{{ 's' if reply.minutes_spent != 1 else '' }}
+                                </span>
+                              {% endif %}
+                              {% if not reply.external_reference %}
+                                <span class="timeline__chip {{ 'timeline__chip--billable' if reply.is_billable else 'timeline__chip--nonbillable' }}">
+                                  {{ 'Billable' if reply.is_billable else 'Non-billable' }}
+                                </span>
+                              {% endif %}
+                              {% if reply.labour_type_name %}
+                                <span class="timeline__chip timeline__chip--labour">{{ reply.labour_type_name }}</span>
+                              {% endif %}
+                            </span>
+                          </div>
+                          <div class="timeline__header-controls">
+                            <button
+                              type="button"
+                              class="button button--ghost button--icon timeline__edit-button"
+                              {% if reply.is_split_hidden %}hidden disabled{% endif %}
+                              data-reply-edit
+                              aria-label="Edit time entry"
+                              aria-controls="reply-time-modal"
+                              aria-haspopup="dialog"
+                              title="Edit time entry"
+                            >
+                              <span class="visually-hidden">Edit time entry</span>
+                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <path d="M20.71 7.04a1 1 0 0 0 0-1.41L18.37 3.3a1 1 0 0 0-1.41 0L6 14.25V18h3.75l10.96-10.96Z" />
+                                <path d="M5 20h14a1 1 0 1 0 0-2H5a1 1 0 1 0 0 2Z" />
+                              </svg>
+                            </button>
+                          </div>
+                        </header>
+                        <div class="timeline__body">
+                          <div
+                            class="timeline__message"
+                            data-timeline-message
+                          >
+                            <div
+                              class="rich-text-viewer timeline__message-content"
+                              data-timeline-message-content
+                            >
+                              {{ reply.body | safe }}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            class="button button--ghost button--small timeline__message-toggle"
+                            data-timeline-message-toggle
+                            data-more-label="Show more"
+                            data-less-label="Show less"
+                            hidden
+                            aria-expanded="false"
+                          >
+                            Expand message
+                          </button>
+                        </div>
+                      </article>
+                    {% endif %}
                   {% endfor %}
+                  <button type="button" class="button button--secondary ticket-history-load" data-history-load-earlier hidden>Load earlier messages</button>
                 </div>
               {% else %}
                 <p class="card__empty">No replies or call recordings have been posted yet.</p>

@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable, Mapping as MappingABC, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable, Sequence
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from app.core.config import get_settings
 from app.core.database import db
@@ -378,6 +379,80 @@ def format_reply_time_summary(
     if labour_label:
         summary = f"{summary} · {labour_label}"
     return summary
+
+
+def build_booking_link_url(
+    base_url: str | None,
+    *,
+    ticket_id: int | str | None,
+    ticket_number: str | int | None = None,
+    ticket_subject: str | None = None,
+    user_name: str | None = None,
+    user_email: str | None = None,
+    user_phone: str | None = None,
+    ticket_url: str | None = None,
+) -> str | None:
+    """Return a provider-aware booking URL with safe prefills when supported."""
+
+    candidate = str(base_url or "").strip()
+    if not candidate:
+        return None
+
+    parsed = urlsplit(candidate)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return candidate
+
+    host = (parsed.hostname or "").lower()
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+
+    identifier = str(ticket_number or ticket_id or "").strip()
+    subject = str(ticket_subject or "").strip()
+    name = str(user_name or "").strip()
+    email = str(user_email or "").strip()
+    phone = str(user_phone or "").strip()
+    ticket_url_value = str(ticket_url or "").strip()
+
+    note_parts: list[str] = []
+    if identifier and subject:
+        note_parts.append(f"Ticket #{identifier} - {subject}")
+    elif identifier:
+        note_parts.append(f"Ticket #{identifier}")
+    if ticket_url_value:
+        note_parts.append(f"Ticket URL: {ticket_url_value}")
+    notes = "\n\n".join(note_parts)
+
+    def _set_if_value(key: str, value: str) -> None:
+        if value:
+            query[key] = value
+
+    if host in {"cal.com", "app.cal.com"}:
+        _set_if_value("name", name)
+        _set_if_value("email", email)
+        _set_if_value("phone", phone)
+        _set_if_value("TicketNumber", identifier)
+        _set_if_value(
+            "title",
+            f"{identifier} - {subject}" if identifier and subject else identifier,
+        )
+        _set_if_value("TicketURL", ticket_url_value)
+        _set_if_value("notes", notes)
+    elif host == "calendly.com" or host.endswith(".calendly.com"):
+        _set_if_value("name", name)
+        _set_if_value("email", email)
+        _set_if_value(
+            "a1",
+            f"Ticket #{identifier} - {subject}" if identifier and subject else identifier,
+        )
+        _set_if_value("a2", ticket_url_value)
+    elif (
+        host in {"book.ms", "bookings.microsoft.com"}
+        or host.endswith(".bookings.microsoft.com")
+        or host == "outlook.office.com"
+        or host.endswith(".outlook.office.com")
+    ):
+        _set_if_value("name", name)
+        _set_if_value("email", email)
+    return parsed._replace(query=urlencode(query, doseq=True)).geturl()
 
 
 async def update_ticket_description(

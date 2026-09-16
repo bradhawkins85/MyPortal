@@ -8697,6 +8697,20 @@ def _format_user_label(user_record: Mapping[str, Any] | None) -> str:
     return email or "System"
 
 
+def _format_booking_requester_name(user_record: Mapping[str, Any] | None) -> str:
+    """Build a booking prefill name from first/last name parts only."""
+    if not isinstance(user_record, Mapping):
+        return ""
+    return " ".join(
+        part.strip()
+        for part in (
+            str(user_record.get("first_name") or ""),
+            str(user_record.get("last_name") or ""),
+        )
+        if part and part.strip()
+    ).strip()
+
+
 async def _render_portal_ticket_detail(
     request: Request,
     user: dict[str, Any],
@@ -8884,6 +8898,16 @@ async def _render_portal_ticket_detail(
         except (TypeError, ValueError):
             requester_staff_record = None
     assigned_record = user_lookup.get(ticket.get("assigned_user_id"))
+    booking_link_url = tickets_service.build_booking_link_url(
+        assigned_record.get("booking_link_url") if assigned_record else None,
+        ticket_id=ticket.get("id"),
+        ticket_number=ticket.get("ticket_number") or ticket.get("id"),
+        ticket_subject=ticket.get("subject"),
+        user_name=_format_booking_requester_name(user),
+        user_email=str(user.get("email") or ""),
+        user_phone=str(user.get("mobile_phone") or ""),
+        ticket_url=str(request.url),
+    )
 
     timeline_entries: list[dict[str, Any]] = []
     for reply in ordered_replies:
@@ -8980,6 +9004,7 @@ async def _render_portal_ticket_detail(
             {
                 "id": recording.get("id"),
                 "type": "call_recording",
+                "call_date": call_date,
                 "created_iso": call_date_iso,
                 "file_name": recording.get("file_name"),
                 "caller_name": caller_name or "Unknown",
@@ -9131,6 +9156,7 @@ async def _render_portal_ticket_detail(
             "billed_at_iso": billed_at_iso,
         },
         "assigned_user": assigned_record,
+        "ticket_booking_link_url": booking_link_url,
         "ticket_replies": timeline_entries,
         "ticket_watchers": watchers,
         "ticket_mention_staff_options": ticket_mention_staff_options,
@@ -9458,7 +9484,10 @@ async def _render_ticket_detail(
         "description_text": sanitized_description.text_content,
     }
     from app.services import slas as sla_service
-    ticket_sla = (await sla_service.statuses_for_tickets([ticket_id])).get(ticket_id, {"state": "not_applicable", "label": "No SLA"})
+    ticket_sla = (await sla_service.statuses_for_tickets([ticket_id])).get(
+        ticket_id,
+        {"state": "not_applicable", "label": "No SLA"},
+    )
 
     replies = await tickets_repo.list_replies(ticket_id)
     split_replies = await tickets_repo.list_split_replies_for_original(ticket_id)
@@ -9745,6 +9774,32 @@ async def _render_ticket_detail(
         watcher_user = user_lookup.get(watcher.get("user_id"))
         enriched_watchers.append({**watcher, "user": watcher_user})
 
+    assigned_user = user_lookup.get(ticket.get("assigned_user_id"))
+    ticket_booking_link_url = tickets_service.build_booking_link_url(
+        assigned_user.get("booking_link_url") if assigned_user else None,
+        ticket_id=ticket.get("id"),
+        ticket_number=ticket.get("ticket_number") or ticket.get("id"),
+        ticket_subject=ticket.get("subject"),
+        user_name=_format_booking_requester_name(user),
+        user_email=str(user.get("email") or ""),
+        user_phone=str(user.get("mobile_phone") or ""),
+        ticket_url=str(request.url),
+    )
+
+    timeline_entries = sorted(
+        [
+            *({**reply, "type": "reply"} for reply in enriched_replies),
+            *({**recording, "type": "call_recording"} for recording in enriched_recordings),
+        ],
+        key=lambda item: (
+            item.get("call_date")
+            if item.get("type") == "call_recording"
+            else item.get("created_at")
+        )
+        or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+
     labour_types = await labour_types_service.list_labour_types()
 
     status_definitions = await tickets_service.list_status_definitions()
@@ -9986,10 +10041,12 @@ async def _render_ticket_detail(
         "ticket_sla": ticket_sla,
         "ticket_company": company,
         "ticket_module": module_info,
-        "ticket_assigned_user": user_lookup.get(ticket.get("assigned_user_id")),
+        "ticket_assigned_user": assigned_user,
+        "ticket_booking_link_url": ticket_booking_link_url,
         "ticket_requester": user_lookup.get(ticket.get("requester_id")),
         "ticket_replies": enriched_replies,
         "ticket_call_recordings": enriched_recordings,
+        "ticket_timeline_entries": timeline_entries,
         "ticket_watchers": enriched_watchers,
         "ticket_shipment_watch": shipment_watch,
         "ticket_attachments": formatted_attachments,
