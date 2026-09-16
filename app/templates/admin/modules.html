@@ -38,6 +38,10 @@
               <span class="stat__value">{{ ops_summary.warning_modules or 0 }}</span>
             </div>
             <div class="stat">
+              <span class="stat__label">Setup required</span>
+              <span class="stat__value">{{ ops_summary.setup_modules or 0 }}</span>
+            </div>
+            <div class="stat">
               <span class="stat__label">Degraded</span>
               <span class="stat__value">{{ ops_summary.degraded_modules or 0 }}</span>
             </div>

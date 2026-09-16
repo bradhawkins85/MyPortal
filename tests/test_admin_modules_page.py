@@ -177,6 +177,7 @@ def test_modules_page_renders_operations_center(super_admin_context, monkeypatch
                 "enabled_modules": 1,
                 "healthy_modules": 0,
                 "warning_modules": 1,
+                "setup_modules": 0,
                 "degraded_modules": 0,
                 "failed_webhooks": 2,
                 "task_conflicts": 1,

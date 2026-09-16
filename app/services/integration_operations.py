@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from math import ceil
+import json
 from typing import Any, Mapping, Sequence
 
 from app.core.config import get_settings
@@ -37,6 +38,7 @@ _WEBHOOK_MATCH_HINTS: dict[str, tuple[str, ...]] = {
     "uptimekuma": ("uptimekuma", "uptime kuma"),
     "xero": ("xero",),
 }
+_DEFAULT_CREDENTIAL_WARNING_DAYS = 30
 
 
 def _to_aware_utc(value: Any) -> datetime | None:
@@ -124,6 +126,11 @@ def _credential_warnings(
 
 def _event_belongs_to_module(event: Mapping[str, Any], module_slug: str) -> bool:
     metadata = event.get("metadata")
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = None
     if isinstance(metadata, Mapping) and _string_value(metadata.get("module_slug")) == module_slug:
         return True
     haystack = " ".join(
@@ -171,9 +178,10 @@ def _tasks_share_scope(left: Mapping[str, Any], right: Mapping[str, Any]) -> boo
     )
 
 
-def _build_task_conflicts(tasks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def _build_task_conflicts(
+    tasks: Sequence[Mapping[str, Any]], *, timezone_name: str | None
+) -> dict[str, Any]:
     active_tasks = [task for task in tasks if bool(task.get("active", True))]
-    timezone_name = get_settings().default_timezone
     graph_rows: list[dict[str, Any]] = []
     conflicts: list[dict[str, Any]] = []
     related_by_task: dict[int, set[str]] = defaultdict(set)
@@ -270,7 +278,8 @@ async def build_operations_center(
     recent_runs = await scheduled_tasks_repo.list_recent_runs(limit=200)
     webhook_events = await webhook_events_repo.list_events(limit=500)
     now = datetime.now(timezone.utc)
-    warning_window_days = max(1, int(get_settings().m365_client_secret_renewal_days or 30))
+    app_settings = get_settings()
+    warning_window_days = _DEFAULT_CREDENTIAL_WARNING_DAYS
 
     task_ids_by_module: dict[str, set[int]] = defaultdict(set)
     for task in tasks:
@@ -377,11 +386,14 @@ async def build_operations_center(
             }
         )
 
-    dependency_graph = _build_task_conflicts(tasks)
+    dependency_graph = _build_task_conflicts(
+        tasks, timezone_name=app_settings.default_timezone
+    )
     summary = {
         "enabled_modules": sum(1 for module in module_rows if bool(module.get("enabled"))),
         "healthy_modules": summary_counts.get("healthy", 0),
-        "warning_modules": summary_counts.get("warning", 0) + summary_counts.get("setup", 0),
+        "warning_modules": summary_counts.get("warning", 0),
+        "setup_modules": summary_counts.get("setup", 0),
         "degraded_modules": summary_counts.get("degraded", 0),
         "disabled_modules": summary_counts.get("disabled", 0),
         "failed_webhooks": sum(
