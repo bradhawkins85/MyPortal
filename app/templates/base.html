@@ -388,13 +388,13 @@
                   <a href="/m365/out-of-office" {% if current_path.startswith('/m365/out-of-office') %}aria-current="page"{% endif %}>Out of Office</a>
                 </li>
                 {% endif %}
-                {% if is_super_admin or is_helpdesk_technician %}<li class="menu__subitem">
+                {% if can_access_m365_spam_purge %}<li class="menu__subitem">
                   <a href="/m365/spam-purge" {% if current_path.startswith('/m365/spam-purge') %}aria-current="page"{% endif %}>Spam Search &amp; Purge</a>
                 </li>{% endif %}
               </ul>
             </li>
           {% endif %}
-          {% if not can_manage_licenses and (can_view_m365_best_practices or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes or can_access_m365_out_of_office or is_helpdesk_technician) %}
+          {% if not can_manage_licenses and (can_view_m365_best_practices or can_view_m365_user_mailboxes or can_view_m365_shared_mailboxes or can_access_m365_out_of_office or can_access_m365_spam_purge) %}
             {% set m365_active = current_path.startswith('/m365/best-practices') or current_path.startswith('/m365/mailboxes') or current_path.startswith('/m365/out-of-office') or current_path.startswith('/m365/spam-purge') %}
             <li class="menu__item menu__item--expandable {% if m365_active %}menu__item--expanded{% endif %}" data-menu-key="/m365">
               <button class="menu__toggle" type="button" data-menu-toggle aria-expanded="{% if m365_active %}true{% else %}false{% endif %}">
@@ -427,7 +427,7 @@
                   <a href="/m365/out-of-office" {% if current_path.startswith('/m365/out-of-office') %}aria-current="page"{% endif %}>Out of Office</a>
                 </li>
                 {% endif %}
-                {% if is_helpdesk_technician %}
+                {% if can_access_m365_spam_purge %}
                 <li class="menu__subitem">
                   <a href="/m365/spam-purge" {% if current_path.startswith('/m365/spam-purge') %}aria-current="page"{% endif %}>Spam Search &amp; Purge</a>
                 </li>

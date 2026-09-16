@@ -26,7 +26,12 @@ def _main():
 
 
 async def _context(request: Request):
-    user, redirect = await _main()._require_helpdesk_page(request)
+    user, redirect = await _main()._require_menu_page_access(
+        request,
+        "menu.m365.spam_purge",
+        write=True,
+        detail="Spam Search & Purge permission required",
+    )
     if redirect:
         return None, None, redirect
     company_id = getattr(request.state, "active_company_id", None) or user.get("company_id")

@@ -43,6 +43,7 @@ MENU_PERMISSIONS: tuple[MenuPermission, ...] = (
     MenuPermission("menu.m365.user_mailboxes", "User Mailboxes", "Office 365", "View user mailboxes; write access allows mailbox actions.", ("m365_user_mailboxes.access",), "can_view_m365_user_mailboxes"),
     MenuPermission("menu.m365.shared_mailboxes", "Shared Mailboxes", "Office 365", "View shared mailboxes; write access allows mailbox actions.", ("m365_shared_mailboxes.access",), "can_view_m365_shared_mailboxes"),
     MenuPermission("menu.m365.out_of_office", "Out of Office", "Office 365", "View user mailboxes and manage their automatic reply messages and schedules."),
+    MenuPermission("menu.m365.spam_purge", "Spam Search & Purge", "Office 365", "Search for and permanently remove malicious email from Microsoft 365 mailboxes.", admin_only=True),
     MenuPermission("menu.m365.licenses", "Licenses", "Office 365", "View licenses; write access allows license changes.", ("licenses.manage", "licenses.order"), "can_manage_licenses"),
     MenuPermission("menu.m365.diagnostics", "Office 365 Diagnostics", "Office 365", "View or repair Microsoft 365 diagnostics.", admin_only=True),
     MenuPermission("menu.subscriptions", "Subscriptions", "Commerce", "View subscriptions; write access allows subscription change/order actions.", ("billing.manage", "licenses.manage", "cart.access"), None),

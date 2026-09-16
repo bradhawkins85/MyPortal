@@ -194,3 +194,21 @@ async def test_run_search_exhausts_retries_and_marks_failed(monkeypatch):
     failed_updates = [d for d in update_calls if d.get("search_status") == "failed"]
     assert failed_updates, "Search should be marked failed after exhausting retries"
     assert "organization container" in failed_updates[-1].get("error_message", "")
+
+
+def test_spam_purge_sidebar_requires_explicit_permission():
+    source = open("app/templates/base.html", encoding="utf-8").read()
+
+    assert source.count("{% if can_access_m365_spam_purge %}") == 2
+    assert "or can_access_m365_spam_purge)" in source
+    assert "{% if is_super_admin or is_helpdesk_technician %}" not in source
+
+
+def test_spam_purge_permission_is_available_to_roles():
+    from app.security.menu_permissions import catalogue_for_api
+
+    permission = next(
+        item for item in catalogue_for_api() if item["key"] == "menu.m365.spam_purge"
+    )
+    assert permission["admin_only"] is True
+    assert permission["levels"] == ["none", "read", "write"]
