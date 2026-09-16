@@ -68,6 +68,7 @@ async def service_status_dashboard(request: Request):
 
 @router.get("/service-status/public/{company_id}/{token}", response_class=HTMLResponse)
 async def public_service_status_dashboard(request: Request, company_id: int, token: str):
+    main_module = _main()
     if not service_status_service.is_valid_public_status_token(company_id, token):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -80,9 +81,12 @@ async def public_service_status_dashboard(request: Request, company_id: int, tok
             detail="Status page not found.",
         )
     services = await service_status_service.list_services_for_company(company_id)
+    to_iso = getattr(main_module, "_to_iso", lambda value: str(value) if value else None)
+    for service in services:
+        service["updated_at_iso"] = to_iso(service.get("updated_at"))
     summary = service_status_service.summarise_services(services)
     status_lookup = {entry["value"]: entry for entry in service_status_service.STATUS_DEFINITIONS}
-    return await _main()._render_template(
+    return await main_module._render_template(
         "service_status/public_dashboard.html",
         request,
         {"id": 0, "is_super_admin": False},

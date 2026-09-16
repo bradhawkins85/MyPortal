@@ -6161,6 +6161,7 @@ async def admin_session_detail_page(request: Request, session_id: int):
     session_detail["expires_at_iso"] = _to_iso(session_detail.get("expires_at"))
     correlated_audit_logs = await access_activity_repo.list_session_audit_activity(
         session_id,
+        session=session_detail,
         limit=200,
     )
     for entry in correlated_audit_logs:

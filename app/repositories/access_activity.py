@@ -221,9 +221,11 @@ async def get_active_user_session(session_id: int) -> dict[str, Any] | None:
 async def list_session_audit_activity(
     session_id: int,
     *,
+    session: Mapping[str, Any] | None = None,
     limit: int = 200,
 ) -> list[dict[str, Any]]:
-    session = await get_active_user_session(session_id)
+    if session is None:
+        session = await get_active_user_session(session_id)
     if not session:
         return []
     created_at = session.get("created_at")
