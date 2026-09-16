@@ -130,20 +130,13 @@
     const html = clipboard.getData('text/html');
     if (html) {
       event.preventDefault();
-      const dataUrls = await Promise.all(imageFiles.map((file) => readFileAsDataUrl(file)));
       const sanitizedHtml = sanitizePastedHtml(html);
       const wrapper = document.createElement('div');
       wrapper.innerHTML = sanitizedHtml;
       let removedImages = 0;
-      let replacedImages = 0;
       wrapper.querySelectorAll('img').forEach((image) => {
         const src = image.getAttribute('src') || '';
         if (isSupportedImageSource(src)) {
-          return;
-        }
-        if (dataUrls.length > 0) {
-          image.setAttribute('src', dataUrls.shift());
-          replacedImages += 1;
           return;
         }
         image.remove();
@@ -152,9 +145,9 @@
       insertHtmlAtSelection(surface, wrapper.innerHTML);
       updateSurfaceState(surface, hidden);
       if (removedImages > 0) {
-        showEditorMessage(editor, 'Some pasted images could not be imported. Use an HTTPS image URL or paste the image itself.', 'error');
-      } else if (replacedImages > 0) {
-        showEditorMessage(editor, 'Pasted images were imported into the signature.', 'info');
+        showEditorMessage(editor, 'Some pasted images could not be imported automatically. Use an HTTPS image URL or paste the image by itself.', 'error');
+      } else if (imageFiles.length > 0) {
+        showEditorMessage(editor, 'Pasted signature formatting was imported. Inline clipboard images could not be matched automatically.', 'error');
       } else {
         showEditorMessage(editor, '', 'info');
       }

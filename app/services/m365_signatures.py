@@ -225,9 +225,6 @@ async def update_template(
         return None
     if bool(is_default):
         return await signatures_repo.set_default_template(company_id, template_id)
-    if current.get("is_default") and not bool(is_default):
-        await signatures_repo.clear_default_template(company_id, exclude_template_id=template_id)
-        return await signatures_repo.update_template(company_id, template_id, is_default=False)
     return updated
 
 
