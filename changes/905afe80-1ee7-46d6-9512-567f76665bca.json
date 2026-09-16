@@ -1,0 +1,7 @@
+{
+  "guid": "905afe80-1ee7-46d6-9512-567f76665bca",
+  "occurred_at": "2026-09-16T00:00Z",
+  "change_type": "Fix",
+  "summary": "Route Purview spam search and purge commands with the tenant initial onmicrosoft.com organization instead of treating its tenant GUID as an Exchange organization.",
+  "content_hash": "634edc7598aeb9f05b925b161c58ac6bd51f208906427197dda07c185e203c8a"
+}
