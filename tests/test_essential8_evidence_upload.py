@@ -42,6 +42,7 @@ class _InterruptedUpload:
 def _configure_upload_dependencies(monkeypatch, tmp_path):
     access = AsyncMock()
     add_calls: list[dict] = []
+    upload_dir = tmp_path / "compliance" / "essential8"
 
     async def fake_add_requirement_evidence(**kwargs):
         add_calls.append(kwargs)
@@ -60,8 +61,8 @@ def _configure_upload_dependencies(monkeypatch, tmp_path):
         AsyncMock(return_value={"id": 17, "control_id": 3}),
     )
     monkeypatch.setattr(essential8_routes.essential8_repo, "add_requirement_evidence", fake_add_requirement_evidence)
-    monkeypatch.setattr(essential8_routes, "_requirement_upload_dir", lambda: tmp_path)
-    return access, add_calls
+    monkeypatch.setattr(essential8_routes, "_requirement_upload_dir", lambda: upload_dir)
+    return access, add_calls, upload_dir
 
 
 @pytest.mark.anyio("asyncio")
@@ -79,7 +80,7 @@ async def test_upload_requirement_evidence_uses_safe_metadata_and_contained_stor
     filename: str,
     expected_name: str,
 ):
-    access, add_calls = _configure_upload_dependencies(monkeypatch, tmp_path)
+    access, add_calls, upload_dir = _configure_upload_dependencies(monkeypatch, tmp_path)
 
     response = await essential8_routes.upload_requirement_evidence(
         company_id=9,
@@ -97,15 +98,15 @@ async def test_upload_requirement_evidence_uses_safe_metadata_and_contained_stor
     assert stored_relative_path.startswith("compliance/essential8/")
     assert stored_relative_path.endswith(Path(expected_name).suffix)
     assert stored_relative_path.rsplit("/", 1)[-1] != expected_name
-    stored_path = tmp_path / stored_relative_path.rsplit("/", 1)[-1]
-    assert stored_path.parent == tmp_path
+    stored_path = tmp_path / Path(stored_relative_path)
+    assert stored_path.parent == upload_dir
     assert stored_path.read_bytes() == b"proof-bytes"
 
 
 @pytest.mark.anyio("asyncio")
 @pytest.mark.parametrize("filename", ["", ".", "..", "/", "\\", "   "])
 async def test_upload_requirement_evidence_rejects_empty_or_invalid_names(monkeypatch, tmp_path, filename: str):
-    _configure_upload_dependencies(monkeypatch, tmp_path)
+    _, _, upload_dir = _configure_upload_dependencies(monkeypatch, tmp_path)
 
     with pytest.raises(HTTPException) as exc_info:
         await essential8_routes.upload_requirement_evidence(
@@ -118,12 +119,12 @@ async def test_upload_requirement_evidence_rejects_empty_or_invalid_names(monkey
         )
 
     assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
-    assert list(tmp_path.iterdir()) == []
+    assert not upload_dir.exists()
 
 
 @pytest.mark.anyio("asyncio")
 async def test_upload_requirement_evidence_truncates_long_metadata_name(monkeypatch, tmp_path):
-    _, add_calls = _configure_upload_dependencies(monkeypatch, tmp_path)
+    _, add_calls, _ = _configure_upload_dependencies(monkeypatch, tmp_path)
     filename = f"{'a' * 400}.pdf"
 
     response = await essential8_routes.upload_requirement_evidence(
@@ -142,7 +143,7 @@ async def test_upload_requirement_evidence_truncates_long_metadata_name(monkeypa
 
 @pytest.mark.anyio("asyncio")
 async def test_upload_requirement_evidence_same_name_uploads_store_distinct_files(monkeypatch, tmp_path):
-    _, add_calls = _configure_upload_dependencies(monkeypatch, tmp_path)
+    _, add_calls, _ = _configure_upload_dependencies(monkeypatch, tmp_path)
     uuids = iter([SimpleNamespace(hex="first"), SimpleNamespace(hex="second")])
     monkeypatch.setattr(essential8_routes, "uuid4", lambda: next(uuids))
 
@@ -164,8 +165,8 @@ async def test_upload_requirement_evidence_same_name_uploads_store_distinct_file
     )
 
     assert first["file_path"] != second["file_path"]
-    first_path = tmp_path / add_calls[0]["file_path"].rsplit("/", 1)[-1]
-    second_path = tmp_path / add_calls[1]["file_path"].rsplit("/", 1)[-1]
+    first_path = tmp_path / Path(add_calls[0]["file_path"])
+    second_path = tmp_path / Path(add_calls[1]["file_path"])
     assert first_path.read_bytes() == b"first"
     assert second_path.read_bytes() == b"second"
 
@@ -175,7 +176,7 @@ async def test_upload_requirement_evidence_retries_on_storage_collision_without_
     monkeypatch,
     tmp_path,
 ):
-    _, add_calls = _configure_upload_dependencies(monkeypatch, tmp_path)
+    _, add_calls, upload_dir = _configure_upload_dependencies(monkeypatch, tmp_path)
     uuids = iter(
         [
             SimpleNamespace(hex="collision"),
@@ -183,7 +184,8 @@ async def test_upload_requirement_evidence_retries_on_storage_collision_without_
         ]
     )
     monkeypatch.setattr(essential8_routes, "uuid4", lambda: next(uuids))
-    existing_path = tmp_path / "company_9_requirement_17_collision.pdf"
+    existing_path = upload_dir / "company_9_requirement_17_collision.pdf"
+    existing_path.parent.mkdir(parents=True, exist_ok=True)
     existing_path.write_bytes(b"keep-me")
 
     response = await essential8_routes.upload_requirement_evidence(
@@ -197,12 +199,12 @@ async def test_upload_requirement_evidence_retries_on_storage_collision_without_
 
     assert existing_path.read_bytes() == b"keep-me"
     assert response["file_path"].endswith("replacement.pdf")
-    assert (tmp_path / add_calls[0]["file_path"].rsplit("/", 1)[-1]).read_bytes() == b"new-bytes"
+    assert (tmp_path / Path(add_calls[0]["file_path"])).read_bytes() == b"new-bytes"
 
 
 @pytest.mark.anyio("asyncio")
 async def test_upload_requirement_evidence_cleans_up_partial_file_on_oversize(monkeypatch, tmp_path):
-    _configure_upload_dependencies(monkeypatch, tmp_path)
+    _, _, upload_dir = _configure_upload_dependencies(monkeypatch, tmp_path)
     monkeypatch.setattr(essential8_routes, "uuid4", lambda: SimpleNamespace(hex="oversize"))
 
     with pytest.raises(HTTPException) as exc_info:
@@ -220,7 +222,7 @@ async def test_upload_requirement_evidence_cleans_up_partial_file_on_oversize(mo
         )
 
     assert exc_info.value.status_code == status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
-    assert not (tmp_path / "company_9_requirement_17_oversize.pdf").exists()
+    assert not (upload_dir / "company_9_requirement_17_oversize.pdf").exists()
 
 
 @pytest.mark.anyio("asyncio")
@@ -228,9 +230,10 @@ async def test_upload_requirement_evidence_cleans_up_only_its_partial_file_on_in
     monkeypatch,
     tmp_path,
 ):
-    _configure_upload_dependencies(monkeypatch, tmp_path)
+    _, _, upload_dir = _configure_upload_dependencies(monkeypatch, tmp_path)
     monkeypatch.setattr(essential8_routes, "uuid4", lambda: SimpleNamespace(hex="interrupted"))
-    neighbour = tmp_path / "existing.bin"
+    neighbour = upload_dir / "existing.bin"
+    neighbour.parent.mkdir(parents=True, exist_ok=True)
     neighbour.write_bytes(b"keep-me")
     upload = _InterruptedUpload("report.pdf", first_chunk=b"partial", error=OSError("socket dropped"))
 
@@ -246,4 +249,4 @@ async def test_upload_requirement_evidence_cleans_up_only_its_partial_file_on_in
 
     assert upload.closed is True
     assert neighbour.read_bytes() == b"keep-me"
-    assert not (tmp_path / "company_9_requirement_17_interrupted.pdf").exists()
+    assert not (upload_dir / "company_9_requirement_17_interrupted.pdf").exists()
