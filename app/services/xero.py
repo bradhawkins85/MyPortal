@@ -1740,7 +1740,9 @@ def _evaluate_qty_expression(expression: str, context: dict[str, Any]) -> float:
         return float(expression)
     except ValueError:
         try:
-            evaluated = str(expression).format_map(_TemplateValues(context))
+            if not isinstance(expression, str):
+                raise ValueError("quantity expression must be a string")
+            evaluated = expression.format_map(_TemplateValues(context))
             return float(evaluated)
         except (ValueError, KeyError):
             logger.warning(

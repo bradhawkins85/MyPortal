@@ -15,6 +15,7 @@ from app.core.logging import log_error
 from app.security.flash import flash_redirect
 
 _REPORTING_SLUG_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+# Keys are raw module status reasons; values are the client-safe labels we expose.
 _APPROVED_AI_QUERY_MODULE_REASONS = {
     "Module disabled": "Module disabled",
     "Module not fully configured": "Module not fully configured",
