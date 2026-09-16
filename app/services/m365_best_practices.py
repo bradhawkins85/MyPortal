@@ -692,41 +692,60 @@ async def _remediate_it_contact_baseline(exo_token: str, tenant_id: str) -> tupl
     if state["conflicts"]:
         return False, "; ".join(state["conflicts"]) + ". Resolve the conflict manually; no changes were made."
 
+    async def _confirm_create_conflict(kind: str, profile: dict[str, str]) -> tuple[bool, str | None]:
+        refreshed_state = await _inspect_it_contact_baseline(exo_token, tenant_id)
+        if refreshed_state.get("error"):
+            return False, refreshed_state["error"]
+        if refreshed_state["conflicts"]:
+            return False, "; ".join(refreshed_state["conflicts"]) + ". Resolve the conflict manually; no changes were made."
+        if (kind, profile) in refreshed_state["missing"]:
+            raise M365Error("Exchange Online object still missing after 409 conflict", http_status=409)
+        return True, None
+
     for kind, profile in state["missing"]:
-        try:
-            if kind == "contact":
+        if kind == "contact":
+            try:
                 await _exo_invoke_command(exo_token, tenant_id, "New-MailContact", {
                     "Name": profile["contact"], "ExternalEmailAddress": profile["external"]
                 })
-                await _exo_invoke_command(exo_token, tenant_id, "Set-MailContact", {
-                    "Identity": profile["contact"], "HiddenFromAddressListsEnabled": True
-                })
-            elif kind == "group":
+            except M365Error as exc:
+                if exc.http_status != 409:
+                    raise
+                okay, message = await _confirm_create_conflict(kind, profile)
+                if not okay:
+                    return False, message
+            await _exo_invoke_command(exo_token, tenant_id, "Set-MailContact", {
+                "Identity": profile["contact"], "HiddenFromAddressListsEnabled": True
+            })
+        elif kind == "group":
+            try:
                 await _exo_invoke_command(exo_token, tenant_id, "New-DistributionGroup", {
                     "Name": profile["group"], "Members": profile["external"],
                     "PrimarySmtpAddress": f'{profile["alias"]}@{state["domain"]}',
                     "RequireSenderAuthenticationEnabled": False,
                 })
-                await _exo_invoke_command(exo_token, tenant_id, "Set-DistributionGroup", {
-                    "Identity": profile["group"], "HiddenFromAddressListsEnabled": True
-                })
-            elif kind == "rule":
+            except M365Error as exc:
+                if exc.http_status != 409:
+                    raise
+                okay, message = await _confirm_create_conflict(kind, profile)
+                if not okay:
+                    return False, message
+            await _exo_invoke_command(exo_token, tenant_id, "Set-DistributionGroup", {
+                "Identity": profile["group"], "HiddenFromAddressListsEnabled": True
+            })
+        elif kind == "rule":
+            try:
                 await _exo_invoke_command(exo_token, tenant_id, "New-TransportRule", {
                     "Name": _IT_BASELINE_RULE_NAME, "Priority": 0, "Enabled": True,
                     "RecipientAddressContainsWords": state["recipient_words"],
                     "StopRuleProcessing": True,
                 })
-        except M365Error as exc:
-            if exc.http_status != 409:
-                raise
-            refreshed_state = await _inspect_it_contact_baseline(exo_token, tenant_id)
-            if refreshed_state.get("error"):
-                return False, refreshed_state["error"]
-            if refreshed_state["conflicts"]:
-                return False, "; ".join(refreshed_state["conflicts"]) + ". Resolve the conflict manually; no changes were made."
-            if (kind, profile) in refreshed_state["missing"]:
-                raise
-            continue
+            except M365Error as exc:
+                if exc.http_status != 409:
+                    raise
+                okay, message = await _confirm_create_conflict(kind, profile)
+                if not okay:
+                    return False, message
     return True, "Created the missing IT contact forwarding baseline objects."
 
 

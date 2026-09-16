@@ -135,6 +135,10 @@ async def test_it_contact_baseline_treats_create_conflict_as_success_after_reins
     assert success is True
     assert "Created" in message
     assert any(call.args[2] == "New-MailContact" for call in command.await_args_list)
+    assert ("Set-MailContact", {"Identity": "Hawkins IT", "HiddenFromAddressListsEnabled": True}) in [
+        (call.args[2], call.args[3] if len(call.args) > 3 else None)
+        for call in command.await_args_list
+    ]
 
 
 @pytest.mark.anyio
