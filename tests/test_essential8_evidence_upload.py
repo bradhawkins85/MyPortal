@@ -250,3 +250,29 @@ async def test_upload_requirement_evidence_cleans_up_only_its_partial_file_on_in
     assert upload.closed is True
     assert neighbour.read_bytes() == b"keep-me"
     assert not (upload_dir / "company_9_requirement_17_interrupted.pdf").exists()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_upload_requirement_evidence_rejects_symlinked_upload_directory(monkeypatch, tmp_path):
+    _, _, upload_dir = _configure_upload_dependencies(monkeypatch, tmp_path)
+    target_dir = tmp_path / "real-evidence"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        upload_dir.parent.mkdir(parents=True, exist_ok=True)
+        upload_dir.symlink_to(target_dir, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlinks not supported on this platform")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await essential8_routes.upload_requirement_evidence(
+            company_id=9,
+            requirement_id=17,
+            title="Quarterly evidence",
+            description=None,
+            evidence_file=_make_upload(b"proof-bytes", "report.pdf", "application/pdf"),
+            user={"id": 41, "company_id": 9},
+        )
+
+    assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    assert list(target_dir.iterdir()) == []

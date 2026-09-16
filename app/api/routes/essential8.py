@@ -96,7 +96,7 @@ def _sanitize_requirement_evidence_filename(filename: str | None) -> str:
     suffix = Path(basename).suffix
     stem = basename[: -len(suffix)] if suffix else basename
     safe_stem = sanitize_filename(stem).rstrip(".") or "upload"
-    safe_suffix = sanitize_filename(suffix.lstrip("."))
+    safe_suffix = sanitize_filename(suffix.lstrip(".")).replace(".", "")
     if suffix and not safe_suffix:
         safe_suffix = "bin"
     if safe_suffix:
@@ -113,19 +113,14 @@ def _allocate_requirement_evidence_storage_path(
 ) -> tuple[Path, Path]:
     storage_dir = _requirement_upload_dir()
     storage_dir.mkdir(parents=True, exist_ok=True)
-    storage_root = storage_dir.resolve(strict=True)
-    if not storage_root.is_dir():
+    if storage_dir.is_symlink():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to allocate evidence storage path",
         )
+    storage_root = storage_dir.resolve(strict=True)
     suffix = Path(safe_name).suffix.lower()
     storage_name = f"company_{company_id}_requirement_{requirement_id}_{uuid4().hex}{suffix}"
-    if not storage_name or storage_name in {".", ".."} or "/" in storage_name or "\\" in storage_name:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to allocate evidence storage path",
-        )
     storage_path = storage_root / storage_name
     return storage_root, storage_path
 
