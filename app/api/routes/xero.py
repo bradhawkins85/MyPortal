@@ -347,16 +347,7 @@ async def list_tenants() -> XeroTenantListResponse:
             connections_response.raise_for_status()
             connections = connections_response.json()
         
-        # Format tenant information
-        tenants = [
-            {
-                "tenant_id": conn.get("tenantId"),
-                "tenant_name": conn.get("tenantName"),
-                "tenant_type": conn.get("tenantType"),
-                "created_date_utc": conn.get("createdDateUtc"),
-            }
-            for conn in connections
-        ]
+        tenants = [XeroTenantConnection.model_validate(conn) for conn in connections]
         
         # Get current tenant_id from settings
         settings = module.get("settings") or {}
@@ -373,7 +364,7 @@ async def list_tenants() -> XeroTenantListResponse:
         )
         
         return XeroTenantListResponse(
-            tenants=[XeroTenantConnection(**tenant) for tenant in tenants],
+            tenants=tenants,
             current_tenant_id=current_tenant_id,
         )
     
