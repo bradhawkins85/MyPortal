@@ -308,7 +308,9 @@
         this.columnFilters = Object.entries(state.columns).reduce((filters, [key, value]) => {
           if (typeof value === 'string' && value) {
             filters[key] = value.trim().toLowerCase();
-          } else if (value && typeof value === 'object' && value.value !== '') {
+          } else if (value && typeof value === 'object' && (
+            value.value !== '' || (Array.isArray(value.values) && value.values.length)
+          )) {
             filters[key] = value;
           }
           return filters;
@@ -339,7 +341,10 @@
         }
         const key = header.getAttribute('data-column-key') || `column-${index}`;
         const sortType = (header.getAttribute('data-filter-type') || header.getAttribute('data-sort') || 'text').toLowerCase();
-        const type = sortType === 'number' || sortType === 'int' ? 'number' : sortType === 'date' ? 'date' : 'text';
+        const usesMultipleOptions = header.getAttribute('data-filter-options') === 'multiple';
+        const type = usesMultipleOptions
+          ? 'multi'
+          : sortType === 'number' || sortType === 'int' ? 'number' : sortType === 'date' ? 'date' : 'text';
         header.setAttribute('data-column-key', key);
         Array.from(this.table.tBodies).forEach((tbody) => {
           Array.from(tbody.rows).forEach((row) => {
@@ -378,17 +383,44 @@
         const valueInput = document.createElement('input');
         valueInput.className = 'form-input';
         valueInput.type = type === 'number' ? 'number' : type === 'date' ? 'date' : 'text';
-        valueInput.setAttribute('aria-label', `Filter value for ${label}`);
+        valueInput.setAttribute('aria-label', type === 'multi' ? `Search ${label}` : `Filter value for ${label}`);
+        if (type === 'multi') valueInput.placeholder = `Search ${label.toLowerCase()}`;
+        const optionsList = document.createElement('span');
+        optionsList.className = 'table-column-filter__options';
+        const optionValues = type === 'multi'
+          ? Array.from(new Set(Array.from(this.table.tBodies).flatMap((tbody) => (
+            Array.from(tbody.rows).map((row) => (row.cells[index]?.textContent || '').trim()).filter(Boolean)
+          )))).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+          : [];
+        optionValues.forEach((optionValue) => {
+          const optionLabel = document.createElement('label');
+          optionLabel.className = 'table-column-filter__option';
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.value = optionValue;
+          optionLabel.append(checkbox, document.createTextNode(optionValue));
+          optionsList.appendChild(optionLabel);
+        });
         const actions = document.createElement('span');
         actions.className = 'table-column-filter__actions';
         actions.innerHTML = '<button type="button" class="button button--primary button--compact" data-table-column-filter-apply>Apply</button><button type="button" class="button button--ghost button--compact" data-table-column-filter-clear>Clear</button>';
-        panel.append(title, operator, valueInput, actions);
+        panel.append(title);
+        if (type !== 'multi') panel.append(operator);
+        panel.append(valueInput);
+        if (type === 'multi') panel.append(optionsList);
+        panel.append(actions);
         wrapper.append(labelNode, toggle, panel);
         header.textContent = '';
         header.appendChild(wrapper);
 
         const current = this.columnFilters[key];
-        if (current && typeof current === 'object') {
+        if (current && typeof current === 'object' && type === 'multi') {
+          const selected = new Set(Array.isArray(current.values) ? current.values : []);
+          optionsList.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+            checkbox.checked = selected.has(checkbox.value);
+          });
+          wrapper.classList.toggle('table-column-filter--active', selected.size > 0);
+        } else if (current && typeof current === 'object') {
           operator.value = current.operator;
           valueInput.value = current.value;
           wrapper.classList.add('table-column-filter--active');
@@ -403,7 +435,27 @@
           toggle.setAttribute('aria-expanded', String(!panel.hidden));
         });
         panel.addEventListener('click', (event) => event.stopPropagation());
+        if (type === 'multi') {
+          valueInput.addEventListener('input', () => {
+            const term = valueInput.value.trim().toLowerCase();
+            optionsList.querySelectorAll('.table-column-filter__option').forEach((optionLabel) => {
+              optionLabel.hidden = Boolean(term) && !optionLabel.textContent.toLowerCase().includes(term);
+            });
+          });
+        }
         actions.querySelector('[data-table-column-filter-apply]').addEventListener('click', () => {
+          if (type === 'multi') {
+            const values = Array.from(optionsList.querySelectorAll('input:checked')).map((checkbox) => checkbox.value);
+            if (values.length) this.columnFilters[key] = { type, values };
+            else delete this.columnFilters[key];
+            wrapper.classList.toggle('table-column-filter--active', values.length > 0);
+            this.page = 0;
+            this.updateFilterState();
+            this.persistFilterState();
+            this.render();
+            close();
+            return;
+          }
           const value = valueInput.value.trim();
           if (value) this.columnFilters[key] = { type, operator: operator.value, value };
           else delete this.columnFilters[key];
@@ -416,6 +468,8 @@
         });
         actions.querySelector('[data-table-column-filter-clear]').addEventListener('click', () => {
           valueInput.value = '';
+          optionsList.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => { checkbox.checked = false; });
+          optionsList.querySelectorAll('.table-column-filter__option').forEach((optionLabel) => { optionLabel.hidden = false; });
           delete this.columnFilters[key];
           wrapper.classList.remove('table-column-filter--active');
           this.page = 0;
@@ -457,6 +511,12 @@
         const cellValue = this.getColumnCellValue(row, columnKey);
         if (typeof filter === 'string') return cellValue.includes(filter);
         const expected = String(filter.value || '').toLowerCase();
+        if (filter.type === 'multi') {
+          const selectedValues = Array.isArray(filter.values)
+            ? filter.values.map((value) => String(value).trim().toLowerCase())
+            : [];
+          return !selectedValues.length || selectedValues.includes(cellValue);
+        }
         if (filter.type === 'number') {
           const actualNumber = Number.parseFloat(cellValue);
           const expectedNumber = Number.parseFloat(expected);

@@ -513,8 +513,6 @@
       toggleFieldsBySubscriptionCategory(createSubscriptionCategorySelect, 'create');
     }
 
-    const stockFilter = document.getElementById('stock-filter');
-    const categoryFilter = document.getElementById('category-filter');
     const showArchivedCheckbox = document.getElementById('show-archived');
     const productsTable = document.getElementById('admin-products-table');
 
@@ -590,25 +588,6 @@
     });
     // ── End column visibility ─────────────────────────────────────────────────
 
-    function applyFilters() {
-      if (!productsTable) {
-        return;
-      }
-      const rows = productsTable.querySelectorAll('tbody tr');
-      const stockValue = stockFilter ? stockFilter.value : '';
-      const categoryValue = categoryFilter ? categoryFilter.value : '';
-      rows.forEach((row) => {
-        const stock = Number(row.getAttribute('data-stock') || '0');
-        const matchesStock =
-          !stockValue ||
-          (stockValue === 'in' && stock > 0) ||
-          (stockValue === 'out' && stock === 0);
-        const rowCategory = row.getAttribute('data-category') || '';
-        const matchesCategory = !categoryValue || rowCategory === categoryValue;
-        row.style.display = matchesStock && matchesCategory ? '' : 'none';
-      });
-    }
-
     const adminProductSearch = document.querySelector('[data-admin-product-search]');
     let adminProductSearchTimer = null;
 
@@ -645,12 +624,6 @@
       });
     }
 
-    if (stockFilter) {
-      stockFilter.addEventListener('change', applyFilters);
-    }
-    if (categoryFilter) {
-      categoryFilter.addEventListener('change', applyFilters);
-    }
     if (showArchivedCheckbox) {
       showArchivedCheckbox.addEventListener('change', () => {
         const url = new URL(window.location.href);
@@ -663,28 +636,17 @@
         window.location.href = url.toString();
       });
     }
-    applyFilters();
-
     // Restore filter state saved before a save-product redirect
     try {
       const savedState = sessionStorage.getItem(FILTER_STATE_KEY);
       if (savedState) {
         const state = JSON.parse(savedState);
         sessionStorage.removeItem(FILTER_STATE_KEY);
-        if (stockFilter && state.stock != null) {
-          stockFilter.value = state.stock;
-          stockFilter.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-        if (categoryFilter && state.category != null) {
-          categoryFilter.value = state.category;
-          categoryFilter.dispatchEvent(new Event('change', { bubbles: true }));
-        }
         const searchInput = document.querySelector('[data-admin-product-search]');
         if (searchInput && state.search != null) {
           searchInput.value = state.search;
           searchInput.dispatchEvent(new Event('input', { bubbles: true }));
         }
-        applyFilters();
       }
     } catch (e) {
       // ignore sessionStorage errors
@@ -1447,12 +1409,6 @@
         // Save client-side filter state for restoration after redirect
         try {
           const state = {};
-          if (stockFilter) {
-            state.stock = stockFilter.value;
-          }
-          if (categoryFilter) {
-            state.category = categoryFilter.value;
-          }
           const searchInput = document.querySelector('[data-admin-product-search]');
           if (searchInput) {
             state.search = searchInput.value;
