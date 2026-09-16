@@ -128,3 +128,41 @@ def test_quote_pdf_omits_unreadable_private_upload_instead_of_showing_alt_text(m
     assert 'class="product-image-card"' not in html
     assert 'alt="MeetingBar"' not in html
     assert "https://portal.example/uploads/shop/missing.png" not in html
+
+
+def test_quote_pdf_shows_current_stock_status_and_out_of_stock_warning():
+    html = _build_quote_pdf_html(
+        request=_request(),
+        company={"name": "Example Co"},
+        quote={"quote_number": "Q-4", "name": "Stock check"},
+        items=[
+            {
+                "product_name": "Available Dock",
+                "sku": "DOCK-AVAILABLE",
+                "quantity": 1,
+                "price": Decimal("199.00"),
+                "stock": 4,
+            },
+            {
+                "product_name": "Unavailable Dock",
+                "sku": "DOCK-UNAVAILABLE",
+                "quantity": 1,
+                "price": Decimal("249.00"),
+                "stock": 0,
+            },
+            {
+                "product_name": "Oversubscribed Dock",
+                "sku": "DOCK-LOW",
+                "quantity": 3,
+                "price": Decimal("249.00"),
+                "stock": 2,
+            },
+        ],
+        include_line_images=False,
+    )
+
+    assert "Stock status" in html
+    assert html.count("In stock") == 2
+    assert html.count("Out of stock") == 2
+    assert html.count("Insufficient stock") == 2
+    assert html.count("Confirm availability before placing an order.") == 4
