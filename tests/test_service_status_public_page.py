@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -28,6 +29,11 @@ def test_public_status_token_validation_uses_company_scope(monkeypatch):
     assert first != second
     assert service_status_service.is_valid_public_status_token(1, first) is True
     assert service_status_service.is_valid_public_status_token(2, first) is False
+
+
+def test_public_status_iso_fallback_uses_isoformat():
+    value = datetime(2026, 9, 16, 6, 0, tzinfo=timezone.utc)
+    assert service_status_routes._to_iso_fallback(value) == "2026-09-16T06:00:00+00:00"
 
 
 def test_public_service_status_dashboard_rejects_invalid_token(monkeypatch):

@@ -14,6 +14,8 @@ imported lazily from ``app.main``; see the pack ``__init__`` and the
 
 from __future__ import annotations
 
+from datetime import date, datetime, time
+
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 
@@ -36,6 +38,14 @@ def _main():
     from app import main as main_module
 
     return main_module
+
+
+def _to_iso_fallback(value):
+    if value is None:
+        return None
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+    return str(value)
 
 
 @router.get("/service-status", response_class=HTMLResponse)
@@ -81,7 +91,7 @@ async def public_service_status_dashboard(request: Request, company_id: int, tok
             detail="Status page not found.",
         )
     services = await service_status_service.list_services_for_company(company_id)
-    to_iso = getattr(main_module, "_to_iso", lambda value: str(value) if value else None)
+    to_iso = getattr(main_module, "_to_iso", _to_iso_fallback)
     for service in services:
         service["updated_at_iso"] = to_iso(service.get("updated_at"))
     summary = service_status_service.summarise_services(services)
