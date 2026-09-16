@@ -36,13 +36,24 @@ def test_public_status_iso_fallback_uses_isoformat():
     assert service_status_routes._to_iso_fallback(value) == "2026-09-16T06:00:00+00:00"
 
 
+def test_public_status_token_seed_uses_company_metadata():
+    company = {"id": 4, "name": "Acme", "updated_at": "2026-09-16T06:00:00+00:00"}
+    assert service_status_service.public_status_token_seed(company) == (
+        "2026-09-16T06:00:00+00:00|Acme|4"
+    )
+
+
 def test_public_service_status_dashboard_rejects_invalid_token(monkeypatch):
+    async def fake_get_company_by_id(_company_id):
+        return {"id": 1, "name": "Acme", "archived": 0}
+
     async def _run() -> None:
         with pytest.raises(HTTPException) as exc:
             await service_status_routes.public_service_status_dashboard(_request(), 1, "bad-token")
         assert exc.value.status_code == 404
 
-    monkeypatch.setattr(service_status_service, "is_valid_public_status_token", lambda *_args: False)
+    monkeypatch.setattr(service_status_service, "is_valid_public_status_token", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(service_status_routes.company_repo, "get_company_by_id", fake_get_company_by_id)
     asyncio.run(_run())
 
 
@@ -61,7 +72,7 @@ def test_public_service_status_dashboard_renders_company_view(monkeypatch):
         captured.update(template=template, user=user, extra=extra)
         return SimpleNamespace(status_code=200)
 
-    monkeypatch.setattr(service_status_service, "is_valid_public_status_token", lambda *_args: True)
+    monkeypatch.setattr(service_status_service, "is_valid_public_status_token", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(service_status_routes.company_repo, "get_company_by_id", fake_get_company_by_id)
     monkeypatch.setattr(service_status_service, "list_services_for_company", fake_list_services_for_company)
     monkeypatch.setattr(service_status_service, "summarise_services", lambda rows: {"total": len(rows), "by_status": {"operational": len(rows)}})

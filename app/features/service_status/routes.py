@@ -79,13 +79,17 @@ async def service_status_dashboard(request: Request):
 @router.get("/service-status/public/{company_id}/{token}", response_class=HTMLResponse)
 async def public_service_status_dashboard(request: Request, company_id: int, token: str):
     main_module = _main()
-    if not service_status_service.is_valid_public_status_token(company_id, token):
+    company = await company_repo.get_company_by_id(company_id)
+    if not company or int(company.get("archived") or 0) == 1:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Status page not found.",
         )
-    company = await company_repo.get_company_by_id(company_id)
-    if not company or int(company.get("archived") or 0) == 1:
+    if not service_status_service.is_valid_public_status_token(
+        company_id,
+        token,
+        seed=service_status_service.public_status_token_seed(company),
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Status page not found.",
