@@ -447,6 +447,10 @@ async def admin_reporting_ai_query(request: Request):
         )
         if response.get("status") in {"error", "failed", "skipped"}:
             reason = response.get("last_error") or response.get("reason")
+            if response.get("status") == "skipped" and reason is None:
+                raise _ClientSafeAIQueryError(
+                    "The configured LLM module did not generate a query."
+                )
             safe_reason = _approved_ai_query_module_reason(reason)
             if safe_reason:
                 raise _ClientSafeAIQueryError(safe_reason)

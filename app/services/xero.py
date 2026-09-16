@@ -1739,18 +1739,16 @@ def _evaluate_qty_expression(expression: str, context: dict[str, Any]) -> float:
     try:
         return float(expression)
     except ValueError:
-        expression = str(expression)
-
-    try:
-        evaluated = expression.format_map(_TemplateValues(context))
-        return float(evaluated)
-    except (ValueError, KeyError):
-        logger.warning(
-            "Failed to evaluate quantity expression, defaulting to 1",
-            expression=expression,
-            context_keys=list(context.keys()),
-        )
-        return 1.0
+        try:
+            evaluated = str(expression).format_map(_TemplateValues(context))
+            return float(evaluated)
+        except (ValueError, KeyError):
+            logger.warning(
+                "Failed to evaluate quantity expression, defaulting to 1",
+                expression=expression,
+                context_keys=list(context.keys()),
+            )
+            return 1.0
 
 
 async def _render_recurring_template_value(
