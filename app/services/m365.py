@@ -852,7 +852,10 @@ async def _exchange_token(
             status=response.status_code,
             body=response.text,
         )
-        raise M365Error("Unable to acquire Microsoft 365 access token")
+        raise M365Error(
+            "Unable to acquire Microsoft 365 access token",
+            http_status=response.status_code,
+        )
 
     payload = response.json()
     access_token = str(payload.get("access_token"))
@@ -2210,16 +2213,25 @@ async def renew_client_secret(company_id: int) -> None:
     new_expiry_str = new_expiry_date.isoformat() + "T00:00:00Z"
 
     # Create new client secret via Graph API
-    secret_data = await _graph_post(
-        access_token,
-        f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/addPassword",
-        {
-            "passwordCredential": {
-                "displayName": _M365_SECRET_DISPLAY_NAME,
-                "endDateTime": new_expiry_str,
-            }
-        },
-    )
+    try:
+        secret_data = await _graph_post(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/addPassword",
+            {
+                "passwordCredential": {
+                    "displayName": _M365_SECRET_DISPLAY_NAME,
+                    "endDateTime": new_expiry_str,
+                }
+            },
+        )
+    except M365Error as exc:
+        if exc.http_status == 403:
+            raise M365ReprovisionRequiredError(
+                "Automatic MyPortal PKCE/bootstrap admin credential renewal requires "
+                "Application.ReadWrite.OwnedBy and the app to be registered as an owner "
+                "of its own app registration. Re-provision the managed admin app and retry."
+            ) from exc
+        raise
     new_secret: str = secret_data["secretText"]
     new_key_id: str | None = secret_data.get("keyId")
     new_expires_at = datetime(

@@ -2834,6 +2834,41 @@ async def test_remediate_app_credential_expiry_fails_for_environment_credentials
     assert upserts[0]["remediation_status"] == "failed"
 
 
+@pytest.mark.anyio("asyncio")
+async def test_remediate_app_credential_expiry_surfaces_reprovision_guidance():
+    """PKCE expiry remediation returns actionable guidance when the admin app cannot self-rotate."""
+    upserts: list[dict[str, Any]] = []
+
+    with (
+        patch(
+            "app.services.m365_best_practices.get_company_admin_credentials",
+            new_callable=AsyncMock,
+            return_value={"client_id": "company-app", "client_secret": "old"},
+        ),
+        patch(
+            "app.services.m365_best_practices.renew_admin_client_secret",
+            new_callable=AsyncMock,
+            side_effect=m365_service.M365ReprovisionRequiredError(
+                "Automatic MyPortal PKCE/bootstrap admin credential renewal requires "
+                "Application.ReadWrite.OwnedBy and the app to be registered as an owner "
+                "of its own app registration. Re-provision the managed admin app and retry."
+            ),
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.update_remediation_status",
+            side_effect=lambda **kw: upserts.append(kw) or None,
+        ),
+    ):
+        result = await bp_service.remediate_check(
+            company_id=7, check_id="bp_monitor_app_credential_expiry"
+        )
+
+    assert result["success"] is False
+    assert "Re-provision" in result["message"]
+    assert "Application.ReadWrite.OwnedBy" in result["message"]
+    assert upserts[0]["remediation_status"] == "failed"
+
+
 # ---------------------------------------------------------------------------
 # Tenant capability detection / N/A marking
 # ---------------------------------------------------------------------------
