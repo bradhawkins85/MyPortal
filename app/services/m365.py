@@ -665,6 +665,20 @@ class M365ReprovisionRequiredError(M365Error):
     """Raised when automatic secret renewal requires app re-provisioning first."""
 
 
+def _self_renewal_reprovision_message(*, admin_flow: bool) -> str:
+    subject = (
+        "MyPortal PKCE/bootstrap admin credential"
+        if admin_flow
+        else "Microsoft 365 client credential"
+    )
+    target = "managed admin app" if admin_flow else "managed app"
+    return (
+        f"Automatic {subject} renewal requires Application.ReadWrite.OwnedBy and "
+        "the app to be registered as an owner of its own app registration. "
+        f"Re-provision the {target} and retry."
+    )
+
+
 def generate_pkce_pair() -> tuple[str, str]:
     """Generate a PKCE ``code_verifier`` / ``code_challenge`` pair.
 
@@ -2227,9 +2241,7 @@ async def renew_client_secret(company_id: int) -> None:
     except M365Error as exc:
         if exc.http_status == 403:
             raise M365ReprovisionRequiredError(
-                "Automatic Microsoft 365 client credential renewal requires "
-                "Application.ReadWrite.OwnedBy and the app to be registered as an owner "
-                "of its own app registration. Re-provision the managed app and retry."
+                _self_renewal_reprovision_message(admin_flow=False)
             ) from exc
         raise
     new_secret: str = secret_data["secretText"]
@@ -2339,9 +2351,7 @@ async def renew_admin_client_secret(company_id: int | None = None) -> dict[str, 
     except M365Error as exc:
         if exc.http_status == 403:
             raise M365ReprovisionRequiredError(
-                "Automatic MyPortal PKCE/bootstrap admin credential renewal requires "
-                "Application.ReadWrite.OwnedBy and the app to be registered as an owner "
-                "of its own app registration. Re-provision the managed admin app and retry."
+                _self_renewal_reprovision_message(admin_flow=True)
             ) from exc
         raise
     new_secret: str = secret_data["secretText"]
