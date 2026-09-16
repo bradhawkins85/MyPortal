@@ -39,6 +39,7 @@ _WEBHOOK_MATCH_HINTS: dict[str, tuple[str, ...]] = {
     "xero": ("xero",),
 }
 _DEFAULT_CREDENTIAL_WARNING_DAYS = 30
+_SAFE_ACTION_URL_PREFIXES = ("/admin/", "/chat/")
 
 
 def _to_aware_utc(value: Any) -> datetime | None:
@@ -154,14 +155,22 @@ def _telemetry_summary(total: int, failures: int) -> dict[str, Any]:
             "error_budget_remaining": 0,
         }
     budget_total = max(1, ceil(total * 0.01))
+    achieved_percent = max(0.0, round(((total - failures) / total) * 100, 1))
     return {
         "target_percent": 99,
-        "achieved_percent": round(((total - failures) / total) * 100, 1),
+        "achieved_percent": achieved_percent,
         "error_budget_total": budget_total,
         "error_budget_used": min(failures, budget_total),
         "error_budget_overrun": max(0, failures - budget_total),
         "error_budget_remaining": max(0, budget_total - failures),
     }
+
+
+def _safe_action_url(value: Any) -> str:
+    candidate = _string_value(value)
+    if any(candidate.startswith(prefix) for prefix in _SAFE_ACTION_URL_PREFIXES):
+        return candidate
+    return "/admin/modules"
 
 
 def _company_label(company_id: Any) -> str:
@@ -373,7 +382,7 @@ async def build_operations_center(
                     "module_slug": slug,
                     "enabled": enabled,
                     "issues": issues,
-                    "action_url": _string_value(settings.get("manage_url")) or "/admin/modules",
+                    "action_url": _safe_action_url(settings.get("manage_url")),
                 }
             )
 
@@ -388,6 +397,7 @@ async def build_operations_center(
                 "failed_run_count": run_failures,
                 "webhook_event_count": len(module_events),
                 "failed_webhook_count": webhook_failures,
+                "telemetry_label": "Combined task + webhook telemetry",
                 "slo_target_percent": telemetry["target_percent"],
                 "slo_achieved_percent": telemetry["achieved_percent"],
                 "error_budget_total": telemetry["error_budget_total"],
