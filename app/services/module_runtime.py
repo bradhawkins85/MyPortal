@@ -8,8 +8,8 @@ from typing import Any
 from app.repositories import integration_modules as module_repo
 
 
-# Keep these defaults aligned with the corresponding operator-facing module
-# settings in ``app.services.modules``. This lightweight helper intentionally
+# Keep these defaults aligned with the matching ``DEFAULT_MODULES[*]["settings"]``
+# entries in ``app.services.modules``. This lightweight helper intentionally
 # covers only the modules that need to read runtime configuration without
 # importing the higher-level module orchestration service.
 _DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
