@@ -354,7 +354,7 @@ function closeAddRoleModal() {
 function showEditRoleModal(roleId, title, responsibilities) {
   const modal = document.getElementById('editRoleModal');
   const form = document.getElementById('editRoleForm');
-  form.action = '/bcp/roles/' + roleId + '/update';
+  form.action = '/bcp/roles/' + encodeURIComponent(String(roleId)) + '/update';
   document.getElementById('edit_role_title').value = title;
   document.getElementById('edit_role_responsibilities').value = responsibilities || '';
   modal.style.display = 'flex';
@@ -367,7 +367,7 @@ function closeEditRoleModal() {
 function showAssignUserModal(roleId, roleTitle) {
   const modal = document.getElementById('assignUserModal');
   const form = document.getElementById('assignUserForm');
-  form.action = '/bcp/roles/' + roleId + '/assign';
+  form.action = '/bcp/roles/' + encodeURIComponent(String(roleId)) + '/assign';
   document.getElementById('assignUserModalTitle').textContent = 'Assign User to ' + roleTitle;
   document.getElementById('assign_user_id').value = '';
   document.querySelector('#assignUserForm input[name="is_alternate"]').checked = false;
@@ -383,7 +383,7 @@ function closeAssignUserModal() {
 function showEditAssignmentModal(assignmentId, userId, collaboratorRole, isAlternate, contactInfo) {
   const modal = document.getElementById('editAssignmentModal');
   const form = document.getElementById('editAssignmentForm');
-  form.action = '/bcp/roles/assignments/' + assignmentId + '/update';
+  form.action = '/bcp/roles/assignments/' + encodeURIComponent(String(assignmentId)) + '/update';
   document.getElementById('edit_assign_user_id').value = userId;
   document.getElementById('edit_assign_collaborator_role').value = collaboratorRole || 'Executor';
   document.getElementById('edit_is_alternate').checked = isAlternate;

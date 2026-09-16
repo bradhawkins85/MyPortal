@@ -214,7 +214,7 @@
 {% endif %}
 <script>
 function openEditModal(id, dataScope, frequency, medium, owner, steps, isJobLinked) {
-  document.getElementById('editBackupForm').action = '/bcp/backups/' + id + '/update';
+  document.getElementById('editBackupForm').action = '/bcp/backups/' + encodeURIComponent(String(id)) + '/update';
   document.getElementById('edit_data_scope').value = dataScope;
   document.getElementById('edit_data_scope').readOnly = isJobLinked;
   document.getElementById('edit_frequency').value = frequency;

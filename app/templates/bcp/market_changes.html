@@ -181,7 +181,7 @@ function editChange(id, change, impact, options) {
   document.getElementById('edit_change').value = change;
   document.getElementById('edit_impact').value = impact;
   document.getElementById('edit_options').value = options;
-  document.getElementById('editChangeForm').action = `/bcp/market-changes/${id}/update`;
+  document.getElementById('editChangeForm').action = '/bcp/market-changes/' + encodeURIComponent(String(id)) + '/update';
   document.getElementById('editChangeModal').showModal();
 }
 </script>

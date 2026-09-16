@@ -32,6 +32,12 @@ document.addEventListener('DOMContentLoaded', function () {
     return headers;
   }
 
+  function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(String(str == null ? '' : str)));
+    return div.innerHTML;
+  }
+
   function handleActionButton(button, pendingText, successText, request, onSuccess, errorText) {
     var originalText = button.textContent;
     button.disabled = true;
@@ -132,12 +138,6 @@ document.addEventListener('DOMContentLoaded', function () {
     var requestStatus = document.getElementById('perm-request-status');
     var saveBtn = document.getElementById('perm-request-save');
     var activeTrigger = null;
-
-    function escapeHtml(str) {
-      var div = document.createElement('div');
-      div.appendChild(document.createTextNode(String(str == null ? '' : str)));
-      return div.innerHTML;
-    }
 
     function handleKeydown(event) {
       if (event.key === 'Escape') {
@@ -415,12 +415,6 @@ document.addEventListener('DOMContentLoaded', function () {
   var errorRulesEl = document.getElementById('rules-error');
   var contentRulesEl = document.getElementById('rules-content');
   var activeRulesTrigger = null;
-
-  function escapeHtml(str) {
-    var div = document.createElement('div');
-    div.appendChild(document.createTextNode(String(str == null ? '' : str)));
-    return div.innerHTML;
-  }
 
   function handleRulesKeydown(event) {
     if (event.key === 'Escape') {

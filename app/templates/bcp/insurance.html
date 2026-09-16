@@ -101,7 +101,7 @@
                     type="button" 
                     class="btn btn-sm btn-secondary" 
                     data-bcp-action="edit-policy"
-                    data-bcp-payload='{{ {"id": policy.id, "type": policy.type, "coverage": policy.coverage or "", "exclusions": policy.exclusions or "", "insurer": policy.insurer or "", "contact": policy.contact or "", "last_review_date": policy.last_review_date.strftime("%Y-%m-%d") if policy.last_review_date else "", "payment_terms": policy.payment_terms or ""} | tojson | e }}'"
+                    data-bcp-payload='{{ {"id": policy.id, "type": policy.type, "coverage": policy.coverage or "", "exclusions": policy.exclusions or "", "insurer": policy.insurer or "", "contact": policy.contact or "", "last_review_date": policy.last_review_date.strftime("%Y-%m-%d") if policy.last_review_date else "", "payment_terms": policy.payment_terms or ""} | tojson | e }}'
                   >
                     Edit
                   </button>
@@ -235,7 +235,7 @@
 {% endif %}
 <script>
 function openEditModal(id, type, coverage, exclusions, insurer, contact, lastReviewDate, paymentTerms) {
-  document.getElementById('editPolicyForm').action = '/bcp/insurance/' + id + '/update';
+  document.getElementById('editPolicyForm').action = '/bcp/insurance/' + encodeURIComponent(String(id)) + '/update';
   document.getElementById('edit_policy_type').value = type;
   document.getElementById('edit_coverage').value = coverage;
   document.getElementById('edit_exclusions').value = exclusions;

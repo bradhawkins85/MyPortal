@@ -198,7 +198,7 @@ function editClaim(id, insurer, claimDate, details, followUpActions) {
   document.getElementById('edit_claim_date').value = claimDate;
   document.getElementById('edit_details').value = details;
   document.getElementById('edit_follow_up_actions').value = followUpActions;
-  document.getElementById('editClaimForm').action = `/bcp/insurance-claims/${id}/update`;
+  document.getElementById('editClaimForm').action = '/bcp/insurance-claims/' + encodeURIComponent(String(id)) + '/update';
   document.getElementById('editClaimModal').showModal();
 }
 </script>

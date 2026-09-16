@@ -464,7 +464,7 @@ function editTraining(id, date, type, status, participantsCount, scorePercent, c
   document.getElementById('edit_training_comments').value = comments;
   document.getElementById('edit_training_lessons_learned').value = lessonsLearned;
   document.getElementById('edit_training_follow_up_actions').value = followUpActions;
-  document.getElementById('editTrainingForm').action = '/bcp/training/' + id + '/update';
+  document.getElementById('editTrainingForm').action = '/bcp/training/' + encodeURIComponent(String(id)) + '/update';
   document.getElementById('editTrainingModal').showModal();
 }
 
@@ -477,7 +477,7 @@ function editReview(id, date, versionLabel, approvalStatus, reviewerId, approver
   document.getElementById('edit_reason').value = reason;
   document.getElementById('edit_changes_made').value = changes;
   document.getElementById('edit_approval_snapshot').value = approvalSnapshot;
-  document.getElementById('editReviewForm').action = '/bcp/review/' + id + '/update';
+  document.getElementById('editReviewForm').action = '/bcp/review/' + encodeURIComponent(String(id)) + '/update';
   document.getElementById('editReviewModal').showModal();
 }
 </script>

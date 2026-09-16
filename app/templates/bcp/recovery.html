@@ -251,7 +251,7 @@ function showAddModal() {
 
 function showEditModal(id, action, resources, ownerId, rtoHours, dueDate, activityId) {
   document.getElementById('modalTitle').textContent = 'Edit Recovery Action';
-  document.getElementById('actionForm').action = '/bcp/recovery/' + id + '/update';
+  document.getElementById('actionForm').action = '/bcp/recovery/' + encodeURIComponent(String(id)) + '/update';
   document.getElementById('action').value = action;
   document.getElementById('resources').value = resources;
   document.getElementById('owner_id').value = ownerId || '';
