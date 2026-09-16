@@ -113,7 +113,14 @@ async def test_module_runtime_merges_service_defaults(monkeypatch):
         "settings": {},
     }
 
-    repo_mock = AsyncMock(side_effect=[module_row, smtp2go_row])
+    async def fake_get_module(slug: str):
+        if slug == "call-recordings":
+            return module_row
+        if slug == "smtp2go":
+            return smtp2go_row
+        return None
+
+    repo_mock = AsyncMock(side_effect=fake_get_module)
     monkeypatch.setattr(module_runtime.module_repo, "get_module", repo_mock)
 
     call_recordings_module = await module_runtime.get_module(
@@ -127,3 +134,7 @@ async def test_module_runtime_merges_service_defaults(monkeypatch):
     assert smtp2go_settings is not None
     assert smtp2go_settings["manage_url"] == "/admin/modules/smtp2go"
     assert smtp2go_settings["not_engaged_delay_seconds"] == 86400
+    assert [call.args[0] for call in repo_mock.await_args_list] == [
+        "call-recordings",
+        "smtp2go",
+    ]
