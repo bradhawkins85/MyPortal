@@ -96,8 +96,7 @@ def _sanitize_requirement_evidence_filename(filename: str | None) -> str:
     suffix = Path(basename).suffix
     stem = basename[: -len(suffix)] if suffix else basename
     safe_stem = sanitize_filename(stem).rstrip(".") or "upload"
-    raw_suffix = suffix[1:] if suffix.startswith(".") else suffix
-    safe_suffix = sanitize_filename(raw_suffix).lstrip(".")
+    safe_suffix = sanitize_filename(suffix[1:] if suffix.startswith(".") else suffix)
     if safe_suffix:
         safe_suffix = f".{safe_suffix}"
     max_stem_length = max(1, 255 - len(safe_suffix))
@@ -121,6 +120,28 @@ def _allocate_requirement_evidence_storage_path(
     if storage_path.parent != storage_root:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid evidence file name")
     return storage_root, storage_name, storage_path
+
+
+def _open_requirement_evidence_storage_file(
+    *,
+    company_id: int,
+    requirement_id: int,
+    safe_name: str,
+) -> tuple[Path, str, Path, object]:
+    for _ in range(5):
+        storage_root, storage_name, storage_path = _allocate_requirement_evidence_storage_path(
+            company_id=company_id,
+            requirement_id=requirement_id,
+            safe_name=safe_name,
+        )
+        try:
+            return storage_root, storage_name, storage_path, storage_path.open("xb")
+        except FileExistsError:
+            continue
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Unable to allocate evidence storage path",
+    )
 
 
 @router.get("/controls", response_model=list[Essential8ControlResponse])
@@ -676,43 +697,28 @@ async def upload_requirement_evidence(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requirement not found")
     safe_name = _sanitize_requirement_evidence_filename(evidence_file.filename)
     total_size = 0
-    storage_root: Path | None = None
-    storage_name: str | None = None
-    storage_path: Path | None = None
+    storage_root, storage_name, storage_path, storage_handle = _open_requirement_evidence_storage_file(
+        company_id=company_id,
+        requirement_id=requirement_id,
+        safe_name=safe_name,
+    )
     created_file = False
     try:
-        for _ in range(5):
-            storage_root, storage_name, storage_path = _allocate_requirement_evidence_storage_path(
-                company_id=company_id,
-                requirement_id=requirement_id,
-                safe_name=safe_name,
-            )
-            total_size = 0
-            try:
-                with storage_path.open("xb") as handle:
-                    created_file = True
-                    while True:
-                        chunk = await evidence_file.read(1024 * 1024)
-                        if not chunk:
-                            break
-                        total_size += len(chunk)
-                        if total_size > _MAX_REQUIREMENT_EVIDENCE_SIZE_BYTES:
-                            raise HTTPException(
-                                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                                detail="Uploaded evidence file exceeds the 15 MB limit",
-                            )
-                        handle.write(chunk)
-                break
-            except FileExistsError:
-                created_file = False
-                continue
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Unable to allocate evidence storage path",
-            )
+        with storage_handle as handle:
+            created_file = True
+            while True:
+                chunk = await evidence_file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > _MAX_REQUIREMENT_EVIDENCE_SIZE_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="Uploaded evidence file exceeds the 15 MB limit",
+                    )
+                handle.write(chunk)
     except Exception:
-        if created_file and storage_root is not None and storage_path is not None and storage_path.parent == storage_root:
+        if created_file and storage_path.parent == storage_root:
             storage_path.unlink(missing_ok=True)
         raise
     finally:
