@@ -83,7 +83,11 @@ async def get_request(
     return item
 
 
-@router.post("/requests/{request_id}/search", response_model=SpamPurgeRequestResponse)
+@router.post(
+    "/requests/{request_id}/search",
+    response_model=SpamPurgeRequestResponse,
+    summary="Start a draft search or retry a failed search",
+)
 async def start_search(
     request_id: int, request: Request, _: dict = Depends(require_helpdesk_technician),
 ):

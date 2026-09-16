@@ -157,3 +157,21 @@ async def purge_search_result(request_id: int, request: Request):
         before={"matched_items": item.get("matched_items")}, after={"purge_type": "HardDelete"},
     )
     return flash_redirect("/m365/spam-purge", "Hard-delete purge queued.", "success")
+
+
+@router.post("/m365/spam-purge/{request_id}/retry")
+async def retry_failed_search(request_id: int, request: Request):
+    user, company_id, redirect = await _context(request)
+    if redirect:
+        return redirect
+    try:
+        item = await purge_service.start_search(request_id, company_id)
+    except (LookupError, ValueError) as exc:
+        return flash_redirect("/m365/spam-purge", str(exc), "error")
+    await audit_service.record(
+        action="m365.spam_search.retry", request=request, user_id=int(user["id"]),
+        entity_type="m365_spam_purge_request", entity_id=request_id,
+        before={"search_status": "failed"},
+        after={"search_status": item.get("search_status")},
+    )
+    return flash_redirect("/m365/spam-purge", "Compliance search retry queued.", "success")
