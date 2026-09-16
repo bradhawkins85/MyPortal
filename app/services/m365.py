@@ -1199,8 +1199,9 @@ async def _scc_invoke_command(
         "Content-Type": "application/json; charset=utf-8",
     }
     appid = _jwt_appid(scc_token)
-    if appid:
-        headers["X-AnchorMailbox"] = f"app:{appid}@{str(tenant_id or '').strip()}"
+    _anchor_tenant = str(tenant_id or "").strip()
+    if appid and _anchor_tenant:
+        headers["X-AnchorMailbox"] = f"app:{appid}@{_anchor_tenant}"
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(url, headers=headers, json=payload)

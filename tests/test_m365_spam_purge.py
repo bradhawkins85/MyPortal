@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.services import m365_spam_purge as service
-from app.services.m365 import M365Error
+from app.services.m365 import M365Error, _jwt_appid
 
 
 @pytest.fixture
@@ -212,9 +212,6 @@ def test_spam_purge_permission_is_available_to_roles():
     )
     assert permission["admin_only"] is True
     assert permission["levels"] == ["none", "read", "write"]
-
-from app.services.m365 import _jwt_appid
-
 
 def test_jwt_appid_extracts_appid_from_valid_jwt():
     import base64, json
