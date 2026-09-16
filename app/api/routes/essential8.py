@@ -96,7 +96,8 @@ def _sanitize_requirement_evidence_filename(filename: str | None) -> str:
     suffix = Path(basename).suffix
     stem = basename[: -len(suffix)] if suffix else basename
     safe_stem = sanitize_filename(stem).rstrip(".") or "upload"
-    safe_suffix = sanitize_filename(suffix).lstrip(".")
+    raw_suffix = suffix[1:] if suffix.startswith(".") else suffix
+    safe_suffix = sanitize_filename(raw_suffix).lstrip(".")
     if safe_suffix:
         safe_suffix = f".{safe_suffix}"
     max_stem_length = max(1, 255 - len(safe_suffix))
@@ -686,6 +687,7 @@ async def upload_requirement_evidence(
                 requirement_id=requirement_id,
                 safe_name=safe_name,
             )
+            total_size = 0
             try:
                 with storage_path.open("xb") as handle:
                     created_file = True
