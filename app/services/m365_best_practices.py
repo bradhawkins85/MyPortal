@@ -2830,6 +2830,11 @@ async def _check_ews_required_apps_allowed(
             )
             + ("." if len(observed_apps) <= 5 else f" (and {len(observed_apps) - 5} more).")
         )
+    elif usage_error:
+        details_parts.append(
+            "Observed EWS usage could not be confirmed because Microsoft 365 usage "
+            "report data was unavailable."
+        )
     else:
         details_parts.append("Observed EWS usage: none confirmed in the available usage report data.")
     if approved_note_apps:

@@ -7523,8 +7523,81 @@ async def test_check_ews_required_apps_allowed_is_unknown_when_usage_data_unavai
         result = await bp_service._check_ews_required_apps_allowed("graph-token", 42)
 
     assert result["status"] == "unknown"
+    assert (
+        "Observed EWS usage could not be confirmed because Microsoft 365 usage report "
+        "data was unavailable."
+    ) in result["details"]
     assert "EWS usage data is unavailable" in result["details"]
+    assert "none confirmed in the available usage report data" not in result["details"]
     assert "Add reviewed AppIDs to the check notes" in result["details"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_check_ews_required_apps_allowed_reports_graph_usage_read_failure_without_false_none_confirmed():
+    permission_app = "22222222-2222-2222-2222-222222222222"
+
+    async def fake_graph_get(_token, url):
+        if "appId eq '00000002-0000-0ff1-ce00-000000000000'" in url:
+            return {"value": [{"id": "exo-sp"}]}
+        if url.endswith("servicePrincipals/sp-permission?$select=appId,displayName"):
+            return {"appId": permission_app, "displayName": "Permission App"}
+        raise AssertionError(f"Unexpected Graph URL: {url}")
+
+    with (
+        patch(
+            "app.services.m365_best_practices._acquire_exo_access_token",
+            new_callable=AsyncMock,
+            return_value=("exo-token", "tenant-id"),
+        ),
+        patch(
+            "app.services.m365_best_practices._exo_invoke_command",
+            new_callable=AsyncMock,
+            return_value={"value": [{"EwsEnabled": False, "EwsAllowedAppIDs": []}]},
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_get",
+            side_effect=fake_graph_get,
+        ),
+        patch(
+            "app.services.m365_best_practices._graph_get_all",
+            new_callable=AsyncMock,
+            return_value=[
+                {
+                    "appRoleId": "e4a3c0d2-0003-4b45-8fd7-d8e34591ad28",
+                    "principalId": "sp-permission",
+                    "principalType": "ServicePrincipal",
+                    "principalDisplayName": "Permission App",
+                }
+            ],
+        ),
+        patch(
+            "app.services.m365_best_practices.acquire_delegated_token",
+            new_callable=AsyncMock,
+            return_value="delegated-token",
+        ),
+        patch(
+            "app.services.m365_best_practices._download_graph_csv_report",
+            new_callable=AsyncMock,
+            side_effect=M365Error("Microsoft Graph report request failed (403)", http_status=403),
+        ),
+        patch(
+            "app.services.m365_best_practices.bp_repo.list_results",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+    ):
+        result = await bp_service._check_ews_required_apps_allowed("graph-token", 42)
+
+    assert result["status"] == "unknown"
+    assert (
+        "Observed EWS usage could not be confirmed because Microsoft 365 usage report "
+        "data was unavailable."
+    ) in result["details"]
+    assert (
+        "EWS usage data could not be read from Microsoft 365 usage reports: "
+        "Microsoft Graph report request failed (403)"
+    ) in result["details"]
+    assert "none confirmed in the available usage report data" not in result["details"]
 
 
 @pytest.mark.anyio("asyncio")
