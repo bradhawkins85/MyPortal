@@ -6174,7 +6174,10 @@ async def _maybe_create_ticket_on_fail(
     )
     try:
         ticket = await tickets_service.create_ticket(
-            subject=build_failure_ticket_subject(check_name, regression_detected=True),
+            subject=build_failure_ticket_subject(
+                check_name,
+                regression_detected=_is_regression(previous_status, status),
+            ),
             description=description,
             requester_id=None,
             company_id=company_id,
