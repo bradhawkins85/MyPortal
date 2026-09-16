@@ -94,7 +94,8 @@
                   <button 
                     type="button" 
                     class="btn btn-sm btn-secondary" 
-                    onclick='openEditModal({{ backup.id }}, {{ backup.data_scope | tojson }}, {{ (backup.frequency or "") | tojson }}, {{ (backup.medium or "") | tojson }}, {{ (backup.owner or "") | tojson }}, {{ (backup.steps or "") | tojson }}, {{ "true" if backup.backup_job_id else "false" }})'
+                    data-bcp-action="edit-backup"
+                    data-bcp-payload='{{ {"id": backup.id, "data_scope": backup.data_scope, "frequency": backup.frequency or "", "medium": backup.medium or "", "owner": backup.owner or "", "steps": backup.steps or "", "is_job_linked": backup.backup_job_id is not none} | tojson | e }}'
                   >
                     Edit
                   </button>

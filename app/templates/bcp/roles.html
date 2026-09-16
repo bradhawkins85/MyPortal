@@ -42,13 +42,13 @@
         <h2 class="card-title">{{ role.title }}</h2>
         {% if can_edit %}
         <div class="card-actions">
-          <button class="btn btn-sm btn-secondary" onclick="showEditRoleModal({{ role.id }}, '{{ role.title|replace("'", "\\'") }}', {{ role.responsibilities|tojson if role.responsibilities else 'null' }})">
+          <button type="button" class="btn btn-sm btn-secondary" data-bcp-action="edit-role" data-bcp-payload='{{ {"id": role.id, "title": role.title, "responsibilities": role.responsibilities} | tojson | e }}'>
             <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
               <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
             </svg>
             Edit Role
           </button>
-          <button class="btn btn-sm btn-primary" onclick="showAssignUserModal({{ role.id }}, '{{ role.title|replace("'", "\\'") }}')">
+          <button type="button" class="btn btn-sm btn-primary" data-bcp-action="assign-role-user" data-bcp-payload='{{ {"id": role.id, "title": role.title} | tojson | e }}'>
             <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
               <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
             </svg>
@@ -112,7 +112,7 @@
                 <td>{{ assignment.contact_info or '-' }}</td>
                 {% if can_edit %}
                 <td>
-                  <button class="btn-icon" onclick="showEditAssignmentModal({{ assignment.id }}, {{ assignment.user_id }}, {{ (assignment.collaborator_role or 'Executor')|tojson }}, {{ assignment.is_alternate|tojson }}, {{ assignment.contact_info|tojson if assignment.contact_info else 'null' }})" title="Edit">
+                  <button type="button" class="btn-icon" data-bcp-action="edit-assignment" data-bcp-payload='{{ {"id": assignment.id, "user_id": assignment.user_id, "collaborator_role": assignment.collaborator_role or "Executor", "is_alternate": assignment.is_alternate, "contact_info": assignment.contact_info} | tojson | e }}' title="Edit">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                       <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
                     </svg>

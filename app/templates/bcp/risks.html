@@ -254,7 +254,7 @@
               <td>
                 {% if can_edit %}
                 <div class="action-buttons">
-                  <button type="button" class="btn btn-sm btn-secondary" onclick="editRisk({{ risk.id }}, '{{ risk.description|replace("'", "\\'") }}', {{ risk.likelihood }}, {{ risk.impact }}, '{{ (risk.preventative_actions or '')|replace("'", "\\'") }}', '{{ (risk.contingency_plans or '')|replace("'", "\\'") }}')">
+                  <button type="button" class="btn btn-sm btn-secondary" data-bcp-action="edit-risk" data-bcp-payload='{{ {"id": risk.id, "description": risk.description, "likelihood": risk.likelihood, "impact": risk.impact, "preventative_actions": risk.preventative_actions or "", "contingency_plans": risk.contingency_plans or ""} | tojson | e }}'>
                     Edit
                   </button>
                   <form method="post" action="/bcp/risks/{{ risk.id }}/delete" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this risk?');">

@@ -125,7 +125,7 @@
                     <div style="font-weight: 500;">{{ action.action }}</div>
                     {% if can_edit %}
                       <div class="action-buttons" style="margin-top: 0.5rem;">
-                        <button onclick="showEditModal({{ action.id }}, '{{ action.action|e }}', '{{ action.resources|e if action.resources else '' }}', {{ action.owner_id if action.owner_id else 'null' }}, {{ action.rto_hours if action.rto_hours else 'null' }}, '{{ action.due_date.strftime('%Y-%m-%d') if action.due_date else '' }}', {{ action.critical_activity_id if action.critical_activity_id else 'null' }})" class="btn btn-sm btn-secondary">Edit</button>
+                        <button type="button" data-bcp-action="edit-recovery-action" data-bcp-payload='{{ {"id": action.id, "action": action.action, "resources": action.resources or "", "owner_id": action.owner_id, "rto_hours": action.rto_hours, "due_date": action.due_date.strftime("%Y-%m-%d") if action.due_date else "", "critical_activity_id": action.critical_activity_id} | tojson | e }}' class="btn btn-sm btn-secondary">Edit</button>
                         {% if not action.completed_at %}
                           <form method="post" action="/bcp/recovery/{{ action.id }}/complete" style="display:inline;">
                             <button type="submit" class="btn btn-sm btn-success">Mark Complete</button>
