@@ -14,7 +14,7 @@ def anyio_backend():
     return "asyncio"
 
 
-@pytest.mark.anyio("asyncio")
+@pytest.mark.anyio
 async def test_preview_invoice_sync_includes_adjustment_and_contact_lookup():
     invoice = {
         "id": 7,
@@ -68,7 +68,7 @@ async def test_preview_invoice_sync_includes_adjustment_and_contact_lookup():
     assert result["payload"]["LineItems"][-1]["UnitAmount"] == -10.0
 
 
-@pytest.mark.anyio("asyncio")
+@pytest.mark.anyio
 async def test_sync_company_skips_invoice_until_approved():
     module_settings = {
         "enabled": True,
@@ -109,7 +109,7 @@ async def test_sync_company_skips_invoice_until_approved():
     assert mock_invoice_repo.patch_invoice.await_args.kwargs["xero_sync_error"] == "Invoice requires approval before Xero sync"
 
 
-@pytest.mark.anyio("asyncio")
+@pytest.mark.anyio
 async def test_resolve_company_contact_payload_persists_lookup(monkeypatch):
     update_company = AsyncMock()
     monkeypatch.setattr(xero_service.company_repo, "update_company", update_company)

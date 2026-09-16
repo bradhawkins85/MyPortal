@@ -170,7 +170,7 @@ async def invoices_page(request: Request):
         "unsynced_invoice_count": len(unsynced_invoices),
         "approval_queue_count": len(approval_queue),
         "exception_queue_count": len(exception_queue),
-        "exception_queue": [],
+        "exception_queue": exception_queue[:10],
     }
     return await main_module._render_template("invoices/index.html", request, user, extra=extra)
 
