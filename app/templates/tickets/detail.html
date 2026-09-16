@@ -112,18 +112,14 @@
               </header>
               <div class="card__body">
                 <p class="text-muted">Book a call with {{ ticket.assigned_label }} to discuss this ticket.</p>
-                <button
-                  type="button"
+                <a
+                  href="{{ ticket_booking_link_url or assigned_user.booking_link_url }}"
+                  target="_blank"
+                  rel="noreferrer noopener"
                   class="button"
-                  data-cal-link="{{ assigned_user.booking_link_url }}"
-                  data-ticket-id="{{ ticket.id }}"
-                  data-ticket-subject="{{ ticket.subject | e }}"
-                  data-user-name="{{ ([user.first_name, user.last_name] | select | join(' ')) | e }}"
-                  data-user-email="{{ (user.email or '') | e }}"
-                  data-user-phone="{{ (user.mobile_phone or '') | e }}"
                 >
                   Book a call
-                </button>
+                </a>
               </div>
             </article>
           {% endif %}
