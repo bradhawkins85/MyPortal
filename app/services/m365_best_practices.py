@@ -549,6 +549,7 @@ def _smtp_value(value: Any) -> str:
 
 
 def _exo_recipient_addresses(row: Mapping[str, Any]) -> set[str]:
+    """Return the normalized SMTP-style addresses present on an EXO recipient row."""
     addresses = {
         _smtp_value(row.get("PrimarySmtpAddress")),
         _smtp_value(row.get("WindowsEmailAddress")),
@@ -569,6 +570,7 @@ def _find_conflicting_recipient(
     expected_addresses: set[str],
     allowed_types: set[str],
 ) -> dict[str, Any] | None:
+    """Find a non-baseline recipient that already owns the target name or address."""
     expected_name_folded = expected_name.casefold()
     expected_addresses = {address.casefold() for address in expected_addresses if address}
     for row in recipients:
