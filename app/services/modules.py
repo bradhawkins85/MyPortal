@@ -875,6 +875,11 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
             "track_clicks": True,
             "webhook_secret": str(os.getenv("SMTP2GO_WEBHOOK_SECRET", "")),
             "disable_webhook_signature_verification": False,
+            "manage_url": "/admin/modules/smtp2go",
+            "rate_limit_max_retries": 3,
+            "retry_backoff_seconds": 60,
+            "not_engaged_delay_seconds": 86400,
+            "ab_campaigns": [],
         },
     },
     {
@@ -1290,6 +1295,11 @@ _ENV_BACKED_MODULE_FIELDS: dict[str, tuple[str, ...]] = {
         "track_clicks",
         "webhook_secret",
         "disable_webhook_signature_verification",
+        "manage_url",
+        "rate_limit_max_retries",
+        "retry_backoff_seconds",
+        "not_engaged_delay_seconds",
+        "ab_campaigns",
     ),
     "m365-direct-delivery": (
         "company_id", "recipient_domains", "fallback_to_smtp", "track_read_status"
@@ -1484,6 +1494,25 @@ def _coerce_settings(
             else:
                 api_key = candidate
 
+        try:
+            rate_limit_max_retries = max(
+                0, int(merged.get("rate_limit_max_retries") or 3)
+            )
+        except (TypeError, ValueError):
+            rate_limit_max_retries = 3
+        try:
+            retry_backoff_seconds = max(
+                1, int(merged.get("retry_backoff_seconds") or 60)
+            )
+        except (TypeError, ValueError):
+            retry_backoff_seconds = 60
+        try:
+            not_engaged_delay_seconds = max(
+                0, int(merged.get("not_engaged_delay_seconds") or 86400)
+            )
+        except (TypeError, ValueError):
+            not_engaged_delay_seconds = 86400
+
         merged.update(
             {
                 "api_key": api_key,
@@ -1493,6 +1522,16 @@ def _coerce_settings(
                 "webhook_secret": str(merged.get("webhook_secret", "")).strip(),
                 "disable_webhook_signature_verification": _ensure_bool(
                     merged.get("disable_webhook_signature_verification"), False
+                ),
+                "manage_url": str(merged.get("manage_url") or "").strip()
+                or "/admin/modules/smtp2go",
+                "rate_limit_max_retries": rate_limit_max_retries,
+                "retry_backoff_seconds": retry_backoff_seconds,
+                "not_engaged_delay_seconds": not_engaged_delay_seconds,
+                "ab_campaigns": (
+                    merged.get("ab_campaigns")
+                    if isinstance(merged.get("ab_campaigns"), list)
+                    else []
                 ),
             }
         )

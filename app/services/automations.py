@@ -33,6 +33,9 @@ TRIGGER_EVENTS: list[dict[str, str]] = [
     {"value": "tickets.sla_response_breached", "label": "Ticket response SLA breached"},
     {"value": "tickets.sla_resolution_breached", "label": "Ticket resolution SLA breached"},
     {"value": "webhook.delivered", "label": "Webhook delivered"},
+    {"value": "smtp2go.opened", "label": "SMTP2Go email opened"},
+    {"value": "smtp2go.clicked", "label": "SMTP2Go email clicked"},
+    {"value": "smtp2go.not_engaged", "label": "SMTP2Go email not engaged"},
 ]
 
 _EVENT_ALIASES: dict[str, tuple[str, ...]] = {

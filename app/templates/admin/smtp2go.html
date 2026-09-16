@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}SMTP2Go operations{% endblock %}
+
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label": "Back to modules", "type": "link", "href": "/admin/modules", "variant": "ghost"}
+  ]) }}
+{% endblock %}
+
+{% block content %}
+  {% set totals = smtp2go_analytics.totals or {} %}
+  {% set rates = smtp2go_analytics.rates or {} %}
+  {% set queue_summary = (smtp2go_analytics.queue or {}).summary or {} %}
+
+  <div class="admin-grid">
+    <section class="card card--panel">
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title">Deliverability dashboard</h2>
+          <p class="card__subtitle">Recent SMTP2Go volume, engagement, and deliverability signals.</p>
+        </div>
+      </header>
+      <div class="stats-grid">
+        <article class="card">
+          <h3 class="card__title">Processed</h3>
+          <p>{{ totals.get("processed", 0) }}</p>
+        </article>
+        <article class="card">
+          <h3 class="card__title">Delivered</h3>
+          <p>{{ totals.get("delivered", 0) }}</p>
+        </article>
+        <article class="card">
+          <h3 class="card__title">Opened</h3>
+          <p>{{ totals.get("open", 0) }} <span class="text-muted">({{ rates.get("open_rate", 0) }}%)</span></p>
+        </article>
+        <article class="card">
+          <h3 class="card__title">Clicked</h3>
+          <p>{{ totals.get("click", 0) }} <span class="text-muted">({{ rates.get("click_rate", 0) }}%)</span></p>
+        </article>
+        <article class="card">
+          <h3 class="card__title">Bounced</h3>
+          <p>{{ totals.get("bounce", 0) }} <span class="text-muted">({{ rates.get("bounce_rate", 0) }}%)</span></p>
+        </article>
+      </div>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Processed</th>
+              <th>Delivered</th>
+              <th>Opened</th>
+              <th>Clicked</th>
+              <th>Bounced</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in smtp2go_analytics.trends %}
+              <tr>
+                <td data-label="Date">{{ row.date }}</td>
+                <td data-label="Processed">{{ row.processed }}</td>
+                <td data-label="Delivered">{{ row.delivered }}</td>
+                <td data-label="Opened">{{ row.open }}</td>
+                <td data-label="Clicked">{{ row.click }}</td>
+                <td data-label="Bounced">{{ row.bounce }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="6" class="table__empty">No recent SMTP2Go events recorded.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card card--panel">
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title">Queue, retry, and campaign settings</h2>
+          <p class="card__subtitle">Tune rate-limit retries, delayed non-engagement checks, and A/B winner selection inputs.</p>
+        </div>
+      </header>
+      <form action="/admin/modules/smtp2go/settings" method="post" class="form-grid">
+        {% include "partials/csrf.html" %}
+        <div class="form-field">
+          <label class="form-label" for="smtp2go-rate-limit-max-retries">Rate-limit max retries</label>
+          <input id="smtp2go-rate-limit-max-retries" class="form-input" type="number" min="0" name="rateLimitMaxRetries" value="{{ smtp2go_settings.get('rate_limit_max_retries', 3) }}" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="smtp2go-retry-backoff">Retry backoff (seconds)</label>
+          <input id="smtp2go-retry-backoff" class="form-input" type="number" min="1" name="retryBackoffSeconds" value="{{ smtp2go_settings.get('retry_backoff_seconds', 60) }}" />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="smtp2go-not-engaged-delay">Not engaged delay (seconds)</label>
+          <input id="smtp2go-not-engaged-delay" class="form-input" type="number" min="0" name="notEngagedDelaySeconds" value="{{ smtp2go_settings.get('not_engaged_delay_seconds', 86400) }}" />
+        </div>
+        <div class="form-field form-field--wide">
+          <label class="form-label" for="smtp2go-ab-campaigns">A/B campaigns JSON</label>
+          <textarea id="smtp2go-ab-campaigns" class="form-input" name="abCampaignsRaw" rows="12">{{ smtp2go_settings.get('ab_campaigns', []) | tojson(indent=2) }}</textarea>
+          <p class="form-help">Provide campaign variants with sent/delivered/opened/clicked/bounced counts for automatic winner promotion decisions.</p>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="button">Save settings</button>
+        </div>
+      </form>
+      <div class="stats-grid">
+        <article class="card">
+          <h3 class="card__title">Recent sends</h3>
+          <p>{{ queue_summary.get("recent_total", 0) }}</p>
+        </article>
+        <article class="card">
+          <h3 class="card__title">Retry waits</h3>
+          <p>{{ queue_summary.get("retry_wait", 0) }}</p>
+        </article>
+        <article class="card">
+          <h3 class="card__title">Queued non-engaged checks</h3>
+          <p>{{ queue_summary.get("queued_not_engaged_checks", 0) }}</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="card card--panel">
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title">Automation triggers and A/B winners</h2>
+          <p class="card__subtitle">Engagement events can drive existing automation actions immediately.</p>
+        </div>
+      </header>
+      <ul>
+        {% for option in smtp2go_trigger_options %}
+          <li><code>{{ option.value }}</code> — {{ option.label }}</li>
+        {% else %}
+          <li>No SMTP2Go engagement triggers are registered.</li>
+        {% endfor %}
+      </ul>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Campaign</th>
+              <th>Status</th>
+              <th>Winner</th>
+              <th>Metric</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for campaign in smtp2go_campaigns %}
+              <tr>
+                <td data-label="Campaign">{{ campaign.campaign_name or 'Untitled campaign' }}</td>
+                <td data-label="Status">{{ campaign.status|replace('_', ' ')|title }}</td>
+                <td data-label="Winner">{{ campaign.winner.name if campaign.winner else 'Collecting data' }}</td>
+                <td data-label="Metric">{{ campaign.winner_metric }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="4" class="table__empty">No A/B campaigns configured yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card card--panel">
+      <header class="card__header card__header--stacked">
+        <div>
+          <h2 class="card__title">Geo / device / email client reporting</h2>
+          <p class="card__subtitle">Breakdowns are populated from SMTP2Go webhook metadata where it is available.</p>
+        </div>
+      </header>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Geo</th>
+              <th>Count</th>
+              <th>Device</th>
+              <th>Count</th>
+              <th>Email client</th>
+              <th>Count</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% set max_len = [smtp2go_analytics.geo_breakdown|length, smtp2go_analytics.device_breakdown|length, smtp2go_analytics.client_breakdown|length]|max %}
+            {% for index in range(max_len) %}
+              {% set geo = smtp2go_analytics.geo_breakdown[index] if index < smtp2go_analytics.geo_breakdown|length else None %}
+              {% set device = smtp2go_analytics.device_breakdown[index] if index < smtp2go_analytics.device_breakdown|length else None %}
+              {% set client = smtp2go_analytics.client_breakdown[index] if index < smtp2go_analytics.client_breakdown|length else None %}
+              <tr>
+                <td data-label="Geo">{{ geo.label if geo else '-' }}</td>
+                <td data-label="Geo count">{{ geo.count if geo else '-' }}</td>
+                <td data-label="Device">{{ device.label if device else '-' }}</td>
+                <td data-label="Device count">{{ device.count if device else '-' }}</td>
+                <td data-label="Email client">{{ client.label if client else '-' }}</td>
+                <td data-label="Email client count">{{ client.count if client else '-' }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="6" class="table__empty">No geo, device, or client engagement metadata is available yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+{% endblock %}

@@ -141,6 +141,7 @@ def _make_tracking_endpoint(original: Callable[..., Any], state: "FeaturePackSta
 
         _async_wrapped.__name__ = getattr(original, "__name__", "tracked_endpoint")
         _async_wrapped.__doc__ = getattr(original, "__doc__", None)
+        _async_wrapped.__module__ = getattr(original, "__module__", __name__)
         _async_wrapped.__wrapped__ = original  # type: ignore[attr-defined]
         return _async_wrapped
 
@@ -153,6 +154,7 @@ def _make_tracking_endpoint(original: Callable[..., Any], state: "FeaturePackSta
 
     _sync_wrapped.__name__ = getattr(original, "__name__", "tracked_endpoint")
     _sync_wrapped.__doc__ = getattr(original, "__doc__", None)
+    _sync_wrapped.__module__ = getattr(original, "__module__", __name__)
     _sync_wrapped.__wrapped__ = original  # type: ignore[attr-defined]
     return _sync_wrapped
 
@@ -293,6 +295,23 @@ class FeatureRegistry:
         return parent
 
     @staticmethod
+    def _flatten_included_routes(routes: Iterable[Any]) -> list[Any]:
+        """Expand FastAPI ``_IncludedRouter`` placeholders into concrete routes."""
+
+        flattened: list[Any] = []
+        for route in routes:
+            if getattr(route, "path", None) is not None:
+                flattened.append(route)
+                continue
+            original_router = getattr(route, "original_router", None)
+            child_routes = getattr(original_router, "routes", None)
+            if original_router is not None and child_routes is not None:
+                flattened.extend(FeatureRegistry._flatten_included_routes(child_routes))
+                continue
+            flattened.append(route)
+        return flattened
+
+    @staticmethod
     def _wrap_routes_with_state(routes: Iterable[Any], state: "FeaturePackState") -> None:
         """Wrap each ``APIRoute`` in ``routes`` to bump ``state.in_flight``.
 
@@ -409,12 +428,12 @@ class FeatureRegistry:
         before = len(self._app.router.routes)
         self._app.include_router(parent)
         new_routes = self._app.router.routes[before:]
-        if (
-            len(new_routes) == 1
-            and getattr(new_routes[0], "path", None) is None
-            and hasattr(new_routes[0], "original_router")
+        if any(
+            getattr(route, "path", None) is None and hasattr(route, "original_router")
+            for route in new_routes
         ):
-            self._app.router.routes = self._app.router.routes[:before] + list(parent.routes)
+            flattened_routes = self._flatten_included_routes(parent.routes)
+            self._app.router.routes = self._app.router.routes[:before] + flattened_routes
             new_routes = self._app.router.routes[before:]
         state.mounted_routes = list(new_routes)
         self._wrap_routes_with_state(new_routes, state)
