@@ -492,8 +492,18 @@ async def shop_page(
 
         category_cards = _category_card_entries(categories)
 
-    # Get active subscription product IDs for the customer
+    # Include the subscription identifier in the customer-safe product payload
+    # so both the product card and details modal can navigate to management.
     active_subscription_product_ids = await subscriptions_repo.get_active_subscription_product_ids(company_id)
+    active_subscriptions = (
+        await subscriptions_repo.get_active_subscriptions_by_product_id(company_id)
+        if active_subscription_product_ids
+        else {}
+    )
+    for product in products:
+        subscription = active_subscriptions.get(int(product.get("id") or 0))
+        if subscription:
+            product["active_subscription_id"] = subscription["id"]
     subscription_categories = await subscription_categories_repo.list_categories()
 
     extra = {

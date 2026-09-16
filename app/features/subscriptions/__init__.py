@@ -18,7 +18,7 @@ from .portal_routes import router as portal_router
 
 PACK = FeaturePack(
     slug="subscriptions",
-    version="1.1.0",
+    version="1.2.0",
     routers=(portal_router, admin_router),
 )
 
