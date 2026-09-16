@@ -90,8 +90,11 @@ async def test_it_contact_baseline_refuses_to_create_when_recipient_conflicts(mo
 @pytest.mark.anyio
 async def test_it_contact_baseline_treats_create_conflict_as_success_after_reinspect(monkeypatch, baseline_config):
     mail_contacts = [
-        [],
-        [{"Name": "Hawkins IT", "ExternalEmailAddress": "it@msp.example", "HiddenFromAddressListsEnabled": True}],
+        [{"Name": "Hawkins IT Support", "ExternalEmailAddress": "support@msp.example", "HiddenFromAddressListsEnabled": True}],
+        [
+            {"Name": "Hawkins IT", "ExternalEmailAddress": "it@msp.example", "HiddenFromAddressListsEnabled": True},
+            {"Name": "Hawkins IT Support", "ExternalEmailAddress": "support@msp.example", "HiddenFromAddressListsEnabled": True},
+        ],
     ]
 
     async def invoke(_token, _tenant, cmdlet, params=None):

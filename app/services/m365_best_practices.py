@@ -692,8 +692,7 @@ async def _remediate_it_contact_baseline(exo_token: str, tenant_id: str) -> tupl
     if state["conflicts"]:
         return False, "; ".join(state["conflicts"]) + ". Resolve the conflict manually; no changes were made."
 
-    while state["missing"]:
-        kind, profile = state["missing"][0]
+    for kind, profile in state["missing"]:
         try:
             if kind == "contact":
                 await _exo_invoke_command(exo_token, tenant_id, "New-MailContact", {
@@ -727,14 +726,7 @@ async def _remediate_it_contact_baseline(exo_token: str, tenant_id: str) -> tupl
                 return False, "; ".join(refreshed_state["conflicts"]) + ". Resolve the conflict manually; no changes were made."
             if (kind, profile) in refreshed_state["missing"]:
                 raise
-            state = refreshed_state
             continue
-
-        state = await _inspect_it_contact_baseline(exo_token, tenant_id)
-        if state.get("error"):
-            return False, state["error"]
-        if state["conflicts"]:
-            return False, "; ".join(state["conflicts"]) + ". Resolve the conflict manually; no changes were made."
     return True, "Created the missing IT contact forwarding baseline objects."
 
 
