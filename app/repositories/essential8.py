@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 from app.core.database import db
-from app.schemas.essential8 import ComplianceStatus, MaturityLevel
+from app.schemas.essential8 import ApprovalStatus, ComplianceStatus, MaturityLevel
 
 
 def _format_datetime(value: Any) -> Optional[str]:
@@ -20,6 +20,38 @@ def _format_datetime(value: Any) -> Optional[str]:
         return value.astimezone(timezone.utc).isoformat()
 
     return value  # type: ignore[return-value]
+
+
+def _normalise_optional_date(value: Any) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return str(value)
+
+
+def _normalise_optional_datetime(value: Any) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.isoformat()
+        return value.astimezone(timezone.utc).isoformat()
+    return str(value)
+
+
+def _normalise_requirement_compliance_record(item: dict[str, Any]) -> dict[str, Any]:
+    item["created_at"] = _format_datetime(item.get("created_at"))
+    item["updated_at"] = _format_datetime(item.get("updated_at"))
+    item["approved_at"] = _format_datetime(item.get("approved_at"))
+    item["last_reminder_sent_at"] = _format_datetime(item.get("last_reminder_sent_at"))
+    item["last_overdue_alert_at"] = _format_datetime(item.get("last_overdue_alert_at"))
+    item["last_reviewed_date"] = _normalise_optional_date(item.get("last_reviewed_date"))
+    item["target_compliance_date"] = _normalise_optional_date(item.get("target_compliance_date"))
+    item["overdue_alert_enabled"] = bool(item.get("overdue_alert_enabled", True))
+    return item
 
 
 def _build_compliance_record(row: Any) -> dict[str, Any]:
@@ -581,13 +613,31 @@ async def create_company_requirement_compliance(
     evidence: Optional[str] = None,
     notes: Optional[str] = None,
     last_reviewed_date: Optional[str] = None,
+    target_compliance_date: Optional[str] = None,
+    owner_user_id: Optional[int] = None,
+    approval_status: ApprovalStatus = ApprovalStatus.DRAFT,
+    approval_notes: Optional[str] = None,
+    approved_by: Optional[int] = None,
+    approved_at: Optional[str] = None,
+    reminder_days_before: Optional[int] = 14,
+    overdue_alert_enabled: bool = True,
+    last_reminder_sent_at: Optional[str] = None,
+    last_overdue_alert_at: Optional[str] = None,
 ) -> dict[str, Any]:
     """Create a requirement compliance record for a company"""
     query = """
         INSERT INTO company_essential8_requirement_compliance
-        (company_id, requirement_id, status, evidence, notes, last_reviewed_date)
+        (
+            company_id, requirement_id, status, evidence, notes, last_reviewed_date,
+            target_compliance_date, owner_user_id, approval_status, approval_notes,
+            approved_by, approved_at, reminder_days_before, overdue_alert_enabled,
+            last_reminder_sent_at, last_overdue_alert_at
+        )
         VALUES (%(company_id)s, %(requirement_id)s, %(status)s, %(evidence)s, %(notes)s,
-                %(last_reviewed_date)s)
+                %(last_reviewed_date)s, %(target_compliance_date)s, %(owner_user_id)s,
+                %(approval_status)s, %(approval_notes)s, %(approved_by)s, %(approved_at)s,
+                %(reminder_days_before)s, %(overdue_alert_enabled)s,
+                %(last_reminder_sent_at)s, %(last_overdue_alert_at)s)
     """
     params = {
         "company_id": company_id,
@@ -595,7 +645,19 @@ async def create_company_requirement_compliance(
         "status": status.value if isinstance(status, ComplianceStatus) else status,
         "evidence": evidence,
         "notes": notes,
-        "last_reviewed_date": last_reviewed_date,
+        "last_reviewed_date": _normalise_optional_date(last_reviewed_date),
+        "target_compliance_date": _normalise_optional_date(target_compliance_date),
+        "owner_user_id": owner_user_id,
+        "approval_status": (
+            approval_status.value if isinstance(approval_status, ApprovalStatus) else approval_status
+        ),
+        "approval_notes": approval_notes,
+        "approved_by": approved_by,
+        "approved_at": _normalise_optional_datetime(approved_at),
+        "reminder_days_before": reminder_days_before,
+        "overdue_alert_enabled": int(bool(overdue_alert_enabled)),
+        "last_reminder_sent_at": _normalise_optional_datetime(last_reminder_sent_at),
+        "last_overdue_alert_at": _normalise_optional_datetime(last_overdue_alert_at),
     }
     
     record_id = await db.execute(query, params)
@@ -616,7 +678,10 @@ async def get_company_requirement_compliance(
     query = """
         SELECT
             cerc.id, cerc.company_id, cerc.requirement_id, cerc.status,
-            cerc.evidence, cerc.notes, cerc.last_reviewed_date,
+            cerc.evidence, cerc.notes, cerc.last_reviewed_date, cerc.target_compliance_date,
+            cerc.owner_user_id, cerc.approval_status, cerc.approval_notes,
+            cerc.approved_by, cerc.approved_at, cerc.reminder_days_before,
+            cerc.overdue_alert_enabled, cerc.last_reminder_sent_at, cerc.last_overdue_alert_at,
             cerc.created_at, cerc.updated_at,
             er.id as req_id, er.control_id, er.maturity_level,
             er.requirement_order, er.description
@@ -646,11 +711,7 @@ async def get_company_requirement_compliance(
     # Clean up duplicate fields
     for key in ["req_id", "control_id", "maturity_level", "requirement_order", "description"]:
         item.pop(key, None)
-    
-    item["created_at"] = _format_datetime(item.get("created_at"))
-    item["updated_at"] = _format_datetime(item.get("updated_at"))
-    
-    return item
+    return _normalise_requirement_compliance_record(item)
 
 
 async def list_company_requirement_compliance(
@@ -680,7 +741,10 @@ async def list_company_requirement_compliance(
     query = f"""
         SELECT
             cerc.id, cerc.company_id, cerc.requirement_id, cerc.status,
-            cerc.evidence, cerc.notes, cerc.last_reviewed_date,
+            cerc.evidence, cerc.notes, cerc.last_reviewed_date, cerc.target_compliance_date,
+            cerc.owner_user_id, cerc.approval_status, cerc.approval_notes,
+            cerc.approved_by, cerc.approved_at, cerc.reminder_days_before,
+            cerc.overdue_alert_enabled, cerc.last_reminder_sent_at, cerc.last_overdue_alert_at,
             cerc.created_at, cerc.updated_at,
             er.id as req_id, er.control_id, er.maturity_level,
             er.requirement_order, er.description
@@ -708,11 +772,7 @@ async def list_company_requirement_compliance(
         # Clean up duplicate fields
         for key in ["req_id", "control_id", "maturity_level", "requirement_order", "description"]:
             item.pop(key, None)
-        
-        item["created_at"] = _format_datetime(item.get("created_at"))
-        item["updated_at"] = _format_datetime(item.get("updated_at"))
-        
-        result.append(item)
+        result.append(_normalise_requirement_compliance_record(item))
     
     return result
 
@@ -741,6 +801,14 @@ async def update_company_requirement_compliance(
             # Handle enum values
             if isinstance(value, ComplianceStatus):
                 params[key] = value.value
+            elif isinstance(value, ApprovalStatus):
+                params[key] = value.value
+            elif key in {"last_reviewed_date", "target_compliance_date"}:
+                params[key] = _normalise_optional_date(value)
+            elif key in {"approved_at", "last_reminder_sent_at", "last_overdue_alert_at"}:
+                params[key] = _normalise_optional_datetime(value)
+            elif key == "overdue_alert_enabled":
+                params[key] = int(bool(value))
             else:
                 params[key] = value
     
@@ -758,6 +826,361 @@ async def update_company_requirement_compliance(
     
     # Return updated record
     return await get_company_requirement_compliance(company_id, requirement_id)
+
+
+async def append_requirement_audit(
+    *,
+    company_id: int,
+    requirement_id: int,
+    user_id: Optional[int],
+    action: str,
+    from_status: Optional[str] = None,
+    to_status: Optional[str] = None,
+    approval_status: Optional[str] = None,
+    change_summary: Optional[str] = None,
+) -> None:
+    await db.execute(
+        """
+        INSERT INTO company_essential8_requirement_audit
+        (
+            company_id, requirement_id, user_id, action,
+            from_status, to_status, approval_status, change_summary
+        )
+        VALUES
+        (
+            %(company_id)s, %(requirement_id)s, %(user_id)s, %(action)s,
+            %(from_status)s, %(to_status)s, %(approval_status)s, %(change_summary)s
+        )
+        """,
+        {
+            "company_id": company_id,
+            "requirement_id": requirement_id,
+            "user_id": user_id,
+            "action": action,
+            "from_status": from_status,
+            "to_status": to_status,
+            "approval_status": approval_status,
+            "change_summary": change_summary,
+        },
+    )
+
+
+async def bulk_update_company_requirement_compliance(
+    *,
+    company_ids: list[int],
+    requirement_ids: list[int],
+    user_id: Optional[int] = None,
+    **updates: Any,
+) -> dict[str, Any]:
+    if not company_ids:
+        raise ValueError("Select at least one company for a bulk update.")
+    if not requirement_ids:
+        raise ValueError("Select at least one requirement for a bulk update.")
+    if updates.get("reminder_days_before") is not None and int(updates["reminder_days_before"]) < 0:
+        raise ValueError("Reminder lead time cannot be negative.")
+
+    updated_count = 0
+    audit_count = 0
+    touched_controls: set[tuple[int, int]] = set()
+    for company_id in company_ids:
+        for requirement_id in requirement_ids:
+            requirement = await get_essential8_requirement(requirement_id)
+            if not requirement:
+                continue
+            existing = await get_company_requirement_compliance(company_id, requirement_id)
+            if existing:
+                previous_status = existing.get("status")
+                updated = await update_company_requirement_compliance(
+                    company_id=company_id,
+                    requirement_id=requirement_id,
+                    **updates,
+                )
+            else:
+                updated = await create_company_requirement_compliance(
+                    company_id=company_id,
+                    requirement_id=requirement_id,
+                    **updates,
+                )
+                previous_status = None
+            if not updated:
+                continue
+            updated_count += 1
+            touched_controls.add((company_id, int(requirement["control_id"])))
+            summary_bits = []
+            if updates.get("status") is not None:
+                summary_bits.append(f"status → {updated.get('status')}")
+            if updates.get("approval_status") is not None:
+                summary_bits.append(f"approval → {updated.get('approval_status')}")
+            if updates.get("owner_user_id") is not None:
+                summary_bits.append(f"owner → {updated.get('owner_user_id')}")
+            await append_requirement_audit(
+                company_id=company_id,
+                requirement_id=requirement_id,
+                user_id=user_id,
+                action="bulk_update",
+                from_status=previous_status,
+                to_status=updated.get("status"),
+                approval_status=updated.get("approval_status"),
+                change_summary=", ".join(summary_bits) or "Requirement updated in bulk.",
+            )
+            audit_count += 1
+
+    for company_id, control_id in touched_controls:
+        await auto_update_control_compliance_from_requirements(company_id=company_id, control_id=control_id)
+
+    return {
+        "updated_count": updated_count,
+        "audit_count": audit_count,
+        "company_count": len(company_ids),
+        "requirement_count": len(requirement_ids),
+    }
+
+
+async def add_requirement_evidence(
+    *,
+    company_id: int,
+    requirement_id: int,
+    title: str,
+    file_name: str,
+    file_path: str,
+    uploaded_by: Optional[int] = None,
+    description: Optional[str] = None,
+    content_type: Optional[str] = None,
+    file_size_bytes: Optional[int] = None,
+) -> dict[str, Any]:
+    version_row = await db.fetch_one(
+        """
+        SELECT COALESCE(MAX(version_number), 0) AS latest_version
+        FROM company_essential8_requirement_evidence
+        WHERE company_id = %(company_id)s AND requirement_id = %(requirement_id)s
+        """,
+        {"company_id": company_id, "requirement_id": requirement_id},
+    )
+    next_version = int((version_row or {}).get("latest_version") or 0) + 1
+    await db.execute(
+        """
+        UPDATE company_essential8_requirement_evidence
+        SET is_current = 0
+        WHERE company_id = %(company_id)s AND requirement_id = %(requirement_id)s
+        """,
+        {"company_id": company_id, "requirement_id": requirement_id},
+    )
+    evidence_id = await db.execute(
+        """
+        INSERT INTO company_essential8_requirement_evidence
+        (
+            company_id, requirement_id, version_number, title, description,
+            file_name, content_type, file_path, file_size_bytes, uploaded_by, is_current
+        )
+        VALUES
+        (
+            %(company_id)s, %(requirement_id)s, %(version_number)s, %(title)s, %(description)s,
+            %(file_name)s, %(content_type)s, %(file_path)s, %(file_size_bytes)s, %(uploaded_by)s, 1
+        )
+        """,
+        {
+            "company_id": company_id,
+            "requirement_id": requirement_id,
+            "version_number": next_version,
+            "title": title,
+            "description": description,
+            "file_name": file_name,
+            "content_type": content_type,
+            "file_path": file_path,
+            "file_size_bytes": file_size_bytes,
+            "uploaded_by": uploaded_by,
+        },
+    )
+    row = await db.fetch_one(
+        """
+        SELECT
+            id, company_id, requirement_id, version_number, title, description,
+            file_name, content_type, file_path, file_size_bytes, uploaded_by,
+            uploaded_at, is_current
+        FROM company_essential8_requirement_evidence
+        WHERE id = %(id)s
+        """,
+        {"id": evidence_id},
+    )
+    if not row:
+        return {}
+    item = dict(row)
+    item["uploaded_at"] = _format_datetime(item.get("uploaded_at"))
+    item["is_current"] = bool(item.get("is_current"))
+    await append_requirement_audit(
+        company_id=company_id,
+        requirement_id=requirement_id,
+        user_id=uploaded_by,
+        action="evidence_upload",
+        change_summary=f"Uploaded evidence version {next_version}: {title}",
+    )
+    return item
+
+
+async def list_requirement_evidence(
+    company_id: int,
+    requirement_id: int,
+) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT
+            id, company_id, requirement_id, version_number, title, description,
+            file_name, content_type, file_path, file_size_bytes, uploaded_by,
+            uploaded_at, is_current
+        FROM company_essential8_requirement_evidence
+        WHERE company_id = %(company_id)s AND requirement_id = %(requirement_id)s
+        ORDER BY version_number DESC, uploaded_at DESC
+        """,
+        {"company_id": company_id, "requirement_id": requirement_id},
+    )
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item["uploaded_at"] = _format_datetime(item.get("uploaded_at"))
+        item["is_current"] = bool(item.get("is_current"))
+        result.append(item)
+    return result
+
+
+async def list_requirement_audit(
+    company_id: int,
+    requirement_id: int,
+    *,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT
+            id, company_id, requirement_id, user_id, action, from_status, to_status,
+            approval_status, change_summary, created_at
+        FROM company_essential8_requirement_audit
+        WHERE company_id = %(company_id)s AND requirement_id = %(requirement_id)s
+        ORDER BY created_at DESC
+        LIMIT %(limit)s
+        """,
+        {"company_id": company_id, "requirement_id": requirement_id, "limit": limit},
+    )
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item["created_at"] = _format_datetime(item.get("created_at"))
+        result.append(item)
+    return result
+
+
+async def get_requirement_reminder_summary(
+    company_id: int,
+    *,
+    as_of: Optional[date] = None,
+) -> dict[str, Any]:
+    anchor = as_of or datetime.now(timezone.utc).date()
+    records = await list_company_requirement_compliance(company_id)
+    reminder_due = 0
+    overdue = 0
+    pending_approval = 0
+    for record in records:
+        target_raw = record.get("target_compliance_date")
+        if record.get("approval_status") == ApprovalStatus.PENDING.value:
+            pending_approval += 1
+        if not target_raw:
+            continue
+        target = date.fromisoformat(str(target_raw))
+        if target < anchor and record.get("overdue_alert_enabled", True):
+            overdue += 1
+            continue
+        reminder_days_before = record.get("reminder_days_before")
+        if reminder_days_before is None:
+            continue
+        if target >= anchor and (target - anchor).days <= int(reminder_days_before):
+            reminder_due += 1
+    return {
+        "company_id": company_id,
+        "as_of": anchor.isoformat(),
+        "reminder_due_count": reminder_due,
+        "overdue_count": overdue,
+        "pending_approval_count": pending_approval,
+    }
+
+
+async def get_requirement_trend(
+    company_id: int,
+    *,
+    control_id: Optional[int] = None,
+) -> list[dict[str, Any]]:
+    params: dict[str, Any] = {"company_id": company_id}
+    control_clause = ""
+    if control_id is not None:
+        control_clause = " AND er.control_id = %(control_id)s"
+        params["control_id"] = control_id
+    rows = await db.fetch_all(
+        f"""
+        SELECT
+            substr(COALESCE(a.created_at, cerc.updated_at, cerc.created_at), 1, 10) AS trend_date,
+            er.control_id,
+            er.maturity_level,
+            COALESCE(a.to_status, cerc.status, 'not_started') AS status,
+            COUNT(*) AS total
+        FROM company_essential8_requirement_compliance cerc
+        INNER JOIN essential8_requirements er ON er.id = cerc.requirement_id
+        LEFT JOIN company_essential8_requirement_audit a
+            ON a.company_id = cerc.company_id
+           AND a.requirement_id = cerc.requirement_id
+        WHERE cerc.company_id = %(company_id)s{control_clause}
+        GROUP BY trend_date, er.control_id, er.maturity_level, status
+        ORDER BY trend_date, er.control_id, er.maturity_level, status
+        """,
+        params,
+    )
+    return [dict(row) for row in rows]
+
+
+async def build_requirement_export_bundle(
+    company_id: int,
+    *,
+    control_id: Optional[int] = None,
+) -> dict[str, Any]:
+    requirements = await list_essential8_requirements(control_id=control_id)
+    compliance_rows = await list_company_requirement_compliance(company_id, control_id=control_id)
+    compliance_map = {int(row["requirement_id"]): row for row in compliance_rows}
+    evidence_map: dict[int, list[dict[str, Any]]] = {}
+    for requirement in requirements:
+        req_id = int(requirement["id"])
+        evidence_map[req_id] = await list_requirement_evidence(company_id, req_id)
+    bundle_rows: list[dict[str, Any]] = []
+    for requirement in requirements:
+        req_id = int(requirement["id"])
+        record = compliance_map.get(req_id, {})
+        evidence_items = evidence_map.get(req_id, [])
+        bundle_rows.append(
+            {
+                "requirement_id": req_id,
+                "control_id": requirement.get("control_id"),
+                "maturity_level": requirement.get("maturity_level"),
+                "requirement_order": requirement.get("requirement_order"),
+                "description": requirement.get("description"),
+                "status": record.get("status") or ComplianceStatus.NOT_STARTED.value,
+                "owner_user_id": record.get("owner_user_id"),
+                "approval_status": record.get("approval_status") or ApprovalStatus.DRAFT.value,
+                "target_compliance_date": record.get("target_compliance_date"),
+                "notes": record.get("notes"),
+                "evidence_reference_count": len(evidence_items),
+                "evidence_references": [
+                    {
+                        "version_number": item.get("version_number"),
+                        "title": item.get("title"),
+                        "file_name": item.get("file_name"),
+                        "file_path": item.get("file_path"),
+                    }
+                    for item in evidence_items
+                ],
+            }
+        )
+    return {
+        "company_id": company_id,
+        "control_id": control_id,
+        "requirements": bundle_rows,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 async def calculate_control_compliance_from_requirements(

@@ -190,6 +190,21 @@ async def test_control_requirements_page_sets_help_per_requirement(monkeypatch):
         AsyncMock(return_value={1: {"ml1": "in_progress", "ml2": "not_started", "ml3": "not_started"}}),
     )
     monkeypatch.setattr(
+        compliance_routes.essential8_repo,
+        "list_requirement_evidence",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        compliance_routes.essential8_repo,
+        "get_requirement_reminder_summary",
+        AsyncMock(return_value={"pending_approval_count": 0, "reminder_due_count": 0, "overdue_count": 0}),
+    )
+    monkeypatch.setattr(
+        compliance_routes.essential8_repo,
+        "get_requirement_trend",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
         compliance_routes,
         "_main",
         lambda: SimpleNamespace(_render_template=fake_render_template),

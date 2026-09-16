@@ -37,3 +37,33 @@ async def test_recommendations_report_lists_current_level_gap(monkeypatch):
     assert result["total"] == 1
     assert result["recommendations"][0]["control"] == "Patch applications"
     assert result["recommendations"][0]["url"] == "https://example.com/patching"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_essential8_detail_report_includes_export_evidence_counts(monkeypatch):
+    monkeypatch.setattr(reports.essential8_repo, "list_essential8_controls", AsyncMock(return_value=[
+        {"id": 1, "name": "Application Control", "description": "Desc"},
+    ]))
+    monkeypatch.setattr(
+        reports.essential8_repo,
+        "get_per_maturity_statuses_for_company",
+        AsyncMock(return_value={1: {"ml1": "compliant", "ml2": "pending", "ml3": "not_started"}}),
+    )
+    monkeypatch.setattr(
+        reports.essential8_repo,
+        "build_requirement_export_bundle",
+        AsyncMock(return_value={
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "requirements": [
+                {"control_id": 1, "approval_status": "pending_approval", "evidence_reference_count": 2},
+                {"control_id": 1, "approval_status": "draft", "evidence_reference_count": 1},
+            ],
+        }),
+    )
+
+    result = await reports._build_essential8_detail(7)
+
+    assert result["generated_at"] == "2026-01-01T00:00:00+00:00"
+    assert result["controls"][0]["requirement_count"] == 2
+    assert result["controls"][0]["evidence_reference_count"] == 3
+    assert result["controls"][0]["pending_approval_count"] == 1

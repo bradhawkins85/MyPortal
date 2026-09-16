@@ -21,6 +21,9 @@ async def test_build_company_report_assembles_all_sections():
         reports.report_sections_repo, "get_section_preferences",
         new=AsyncMock(return_value={}),  # all sections default to enabled
     ), patch.object(
+        reports.report_sections_repo, "get_detail_preferences",
+        new=AsyncMock(return_value={}),
+    ), patch.object(
         reports.report_sections_repo, "get_company_report_settings",
         new=AsyncMock(return_value={"auto_hide_empty": False, "section_order": None}),
     ), patch.object(
@@ -91,6 +94,9 @@ async def test_build_company_report_assembles_all_sections():
             1: {"ml1": "compliant", "ml2": "in_progress", "ml3": "not_started"},
             2: {"ml1": "compliant", "ml2": "not_started", "ml3": "not_started"},
         }),
+    ), patch.object(
+        reports.essential8_repo, "build_requirement_export_bundle",
+        new=AsyncMock(return_value={"requirements": [], "generated_at": "2026-01-01T00:00:00+00:00"}),
     ), patch.object(
         reports.compliance_checks_repo, "get_assignment_summary",
         new=AsyncMock(return_value={

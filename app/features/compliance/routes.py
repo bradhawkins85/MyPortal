@@ -228,6 +228,11 @@ async def compliance_control_requirements_page(request: Request, control_id: int
     requirement_compliance_map = {}
     for rc in control_data.get("requirement_compliance", []):
         requirement_compliance_map[rc["requirement_id"]] = rc
+    evidence_map = {
+        requirement["id"]: await essential8_repo.list_requirement_evidence(company_id, requirement["id"])
+        for key in ("requirements_ml1", "requirements_ml2", "requirements_ml3")
+        for requirement in control_data.get(key, [])
+    }
     requirement_help_links = {
         item["requirement_id"]: item
         for item in await essential8_repo.list_requirement_marketing_page_links()
@@ -256,8 +261,12 @@ async def compliance_control_requirements_page(request: Request, control_id: int
         "ml2_status": ctrl_ml["ml2"],
         "ml3_status": ctrl_ml["ml3"],
         "requirement_compliance_map": requirement_compliance_map,
+        "requirement_evidence_map": evidence_map,
+        "reminder_summary": await essential8_repo.get_requirement_reminder_summary(company_id),
+        "trend_rows": await essential8_repo.get_requirement_trend(company_id, control_id=control_id),
         "company": company,
         "is_super_admin": bool(user.get("is_super_admin")),
+        "can_manage": bool(user.get("is_super_admin")) or bool(_membership and _membership.get("is_admin")),
     }
     return await main_module._render_template(
         "compliance/control_requirements.html",
