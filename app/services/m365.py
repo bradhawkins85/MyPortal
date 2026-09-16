@@ -679,6 +679,33 @@ def _self_renewal_reprovision_message(*, admin_flow: bool) -> str:
     )
 
 
+async def _add_password_credential(
+    access_token: str,
+    app_object_id: str,
+    end_datetime: str,
+    *,
+    admin_flow: bool,
+) -> dict[str, Any]:
+    """Create an app secret and normalize 403 self-renewal failures."""
+    try:
+        return await _graph_post(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/addPassword",
+            {
+                "passwordCredential": {
+                    "displayName": _M365_SECRET_DISPLAY_NAME,
+                    "endDateTime": end_datetime,
+                }
+            },
+        )
+    except M365Error as exc:
+        if exc.http_status == 403:
+            raise M365ReprovisionRequiredError(
+                _self_renewal_reprovision_message(admin_flow=admin_flow)
+            ) from exc
+        raise
+
+
 def generate_pkce_pair() -> tuple[str, str]:
     """Generate a PKCE ``code_verifier`` / ``code_challenge`` pair.
 
@@ -2227,23 +2254,12 @@ async def renew_client_secret(company_id: int) -> None:
     new_expiry_str = new_expiry_date.isoformat() + "T00:00:00Z"
 
     # Create new client secret via Graph API
-    try:
-        secret_data = await _graph_post(
-            access_token,
-            f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/addPassword",
-            {
-                "passwordCredential": {
-                    "displayName": _M365_SECRET_DISPLAY_NAME,
-                    "endDateTime": new_expiry_str,
-                }
-            },
-        )
-    except M365Error as exc:
-        if exc.http_status == 403:
-            raise M365ReprovisionRequiredError(
-                _self_renewal_reprovision_message(admin_flow=False)
-            ) from exc
-        raise
+    secret_data = await _add_password_credential(
+        access_token,
+        app_object_id,
+        new_expiry_str,
+        admin_flow=False,
+    )
     new_secret: str = secret_data["secretText"]
     new_key_id: str | None = secret_data.get("keyId")
     new_expires_at = datetime(
@@ -2337,23 +2353,12 @@ async def renew_admin_client_secret(company_id: int | None = None) -> dict[str, 
     new_expiry_date = date.today() + timedelta(days=secret_lifetime_days)
     new_expiry_str = new_expiry_date.isoformat() + "T00:00:00Z"
 
-    try:
-        secret_data = await _graph_post(
-            access_token,
-            f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/addPassword",
-            {
-                "passwordCredential": {
-                    "displayName": _M365_SECRET_DISPLAY_NAME,
-                    "endDateTime": new_expiry_str,
-                }
-            },
-        )
-    except M365Error as exc:
-        if exc.http_status == 403:
-            raise M365ReprovisionRequiredError(
-                _self_renewal_reprovision_message(admin_flow=True)
-            ) from exc
-        raise
+    secret_data = await _add_password_credential(
+        access_token,
+        app_object_id,
+        new_expiry_str,
+        admin_flow=True,
+    )
     new_secret: str = secret_data["secretText"]
     new_key_id: str | None = secret_data.get("keyId")
     new_expires_at = datetime(
