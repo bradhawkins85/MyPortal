@@ -233,6 +233,8 @@ async def generate_invoice(
     *,
     ticket_ids: list[int] | None = None,
     include_recurring_items: bool = True,
+    recurring_line_items: list[dict[str, Any]] | None = None,
+    include_ticket_items: bool = True,
     approval_required: bool = False,
 ) -> dict[str, Any]:
     """Generate a local invoice for the given company.
@@ -265,9 +267,11 @@ async def generate_invoice(
 
     # Build recurring invoice items. When Xero is configured, pass credentials
     # so items without a local price override use their Xero sales price.
-    recurring_line_items: list[dict[str, Any]] = []
-    if include_recurring_items:
-        recurring_line_items = await xero_service.build_recurring_invoice_items(
+    generated_recurring_line_items: list[dict[str, Any]] = []
+    if recurring_line_items is not None:
+        generated_recurring_line_items = list(recurring_line_items)
+    elif include_recurring_items:
+        generated_recurring_line_items = await xero_service.build_recurring_invoice_items(
             company_id,
             tax_type=None,
             context=context,
@@ -301,7 +305,7 @@ async def generate_invoice(
         )
         all_tickets = []
 
-    for ticket in all_tickets:
+    for ticket in all_tickets if include_ticket_items else []:
         try:
             ticket_id = int(ticket.get("id")) if ticket.get("id") is not None else None
         except (TypeError, ValueError):
@@ -446,7 +450,7 @@ async def generate_invoice(
                 }
             )
 
-    combined_line_items = recurring_line_items + ticket_line_items
+    combined_line_items = generated_recurring_line_items + ticket_line_items
 
     if not combined_line_items:
         logger.info(
@@ -550,7 +554,7 @@ async def generate_invoice(
 
     recurring_item_ids = [
         int(item["MyPortalRecurringItemId"])
-        for item in recurring_line_items
+        for item in generated_recurring_line_items
         if item.get("MyPortalRecurringItemId")
     ]
     now = datetime.now(timezone.utc)
@@ -565,6 +569,21 @@ async def generate_invoice(
             invoice_id=invoice_id,
             error=str(exc),
         )
+        try:
+            await invoice_repo.delete_invoice(invoice_id)
+        except Exception as cleanup_exc:
+            logger.error(
+                "Failed to remove invoice after recurring billing update failed",
+                invoice_id=invoice_id,
+                error=str(cleanup_exc),
+            )
+        return {
+            "status": "error",
+            "reason": "Failed to mark recurring invoice items as billed",
+            "error": str(exc),
+            "company_id": company_id,
+            "invoice_id": invoice_id,
+        }
 
     # Mark time entries as billed and update ticket statuses
     billed_count = 0
@@ -643,8 +662,49 @@ async def generate_invoice(
         "invoice_number": invoice_number,
         "total_amount": str(total_amount),
         "line_items": len(combined_line_items),
-        "recurring_items": len(recurring_line_items),
+        "recurring_items": len(generated_recurring_line_items),
         "ticket_items": len(ticket_line_items),
         "tickets_billed": len(tickets_context),
         "time_entries_recorded": billed_count,
     }
+
+
+async def generate_subscription_invoice(
+    company_id: int,
+    *,
+    recurring_item: dict[str, Any],
+    quantity: int,
+    unit_amount: Decimal,
+) -> dict[str, Any]:
+    """Invoice one subscription charge locally, then sync it using its send policy."""
+    if int(recurring_item.get("company_id") or 0) != int(company_id):
+        raise ValueError("Recurring invoice item does not belong to the company")
+    if quantity <= 0 or unit_amount < 0:
+        raise ValueError("Subscription invoice quantity and unit amount must be valid")
+
+    line_item = {
+        "Description": str(
+            recurring_item.get("description_template")
+            or recurring_item.get("product_code")
+            or "Subscription"
+        ),
+        "Quantity": quantity,
+        "UnitAmount": float(unit_amount),
+        "ItemCode": str(recurring_item.get("product_code") or ""),
+        "MyPortalRecurringItemId": int(recurring_item["id"]),
+    }
+    result = await generate_invoice(
+        company_id,
+        include_recurring_items=False,
+        recurring_line_items=[line_item],
+        include_ticket_items=False,
+    )
+    if result.get("status") != "succeeded":
+        return result
+
+    company = await company_repo.get_company_by_id(company_id) or {}
+    auto_send = bool(company.get("xero_auto_send_subscription_invoices", 1))
+    result["xero_result"] = await xero_service.sync_invoice(
+        int(result["invoice_id"]), auto_send=auto_send
+    )
+    return result

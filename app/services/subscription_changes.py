@@ -247,7 +247,7 @@ async def apply_subscription_addition(
     
     Increases the subscription quantity immediately and creates a change request
     record with the prorated charge. If there's a charge, automatically creates
-    a Xero invoice.
+    a MyPortal invoice and then applies the configured Xero delivery policy.
     
     Args:
         subscription_id: The subscription to modify
@@ -299,24 +299,25 @@ async def apply_subscription_addition(
         f"prorated charge: ${prorated_charge:.2f}"
     )
     
-    # If there's a charge, send to Xero
+    # Keep the recurring item current before generating the one-item invoice.
+    updated_subscription = await subscriptions_repo.get_subscription(subscription_id)
+    recurring_item = None
+    if updated_subscription:
+        from app.services.subscription_billing import sync_subscription_recurring_item
+
+        recurring_item = await sync_subscription_recurring_item(updated_subscription)
+
+    # If there's a charge, record it in MyPortal before any Xero sync.
     xero_result = None
     if prorated_charge and prorated_charge > 0:
-        from app.services import xero as xero_service
-        
-        # Get product name for invoice description
-        product_name = subscription.get("product_name") or f"Product {subscription['product_id']}"
-        
         try:
-            xero_result = await xero_service.send_subscription_charge_to_xero(
-                subscription_id=subscription_id,
-                change_request_id=change_request["id"],
-                customer_id=subscription["customer_id"],
-                product_name=product_name,
-                product_code=subscription.get("product_sku") or subscription.get("sku"),
-                quantity_change=quantity_to_add,
-                prorated_charge=prorated_charge,
-                end_date=subscription["end_date"],
+            from app.services.invoice_generator import generate_subscription_invoice
+
+            xero_result = await generate_subscription_invoice(
+                int(subscription["customer_id"]),
+                recurring_item=recurring_item,
+                quantity=quantity_to_add,
+                unit_amount=prorated_charge / Decimal(quantity_to_add),
             )
             
             # If successful, update the change request with the invoice number
@@ -345,13 +346,6 @@ async def apply_subscription_addition(
                 "status": "error",
                 "error": str(exc),
             }
-    
-    # Get updated subscription
-    updated_subscription = await subscriptions_repo.get_subscription(subscription_id)
-    if updated_subscription:
-        from app.services.subscription_billing import sync_subscription_recurring_item
-
-        await sync_subscription_recurring_item(updated_subscription)
     
     return {
         "subscription": updated_subscription,
