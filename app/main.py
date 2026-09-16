@@ -8711,16 +8711,6 @@ def _format_booking_requester_name(user_record: Mapping[str, Any] | None) -> str
     ).strip()
 
 
-async def _with_uninitialised_db_fallback(awaitable: Awaitable[Any], fallback: Any) -> Any:
-    """Return a fallback value when optional helpers run without an initialised DB."""
-    try:
-        return await awaitable
-    except RuntimeError as exc:
-        if "Database pool not initialised" in str(exc):
-            return fallback
-        raise
-
-
 async def _render_portal_ticket_detail(
     request: Request,
     user: dict[str, Any],
@@ -9494,26 +9484,18 @@ async def _render_ticket_detail(
         "description_text": sanitized_description.text_content,
     }
     from app.services import slas as sla_service
-    ticket_sla = (
-        await _with_uninitialised_db_fallback(
-            sla_service.statuses_for_tickets([ticket_id]),
-            {},
-        )
-    ).get(ticket_id, {"state": "not_applicable", "label": "No SLA"})
+    ticket_sla = (await sla_service.statuses_for_tickets([ticket_id])).get(
+        ticket_id,
+        {"state": "not_applicable", "label": "No SLA"},
+    )
 
     replies = await tickets_repo.list_replies(ticket_id)
-    split_replies = await _with_uninitialised_db_fallback(
-        tickets_repo.list_split_replies_for_original(ticket_id),
-        [],
-    )
+    split_replies = await tickets_repo.list_split_replies_for_original(ticket_id)
     replies = [*replies, *split_replies]
     watchers = await tickets_repo.list_watchers(ticket_id)
     from app.services import ticket_shipment_tracking as shipment_watch_service
 
-    shipment_watch = await _with_uninitialised_db_fallback(
-        shipment_watch_service.get_watch_for_ticket(ticket_id),
-        None,
-    )
+    shipment_watch = await shipment_watch_service.get_watch_for_ticket(ticket_id)
 
     related_user_ids: set[int] = set()
     for key in ("assigned_user_id", "requester_id"):
@@ -9809,8 +9791,11 @@ async def _render_ticket_detail(
             *({**reply, "type": "reply"} for reply in enriched_replies),
             *({**recording, "type": "call_recording"} for recording in enriched_recordings),
         ],
-        key=lambda item: item.get("call_date")
-        or item.get("created_at")
+        key=lambda item: (
+            item.get("call_date")
+            if item.get("type") == "call_recording"
+            else item.get("created_at")
+        )
         or datetime.min.replace(tzinfo=timezone.utc),
         reverse=True,
     )
@@ -9931,14 +9916,8 @@ async def _render_ticket_detail(
         seen_priorities.add(normalised)
         priority_options.append(option_str)
 
-    ticket_assets = await _with_uninitialised_db_fallback(
-        tickets_repo.list_ticket_assets(ticket_id),
-        [],
-    )
-    ticket_suggested_assets = await _with_uninitialised_db_fallback(
-        tickets_repo.list_ticket_suggested_assets(ticket_id),
-        [],
-    )
+    ticket_assets = await tickets_repo.list_ticket_assets(ticket_id)
+    ticket_suggested_assets = await tickets_repo.list_ticket_suggested_assets(ticket_id)
     asset_selection: list[int] = []
     for linked in ticket_assets:
         asset_id = linked.get("asset_id")
@@ -10015,14 +9994,8 @@ async def _render_ticket_detail(
     asset_options.sort(key=lambda option: option["label"].lower())
 
     ticket_related_items = await _load_ticket_stored_related_items(ticket_id)
-    ticket_expenses = await _with_uninitialised_db_fallback(
-        expenses_repo.list_expenses(ticket_id),
-        [],
-    )
-    ticket_canned_responses = await _with_uninitialised_db_fallback(
-        canned_responses_repo.list_responses(),
-        [],
-    )
+    ticket_expenses = await expenses_repo.list_expenses(ticket_id)
+    ticket_canned_responses = await canned_responses_repo.list_responses()
     ticket_expense_total = sum(Decimal(str(expense.get("amount") or 0)) for expense in ticket_expenses)
 
     # Find relevant knowledge base articles based on AI tag matching

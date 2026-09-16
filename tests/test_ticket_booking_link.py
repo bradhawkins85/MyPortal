@@ -62,6 +62,7 @@ async def _setup_ticket_detail_mocks(monkeypatch, ticket, user_lookup_override=N
     monkeypatch.setattr(main.tickets_repo, "list_split_replies_for_original", AsyncMock(return_value=[]))
     monkeypatch.setattr(main.tickets_repo, "list_watchers", AsyncMock(return_value=[]))
     monkeypatch.setattr(main.tickets_repo, "list_ticket_assets", AsyncMock(return_value=[]))
+    monkeypatch.setattr(main.tickets_repo, "list_ticket_suggested_assets", AsyncMock(return_value=[]))
     monkeypatch.setattr(main.user_repo, "get_user_by_id", mock_get_user_by_id)
     monkeypatch.setattr(main.company_repo, "get_company_by_id", AsyncMock(return_value={"id": 1, "name": "Test Company"}))
     monkeypatch.setattr(main.modules_service, "list_modules", AsyncMock(return_value=[]))
@@ -85,7 +86,16 @@ async def _setup_ticket_detail_mocks(monkeypatch, ticket, user_lookup_override=N
         "find_relevant_services_for_ticket",
         AsyncMock(return_value=[]),
     )
+    monkeypatch.setattr(
+        main,
+        "_load_ticket_stored_related_items",
+        AsyncMock(return_value=[]),
+    )
     from app.repositories import call_recordings as call_recordings_repo
+    from app.repositories import ticket_canned_responses as canned_responses_repo
+    from app.repositories import ticket_expenses as expenses_repo
+    from app.services import slas as sla_service
+    from app.services import ticket_shipment_tracking as shipment_watch_service
 
     monkeypatch.setattr(
         call_recordings_repo,
@@ -95,6 +105,26 @@ async def _setup_ticket_detail_mocks(monkeypatch, ticket, user_lookup_override=N
     monkeypatch.setattr(
         main.attachments_repo,
         "list_attachments",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        shipment_watch_service,
+        "get_watch_for_ticket",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        sla_service,
+        "statuses_for_tickets",
+        AsyncMock(return_value={ticket["id"]: {"state": "not_applicable", "label": "No SLA"}}),
+    )
+    monkeypatch.setattr(
+        expenses_repo,
+        "list_expenses",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        canned_responses_repo,
+        "list_responses",
         AsyncMock(return_value=[]),
     )
 
