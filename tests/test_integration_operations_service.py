@@ -117,6 +117,11 @@ async def test_build_operations_center_aggregates_health_and_conflicts(monkeypat
         lambda command: command_map.get(command, frozenset()),
     )
     monkeypatch.setattr(
+        integration_operations,
+        "COMMANDS_BY_MODULE",
+        {"xero": {"sync_to_xero"}, "m365-admin": {"sync_m365_data"}},
+    )
+    monkeypatch.setattr(
         integration_operations.scheduled_tasks_repo, "list_tasks", fake_list_tasks
     )
     monkeypatch.setattr(
@@ -191,6 +196,9 @@ async def test_build_operations_center_flags_missing_scheduled_task_for_enabled_
         integration_operations,
         "modules_for_command",
         lambda command: frozenset({"huntress"}) if command == "sync_huntress" else frozenset(),
+    )
+    monkeypatch.setattr(
+        integration_operations, "COMMANDS_BY_MODULE", {"huntress": {"sync_huntress"}}
     )
     monkeypatch.setattr(
         integration_operations.scheduled_tasks_repo, "list_tasks", fake_list_tasks
