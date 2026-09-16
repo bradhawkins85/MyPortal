@@ -8531,6 +8531,7 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                             graph_token
                         )
                     except Exception as retry_exc:  # noqa: BLE001 – normalize retry errors into remediation failure
+                        success = False
                         outcome_message = str(retry_exc)
                         log_error(
                             "M365 internal phishing Forms remediation failed after permission repair",
@@ -8539,7 +8540,6 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                             error=outcome_message,
                         )
                 else:
-                    success = False
                     if exc.http_status == 403:
                         outcome_message = _forms_permission_guidance(
                             "update Microsoft Forms settings"
