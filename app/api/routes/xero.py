@@ -47,7 +47,7 @@ class XeroTenantConnection(BaseModel):
 
 class XeroTenantListResponse(BaseModel):
     tenants: list[XeroTenantConnection]
-    current_tenant_id: str
+    current_tenant_id: str | None = None
 
 
 def _get_settings() -> Settings:
@@ -358,7 +358,11 @@ async def list_tenants() -> XeroTenantListResponse:
         
         # Get current tenant_id from settings
         settings = module.get("settings") or {}
-        current_tenant_id = settings.get("tenant_id", "")
+        current_tenant_id = settings.get("tenant_id")
+        if isinstance(current_tenant_id, str):
+            current_tenant_id = current_tenant_id.strip() or None
+        elif current_tenant_id is not None:
+            current_tenant_id = str(current_tenant_id).strip() or None
         
         logger.info(
             "Listed Xero tenants",
@@ -368,7 +372,7 @@ async def list_tenants() -> XeroTenantListResponse:
         
         return XeroTenantListResponse(
             tenants=[XeroTenantConnection(**tenant) for tenant in tenants],
-            current_tenant_id=str(current_tenant_id or ""),
+            current_tenant_id=current_tenant_id,
         )
     
     except httpx.HTTPStatusError as exc:
