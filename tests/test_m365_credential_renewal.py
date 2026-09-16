@@ -248,7 +248,7 @@ async def test_renew_admin_client_secret_validation_failure_restores_previous_se
 
     assert len(persisted) == 2
     assert persisted[0]["client_secret"] == "new-secret"
-    assert persisted[0]["client_secret_key_id"] == OLD_KEY_ID
+    assert persisted[0]["client_secret_key_id"] == NEW_KEY_ID
     assert persisted[1]["client_secret"] == "old-secret"
     assert persisted[1]["client_secret_key_id"] == OLD_KEY_ID
     remove_call = next(c for c in posted_calls if "removePassword" in c["url"])

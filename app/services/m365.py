@@ -2299,7 +2299,6 @@ async def renew_admin_client_secret(company_id: int | None = None) -> dict[str, 
     )
     old_key_id: str | None = creds.get("client_secret_key_id")
     old_expires_at = _parse_client_secret_expires(creds.get("client_secret_expires_at"))
-    persisted_key_id = old_key_id or new_key_id
 
     if company_id is None:
         await update_admin_m365_credentials(
@@ -2307,7 +2306,7 @@ async def renew_admin_client_secret(company_id: int | None = None) -> dict[str, 
             client_secret=new_secret,
             tenant_id=tenant_id,
             app_object_id=app_object_id,
-            client_secret_key_id=persisted_key_id,
+            client_secret_key_id=new_key_id,
             client_secret_expires_at=new_expires_at,
             pkce_client_id=creds.get("pkce_client_id"),
         )
@@ -2318,7 +2317,7 @@ async def renew_admin_client_secret(company_id: int | None = None) -> dict[str, 
             client_secret=new_secret,
             tenant_id=tenant_id,
             app_object_id=app_object_id,
-            client_secret_key_id=persisted_key_id,
+            client_secret_key_id=new_key_id,
             client_secret_expires_at=new_expires_at,
             pkce_client_id=creds.get("pkce_client_id"),
         )
