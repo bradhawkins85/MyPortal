@@ -83,9 +83,7 @@ async def _validate_requirement_owner(company_id: int, owner_user_id: int | None
 def _requirement_upload_dir() -> Path:
     from app import main as main_module
 
-    path = main_module._private_uploads_path / "compliance" / "essential8"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return main_module._private_uploads_path / "compliance" / "essential8"
 
 
 def _sanitize_requirement_evidence_filename(filename: str | None) -> str:
@@ -112,12 +110,12 @@ def _allocate_requirement_evidence_storage_path(
     safe_name: str,
 ) -> tuple[Path, Path]:
     storage_dir = _requirement_upload_dir()
-    storage_dir.mkdir(parents=True, exist_ok=True)
-    if storage_dir.is_symlink():
+    if storage_dir.exists() and storage_dir.is_symlink():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to allocate evidence storage path",
         )
+    storage_dir.mkdir(parents=True, exist_ok=True)
     storage_root = storage_dir.resolve(strict=True)
     suffix = Path(safe_name).suffix.lower()
     storage_name = f"company_{company_id}_requirement_{requirement_id}_{uuid4().hex}{suffix}"
@@ -723,7 +721,7 @@ async def upload_requirement_evidence(
                     )
                 handle.write(chunk)
     except Exception:
-        if created_file and storage_root is not None and storage_path is not None and storage_path.parent == storage_root:
+        if created_file and storage_root is not None and storage_path is not None and storage_root in storage_path.parents:
             storage_path.unlink(missing_ok=True)
         raise
     finally:
