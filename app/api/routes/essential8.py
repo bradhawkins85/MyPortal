@@ -127,15 +127,15 @@ def _open_requirement_evidence_storage_file(
     company_id: int,
     requirement_id: int,
     safe_name: str,
-) -> tuple[Path, BinaryIO]:
+) -> tuple[Path, Path, BinaryIO]:
     for _ in range(5):
-        _, _, storage_path = _allocate_requirement_evidence_storage_path(
+        storage_root, _, storage_path = _allocate_requirement_evidence_storage_path(
             company_id=company_id,
             requirement_id=requirement_id,
             safe_name=safe_name,
         )
         try:
-            return storage_path, storage_path.open("xb")
+            return storage_root, storage_path, storage_path.open("xb")
         except FileExistsError:
             continue
     raise HTTPException(
@@ -698,17 +698,14 @@ async def upload_requirement_evidence(
     safe_name = _sanitize_requirement_evidence_filename(evidence_file.filename)
     total_size = 0
     storage_root: Path | None = None
-    storage_name: str | None = None
     storage_path: Path | None = None
     created_file = False
     try:
-        storage_path, storage_handle = _open_requirement_evidence_storage_file(
+        storage_root, storage_path, storage_handle = _open_requirement_evidence_storage_file(
             company_id=company_id,
             requirement_id=requirement_id,
             safe_name=safe_name,
         )
-        storage_root = storage_path.parent
-        storage_name = storage_path.name
         created_file = True
         with storage_handle as handle:
             while True:
@@ -728,7 +725,7 @@ async def upload_requirement_evidence(
         raise
     finally:
         await evidence_file.close()
-    relative_path = f"compliance/essential8/{storage_name}"
+    relative_path = f"compliance/essential8/{storage_path.name}"
     return await essential8_repo.add_requirement_evidence(
         company_id=company_id,
         requirement_id=requirement_id,
