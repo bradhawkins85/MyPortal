@@ -200,7 +200,7 @@ async def test_renew_admin_client_secret_backfills_missing_app_object_id():
     """Renewal recovers and persists a missing admin app object ID from Graph."""
     stored_creds = {
         "tenant_id": "tenant-1",
-        "client_id": "admin-client-id",
+        "client_id": "66666666-6666-6666-6666-666666666666",
         "client_secret": "old-secret",
         "app_object_id": None,
         "client_secret_key_id": OLD_KEY_ID,
