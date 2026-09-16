@@ -100,6 +100,9 @@ def _iter_conditional_matches(
 
         parse_limit = min(text_length, start + _MAX_CONDITIONAL_LENGTH + 2)
         cursor = _skip_whitespace(text, start + 2, parse_limit)
+        if cursor >= parse_limit:
+            search_from = start + 2
+            continue
         if text[cursor:cursor + 2].lower() != "if":
             search_from = start + 2
             continue

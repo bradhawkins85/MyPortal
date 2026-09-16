@@ -420,7 +420,10 @@ def _iter_var_token_matches(text: str) -> list[tuple[int, int, str, str | None]]
         if start < 0:
             break
 
-        close_limit = min(text_length, start + _MAX_VAR_TOKEN_LENGTH + 2)  # ${ opener
+        close_limit = min(
+            text_length,
+            start + _MAX_VAR_TOKEN_LENGTH + 2,  # +2 accounts for the `${` opener
+        )
         close_index = text.find("}", start + 2, close_limit)
         if close_index < 0:
             search_from = start + 2
