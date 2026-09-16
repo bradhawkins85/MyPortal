@@ -4,7 +4,7 @@ import html
 from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Optional
+from typing import BinaryIO, Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
@@ -127,7 +127,7 @@ def _open_requirement_evidence_storage_file(
     company_id: int,
     requirement_id: int,
     safe_name: str,
-) -> tuple[Path, str, Path, object]:
+) -> tuple[Path, str, Path, BinaryIO]:
     for _ in range(5):
         storage_root, storage_name, storage_path = _allocate_requirement_evidence_storage_path(
             company_id=company_id,
@@ -702,10 +702,9 @@ async def upload_requirement_evidence(
         requirement_id=requirement_id,
         safe_name=safe_name,
     )
-    created_file = False
+    created_file = True
     try:
         with storage_handle as handle:
-            created_file = True
             while True:
                 chunk = await evidence_file.read(1024 * 1024)
                 if not chunk:
