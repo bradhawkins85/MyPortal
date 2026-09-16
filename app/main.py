@@ -2149,6 +2149,7 @@ async def _build_base_context(
         "can_manage_compliance_checks": _menu_can(menu_access, "menu.compliance_checks.library", write=True) or is_super_admin or _has_permission("can_manage_compliance_checks"),
         "can_view_m365_user_mailboxes": _menu_can(menu_access, "menu.m365.user_mailboxes") or is_super_admin or _has_permission("can_view_m365_user_mailboxes"),
         "can_view_m365_shared_mailboxes": _menu_can(menu_access, "menu.m365.shared_mailboxes") or is_super_admin or _has_permission("can_view_m365_shared_mailboxes"),
+        "can_access_m365_spam_purge": _menu_can(menu_access, "menu.m365.spam_purge", write=True),
         "can_access_chat": _menu_can(menu_access, "menu.chat") or is_super_admin or _has_permission("can_access_chat"),
         "can_access_marketing": _menu_can(menu_access, "menu.marketing") or has_marketing_access,
         "can_manage_subscriptions": _menu_can(menu_access, "menu.subscriptions", write=True),
