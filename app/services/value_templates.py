@@ -16,6 +16,8 @@ from app.services import (
 _TOKEN_PATTERN = re.compile(r"\{\{\s*([^\s{}]+)\s*\}\}")
 _VAR_METHOD_PATTERN = re.compile(r"\.([A-Za-z_][A-Za-z0-9_]*)\(([^()]*)\)")
 _UPPER_TOKEN_SANITISER = re.compile(r"[^A-Z0-9]+")
+_VAR_TOKEN_OPENER_LENGTH = 2
+_VAR_TOKEN_CLOSER_LENGTH = 1
 _MAX_VAR_TOKEN_LENGTH = 2048
 _MAX_VAR_FORMAT_LENGTH = 512
 
@@ -422,7 +424,10 @@ def _iter_var_token_matches(text: str) -> list[tuple[int, int, str, str | None]]
 
         close_limit = min(
             text_length,
-            start + _MAX_VAR_TOKEN_LENGTH + 2,  # +2 accounts for the `${` opener
+            start
+            + _VAR_TOKEN_OPENER_LENGTH
+            + _MAX_VAR_TOKEN_LENGTH
+            + _VAR_TOKEN_CLOSER_LENGTH,
         )
         close_index = text.find("}", start + 2, close_limit)
         if close_index < 0:
