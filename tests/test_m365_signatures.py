@@ -209,6 +209,33 @@ def test_is_template_active_respects_inclusive_schedule_bounds():
     assert m365_signatures.is_template_active(template, on_date=date(2026, 10, 1)) is False
 
 
+def test_pick_primary_template_uses_earliest_start_date_for_equal_priority():
+    primary = m365_signatures.pick_primary_template(
+        [
+            {
+                "id": 7,
+                "status": "published",
+                "priority": 4,
+                "is_default": False,
+                "schedule_start_on": date(2026, 9, 10),
+                "schedule_end_on": date(2026, 9, 30),
+            },
+            {
+                "id": 8,
+                "status": "published",
+                "priority": 4,
+                "is_default": False,
+                "schedule_start_on": date(2026, 9, 1),
+                "schedule_end_on": date(2026, 9, 30),
+            },
+        ],
+        on_date=date(2026, 9, 16),
+    )
+
+    assert primary is not None
+    assert primary["id"] == 8
+
+
 def test_signature_sidebar_requires_explicit_permission():
     source = (ROOT / "app" / "templates" / "base.html").read_text(encoding="utf-8")
 

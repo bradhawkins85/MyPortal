@@ -98,11 +98,11 @@ def pick_primary_template(
     if not active:
         return None
 
-    def _sort_key(template: dict[str, Any]) -> tuple[int, int, date, int]:
+    def _sort_key(template: dict[str, Any]) -> tuple[int, int, int, int]:
         return (
             _normalise_priority(template.get("priority")),
             1 if template.get("is_default") else 0,
-            _normalise_date(template.get("schedule_start_on")) or date.max,
+            -((_normalise_date(template.get("schedule_start_on")) or date.max).toordinal()),
             -int(template.get("id") or 0),
         )
 
