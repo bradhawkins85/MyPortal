@@ -262,6 +262,7 @@ async def _build_active_user_accounts(company_id: int) -> dict[str, Any]:
 async def _build_m365_best_practices(company_id: int) -> dict[str, Any]:
     results = await m365_bp_repo.list_results(company_id)
     history = await m365_bp_repo.list_daily_history(company_id, limit=30)
+    catalog = m365_bp_service._catalog_map()
     counts: dict[str, int] = {
         "pass": 0,
         "fail": 0,
@@ -281,7 +282,7 @@ async def _build_m365_best_practices(company_id: int) -> dict[str, Any]:
     for row in results:
         if str(row.get("status") or "").lower() != "fail":
             continue
-        bp = m365_bp_service._catalog_map().get(
+        bp = catalog.get(
             str(row.get("check_id") or ""),
             {"id": str(row.get("check_id") or "")},
         )
@@ -803,9 +804,10 @@ async def _build_active_user_accounts_detail(company_id: int) -> dict[str, Any]:
 async def _build_m365_best_practices_detail(company_id: int) -> dict[str, Any]:
     """Per-check breakdown for the detail page."""
     results = await m365_bp_repo.list_results(company_id)
+    catalog = m365_bp_service._catalog_map()
     checks: list[dict[str, Any]] = []
     for row in results:
-        bp = m365_bp_service._catalog_map().get(
+        bp = catalog.get(
             str(row.get("check_id") or ""),
             {"id": str(row.get("check_id") or "")},
         )

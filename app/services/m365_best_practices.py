@@ -6990,6 +6990,7 @@ async def remediate_failed_checks_batch(company_id: int, *, scope: str) -> dict[
             "failures": [],
         }
     failures: list[str] = []
+    refresh_issues: list[str] = []
     succeeded = 0
     for candidate in candidates:
         check_id = str(candidate.get("check_id") or "")
@@ -7010,7 +7011,13 @@ async def remediate_failed_checks_batch(company_id: int, *, scope: str) -> dict[
         except (ValueError, M365Error) as exc:
             if remediation_succeeded:
                 succeeded += 1
-            failures.append(f"{candidate.get('check_name') or check_id}: unable to refresh check ({exc})")
+                refresh_issues.append(
+                    f"{candidate.get('check_name') or check_id}: unable to refresh check ({exc})"
+                )
+            else:
+                failures.append(
+                    f"{candidate.get('check_name') or check_id}: unable to refresh check ({exc})"
+                )
             continue
         if remediation_succeeded:
             succeeded += 1
@@ -7023,6 +7030,11 @@ async def remediate_failed_checks_batch(company_id: int, *, scope: str) -> dict[
     )
     if failed:
         message = f"{message} Review per-check remediation status below for details."
+    elif refresh_issues:
+        message = (
+            f"{message} Verification warnings were recorded for {len(refresh_issues)} check(s); "
+            "review the latest evaluation details below."
+        )
     log_info(
         "M365 best practice batch remediation finished",
         company_id=company_id,
@@ -7030,9 +7042,10 @@ async def remediate_failed_checks_batch(company_id: int, *, scope: str) -> dict[
         total=len(candidates),
         succeeded=succeeded,
         failed=failed,
+        refresh_warnings=len(refresh_issues),
     )
     return {
-        "success": failed == 0,
+        "success": failed == 0 and not refresh_issues,
         "message": message,
         "scope": normalised_scope,
         "scope_label": scope_label,
@@ -7040,6 +7053,7 @@ async def remediate_failed_checks_batch(company_id: int, *, scope: str) -> dict[
         "succeeded": succeeded,
         "failed": failed,
         "failures": failures,
+        "refresh_issues": refresh_issues,
     }
 
 
