@@ -90,7 +90,7 @@ def _delete_cover_image_file(relative_path: str) -> None:
         candidate.relative_to(base)
         candidate.unlink(missing_ok=True)
     except (ValueError, OSError):  # pragma: no cover - defensive
-        pass
+        return
 
 
 async def company_overview_report_page(request: Request):

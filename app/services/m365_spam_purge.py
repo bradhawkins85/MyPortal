@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
+from contextlib import suppress
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -218,12 +219,10 @@ async def _run_search(request_id: int, *, retry: bool = False) -> None:
         if retry:
             # A prior attempt can fail after Purview persisted the object. Remove
             # only this request's unique, non-destructive search before recreating it.
-            try:
+            with suppress(Exception):
                 await m365_service._scc_invoke_command(token, tenant_id, "Remove-ComplianceSearch", {
                     "Identity": request["search_name"], "Confirm": False,
                 }, organization=organization)
-            except Exception:  # noqa: BLE001 - absence is expected on an early failure
-                pass
         for attempt in range(_NEW_SEARCH_MAX_RETRIES + 1):
             try:
                 await m365_service._scc_invoke_command(token, tenant_id, "New-ComplianceSearch", {

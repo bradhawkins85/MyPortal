@@ -1356,7 +1356,7 @@ async def _graph_get(
         try:
             graph_error_code = (response.json().get("error") or {}).get("code")
         except Exception:  # noqa: BLE001
-            pass
+            graph_error_code = None
         raise M365Error(
             f"Microsoft Graph request failed ({response.status_code})",
             http_status=response.status_code,
@@ -1606,7 +1606,8 @@ async def _graph_post(
             if isinstance(message_value, str):
                 graph_error_message = message_value
         except Exception:  # noqa: BLE001
-            pass
+            graph_error_code = None
+            graph_error_message = None
         suffix = f": {graph_error_message}" if graph_error_message else ""
         raise M365Error(
             f"Microsoft Graph POST failed ({response.status_code}){suffix}",
@@ -1725,7 +1726,8 @@ async def _graph_patch(
             if isinstance(message_value, str):
                 graph_error_message = message_value
         except Exception:  # noqa: BLE001
-            pass
+            graph_error_code = None
+            graph_error_message = None
         suffix = f": {graph_error_message}" if graph_error_message else ""
         raise M365Error(
             f"Microsoft Graph PATCH failed ({response.status_code}){suffix}",

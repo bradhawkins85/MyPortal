@@ -45,10 +45,8 @@ def _normalise_content_reference(value: str | None) -> str:
     if not reference:
         return ""
     reference = reference.strip("<>")
-    try:
+    with suppress(Exception):
         reference = unquote(reference)
-    except Exception:  # pragma: no cover - unquote is defensive here
-        pass
     return reference.strip().lower()
 
 
@@ -607,14 +605,10 @@ def _extract_record_id(record: Any) -> int | None:
     if isinstance(record, Mapping):
         return _int_or_none(record.get("id"))
     if hasattr(record, "get"):
-        try:
+        with suppress(Exception):
             return _int_or_none(record.get("id"))  # type: ignore[call-arg]
-        except Exception:  # pragma: no cover - defensive
-            pass
-    try:
+    with suppress(Exception):
         return _int_or_none(record["id"])  # type: ignore[index]
-    except Exception:  # pragma: no cover - defensive
-        pass
     return _int_or_none(getattr(record, "id", None))
 
 
@@ -1392,7 +1386,7 @@ async def _find_existing_ticket_for_reply(
                 # request rather than falling through to a less reliable match.
                 return None if _ticket_is_closed(ticket) else ticket
         except Exception:  # pragma: no cover - defensive
-            pass
+            rows = []
 
         try:
             rows = await db.fetch_all(
@@ -1405,7 +1399,7 @@ async def _find_existing_ticket_for_reply(
                 ticket = _normalise_ticket(rows[0])
                 return None if _ticket_is_closed(ticket) else ticket
         except Exception:  # pragma: no cover - defensive
-            pass
+            rows = []
 
     related_ids = _expand_ticket_external_references(related_message_ids)
 
@@ -1418,7 +1412,7 @@ async def _find_existing_ticket_for_reply(
                 if ticket and not _ticket_is_closed(ticket):
                     return ticket
             except Exception:  # pragma: no cover - defensive logging
-                pass
+                ticket = None
 
             try:
                 rows = await db.fetch_all(
@@ -1436,7 +1430,7 @@ async def _find_existing_ticket_for_reply(
                     if not _ticket_is_closed(ticket):
                         return ticket
             except Exception:  # pragma: no cover - defensive logging
-                pass
+                rows = []
 
     # Next, try to match Syncro-originated replies using the embedded message id
     syncro_external_id = _extract_syncro_message_id(subject) or _extract_syncro_message_id(message_body)
@@ -1446,7 +1440,7 @@ async def _find_existing_ticket_for_reply(
             if ticket and not _ticket_is_closed(ticket):
                 return ticket
         except Exception:  # pragma: no cover - defensive logging
-            pass
+            ticket = None
 
     # If no ticket number found, try to match by normalized subject
     # Only match non-closed tickets where sender is requester or watcher

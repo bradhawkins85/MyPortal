@@ -338,7 +338,7 @@ class FeatureRegistry:
 
                 route.app = _request_response(route.get_route_handler())
             except Exception:  # pragma: no cover - defensive
-                pass
+                continue
 
     async def _start_background_jobs(self, state: FeaturePackState) -> None:
         for factory in state.pack.background_jobs:

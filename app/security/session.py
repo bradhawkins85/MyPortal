@@ -158,7 +158,7 @@ class SessionManager:
                 if scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https":
                     secure = True
             except Exception:  # pragma: no cover - defensive
-                pass
+                secure = self._is_secure()
         response.set_cookie(
             self.session_cookie_name,
             session.session_token,

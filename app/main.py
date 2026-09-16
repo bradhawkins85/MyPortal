@@ -8,6 +8,7 @@ import math
 import random
 import re
 import secrets
+from contextlib import suppress
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta, timezone
@@ -891,12 +892,8 @@ _uploads_path.mkdir(parents=True, exist_ok=True)
 
 _private_uploads_path = Path(__file__).resolve().parent.parent / "private_uploads"
 _private_uploads_path.mkdir(parents=True, exist_ok=True)
-try:
+with suppress(OSError):
     _private_uploads_path.chmod(0o700)
-except OSError:
-    # The filesystem may not support chmod (e.g. on Windows).  Continue with
-    # the secure default provided by ``mkdir``.
-    pass
 
 
 def _sanitize_upload_path(file_path: str) -> PurePosixPath:

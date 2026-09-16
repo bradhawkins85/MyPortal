@@ -7540,7 +7540,7 @@ async def run_single_check(
                     company_id, force_client_credentials=True
                 )
         except Exception:  # noqa: BLE001 – self-heal must never raise
-            pass
+            granted = []
 
     run_at = datetime.now(timezone.utc).replace(tzinfo=None)
     tenant_capabilities = await detect_tenant_capabilities(graph_token)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import date, datetime, timezone
+from contextlib import suppress
 from typing import Any
 
 from app.core.database import db
@@ -13,11 +14,9 @@ SignatureTemplateRecord = dict[str, Any]
 async def _ensure_connection() -> None:
     is_connected = getattr(db, "is_connected", None)
     if callable(is_connected):
-        try:
+        with suppress(Exception):
             if is_connected():
                 return
-        except Exception:  # pragma: no cover - defensive guard
-            pass
     connect = getattr(db, "connect", None)
     if not connect:
         return
