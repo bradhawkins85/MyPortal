@@ -5730,6 +5730,9 @@ _STATUS_PRIORITY_ORDER = {
     STATUS_PASS: 2,
     STATUS_NOT_APPLICABLE: 3,
 }
+_REGRESSION_NOTICE = (
+    "Regression detected: this check changed from pass to fail since the last successful evaluation."
+)
 
 
 def _benchmark_category_label(bp: Mapping[str, Any]) -> str:
@@ -5820,10 +5823,9 @@ def _is_regression(previous_status: str | None, status: str) -> bool:
 def _with_regression_notice(details: str, *, previous_status: str | None, status: str) -> str:
     if not _is_regression(previous_status, status):
         return details
-    notice = "Regression detected: this check changed from pass to fail since the last successful evaluation."
-    if notice in details:
+    if _REGRESSION_NOTICE in details:
         return details
-    return f"{notice} {details}".strip()
+    return f"{_REGRESSION_NOTICE} {details}".strip()
 
 
 def _sort_results_by_priority(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -6953,7 +6955,7 @@ async def get_last_results(company_id: int) -> list[dict[str, Any]]:
         }
         result.update(_posture_metadata_for_bp(bp_meta))
         result["regression_detected"] = str(result.get("details") or "").startswith(
-            "Regression detected:"
+            _REGRESSION_NOTICE
         )
         out.append(result)
     return _sort_results_by_priority(out)
@@ -6996,6 +6998,7 @@ async def remediate_failed_checks_batch(company_id: int, *, scope: str) -> dict[
         except (ValueError, M365Error) as exc:
             failures.append(f"{candidate.get('check_name') or check_id}: remediation failed ({exc})")
             continue
+        remediation_succeeded = bool(outcome.get("success"))
         try:
             await run_single_check(
                 company_id=company_id,
@@ -7005,9 +7008,11 @@ async def remediate_failed_checks_batch(company_id: int, *, scope: str) -> dict[
                 emit_ticket_on_fail=False,
             )
         except (ValueError, M365Error) as exc:
+            if remediation_succeeded:
+                succeeded += 1
             failures.append(f"{candidate.get('check_name') or check_id}: unable to refresh check ({exc})")
             continue
-        if outcome.get("success"):
+        if remediation_succeeded:
             succeeded += 1
         else:
             failures.append(f"{candidate.get('check_name') or check_id}: {outcome.get('message') or 'Remediation failed'}")
