@@ -8531,18 +8531,12 @@ async def remediate_check(company_id: int, check_id: str) -> dict[str, Any]:
                             graph_token
                         )
                     except Exception as retry_exc:  # noqa: BLE001 – normalize retry errors into remediation failure
-                        retry_error = (
-                            retry_exc
-                            if isinstance(retry_exc, M365Error)
-                            else M365Error(str(retry_exc))
-                        )
-                        success = False
-                        outcome_message = str(retry_error)
+                        outcome_message = str(retry_exc)
                         log_error(
                             "M365 internal phishing Forms remediation failed after permission repair",
                             company_id=company_id,
                             check_id=check_id,
-                            error=str(retry_error),
+                            error=outcome_message,
                         )
                 else:
                     success = False
