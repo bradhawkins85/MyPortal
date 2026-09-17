@@ -41,6 +41,10 @@ def _request(path: str, *, cookie: str | None = None) -> Request:
     )
 
 
+def _valid_browser_binding(seed: str = "A") -> str:
+    return seed * passkeys_service.BROWSER_BINDING_TOKEN_LENGTH
+
+
 def _session() -> SessionData:
     now = datetime.utcnow()
     return SessionData(
@@ -59,6 +63,7 @@ def _session() -> SessionData:
 @pytest.mark.anyio
 async def test_finish_passkey_authentication_creates_session(monkeypatch):
     recorded = {}
+    browser_binding = _valid_browser_binding()
 
     async def fake_get_passkey_challenge(challenge_id):
         return {"challenge_id": challenge_id, "challenge": "expected-challenge"}
@@ -142,7 +147,7 @@ async def test_finish_passkey_authentication_creates_session(monkeypatch):
 
     request = _request(
         "/auth/passkeys/authenticate/verify",
-        cookie="myportal_session_passkey_login=browser-binding",
+        cookie=f"myportal_session_passkey_login={browser_binding}",
     )
     response = await auth_routes.finish_passkey_authentication(
         PasskeyCredentialRequest(challenge_id="challenge-1", credential={"id": "credential-1"}),
@@ -154,12 +159,15 @@ async def test_finish_passkey_authentication_creates_session(monkeypatch):
     assert response.status_code == 200
     assert payload["user"]["id"] == 42
     assert payload["requires_totp_enrollment"] is False
+    assert recorded["consumed"]["browser_binding_hash"] == passkeys_service.browser_binding_hash(browser_binding)
     assert recorded["updated_passkey"]["sign_count"] == 5
     assert recorded["record_login"][0] == 42
 
 
 @pytest.mark.anyio
 async def test_finish_passkey_authentication_rejects_ineligible_user(monkeypatch):
+    browser_binding = _valid_browser_binding()
+
     async def fake_get_passkey_challenge(challenge_id):
         return {"challenge_id": challenge_id, "challenge": "expected-challenge"}
 
@@ -186,7 +194,7 @@ async def test_finish_passkey_authentication_rejects_ineligible_user(monkeypatch
 
     request = _request(
         "/auth/passkeys/authenticate/verify",
-        cookie="myportal_session_passkey_login=browser-binding",
+        cookie=f"myportal_session_passkey_login={browser_binding}",
     )
     with pytest.raises(HTTPException) as exc_info:
         await auth_routes.finish_passkey_authentication(
@@ -197,6 +205,190 @@ async def test_finish_passkey_authentication_rejects_ineligible_user(monkeypatch
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "Passkey sign-in is not available for this account."
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "cookie_value",
+    [
+        None,
+        "invalid",
+        _valid_browser_binding("A") + "A",
+        _valid_browser_binding("A")[:-1] + ";",
+        _valid_browser_binding("A")[:-1] + "\n",
+    ],
+)
+async def test_finish_passkey_authentication_rejects_missing_or_invalid_cookie(monkeypatch, cookie_value):
+    async def fail_get_passkey_challenge(challenge_id):
+        raise AssertionError("challenge lookup should not occur for a missing or invalid browser binding cookie")
+
+    monkeypatch.setattr(auth_routes.auth_repo, "get_passkey_challenge", fail_get_passkey_challenge)
+
+    request = _request("/auth/passkeys/authenticate/verify")
+    if cookie_value is not None:
+        request._cookies = {auth_routes._passkey_login_cookie_name(): cookie_value}
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_routes.finish_passkey_authentication(
+            PasskeyCredentialRequest(challenge_id="challenge-1", credential={"id": "credential-1"}),
+            request,
+            None,
+        )
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Passkey sign-in failed. Use another sign-in option and try again."
+
+
+@pytest.mark.anyio
+async def test_begin_passkey_authentication_generates_cookie_when_missing(monkeypatch):
+    recorded = {}
+    generated_binding = _valid_browser_binding("B")
+    expires_at = datetime(2026, 1, 1, 12)
+
+    async def fake_create_passkey_challenge(**kwargs):
+        recorded["challenge"] = kwargs
+
+    monkeypatch.setattr(auth_routes.auth_repo, "create_passkey_challenge", fake_create_passkey_challenge)
+    monkeypatch.setattr(
+        auth_routes.passkeys_service,
+        "authentication_options",
+        lambda: {
+            "challenge_id": "challenge-1",
+            "challenge": "expected-challenge",
+            "expires_at": expires_at,
+            "public_key": {"challenge": "expected-challenge"},
+        },
+    )
+    monkeypatch.setattr(auth_routes.passkeys_service, "generate_browser_binding_token", lambda: generated_binding)
+
+    response = await auth_routes.begin_passkey_authentication(
+        _request("/auth/passkeys/authenticate/options"),
+        None,
+    )
+
+    assert recorded["challenge"]["browser_binding_hash"] == passkeys_service.browser_binding_hash(generated_binding)
+    set_cookie = response.headers["set-cookie"]
+    assert f"{auth_routes._passkey_login_cookie_name()}={generated_binding}" in set_cookie
+    assert "HttpOnly" in set_cookie
+    assert "SameSite=lax" in set_cookie
+    assert "Max-Age=300" in set_cookie
+    # HTTP requests in the default test environment should not receive Secure cookies.
+    assert "Secure" not in set_cookie
+
+
+@pytest.mark.anyio
+async def test_begin_passkey_authentication_sets_secure_cookie_in_production(monkeypatch):
+    recorded = {}
+    generated_binding = _valid_browser_binding("P")
+    expires_at = datetime(2026, 1, 1, 12)
+
+    async def fake_create_passkey_challenge(**kwargs):
+        recorded["challenge"] = kwargs
+
+    monkeypatch.setattr(auth_routes.auth_repo, "create_passkey_challenge", fake_create_passkey_challenge)
+    monkeypatch.setattr(
+        auth_routes.passkeys_service,
+        "authentication_options",
+        lambda: {
+            "challenge_id": "challenge-prod",
+            "challenge": "expected-challenge",
+            "expires_at": expires_at,
+            "public_key": {"challenge": "expected-challenge"},
+        },
+    )
+    monkeypatch.setattr(auth_routes.passkeys_service, "generate_browser_binding_token", lambda: generated_binding)
+    monkeypatch.setattr(auth_routes.settings, "environment", "production")
+
+    response = await auth_routes.begin_passkey_authentication(
+        _request("/auth/passkeys/authenticate/options"),
+        None,
+    )
+
+    assert recorded["challenge"]["browser_binding_hash"] == passkeys_service.browser_binding_hash(generated_binding)
+    assert "Secure" in response.headers["set-cookie"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "cookie_value",
+    [
+        "invalid",
+        _valid_browser_binding("A") + "A",
+        _valid_browser_binding("A")[:-1] + ";",
+        _valid_browser_binding("A")[:-1] + "\n",
+    ],
+)
+async def test_begin_passkey_authentication_replaces_invalid_cookie(monkeypatch, cookie_value):
+    recorded = {}
+    generated_binding = _valid_browser_binding("C")
+    expires_at = datetime(2026, 1, 1, 12)
+
+    async def fake_create_passkey_challenge(**kwargs):
+        recorded["challenge"] = kwargs
+
+    monkeypatch.setattr(auth_routes.auth_repo, "create_passkey_challenge", fake_create_passkey_challenge)
+    monkeypatch.setattr(
+        auth_routes.passkeys_service,
+        "authentication_options",
+        lambda: {
+            "challenge_id": "challenge-1",
+            "challenge": "expected-challenge",
+            "expires_at": expires_at,
+            "public_key": {"challenge": "expected-challenge"},
+        },
+    )
+    monkeypatch.setattr(auth_routes.passkeys_service, "generate_browser_binding_token", lambda: generated_binding)
+
+    request = _request("/auth/passkeys/authenticate/options")
+    request._cookies = {auth_routes._passkey_login_cookie_name(): cookie_value}
+    response = await auth_routes.begin_passkey_authentication(request, None)
+
+    assert recorded["challenge"]["browser_binding_hash"] == passkeys_service.browser_binding_hash(generated_binding)
+    assert cookie_value not in response.headers["set-cookie"]
+
+
+@pytest.mark.anyio
+async def test_begin_passkey_authentication_reuses_valid_cookie_for_multiple_ceremonies(monkeypatch):
+    created = []
+    browser_binding = _valid_browser_binding("D")
+    responses = iter(
+        [
+            {
+                "challenge_id": "challenge-1",
+                "challenge": "expected-challenge-1",
+                "expires_at": datetime(2026, 1, 1, 12),
+                "public_key": {"challenge": "expected-challenge-1"},
+            },
+            {
+                "challenge_id": "challenge-2",
+                "challenge": "expected-challenge-2",
+                "expires_at": datetime(2026, 1, 1, 12, 1),
+                "public_key": {"challenge": "expected-challenge-2"},
+            },
+        ]
+    )
+
+    async def fake_create_passkey_challenge(**kwargs):
+        created.append(kwargs)
+
+    monkeypatch.setattr(auth_routes.auth_repo, "create_passkey_challenge", fake_create_passkey_challenge)
+    monkeypatch.setattr(auth_routes.passkeys_service, "authentication_options", lambda: next(responses))
+
+    request = _request(
+        "/auth/passkeys/authenticate/options",
+        cookie=f"myportal_session_passkey_login={browser_binding}",
+    )
+    first = await auth_routes.begin_passkey_authentication(request, None)
+    second = await auth_routes.begin_passkey_authentication(request, None)
+
+    assert [item["challenge_id"] for item in created] == ["challenge-1", "challenge-2"]
+    assert all(
+        item["browser_binding_hash"] == passkeys_service.browser_binding_hash(browser_binding)
+        for item in created
+    )
+    cookie_pair = f"{auth_routes._passkey_login_cookie_name()}={browser_binding}"
+    assert cookie_pair in first.headers["set-cookie"]
+    assert cookie_pair in second.headers["set-cookie"]
 
 
 @pytest.mark.anyio
