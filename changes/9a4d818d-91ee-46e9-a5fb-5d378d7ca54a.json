@@ -1,0 +1,7 @@
+{
+  "guid": "9a4d818d-91ee-46e9-a5fb-5d378d7ca54a",
+  "occurred_at": "2026-09-17T13:20Z",
+  "change_type": "Fix",
+  "summary": "Verify and repair the enterprise application's Purview administrator role during preflight diagnostics",
+  "content_hash": "0d90c05ccf691fcd0a8a9a8cef4697e935fd7747a58855aed4821fba6ad7eefc"
+}

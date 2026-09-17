@@ -59,6 +59,7 @@ _SCC_MANAGE_AS_APP_ROLE = _EXO_MANAGE_AS_APP_ROLE
 # principal is required *in addition to* the Exchange.ManageAsApp app role for
 # Exchange Online PowerShell REST API access (e.g. Get-MailboxPermission).
 _EXO_ADMIN_ROLE_TEMPLATE_ID = "29232cdf-9323-42fd-ade2-1d097af3e4de"
+_COMPLIANCE_ADMIN_ROLE_TEMPLATE_ID = "17315797-102d-40b4-93e0-432062caca18"
 
 # This role is intentionally resolved from Graph by display name rather than
 # relying on a copied identifier.  The remediation below verifies that Graph
@@ -3951,8 +3952,10 @@ async def run_purview_preflight(
 
     Graph is authoritative for the EOP resource assignment.  The similarly named
     Office 365 Exchange Online assignment is deliberately never accepted here.
-    Purview-native registration and role membership are checked through the SCC
-    session because those objects are not represented by Entra directory roles.
+    The enterprise application's supported Entra administrator role is checked
+    through Graph. Purview-native registration and role membership are checked
+    through the SCC session because those objects are not represented by Entra
+    directory roles.
     When *repair* is true, missing Purview registration and eDiscoveryManager
     membership are created after the compliance organization is reachable.
     """
@@ -3984,6 +3987,30 @@ async def run_purview_preflight(
     object_id = str(enterprise_sp.get("id") or "")
     checks: list[dict[str, str]] = []
     repaired: list[str] = []
+
+    admin_role_ok = False
+    admin_role_name = ""
+    admin_role_error = ""
+    if object_id:
+        try:
+            role_payload = await _graph_get(
+                graph_token,
+                f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(object_id)}"
+                "/transitiveMemberOf/microsoft.graph.directoryRole"
+                "?$select=displayName,roleTemplateId",
+            )
+            supported_roles = {
+                _EXO_ADMIN_ROLE_TEMPLATE_ID: "Exchange Administrator",
+                _COMPLIANCE_ADMIN_ROLE_TEMPLATE_ID: _COMPLIANCE_ADMIN_ROLE_NAME,
+            }
+            for role in role_payload.get("value") or []:
+                template_id = str(role.get("roleTemplateId") or "").lower()
+                if template_id in supported_roles:
+                    admin_role_ok = True
+                    admin_role_name = str(role.get("displayName") or supported_roles[template_id])
+                    break
+        except M365Error as exc:
+            admin_role_error = str(exc)
 
     permission_configured = False
     app_object_id = str(creds.get("app_object_id") or "")
@@ -4129,6 +4156,18 @@ async def run_purview_preflight(
             "The EOP application role is usable by the enterprise application." if consent_granted else
             "Tenant-wide consent for the EOP permission has not been verified.",
             None if consent_granted else PURVIEW_ADMIN_CONSENT_STEPS,
+        ),
+        _purview_check(
+            "administrator_role", "Purview administrator directory role",
+            "Passed" if admin_role_ok else "Requires Admin Action",
+            (f"The enterprise application has the {admin_role_name} role."
+             if admin_role_ok else
+             "The enterprise application is not assigned Exchange Administrator or "
+             "Compliance Administrator."
+             + (f" Role lookup failed: {admin_role_error}" if admin_role_error else "")),
+            None if admin_role_ok else
+            "Microsoft Entra admin center → Roles and administrators → Compliance "
+            "Administrator → Add assignments → select the MyPortal enterprise application.",
         ),
     ])
     org_help = (
@@ -4456,10 +4495,15 @@ async def repair_enterprise_app_permissions(
         company_id=company_id,
         access_token=access_token,
     )
+    role_result = await ensure_compliance_administrator_role(
+        company_id=company_id,
+        access_token=access_token,
+    )
     results = await check_enterprise_app_permissions(company_id)
     purview = await run_purview_preflight(company_id, repair=True)
     return {
         "granted": granted,
+        "compliance_role": role_result,
         "results": results,
         "purview": purview,
         "purview_repaired": bool(purview["repaired"]),

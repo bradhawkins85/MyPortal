@@ -32,7 +32,7 @@
     <header class="panel__header">
       <div>
         <h2 class="panel__title" id="purview-preflight-title">Purview eDiscovery preflight</h2>
-        <p class="panel__subtitle">Validates Purview separately from Entra administrator roles before searches or purges run.</p>
+        <p class="panel__subtitle">Validates API consent, the enterprise application's Entra administrator role, and Purview configuration before searches or purges run.</p>
       </div>
       <span class="status status--{{ 'success' if purview_preflight.ready else 'warning' }}">{{ 'Ready' if purview_preflight.ready else 'Admin action required' }}</span>
     </header>

@@ -27,6 +27,11 @@ async def test_preflight_distinguishes_eop_permission_and_reports_all_checks():
             }]}
         if f"servicePrincipals/{eop_object_id}" in url:
             return {"appId": m365._SCC_APP_ID}
+        if "/transitiveMemberOf/" in url:
+            return {"value": [{
+                "displayName": "Compliance Administrator",
+                "roleTemplateId": m365._COMPLIANCE_ADMIN_ROLE_TEMPLATE_ID,
+            }]}
         if "/servicePrincipals?" in url:
             return {"value": [{"id": object_id, "appId": client_id}]}
         raise AssertionError(url)
@@ -53,7 +58,7 @@ async def test_preflight_distinguishes_eop_permission_and_reports_all_checks():
 
     assert result["ready"] is True
     assert [item["key"] for item in result["checks"]] == [
-        "eop_permission", "admin_consent", "organization",
+        "eop_permission", "admin_consent", "administrator_role", "organization",
         "service_principal", "ediscovery_manager",
     ]
     assert {item["status"] for item in result["checks"]} == {"Passed"}
@@ -71,6 +76,11 @@ async def test_preflight_missing_eop_consent_reports_failed_live_purview_probe()
             return {"requiredResourceAccess": [{
                 "resourceAppId": m365._EXO_APP_ID,
                 "resourceAccess": [{"id": m365._EXO_MANAGE_AS_APP_ROLE, "type": "Role"}],
+            }]}
+        if "/transitiveMemberOf/" in url:
+            return {"value": [{
+                "displayName": "Compliance Administrator",
+                "roleTemplateId": m365._COMPLIANCE_ADMIN_ROLE_TEMPLATE_ID,
             }]}
         if "/servicePrincipals?" in url:
             return {"value": [{"id": "33333333-3333-3333-3333-333333333333"}]}
@@ -113,6 +123,11 @@ async def test_preflight_uses_live_purview_probe_when_graph_assignment_is_stale(
             raise m365.M365Error("Insufficient privileges", http_status=403)
         if "/appRoleAssignments" in url:
             return {"value": []}
+        if "/transitiveMemberOf/" in url:
+            return {"value": [{
+                "displayName": "Compliance Administrator",
+                "roleTemplateId": m365._COMPLIANCE_ADMIN_ROLE_TEMPLATE_ID,
+            }]}
         if "/servicePrincipals?" in url:
             return {"value": [{"id": object_id, "appId": client_id}]}
         raise AssertionError(url)
@@ -159,6 +174,11 @@ async def test_preflight_accepts_eop_assignment_when_manifest_cannot_be_read():
             }]}
         if f"servicePrincipals/{eop_object_id}" in url:
             return {"appId": m365._SCC_APP_ID}
+        if "/transitiveMemberOf/" in url:
+            return {"value": [{
+                "displayName": "Compliance Administrator",
+                "roleTemplateId": m365._COMPLIANCE_ADMIN_ROLE_TEMPLATE_ID,
+            }]}
         if "/servicePrincipals?" in url:
             return {"value": [{"id": object_id, "appId": client_id}]}
         raise AssertionError(url)
@@ -203,6 +223,11 @@ async def test_preflight_repair_registers_principal_and_adds_role_member():
             return {"value": [{"appRoleId": m365._SCC_MANAGE_AS_APP_ROLE, "resourceId": eop_object_id}]}
         if f"servicePrincipals/{eop_object_id}" in url:
             return {"appId": m365._SCC_APP_ID}
+        if "/transitiveMemberOf/" in url:
+            return {"value": [{
+                "displayName": "Compliance Administrator",
+                "roleTemplateId": m365._COMPLIANCE_ADMIN_ROLE_TEMPLATE_ID,
+            }]}
         if "/servicePrincipals?" in url:
             return {"value": [{"id": object_id, "appId": client_id}]}
         raise AssertionError(url)
@@ -231,3 +256,38 @@ async def test_preflight_repair_registers_principal_and_adds_role_member():
     assert ("Add-RoleGroupMember", {
         "Identity": "eDiscoveryManager", "Member": object_id,
     }) in commands
+
+
+@pytest.mark.anyio("asyncio")
+async def test_preflight_reports_missing_enterprise_application_admin_role():
+    client_id = "22222222-2222-2222-2222-222222222222"
+    object_id = "33333333-3333-3333-3333-333333333333"
+
+    async def graph_get(_token: str, url: str):
+        if "/domains?" in url:
+            return {"value": [{"id": "contoso.onmicrosoft.com", "isInitial": True}]}
+        if "/applications/" in url:
+            return {"requiredResourceAccess": []}
+        if "/appRoleAssignments" in url or "/transitiveMemberOf/" in url:
+            return {"value": []}
+        if "/servicePrincipals?" in url:
+            return {"value": [{"id": object_id, "appId": client_id}]}
+        raise AssertionError(url)
+
+    with (
+        patch.object(m365, "get_credentials", AsyncMock(return_value={
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "client_id": client_id,
+            "app_object_id": "55555555-5555-5555-5555-555555555555",
+        })),
+        patch.object(m365, "acquire_access_token", AsyncMock(return_value="graph-token")),
+        patch.object(m365, "_graph_get", side_effect=graph_get),
+        patch.object(m365, "_acquire_scc_access_token", AsyncMock(side_effect=m365.M365Error("unauthorized", http_status=403))),
+    ):
+        result = await m365.run_purview_preflight(7)
+
+    check = next(item for item in result["checks"] if item["key"] == "administrator_role")
+    assert check["status"] == "Requires Admin Action"
+    assert "enterprise application" in check["detail"]
+    assert "Compliance Administrator" in check["remediation"]
+    assert result["ready"] is False

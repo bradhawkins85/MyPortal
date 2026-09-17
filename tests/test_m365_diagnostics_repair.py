@@ -111,6 +111,7 @@ async def test_repair_enterprise_app_permissions_success():
         patch.object(m365_service, "acquire_delegated_token", AsyncMock(return_value="delegated-token")),
         patch.object(m365_service, "try_grant_missing_permissions", AsyncMock(return_value=True)),
         patch.object(m365_service, "check_enterprise_app_permissions", AsyncMock(return_value=fake_results)),
+        patch.object(m365_service, "ensure_compliance_administrator_role", AsyncMock(return_value={"status": "existing", "verified": True})),
         patch.object(m365_service, "run_purview_preflight", AsyncMock(return_value={"checks": [], "repaired": []})),
     ):
         result = await m365_service.repair_enterprise_app_permissions(company_id=1)
@@ -130,6 +131,7 @@ async def test_repair_enterprise_app_permissions_no_grant_needed():
         patch.object(m365_service, "acquire_delegated_token", AsyncMock(return_value="delegated-token")),
         patch.object(m365_service, "try_grant_missing_permissions", AsyncMock(return_value=False)),
         patch.object(m365_service, "check_enterprise_app_permissions", AsyncMock(return_value=fake_results)),
+        patch.object(m365_service, "ensure_compliance_administrator_role", AsyncMock(return_value={"status": "existing", "verified": True})),
         patch.object(m365_service, "run_purview_preflight", AsyncMock(return_value={"checks": [], "repaired": []})),
     ):
         result = await m365_service.repair_enterprise_app_permissions(company_id=1)
@@ -309,6 +311,7 @@ async def test_connect_callback_return_to_diagnostics(async_client):
         patch("app.main.m365_service.get_credentials", AsyncMock(return_value=fake_creds)),
         patch("app.main.m365_service.try_grant_missing_permissions", AsyncMock(return_value=True)),
         patch("app.main.m365_service.check_enterprise_app_permissions", AsyncMock(return_value=[])),
+        patch("app.main.m365_service.ensure_compliance_administrator_role", AsyncMock(return_value={"status": "existing", "verified": True})),
         patch("app.main.m365_service.run_purview_preflight", AsyncMock(return_value={"checks": [], "repaired": []})),
         patch("app.main.httpx.AsyncClient") as mock_http,
     ):
