@@ -165,6 +165,44 @@ async def test_provision_app_roles_includes_self_renewal_permission():
     """_PROVISION_APP_ROLES includes Application.ReadWrite.OwnedBy for self-renewal."""
     # Application.ReadWrite.OwnedBy GUID
     assert "18a4783c-866b-4cc7-a460-3d5e5662c884" in m365_service._PROVISION_APP_ROLES
+    assert "18a4783c-866b-4cc7-a460-3d5e5662c884" in m365_service._FORCE_GRANT_GRAPH_APP_ROLES
+
+
+@pytest.mark.anyio("asyncio")
+async def test_diagnostics_reports_missing_app_self_owner():
+    """Diagnostics fail when the integration SP is not an app owner."""
+    credentials = {
+        "tenant_id": "tenant-1",
+        "client_id": "66666666-6666-6666-6666-666666666666",
+        "client_secret": "secret",
+        "app_object_id": APP_OBJECT_ID,
+    }
+
+    async def mock_get(token: str, url: str) -> dict:
+        if "owners?$select=id" in url:
+            return {"value": []}
+        if "appRoleAssignments" in url:
+            return {"value": []}
+        if "?$filter=appId eq" in url:
+            return {"value": [{"id": SERVICE_PRINCIPAL_ID, "appRoles": []}]}
+        return {"id": GRAPH_SP_ID, "appId": m365_service._GRAPH_APP_ID}
+
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value=credentials)),
+        patch.object(m365_service, "_exchange_token", AsyncMock(return_value=("token", None, None))),
+        patch.object(m365_service, "_graph_get", side_effect=mock_get),
+        patch.object(m365_service.m365_repo, "upsert_permission_check_result", AsyncMock()),
+    ):
+        results = await m365_service.check_enterprise_app_permissions(1)
+
+    graph_result = next(app for app in results if app["app_id"] == m365_service._GRAPH_APP_ID)
+    owner_result = next(
+        permission
+        for permission in graph_result["permissions"]
+        if permission["id"] == m365_service._APP_SELF_OWNER_CHECK_ID
+    )
+    assert owner_result["status"] == "fail"
+    assert graph_result["all_ok"] is False
 
 
 # ---------------------------------------------------------------------------

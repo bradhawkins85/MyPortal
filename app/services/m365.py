@@ -120,6 +120,7 @@ _PACKAGE_MAILBOX_RE = PACKAGE_MAILBOX_RE  # backward-compat alias
 
 # Microsoft Graph's own well-known app ID (constant across all tenants)
 _GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
+_APP_SELF_OWNER_CHECK_ID = "myportal-app-self-owner"
 
 # Application-permission role IDs required for the provisioned integration app.
 # The CIS benchmark checks require several additional read-only permissions so
@@ -284,6 +285,10 @@ _GRAPH_ROLE_NAMES: dict[str, str] = {
 _FORCE_GRANT_GRAPH_APP_ROLES: frozenset[str] = frozenset(
     {
         _SHAREPOINT_TENANT_SETTINGS_ROLE,
+        # This permission is a hard requirement for automatic credential
+        # rotation.  Never silently omit it because a tenant's Graph service
+        # principal projection is stale or incomplete.
+        "18a4783c-866b-4cc7-a460-3d5e5662c884",
     }
 )
 
@@ -302,6 +307,11 @@ ENTERPRISE_APP_CATALOG: list[dict[str, Any]] = [
         "permissions": [
             {"id": role_id, "name": _GRAPH_ROLE_NAMES.get(role_id, role_id)}
             for role_id in _PROVISION_APP_ROLES
+        ] + [
+            {
+                "id": _APP_SELF_OWNER_CHECK_ID,
+                "name": "App registration self-owner",
+            }
         ],
     },
     {
@@ -3864,6 +3874,24 @@ async def verify_tenant_permissions(
         raise M365Error("Service principal not found in tenant")
     sp_object_id: str = sp_list[0]["id"]
 
+    # Credential renewal needs both the Graph application role and ownership
+    # of the application object.  Treat ownership as a first-class diagnostic
+    # prerequisite; checking only appRoleAssignments can otherwise report a
+    # healthy integration that cannot rotate its own secret.
+    app_object_id = str(creds.get("app_object_id") or "").strip()
+    if not app_object_id and _GRAPH_OBJECT_ID_PATTERN.fullmatch(client_id):
+        app_object_id = await _lookup_application_object_id(access_token, client_id) or ""
+    self_owner_ok = False
+    if app_object_id:
+        owners_response = await _graph_get(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/owners?$select=id",
+        )
+        self_owner_ok = any(
+            str(owner.get("id") or "").lower() == sp_object_id.lower()
+            for owner in owners_response.get("value", [])
+        )
+
     # Retrieve current app role assignments for the service principal
     assignments_response = await _graph_get(
         access_token,
@@ -3876,6 +3904,10 @@ async def verify_tenant_permissions(
     required_roles: set[str] = set(_PROVISION_APP_ROLES)
     present: list[str] = sorted(required_roles & assigned_roles)
     missing: list[str] = sorted(required_roles - assigned_roles)
+    if self_owner_ok:
+        present.append(_APP_SELF_OWNER_CHECK_ID)
+    else:
+        missing.append(_APP_SELF_OWNER_CHECK_ID)
 
     if not missing:
         return {"all_ok": True, "missing": [], "present": present, "updated": False}
@@ -3945,6 +3977,20 @@ async def check_enterprise_app_permissions(
         raise M365Error("Service principal not found in tenant")
     sp_object_id: str = sp_list[0]["id"]
 
+    app_object_id = str(creds.get("app_object_id") or "").strip()
+    if not app_object_id and _GRAPH_OBJECT_ID_PATTERN.fullmatch(client_id):
+        app_object_id = await _lookup_application_object_id(access_token, client_id) or ""
+    self_owner_ok = False
+    if app_object_id:
+        owners_response = await _graph_get(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/owners?$select=id",
+        )
+        self_owner_ok = any(
+            str(owner.get("id") or "").lower() == sp_object_id.lower()
+            for owner in owners_response.get("value", [])
+        )
+
     # Fetch all app role assignments for this service principal.
     # Each assignment has appRoleId and resourceId (the resource SP object ID).
     assignments_response = await _graph_get(
@@ -4011,6 +4057,22 @@ async def check_enterprise_app_permissions(
         for perm in app_entry["permissions"]:
             role_id: str = perm["id"]
             role_name: str = perm["name"]
+            if role_id == _APP_SELF_OWNER_CHECK_ID:
+                perm_status = "pass" if self_owner_ok else "fail"
+                app_all_ok = app_all_ok and self_owner_ok
+                perm_results.append(
+                    {"id": role_id, "name": role_name, "status": perm_status}
+                )
+                await m365_repo.upsert_permission_check_result(
+                    company_id=company_id,
+                    app_id=app_id,
+                    app_name=app_name,
+                    role_id=role_id,
+                    role_name=role_name,
+                    status=perm_status,
+                    checked_at=checked_at,
+                )
+                continue
             granted = (role_id, app_id) in assigned_by_app
             # Determine whether the role GUID exists at all on the resource SP.
             # When it doesn't, the permission can never be granted via admin
@@ -4537,6 +4599,36 @@ async def try_grant_missing_permissions(
         # This is required in addition to Teams.ManageAsApp.
         if await _ensure_teams_service_admin_role(access_token, sp_object_id):
             granted.append("teams-admin-role")
+
+        # Repair the second half of the self-renewal contract as well as the
+        # Application.ReadWrite.OwnedBy assignment.  Existing installations
+        # may have the role but predate registration of their own service
+        # principal as an application owner.
+        app_object_id = str(creds.get("app_object_id") or "").strip()
+        if not app_object_id and _GRAPH_OBJECT_ID_PATTERN.fullmatch(client_id):
+            app_object_id = await _lookup_application_object_id(access_token, client_id) or ""
+        if app_object_id:
+            try:
+                await _graph_post(
+                    access_token,
+                    f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/owners/$ref",
+                    {
+                        "@odata.id": (
+                            "https://graph.microsoft.com/v1.0/directoryObjects/"
+                            f"{_graph_object_id(sp_object_id)}"
+                        )
+                    },
+                )
+                granted.append(_APP_SELF_OWNER_CHECK_ID)
+            except M365Error as exc:
+                # Graph returns 400 when the owner reference already exists.
+                # It is safe to leave it in place; diagnostics will verify it.
+                if exc.http_status not in (400, 409):
+                    log_error(
+                        "try_grant_missing_permissions: failed to register app self-owner",
+                        company_id=company_id,
+                        error=str(exc),
+                    )
 
         return bool(granted)
     except Exception as exc:  # noqa: BLE001
