@@ -60,3 +60,26 @@ async def test_startup_database_initialization_does_not_retry_non_retryable_erro
 
     assert main_module.db.disconnect.await_count == 1
     sleep.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_startup_database_initialization_retries_os_errors(monkeypatch):
+    attempts: list[int] = []
+    sleep = AsyncMock()
+
+    async def fake_run_migrations() -> None:
+        attempts.append(len(attempts) + 1)
+        if len(attempts) == 1:
+            raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(main_module.settings, "startup_database_retry_attempts", 2)
+    monkeypatch.setattr(main_module.settings, "startup_database_retry_delay_seconds", 3)
+    monkeypatch.setattr(main_module.db, "run_migrations", fake_run_migrations)
+    monkeypatch.setattr(main_module.db, "disconnect", AsyncMock())
+    monkeypatch.setattr(main_module.asyncio, "sleep", sleep)
+
+    await main_module._initialise_database_for_startup()
+
+    assert attempts == [1, 2]
+    assert main_module.db.disconnect.await_count == 1
+    assert sleep.await_args_list == [call(3)]

@@ -257,35 +257,35 @@ async def _store_m365_provision_code_verifier(verifier: str) -> str:
 
 
 def _is_retryable_startup_database_error(exc: Exception) -> bool:
-        if isinstance(exc, OSError):
-            return True
-        if isinstance(exc, aiomysql.OperationalError):
-            errno = exc.args[0] if exc.args else None
-            return isinstance(errno, int) and errno in _RETRYABLE_STARTUP_DATABASE_ERRNOS
-        return False
+    if isinstance(exc, OSError):
+        return True
+    if isinstance(exc, aiomysql.OperationalError):
+        errno = exc.args[0] if exc.args else None
+        return isinstance(errno, int) and errno in _RETRYABLE_STARTUP_DATABASE_ERRNOS
+    return False
 
 
 async def _initialise_database_for_startup() -> None:
-        attempts = max(1, int(settings.startup_database_retry_attempts))
-        retry_delay_seconds = max(0, int(settings.startup_database_retry_delay_seconds))
+    attempts = max(1, int(settings.startup_database_retry_attempts))
+    retry_delay_seconds = max(0, int(settings.startup_database_retry_delay_seconds))
 
-        for attempt in range(1, attempts + 1):
-            try:
-                await db.run_migrations()
-                return
-            except Exception as exc:
-                await db.disconnect()
-                if attempt >= attempts or not _is_retryable_startup_database_error(exc):
-                    raise
-                log_warning(
-                    "Startup database initialisation failed; retrying",
-                    attempt=attempt,
-                    max_attempts=attempts,
-                    retry_delay_seconds=retry_delay_seconds,
-                    error=str(exc),
-                )
-                if retry_delay_seconds > 0:
-                    await asyncio.sleep(retry_delay_seconds)
+    for attempt in range(1, attempts + 1):
+        try:
+            await db.run_migrations()
+            return
+        except Exception as exc:
+            await db.disconnect()
+            if attempt >= attempts or not _is_retryable_startup_database_error(exc):
+                raise
+            log_warning(
+                "Startup database initialisation failed; retrying",
+                attempt=attempt,
+                max_attempts=attempts,
+                retry_delay_seconds=retry_delay_seconds,
+                error=str(exc),
+            )
+            if retry_delay_seconds > 0:
+                await asyncio.sleep(retry_delay_seconds)
 
 
 async def _pop_m365_provision_code_verifier(verifier_id: str | None) -> str | None:
