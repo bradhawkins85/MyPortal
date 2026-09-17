@@ -4016,10 +4016,16 @@ async def run_purview_preflight(
         pass
     consent_granted = False
     if object_id:
-        assignments = await _graph_get(
-            graph_token,
-            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(object_id)}/appRoleAssignments",
-        )
+        try:
+            assignments = await _graph_get(
+                graph_token,
+                f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(object_id)}/appRoleAssignments",
+            )
+        except M365Error:
+            # A least-privilege Graph token may be unable to enumerate role
+            # assignments even though Entra can issue a working Purview token.
+            # The live SCC probe below is authoritative in that situation.
+            assignments = {}
         resource_ids = {
             str(item.get("resourceId") or "")
             for item in assignments.get("value") or []
@@ -4033,25 +4039,6 @@ async def run_purview_preflight(
             if str(resource.get("appId") or "").lower() == _SCC_APP_ID:
                 consent_granted = True
                 break
-    # An assignment on the exact EOP resource proves both that the application
-    # permission exists and that tenant-wide consent was granted.  This is more
-    # authoritative than requiredResourceAccess, which least-privilege app
-    # tokens may be unable to read and which can lag a manual assignment.
-    permission_configured = permission_configured or consent_granted
-    checks.append(_purview_check(
-        "eop_permission", "EOP Exchange.ManageAsApp application permission",
-        "Passed" if permission_configured else "Requires Admin Action",
-        "Configured on Microsoft Exchange Online Protection." if permission_configured else
-        "The application permission is absent or its app-registration manifest could not be read. Office 365 Exchange Online Exchange.ManageAsApp is not sufficient for Purview.",
-        None if permission_configured else PURVIEW_ADMIN_CONSENT_STEPS,
-    ))
-    checks.append(_purview_check(
-        "admin_consent", "Tenant-wide admin consent", "Passed" if consent_granted else "Requires Admin Action",
-        "The EOP application role is assigned to the enterprise application." if consent_granted else
-        "Tenant-wide consent for the EOP permission has not been verified.",
-        None if consent_granted else PURVIEW_ADMIN_CONSENT_STEPS,
-    ))
-
     registration_command = (
         'New-ServicePrincipal `\n'
         f'  -AppId "{client_id}" `\n'
@@ -4064,16 +4051,17 @@ async def run_purview_preflight(
     )
     org_ok = registration_ok = membership_ok = False
     scc_error = ""
-    if consent_granted and tenant_domain:
+    if tenant_domain:
         try:
             scc_token, _ = await _acquire_scc_access_token(company_id)
-            await _scc_invoke_command(
-                scc_token, tenant_id, "Get-OrganizationConfig", organization=tenant_domain
-            )
-            org_ok = True
             principals = await _scc_invoke_command(
                 scc_token, tenant_id, "Get-ServicePrincipal", organization=tenant_domain
             )
+            # A successful app-only Purview command proves the EOP application
+            # permission, tenant consent, and organization routing directly.
+            # Do not gate this probe on Graph metadata: manually granted roles
+            # can be usable before (or without permission for) Graph enumeration.
+            permission_configured = consent_granted = org_ok = True
             principal_rows = principals.get("value") or principals.get("Value") or []
             if isinstance(principal_rows, dict):
                 principal_rows = [principal_rows]
@@ -4124,6 +4112,25 @@ async def run_purview_preflight(
         except M365Error as exc:
             scc_error = str(exc)
             correlation_id = getattr(exc, "correlation_id", None) or correlation_id
+    # Either an exact Graph assignment or a successful live SCC command proves
+    # both configuration and consent. The live command is the stronger signal.
+    permission_configured = permission_configured or consent_granted
+    checks.extend([
+        _purview_check(
+            "eop_permission", "EOP Exchange.ManageAsApp application permission",
+            "Passed" if permission_configured else "Requires Admin Action",
+            "Configured on Microsoft Exchange Online Protection." if permission_configured else
+            "The application permission is absent or its app-registration manifest could not be read. Office 365 Exchange Online Exchange.ManageAsApp is not sufficient for Purview.",
+            None if permission_configured else PURVIEW_ADMIN_CONSENT_STEPS,
+        ),
+        _purview_check(
+            "admin_consent", "Tenant-wide admin consent",
+            "Passed" if consent_granted else "Requires Admin Action",
+            "The EOP application role is usable by the enterprise application." if consent_granted else
+            "Tenant-wide consent for the EOP permission has not been verified.",
+            None if consent_granted else PURVIEW_ADMIN_CONSENT_STEPS,
+        ),
+    ])
     org_help = (
         "Confirm https://purview.microsoft.com loads, including Settings → Role groups "
         "and eDiscovery, then retry after Microsoft has completed provisioning."
