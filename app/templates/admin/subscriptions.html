@@ -119,7 +119,7 @@
                                             type="button"
                                             class="header-title-menu__link"
                                             role="menuitem"
-                                            onclick="editSubscription('{{ sub.id }}', '{{ sub.status }}', {{ 'true' if sub.auto_renew else 'false' }})"
+                                            onclick="editSubscription({{ sub.id | tojson | forceescape }}, {{ sub.status | tojson | forceescape }}, {{ sub.auto_renew | tojson | forceescape }})"
                                         >Edit</button>
                                     </li>
                                     <li class="header-title-menu__item" role="none">
@@ -127,7 +127,7 @@
                                             type="button"
                                             class="header-title-menu__link header-title-menu__link--danger"
                                             role="menuitem"
-                                            onclick="deleteSubscription('{{ sub.id }}')"
+                                            onclick="deleteSubscription({{ sub.id | tojson | forceescape }})"
                                         >Delete</button>
                                     </li>
                                 </ul>

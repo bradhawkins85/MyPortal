@@ -233,7 +233,7 @@
   <form method="{{ button.method|default('post') }}" 
         action="{{ button.action }}" 
         style="display: inline;"
-        {% if button.confirm %}onsubmit="return confirm('{{ button.confirm }}')"{% endif %}>
+        {% if button.confirm %}onsubmit="return confirm({{ button.confirm | tojson | forceescape }})"{% endif %}>
     {% if csrf_token %}
     <input type="hidden" name="_csrf" value="{{ csrf_token }}">
     {% endif %}

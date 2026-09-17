@@ -486,14 +486,14 @@
                                 <button 
                                   type="button" 
                                   class="tag__remove" 
-                                  onclick="removeTag('{{ tag }}')"
+                                  onclick="removeTag({{ tag | tojson | forceescape }})"
                                   aria-label="Remove tag {{ tag }}"
                                   title="Remove this tag"
                                 >×</button>
                                 <button
                                   type="button"
                                   class="tag__exclude"
-                                  onclick="excludeAndRemoveTag('{{ tag }}')"
+                                  onclick="excludeAndRemoveTag({{ tag | tojson | forceescape }})"
                                   aria-label="Exclude tag {{ tag }} from future use"
                                   title="Remove and exclude from future use"
                                 ><svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true"><path d="M8.27 3 3 8.27v7.46L8.27 21h7.46L21 15.73V8.27L15.73 3H8.27zm4.5 13h-1.5v-1.5h1.5V16zm0-3h-1.5V8h1.5v5z"/></svg></button>

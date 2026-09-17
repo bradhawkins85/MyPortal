@@ -90,7 +90,7 @@
               {% if can_edit %}
               <td>
                 <div class="action-buttons">
-                  <button type="button" class="btn-icon" onclick='editTraining({{ item.id }}, {{ (item.training_date.strftime("%Y-%m-%dT%H:%M") if item.training_date else "")|tojson }}, {{ (item.training_type or "")|tojson }}, {{ (item.status or "Scheduled")|tojson }}, {{ item.participants_count|tojson }}, {{ item.score_percent|tojson }}, {{ (item.comments or "")|tojson }}, {{ (item.lessons_learned or "")|tojson }}, {{ (item.follow_up_actions or "")|tojson }})' title="Edit">
+                  <button type="button" class="btn-icon" data-bcp-action="edit-training" data-bcp-payload='{{ {"id": item.id, "training_date": item.training_date.strftime("%Y-%m-%dT%H:%M") if item.training_date else "", "training_type": item.training_type or "", "status": item.status or "Scheduled", "participants_count": item.participants_count, "score_percent": item.score_percent, "comments": item.comments or "", "lessons_learned": item.lessons_learned or "", "follow_up_actions": item.follow_up_actions or ""} | tojson | e }}' title="Edit">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                       <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
                     </svg>
@@ -171,7 +171,7 @@
               {% if can_edit %}
               <td>
                 <div class="action-buttons">
-                  <button type="button" class="btn-icon" onclick='editReview({{ item.id }}, {{ (item.review_date.strftime("%Y-%m-%dT%H:%M") if item.review_date else "")|tojson }}, {{ (item.version_label or "")|tojson }}, {{ (item.approval_status or "Draft")|tojson }}, {{ item.reviewed_by_user_id|tojson }}, {{ item.approved_by_user_id|tojson }}, {{ (item.reason or "")|tojson }}, {{ (item.changes_made or "")|tojson }}, {{ (item.approval_snapshot or "")|tojson }})' title="Edit">
+                  <button type="button" class="btn-icon" data-bcp-action="edit-review" data-bcp-payload='{{ {"id": item.id, "review_date": item.review_date.strftime("%Y-%m-%dT%H:%M") if item.review_date else "", "version_label": item.version_label or "", "approval_status": item.approval_status or "Draft", "reviewed_by_user_id": item.reviewed_by_user_id, "approved_by_user_id": item.approved_by_user_id, "reason": item.reason or "", "changes_made": item.changes_made or "", "approval_snapshot": item.approval_snapshot or ""} | tojson | e }}' title="Edit">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                       <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
                     </svg>
@@ -464,7 +464,7 @@ function editTraining(id, date, type, status, participantsCount, scorePercent, c
   document.getElementById('edit_training_comments').value = comments;
   document.getElementById('edit_training_lessons_learned').value = lessonsLearned;
   document.getElementById('edit_training_follow_up_actions').value = followUpActions;
-  document.getElementById('editTrainingForm').action = '/bcp/training/' + id + '/update';
+  document.getElementById('editTrainingForm').action = '/bcp/training/' + encodeURIComponent(String(id)) + '/update';
   document.getElementById('editTrainingModal').showModal();
 }
 
@@ -477,7 +477,7 @@ function editReview(id, date, versionLabel, approvalStatus, reviewerId, approver
   document.getElementById('edit_reason').value = reason;
   document.getElementById('edit_changes_made').value = changes;
   document.getElementById('edit_approval_snapshot').value = approvalSnapshot;
-  document.getElementById('editReviewForm').action = '/bcp/review/' + id + '/update';
+  document.getElementById('editReviewForm').action = '/bcp/review/' + encodeURIComponent(String(id)) + '/update';
   document.getElementById('editReviewModal').showModal();
 }
 </script>
