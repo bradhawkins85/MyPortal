@@ -131,7 +131,7 @@ async def portal_tickets_page(request: Request):
                     search_term = str(filters["search"])
         except (TypeError, ValueError, RuntimeError):
             # If we can't load the default view, just continue without it
-            filters = {}
+            pass
 
     return await _main()._render_portal_tickets_page(
         request,

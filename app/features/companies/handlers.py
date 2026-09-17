@@ -960,7 +960,7 @@ async def admin_sla_templates_page(request: Request):
 
 async def admin_create_sla_template(request: Request):
     from app.repositories import slas as sla_repo
-    user, redirect = await _main()._require_super_admin_page(request)
+    _, redirect = await _main()._require_super_admin_page(request)
     if redirect:
         return redirect
     form = await request.form()
@@ -977,16 +977,17 @@ async def admin_create_sla_template(request: Request):
         priorities, responses, resolutions
     ):
         priority = str(priority_value or "").strip().lower()
+        invalid_sla_window = False
         try:
             response = int(response_value or 0)
             resolution = int(resolution_value or 0)
         except (TypeError, ValueError):
-            response = 0
-            resolution = 0
+            invalid_sla_window = True
         if (
             not priority
             or len(priority) > 32
             or priority in seen_priorities
+            or invalid_sla_window
             or response < 1
             or resolution < response
         ):

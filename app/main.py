@@ -164,7 +164,6 @@ from app.services import dashboard as dashboard_service
 from app.services import user_m365_contacts as user_m365_contacts_service
 from app.services import rag_relationships as rag_relationship_service
 from app.services import m365 as m365_service
-from app.services import m365_spam_purge as purge_service
 from app.services import cis_benchmark as cis_benchmark_service
 from app.services import m365_best_practices as m365_best_practices_service
 from app.services import modules as modules_service

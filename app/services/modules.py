@@ -17,7 +17,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import asyncio
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
 import httpx
 from dotenv import load_dotenv
