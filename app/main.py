@@ -4318,6 +4318,12 @@ async def m365_diagnostics_page(request: Request):
 
     credentials = await m365_service.get_credentials(company_id)
     last_results = await m365_service.get_last_enterprise_app_permissions(company_id)
+    purview_preflight = None
+    if credentials:
+        try:
+            purview_preflight = await m365_service.run_purview_preflight(company_id)
+        except m365_service.M365Error as exc:
+            purview_preflight = {"ready": False, "error": str(exc), "checks": []}
 
     extra = {
         "title": "Office 365 Diagnostics",
@@ -4325,6 +4331,7 @@ async def m365_diagnostics_page(request: Request):
         "has_credentials": bool(credentials),
         "catalog": m365_service.ENTERPRISE_APP_CATALOG,
         "results": last_results,
+        "purview_preflight": purview_preflight,
         "is_super_admin": True,
     }
     return await _render_template("m365/diagnostics.html", request, user, extra=extra)

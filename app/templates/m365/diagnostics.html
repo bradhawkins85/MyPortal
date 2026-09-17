@@ -20,6 +20,52 @@
 {% endblock %}
 
 {% block content %}
+  {% if purview_preflight %}
+  <section class="panel" aria-labelledby="purview-preflight-title">
+    <header class="panel__header">
+      <div>
+        <h2 class="panel__title" id="purview-preflight-title">Purview eDiscovery preflight</h2>
+        <p class="panel__subtitle">Validates Purview separately from Entra administrator roles before searches or purges run.</p>
+      </div>
+      <span class="status status--{{ 'success' if purview_preflight.ready else 'warning' }}">{{ 'Ready' if purview_preflight.ready else 'Admin action required' }}</span>
+    </header>
+    <div class="panel__body">
+      {% if purview_preflight.error %}<p class="alert alert--danger">{{ purview_preflight.error }}</p>{% endif %}
+      {% for check in purview_preflight.checks %}
+      <article class="card card--panel" style="margin-bottom: var(--space-3);">
+        <div style="display:flex; justify-content:space-between; gap:var(--space-3); align-items:flex-start;">
+          <div><strong>{{ check.label }}</strong><p class="text-muted">{{ check.detail }}</p></div>
+          <span class="status status--{{ 'success' if check.status == 'Passed' else ('danger' if check.status == 'Failed' else 'warning') }}">{{ check.status }}</span>
+        </div>
+        {% if check.remediation %}<pre style="white-space:pre-wrap; overflow:auto;"><code>{{ check.remediation }}</code></pre>{% endif %}
+      </article>
+      {% endfor %}
+      {% if purview_preflight.client_id %}
+      <h3>Identifiers</h3>
+      <p><strong>Application/client ID</strong> (App registrations): <code>{{ purview_preflight.client_id }}</code></p>
+      <p><strong>Enterprise application object ID</strong> (Enterprise applications): <code>{{ purview_preflight.enterprise_application_object_id or 'Not found' }}</code></p>
+      <details>
+        <summary>Support-ready diagnostic bundle</summary>
+        <pre style="white-space:pre-wrap; overflow:auto;"><code>Tenant domain: {{ purview_preflight.tenant_domain }}
+Tenant ID: {{ purview_preflight.tenant_id }}
+Timestamp (UTC): {{ purview_preflight.timestamp }}
+Correlation/request ID: {{ purview_preflight.correlation_id }}
+{% for check in purview_preflight.checks %}{{ check.label }}: {{ check.status }}
+{% endfor %}</code></pre>
+      </details>
+      {% endif %}
+      <p class="text-muted">Validation uses ExchangeOnlineManagement 3.10.1 or later guidance. A 401 usually means the EOP permission or consent is missing; a connection without eDiscovery commands usually means registration or role-group membership is missing.</p>
+      {% if purview_preflight.client_id and purview_preflight.tenant_domain %}
+      <h3>Certificate connection validation</h3>
+      <pre style="white-space:pre-wrap; overflow:auto;"><code>Connect-IPPSSession `
+  -CertificateThumbprint "&lt;certificate-thumbprint&gt;" `
+  -AppId "{{ purview_preflight.client_id }}" `
+  -Organization "{{ purview_preflight.tenant_domain }}" `
+  -EnableSearchOnlySession</code></pre>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
   <section class="panel">
     <header class="panel__header">
       <div>

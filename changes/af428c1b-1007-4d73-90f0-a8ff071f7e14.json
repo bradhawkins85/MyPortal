@@ -1,0 +1,7 @@
+{
+  "guid": "af428c1b-1007-4d73-90f0-a8ff071f7e14",
+  "occurred_at": "2026-09-17T12:00:00Z",
+  "change_type": "feature",
+  "summary": "Added Purview eDiscovery prerequisite preflight, safe remediation guidance, and operation gating.",
+  "content_hash": "purview-ediscovery-preflight-v1"
+}

@@ -144,6 +144,7 @@ async def start_search(request_id: int, company_id: int) -> dict[str, Any]:
     previous_status = str(request["search_status"]).lower()
     if previous_status not in {"draft", "failed"}:
         raise ValueError("Only draft or failed searches can be started")
+    await _require_purview_preflight(company_id)
     await purge_repo.update_request(request_id, {
         "search_status": "queued", "error_message": None, "search_details": None,
         "matched_items": 0, "matched_size": 0, "search_started_at": _utcnow(),
@@ -161,11 +162,25 @@ async def start_purge(request_id: int, company_id: int) -> dict[str, Any]:
         raise ValueError("The completed search contains no messages to purge")
     if str(request["purge_status"]).lower() not in {"not_started", "failed"}:
         raise ValueError("Purge has already been started")
+    await _require_purview_preflight(company_id)
     await purge_repo.update_request(request_id, {
         "purge_status": "queued", "error_message": None, "purge_started_at": _utcnow(),
     })
     _start_task(request_id, "purge")
     return (await purge_repo.get_request(request_id)) or request
+
+
+async def _require_purview_preflight(company_id: int) -> None:
+    result = await m365_service.run_purview_preflight(company_id)
+    if result["ready"]:
+        return
+    failed = ", ".join(
+        check["label"] for check in result["checks"] if check["status"] != "Passed"
+    )
+    raise m365_service.M365Error(
+        "Purview preflight did not pass: " + failed
+        + ". Open Office 365 Diagnostics for exact remediation commands and recheck configuration."
+    )
 
 
 async def _owned_request(request_id: int, company_id: int) -> dict[str, Any]:
