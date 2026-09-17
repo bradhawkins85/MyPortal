@@ -981,7 +981,6 @@ async def admin_create_sla_template(request: Request):
             response = int(response_value or 0)
             resolution = int(resolution_value or 0)
         except (TypeError, ValueError):
-            from fastapi.responses import RedirectResponse
             return RedirectResponse("/admin/sla-templates?error=invalid", status_code=303)
         if (
             not priority
@@ -990,12 +989,10 @@ async def admin_create_sla_template(request: Request):
             or response < 1
             or resolution < response
         ):
-            from fastapi.responses import RedirectResponse
             return RedirectResponse("/admin/sla-templates?error=invalid", status_code=303)
         seen_priorities.add(priority)
         targets.append((priority, response, resolution))
     if not name or not targets:
-        from fastapi.responses import RedirectResponse
         return RedirectResponse("/admin/sla-templates?error=invalid", status_code=303)
     pause_statuses: list[str] = []
     seen_statuses: set[str] = set()
@@ -1011,7 +1008,6 @@ async def admin_create_sla_template(request: Request):
         name=name, description=description, enabled=form.get("enabled") is not None,
         targets=targets, pause_statuses=pause_statuses,
     )
-    from fastapi.responses import RedirectResponse
     return RedirectResponse("/admin/sla-templates", status_code=303)
 
 
