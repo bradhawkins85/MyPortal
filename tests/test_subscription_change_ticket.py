@@ -3,6 +3,64 @@ from __future__ import annotations
 
 import pytest
 
+from app.services import subscription_changes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("change_type", "expected_subject", "expected_change", "expected_effective"),
+    [
+        (
+            "addition",
+            "License Addition Request",
+            "License Change: +2",
+            "Effective: Immediately",
+        ),
+        (
+            "decrease",
+            "License Decrease Request",
+            "License Change: -2",
+            "Effective: 2027-06-30",
+        ),
+    ],
+)
+async def test_license_changes_create_technician_ticket(
+    monkeypatch, change_type, expected_subject, expected_change, expected_effective
+):
+    captured = {}
+
+    async def fake_create_ticket(**kwargs):
+        captured.update(kwargs)
+        return {"id": 91, "ticket_number": "T-91"}
+
+    from app.services import tickets as tickets_service
+
+    monkeypatch.setattr(tickets_service, "create_ticket", fake_create_ticket)
+    result = await subscription_changes._create_change_ticket(
+        {
+            "id": "sub-123",
+            "customer_id": 7,
+            "product_name": "Microsoft 365 Business Premium",
+            "quantity": 4,
+            "end_date": "2027-06-30",
+        },
+        change_type=change_type,
+        quantity=2,
+        requested_by=42,
+        notes="Please process",
+    )
+
+    assert result["id"] == 91
+    assert captured["subject"] == (
+        f"{expected_subject} - Microsoft 365 Business Premium"
+    )
+    assert expected_change in captured["description"]
+    assert expected_effective in captured["description"]
+    assert captured["requester_id"] == 42
+    assert captured["company_id"] == 7
+    assert captured["module_slug"] == "subscriptions"
+    assert captured["assigned_user_id"] is None
+
 
 def test_subscription_change_ticket_subject_format():
     """Test that subscription change ticket subject is formatted correctly."""
@@ -21,7 +79,7 @@ def test_subscription_change_ticket_description_with_reason():
     reason = "Need more licenses"
     
     description_parts = [
-        f"A subscription change has been requested.",
+        "A subscription change has been requested.",
         "",
         "**Subscription Details:**",
         f"- Product: {product_name}",
@@ -56,7 +114,7 @@ def test_subscription_change_ticket_description_without_reason():
     reason = None
     
     description_parts = [
-        f"A subscription change has been requested.",
+        "A subscription change has been requested.",
         "",
         "**Subscription Details:**",
         f"- Product: {product_name}",
