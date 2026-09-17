@@ -35,9 +35,13 @@ def _organization_context_error(organization: str) -> m365_service.M365Error:
     """Return a useful operator-facing error without exposing directory paths."""
     return m365_service.M365Error(
         "Microsoft Purview could not load the compliance organization for "
-        f"{organization}. Confirm that the app is assigned Exchange or Compliance "
-        "Administrator, that the tenant has completed Purview provisioning, and "
-        "then retry the search.",
+        f"{organization}. The Entra administrator-role check is separate from this "
+        "failure and does not prove Purview readiness. In M365 diagnostics, confirm "
+        "Exchange.ManageAsApp is granted specifically on Microsoft Exchange Online "
+        "Protection (not only Office 365 Exchange Online). Then register the enterprise "
+        "application service principal in Purview, add it to the eDiscoveryManager "
+        "role group, and confirm the tenant has completed Purview provisioning before "
+        "retrying.",
         http_status=503,
     )
 

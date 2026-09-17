@@ -152,9 +152,8 @@ async def test_try_grant_missing_permissions_noop_when_all_present():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_try_grant_missing_permissions_grants_exo_and_teams_when_graph_complete():
-    """EXO Exchange.ManageAsApp and Teams.ManageAsApp are both granted when all Graph
-    roles are present but neither ManageAsApp role has been assigned yet.
+async def test_try_grant_missing_permissions_grants_all_powershell_resources_when_graph_complete():
+    """EXO, Purview, and Teams ManageAsApp grants target distinct resources.
 
     Regression test: previously the function returned early when all
     _PROVISION_APP_ROLES were assigned, skipping the Exchange.ManageAsApp
@@ -168,6 +167,8 @@ async def test_try_grant_missing_permissions_grants_exo_and_teams_when_graph_com
     async def mock_graph_get(token: str, url: str) -> dict:
         if "appRoleAssignments" in url:
             return {"value": all_graph_role_assignments}
+        if m365_service._SCC_APP_ID in url:
+            return {"value": [{"id": "scc-sp-id", "appId": m365_service._SCC_APP_ID}]}
         if _EXO_APP_ID in url:
             return {"value": [{"id": "exo-sp-id"}]}
         if _TEAMS_APP_ID in url:
@@ -191,12 +192,13 @@ async def test_try_grant_missing_permissions_grants_exo_and_teams_when_graph_com
             access_token="admin-token",
         )
 
-    assert result is True, "Should return True when EXO/Teams permissions were granted"
+    assert result is True, "Should return True when PowerShell permissions were granted"
     granted_role_ids = {g["appRoleId"] for g in granted}
     granted_resource_ids = {g["resourceId"] for g in granted}
     assert _EXO_MANAGE_AS_APP_ROLE in granted_role_ids, "Exchange.ManageAsApp must be granted"
     assert _TEAMS_MANAGE_AS_APP_ROLE in granted_role_ids, "Teams.ManageAsApp must be granted"
     assert "exo-sp-id" in granted_resource_ids, "Exchange.ManageAsApp must target EXO SP"
+    assert "scc-sp-id" in granted_resource_ids, "Purview ManageAsApp must target EOP SP"
     assert "teams-sp-id" in granted_resource_ids, "Teams.ManageAsApp must target Teams SP"
 
 
