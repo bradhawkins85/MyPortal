@@ -386,8 +386,9 @@ async def test_begin_passkey_authentication_reuses_valid_cookie_for_multiple_cer
         item["browser_binding_hash"] == passkeys_service.browser_binding_hash(browser_binding)
         for item in created
     )
-    assert browser_binding in first.headers["set-cookie"]
-    assert browser_binding in second.headers["set-cookie"]
+    cookie_pair = f"{auth_routes._passkey_login_cookie_name()}={browser_binding}"
+    assert cookie_pair in first.headers["set-cookie"]
+    assert cookie_pair in second.headers["set-cookie"]
 
 
 @pytest.mark.anyio
