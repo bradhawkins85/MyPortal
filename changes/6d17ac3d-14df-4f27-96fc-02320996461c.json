@@ -1,0 +1,7 @@
+{
+  "guid": "6d17ac3d-14df-4f27-96fc-02320996461c",
+  "occurred_at": "2026-09-17T00:00Z",
+  "change_type": "Fix",
+  "summary": "Added M365 diagnostics and repair coverage for Application.ReadWrite.OwnedBy and application self-ownership so automatic credential renewal remains available after provisioning or reprovisioning.",
+  "content_hash": "96c6d6a45c696f2406a206c65ffe32bdb065692e4a489042f78b66acde728fbf"
+}
