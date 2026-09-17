@@ -202,7 +202,7 @@ For existing legacy email-tracking users:
 6. SMTP2Go takes over automatically
 7. Remove any remaining Plausible configuration from older deployments
 
-No breaking changes - fully backward compatible.
+Note: legacy Plausible fallback behavior has been removed; deployments should rely on SMTP2Go or MyPortal's local email-tracking flow.
 
 ## Configuration Steps
 
