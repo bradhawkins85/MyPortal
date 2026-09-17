@@ -39,6 +39,7 @@ DB_METHODS = ("execute", "execute_returning_lastrowid", "fetch_one", "fetch_all"
 
 def _mock_database(monkeypatch, **returns):
     mocks = {}
+    monkeypatch.setattr(db, "is_connected", lambda: True)
     for method in DB_METHODS:
         mock = AsyncMock(return_value=returns.get(method))
         monkeypatch.setattr(db, method, mock)
