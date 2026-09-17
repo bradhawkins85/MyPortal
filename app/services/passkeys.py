@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import re
 import secrets
 from datetime import datetime, timedelta
@@ -28,8 +29,9 @@ from app.core.config import Settings, get_settings
 
 PASSKEY_CHALLENGE_TTL_SECONDS = 300
 BROWSER_BINDING_TOKEN_BYTES = 32
-BROWSER_BINDING_TOKEN_LENGTH = len(secrets.token_urlsafe(BROWSER_BINDING_TOKEN_BYTES))
-_BROWSER_BINDING_TOKEN_PATTERN = re.compile(rf"[-A-Za-z0-9_]{{{BROWSER_BINDING_TOKEN_LENGTH}}}")
+# token_urlsafe() base64url-encodes random bytes without "=" padding.
+BROWSER_BINDING_TOKEN_LENGTH = math.ceil(BROWSER_BINDING_TOKEN_BYTES * 4 / 3)
+_BROWSER_BINDING_TOKEN_PATTERN = re.compile(rf"\A[-A-Za-z0-9_]{{{BROWSER_BINDING_TOKEN_LENGTH}}}\Z")
 
 
 def _bytes_to_base64url(value: bytes) -> str:
@@ -63,7 +65,7 @@ def generate_browser_binding_token() -> str:
 
 
 def is_valid_browser_binding_token(token: Any) -> bool:
-    return isinstance(token, str) and bool(_BROWSER_BINDING_TOKEN_PATTERN.fullmatch(token))
+    return isinstance(token, str) and bool(_BROWSER_BINDING_TOKEN_PATTERN.match(token))
 
 
 def relying_party_id(settings: Settings | None = None) -> str:
