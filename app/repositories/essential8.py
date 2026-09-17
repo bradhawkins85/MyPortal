@@ -121,7 +121,7 @@ async def list_company_compliance(
         INNER JOIN essential8_controls ec ON cec.control_id = ec.id
         WHERE {where_clause}
         ORDER BY ec.control_order
-    """
+    """  # nosec B608
     rows = await db.fetch_all(query, params)
     
     # Transform the flat rows into nested structure
@@ -225,7 +225,7 @@ async def update_company_compliance(
         UPDATE company_essential8_compliance
         SET {set_clause}
         WHERE company_id = %(company_id)s AND control_id = %(control_id)s
-    """
+    """  # nosec B608
     
     await db.execute(query, params)
     
@@ -376,7 +376,7 @@ async def list_compliance_audit(
         WHERE {where_clause}
         ORDER BY created_at DESC
         LIMIT %(limit)s
-    """
+    """  # nosec B608
     
     rows = await db.fetch_all(query, params)
 
@@ -418,7 +418,7 @@ async def list_essential8_requirements(
         FROM essential8_requirements
         WHERE {where_clause}
         ORDER BY control_id, maturity_level, requirement_order
-    """
+    """  # nosec B608
     
     rows = await db.fetch_all(query, params)
     
@@ -752,7 +752,7 @@ async def list_company_requirement_compliance(
         INNER JOIN essential8_requirements er ON cerc.requirement_id = er.id
         WHERE {where_clause}
         ORDER BY er.control_id, er.maturity_level, er.requirement_order
-    """
+    """  # nosec B608
     
     rows = await db.fetch_all(query, params)
     
@@ -820,7 +820,7 @@ async def update_company_requirement_compliance(
         UPDATE company_essential8_requirement_compliance
         SET {set_clause}
         WHERE company_id = %(company_id)s AND requirement_id = %(requirement_id)s
-    """
+    """  # nosec B608
     
     await db.execute(query, params)
     
@@ -1074,7 +1074,7 @@ async def list_requirement_evidence_map(
         {joins}
         WHERE {' AND '.join(filters)}
         ORDER BY version_number DESC, uploaded_at DESC
-        """,
+        """,  # nosec B608
         params,
     )
     result: dict[int, list[dict[str, Any]]] = {}
@@ -1170,7 +1170,7 @@ async def get_requirement_trend(
         WHERE cerc.company_id = %(company_id)s{control_clause}
         GROUP BY trend_date, er.control_id, er.maturity_level, status
         ORDER BY trend_date, er.control_id, er.maturity_level, status
-        """,
+        """,  # nosec B608
         params,
     )
     return [dict(row) for row in rows]

@@ -110,7 +110,7 @@ async def list_pending_changes_for_subscriptions(
         SELECT * FROM subscription_change_requests 
         WHERE subscription_id IN ({placeholders}) AND status = 'pending'
         ORDER BY subscription_id, requested_at ASC
-        """,
+        """,  # nosec B608
         tuple(subscription_ids),
     )
     

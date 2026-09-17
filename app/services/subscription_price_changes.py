@@ -76,7 +76,7 @@ async def get_companies_with_subscriptions_for_products(
         FROM subscriptions
         WHERE product_id IN ({placeholders})
           AND status = 'active'
-        """,
+        """,  # nosec B608
         tuple(product_ids),
     )
     

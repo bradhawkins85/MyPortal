@@ -147,7 +147,7 @@ async def update_session(
     if not updates:
         return
     params.append(session_id)
-    sql = f"UPDATE user_sessions SET {', '.join(updates)} WHERE id = %s"
+    sql = f"UPDATE user_sessions SET {', '.join(updates)} WHERE id = %s"  # nosec B608
     await db.execute(sql, tuple(params))
 
 

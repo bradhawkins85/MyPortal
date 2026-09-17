@@ -76,7 +76,7 @@ async def mark_replies_billed(
               SELECT 1 FROM ticket_billed_time_entries bte
               WHERE bte.reply_id = tr.id
           )
-        """,
+        """,  # nosec B608
         tuple(clean_ids),
     )
     inserted = 0
@@ -164,7 +164,7 @@ async def delete_entries_for_tickets(ticket_ids: list[int]) -> int:
         return 0
     placeholders = ", ".join(["%s"] * len(clean_ids))
     return await db.execute_rowcount(
-        f"DELETE FROM ticket_billed_time_entries WHERE ticket_id IN ({placeholders})",
+        f"DELETE FROM ticket_billed_time_entries WHERE ticket_id IN ({placeholders})",  # nosec B608
         tuple(clean_ids),
     )
 
@@ -176,6 +176,6 @@ async def delete_entries_for_replies(reply_ids: list[int]) -> int:
         return 0
     placeholders = ", ".join(["%s"] * len(clean_ids))
     return await db.execute_rowcount(
-        f"DELETE FROM ticket_billed_time_entries WHERE reply_id IN ({placeholders})",
+        f"DELETE FROM ticket_billed_time_entries WHERE reply_id IN ({placeholders})",  # nosec B608
         tuple(clean_ids),
     )

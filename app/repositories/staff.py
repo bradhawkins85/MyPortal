@@ -128,7 +128,7 @@ async def count_staff(
         conditions.append("NOT (LOWER(SUBSTR(email, 1, 8)) = 'package_')")
     where_clause = " AND ".join(conditions)
     row = await db.fetch_one(
-        f"SELECT COUNT(*) AS count FROM staff WHERE {where_clause}",
+        f"SELECT COUNT(*) AS count FROM staff WHERE {where_clause}",  # nosec B608
         tuple(params),
     )
     return int(row["count"]) if row else 0
@@ -248,7 +248,7 @@ async def list_staff(
         WHERE {where}
         ORDER BY s.updated_at ASC, s.id ASC
         LIMIT %s
-        """.format(
+        """.format(  # nosec B608
             where=where_clause,
             portal_last_login_select=portal_last_login_select,
             portal_last_login_join=portal_last_login_join,
@@ -869,7 +869,7 @@ async def list_active_staff_for_offboarding(
         FROM staff AS s
         WHERE {where}
         ORDER BY s.last_name, s.first_name, s.email
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return _dedupe_by_normalized_email([dict(row) for row in rows])

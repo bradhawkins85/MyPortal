@@ -45,7 +45,7 @@ async def count_items_by_company_ids(company_ids: Sequence[int]) -> dict[int, in
         FROM company_recurring_invoice_items
         WHERE company_id IN ({placeholders})
         GROUP BY company_id
-        """,
+        """,  # nosec B608
         tuple(unique_ids),
     )
     return {

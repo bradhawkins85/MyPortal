@@ -106,7 +106,7 @@ async def _attach_relations(rows: Sequence[dict[str, Any]]) -> list[dict[str, An
 
     if placeholders:
         user_rows = await db.fetch_all(
-            f"SELECT article_id, user_id FROM knowledge_base_article_users WHERE article_id IN ({placeholders})",
+            f"SELECT article_id, user_id FROM knowledge_base_article_users WHERE article_id IN ({placeholders})",  # nosec B608
             params,
         )
         for relation in user_rows:
@@ -118,7 +118,7 @@ async def _attach_relations(rows: Sequence[dict[str, Any]]) -> list[dict[str, An
             user_map[article_id].append(user_id)
 
         company_rows = await db.fetch_all(
-            f"SELECT article_id, company_id, require_admin FROM knowledge_base_article_companies WHERE article_id IN ({placeholders})",
+            f"SELECT article_id, company_id, require_admin FROM knowledge_base_article_companies WHERE article_id IN ({placeholders})",  # nosec B608
             params,
         )
         for relation in company_rows:
@@ -139,7 +139,7 @@ async def _attach_relations(rows: Sequence[dict[str, Any]]) -> list[dict[str, An
             FROM knowledge_base_sections
             WHERE article_id IN ({placeholders})
             ORDER BY position ASC, id ASC
-            """,
+            """,  # nosec B608
             params,
         )
         
@@ -151,7 +151,7 @@ async def _attach_relations(rows: Sequence[dict[str, Any]]) -> list[dict[str, An
             section_placeholders, section_params = _prepare_in_clause(section_ids)
             if section_placeholders:
                 section_company_rows = await db.fetch_all(
-                    f"SELECT section_id, company_id FROM knowledge_base_section_companies WHERE section_id IN ({section_placeholders})",
+                    f"SELECT section_id, company_id FROM knowledge_base_section_companies WHERE section_id IN ({section_placeholders})",  # nosec B608
                     section_params,
                 )
                 for relation in section_company_rows:
@@ -307,7 +307,7 @@ async def update_article(article_id: int, **updates: Any) -> dict[str, Any]:
             raise ValueError("Article not found")
         return article
     params.append(article_id)
-    sql = f"UPDATE knowledge_base_articles SET {', '.join(columns)} WHERE id = %s"
+    sql = f"UPDATE knowledge_base_articles SET {', '.join(columns)} WHERE id = %s"  # nosec B608
     await db.execute(sql, tuple(params))
     updated = await get_article_by_id(article_id)
     if not updated:

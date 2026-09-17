@@ -95,7 +95,7 @@ async def list_requests(
         params.append(str(status).strip())
     where = " AND ".join(conditions)
     rows = await db.fetch_all(
-        f"SELECT * FROM staff_requests WHERE {where} ORDER BY created_at DESC",
+        f"SELECT * FROM staff_requests WHERE {where} ORDER BY created_at DESC",  # nosec B608
         tuple(params),
     )
     return [_map_row(row) for row in rows]

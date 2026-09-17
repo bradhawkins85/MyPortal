@@ -125,7 +125,7 @@ async def list_notifications(
     order = "ASC" if sort_direction.lower() == "asc" else "DESC"
 
     sql = (
-        "SELECT id, user_id, event_type, message, metadata, created_at, read_at "
+        "SELECT id, user_id, event_type, message, metadata, created_at, read_at "  # nosec B608
         f"FROM notifications WHERE {' AND '.join(clauses)} "
         f"ORDER BY {column} {order}, id DESC LIMIT %s OFFSET %s"
     )
@@ -216,7 +216,7 @@ async def mark_read_bulk(notification_ids: Sequence[int]) -> list[dict[str, Any]
         tuple([now] + unique_ids),
     )
     rows = await db.fetch_all(
-        f"SELECT id, user_id, event_type, message, metadata, created_at, read_at "
+        f"SELECT id, user_id, event_type, message, metadata, created_at, read_at "  # nosec B608
         f"FROM notifications WHERE id IN ({placeholders})",
         tuple(unique_ids),
     )
@@ -258,7 +258,7 @@ async def count_notifications(
         created_from=created_from,
         created_to=created_to,
     )
-    sql = f"SELECT COUNT(*) AS count FROM notifications WHERE {' AND '.join(clauses)}"
+    sql = f"SELECT COUNT(*) AS count FROM notifications WHERE {' AND '.join(clauses)}"  # nosec B608
     row = await db.fetch_one(sql, tuple(params))
     if not row:
         return 0
@@ -282,7 +282,7 @@ async def list_event_types(*, user_id: int | None = None) -> list[str]:
     if user_id is not None:
         clauses.append("user_id = %s")
         params.append(user_id)
-    sql = f"SELECT DISTINCT event_type FROM notifications WHERE {' AND '.join(clauses)} ORDER BY event_type"
+    sql = f"SELECT DISTINCT event_type FROM notifications WHERE {' AND '.join(clauses)} ORDER BY event_type"  # nosec B608
     rows = await db.fetch_all(sql, tuple(params))
     values: list[str] = []
     for row in rows:

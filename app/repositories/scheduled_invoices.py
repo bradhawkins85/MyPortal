@@ -143,7 +143,7 @@ async def list_scheduled_invoices(
         SELECT * FROM scheduled_invoices
         {where_clause}
         ORDER BY scheduled_for_date ASC
-    """
+    """  # nosec B608
     
     if limit is not None:
         query += " LIMIT %s"

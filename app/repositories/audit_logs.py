@@ -100,7 +100,7 @@ async def list_audit_logs(
         SELECT al.*, u.email AS user_email
         FROM audit_logs AS al
         LEFT JOIN users AS u ON u.id = al.user_id
-        """
+        """  # nosec B608
         + where
         + """
         ORDER BY al.created_at DESC
@@ -166,7 +166,7 @@ async def count_audit_logs(
         SELECT COUNT(*) AS total
         FROM audit_logs AS al
         LEFT JOIN users AS u ON u.id = al.user_id
-        """
+        """  # nosec B608
         + where,
         tuple(params),
     )

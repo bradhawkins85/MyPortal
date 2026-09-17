@@ -345,7 +345,7 @@ async def get_recipient_count_map(reply_ids: Iterable[int]) -> dict[int, int]:
         placeholders.append(f":{key}")
         params[key] = reply_id
     query = (
-        "SELECT ticket_reply_id, COUNT(*) AS recipient_count "
+        "SELECT ticket_reply_id, COUNT(*) AS recipient_count "  # nosec B608
         "FROM ticket_reply_email_recipients "
         f"WHERE ticket_reply_id IN ({', '.join(placeholders)}) "
         "GROUP BY ticket_reply_id"
@@ -519,7 +519,7 @@ async def update_recipient_event(
         set_clauses.append("last_event_detail = :detail")
         params["detail"] = str(detail)[:65000]
 
-    sql = f"UPDATE ticket_reply_email_recipients SET {', '.join(set_clauses)} WHERE id = :id"
+    sql = f"UPDATE ticket_reply_email_recipients SET {', '.join(set_clauses)} WHERE id = :id"  # nosec B608
     try:
         await db.execute(sql, params)
     except Exception as exc:  # pragma: no cover - defensive

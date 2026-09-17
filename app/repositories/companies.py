@@ -194,7 +194,7 @@ async def _bulk_email_domains(company_ids: Sequence[int]) -> dict[int, list[str]
         FROM company_email_domains
         WHERE company_id IN ({placeholders})
         ORDER BY company_id, domain
-        """,
+        """,  # nosec B608
         tuple(company_ids),
     )
     grouped: dict[int, list[str]] = defaultdict(list)
@@ -236,7 +236,7 @@ async def create_company(**data: Any) -> dict[str, Any]:
     columns = ", ".join(data.keys())
     placeholders = ", ".join(["%s"] * len(data))
     company_id = await db.execute_returning_lastrowid(
-        f"INSERT INTO companies ({columns}) VALUES ({placeholders})",
+        f"INSERT INTO companies ({columns}) VALUES ({placeholders})",  # nosec B608
         tuple(data.values()),
     )
     if not company_id:

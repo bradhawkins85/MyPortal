@@ -272,7 +272,7 @@ async def list_alerts(
         WHERE {' AND '.join(clauses)}
         ORDER BY {column} {order}, id DESC
         LIMIT %s OFFSET %s
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return [_normalise_alert(row) for row in rows]

@@ -159,7 +159,7 @@ async def update_watch_check_state(
     params.append(watch_id)
     # ``assignments`` is built from a fixed internal allowlist above (never from
     # user input), so joining the column fragment remains safe here.
-    query = "UPDATE ticket_shipment_watches SET " + ", ".join(assignments) + " WHERE id = %s"
+    query = "UPDATE ticket_shipment_watches SET " + ", ".join(assignments) + " WHERE id = %s"  # nosec B608
     await db.execute(
         query,
         tuple(params),

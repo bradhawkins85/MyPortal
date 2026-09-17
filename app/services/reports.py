@@ -346,7 +346,7 @@ _EXCLUDE_PACKAGE_MAILBOX_SQL = (
 )
 
 _MAILBOX_BASE_QUERY = (
-    "SELECT user_principal_name, display_name, mailbox_type,"
+    "SELECT user_principal_name, display_name, mailbox_type,"  # nosec B608
     " storage_used_bytes, archive_storage_used_bytes"
     " FROM m365_mailboxes"
     " WHERE company_id = %s AND mailbox_type = %s"

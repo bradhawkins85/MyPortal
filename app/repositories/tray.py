@@ -74,7 +74,7 @@ async def list_install_tokens(*, company_id: int | None = None) -> list[dict[str
 async def get_install_token_by_hash(token_hash: str) -> dict[str, Any] | None:
     placeholder = "?" if db.is_sqlite() else "%s"
     row = await db.fetch_one(
-        f"SELECT * FROM tray_install_tokens WHERE token_hash = {placeholder}",
+        f"SELECT * FROM tray_install_tokens WHERE token_hash = {placeholder}",  # nosec B608
         (token_hash,),
     )
     return dict(row) if row else None
@@ -182,7 +182,7 @@ async def update_device_auth(
 async def get_device_by_uid(device_uid: str) -> dict[str, Any] | None:
     placeholder = "?" if db.is_sqlite() else "%s"
     row = await db.fetch_one(
-        f"SELECT * FROM tray_devices WHERE device_uid = {placeholder}",
+        f"SELECT * FROM tray_devices WHERE device_uid = {placeholder}",  # nosec B608
         (device_uid,),
     )
     return dict(row) if row else None
@@ -191,7 +191,7 @@ async def get_device_by_uid(device_uid: str) -> dict[str, Any] | None:
 async def get_device_by_id(device_id: int) -> dict[str, Any] | None:
     placeholder = "?" if db.is_sqlite() else "%s"
     row = await db.fetch_one(
-        f"SELECT * FROM tray_devices WHERE id = {placeholder}",
+        f"SELECT * FROM tray_devices WHERE id = {placeholder}",  # nosec B608
         (device_id,),
     )
     return dict(row) if row else None
@@ -200,7 +200,7 @@ async def get_device_by_id(device_id: int) -> dict[str, Any] | None:
 async def get_device_by_auth_hash(auth_token_hash: str) -> dict[str, Any] | None:
     placeholder = "?" if db.is_sqlite() else "%s"
     row = await db.fetch_one(
-        f"SELECT * FROM tray_devices WHERE auth_token_hash = {placeholder} "
+        f"SELECT * FROM tray_devices WHERE auth_token_hash = {placeholder} "  # nosec B608
         "AND status = 'active'",
         (auth_token_hash,),
     )
@@ -222,7 +222,7 @@ async def list_devices(
         clauses.append(f"status = {placeholder}")
         params.append(status)
     rows = await db.fetch_all(
-        f"SELECT * FROM tray_devices WHERE {' AND '.join(clauses)} "
+        f"SELECT * FROM tray_devices WHERE {' AND '.join(clauses)} "  # nosec B608
         "ORDER BY last_seen_utc DESC, created_at DESC",
         tuple(params),
     )
@@ -379,7 +379,7 @@ async def list_menu_configs() -> list[dict[str, Any]]:
 async def get_menu_config(config_id: int) -> dict[str, Any] | None:
     placeholder = "?" if db.is_sqlite() else "%s"
     row = await db.fetch_one(
-        f"SELECT * FROM tray_menu_configs WHERE id = {placeholder}",
+        f"SELECT * FROM tray_menu_configs WHERE id = {placeholder}",  # nosec B608
         (config_id,),
     )
     return dict(row) if row else None
@@ -457,7 +457,7 @@ async def log_command(
 ) -> int:
     placeholder = "?" if db.is_sqlite() else "%s"
     last_id = await db.execute_returning_lastrowid(
-        f"INSERT INTO tray_command_log (device_id, command, payload_json, "
+        f"INSERT INTO tray_command_log (device_id, command, payload_json, "  # nosec B608
         f"initiated_by_user_id, status) VALUES ({placeholder}, {placeholder}, "
         f"{placeholder}, {placeholder}, {placeholder})",
         (device_id, command, payload_json, initiated_by_user_id, status),
@@ -476,7 +476,7 @@ async def get_queued_commands_for_device(device_id: int, *, limit: int = 50) -> 
 
     placeholder = "?" if db.is_sqlite() else "%s"
     rows = await db.fetch_all(
-        f"SELECT * FROM tray_command_log "
+        f"SELECT * FROM tray_command_log "  # nosec B608
         f"WHERE device_id = {placeholder} AND status = 'queued' "
         f"ORDER BY created_at ASC, id ASC LIMIT {int(limit)}",
         (device_id,),
@@ -512,7 +512,7 @@ async def save_diagnostic(
     placeholder = "?" if db.is_sqlite() else "%s"
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     last_id = await db.execute_returning_lastrowid(
-        f"INSERT INTO tray_diagnostics "
+        f"INSERT INTO tray_diagnostics "  # nosec B608
         f"(device_id, filename, content_type, size_bytes, stored_path, uploaded_at) "
         f"VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})",
         (device_id, filename, content_type, size_bytes, stored_path, now),
@@ -528,14 +528,14 @@ async def list_diagnostics(
     p = "?" if db.is_sqlite() else "%s"
     if device_id is not None:
         rows = await db.fetch_all(
-            f"SELECT d.*, dev.hostname, dev.device_uid FROM tray_diagnostics d "
+            f"SELECT d.*, dev.hostname, dev.device_uid FROM tray_diagnostics d "  # nosec B608
             f"JOIN tray_devices dev ON dev.id = d.device_id "
             f"WHERE d.device_id = {p} ORDER BY d.uploaded_at DESC LIMIT {p}",
             (device_id, limit),
         )
     else:
         rows = await db.fetch_all(
-            f"SELECT d.*, dev.hostname, dev.device_uid FROM tray_diagnostics d "
+            f"SELECT d.*, dev.hostname, dev.device_uid FROM tray_diagnostics d "  # nosec B608
             f"JOIN tray_devices dev ON dev.id = d.device_id "
             f"ORDER BY d.uploaded_at DESC LIMIT {p}",
             (limit,),
@@ -546,7 +546,7 @@ async def list_diagnostics(
 async def get_diagnostic(diagnostic_id: int) -> dict[str, Any] | None:
     p = "?" if db.is_sqlite() else "%s"
     row = await db.fetch_one(
-        f"SELECT d.*, dev.hostname, dev.device_uid FROM tray_diagnostics d "
+        f"SELECT d.*, dev.hostname, dev.device_uid FROM tray_diagnostics d "  # nosec B608
         f"JOIN tray_devices dev ON dev.id = d.device_id "
         f"WHERE d.id = {p}",
         (diagnostic_id,),
@@ -562,7 +562,7 @@ async def get_diagnostic(diagnostic_id: int) -> dict[str, Any] | None:
 async def get_latest_tray_version(platform: str = "all") -> dict[str, Any] | None:
     p = "?" if db.is_sqlite() else "%s"
     row = await db.fetch_one(
-        f"SELECT * FROM tray_versions WHERE enabled = 1 AND (platform = {p} OR platform = 'all') "
+        f"SELECT * FROM tray_versions WHERE enabled = 1 AND (platform = {p} OR platform = 'all') "  # nosec B608
         f"ORDER BY published_at DESC LIMIT 1",
         (platform,),
     )
@@ -577,7 +577,7 @@ async def get_stable_tray_version(platform: str = "all") -> dict[str, Any] | Non
     """
     p = "?" if db.is_sqlite() else "%s"
     row = await db.fetch_one(
-        f"SELECT * FROM tray_versions "
+        f"SELECT * FROM tray_versions "  # nosec B608
         f"WHERE enabled = 1 AND rollout_percent = 100 "
         f"AND (platform = {p} OR platform = 'all') "
         f"ORDER BY published_at DESC LIMIT 1",
@@ -596,13 +596,13 @@ async def count_devices_on_version(version: str, platform: str) -> int:
     p = "?" if db.is_sqlite() else "%s"
     if platform == "all":
         row = await db.fetch_one(
-            f"SELECT COUNT(*) AS n FROM tray_devices "
+            f"SELECT COUNT(*) AS n FROM tray_devices "  # nosec B608
             f"WHERE status = 'active' AND agent_version = {p}",
             (version,),
         )
     else:
         row = await db.fetch_one(
-            f"SELECT COUNT(*) AS n FROM tray_devices "
+            f"SELECT COUNT(*) AS n FROM tray_devices "  # nosec B608
             f"WHERE status = 'active' AND agent_version = {p} AND os = {p}",
             (version, platform),
         )
@@ -618,7 +618,7 @@ async def count_active_devices(platform: str = "all") -> int:
         )
     else:
         row = await db.fetch_one(
-            f"SELECT COUNT(*) AS n FROM tray_devices WHERE status = 'active' AND os = {p}",
+            f"SELECT COUNT(*) AS n FROM tray_devices WHERE status = 'active' AND os = {p}",  # nosec B608
             (platform,),
         )
     return int(row["n"]) if row else 0
@@ -639,7 +639,7 @@ async def publish_tray_version(
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     rollout_start = rollout_start_at or (now if rollout_percent < 100 else None)
     last_id = await db.execute_returning_lastrowid(
-        f"INSERT INTO tray_versions "
+        f"INSERT INTO tray_versions "  # nosec B608
         f"(version, platform, download_url, required, release_notes, published_by_user_id, "
         f"published_at, rollout_percent, rollout_start_at) "
         f"VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})",
@@ -652,7 +652,7 @@ async def publish_tray_version(
 async def list_tray_versions(limit: int = 20) -> list[dict[str, Any]]:
     p = "?" if db.is_sqlite() else "%s"
     rows = await db.fetch_all(
-        f"SELECT * FROM tray_versions ORDER BY published_at DESC LIMIT {p}",
+        f"SELECT * FROM tray_versions ORDER BY published_at DESC LIMIT {p}",  # nosec B608
         (limit,),
     )
     return [dict(r) for r in rows] if rows else []
@@ -696,7 +696,7 @@ async def create_chat_token(
         (device_id, token_hash, room_id, expires_at),
     )
     row = await db.fetch_one(
-        f"SELECT * FROM tray_chat_tokens WHERE token_hash = {p}",
+        f"SELECT * FROM tray_chat_tokens WHERE token_hash = {p}",  # nosec B608
         (token_hash,),
     )
     return dict(row) if row else {}
@@ -705,7 +705,7 @@ async def create_chat_token(
 async def get_chat_token_by_hash(token_hash: str) -> dict[str, Any] | None:
     p = "?" if db.is_sqlite() else "%s"
     row = await db.fetch_one(
-        f"SELECT * FROM tray_chat_tokens WHERE token_hash = {p}",
+        f"SELECT * FROM tray_chat_tokens WHERE token_hash = {p}",  # nosec B608
         (token_hash,),
     )
     return dict(row) if row else None

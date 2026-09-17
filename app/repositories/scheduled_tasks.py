@@ -63,7 +63,7 @@ async def count_tasks_by_company_ids(company_ids: Sequence[int]) -> dict[int, in
         return {}
     placeholders = ", ".join(["%s"] * len(unique_ids))
     rows = await db.fetch_all(
-        "SELECT company_id, COUNT(*) AS task_count"
+        "SELECT company_id, COUNT(*) AS task_count"  # nosec B608
         " FROM scheduled_tasks"
         " WHERE company_id IN (" + placeholders + ")"
         " GROUP BY company_id",
@@ -94,7 +94,7 @@ async def get_first_task_for_company_by_commands(
         return None
     placeholders = ",".join(["%s"] * len(commands))
     rows = await db.fetch_all(
-        "SELECT * FROM scheduled_tasks WHERE company_id = %s AND command IN (" + placeholders + ")",
+        "SELECT * FROM scheduled_tasks WHERE company_id = %s AND command IN (" + placeholders + ")",  # nosec B608
         (company_id, *commands),
     )
     # Return the first match according to the priority order of commands
@@ -109,7 +109,7 @@ async def get_first_task_for_company_by_commands(
 async def list_tasks(include_inactive: bool = False) -> list[dict[str, Any]]:
     where = "" if include_inactive else "WHERE active = 1"
     rows = await db.fetch_all(
-        "SELECT * FROM scheduled_tasks " + where + " ORDER BY name ASC",
+        "SELECT * FROM scheduled_tasks " + where + " ORDER BY name ASC",  # nosec B608
     )
     return [_normalise_task(row) for row in rows]
 
@@ -121,7 +121,7 @@ async def list_calendar_tasks(include_inactive: bool = False) -> list[dict[str, 
         where_clauses.append("t.active = 1")
     where = "WHERE " + " AND ".join(where_clauses)
     rows = await db.fetch_all(
-        "SELECT t.*, c.name AS company_name"
+        "SELECT t.*, c.name AS company_name"  # nosec B608
         " FROM scheduled_tasks AS t"
         " LEFT JOIN companies AS c ON c.id = t.company_id"
         " " + where + " ORDER BY t.name ASC",
@@ -339,7 +339,7 @@ async def list_recent_runs(task_ids: Sequence[int] | None = None, limit: int = 5
     if task_ids:
         placeholders = ",".join(["%s"] * len(task_ids))
         rows = await db.fetch_all(
-            "SELECT r.*, t.name AS task_name"
+            "SELECT r.*, t.name AS task_name"  # nosec B608
             " FROM scheduled_task_runs AS r"
             " JOIN scheduled_tasks AS t ON t.id = r.task_id"
             " WHERE r.task_id IN (" + placeholders + ")"

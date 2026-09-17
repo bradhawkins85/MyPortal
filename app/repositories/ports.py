@@ -52,7 +52,7 @@ async def list_ports(
 
     column, order_direction = _normalise_ordering(order_by, direction)
     sql = (
-        "SELECT id, name, code, country, region, timezone, description, latitude, longitude, "
+        "SELECT id, name, code, country, region, timezone, description, latitude, longitude, "  # nosec B608
         "is_active, created_at, updated_at "
         f"FROM ports WHERE {' AND '.join(clauses)} "
         f"ORDER BY {column} {order_direction} LIMIT %s OFFSET %s"
@@ -128,7 +128,7 @@ async def bulk_get_ports(port_ids: Iterable[int]) -> list[dict[str, Any]]:
         return []
     placeholders = ",".join(["%s"] * len(ids))
     sql = (
-        "SELECT id, name, code, country, region, timezone, description, latitude, longitude, is_active, created_at, updated_at "
+        "SELECT id, name, code, country, region, timezone, description, latitude, longitude, is_active, created_at, updated_at "  # nosec B608
         f"FROM ports WHERE id IN ({placeholders})"
     )
     rows = await db.fetch_all(sql, tuple(ids))

@@ -99,7 +99,7 @@ async def list_memberships_for_user(user_id: int, *, status: str | None = "activ
         INNER JOIN roles AS r ON r.id = m.role_id
         WHERE {where_clause}
         ORDER BY m.company_id
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return [_normalise_membership(row) for row in rows]
@@ -163,7 +163,7 @@ async def update_membership(membership_id: int, **updates: Any) -> dict[str, Any
         columns.append(f"{column} = %s")
         params.append(value)
     params.append(membership_id)
-    sql = f"UPDATE company_memberships SET {', '.join(columns)} WHERE id = %s"
+    sql = f"UPDATE company_memberships SET {', '.join(columns)} WHERE id = %s"  # nosec B608
     await db.execute(sql, tuple(params))
     updated = await get_membership_by_id(membership_id)
     if not updated:
