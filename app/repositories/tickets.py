@@ -2081,7 +2081,7 @@ async def add_watcher(
             """
             INSERT INTO ticket_watchers (ticket_id, user_id, email)
             VALUES (%s, %s, NULL)
-            ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)  # nosec B608
+            ON DUPLICATE KEY UPDATE user_id = VALUES(user_id)
             """,
             (ticket_id, user_id),
         )
@@ -2178,11 +2178,11 @@ async def move_replies_to_ticket(
     if not reply_list:
         return 0
     placeholders = ", ".join(["%s"] * len(reply_list))
-    return await db.execute_rowcount(
+    return await db.execute_rowcount(  # nosec B608
         f"""
         UPDATE ticket_replies
         SET ticket_id = %s
-        WHERE id IN ({placeholders})  # nosec B608
+        WHERE id IN ({placeholders})
         """,
         (target_ticket_id, *reply_list),
     )
