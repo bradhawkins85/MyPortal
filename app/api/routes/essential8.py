@@ -3,8 +3,9 @@ from __future__ import annotations
 import html
 from io import BytesIO
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional
+from pathlib import Path, PurePosixPath
+from typing import BinaryIO, Optional
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -14,6 +15,7 @@ from app.api.dependencies.database import require_database
 from app.repositories import essential8 as essential8_repo
 from app.repositories import users as users_repo
 from app.repositories import user_companies as user_company_repo
+from app.services.file_storage import sanitize_filename
 from app.schemas.essential8 import (
     ApprovalStatus,
     CompanyEssential8AuditResponse,
@@ -81,9 +83,66 @@ async def _validate_requirement_owner(company_id: int, owner_user_id: int | None
 def _requirement_upload_dir() -> Path:
     from app import main as main_module
 
-    path = main_module._private_uploads_path / "compliance" / "essential8"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return main_module._private_uploads_path / "compliance" / "essential8"
+
+
+def _sanitize_requirement_evidence_filename(filename: str | None) -> str:
+    normalised = (filename or "").replace("\\", "/").strip()
+    basename = PurePosixPath(normalised).name
+    if not basename or basename in {".", ".."}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Evidence file name is required")
+    suffix = Path(basename).suffix
+    stem = basename[: -len(suffix)] if suffix else basename
+    safe_stem = sanitize_filename(stem).rstrip(".") or "upload"
+    safe_suffix = sanitize_filename(suffix.lstrip(".")).replace(".", "")
+    if suffix and not safe_suffix:
+        safe_suffix = "bin"
+    if safe_suffix:
+        safe_suffix = f".{safe_suffix}"
+    max_stem_length = max(1, 255 - len(safe_suffix))
+    return f"{safe_stem[:max_stem_length]}{safe_suffix}"
+
+
+def _allocate_requirement_evidence_storage_path(
+    *,
+    company_id: int,
+    requirement_id: int,
+    safe_name: str,
+) -> tuple[Path, Path]:
+    storage_dir = _requirement_upload_dir()
+    if storage_dir.exists() and storage_dir.is_symlink():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to allocate evidence storage path",
+        )
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    storage_root = storage_dir.resolve(strict=True)
+    suffix = Path(safe_name).suffix.lower()
+    storage_name = f"company_{company_id}_requirement_{requirement_id}_{uuid4().hex}{suffix}"
+    storage_path = storage_root / storage_name
+    return storage_root, storage_path
+
+
+def _open_requirement_evidence_storage_file(
+    *,
+    company_id: int,
+    requirement_id: int,
+    safe_name: str,
+) -> tuple[Path, Path, BinaryIO]:
+    for _ in range(5):
+        storage_root, storage_path = _allocate_requirement_evidence_storage_path(
+            company_id=company_id,
+            requirement_id=requirement_id,
+            safe_name=safe_name,
+        )
+        try:
+            return storage_root, storage_path, storage_path.open("xb")
+        except FileExistsError:
+            continue
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Unable to allocate evidence storage path",
+    )
 
 
 @router.get("/controls", response_model=list[Essential8ControlResponse])
@@ -637,16 +696,19 @@ async def upload_requirement_evidence(
     requirement = await essential8_repo.get_essential8_requirement(requirement_id)
     if not requirement:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requirement not found")
-    safe_name = Path(evidence_file.filename or "evidence.bin").name
-    if not safe_name:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Evidence file name is required")
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    storage_name = f"company_{company_id}_requirement_{requirement_id}_{timestamp}_{safe_name}"
-    storage_dir = _requirement_upload_dir()
-    storage_path = storage_dir / storage_name
+    safe_name = _sanitize_requirement_evidence_filename(evidence_file.filename)
     total_size = 0
+    storage_root: Path | None = None
+    storage_path: Path | None = None
+    created_file = False
     try:
-        with storage_path.open("wb") as handle:
+        storage_root, storage_path, storage_handle = _open_requirement_evidence_storage_file(
+            company_id=company_id,
+            requirement_id=requirement_id,
+            safe_name=safe_name,
+        )
+        created_file = True
+        with storage_handle as handle:
             while True:
                 chunk = await evidence_file.read(1024 * 1024)
                 if not chunk:
@@ -659,11 +721,12 @@ async def upload_requirement_evidence(
                     )
                 handle.write(chunk)
     except Exception:
-        storage_path.unlink(missing_ok=True)
+        if created_file and storage_root is not None and storage_path is not None and storage_root in storage_path.parents:
+            storage_path.unlink(missing_ok=True)
         raise
     finally:
         await evidence_file.close()
-    relative_path = f"compliance/essential8/{storage_name}"
+    relative_path = f"compliance/essential8/{storage_path.name}"
     return await essential8_repo.add_requirement_evidence(
         company_id=company_id,
         requirement_id=requirement_id,
