@@ -46,3 +46,23 @@ after that GUID in the FFO test forest. The app registration therefore needs
 Microsoft Graph `Domain.Read.All` application permission in addition to the
 Purview roles above. This permission is included in provisioning, automatic
 permission repair, and M365 permission diagnostics.
+
+## Compliance Administrator remediation
+
+The spam search page can start an interactive Microsoft administrator sign-in to
+assign the built-in **Compliance Administrator** directory role to the configured
+enterprise application. The remediation resolves the enterprise application's
+service principal by its application/client ID, verifies the authenticated tenant,
+and creates a tenant-wide (`/`) assignment only when one does not already exist.
+
+The delegated administrator session must have the Microsoft Graph
+`RoleManagement.ReadWrite.Directory` scope consented and the signed-in account must
+have an active supported role, such as Privileged Role Administrator. After Graph
+verifies a new assignment, MyPortal reconnects and can queue the selected failed
+search again. Role assignment success and the later Purview search result are
+reported separately because the assignment does not establish Purview provisioning
+or app-only command support.
+
+`Exchange.ManageAsApp` application permission and administrator consent remain a
+separate prerequisite. MyPortal does not consent permissions, provision Purview,
+or make unsupported app-only eDiscovery PowerShell commands supported.
