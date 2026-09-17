@@ -116,22 +116,23 @@ async def portal_tickets_page(request: Request):
 
     # If no explicit filters are provided, try to load the default view
     if not status_filter and not search_term:
+        filters: dict[str, Any] = {}
         try:
             user_id = int(user.get("id"))
             default_view = await ticket_views_repo.get_default_view(user_id)
             if default_view:
-                filters = default_view.get("filters") or {}
-                # Apply status filter from default view
-                if filters.get("status"):
-                    status_list = filters["status"]
-                    if isinstance(status_list, list) and status_list:
-                        status_filter = ",".join(str(s) for s in status_list)
-                # Apply search filter from default view
-                if filters.get("search"):
-                    search_term = str(filters["search"])
+                loaded_filters = default_view.get("filters")
+                if isinstance(loaded_filters, dict):
+                    filters = loaded_filters
         except (TypeError, ValueError, RuntimeError):
             # If we can't load the default view, just continue without it
-            pass
+            filters = {}
+        status_list = filters.get("status")
+        if isinstance(status_list, list) and status_list:
+            status_filter = ",".join(str(s) for s in status_list)
+        search_value = filters.get("search")
+        if search_value:
+            search_term = str(search_value)
 
     return await _main()._render_portal_tickets_page(
         request,
