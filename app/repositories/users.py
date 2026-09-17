@@ -173,7 +173,11 @@ async def update_user(user_id: int, **updates: Any) -> dict[str, Any]:
     log_info("Updating user", user_id=user_id, fields=list(updates.keys()))
     columns, params = _build_safe_update_clause(updates)
     params.append(user_id)
-    await db.execute(f"UPDATE users SET {columns} WHERE id = %s", tuple(params))
+    # Columns are produced by _build_safe_update_clause's explicit allowlist; values remain bound.
+    await db.execute(  # nosec B608
+        f"UPDATE users SET {columns} WHERE id = %s",  # nosec B608
+        tuple(params),
+    )
     updated = await get_user_by_id(user_id)
     if not updated:
         log_error("User not found after update", user_id=user_id)

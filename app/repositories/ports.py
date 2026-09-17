@@ -107,7 +107,11 @@ async def update_port(port_id: int, **values: Any) -> dict[str, Any]:
         assignments.append(f"{column} = %s")
         params.append(value)
     params.append(port_id)
-    await db.execute(f"UPDATE ports SET {', '.join(assignments)} WHERE id = %s", tuple(params))
+    # Columns are produced by the explicit port update allowlist above; values remain bound.
+    await db.execute(  # nosec B608
+        f"UPDATE ports SET {', '.join(assignments)} WHERE id = %s",  # nosec B608
+        tuple(params),
+    )
     updated = await get_port_by_id(port_id)
     if not updated:
         raise ValueError("Port not found after update")

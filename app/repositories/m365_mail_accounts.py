@@ -164,30 +164,34 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
         return await get_account(account_id)
     assignments: list[str] = []
     params: list[Any] = []
+    allowed = {
+        "name",
+        "company_id",
+        "tenant_id",
+        "user_principal_name",
+        "mailbox_type",
+        "folder",
+        "schedule_cron",
+        "filter_query",
+        "process_unread_only",
+        "mark_as_read",
+        "delete_after_import",
+        "sync_known_only",
+        "active",
+        "scheduled_task_id",
+        "last_synced_at",
+        "priority",
+        "import_purpose",
+        "refresh_token",
+        "access_token",
+        "token_expires_at",
+    }
+    unknown = set(fields) - allowed
+    if unknown:
+        raise ValueError(
+            f"Unsupported Microsoft 365 mail account fields: {', '.join(sorted(unknown))}"
+        )
     for key, value in fields.items():
-        if key not in {
-            "name",
-            "company_id",
-            "tenant_id",
-            "user_principal_name",
-            "mailbox_type",
-            "folder",
-            "schedule_cron",
-            "filter_query",
-            "process_unread_only",
-            "mark_as_read",
-            "delete_after_import",
-            "sync_known_only",
-            "active",
-            "scheduled_task_id",
-            "last_synced_at",
-            "priority",
-            "import_purpose",
-            "refresh_token",
-            "access_token",
-            "token_expires_at",
-        }:
-            continue
         if key in {
             "process_unread_only",
             "mark_as_read",
@@ -213,8 +217,8 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
         return await get_account(account_id)
     assignments.append("updated_at = UTC_TIMESTAMP(6)")
     params.append(account_id)
-    await db.execute(
-        f"UPDATE m365_mail_accounts SET {', '.join(assignments)} WHERE id = %s",
+    await db.execute(  # nosec B608
+        f"UPDATE m365_mail_accounts SET {', '.join(assignments)} WHERE id = %s",  # nosec B608
         tuple(params),
     )
     return await get_account(account_id)

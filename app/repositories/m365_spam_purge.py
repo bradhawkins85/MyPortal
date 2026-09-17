@@ -85,8 +85,9 @@ async def update_request(request_id: int, updates: dict[str, Any]) -> dict[str, 
     if not assignments:
         return await get_request(request_id)
     values.append(request_id)
+    # Assignment names are constrained by the explicit request-status allowlist above; values remain bound.
     await db.execute(
-        "UPDATE m365_spam_purge_requests SET " + ", ".join(assignments) + " WHERE id = %s",
+        "UPDATE m365_spam_purge_requests SET " + ", ".join(assignments) + " WHERE id = %s",  # nosec B608
         tuple(values),
     )
     return await get_request(request_id)

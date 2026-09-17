@@ -145,12 +145,13 @@ async def delete_rooms(room_ids: list[int]) -> int:
         return 0
     placeholders = _placeholders(len(room_ids))
     params = tuple(room_ids)
-    await db.execute(f"DELETE FROM chat_ticket_reply_links WHERE room_id IN ({placeholders})", params)
-    await db.execute(f"DELETE FROM matrix_ai_analysis_queue WHERE chat_room_id IN ({placeholders})", params)
-    await db.execute(f"DELETE FROM chat_invites WHERE room_id IN ({placeholders})", params)
-    await db.execute(f"DELETE FROM chat_room_participants WHERE room_id IN ({placeholders})", params)
-    await db.execute(f"DELETE FROM chat_messages WHERE room_id IN ({placeholders})", params)
-    return await db.execute_rowcount(f"DELETE FROM chat_rooms WHERE id IN ({placeholders})", params)
+    # The IN placeholders are derived only from the supplied room id count; values remain bound.
+    await db.execute(f"DELETE FROM chat_ticket_reply_links WHERE room_id IN ({placeholders})", params)  # nosec B608
+    await db.execute(f"DELETE FROM matrix_ai_analysis_queue WHERE chat_room_id IN ({placeholders})", params)  # nosec B608
+    await db.execute(f"DELETE FROM chat_invites WHERE room_id IN ({placeholders})", params)  # nosec B608
+    await db.execute(f"DELETE FROM chat_room_participants WHERE room_id IN ({placeholders})", params)  # nosec B608
+    await db.execute(f"DELETE FROM chat_messages WHERE room_id IN ({placeholders})", params)  # nosec B608
+    return await db.execute_rowcount(f"DELETE FROM chat_rooms WHERE id IN ({placeholders})", params)  # nosec B608
 
 
 async def create_room(
@@ -197,8 +198,9 @@ async def update_room(room_id: int, **fields: Any) -> None:
         raise ValueError(f"Cannot update chat_rooms fields: {invalid}")
     set_clauses = ", ".join(f"{k} = %s" for k in fields)
     params = list(fields.values()) + [room_id]
+    # Room columns are constrained by _ROOM_UPDATABLE_FIELDS and values remain bound.
     await db.execute(
-        f"UPDATE chat_rooms SET {set_clauses} WHERE id = %s",
+        f"UPDATE chat_rooms SET {set_clauses} WHERE id = %s",  # nosec B608
         tuple(params),
     )
 
@@ -551,8 +553,9 @@ async def update_invite(invite_id: int, **fields: Any) -> None:
         raise ValueError(f"Cannot update chat_invites fields: {invalid}")
     set_clauses = ", ".join(f"{k} = %s" for k in fields)
     params = list(fields.values()) + [invite_id]
+    # Invite columns are constrained by _INVITE_UPDATABLE_FIELDS and values remain bound.
     await db.execute(
-        f"UPDATE chat_invites SET {set_clauses} WHERE id = %s",
+        f"UPDATE chat_invites SET {set_clauses} WHERE id = %s",  # nosec B608
         tuple(params),
     )
 
@@ -764,7 +767,11 @@ async def update_ai_queue_item(queue_id: int, **fields: Any) -> None:
     if "result_payload" in fields:
         fields["result_payload"] = _json_dumps(fields["result_payload"])
     set_clauses = ", ".join(f"{key} = %s" for key in fields)
-    await db.execute(f"UPDATE matrix_ai_analysis_queue SET {set_clauses} WHERE id = %s", tuple(fields.values()) + (queue_id,))
+    # Queue columns are constrained by the explicit local allowlist and values remain bound.
+    await db.execute(  # nosec B608
+        f"UPDATE matrix_ai_analysis_queue SET {set_clauses} WHERE id = %s",  # nosec B608
+        tuple(fields.values()) + (queue_id,),
+    )
 
 
 async def cancel_active_ai_queue_for_room(chat_room_id: int, reason: str) -> None:

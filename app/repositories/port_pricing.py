@@ -97,8 +97,9 @@ async def update_pricing_version(pricing_id: int, **values: Any) -> dict[str, An
         assignments.append(f"{column} = %s")
         params.append(value)
     params.append(pricing_id)
-    await db.execute(
-        f"UPDATE port_pricing_versions SET {', '.join(assignments)} WHERE id = %s",
+    # Columns are produced by the explicit pricing update allowlist above; values remain bound.
+    await db.execute(  # nosec B608
+        f"UPDATE port_pricing_versions SET {', '.join(assignments)} WHERE id = %s",  # nosec B608
         tuple(params),
     )
     updated = await get_pricing_version(pricing_id)

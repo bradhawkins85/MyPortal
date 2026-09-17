@@ -257,7 +257,8 @@ async def delete_missing(event_types: Iterable[str]) -> None:
         await db.execute("DELETE FROM notification_event_settings")
         return
     placeholders = ", ".join(["%s"] * len(identifiers))
-    await db.execute(
-        f"DELETE FROM notification_event_settings WHERE event_type NOT IN ({placeholders})",
+    # The NOT IN placeholders are derived only from the trusted identifier count; values remain bound.
+    await db.execute(  # nosec B608
+        f"DELETE FROM notification_event_settings WHERE event_type NOT IN ({placeholders})",  # nosec B608
         tuple(identifiers),
     )

@@ -196,8 +196,9 @@ async def replace_statuses(definitions: Sequence[dict[str, Any]]) -> list[dict[s
                 slugs_to_remove = current_slugs - encountered
                 if slugs_to_remove:
                     placeholders = ", ".join(["%s"] * len(slugs_to_remove))
+                    # The IN placeholders are derived only from existing validated status slugs.
                     await cursor.execute(
-                        f"SELECT status, COUNT(*) AS usage_count FROM tickets WHERE status IN ({placeholders}) GROUP BY status",
+                        f"SELECT status, COUNT(*) AS usage_count FROM tickets WHERE status IN ({placeholders}) GROUP BY status",  # nosec B608
                         tuple(slugs_to_remove),
                     )
                     usage_rows = await cursor.fetchall()
@@ -215,8 +216,9 @@ async def replace_statuses(definitions: Sequence[dict[str, Any]]) -> list[dict[s
                             "Cannot remove ticket statuses that are still assigned to tickets: "
                             + ", ".join(sorted(in_use.keys()))
                         )
+                    # The IN placeholders are derived only from existing validated status slugs.
                     await cursor.execute(
-                        f"DELETE FROM ticket_statuses WHERE tech_status IN ({placeholders})",
+                        f"DELETE FROM ticket_statuses WHERE tech_status IN ({placeholders})",  # nosec B608
                         tuple(slugs_to_remove),
                     )
 

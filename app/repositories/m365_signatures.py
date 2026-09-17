@@ -9,6 +9,7 @@ from app.core.database import db
 
 
 SignatureTemplateRecord = dict[str, Any]
+_SQL_UPDATE_SIGNATURE_TEMPLATES = "UPDATE m365_signature_templates SET "
 
 
 async def _ensure_connection() -> None:
@@ -171,7 +172,6 @@ async def update_template(
 ) -> SignatureTemplateRecord | None:
     if not fields:
         return await get_template(company_id, template_id)
-    await _ensure_connection()
     assignments: list[str] = []
     params: list[Any] = []
     allowed = {
@@ -190,9 +190,11 @@ async def update_template(
         "published_at",
         "disabled_at",
     }
+    unknown = set(fields) - allowed
+    if unknown:
+        raise ValueError(f"Unsupported signature template fields: {', '.join(sorted(unknown))}")
+    await _ensure_connection()
     for key, value in fields.items():
-        if key not in allowed:
-            continue
         assignments.append(f"{key} = %s")
         if isinstance(value, datetime):
             params.append(value.replace(tzinfo=None))
@@ -202,11 +204,9 @@ async def update_template(
         return await get_template(company_id, template_id)
     params.extend([company_id, template_id])
     await db.execute(
-        f"""
-        UPDATE m365_signature_templates
-        SET {', '.join(assignments)}
-        WHERE company_id = %s AND id = %s
-        """,
+        _SQL_UPDATE_SIGNATURE_TEMPLATES
+        + ", ".join(assignments)
+        + " WHERE company_id = %s AND id = %s",
         tuple(params),
     )
     return await get_template(company_id, template_id)

@@ -167,8 +167,9 @@ async def record_recipients(
                 set_clauses = ", ".join(f"{col} = :{col}" for col in updates)
                 params = {**updates, "id": existing["id"]}
                 try:
-                    await db.execute(
-                        f"UPDATE ticket_reply_email_recipients SET {set_clauses} WHERE id = :id",
+                    # Updated columns come only from the fixed backfill keys above; values remain bound.
+                    await db.execute(  # nosec B608
+                        f"UPDATE ticket_reply_email_recipients SET {set_clauses} WHERE id = :id",  # nosec B608
                         params,
                     )
                 except Exception as exc:  # pragma: no cover - defensive

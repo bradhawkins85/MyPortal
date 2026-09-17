@@ -132,8 +132,9 @@ async def update_module(
         return await get_module(slug)
     assignments.append("updated_at = UTC_TIMESTAMP(6)")
     params.append(slug)
-    await db.execute(
-        f"UPDATE integration_modules SET {', '.join(assignments)} WHERE slug = %s",
+    # The SET fragment is assembled only from fixed function arguments above; values remain bound.
+    await db.execute(  # nosec B608
+        f"UPDATE integration_modules SET {', '.join(assignments)} WHERE slug = %s",  # nosec B608
         tuple(params),
     )
     return await get_module(slug)

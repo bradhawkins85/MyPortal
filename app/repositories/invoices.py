@@ -219,8 +219,9 @@ async def patch_invoice(invoice_id: int, **updates: Any) -> dict[str, Any]:
         return existing
     columns = ", ".join(f"{column} = %s" for column in updates.keys())
     params = list(updates.values()) + [invoice_id]
-    await db.execute(
-        f"UPDATE invoices SET {columns} WHERE id = %s",
+    # Columns are produced by the explicit invoice patch allowlist above; values remain bound.
+    await db.execute(  # nosec B608
+        f"UPDATE invoices SET {columns} WHERE id = %s",  # nosec B608
         tuple(params),
     )
     updated = await get_invoice_by_id(invoice_id)

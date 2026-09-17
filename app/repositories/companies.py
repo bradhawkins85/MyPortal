@@ -272,7 +272,11 @@ async def update_company(company_id: int, **updates: Any) -> dict[str, Any]:
 
     columns = ", ".join(f"{column} = %s" for column in updates.keys())
     params = list(updates.values()) + [company_id]
-    await db.execute(f"UPDATE companies SET {columns} WHERE id = %s", tuple(params))
+    # Columns are produced by the explicit company update allowlist above; values remain bound.
+    await db.execute(  # nosec B608
+        f"UPDATE companies SET {columns} WHERE id = %s",  # nosec B608
+        tuple(params),
+    )
     updated = await get_company_by_id(company_id)
     if not updated:
         raise ValueError("Company not found after update")

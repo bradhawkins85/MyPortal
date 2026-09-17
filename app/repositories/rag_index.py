@@ -233,8 +233,9 @@ async def update_job(
     if finished:
         assignments.append("finished_at = CURRENT_TIMESTAMP")
     params.append(job_id)
+    # Assignment names are fixed within this helper and values remain bound.
     await db.execute(
-        f"UPDATE rag_index_jobs SET {', '.join(assignments)} WHERE id = ?",
+        f"UPDATE rag_index_jobs SET {', '.join(assignments)} WHERE id = ?",  # nosec B608
         tuple(params),
     )
 
@@ -286,19 +287,20 @@ async def delete_documents_by_ids(document_ids: Sequence[int]) -> int:
     if not ids:
         return 0
     placeholders = ",".join("?" for _ in ids)
+    # Placeholder groups are derived only from normalised integer document ids; values remain bound.
     await db.execute(
-        f"DELETE FROM rag_relationship_queue WHERE source_document_id IN ({placeholders}) OR target_document_id IN ({placeholders})",
+        f"DELETE FROM rag_relationship_queue WHERE source_document_id IN ({placeholders}) OR target_document_id IN ({placeholders})",  # nosec B608
         tuple(ids + ids),
     )
     await db.execute(
-        f"DELETE FROM rag_relationships WHERE source_document_id IN ({placeholders}) OR target_document_id IN ({placeholders})",
+        f"DELETE FROM rag_relationships WHERE source_document_id IN ({placeholders}) OR target_document_id IN ({placeholders})",  # nosec B608
         tuple(ids + ids),
     )
     await db.execute(
-        f"DELETE FROM rag_chunks WHERE document_id IN ({placeholders})", tuple(ids)
+        f"DELETE FROM rag_chunks WHERE document_id IN ({placeholders})", tuple(ids)  # nosec B608
     )
     await db.execute(
-        f"DELETE FROM rag_documents WHERE id IN ({placeholders})", tuple(ids)
+        f"DELETE FROM rag_documents WHERE id IN ({placeholders})", tuple(ids)  # nosec B608
     )
     return len(ids)
 

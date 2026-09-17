@@ -185,8 +185,9 @@ async def bulk_update_devices(
 
     normalized_device_ids = [int(device_id) for device_id in device_ids]
     placeholders = ",".join("%s" for _ in normalized_device_ids)
+    # Assignments come from fixed local branches and the id list is normalised to integers; values remain bound.
     await db.execute(
-        f"UPDATE network_devices SET {', '.join(assignments)} "
+        f"UPDATE network_devices SET {', '.join(assignments)} "  # nosec B608
         f"WHERE company_id=%s AND id IN ({placeholders})",
         tuple(values + [company_id, *normalized_device_ids]),
     )
@@ -224,8 +225,9 @@ async def purge_out_of_scope(company_id: int) -> int:
 
     if purge_ids:
         placeholders = ",".join("%s" for _ in purge_ids)
+        # The IN placeholders are derived only from discovered integer device ids; values remain bound.
         await db.execute(
-            f"DELETE FROM network_devices WHERE company_id=%s AND id IN ({placeholders})",
+            f"DELETE FROM network_devices WHERE company_id=%s AND id IN ({placeholders})",  # nosec B608
             (company_id, *purge_ids),
         )
     return len(purge_ids)

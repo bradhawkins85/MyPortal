@@ -241,8 +241,9 @@ async def delete_tasks(task_ids: list[int]) -> int:
     if not task_ids:
         return 0
     placeholders = ",".join(["%s"] * len(task_ids))
+    # The IN placeholders are derived only from the supplied task id count; values remain bound.
     result = await db.execute(
-        "DELETE FROM scheduled_tasks WHERE id IN (" + placeholders + ")",
+        "DELETE FROM scheduled_tasks WHERE id IN (" + placeholders + ")",  # nosec B608
         tuple(task_ids),
     )
     return int(result or 0)
@@ -377,8 +378,9 @@ async def disable_tasks_for_commands(commands: Iterable[str], *, module_slug: st
     if not command_list:
         return 0
     placeholders = ",".join(["%s"] * len(command_list))
+    # The IN placeholders are derived only from the filtered command count; values remain bound.
     result = await db.execute(
-        "UPDATE scheduled_tasks SET active = 0, disabled_by_module = %s"
+        "UPDATE scheduled_tasks SET active = 0, disabled_by_module = %s"  # nosec B608
         " WHERE active = 1 AND command IN (" + placeholders + ")",
         (module_slug, *command_list),
     )

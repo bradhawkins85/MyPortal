@@ -139,8 +139,9 @@ async def remove_items(session_id: int, product_ids: Iterable[int]) -> None:
         return
     placeholders = ", ".join(["%s"] * len(ids))
     params: list[Any] = [session_id, *ids]
-    await db.execute(
-        f"DELETE FROM shop_cart_items WHERE session_id = %s AND product_id IN ({placeholders})",
+    # The IN placeholders are derived only from the validated product id count; values remain bound.
+    await db.execute(  # nosec B608
+        f"DELETE FROM shop_cart_items WHERE session_id = %s AND product_id IN ({placeholders})",  # nosec B608
         tuple(params),
     )
 

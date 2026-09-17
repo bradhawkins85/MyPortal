@@ -1281,8 +1281,9 @@ async def bulk_dismiss_pending_optional_accessories(ids: list[int]) -> int:
     if not ids:
         return 0
     placeholders = ",".join(["%s"] * len(ids))
+    # The IN placeholders are derived only from the supplied accessory id count; values remain bound.
     result = await db.execute(
-        f"UPDATE shop_optional_accessories SET dismissed = 1, dismissed_at = UTC_TIMESTAMP() WHERE id IN ({placeholders}) AND dismissed = 0",
+        f"UPDATE shop_optional_accessories SET dismissed = 1, dismissed_at = UTC_TIMESTAMP() WHERE id IN ({placeholders}) AND dismissed = 0",  # nosec B608
         tuple(ids),
     )
     return int(result) if result else 0
@@ -1710,8 +1711,9 @@ async def update_order(
         set_clause = ", ".join(f"{column} = %s" for column in updates)
         params: list[Any] = list(updates.values())
         params.extend([order_number, company_id])
+        # `updates` is filtered against the fixed order-field allowlist above; values remain bound.
         await db.execute(
-            f"UPDATE shop_orders SET {set_clause} WHERE order_number = %s AND company_id = %s",
+            f"UPDATE shop_orders SET {set_clause} WHERE order_number = %s AND company_id = %s",  # nosec B608
             tuple(params),
         )
 
@@ -2132,8 +2134,9 @@ async def remove_inbound_product_recommendations(
                 if not source_ids:
                     continue
                 placeholders = ", ".join(["%s"] * len(source_ids))
+                # `table_name` comes from the fixed `relations` mapping in this function and product ids are integer-normalised.
                 await cursor.execute(
-                    f"DELETE FROM {table_name} WHERE related_product_id = %s "
+                    f"DELETE FROM {table_name} WHERE related_product_id = %s "  # nosec B608
                     f"AND product_id IN ({placeholders})",
                     (product_id, *source_ids),
                 )
@@ -3004,8 +3007,9 @@ async def update_quote(
     set_clause = ", ".join(f"{column} = %s" for column in updates)
     params: list[Any] = list(updates.values())
     params.extend([quote_number, company_id])
+    # `updates` is filtered against the fixed quote-field allowlist above; values remain bound.
     await db.execute(
-        f"UPDATE shop_quotes SET {set_clause} WHERE quote_number = %s AND company_id = %s",
+        f"UPDATE shop_quotes SET {set_clause} WHERE quote_number = %s AND company_id = %s",  # nosec B608
         tuple(params),
     )
 
