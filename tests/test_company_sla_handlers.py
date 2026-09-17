@@ -10,7 +10,12 @@ from app.features.companies import handlers
 from app.repositories import slas as sla_repo
 
 
-@pytest.mark.asyncio
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+@pytest.mark.anyio("asyncio")
 async def test_admin_create_sla_template_rejects_non_numeric_windows(monkeypatch):
     request = MagicMock()
     request.form = AsyncMock(

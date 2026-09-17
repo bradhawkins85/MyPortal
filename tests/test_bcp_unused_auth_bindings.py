@@ -8,7 +8,12 @@ from fastapi import HTTPException, status
 from app.api.routes import bcp
 
 
-@pytest.mark.asyncio
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+@pytest.mark.anyio("asyncio")
 async def test_delete_distribution_entry_still_awaits_auth_before_delete(monkeypatch):
     request = MagicMock()
     require_edit = AsyncMock(return_value=({"id": 7}, 101))
@@ -25,7 +30,7 @@ async def test_delete_distribution_entry_still_awaits_auth_before_delete(monkeyp
     assert response.headers["location"] == "/bcp"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio("asyncio")
 async def test_delete_distribution_entry_does_not_mutate_when_auth_fails(monkeypatch):
     request = MagicMock()
     delete_entry = AsyncMock()
