@@ -30,6 +30,7 @@ async def test_startup_database_initialization_retries_retryable_mysql_errors(
     monkeypatch.setattr(main_module.settings, "startup_database_retry_attempts", 3)
     monkeypatch.setattr(main_module.settings, "startup_database_retry_delay_seconds", 7)
     monkeypatch.setattr(main_module.db, "run_migrations", fake_run_migrations)
+    monkeypatch.setattr(main_module.db, "connect", AsyncMock())
     monkeypatch.setattr(main_module.db, "disconnect", AsyncMock())
     monkeypatch.setattr(main_module.asyncio, "sleep", sleep)
 
@@ -52,6 +53,7 @@ async def test_startup_database_initialization_does_not_retry_non_retryable_erro
     monkeypatch.setattr(main_module.settings, "startup_database_retry_attempts", 5)
     monkeypatch.setattr(main_module.settings, "startup_database_retry_delay_seconds", 7)
     monkeypatch.setattr(main_module.db, "run_migrations", fake_run_migrations)
+    monkeypatch.setattr(main_module.db, "connect", AsyncMock())
     monkeypatch.setattr(main_module.db, "disconnect", AsyncMock())
     monkeypatch.setattr(main_module.asyncio, "sleep", sleep)
 
@@ -75,6 +77,7 @@ async def test_startup_database_initialization_retries_os_errors(monkeypatch):
     monkeypatch.setattr(main_module.settings, "startup_database_retry_attempts", 2)
     monkeypatch.setattr(main_module.settings, "startup_database_retry_delay_seconds", 3)
     monkeypatch.setattr(main_module.db, "run_migrations", fake_run_migrations)
+    monkeypatch.setattr(main_module.db, "connect", AsyncMock())
     monkeypatch.setattr(main_module.db, "disconnect", AsyncMock())
     monkeypatch.setattr(main_module.asyncio, "sleep", sleep)
 
