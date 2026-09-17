@@ -31,6 +31,7 @@ from app.repositories import (
     scheduled_invoices,
     service_status,
     subscriptions,
+    tray,
     users,
 )
 
@@ -280,6 +281,19 @@ def test_subscription_list_filters_and_pagination_bind_values_outside_sql(monkey
     assert "OFFSET %s" in sql
     assert INJECTION not in sql
     assert params == (INJECTION, 5, 10)
+
+
+def test_tray_queued_command_limit_is_bound(monkeypatch):
+    fetch_all = AsyncMock(return_value=[])
+    monkeypatch.setattr(tray.db, "fetch_all", fetch_all)
+    monkeypatch.setattr(tray.db, "is_sqlite", lambda: False)
+
+    asyncio.run(tray.get_queued_commands_for_device(11, limit="7"))
+
+    sql, params = fetch_all.await_args.args
+    assert "LIMIT %s" in sql
+    assert "LIMIT 7" not in sql
+    assert params == (11, 7)
 
 
 def test_bulk_in_clause_uses_one_placeholder_and_binding_per_item(monkeypatch):

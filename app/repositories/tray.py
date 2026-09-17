@@ -475,11 +475,12 @@ async def get_queued_commands_for_device(device_id: int, *, limit: int = 50) -> 
     """
 
     placeholder = "?" if db.is_sqlite() else "%s"
+    limit_value = int(limit)
     rows = await db.fetch_all(
         f"SELECT * FROM tray_command_log "  # nosec B608
         f"WHERE device_id = {placeholder} AND status = 'queued' "
-        f"ORDER BY created_at ASC, id ASC LIMIT {int(limit)}",
-        (device_id,),
+        f"ORDER BY created_at ASC, id ASC LIMIT {placeholder}",
+        (device_id, limit_value),
     )
     return [dict(row) for row in rows]
 
