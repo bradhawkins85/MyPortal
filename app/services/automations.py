@@ -17,7 +17,7 @@ from app.core.database import db
 from app.repositories import automations as automation_repo
 from app.repositories import tickets as tickets_repo
 from app.services import automation_dispatch
-from app.services import module_dispatch as modules_service
+from app.services import module_dispatch
 from app.services import tickets as tickets_service
 from app.services import value_templates
 
@@ -787,7 +787,7 @@ async def _invoke_automation_actions_for_context(
             if context:
                 module_payload.setdefault("context", context)
             try:
-                action_result = await modules_service.trigger_module(
+                action_result = await module_dispatch.trigger_module(
                     module_slug,
                     module_payload,
                     background=False,
@@ -872,7 +872,7 @@ async def _invoke_automation_actions_for_context(
         )
         if context:
             module_payload.setdefault("context", context)
-        result = await modules_service.trigger_module(
+        result = await module_dispatch.trigger_module(
             str(module_slug), module_payload, background=False
         )
         history_error = None
@@ -1343,7 +1343,7 @@ async def _execute_automation(
                     if context:
                         module_payload.setdefault("context", context)
                     try:
-                        action_result = await modules_service.trigger_module(
+                        action_result = await module_dispatch.trigger_module(
                             module_slug,
                             module_payload,
                             background=False,
@@ -1440,7 +1440,7 @@ async def _execute_automation(
                     )
                     if context:
                         module_payload.setdefault("context", context)
-                    result_payload = await modules_service.trigger_module(
+                    result_payload = await module_dispatch.trigger_module(
                         str(module_slug), module_payload, background=False
                     )
                     action_status = "succeeded"

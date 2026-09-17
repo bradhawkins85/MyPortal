@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from types import TracebackType
+from typing import Any, Protocol, TypeAlias
 
 from fastapi import Request
 from fastapi.responses import RedirectResponse
@@ -13,17 +15,68 @@ from app.security.flash import flash_redirect
 __all__ = ["handle_m365_mail_auth_callback"]
 
 
+class M365OAuthService(Protocol):
+    async def get_effective_pkce_client_id_for_company(
+        self,
+        company_id: int,
+        *,
+        redirect_uri: str | None = None,
+    ) -> str: ...
+
+    async def get_effective_pkce_client_id(
+        self,
+        *,
+        redirect_uri: str | None = None,
+    ) -> str: ...
+
+    def extract_tenant_id_from_token(self, token: str) -> str: ...
+
+
+class M365MailOAuthService(Protocol):
+    DELEGATED_MAIL_SCOPE: str
+
+    async def store_delegated_tokens(
+        self,
+        account_id: int,
+        *,
+        tenant_id: str,
+        refresh_token: str,
+        access_token: str,
+        expires_at: datetime | None,
+    ) -> None: ...
+
+    async def get_account(self, account_id: int) -> dict[str, Any] | None: ...
+
+
+class AsyncPostClient(Protocol):
+    async def __aenter__(self) -> "AsyncPostClient": ...
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool | None: ...
+
+    async def post(self, url: str, *, data: dict[str, Any]) -> Any: ...
+
+
+HttpClientFactory: TypeAlias = Callable[..., AsyncPostClient]
+BuildRedirectUri: TypeAlias = Callable[[Request], str]
+LogError: TypeAlias = Callable[..., None]
+
+
 async def handle_m365_mail_auth_callback(
     request: Request,
     *,
     state_data: dict[str, Any],
     code: str,
     company_id: int,
-    m365_service: Any,
-    m365_mail_service: Any,
-    http_client_class: Any,
-    build_m365_redirect_uri: Any,
-    log_error: Any,
+    m365_service: M365OAuthService,
+    m365_mail_service: M365MailOAuthService,
+    http_client_class: HttpClientFactory,
+    build_m365_redirect_uri: BuildRedirectUri,
+    log_error: LogError,
 ) -> RedirectResponse:
     """Handle the M365 mail delegated-auth callback flow."""
     account_id_raw = state_data.get("account_id")

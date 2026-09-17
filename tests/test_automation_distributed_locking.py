@@ -24,7 +24,7 @@ async def test_automation_execution_uses_distributed_lock():
             with patch('app.services.automations.automation_repo.record_run', new_callable=AsyncMock):
                 with patch('app.services.automations.automation_repo.set_last_error', new_callable=AsyncMock):
                     with patch('app.services.automations.automation_repo.set_next_run', new_callable=AsyncMock):
-                        with patch('app.services.automations.modules_service.trigger_module', new_callable=AsyncMock) as mock_trigger:
+                        with patch('app.services.automations.module_dispatch.trigger_module', new_callable=AsyncMock) as mock_trigger:
                             mock_trigger.return_value = {"status": "succeeded"}
                             
                             from app.services.automations import _execute_automation
@@ -55,7 +55,7 @@ async def test_automation_execution_skips_when_lock_not_acquired():
         mock_lock.return_value.__aenter__.return_value = False
         
         with patch('app.services.automations.automation_repo.mark_started', new_callable=AsyncMock) as mock_mark:
-            with patch('app.services.automations.modules_service.trigger_module', new_callable=AsyncMock) as mock_trigger:
+            with patch('app.services.automations.module_dispatch.trigger_module', new_callable=AsyncMock) as mock_trigger:
                 
                 from app.services.automations import _execute_automation
                 
@@ -96,7 +96,7 @@ async def test_process_due_automations_each_gets_lock():
                 with patch('app.services.automations.automation_repo.record_run', new_callable=AsyncMock):
                     with patch('app.services.automations.automation_repo.set_last_error', new_callable=AsyncMock):
                         with patch('app.services.automations.automation_repo.set_next_run', new_callable=AsyncMock):
-                            with patch('app.services.automations.modules_service.trigger_module', new_callable=AsyncMock) as mock_trigger:
+                            with patch('app.services.automations.module_dispatch.trigger_module', new_callable=AsyncMock) as mock_trigger:
                                 mock_trigger.return_value = {"status": "succeeded"}
                                 
                                 from app.services.automations import process_due_automations
