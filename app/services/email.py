@@ -308,34 +308,19 @@ async def send_email(
                     reply_id=ticket_reply_id,
                 )
             else:
-                track_opens = True
-                track_clicks = True
+                tracking_id = email_tracking.generate_tracking_id()
+                modified_html_body = email_tracking.insert_tracking_pixel(
+                    modified_html_body, tracking_id
+                )
+                modified_html_body = email_tracking.rewrite_links_for_tracking(
+                    modified_html_body, tracking_id
+                )
 
-                if track_opens or track_clicks:
-                    tracking_id = email_tracking.generate_tracking_id()
-
-                    # Insert tracking pixel for open tracking
-                    if track_opens:
-                        modified_html_body = email_tracking.insert_tracking_pixel(modified_html_body, tracking_id)
-
-                    # Rewrite links for click tracking
-                    if track_clicks:
-                        modified_html_body = email_tracking.rewrite_links_for_tracking(modified_html_body, tracking_id)
-
-                    logger.info(
-                        "Email tracking enabled",
-                        tracking_id=tracking_id,
-                        reply_id=ticket_reply_id,
-                        track_opens=track_opens,
-                        track_clicks=track_clicks,
-                    )
-                else:
-                    logger.info(
-                        "Email tracking disabled",
-                        reply_id=ticket_reply_id,
-                        track_opens=track_opens,
-                        track_clicks=track_clicks,
-                    )
+                logger.info(
+                    "Email tracking enabled",
+                    tracking_id=tracking_id,
+                    reply_id=ticket_reply_id,
+                )
         except Exception as exc:
             logger.error(
                 "Failed to apply email tracking",
