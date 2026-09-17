@@ -32,6 +32,74 @@ def test_run_now_forces_restart_flag(monkeypatch):
     assert recorded["force_restart"] is True
 
 
+def test_system_update_run_is_skipped_when_no_update_is_available(monkeypatch):
+    scheduler = SchedulerService()
+
+    async def fake_record_task_run(*args, **kwargs):
+        recorded.update(kwargs)
+
+    monkeypatch.setattr(
+        scheduled_tasks_repo,
+        "record_task_run",
+        fake_record_task_run,
+    )
+    monkeypatch.setattr(
+        SchedulerService,
+        "run_system_update",
+        lambda self, *, force_restart=False: _async_result(
+            "No GitHub update available; upgrade was not scheduled."
+        ),
+    )
+
+    recorded = {}
+    asyncio.run(
+        scheduler._run_task(
+            {"id": 8, "command": "system_update"}, force_restart=True
+        )
+    )
+
+    assert recorded["status"] == "skipped"
+    assert recorded["details"] == (
+        "No GitHub update available; upgrade was not scheduled."
+    )
+
+
+def test_system_update_run_succeeds_when_update_is_scheduled(monkeypatch):
+    scheduler = SchedulerService()
+
+    async def fake_record_task_run(*args, **kwargs):
+        recorded.update(kwargs)
+
+    monkeypatch.setattr(
+        scheduled_tasks_repo,
+        "record_task_run",
+        fake_record_task_run,
+    )
+    monkeypatch.setattr(
+        SchedulerService,
+        "run_system_update",
+        lambda self, *, force_restart=False: _async_result(
+            "Update scheduled via system_update.flag using restart mode."
+        ),
+    )
+
+    recorded = {}
+    asyncio.run(
+        scheduler._run_task(
+            {"id": 9, "command": "system_update"}, force_restart=True
+        )
+    )
+
+    assert recorded["status"] == "succeeded"
+    assert recorded["details"] == (
+        "Update scheduled via system_update.flag using restart mode."
+    )
+
+
+async def _async_result(value: str) -> str:
+    return value
+
+
 def test_system_update_schedules_flag_when_remote_ahead(monkeypatch, tmp_path: Path):
     scheduler = SchedulerService()
     flag_path = tmp_path / "var" / "state" / "system_update.flag"

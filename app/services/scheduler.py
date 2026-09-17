@@ -52,6 +52,9 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SYSTEM_UPDATE_LOCK = asyncio.Lock()
 _OUTPUT_PREVIEW_LIMIT = 2000
 _SYSTEM_UPDATE_FLAG_PATH = _PROJECT_ROOT / "var" / "state" / "system_update.flag"
+_SYSTEM_UPDATE_NOT_AVAILABLE_MESSAGE = (
+    "No GitHub update available; upgrade was not scheduled."
+)
 _DEFAULT_UPGRADE_MODE = "graceful"
 _VALID_UPGRADE_MODES = {"graceful", "rolling", "restart"}
 COMMANDS_BY_MODULE = module_capabilities.COMMANDS_BY_MODULE
@@ -980,6 +983,8 @@ class SchedulerService:
                     output = await self.run_system_update(force_restart=force_restart)
                     if output:
                         details = output
+                    if output == _SYSTEM_UPDATE_NOT_AVAILABLE_MESSAGE:
+                        status = "skipped"
                 elif command == "update_tray_icon_installer":
                     settings = get_settings()
                     updated_assets = (
@@ -1511,7 +1516,6 @@ class SchedulerService:
                 )
 
             if local_head == remote_head:
-                message = "No GitHub update available; upgrade was not scheduled."
                 log_info(
                     "System update skipped",
                     reason="already_up_to_date",
@@ -1519,7 +1523,7 @@ class SchedulerService:
                     remote_head=remote_head,
                     requested_from_ui=force_restart,
                 )
-                return message
+                return _SYSTEM_UPDATE_NOT_AVAILABLE_MESSAGE
 
             requested_mode = self._resolve_requested_upgrade_mode(
                 force_restart=force_restart
