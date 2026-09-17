@@ -296,6 +296,19 @@ def test_tray_queued_command_limit_is_bound(monkeypatch):
     assert params == (11, 7)
 
 
+def test_tray_queued_command_rejects_non_numeric_limit_before_query(monkeypatch):
+    fetch_all = AsyncMock(return_value=[])
+    monkeypatch.setattr(tray.db, "fetch_all", fetch_all)
+    monkeypatch.setattr(tray.db, "is_sqlite", lambda: False)
+
+    with pytest.raises(ValueError):
+        asyncio.run(
+            tray.get_queued_commands_for_device(11, limit="1; DROP TABLE tray_command_log")
+        )
+
+    fetch_all.assert_not_awaited()
+
+
 def test_bulk_in_clause_uses_one_placeholder_and_binding_per_item(monkeypatch):
     fetch_all = AsyncMock(return_value=[])
     monkeypatch.setattr(db, "fetch_all", fetch_all)
