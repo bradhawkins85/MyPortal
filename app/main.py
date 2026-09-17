@@ -19,6 +19,7 @@ from urllib.parse import parse_qsl, quote, urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
+import aiomysql
 from fastapi import (
     Depends,
     FastAPI,
@@ -207,6 +208,7 @@ _ticket_dashboard_reference_lock = asyncio.Lock()
 _M365_PROVISION_PKCE_TTL_SECONDS = 600
 _m365_provision_pkce_cache: dict[str, tuple[str, datetime]] = {}
 _m365_provision_pkce_lock = asyncio.Lock()
+_RETRYABLE_STARTUP_DATABASE_ERRNOS: frozenset[int] = frozenset({2003, 2006, 2013})
 
 _LEGACY_MODULE_EXPORTS = {
     "backup_jobs_service": "app.services.backup_jobs",
@@ -252,6 +254,38 @@ async def _store_m365_provision_code_verifier(verifier: str) -> str:
     async with _m365_provision_pkce_lock:
         _m365_provision_pkce_cache[verifier_id] = (verifier, expires_at)
     return verifier_id
+
+
+def _is_retryable_startup_database_error(exc: Exception) -> bool:
+        if isinstance(exc, OSError):
+            return True
+        if isinstance(exc, aiomysql.OperationalError):
+            errno = exc.args[0] if exc.args else None
+            return isinstance(errno, int) and errno in _RETRYABLE_STARTUP_DATABASE_ERRNOS
+        return False
+
+
+async def _initialise_database_for_startup() -> None:
+        attempts = max(1, int(settings.startup_database_retry_attempts))
+        retry_delay_seconds = max(0, int(settings.startup_database_retry_delay_seconds))
+
+        for attempt in range(1, attempts + 1):
+            try:
+                await db.run_migrations()
+                return
+            except Exception as exc:
+                await db.disconnect()
+                if attempt >= attempts or not _is_retryable_startup_database_error(exc):
+                    raise
+                log_warning(
+                    "Startup database initialisation failed; retrying",
+                    attempt=attempt,
+                    max_attempts=attempts,
+                    retry_delay_seconds=retry_delay_seconds,
+                    error=str(exc),
+                )
+                if retry_delay_seconds > 0:
+                    await asyncio.sleep(retry_delay_seconds)
 
 
 async def _pop_m365_provision_code_verifier(verifier_id: str | None) -> str | None:
@@ -2731,8 +2765,7 @@ async def on_startup() -> None:
         await scheduler_service.run_system_update()
     except Exception as exc:
         log_error("Startup system update failed", error=str(exc))
-    await db.connect()
-    await db.run_migrations()
+    await _initialise_database_for_startup()
     async def _bootstrap_default_bcp_template() -> None:
         from app.services.bcp_template import bootstrap_default_template
 

@@ -91,6 +91,12 @@ class Settings(BaseSettings):
     migration_lock_timeout: int = Field(
         default=60, validation_alias="MIGRATION_LOCK_TIMEOUT"
     )
+    startup_database_retry_attempts: int = Field(
+        default=12, validation_alias="STARTUP_DATABASE_RETRY_ATTEMPTS"
+    )
+    startup_database_retry_delay_seconds: int = Field(
+        default=5, validation_alias="STARTUP_DATABASE_RETRY_DELAY_SECONDS"
+    )
     redis_url: str | None = Field(default=None, validation_alias="REDIS_URL")
     m365_it_external_email_address: str = Field(
         default="", validation_alias="M365_IT_EXTERNAL_EMAIL_ADDRESS"
