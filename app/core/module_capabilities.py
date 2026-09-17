@@ -30,7 +30,6 @@ def _c(*, pack=None, commands=(), routes=(), services=(), ui=(), always_on=False
 
 
 MODULE_CAPABILITIES: dict[str, ModuleCapabilities] = {
-    "plausible": _c(pack="plausible", routes=("analytics.pageview", "email.tracking"), services=("plausible.analytics", "email_tracking.delivery"), ui=("modules.plausible",)),
     "syncro": _c(pack="syncro", routes=("syncro.import",), services=("syncro.api",), ui=("syncro",)),
     "ollama": _c(pack="ollama", commands=("process_transcription",), services=("ollama.ai",), ui=("ai.ollama",)),
     "smtp": _c(pack="smtp", services=("smtp.delivery",), ui=("modules.smtp",)),

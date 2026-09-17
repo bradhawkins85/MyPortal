@@ -251,13 +251,12 @@ If SMTP2Go API fails, the system automatically falls back to SMTP relay:
 
 ## Migration from Plausible Analytics
 
-If you're migrating from Plausible Analytics email tracking:
+If you're migrating from legacy Plausible-based email tracking:
 
 1. Configure SMTP2Go as described above
 2. Enable the SMTP2Go module
-3. Disable the Plausible Analytics module (optional)
+3. Remove any remaining Plausible configuration
 4. SMTP2Go will take over email tracking automatically
-5. Existing Plausible tracking continues to work as a fallback
 
 ### Key Differences
 

@@ -192,7 +192,7 @@ Extended `event_type` enum:
 
 ## Migration Path
 
-For existing Plausible Analytics users:
+For existing legacy email-tracking users:
 
 1. Sign up for SMTP2Go account
 2. Generate API key in SMTP2Go dashboard
@@ -200,9 +200,9 @@ For existing Plausible Analytics users:
 4. Enable the module
 5. Set up webhooks in SMTP2Go (optional but recommended)
 6. SMTP2Go takes over automatically
-7. Plausible continues to work as fallback
+7. Remove any remaining Plausible configuration from older deployments
 
-No breaking changes - fully backward compatible.
+Note: legacy Plausible fallback behavior has been removed; deployments should rely on SMTP2Go or MyPortal's local email-tracking flow.
 
 ## Configuration Steps
 

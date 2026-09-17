@@ -355,6 +355,30 @@ resolve_effective_upgrade_mode() {
   esac
 }
 
+validate_origin_remote() {
+  local remote_url="$1"
+  if [[ -z "$remote_url" ]]; then
+    echo "Error: Git remote 'origin' is not configured." >&2
+    exit 1
+  fi
+
+  case "$remote_url" in
+    https://github.com/*|git@github.com:*|ssh://git@github.com/*)
+      ;;
+    *)
+      echo "Error: Refusing automatic update from untrusted origin remote: ${remote_url}" >&2
+      echo "Configure origin to point at the expected GitHub repository before retrying." >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ "$remote_url" =~ ^https://[^/@]+:[^/@]+@ ]]; then
+    echo "Error: Refusing automatic update with credential-bearing HTTPS remotes." >&2
+    echo "Remove embedded credentials from the origin URL and use a managed credential helper or SSH deploy key." >&2
+    exit 1
+  fi
+}
+
 PYTHON_INTERPRETER=$(detect_python_interpreter)
 
 cd "$PROJECT_ROOT"
@@ -473,47 +497,9 @@ reset_project_permissions() {
 SERVICE_NAME=$(detect_service_name)
 SERVICE_USER=$(resolve_service_user "$SERVICE_NAME")
 
-# Load GitHub credentials from .env in a safe manner
-if [[ -f .env ]]; then
-  if [[ -z "$PYTHON_INTERPRETER" ]]; then
-    echo "Warning: Unable to locate a python interpreter to parse .env credentials. Skipping GitHub authentication." >&2
-  else
-    while IFS=':' read -r key encoded || [[ -n "${key:-}" ]]; do
-      if [[ -z "${key:-}" ]]; then
-        continue
-      fi
-      value=$(printf '%s' "$encoded" | base64 --decode)
-      case "$key" in
-        GITHUB_USERNAME) GITHUB_USERNAME="$value" ;;
-        GITHUB_PASSWORD) GITHUB_PASSWORD="$value" ;;
-      esac
-    done < <(
-      "$PYTHON_INTERPRETER" - <<'PY'
-import base64
-from pathlib import Path
-
-env_path = Path('.env')
-if env_path.exists():
-    for raw_line in env_path.read_text().splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith('#') or '=' not in line:
-            continue
-        key, value = line.split('=', 1)
-        key = key.strip()
-        if key not in {'GITHUB_USERNAME', 'GITHUB_PASSWORD'}:
-            continue
-        value = value.strip()
-        if value and len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-            value = value[1:-1]
-        encoded = base64.b64encode(value.encode()).decode()
-        print(f"{key}:{encoded}")
-PY
-    )
-  fi
-fi
-
 REMOTE_URL=$(git config --get remote.origin.url || true)
 PRE_PULL_HEAD=$(git rev-parse HEAD)
+validate_origin_remote "$REMOTE_URL"
 
 # Clean up __pycache__ files before pulling to prevent merge conflicts
 clean_pycache_files
@@ -536,12 +522,7 @@ perform_git_update() {
   exit 1
 }
 
-if [[ -n "${GITHUB_USERNAME:-}" && -n "${GITHUB_PASSWORD:-}" && "$REMOTE_URL" == https://* ]]; then
-  AUTH_REMOTE_URL="https://${GITHUB_USERNAME}:${GITHUB_PASSWORD}@${REMOTE_URL#https://}"
-  perform_git_update "$AUTH_REMOTE_URL" main
-else
-  perform_git_update origin main
-fi
+perform_git_update origin main
 
 POST_PULL_HEAD=$(git rev-parse HEAD)
 FORCE_RESTART="$(read_env_var "FORCE_RESTART" "0")"

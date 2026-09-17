@@ -86,3 +86,12 @@ def test_upgrade_script_promotes_sensitive_changes_to_restart():
 
     assert "dependency_manifest_changed|destructive_migration_phase" in contents
     assert "printf '%s' \"restart\"" in contents
+
+
+def test_upgrade_script_refuses_untrusted_or_credentialed_remotes():
+    script_path = Path(__file__).resolve().parents[1] / "scripts" / "upgrade.sh"
+    contents = script_path.read_text()
+
+    assert "validate_origin_remote()" in contents
+    assert "https://github.com/*|git@github.com:*|ssh://git@github.com/*" in contents
+    assert "credential-bearing HTTPS remotes" in contents
