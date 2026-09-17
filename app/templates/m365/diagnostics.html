@@ -37,6 +37,14 @@
         Configure them on the <a href="/m365">Office 365</a> page before running diagnostics.
       </p>
     </div>
+    {% else %}
+    <div class="panel__body">
+      <h3>Purview role check</h3>
+      <p class="text-muted">
+        Configure the tenant-wide <strong>Compliance Administrator</strong> role for this company's enterprise application. This delegated setup requires an administrator with an active supported role and does not grant API consent or provision Purview.
+      </p>
+      <a class="button button--secondary" href="/m365/connect?setup=compliance_role&amp;return_to=diagnostics">Configure Compliance Administrator</a>
+    </div>
     {% endif %}
   </section>
 

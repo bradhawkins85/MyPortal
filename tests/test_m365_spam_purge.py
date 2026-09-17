@@ -177,6 +177,18 @@ def test_spam_purge_template_has_review_confirmation_and_live_refresh():
     assert "Retry search" in source
     assert "active_jobs" in source
     assert 'data-utc="{{ item.created_at }}"' in source
+    assert "Configure Compliance Administrator" not in source
+    assert "setup=compliance_role" not in source
+
+
+def test_compliance_role_setup_is_on_m365_configuration_and_diagnostics_pages():
+    configuration = open("app/templates/m365/index.html", encoding="utf-8").read()
+    diagnostics = open("app/templates/m365/diagnostics.html", encoding="utf-8").read()
+
+    assert "Configure Compliance Administrator" in configuration
+    assert "setup=compliance_role&amp;return_to=m365" in configuration
+    assert "Configure Compliance Administrator" in diagnostics
+    assert "setup=compliance_role&amp;return_to=diagnostics" in diagnostics
 
 
 @pytest.mark.anyio("asyncio")

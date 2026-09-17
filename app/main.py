@@ -4558,10 +4558,10 @@ async def m365_connect(request: Request):
     }
     if request.query_params.get("setup") == "compliance_role":
         state_payload["setup"] = "compliance_role"
-        state_payload["return_to"] = "spam_purge"
-        retry_request_id = request.query_params.get("retry_request_id", "")
-        if retry_request_id.isdigit():
-            state_payload["retry_request_id"] = int(retry_request_id)
+        requested_return = request.query_params.get("return_to", "m365")
+        state_payload["return_to"] = (
+            requested_return if requested_return in {"m365", "diagnostics"} else "m365"
+        )
     state = oauth_state_serializer.dumps(state_payload)
     params = {
         "client_id": credentials["client_id"],
@@ -5467,10 +5467,15 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         _best_effort_sync_m365_email_domains(company_id),
         name=f"sync_m365_email_domains_{company_id}",
     )
-    if state_data.get("return_to") == "spam_purge":
+    if compliance_setup:
+        destination = (
+            "/m365/diagnostics"
+            if state_data.get("return_to") == "diagnostics"
+            else "/m365"
+        )
         if compliance_role_error:
             return flash_redirect(
-                "/m365/spam-purge",
+                destination,
                 compliance_role_error,
                 "error",
             )
@@ -5480,26 +5485,8 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             if role_status == "existing"
             else "Compliance Administrator was assigned and verified."
         )
-        retry_request_id = state_data.get("retry_request_id")
-        if retry_request_id:
-            try:
-                await purge_service.start_search(int(retry_request_id), company_id)
-                return flash_redirect(
-                    "/m365/spam-purge",
-                    role_message
-                    + " The application was reconnected with a fresh administrator "
-                    "session and the Purview search retry was queued separately; "
-                    "check request history for its result.",
-                    "success",
-                )
-            except (LookupError, TypeError, ValueError) as exc:
-                return flash_redirect(
-                    "/m365/spam-purge",
-                    role_message + f" The Purview retry was not queued: {exc}",
-                    "error",
-                )
         return flash_redirect(
-            "/m365/spam-purge",
+            destination,
             role_message
             + " Reconnect is complete; Purview provisioning and search support "
             "must still be verified separately.",

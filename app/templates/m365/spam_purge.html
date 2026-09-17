@@ -63,11 +63,7 @@
         <div><dt>Purge mode</dt><dd>Hard delete</dd></div>
       </dl>
       <p class="form-help">Searches run against all Exchange locations in the selected company tenant. Every action is retained in history and the audit log.</p>
-      <hr>
-      <h3>Purview role setup</h3>
-      <p class="form-help">Assign the tenant-wide <strong>Compliance Administrator</strong> role to this company's enterprise application. Microsoft Graph delegated access requires <code>RoleManagement.ReadWrite.Directory</code> consent and a signed-in administrator with an active supported role, such as Privileged Role Administrator.</p>
-      <a class="button button--secondary" href="/m365/connect?setup=compliance_role&amp;return_to=spam_purge">Configure Compliance Administrator</a>
-      <p class="form-help">This does not grant API consent, provision Purview, or guarantee that a search supports app-only authentication. Verify <code>Exchange.ManageAsApp</code> and its admin consent separately.</p>
+      <p class="form-help">Tenant permissions and Purview role configuration are managed from <a href="/m365/diagnostics">Office 365 Diagnostics</a>.</p>
     </div>
   </aside>
 </div>
@@ -107,7 +103,6 @@
               {% if item.search_details %}<strong>Search details</strong><br>{{ item.search_details|tojson(indent=2) }}<br><br>{% endif %}
               {% if item.purge_details %}<strong>Purge details</strong><br>{{ item.purge_details|tojson(indent=2) }}<br><br>{% endif %}
               {% if item.search_status == 'failed' %}
-              <a class="button button--secondary button--small" href="/m365/connect?setup=compliance_role&amp;return_to=spam_purge&amp;retry_request_id={{ item.id }}">Configure role, reconnect &amp; retry</a>
               <form method="post" action="/m365/spam-purge/{{ item.id }}/retry" class="purge-actions">
                 {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}
                 <button class="button button--primary button--small" type="submit">Retry search</button>
