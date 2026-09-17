@@ -9,7 +9,7 @@ This service handles:
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -18,6 +18,53 @@ from loguru import logger
 from app.repositories import subscription_change_requests as change_requests_repo
 from app.repositories import subscriptions as subscriptions_repo
 from app.services.subscription_pricing import calculate_coterm_price
+
+
+async def _create_change_ticket(
+    subscription: dict[str, Any],
+    *,
+    change_type: str,
+    quantity: int,
+    requested_by: int,
+    notes: str | None,
+) -> dict[str, Any]:
+    """Create the technician work ticket associated with a license change."""
+    from app.services import tickets as tickets_service
+
+    product_name = str(subscription.get("product_name") or "Unknown Product")
+    current_quantity = int(subscription.get("quantity") or 0)
+    direction = "Addition" if change_type == "addition" else "Decrease"
+    effective = (
+        "Immediately"
+        if change_type == "addition"
+        else str(subscription.get("end_date") or "Term end")
+    )
+    description = "\n".join(
+        [
+            f"A license {change_type} requires technician processing.",
+            "",
+            "**Subscription Details:**",
+            f"- Product: {product_name}",
+            f"- Subscription ID: {subscription['id']}",
+            f"- Current Quantity: {current_quantity}",
+            f"- License Change: {'+' if change_type == 'addition' else '-'}{quantity}",
+            f"- Effective: {effective}",
+            *(["", "**Request Notes:**", notes] if notes else []),
+        ]
+    )
+    return await tickets_service.create_ticket(
+        subject=f"License {direction} Request - {product_name}",
+        description=description,
+        requester_id=requested_by,
+        company_id=int(subscription["customer_id"]),
+        assigned_user_id=None,
+        priority="normal",
+        status="open",
+        category="subscription",
+        module_slug="subscriptions",
+        external_reference=f"subscription-change:{subscription['id']}:{change_type}",
+        trigger_automations=True,
+    )
 
 
 def calculate_net_changes(
@@ -274,6 +321,13 @@ async def apply_subscription_addition(
     
     # Update the subscription quantity immediately
     subscription = await subscriptions_repo.get_subscription(subscription_id)
+    ticket = await _create_change_ticket(
+        subscription,
+        change_type="addition",
+        quantity=quantity_to_add,
+        requested_by=requested_by,
+        notes=notes,
+    )
     new_quantity = subscription["quantity"] + quantity_to_add
     
     await subscriptions_repo.update_subscription(
@@ -318,6 +372,7 @@ async def apply_subscription_addition(
                 recurring_item=recurring_item,
                 quantity=quantity_to_add,
                 unit_amount=prorated_charge / Decimal(quantity_to_add),
+                coterm_end_date=subscription.get("end_date"),
             )
             
             # If successful, update the change request with the invoice number
@@ -353,6 +408,7 @@ async def apply_subscription_addition(
         "prorated_charge": prorated_charge,
         "preview": preview,
         "xero_result": xero_result,
+        "ticket": ticket,
     }
 
 
@@ -392,6 +448,15 @@ async def request_subscription_decrease(
             f"Cannot decrease by {quantity_to_decrease} licenses. "
             f"This would result in a negative quantity at term end."
         )
+
+    subscription = await subscriptions_repo.get_subscription(subscription_id)
+    ticket = await _create_change_ticket(
+        subscription,
+        change_type="decrease",
+        quantity=quantity_to_decrease,
+        requested_by=requested_by,
+        notes=notes,
+    )
     
     # Create a pending change request
     change_request = await change_requests_repo.create_change_request(
@@ -411,6 +476,7 @@ async def request_subscription_decrease(
     return {
         "change_request": change_request,
         "preview": preview,
+        "ticket": ticket,
     }
 
 
