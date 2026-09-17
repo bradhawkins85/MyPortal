@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import httpx
+from fastapi import HTTPException
 
+from app.features.m365_admin import api_routes, routes
 from app.services import m365 as m365_service
 from app.services import m365_spam_purge as service
 from app.services.m365 import M365Error, _jwt_appid
@@ -70,6 +72,59 @@ def test_start_purge_is_company_scoped(monkeypatch):
     monkeypatch.setattr(service.purge_repo, "get_request", fake_get)
     with pytest.raises(LookupError):
         asyncio.run(service.start_purge(7, 2))
+
+
+@pytest.mark.anyio("asyncio")
+async def test_retry_route_flashes_purview_preflight_error(monkeypatch):
+    request = object()
+    error = M365Error("Purview preflight did not pass", http_status=503)
+
+    monkeypatch.setattr(
+        routes, "_context",
+        AsyncMock(return_value=({"id": 9}, 2, None)),
+    )
+    monkeypatch.setattr(
+        routes.purge_service, "start_search", AsyncMock(side_effect=error),
+    )
+
+    response = await routes.retry_failed_search(7, request)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/m365/spam-purge"
+    assert "set-cookie" in response.headers
+
+
+@pytest.mark.anyio("asyncio")
+async def test_api_start_search_returns_service_unavailable_for_preflight_error(monkeypatch):
+    error = M365Error("Purview preflight did not pass", http_status=503)
+    monkeypatch.setattr(api_routes, "_company_id", AsyncMock(return_value=2))
+    monkeypatch.setattr(
+        api_routes.purge_service, "start_search", AsyncMock(side_effect=error),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await api_routes.start_search(7, object(), {})
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Purview preflight did not pass"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_preflight_failure_is_marked_service_unavailable(monkeypatch):
+    monkeypatch.setattr(
+        service.m365_service,
+        "run_purview_preflight",
+        AsyncMock(return_value={
+            "ready": False,
+            "checks": [{"label": "Tenant-wide admin consent", "status": "Requires Admin Action"}],
+        }),
+    )
+
+    with pytest.raises(M365Error) as exc_info:
+        await service._require_purview_preflight(2)
+
+    assert exc_info.value.http_status == 503
+    assert "Tenant-wide admin consent" in str(exc_info.value)
 
 
 def test_scc_organization_uses_initial_onmicrosoft_domain(monkeypatch):

@@ -13,6 +13,7 @@ from app.schemas.m365_spam_purge import SpamPurgeRequestCreate
 from app.schemas.m365_out_of_office import OutOfOfficeCreate
 from app.security.flash import flash_redirect
 from app.services import audit as audit_service
+from app.services import m365 as m365_service
 from app.services import m365_signatures as signatures_service
 from app.services import m365_spam_purge as purge_service
 from app.services import m365_out_of_office as oof_service
@@ -434,7 +435,7 @@ async def create_and_start_search(request: Request):
         )
         item = await purge_service.create_request(company_id, int(user["id"]), payload.model_dump())
         await purge_service.start_search(int(item["id"]), company_id)
-    except (ValueError, ValidationError) as exc:
+    except (ValueError, ValidationError, m365_service.M365Error) as exc:
         return flash_redirect("/m365/spam-purge", str(exc), "error")
     await audit_service.record(
         action="m365.spam_search.start", request=request, user_id=int(user["id"]),
@@ -454,7 +455,7 @@ async def purge_search_result(request_id: int, request: Request):
         return flash_redirect("/m365/spam-purge", "Type PURGE to confirm permanent deletion.", "error")
     try:
         item = await purge_service.start_purge(request_id, company_id)
-    except (LookupError, ValueError) as exc:
+    except (LookupError, ValueError, m365_service.M365Error) as exc:
         return flash_redirect("/m365/spam-purge", str(exc), "error")
     await audit_service.record(
         action="m365.spam_purge.start", request=request, user_id=int(user["id"]),
@@ -471,7 +472,7 @@ async def retry_failed_search(request_id: int, request: Request):
         return redirect
     try:
         item = await purge_service.start_search(request_id, company_id)
-    except (LookupError, ValueError) as exc:
+    except (LookupError, ValueError, m365_service.M365Error) as exc:
         return flash_redirect("/m365/spam-purge", str(exc), "error")
     await audit_service.record(
         action="m365.spam_search.retry", request=request, user_id=int(user["id"]),
