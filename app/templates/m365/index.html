@@ -146,6 +146,12 @@
 
       {% if has_credentials and is_super_admin %}
       <section class="m365-card">
+        <header class="m365-card__header"><span class="m365-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2 3 6v6c0 5 3.8 9.7 9 10 5.2-.3 9-5 9-10V6l-9-4Zm-1 14-4-4 1.4-1.4 2.6 2.6 5.6-5.6L18 9l-7 7Z"/></svg></span><div><h3>Purview role setup</h3><p>Assign the Compliance Administrator role required by compliance searches.</p></div></header>
+        <a href="/m365/connect?setup=compliance_role&amp;return_to=m365" class="button button--ghost">Configure Compliance Administrator</a>
+        <p class="form-help">Requires a signed-in administrator with an active supported role and delegated <code>RoleManagement.ReadWrite.Directory</code> consent. This does not grant API consent or provision Purview.</p>
+      </section>
+
+      <section class="m365-card">
         <header class="m365-card__header"><span class="m365-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2 3 6v6c0 5 3.8 9.7 9 10 5.2-.3 9-5 9-10V6l-9-4Zm-1 14-4-4 1.4-1.4 2.6 2.6 5.6-5.6L18 9l-7 7Z"/></svg></span><div><h3>Mailbox report privacy</h3><p>Confirm that usage reports expose the identifiers required for mailbox sync.</p></div></header>
         <form method="post" action="/m365/checks/report-privacy">{% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}<button type="submit" class="button button--ghost">Run privacy check</button></form>
         <p class="form-help">If concealment is detected, update Reports settings in the <a href="https://admin.microsoft.com" target="_blank" rel="noopener noreferrer">Microsoft 365 admin centre</a>.</p>
