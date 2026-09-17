@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import math
 import re
 import secrets
 from datetime import datetime, timedelta
@@ -29,7 +28,8 @@ from app.core.config import Settings, get_settings
 
 PASSKEY_CHALLENGE_TTL_SECONDS = 300
 BROWSER_BINDING_TOKEN_BYTES = 32
-BROWSER_BINDING_TOKEN_LENGTH = math.ceil(BROWSER_BINDING_TOKEN_BYTES * 4 / 3)
+# secrets.token_urlsafe(32) emits a 43-character unpadded base64url token.
+BROWSER_BINDING_TOKEN_LENGTH = 43
 _BROWSER_BINDING_TOKEN_PATTERN = re.compile(rf"[A-Za-z0-9_-]{{{BROWSER_BINDING_TOKEN_LENGTH}}}")
 
 
