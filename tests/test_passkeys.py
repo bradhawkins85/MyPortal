@@ -272,7 +272,40 @@ async def test_begin_passkey_authentication_generates_cookie_when_missing(monkey
     assert "HttpOnly" in set_cookie
     assert "SameSite=lax" in set_cookie
     assert "Max-Age=300" in set_cookie
+    # HTTP requests in the default test environment should not receive Secure cookies.
     assert "Secure" not in set_cookie
+
+
+@pytest.mark.anyio
+async def test_begin_passkey_authentication_sets_secure_cookie_in_production(monkeypatch):
+    recorded = {}
+    generated_binding = _valid_browser_binding("P")
+    expires_at = datetime(2026, 1, 1, 12)
+
+    async def fake_create_passkey_challenge(**kwargs):
+        recorded["challenge"] = kwargs
+
+    monkeypatch.setattr(auth_routes.auth_repo, "create_passkey_challenge", fake_create_passkey_challenge)
+    monkeypatch.setattr(
+        auth_routes.passkeys_service,
+        "authentication_options",
+        lambda: {
+            "challenge_id": "challenge-prod",
+            "challenge": "expected-challenge",
+            "expires_at": expires_at,
+            "public_key": {"challenge": "expected-challenge"},
+        },
+    )
+    monkeypatch.setattr(auth_routes.passkeys_service, "generate_browser_binding_token", lambda: generated_binding)
+    monkeypatch.setattr(auth_routes.settings, "environment", "production")
+
+    response = await auth_routes.begin_passkey_authentication(
+        _request("/auth/passkeys/authenticate/options"),
+        None,
+    )
+
+    assert recorded["challenge"]["browser_binding_hash"] == passkeys_service.browser_binding_hash(generated_binding)
+    assert "Secure" in response.headers["set-cookie"]
 
 
 @pytest.mark.anyio
