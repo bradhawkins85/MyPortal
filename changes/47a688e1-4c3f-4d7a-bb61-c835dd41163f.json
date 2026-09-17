@@ -1,0 +1,7 @@
+{
+  "guid": "47a688e1-4c3f-4d7a-bb61-c835dd41163f",
+  "occurred_at": "2026-09-17T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed the Microsoft 365 spam purge page failing to load when active-job state is boolean.",
+  "content_hash": "f5f11bb973538f9fe82380967d90855211c1d67dd7a029d6df02241d85c28b4d"
+}

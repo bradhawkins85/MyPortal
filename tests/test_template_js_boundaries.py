@@ -153,8 +153,8 @@ def test_static_javascript_files_parse(relative_path: str) -> None:
             },
         ),
         (
-            """<div data-spam-purge-config='{{ {"refresh": (active_jobs | default([]) | length) > 0} | tojson | e }}'></div>""",
-            {"active_jobs": [1]},
+            """<div data-spam-purge-config='{{ {"refresh": active_jobs | default(false)} | tojson | e }}'></div>""",
+            {"active_jobs": True},
             {"refresh": True},
         ),
     ],
