@@ -268,10 +268,13 @@ def _is_retryable_startup_database_error(exc: Exception) -> bool:
 async def _initialise_database_for_startup() -> None:
     attempts = max(1, int(settings.startup_database_retry_attempts))
     retry_delay_seconds = max(0, int(settings.startup_database_retry_delay_seconds))
+    migrations_completed = False
 
     for attempt in range(1, attempts + 1):
         try:
-            await db.run_migrations()
+            if not migrations_completed:
+                await db.run_migrations()
+                migrations_completed = True
             await db.connect()
             return
         except Exception as exc:

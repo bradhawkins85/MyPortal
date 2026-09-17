@@ -30,14 +30,17 @@ async def test_startup_database_initialization_retries_retryable_mysql_errors(
     monkeypatch.setattr(main_module.settings, "startup_database_retry_attempts", 3)
     monkeypatch.setattr(main_module.settings, "startup_database_retry_delay_seconds", 7)
     monkeypatch.setattr(main_module.db, "run_migrations", fake_run_migrations)
-    monkeypatch.setattr(main_module.db, "connect", AsyncMock())
-    monkeypatch.setattr(main_module.db, "disconnect", AsyncMock())
+    connect = AsyncMock()
+    disconnect = AsyncMock()
+    monkeypatch.setattr(main_module.db, "connect", connect)
+    monkeypatch.setattr(main_module.db, "disconnect", disconnect)
     monkeypatch.setattr(main_module.asyncio, "sleep", sleep)
 
     await main_module._initialise_database_for_startup()
 
     assert attempts == [1, 2, 3]
-    assert main_module.db.disconnect.await_count == 2
+    assert disconnect.await_count == 2
+    assert connect.await_count == 1
     assert sleep.await_args_list == [call(7), call(7)]
 
 
@@ -53,14 +56,17 @@ async def test_startup_database_initialization_does_not_retry_non_retryable_erro
     monkeypatch.setattr(main_module.settings, "startup_database_retry_attempts", 5)
     monkeypatch.setattr(main_module.settings, "startup_database_retry_delay_seconds", 7)
     monkeypatch.setattr(main_module.db, "run_migrations", fake_run_migrations)
-    monkeypatch.setattr(main_module.db, "connect", AsyncMock())
-    monkeypatch.setattr(main_module.db, "disconnect", AsyncMock())
+    connect = AsyncMock()
+    disconnect = AsyncMock()
+    monkeypatch.setattr(main_module.db, "connect", connect)
+    monkeypatch.setattr(main_module.db, "disconnect", disconnect)
     monkeypatch.setattr(main_module.asyncio, "sleep", sleep)
 
     with pytest.raises(aiomysql.ProgrammingError):
         await main_module._initialise_database_for_startup()
 
-    assert main_module.db.disconnect.await_count == 1
+    assert disconnect.await_count == 1
+    assert connect.await_count == 0
     sleep.assert_not_awaited()
 
 
@@ -77,12 +83,15 @@ async def test_startup_database_initialization_retries_os_errors(monkeypatch):
     monkeypatch.setattr(main_module.settings, "startup_database_retry_attempts", 2)
     monkeypatch.setattr(main_module.settings, "startup_database_retry_delay_seconds", 3)
     monkeypatch.setattr(main_module.db, "run_migrations", fake_run_migrations)
-    monkeypatch.setattr(main_module.db, "connect", AsyncMock())
-    monkeypatch.setattr(main_module.db, "disconnect", AsyncMock())
+    connect = AsyncMock()
+    disconnect = AsyncMock()
+    monkeypatch.setattr(main_module.db, "connect", connect)
+    monkeypatch.setattr(main_module.db, "disconnect", disconnect)
     monkeypatch.setattr(main_module.asyncio, "sleep", sleep)
 
     await main_module._initialise_database_for_startup()
 
     assert attempts == [1, 2]
-    assert main_module.db.disconnect.await_count == 1
+    assert disconnect.await_count == 1
+    assert connect.await_count == 1
     assert sleep.await_args_list == [call(3)]
