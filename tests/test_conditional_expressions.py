@@ -41,6 +41,22 @@ def test_find_multiple_conditionals():
     assert len(conditionals) == 2
 
 
+def test_find_conditionals_preserves_keywords_inside_quotes():
+    """Quoted then/else text should stay within the selected branch value."""
+    text = '{{ if x > 0 then "contains else here" else "contains then here" }}'
+
+    conditionals = conditional_expressions.find_conditionals(text)
+
+    assert conditionals == [
+        (
+            text,
+            "x > 0",
+            '"contains else here"',
+            '"contains then here"',
+        )
+    ]
+
+
 def test_parse_value_quoted_string():
     """Test parsing quoted string values."""
     assert conditional_expressions._parse_value('"hello"') == "hello"
@@ -229,6 +245,35 @@ def test_process_conditionals_empty_text():
     """Test processing with empty or None text."""
     assert conditional_expressions.process_conditionals("", {}) == ""
     assert conditional_expressions.process_conditionals(None, {}) is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "{{if x > 0 then}}",
+        "{{if x > 0 then a else}}",
+        "{{if x > 0 then else a}}",
+        "{{if x > 0 else a}}",
+    ],
+)
+def test_process_conditionals_leaves_malformed_tokens_unchanged(text):
+    """Malformed conditional syntax should be ignored instead of partially parsed."""
+    token_map = {"x": "1", "a": "yes"}
+
+    assert conditional_expressions.find_conditionals(text) == []
+    assert conditional_expressions.process_conditionals(text, token_map) == text
+
+
+def test_process_conditionals_leaves_oversized_token_unchanged():
+    """Oversized conditionals should be left visible to the user."""
+    text = (
+        "{{if "
+        + ("x" * (conditional_expressions._MAX_CONDITIONAL_LENGTH + 10))
+        + " then a}}"
+    )
+
+    assert conditional_expressions.find_conditionals(text) == []
+    assert conditional_expressions.process_conditionals(text, {"a": "yes"}) == text
 
 
 def test_comparison_operators_all():
