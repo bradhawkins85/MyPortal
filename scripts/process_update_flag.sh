@@ -75,7 +75,7 @@ validate_flag_file() {
     flag_owner=$(stat -c '%u' "$UPDATE_FLAG_FILE" 2>/dev/null || true)
     project_owner=$(stat -c '%u' "$PROJECT_ROOT" 2>/dev/null || true)
 
-    if [[ -n "$flag_mode" ]] && (( (8#$flag_mode & 18) != 0 )); then
+    if [[ -n "$flag_mode" ]] && (( (8#$flag_mode & 8#22) != 0 )); then
       echo "Error: Refusing to process insecure update flag permissions ($flag_mode)." >&2
       exit 1
     fi

@@ -2090,8 +2090,6 @@ async def _build_base_context(
         module_lookup = {module.get("slug"): module for module in module_list if module.get("slug")}
         request.state.module_lookup = module_lookup
     
-    plausible_config = {"enabled": False}
-
     context: dict[str, Any] = {
         "request": request,
         "app_name": settings.app_name,
@@ -2129,7 +2127,6 @@ async def _build_base_context(
         "has_issue_tracker_access": has_issue_tracker_access,
         "can_access_tickets": _menu_can(menu_access, "menu.tickets"),
         "can_access_all_tickets": _menu_can(menu_access, "menu.tickets", write=True),
-        "plausible_config": plausible_config,
     }
     context.update(permission_flags)
     if extra:
@@ -2224,7 +2221,6 @@ async def _build_public_context(
         "can_view_m365_shared_mailboxes": False,
         "can_access_chat": False,
         "can_access_marketing": False,
-        "plausible_config": {"enabled": False},
         "cart_summary": {"item_count": 0, "total_quantity": 0, "subtotal": Decimal("0")},
         "notification_unread_count": 0,
         "chat_open_count": 0,
