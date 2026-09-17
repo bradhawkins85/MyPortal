@@ -71,6 +71,19 @@ def test_app_main_no_longer_defines_cart_handlers():
         )
 
 
+def test_cart_pack_runtime_dependencies_remain_available_from_main():
+    """Protect dependencies used by the cart pack's legacy main-module seam."""
+    for name in (
+        "shop_repo",
+        "subscriptions_repo",
+        "subscription_shop_integration",
+    ):
+        assert hasattr(main_module, name), (
+            f"app.main must expose {name} while cart routes resolve dependencies "
+            "through the legacy main-module seam."
+        )
+
+
 def test_cart_pack_loads_and_reloads_cleanly():
     import asyncio
 

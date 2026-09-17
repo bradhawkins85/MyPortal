@@ -13,7 +13,7 @@ from .routes import router as cart_router
 
 PACK = FeaturePack(
     slug="cart",
-    version="1.0.3",
+    version="1.0.4",
     routers=(cart_router,),
 )
 
