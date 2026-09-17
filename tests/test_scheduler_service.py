@@ -162,4 +162,15 @@ def test_build_trigger_rejects_wrong_cron_field_count():
     service._scheduler = SimpleNamespace(timezone=timezone.utc)
 
     assert service._build_trigger({"id": 1, "cron": "0 0 * *"}) is None
-    assert service._build_trigger({"id": 1, "cron": "0 0 * * * *"}) is None
+    assert service._build_trigger({"id": 1, "cron": "0 0 * * * * extra"}) is None
+
+
+def test_build_trigger_accepts_year_and_preserves_last_day():
+    service = SchedulerService()
+    service._scheduler = SimpleNamespace(timezone=timezone.utc)
+
+    trigger = service._build_trigger({"id": 1, "cron": "0 9 L * * 2028"})
+
+    assert trigger is not None
+    assert "day='last'" in str(trigger)
+    assert "year='2028'" in str(trigger)

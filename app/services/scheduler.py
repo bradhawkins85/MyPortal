@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from app.services.cron_expression import parse as parse_cron_expression
 
 from app.core import module_capabilities
 from app.core.config import get_settings
@@ -569,18 +570,16 @@ class SchedulerService:
 
     def _build_trigger(self, task: dict[str, Any]) -> CronTrigger | None:
         try:
-            fields = str(task["cron"]).strip().split()
-            if len(fields) != 5:
-                raise ValueError(
-                    f"Wrong number of fields; got {len(fields)}, expected 5"
-                )
-            minute, hour, day, month, day_of_week = fields
+            minute, hour, day, month, day_of_week, year = parse_cron_expression(
+                str(task["cron"])
+            )
             return CronTrigger(
                 minute=minute,
                 hour=hour,
                 day=_normalise_cron_day_field(day),
                 month=month,
                 day_of_week=day_of_week,
+                year=year,
                 timezone=self._scheduler.timezone,
             )
         except Exception as exc:  # pragma: no cover - defensive logging

@@ -158,6 +158,7 @@ from app.services import background as background_tasks
 from app.services import automations as automations_service
 from app.services import change_log as change_log_service
 from app.services import cron_calendar as cron_calendar_service
+from app.services.cron_expression import validate as validate_cron_expression
 from app.services import company_access
 from app.services import dashboard as dashboard_service
 from app.services import user_m365_contacts as user_m365_contacts_service
@@ -6451,8 +6452,12 @@ async def admin_bulk_create_scheduled_tasks(request: Request):
     start_minute: int | None = None
     start_hour: int | None = None
     if cron:
-        if len(cron_fields) not in {5, 6}:
-            return flash_redirect("/admin/scheduled-tasks", "Enter a valid five- or six-field cron expression.", "error")
+        try:
+            validate_cron_expression(cron)
+        except ValueError as exc:
+            return flash_redirect(
+                "/admin/scheduled-tasks", f"Invalid cron expression: {exc}.", "error"
+            )
         try:
             start_minute = int(cron_fields[0])
             start_hour = int(cron_fields[1])

@@ -9,7 +9,7 @@ from functools import lru_cache
 from time import monotonic
 from typing import Any
 
-from croniter import croniter
+from croniter import CroniterBadDateError, croniter
 
 from loguru import logger
 
@@ -20,6 +20,7 @@ from app.services import automation_dispatch
 from app.services import module_dispatch
 from app.services import tickets as tickets_service
 from app.services import value_templates
+from app.services.cron_expression import for_croniter
 
 SCHEDULED_TICKET_SCAN_BATCH_SIZE = 1000
 SCHEDULED_TICKET_SCAN_MAX_CANDIDATES = 50000
@@ -690,10 +691,10 @@ def calculate_next_run(
     cron_expression = str(automation.get("cron_expression") or "").strip()
     if cron_expression:
         try:
-            iterator = croniter(cron_expression, reference_time)
+            iterator = croniter(for_croniter(cron_expression), reference_time)
             next_time = iterator.get_next(datetime)
             return next_time.astimezone(timezone.utc)
-        except (ValueError, KeyError) as exc:
+        except (CroniterBadDateError, ValueError, KeyError) as exc:
             logger.warning(
                 "Invalid cron expression on automation",
                 automation_id=automation.get("id"),
