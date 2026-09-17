@@ -272,6 +272,7 @@ async def _initialise_database_for_startup() -> None:
     for attempt in range(1, attempts + 1):
         try:
             await db.run_migrations()
+            await db.connect()
             return
         except Exception as exc:
             await db.disconnect()
