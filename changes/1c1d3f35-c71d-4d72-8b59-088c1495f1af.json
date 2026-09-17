@@ -1,0 +1,7 @@
+{
+  "guid": "1c1d3f35-c71d-4d72-8b59-088c1495f1af",
+  "occurred_at": "2026-09-17T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added optional year fields to cron schedules, including years, ranges, and lists.",
+  "content_hash": "cron-optional-year-2026-09-17"
+}

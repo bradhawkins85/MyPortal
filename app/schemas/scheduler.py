@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.services.cron_expression import validate as validate_cron_expression
 
 
 class ScheduledTaskBase(BaseModel):
@@ -20,6 +22,11 @@ class ScheduledTaskBase(BaseModel):
     model_config = {
         "populate_by_name": True,
     }
+
+    @field_validator("cron")
+    @classmethod
+    def validate_cron(cls, value: str) -> str:
+        return validate_cron_expression(value)
 
 
 class ScheduledTaskCreate(ScheduledTaskBase):
@@ -40,6 +47,11 @@ class ScheduledTaskUpdate(BaseModel):
     model_config = {
         "populate_by_name": True,
     }
+
+    @field_validator("cron")
+    @classmethod
+    def validate_cron(cls, value: str | None) -> str | None:
+        return validate_cron_expression(value) if value is not None else None
 
 
 class ScheduledTaskResponse(BaseModel):
