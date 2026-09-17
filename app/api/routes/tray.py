@@ -2372,7 +2372,7 @@ async def issue_chat_token(
     try:
         body = await request.json()
     except Exception:
-        pass
+        body = {}
 
     room_id: int | None = body.get("room_id") or None
     if room_id is not None:
@@ -2607,8 +2607,12 @@ async def popup_chat_send_message(
                 "room_id": room_id,
             },
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        log_error(
+            "popup_chat_send_message: failed to broadcast refresh",
+            room_id=room_id,
+            error=str(exc),
+        )
 
     msg_data = {
         k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in msg.items()

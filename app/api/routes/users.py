@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
@@ -135,7 +136,7 @@ async def create_user(
         company_id=payload.company_id,
     )
     if payload.company_id:
-        try:
+        with suppress(Exception):
             existing = await membership_repo.get_membership_by_company_user(
                 payload.company_id, created["id"]
             )
@@ -148,9 +149,6 @@ async def create_user(
                         role_id=default_role["id"],
                         status="active",
                     )
-        except Exception:
-            # Membership creation is best-effort to avoid blocking user provisioning
-            pass
     await audit_service.record(
         action="user.create",
         request=request,

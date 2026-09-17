@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from contextlib import suppress
 from typing import Any
 
 from inspect import isawaitable
@@ -39,11 +40,9 @@ async def _ensure_connection() -> None:
 
     is_connected = getattr(db, "is_connected", None)
     if callable(is_connected):
-        try:
+        with suppress(Exception):
             if is_connected():
                 return
-        except Exception:  # pragma: no cover - defensive guard
-            pass
     connect = getattr(db, "connect", None)
     if not connect:
         return

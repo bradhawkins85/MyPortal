@@ -158,7 +158,7 @@ def _parse_value(value_str: str) -> str | int | float:
             return float(value_str)
         return int(value_str)
     except (ValueError, TypeError):
-        pass
+        return value_str
     
     # Return as-is (will be treated as variable reference)
     return value_str
@@ -179,7 +179,7 @@ def _resolve_value(value: str | int | float, token_map: dict[str, Any]) -> Any:
                     return float(resolved)
                 return int(resolved)
         except (ValueError, TypeError):
-            pass
+            return resolved
         return resolved
     
     # Not a token, return the string as-is

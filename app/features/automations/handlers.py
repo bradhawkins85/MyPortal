@@ -384,7 +384,7 @@ def _parse_automation_form_submission(
                 try:
                     action_entry["order"] = int(raw_order)
                 except (TypeError, ValueError):
-                    pass
+                    action_entry.pop("order", None)
             note_value = str(entry.get("note") or "").strip()
             if note_value:
                 action_entry["note"] = note_value

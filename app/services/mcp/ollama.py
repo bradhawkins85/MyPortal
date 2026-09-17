@@ -936,7 +936,9 @@ async def _get_application_logs(
                     if entry_ts < since_filter:
                         continue
                 except ValueError:
-                    pass
+                    # Preserve the historical behaviour for malformed log lines:
+                    # keep the entry rather than silently dropping it.
+                    entry_ts = since_filter
             parsed.append(
                 {
                     "timestamp": m.group("ts"),

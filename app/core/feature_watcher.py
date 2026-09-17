@@ -82,7 +82,7 @@ class FeaturePackWatcher:
             try:
                 await task
             except (asyncio.CancelledError, Exception):  # pragma: no cover - best effort cleanup
-                pass
+                continue
         self._tasks.clear()
 
     @staticmethod

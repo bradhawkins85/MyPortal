@@ -1356,7 +1356,7 @@ async def _graph_get(
         try:
             graph_error_code = (response.json().get("error") or {}).get("code")
         except Exception:  # noqa: BLE001
-            pass
+            graph_error_code = None
         raise M365Error(
             f"Microsoft Graph request failed ({response.status_code})",
             http_status=response.status_code,
@@ -1606,7 +1606,8 @@ async def _graph_post(
             if isinstance(message_value, str):
                 graph_error_message = message_value
         except Exception:  # noqa: BLE001
-            pass
+            graph_error_code = None
+            graph_error_message = None
         suffix = f": {graph_error_message}" if graph_error_message else ""
         raise M365Error(
             f"Microsoft Graph POST failed ({response.status_code}){suffix}",
@@ -1725,7 +1726,8 @@ async def _graph_patch(
             if isinstance(message_value, str):
                 graph_error_message = message_value
         except Exception:  # noqa: BLE001
-            pass
+            graph_error_code = None
+            graph_error_message = None
         suffix = f": {graph_error_message}" if graph_error_message else ""
         raise M365Error(
             f"Microsoft Graph PATCH failed ({response.status_code}){suffix}",
@@ -3560,7 +3562,7 @@ async def _lookup_user_by_email(access_token: str, email: str) -> dict[str, Any]
         if matched:
             return matched
     except M365Error:
-        pass
+        matched = None
 
     # Fall back to a full list scan (handles edge cases with filter support)
     all_users = await _graph_get_all(
@@ -3816,7 +3818,7 @@ async def check_enterprise_app_permissions(
             )
             resource_id_to_app_id[resource_id] = str(sp_info.get("appId") or "")
         except M365Error:
-            pass  # leave as empty string; the permission will appear as fail
+            resource_id_to_app_id[resource_id] = ""
 
     # Build a set of (appRoleId, resourceAppId) tuples for quick membership test.
     assigned_by_app: set[tuple[str, str]] = {
@@ -4174,7 +4176,7 @@ async def try_grant_missing_permissions(
             if exo_sp_list:
                 exo_sp_id = exo_sp_list[0]["id"]
         except M365Error:
-            pass  # non-fatal – will skip EXO grant
+            exo_sp_id = None
 
         teams_sp_has_role: bool = False
         try:
@@ -4192,7 +4194,8 @@ async def try_grant_missing_permissions(
                     for r in teams_sp_obj.get("appRoles", [])
                 )
         except M365Error:
-            pass  # non-fatal – will skip Teams grant
+            teams_sp_id = None
+            teams_sp_has_role = False
 
         exo_needed = exo_sp_id is not None and exo_sp_id not in manage_as_app_resource_ids
         teams_needed = (
@@ -4288,7 +4291,7 @@ async def try_grant_missing_permissions(
                                 error=str(exc),
                             )
             except M365Error:
-                pass  # Exchange Online SP lookup failed; non-fatal
+                exo_sp_id = None
 
         # Best-effort: grant Teams.ManageAsApp if not already assigned.
         # Exchange.ManageAsApp and Teams.ManageAsApp share the same role GUID but
@@ -4320,7 +4323,7 @@ async def try_grant_missing_permissions(
                                 error=str(exc),
                             )
             except M365Error:
-                pass  # Teams SP lookup failed; non-fatal
+                teams_sp_id = None
 
         # Best-effort: assign the Exchange Administrator directory role so that
         # Exchange Online PowerShell cmdlets (Get-MailboxPermission) succeed.

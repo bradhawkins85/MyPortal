@@ -8,6 +8,7 @@ import io
 import json
 import re
 import secrets
+from contextlib import suppress
 from datetime import datetime, timezone
 from urllib.parse import unquote
 from email.header import decode_header, make_header
@@ -44,10 +45,8 @@ def _normalise_content_reference(value: str | None) -> str:
     if not reference:
         return ""
     reference = reference.strip("<>")
-    try:
+    with suppress(Exception):
         reference = unquote(reference)
-    except Exception:  # pragma: no cover - unquote is defensive here
-        pass
     return reference.strip().lower()
 
 
@@ -61,12 +60,8 @@ def _content_reference_keys(part: email.message.Message) -> set[str]:
             keys.add(key)
     filename = part.get_filename()
     if filename:
-        try:
+        with suppress(Exception):
             filename = str(make_header(decode_header(filename)))
-        except Exception:
-            # Malformed/unknown encoded filenames are tolerated; fall back to
-            # the raw filename value for reference key normalization.
-            pass
         key = _normalise_content_reference(filename)
         if key:
             keys.add(key)
@@ -610,14 +605,10 @@ def _extract_record_id(record: Any) -> int | None:
     if isinstance(record, Mapping):
         return _int_or_none(record.get("id"))
     if hasattr(record, "get"):
-        try:
+        with suppress(Exception):
             return _int_or_none(record.get("id"))  # type: ignore[call-arg]
-        except Exception:  # pragma: no cover - defensive
-            pass
-    try:
+    with suppress(Exception):
         return _int_or_none(record["id"])  # type: ignore[index]
-    except Exception:  # pragma: no cover - defensive
-        pass
     return _int_or_none(getattr(record, "id", None))
 
 
@@ -1192,11 +1183,9 @@ def _extract_body_and_attachments(message: email.message.Message) -> tuple[str, 
                 filename = part.get_filename()
                 if filename:
                     # Decode filename if it's encoded
-                    try:
+                    with suppress(Exception):
                         decoded_header = make_header(decode_header(filename))
                         filename = str(decoded_header)
-                    except Exception:
-                        pass  # Use filename as-is if decoding fails
                 else:
                     # Generate a filename if none provided
                     filename = f"attachment_{secrets.token_hex(4)}"
@@ -1397,7 +1386,7 @@ async def _find_existing_ticket_for_reply(
                 # request rather than falling through to a less reliable match.
                 return None if _ticket_is_closed(ticket) else ticket
         except Exception:  # pragma: no cover - defensive
-            pass
+            rows = []
 
         try:
             rows = await db.fetch_all(
@@ -1410,7 +1399,7 @@ async def _find_existing_ticket_for_reply(
                 ticket = _normalise_ticket(rows[0])
                 return None if _ticket_is_closed(ticket) else ticket
         except Exception:  # pragma: no cover - defensive
-            pass
+            rows = []
 
     related_ids = _expand_ticket_external_references(related_message_ids)
 
@@ -1423,7 +1412,7 @@ async def _find_existing_ticket_for_reply(
                 if ticket and not _ticket_is_closed(ticket):
                     return ticket
             except Exception:  # pragma: no cover - defensive logging
-                pass
+                ticket = None
 
             try:
                 rows = await db.fetch_all(
@@ -1441,7 +1430,7 @@ async def _find_existing_ticket_for_reply(
                     if not _ticket_is_closed(ticket):
                         return ticket
             except Exception:  # pragma: no cover - defensive logging
-                pass
+                rows = []
 
     # Next, try to match Syncro-originated replies using the embedded message id
     syncro_external_id = _extract_syncro_message_id(subject) or _extract_syncro_message_id(message_body)
@@ -1451,7 +1440,7 @@ async def _find_existing_ticket_for_reply(
             if ticket and not _ticket_is_closed(ticket):
                 return ticket
         except Exception:  # pragma: no cover - defensive logging
-            pass
+            ticket = None
 
     # If no ticket number found, try to match by normalized subject
     # Only match non-closed tickets where sender is requester or watcher
@@ -1713,10 +1702,8 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             mailbox = imaplib.IMAP4_SSL(host, port)
         else:
             mailbox = imaplib.IMAP4(host, port)
-            try:
+            with suppress(Exception):
                 mailbox.starttls()
-            except Exception:
-                pass
         mailbox.login(username, password)
         mailbox.select(folder, readonly=not mark_as_read)
         criterion = "UNSEEN" if process_unread_only else "ALL"
@@ -1942,12 +1929,20 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         )
                         try:
                             await tickets_service.refresh_ticket_ai_summary(int(ticket_id))
-                        except RuntimeError:
-                            pass
+                        except RuntimeError as exc:
+                            log_error(
+                                "IMAP ticket AI summary refresh skipped",
+                                ticket_id=int(ticket_id),
+                                error=str(exc),
+                            )
                         try:
                             await tickets_service.refresh_ticket_ai_tags(int(ticket_id))
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            log_error(
+                                "IMAP ticket AI tag refresh skipped",
+                                ticket_id=int(ticket_id),
+                                error=str(exc),
+                            )
             except Exception as exc:  # pragma: no cover - defensive logging
                 error_text = str(exc)
                 errors.append({"uid": uid, "error": error_text})
@@ -2077,10 +2072,8 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         errors.append({"error": str(exc)})
     finally:
         if mailbox is not None:
-            try:
+            with suppress(Exception):
                 mailbox.logout()
-            except Exception:
-                pass
     await imap_repo.update_account(
         int(account_id),
         last_synced_at=datetime.now(timezone.utc),

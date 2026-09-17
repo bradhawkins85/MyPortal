@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import suppress
 import ipaddress
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
@@ -65,10 +66,8 @@ def _normalise_ip(value: Any) -> str | None:
         text = text.split(";", 1)[0].strip()
     if text.startswith("[") and "]" in text:
         text = text[1 : text.index("]")]
-    try:
+    with suppress(ValueError):
         return str(ipaddress.ip_address(text))
-    except ValueError:
-        pass
     if text.count(":") == 1:
         host, port = text.rsplit(":", 1)
         if port.isdigit():

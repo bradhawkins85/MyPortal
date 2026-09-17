@@ -90,7 +90,7 @@ def _delete_cover_image_file(relative_path: str) -> None:
         candidate.relative_to(base)
         candidate.unlink(missing_ok=True)
     except (ValueError, OSError):  # pragma: no cover - defensive
-        pass
+        return
 
 
 async def company_overview_report_page(request: Request):
@@ -156,7 +156,7 @@ async def company_overview_report_pdf(request: Request):
                 encoded = base64.b64encode(cover_file.read_bytes()).decode("ascii")
                 pdf_cover_image_data_uri = f"data:{mime};base64,{encoded}"
         except (ValueError, OSError):
-            pass
+            pdf_cover_image_data_uri = None
 
     report = await company_report_layout.build(company_id, company)
     base_context = await _main()._build_base_context(

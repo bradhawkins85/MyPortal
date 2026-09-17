@@ -11,9 +11,24 @@ from fastapi import HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from starlette.datastructures import FormData
 
+from app.core.logging import log_error
 from app.security.flash import flash_redirect
 
 _REPORTING_SLUG_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+# Keys are raw module status reasons; values are the client-safe labels we expose.
+_APPROVED_AI_QUERY_MODULE_REASONS = {
+    "Module disabled": "Module disabled",
+    "Module not fully configured": "Module not fully configured",
+    "pending_restart": "Module pending restart",
+}
+
+
+class _ClientSafeAIQueryError(ValueError):
+    """Approved message that may be returned to the reporting UI."""
+
+
+class _AIQueryModuleFailure(RuntimeError):
+    """Raised when the backing AI module fails with non-public diagnostics."""
 
 
 def _main():
@@ -29,6 +44,11 @@ def _reporting_message(value: str | None, *, max_length: int = 240) -> str | Non
     if not cleaned:
         return None
     return cleaned[:max_length]
+
+
+def _approved_ai_query_module_reason(value: Any) -> str | None:
+    cleaned = _reporting_message(str(value) if value is not None else None)
+    return _APPROVED_AI_QUERY_MODULE_REASONS.get(cleaned)
 
 
 def _reporting_user_label(record: Any) -> str:
@@ -429,16 +449,38 @@ async def admin_reporting_ai_query(request: Request):
         )
         if response.get("status") in {"error", "failed", "skipped"}:
             reason = response.get("last_error") or response.get("reason")
-            raise ValueError(
-                str(reason or "The configured LLM module did not generate a query.")
+            if response.get("status") == "skipped" and reason is None:
+                raise _ClientSafeAIQueryError(
+                    "The configured LLM module did not generate a query."
+                )
+            safe_reason = _approved_ai_query_module_reason(reason)
+            if safe_reason:
+                raise _ClientSafeAIQueryError(safe_reason)
+            log_error(
+                "Reporting AI query module failed",
+                status=str(response.get("status") or ""),
+                reason_type=type(reason).__name__,
+                reason_length=len(str(reason)) if reason is not None else 0,
             )
+            raise _AIQueryModuleFailure("module failure")
         sql, summary = report_query_builder.extract_ai_sql(response)
         if not sql:
-            raise ValueError("The configured LLM returned no SQL query.")
-        reporting_service.validate_select_query(sql)
-    except ValueError as exc:
+            raise _ClientSafeAIQueryError("The configured LLM returned no SQL query.")
+        sql = reporting_service.validate_select_query(sql)
+    except (reporting_service.ReportingQueryError, _ClientSafeAIQueryError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
-    except Exception:
+    except _AIQueryModuleFailure:
+        return JSONResponse(
+            {
+                "error": "The AI query service is unavailable. Check that an LLM module is enabled and configured."
+            },
+            status_code=503,
+        )
+    except Exception as exc:
+        log_error(
+            "Reporting AI query generation failed",
+            error_type=type(exc).__name__,
+        )
         return JSONResponse(
             {
                 "error": "The AI query service is unavailable. Check that an LLM module is enabled and configured."

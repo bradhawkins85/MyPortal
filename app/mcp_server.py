@@ -468,5 +468,5 @@ async def handle_mcp_connection(websocket: WebSocket) -> None:
         logger.exception(f"Unexpected error in MCP WebSocket handler: {e}")
         try:
             await websocket.close(code=status.WS_1011_INTERNAL_ERROR, reason="Internal server error")
-        except Exception:
-            pass  # Connection may already be closed
+        except Exception as close_error:
+            logger.debug(f"MCP WebSocket close skipped after handler failure: {close_error}")

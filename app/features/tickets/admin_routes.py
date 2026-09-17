@@ -253,7 +253,7 @@ def _related_items_from_agent_sources(
                     if int(raw_item.get("id")) == current_ticket_id:
                         continue
                 except (TypeError, ValueError):
-                    pass
+                    continue
             if meaningful_terms and _source_relevance_score(raw_item, meaningful_terms) == 0:
                 continue
             url = _source_url(item_type, raw_item)
@@ -647,7 +647,7 @@ async def admin_rescan_ticket_related(ticket_id: int, request: Request):
                 if int(source_id) == ticket_id:
                     continue
             except (TypeError, ValueError):
-                pass
+                source_id = None
         url = _safe_related_url(candidate.get("url"))
         if not url:
             url = _source_url(source_type, {"id": source_id, "url": candidate.get("url")})

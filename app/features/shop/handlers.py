@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import suppress
 from collections.abc import Mapping, Sequence
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
@@ -1649,7 +1650,7 @@ async def admin_bulk_dismiss_optional_accessories(request: Request):
         try:
             ids.append(int(raw))
         except (ValueError, TypeError):
-            pass
+            continue
 
     if ids:
         await shop_repo.bulk_dismiss_pending_optional_accessories(ids)
@@ -2702,7 +2703,7 @@ async def admin_update_shop_product(
         sensitive_extra_keys=("buy_price",),
     )
     redirect_params: dict[str, str] = {}
-    try:
+    with suppress(KeyError):
         # request.query_params accesses scope["query_string"] which may be absent
         # in synthetic test requests; guard with KeyError to stay safe in production
         qp = request.query_params
@@ -2714,8 +2715,6 @@ async def admin_update_shop_product(
         page_size_str = qp.get("pageSize", "")
         if page_size_str.isdigit() and int(page_size_str) > 0:
             redirect_params["pageSize"] = page_size_str
-    except KeyError:
-        pass
     redirect_url = f"/admin/shop?{urlencode(redirect_params)}" if redirect_params else "/admin/shop"
     return RedirectResponse(url=redirect_url, status_code=status.HTTP_303_SEE_OTHER)
 

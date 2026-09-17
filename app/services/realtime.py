@@ -58,14 +58,10 @@ class RefreshNotifier:
                 await self._listener_task
             self._listener_task = None
         if self._pubsub is not None:
-            try:
+            with suppress(Exception):
                 await self._pubsub.unsubscribe(self._channel)
-            except Exception:  # pragma: no cover - defensive cleanup
-                pass
-            try:
+            with suppress(Exception):
                 await self._pubsub.close()
-            except Exception:  # pragma: no cover - defensive cleanup
-                pass
             self._pubsub = None
 
     async def connect(self, websocket: WebSocket) -> None:

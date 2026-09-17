@@ -85,7 +85,7 @@ async def first_accessible_company_id(user: Mapping[str, Any]) -> int | None:
         if raw_company is not None:
             return int(raw_company)
     except (TypeError, ValueError):
-        pass
+        return None
 
     companies = await list_accessible_companies(user)
     for company in companies:
@@ -128,4 +128,3 @@ def _build_super_admin_membership(company: Mapping[str, Any]) -> dict[str, Any]:
         base[flag] = True
 
     return base
-
