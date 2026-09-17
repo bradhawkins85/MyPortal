@@ -173,7 +173,6 @@ async def update_template(
 ) -> SignatureTemplateRecord | None:
     if not fields:
         return await get_template(company_id, template_id)
-    await _ensure_connection()
     assignments: list[str] = []
     params: list[Any] = []
     allowed = {
@@ -195,6 +194,7 @@ async def update_template(
     unknown = set(fields) - allowed
     if unknown:
         raise ValueError(f"Unsupported signature template fields: {', '.join(sorted(unknown))}")
+    await _ensure_connection()
     for key, value in fields.items():
         assignments.append(f"{key} = %s")
         if isinstance(value, datetime):

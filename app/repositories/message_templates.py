@@ -139,13 +139,13 @@ async def create_template(
 async def update_template(template_id: int, **fields: Any) -> MessageTemplateRecord | None:
     if not fields:
         return await get_template(template_id)
-    await _ensure_connection()
     assignments: list[str] = []
     params: list[Any] = []
     allowed = {"slug", "name", "description", "content_type", "content"}
     unknown = set(fields) - allowed
     if unknown:
         raise ValueError(f"Unsupported message template fields: {', '.join(sorted(unknown))}")
+    await _ensure_connection()
     for key, value in fields.items():
         assignments.append(f"{key} = %s")
         params.append(value)

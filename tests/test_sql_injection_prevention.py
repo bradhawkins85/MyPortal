@@ -119,6 +119,16 @@ def test_repository_values_are_bound_outside_sql(monkeypatch, call, expected_met
         fetch_one={"id": 7, "name": INJECTION},
         fetch_all=[],
     )
+    monkeypatch.setattr(
+        m365_signatures,
+        "get_template",
+        AsyncMock(return_value={"id": 7, "name": INJECTION}),
+    )
+    monkeypatch.setattr(
+        message_templates,
+        "get_template",
+        AsyncMock(return_value={"id": 7, "name": INJECTION}),
+    )
     monkeypatch.setattr(service_status, "replace_service_companies", AsyncMock())
     monkeypatch.setattr(
         company_memberships,
