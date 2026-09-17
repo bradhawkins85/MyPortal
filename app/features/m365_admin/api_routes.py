@@ -10,6 +10,7 @@ from app.repositories import m365_spam_purge as purge_repo
 from app.schemas.m365_spam_purge import SpamPurgeRequestCreate, SpamPurgeRequestResponse
 from app.schemas.m365_out_of_office import OutOfOfficeCreate, OutOfOfficeResult
 from app.security.session import session_manager
+from app.services import m365 as m365_service
 from app.services import m365_spam_purge as purge_service
 from app.services import m365_out_of_office as oof_service
 
@@ -107,6 +108,8 @@ async def start_search(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except m365_service.M365Error as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.post("/requests/{request_id}/purge", response_model=SpamPurgeRequestResponse)
@@ -119,6 +122,8 @@ async def start_purge(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except m365_service.M365Error as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.delete("/requests/{request_id}", status_code=status.HTTP_204_NO_CONTENT)

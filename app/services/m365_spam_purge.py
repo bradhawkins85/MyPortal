@@ -179,7 +179,8 @@ async def _require_purview_preflight(company_id: int) -> None:
     )
     raise m365_service.M365Error(
         "Purview preflight did not pass: " + failed
-        + ". Open Office 365 Diagnostics for exact remediation commands and recheck configuration."
+        + ". Open Office 365 Diagnostics for exact remediation commands and recheck configuration.",
+        http_status=503,
     )
 
 
