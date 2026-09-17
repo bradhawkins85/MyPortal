@@ -1,4 +1,6 @@
 """Regression tests for the M365 mail OAuth callback."""
+import base64
+import json
 from urllib.parse import quote
 
 import pytest
@@ -130,7 +132,14 @@ def test_m365_mail_callback_handles_null_company_id(monkeypatch):
     assert response.headers["location"] == "/admin/modules/m365-mail"
     flash_cookie = response.headers.get("set-cookie", "")
     assert "_flash=" in flash_cookie
-    assert "success" in flash_cookie
+    flash_payload = json.loads(
+        base64.b64decode(
+            flash_cookie.split("_flash=", 1)[1].split(";", 1)[0].encode("utf-8")
+        )
+        .decode("utf-8")
+        .rsplit("|", 1)[0]
+    )
+    assert flash_payload["variant"] == "success"
     assert stored["account_id"] == 1
     assert stored["tenant_id"] == "tenant-123"
     assert calls, "Token exchange should be attempted"

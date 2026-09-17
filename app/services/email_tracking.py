@@ -23,6 +23,7 @@ from loguru import logger
 from app.core.config import get_settings
 from app.core.database import db
 from app.services.module_gate import require_module_enabled
+from app.services import module_runtime as module_runtime_service
 
 
 def generate_tracking_id() -> str:
@@ -365,11 +366,8 @@ async def send_event_to_plausible(
     Returns:
         True if event was sent successfully, False otherwise
     """
-    # Get Plausible configuration from integration module
-    from app.services import modules as modules_service
-    
     try:
-        module_settings = await modules_service.get_module_settings('plausible')
+        module_settings = await module_runtime_service.get_module_settings('plausible')
         if not module_settings or not module_settings.get('send_to_plausible'):
             # Plausible integration not configured or disabled
             return False

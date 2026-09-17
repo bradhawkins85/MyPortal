@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from types import TracebackType
+from typing import Any, Protocol, TypeAlias
 
 from fastapi import Request
 from fastapi.responses import RedirectResponse
@@ -13,10 +15,55 @@ from app.security.flash import flash_redirect
 __all__ = ["handle_m365_mail_auth_callback"]
 
 
-def _main():
-    from app import main as main_module
+class M365OAuthService(Protocol):
+    async def get_effective_pkce_client_id_for_company(
+        self,
+        company_id: int,
+        *,
+        redirect_uri: str | None = None,
+    ) -> str: ...
 
-    return main_module
+    async def get_effective_pkce_client_id(
+        self,
+        *,
+        redirect_uri: str | None = None,
+    ) -> str: ...
+
+    def extract_tenant_id_from_token(self, token: str) -> str: ...
+
+
+class M365MailOAuthService(Protocol):
+    DELEGATED_MAIL_SCOPE: str
+
+    async def store_delegated_tokens(
+        self,
+        account_id: int,
+        *,
+        tenant_id: str,
+        refresh_token: str,
+        access_token: str,
+        expires_at: datetime | None,
+    ) -> None: ...
+
+    async def get_account(self, account_id: int) -> dict[str, Any] | None: ...
+
+
+class AsyncPostClient(Protocol):
+    async def __aenter__(self) -> "AsyncPostClient": ...
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool | None: ...
+
+    async def post(self, url: str, *, data: dict[str, Any]) -> Any: ...
+
+
+HttpClientFactory: TypeAlias = Callable[..., AsyncPostClient]
+BuildRedirectUri: TypeAlias = Callable[[Request], str]
+LogError: TypeAlias = Callable[..., None]
 
 
 async def handle_m365_mail_auth_callback(
@@ -25,16 +72,20 @@ async def handle_m365_mail_auth_callback(
     state_data: dict[str, Any],
     code: str,
     company_id: int,
+    m365_service: M365OAuthService,
+    m365_mail_service: M365MailOAuthService,
+    http_client_class: HttpClientFactory,
+    build_m365_redirect_uri: BuildRedirectUri,
+    log_error: LogError,
 ) -> RedirectResponse:
     """Handle the M365 mail delegated-auth callback flow."""
-    main_module = _main()
     account_id_raw = state_data.get("account_id")
     try:
         account_id = int(account_id_raw)
     except (TypeError, ValueError):
         account_id = 0
     code_verifier: str | None = state_data.get("code_verifier")
-    redirect_uri = main_module._build_m365_redirect_uri(request)
+    redirect_uri = build_m365_redirect_uri(request)
 
     def _mail_auth_error(msg: str) -> RedirectResponse:
         return flash_redirect("/admin/modules/m365-mail", msg, "error")
@@ -46,21 +97,21 @@ async def handle_m365_mail_auth_callback(
 
     token_endpoint = "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
     token_data = {
-        "client_id": await main_module.m365_service.get_effective_pkce_client_id_for_company(
+        "client_id": await m365_service.get_effective_pkce_client_id_for_company(
             company_id, redirect_uri=redirect_uri
         )
         if company_id
-        else await main_module.m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri),
+        else await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri),
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": redirect_uri,
         "code_verifier": code_verifier,
-        "scope": main_module.m365_mail_service.DELEGATED_MAIL_SCOPE,
+        "scope": m365_mail_service.DELEGATED_MAIL_SCOPE,
     }
-    async with main_module.httpx.AsyncClient(timeout=30) as client:
+    async with http_client_class(timeout=30) as client:
         token_response = await client.post(token_endpoint, data=token_data)
     if token_response.status_code != 200:
-        main_module.log_error(
+        log_error(
             "M365 mail account OAuth token exchange failed",
             account_id=account_id,
             status=token_response.status_code,
@@ -83,15 +134,15 @@ async def handle_m365_mail_auth_callback(
         )
 
     try:
-        tenant_id = main_module.m365_service.extract_tenant_id_from_token(access_token)
+        tenant_id = m365_service.extract_tenant_id_from_token(access_token)
     except Exception:
         id_token = token_payload.get("id_token", "")
         try:
-            tenant_id = main_module.m365_service.extract_tenant_id_from_token(id_token)
+            tenant_id = m365_service.extract_tenant_id_from_token(id_token)
         except Exception:
             return _mail_auth_error("Unable to determine tenant ID from the sign-in response.")
 
-    await main_module.m365_mail_service.store_delegated_tokens(
+    await m365_mail_service.store_delegated_tokens(
         account_id,
         tenant_id=tenant_id,
         refresh_token=refresh_token,
@@ -99,7 +150,7 @@ async def handle_m365_mail_auth_callback(
         expires_at=expires_at,
     )
 
-    account = await main_module.m365_mail_service.get_account(account_id)
+    account = await m365_mail_service.get_account(account_id)
     label = account.get("name") if account else f"#{account_id}"
     message = f"Successfully signed in for mailbox {label}."
     return flash_redirect("/admin/modules/m365-mail", message, "success")

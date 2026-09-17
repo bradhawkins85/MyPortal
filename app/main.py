@@ -5053,6 +5053,11 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             state_data=state_data,
             code=code,
             company_id=company_id,
+            m365_service=m365_service,
+            m365_mail_service=m365_mail_service,
+            http_client_class=httpx.AsyncClient,
+            build_m365_redirect_uri=_build_m365_redirect_uri,
+            log_error=log_error,
         )
 
     if flow == "discover":

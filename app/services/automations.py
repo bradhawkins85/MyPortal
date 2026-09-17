@@ -16,7 +16,9 @@ from loguru import logger
 from app.core.database import db
 from app.repositories import automations as automation_repo
 from app.repositories import tickets as tickets_repo
-from app.services import modules as modules_service
+from app.services import automation_dispatch
+from app.services import module_dispatch
+from app.services import tickets as tickets_service
 from app.services import value_templates
 
 SCHEDULED_TICKET_SCAN_BATCH_SIZE = 1000
@@ -785,7 +787,7 @@ async def _invoke_automation_actions_for_context(
             if context:
                 module_payload.setdefault("context", context)
             try:
-                action_result = await modules_service.trigger_module(
+                action_result = await module_dispatch.trigger_module(
                     module_slug,
                     module_payload,
                     background=False,
@@ -870,7 +872,7 @@ async def _invoke_automation_actions_for_context(
         )
         if context:
             module_payload.setdefault("context", context)
-        result = await modules_service.trigger_module(
+        result = await module_dispatch.trigger_module(
             str(module_slug), module_payload, background=False
         )
         history_error = None
@@ -959,8 +961,6 @@ async def _scan_tickets_for_automation(
     scanned = await _list_ticket_automation_scan_candidates(limit=scan_limit)
     matches: list[dict[str, Any]] = []
 
-    from app.services import tickets as tickets_service
-
     for ticket in scanned:
         ticket_context = _attach_ticket_age_context(ticket, now=now)
         try:
@@ -1019,8 +1019,6 @@ async def _build_ticket_test_context(
     checked_at = now or datetime.now(timezone.utc)
     ticket_context = _attach_ticket_age_context(ticket, now=checked_at)
     try:
-        from app.services import tickets as tickets_service
-
         enriched_ticket = await tickets_service._enrich_ticket_context(ticket_context)
     except Exception:  # pragma: no cover - defensive fallback for test action
         enriched_ticket = ticket_context
@@ -1079,8 +1077,6 @@ async def test_ticket_automation_by_id(
         result["reason"] = "Automation filters did not match the ticket."
         return result
     if apply:
-        from app.services import tickets as tickets_service
-
         await tickets_service._remove_assigned_user_from_watchers(ticket)
         action_result, action_error = await _invoke_automation_actions_for_context(
             automation,
@@ -1232,10 +1228,6 @@ async def _execute_scheduled_ticket_automation(
     skipped = 0
     results: list[dict[str, Any]] = []
 
-    # Local import avoids a circular import during application startup because
-    # the ticket service emits automation events.
-    from app.services import tickets as tickets_service
-
     for ticket in scanned:
         await tickets_service._remove_assigned_user_from_watchers(ticket)
         ticket_context = _attach_ticket_age_context(ticket, now=now)
@@ -1351,7 +1343,7 @@ async def _execute_automation(
                     if context:
                         module_payload.setdefault("context", context)
                     try:
-                        action_result = await modules_service.trigger_module(
+                        action_result = await module_dispatch.trigger_module(
                             module_slug,
                             module_payload,
                             background=False,
@@ -1448,7 +1440,7 @@ async def _execute_automation(
                     )
                     if context:
                         module_payload.setdefault("context", context)
-                    result_payload = await modules_service.trigger_module(
+                    result_payload = await module_dispatch.trigger_module(
                         str(module_slug), module_payload, background=False
                     )
                     action_status = "succeeded"
@@ -1629,3 +1621,6 @@ async def handle_event(
             }
         )
     return matched
+
+
+automation_dispatch.register_event_handler(handle_event)

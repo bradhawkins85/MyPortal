@@ -67,7 +67,6 @@ _DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
     },
 }
 
-
 def _ensure_bool(value: Any, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
