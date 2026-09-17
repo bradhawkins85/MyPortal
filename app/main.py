@@ -164,6 +164,7 @@ from app.services import dashboard as dashboard_service
 from app.services import user_m365_contacts as user_m365_contacts_service
 from app.services import rag_relationships as rag_relationship_service
 from app.services import m365 as m365_service
+from app.services import m365_spam_purge as purge_service
 from app.services import cis_benchmark as cis_benchmark_service
 from app.services import m365_best_practices as m365_best_practices_service
 from app.services import modules as modules_service
@@ -4551,10 +4552,17 @@ async def m365_connect(request: Request):
     if not credentials:
         return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
     redirect_uri = _build_m365_redirect_uri(request)
-    state = oauth_state_serializer.dumps({
+    state_payload = {
         "company_id": company_id,
         "user_id": user.get("id"),
-    })
+    }
+    if request.query_params.get("setup") == "compliance_role":
+        state_payload["setup"] = "compliance_role"
+        state_payload["return_to"] = "spam_purge"
+        retry_request_id = request.query_params.get("retry_request_id", "")
+        if retry_request_id.isdigit():
+            state_payload["retry_request_id"] = int(retry_request_id)
+    state = oauth_state_serializer.dumps(state_payload)
     params = {
         "client_id": credentials["client_id"],
         "response_type": "code",
@@ -5414,11 +5422,37 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         access_token=None,
         token_expires_at=None,
     )
+    compliance_role_result = None
+    compliance_role_error = None
+    compliance_setup = state_data.get("setup") == "compliance_role"
+    if compliance_setup:
+        if not access_token:
+            compliance_role_error = (
+                "Microsoft did not return the delegated administrator token "
+                "required for Compliance Administrator setup. Reconnect and consent "
+                "RoleManagement.ReadWrite.Directory."
+            )
+        else:
+            try:
+                compliance_role_result = await m365_service.ensure_compliance_administrator_role(
+                    company_id=company_id,
+                    access_token=access_token,
+                )
+            except m365_service.M365Error as exc:
+                compliance_role_error = str(exc)
+                log_error(
+                    "Compliance Administrator remediation failed",
+                    company_id=company_id,
+                    error=str(exc),
+                )
+
     # Best-effort: grant any newly-required app role assignments (e.g. the
     # permissions added for mailbox sync) using the admin's delegated token.
     # This ensures existing deployments pick up new permissions automatically
     # when an administrator re-runs "Authorize portal access".
-    if access_token:
+    # The focused Purview remediation intentionally does not grant other API
+    # permissions or administrator roles; those remain separate setup checks.
+    if access_token and not compliance_setup:
         new_permissions_granted = await m365_service.try_grant_missing_permissions(
             company_id=company_id,
             access_token=access_token,
@@ -5433,6 +5467,44 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         _best_effort_sync_m365_email_domains(company_id),
         name=f"sync_m365_email_domains_{company_id}",
     )
+    if state_data.get("return_to") == "spam_purge":
+        if compliance_role_error:
+            return flash_redirect(
+                "/m365/spam-purge",
+                compliance_role_error,
+                "error",
+            )
+        role_status = str((compliance_role_result or {}).get("status") or "")
+        role_message = (
+            "Compliance Administrator was already assigned."
+            if role_status == "existing"
+            else "Compliance Administrator was assigned and verified."
+        )
+        retry_request_id = state_data.get("retry_request_id")
+        if retry_request_id:
+            try:
+                await purge_service.start_search(int(retry_request_id), company_id)
+                return flash_redirect(
+                    "/m365/spam-purge",
+                    role_message
+                    + " The application was reconnected with a fresh administrator "
+                    "session and the Purview search retry was queued separately; "
+                    "check request history for its result.",
+                    "success",
+                )
+            except (LookupError, TypeError, ValueError) as exc:
+                return flash_redirect(
+                    "/m365/spam-purge",
+                    role_message + f" The Purview retry was not queued: {exc}",
+                    "error",
+                )
+        return flash_redirect(
+            "/m365/spam-purge",
+            role_message
+            + " Reconnect is complete; Purview provisioning and search support "
+            "must still be verified separately.",
+            "success",
+        )
     if state_data.get("return_to") == "diagnostics":
         # Re-run the diagnostics check so the page shows fresh results after repair.
         try:

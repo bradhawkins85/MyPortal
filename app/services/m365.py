@@ -54,6 +54,13 @@ _EXO_MANAGE_AS_APP_ROLE = "dc50a0fb-09a3-484d-be87-e023b12c6440"
 # Exchange Online PowerShell REST API access (e.g. Get-MailboxPermission).
 _EXO_ADMIN_ROLE_TEMPLATE_ID = "29232cdf-9323-42fd-ade2-1d097af3e4de"
 
+# This role is intentionally resolved from Graph by display name rather than
+# relying on a copied identifier.  The remediation below verifies that Graph
+# returned the built-in, tenant-wide role definition before assigning it.
+_COMPLIANCE_ADMIN_ROLE_NAME = "Compliance Administrator"
+_COMPLIANCE_ROLE_VERIFY_ATTEMPTS = 5
+_COMPLIANCE_ROLE_VERIFY_DELAY_SECONDS = 2.0
+
 # Security & Compliance (Microsoft Purview) PowerShell REST API.
 # Protection alert policies (Get-ProtectionAlert / New-ProtectionAlert) require a
 # token scoped to the compliance endpoint rather than the Exchange Online endpoint.
@@ -664,6 +671,145 @@ class M365NoDelegatedTokenError(M365Error):
 
 class M365ReprovisionRequiredError(M365Error):
     """Raised when automatic secret renewal requires app re-provisioning first."""
+
+
+def _compliance_role_error(exc: M365Error) -> M365Error:
+    """Add safe, actionable guidance to delegated role-management failures."""
+    if exc.http_status in {401, 403}:
+        return M365Error(
+            "Microsoft Graph denied the Compliance Administrator assignment. "
+            "Grant delegated RoleManagement.ReadWrite.Directory consent and sign "
+            "in with an administrator whose supported role is active, such as "
+            "Privileged Role Administrator, then reconnect and retry.",
+            http_status=exc.http_status,
+            graph_error_code=exc.graph_error_code,
+        )
+    return M365Error(
+        "Microsoft Graph could not configure Compliance Administrator: " + str(exc),
+        http_status=exc.http_status,
+        graph_error_code=exc.graph_error_code,
+    )
+
+
+async def ensure_compliance_administrator_role(
+    company_id: int,
+    access_token: str,
+    *,
+    verify_attempts: int = _COMPLIANCE_ROLE_VERIFY_ATTEMPTS,
+    verify_delay_seconds: float = _COMPLIANCE_ROLE_VERIFY_DELAY_SECONDS,
+) -> dict[str, Any]:
+    """Idempotently assign Compliance Administrator to the configured app.
+
+    ``access_token`` must be a delegated token obtained from an interactive
+    administrator session.  No token or credential value is logged.  The
+    authenticated Graph tenant is checked before any mutating request.
+    """
+    credentials = await get_credentials(company_id)
+    if not credentials:
+        raise M365Error("No Microsoft 365 credentials are configured for this company.")
+    configured_tenant = str(credentials.get("tenant_id") or "").strip().lower()
+    client_id = str(credentials.get("client_id") or "").strip()
+    if not configured_tenant or not client_id:
+        raise M365Error("The configured Microsoft 365 tenant ID or client ID is missing.")
+    try:
+        organizations = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/organization?$select=id",
+        )
+        organization_rows = organizations.get("value") or []
+        authenticated_tenant = str(
+            organization_rows[0].get("id") if organization_rows else ""
+        ).strip().lower()
+        if not authenticated_tenant:
+            raise M365Error("Microsoft Graph did not return the authenticated tenant ID.")
+        if authenticated_tenant != configured_tenant:
+            raise M365Error(
+                "The signed-in administrator belongs to tenant "
+                f"{authenticated_tenant}, but this company is configured for tenant "
+                f"{configured_tenant}. Sign out and reconnect with an administrator "
+                "from the configured tenant.",
+                http_status=409,
+            )
+
+        escaped_client_id = client_id.replace("'", "''")
+        principals = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/servicePrincipals"
+            f"?$filter=appId eq '{escaped_client_id}'&$select=id,appId",
+        )
+        principal_rows = principals.get("value") or []
+        if len(principal_rows) != 1 or not principal_rows[0].get("id"):
+            raise M365Error(
+                "The enterprise application service principal could not be found "
+                f"using the configured client ID {client_id}. Re-provision the "
+                "Microsoft 365 connection in this tenant and retry.",
+                http_status=404,
+            )
+        principal_id = str(principal_rows[0]["id"])
+
+        definitions = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions"
+            "?$filter=displayName eq 'Compliance Administrator'"
+            "&$select=id,displayName,isBuiltIn",
+        )
+        definition_rows = [
+            row for row in (definitions.get("value") or [])
+            if row.get("displayName") == _COMPLIANCE_ADMIN_ROLE_NAME
+            and row.get("isBuiltIn", True) is not False
+            and row.get("id")
+        ]
+        if len(definition_rows) != 1:
+            raise M365Error(
+                "Microsoft Graph did not return the built-in Compliance "
+                "Administrator role definition. Confirm directory role access and retry.",
+                http_status=404,
+            )
+        role_definition_id = str(definition_rows[0]["id"])
+        assignment_url = (
+            "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments"
+            f"?$filter=principalId eq '{principal_id}' and roleDefinitionId eq "
+            f"'{role_definition_id}' and directoryScopeId eq '/'&$select=id"
+        )
+        if (await _graph_get(access_token, assignment_url)).get("value"):
+            return {"status": "existing", "verified": True}
+
+        try:
+            await _graph_post(
+                access_token,
+                "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments",
+                {
+                    "principalId": principal_id,
+                    "roleDefinitionId": role_definition_id,
+                    "directoryScopeId": "/",
+                },
+            )
+        except M365Error as exc:
+            # A concurrent remediation can win between the GET and POST.
+            if exc.http_status != 409:
+                raise
+
+        attempts = max(1, min(int(verify_attempts), 10))
+        for attempt in range(attempts):
+            if (await _graph_get(access_token, assignment_url)).get("value"):
+                log_info(
+                    "Verified Compliance Administrator directory role assignment",
+                    company_id=company_id,
+                    principal_id=principal_id,
+                )
+                return {"status": "created", "verified": True, "attempts": attempt + 1}
+            if attempt + 1 < attempts:
+                await asyncio.sleep(max(0.0, min(verify_delay_seconds, 30.0)))
+        raise M365Error(
+            "Compliance Administrator was submitted but Microsoft Graph did not "
+            f"confirm it after {attempts} checks. Wait for directory propagation, "
+            "reconnect, and retry the Purview operation.",
+            http_status=503,
+        )
+    except M365Error as exc:
+        if exc.http_status in {404, 409, 503}:
+            raise
+        raise _compliance_role_error(exc) from exc
 
 
 def _self_renewal_reprovision_message(*, admin_flow: bool) -> str:
