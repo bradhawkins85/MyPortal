@@ -62,7 +62,7 @@
                     <td data-label="Reason / event">{{ entry.reason or entry.last_event_type or '—' }}</td>
                     <td data-label="Updated" data-value="{{ entry.updated_iso or '' }}">{% if entry.updated_iso %}<span data-utc="{{ entry.updated_iso }}"></span>{% else %}—{% endif %}</td>
                     <td data-label="Actions">
-                      <form method="post" action="/admin/tickets/email-blocklist/{{ entry.id }}/delete" onsubmit="return confirm('Remove {{ entry.email }} from the email blocklist?');">
+                      <form method="post" action="/admin/tickets/email-blocklist/{{ entry.id }}/delete" onsubmit="return confirm({{ ('Remove ' ~ entry.email ~ ' from the email blocklist?') | tojson | forceescape }});">
                         {% include "partials/csrf.html" %}
                         <button type="submit" class="button button--ghost button--compact">Remove</button>
                       </form>

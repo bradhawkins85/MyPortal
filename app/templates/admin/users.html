@@ -41,12 +41,12 @@
               </td>
               <td class="table__actions" data-column-key="actions">
                 <form action="/admin/users/{{ entry.id }}/deactivate" method="post" class="inline-form"
-                      onsubmit="return confirm('Deactivate {{ entry.email|e }}? They will no longer be able to sign in.');">
+                      onsubmit="return confirm({{ ('Deactivate ' ~ entry.email ~ '? They will no longer be able to sign in.') | tojson | forceescape }});">
                   {% include "partials/csrf.html" %}
                   <button type="submit" class="button button--ghost" {% if is_self %}disabled{% endif %}>Deactivate</button>
                 </form>
                 <form action="/admin/users/{{ entry.id }}/delete" method="post" class="inline-form"
-                      onsubmit="return confirm('Permanently delete {{ entry.email|e }}? This cannot be undone.');">
+                      onsubmit="return confirm({{ ('Permanently delete ' ~ entry.email ~ '? This cannot be undone.') | tojson | forceescape }});">
                   {% include "partials/csrf.html" %}
                   <button type="submit" class="button button--danger" {% if is_self %}disabled{% endif %}>Delete</button>
                 </form>
