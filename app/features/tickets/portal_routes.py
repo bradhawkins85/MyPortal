@@ -126,7 +126,7 @@ async def portal_tickets_page(request: Request):
                     filters = loaded_filters
         except (TypeError, ValueError, RuntimeError):
             # If we can't load the default view, just continue without it
-            filters = {}
+            pass
         status_list = filters.get("status")
         if isinstance(status_list, list) and status_list:
             status_filter = ",".join(str(s) for s in status_list)
