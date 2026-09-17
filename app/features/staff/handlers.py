@@ -14,6 +14,13 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import ValidationError
 
 from app import main as main_module
+from app.repositories import staff_custom_fields as staff_custom_fields_repo
+from app.repositories import staff_onboarding_workflows as staff_workflow_repo
+from app.repositories import staff_requests as staff_requests_repo
+from app.schemas.staff_onboarding_workflows import (
+    CompanyWorkflowPolicyUpsertSchema,
+    WorkflowConfigSchema,
+)
 from app.services import notifications as notifications_service
 
 from .helpers import (
@@ -24,8 +31,6 @@ from .helpers import (
     _staff_member_matches_company_email_domains,
 )
 
-CompanyWorkflowPolicyUpsertSchema = main_module.CompanyWorkflowPolicyUpsertSchema
-WorkflowConfigSchema = main_module.WorkflowConfigSchema
 _parse_input_datetime = main_module._parse_input_datetime
 _parse_local_datetime_to_utc = main_module._parse_local_datetime_to_utc
 _raw_value_includes_time = main_module._raw_value_includes_time
@@ -44,12 +49,9 @@ message_templates_service = main_module.message_templates_service
 modules_service = main_module.modules_service
 settings = main_module.settings
 staff_access_service = main_module.staff_access_service
-staff_custom_fields_repo = main_module.staff_custom_fields_repo
 staff_field_config_service = main_module.staff_field_config_service
 staff_onboarding_workflow_service = main_module.staff_onboarding_workflow_service
 staff_repo = main_module.staff_repo
-staff_requests_repo = main_module.staff_requests_repo
-staff_workflow_repo = main_module.staff_workflow_repo
 tickets_service = main_module.tickets_service
 user_company_repo = main_module.user_company_repo
 user_repo = main_module.user_repo
