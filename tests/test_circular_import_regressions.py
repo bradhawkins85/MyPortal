@@ -55,6 +55,12 @@ def _run_import_order(*module_names: str) -> subprocess.CompletedProcess[str]:
     [
         ("app.main", "app.api.routes.bcp"),
         ("app.api.routes.bcp", "app.main"),
+        ("app.features.m365_mail.oauth", "app.main"),
+        ("app.main", "app.features.m365_mail.oauth"),
+        ("app.services.automations", "app.services.tickets", "app.services.modules"),
+        ("app.services.modules", "app.services.tickets", "app.services.automations"),
+        ("app.services.email_tracking", "app.services.email", "app.services.modules"),
+        ("app.services.modules", "app.services.email", "app.services.email_tracking"),
         ("app.services.modules", "app.services.call_recordings"),
         ("app.services.call_recordings", "app.services.modules"),
         ("app.services.modules", "app.services.email", "app.services.smtp2go", "app.services.solidtime"),

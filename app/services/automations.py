@@ -16,7 +16,9 @@ from loguru import logger
 from app.core.database import db
 from app.repositories import automations as automation_repo
 from app.repositories import tickets as tickets_repo
-from app.services import modules as modules_service
+from app.services import automation_dispatch
+from app.services import module_dispatch as modules_service
+from app.services import tickets as tickets_service
 from app.services import value_templates
 
 SCHEDULED_TICKET_SCAN_BATCH_SIZE = 1000
@@ -959,8 +961,6 @@ async def _scan_tickets_for_automation(
     scanned = await _list_ticket_automation_scan_candidates(limit=scan_limit)
     matches: list[dict[str, Any]] = []
 
-    from app.services import tickets as tickets_service
-
     for ticket in scanned:
         ticket_context = _attach_ticket_age_context(ticket, now=now)
         try:
@@ -1019,8 +1019,6 @@ async def _build_ticket_test_context(
     checked_at = now or datetime.now(timezone.utc)
     ticket_context = _attach_ticket_age_context(ticket, now=checked_at)
     try:
-        from app.services import tickets as tickets_service
-
         enriched_ticket = await tickets_service._enrich_ticket_context(ticket_context)
     except Exception:  # pragma: no cover - defensive fallback for test action
         enriched_ticket = ticket_context
@@ -1079,8 +1077,6 @@ async def test_ticket_automation_by_id(
         result["reason"] = "Automation filters did not match the ticket."
         return result
     if apply:
-        from app.services import tickets as tickets_service
-
         await tickets_service._remove_assigned_user_from_watchers(ticket)
         action_result, action_error = await _invoke_automation_actions_for_context(
             automation,
@@ -1231,10 +1227,6 @@ async def _execute_scheduled_ticket_automation(
     failed = 0
     skipped = 0
     results: list[dict[str, Any]] = []
-
-    # Local import avoids a circular import during application startup because
-    # the ticket service emits automation events.
-    from app.services import tickets as tickets_service
 
     for ticket in scanned:
         await tickets_service._remove_assigned_user_from_watchers(ticket)
@@ -1629,3 +1621,6 @@ async def handle_event(
             }
         )
     return matched
+
+
+automation_dispatch.register_event_handler(handle_event)

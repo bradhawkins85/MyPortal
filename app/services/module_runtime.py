@@ -67,6 +67,17 @@ _DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
     },
 }
 
+_ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS = {
+    "suggest-assets",
+    "create-ticket",
+    "create-task",
+    "update-ticket",
+    "update-ticket-description",
+    "ai-rename-ticket",
+    "add-ticket-reply",
+    "smart-attachment-removal",
+}
+
 
 def _ensure_bool(value: Any, default: bool = False) -> bool:
     if isinstance(value, bool):
@@ -251,6 +262,25 @@ async def get_module(slug: str, *, redact: bool = True) -> dict[str, Any] | None
     if redact:
         resolved["settings"] = _redact_module_settings(slug, resolved["settings"])
     return resolved
+
+
+async def list_modules() -> list[dict[str, Any]]:
+    modules = await module_repo.list_modules()
+    resolved_modules: list[dict[str, Any]] = []
+    for module in modules:
+        slug = str(module.get("slug") or "").strip()
+        if slug in _ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS:
+            continue
+        resolved = dict(module)
+        resolved["settings"] = _redact_module_settings(
+            slug,
+            _resolve_module_settings(
+                slug,
+                _coerce_settings_payload(module.get("settings")),
+            ),
+        )
+        resolved_modules.append(resolved)
+    return resolved_modules
 
 
 async def get_module_settings(slug: str) -> dict[str, Any] | None:

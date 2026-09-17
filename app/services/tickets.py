@@ -20,9 +20,10 @@ from app.repositories import company_memberships as membership_repo
 from app.repositories import ticket_statuses as ticket_status_repo
 from app.repositories import staff as staff_repo
 from app.repositories.tickets import TicketRecord
-from app.services import automations as automations_service
+from app.services import automation_dispatch as automations_service
+from app.services import module_dispatch as modules_service
+from app.services import module_runtime as module_runtime_service
 from app.repositories import users as user_repo
-from app.services import modules as modules_service
 from app.services.tagging import filter_helpful_slugs, get_all_excluded_tags, is_helpful_slug, slugify_tag
 from app.services.sanitization import sanitize_rich_text
 from app.services.realtime import RefreshNotifier, refresh_notifier
@@ -2127,7 +2128,7 @@ async def load_dashboard_state(
     technicians: list[Mapping[str, Any]] = []
 
     if include_reference_data:
-        modules = await modules_service.list_modules()
+        modules = await module_runtime_service.list_modules()
         companies = await company_repo.list_companies()
         technicians = await membership_repo.list_users_with_permission(HELPDESK_PERMISSION_KEY)
 

@@ -38,6 +38,7 @@ from app.repositories import tickets as tickets_repo
 from app.repositories import webhook_events as webhook_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import call_recordings as call_recordings_service
+from app.services import module_dispatch
 from app.services import email as email_service, webhook_monitor
 from app.services import unifi_talk as unifi_talk_service
 from app.services.realtime import RefreshNotifier, refresh_notifier
@@ -7504,3 +7505,6 @@ async def _invoke_solidtime_reconcile(
     from app.services.solidtime import reconcile_once
 
     return await reconcile_once()
+
+
+module_dispatch.register_trigger_module_handler(trigger_module)
