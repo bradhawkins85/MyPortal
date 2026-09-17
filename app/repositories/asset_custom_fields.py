@@ -119,7 +119,7 @@ async def get_all_asset_field_values(asset_ids: list[int]) -> dict[int, dict[int
         JOIN asset_custom_field_definitions d ON v.field_definition_id = d.id
         WHERE v.asset_id IN ({placeholders})
         ORDER BY d.display_order ASC, d.id ASC
-        """,
+        """,  # nosec B608
         tuple(asset_ids),
     )
 

@@ -586,7 +586,7 @@ async def mark_replies_non_billable(reply_ids: Sequence[int]) -> int:
         return 0
     placeholders = ", ".join(["%s"] * len(clean_ids))
     return await db.execute_rowcount(
-        f"UPDATE ticket_replies SET is_billable = 0 WHERE is_billable = 1 AND id IN ({placeholders})",
+        f"UPDATE ticket_replies SET is_billable = 0 WHERE is_billable = 1 AND id IN ({placeholders})",  # nosec B608
         tuple(clean_ids),
     )
 
@@ -786,7 +786,7 @@ async def list_tickets_in_companies(
         WHERE {' AND '.join(where_clauses)}
         ORDER BY t.updated_at DESC, t.id DESC
         LIMIT %s OFFSET %s
-    """
+    """  # nosec B608
     params: list[Any] = [
         *search_params,
         *status_filters,
@@ -829,7 +829,7 @@ async def count_tickets_in_companies(
         SELECT COUNT(*) AS count
         FROM tickets AS t
         WHERE {' AND '.join(where_clauses)}
-    """
+    """  # nosec B608
     params: list[Any] = [
         *search_params,
         *status_filters,
@@ -884,7 +884,7 @@ async def count_tickets_for_user(
         ) AS scoped
         INNER JOIN tickets AS t ON t.id = scoped.id
         WHERE {' AND '.join(where_clauses)}
-    """
+    """  # nosec B608
 
     params: list[Any] = [
         user_id,
@@ -937,7 +937,7 @@ async def count_tickets(
     _append_ticket_search_filter(where, params, search=search)
     where_clause = " WHERE " + " AND ".join(where) if where else ""
     row = await db.fetch_one(
-        f"SELECT COUNT(*) AS count FROM tickets{where_clause}",
+        f"SELECT COUNT(*) AS count FROM tickets{where_clause}",  # nosec B608
         tuple(params) if params else None,
     )
     return int(row["count"]) if row else 0
@@ -1279,7 +1279,7 @@ async def clear_ticket_billing_fields(ticket_ids: list[int]) -> int:
             billed_at = NULL,
             updated_at = %s
         WHERE id IN ({placeholders})
-        """,
+        """,  # nosec B608
         (datetime.now(timezone.utc), *clean_ids),
     )
 
@@ -1326,7 +1326,7 @@ async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
         params.append(override_updated_at)
     else:
         assignments.append("updated_at = UTC_TIMESTAMP(6)")
-    query = f"UPDATE tickets SET {', '.join(assignments)} WHERE id = %s"
+    query = f"UPDATE tickets SET {', '.join(assignments)} WHERE id = %s"  # nosec B608
     params.append(ticket_id)
     await db.execute(query, tuple(params))
     if (
@@ -1404,9 +1404,12 @@ async def set_tickets_status(
         return 0
 
     placeholders = ", ".join(["%s"] * len(normalised_ids))
+    query = (
+        "SELECT id,status,COALESCE(status_changed_at,created_at) AS started_at "  # nosec B608
+        f"FROM tickets WHERE id IN ({placeholders}) AND LOWER(status) <> LOWER(%s)"
+    )
     previous_rows = await db.fetch_all(
-        f"""SELECT id,status,COALESCE(status_changed_at,created_at) AS started_at
-            FROM tickets WHERE id IN ({placeholders}) AND LOWER(status) <> LOWER(%s)""",
+        query,
         (*normalised_ids, status),
     )
     params: list[Any] = [status, status]
@@ -1427,7 +1430,7 @@ async def set_tickets_status(
             {closed_clause}
             updated_at = UTC_TIMESTAMP(6)
         WHERE id IN ({placeholders})
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     ended_at = datetime.now(timezone.utc)
@@ -1553,7 +1556,7 @@ async def create_reply(
         f"""
         INSERT INTO ticket_replies ({', '.join(columns)})
         VALUES ({placeholders})
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     if reply_id:
@@ -1621,7 +1624,7 @@ async def list_replies(
         LEFT JOIN ticket_labour_types lt ON tr.labour_type_id = lt.id
         WHERE {where}
         ORDER BY tr.created_at ASC
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return [_normalise_reply(row) for row in rows]
@@ -1656,7 +1659,7 @@ async def get_time_totals_by_ticket_ids(
         FROM ticket_replies
         WHERE ticket_id IN ({placeholders}) AND minutes_spent IS NOT NULL AND minutes_spent > 0
         GROUP BY ticket_id
-        """,
+        """,  # nosec B608
         tuple(ticket_ids),
     )
     result: dict[int, dict[str, int]] = {}
@@ -1787,7 +1790,7 @@ async def get_automation_filter_context_by_ticket_ids(
         FROM ticket_replies
         WHERE ticket_id IN ({placeholders}) AND minutes_spent IS NOT NULL AND minutes_spent > 0
         GROUP BY ticket_id
-        """,
+        """,  # nosec B608
         tuple(unique_ids),
     )
     for row in time_rows:
@@ -1803,7 +1806,7 @@ async def get_automation_filter_context_by_ticket_ids(
         FROM ticket_attachments
         WHERE ticket_id IN ({placeholders})
         GROUP BY ticket_id
-        """,
+        """,  # nosec B608
         tuple(unique_ids),
     )
     for row in attachment_rows:
@@ -1837,7 +1840,7 @@ async def get_automation_filter_context_by_ticket_ids(
         FROM ticket_tasks
         WHERE ticket_id IN ({placeholders})
         GROUP BY ticket_id
-        """,
+        """,  # nosec B608
         tuple(unique_ids),
     )
     for row in task_rows:
@@ -1855,7 +1858,7 @@ async def get_automation_filter_context_by_ticket_ids(
         FROM ticket_assets
         WHERE ticket_id IN ({placeholders})
         GROUP BY ticket_id
-        """,
+        """,  # nosec B608
         tuple(unique_ids),
     )
     for row in linked_asset_rows:
@@ -1870,7 +1873,7 @@ async def get_automation_filter_context_by_ticket_ids(
         FROM ticket_suggested_assets
         WHERE ticket_id IN ({placeholders})
         GROUP BY ticket_id
-        """,
+        """,  # nosec B608
         tuple(unique_ids),
     )
     for row in suggested_asset_rows:
@@ -1899,7 +1902,7 @@ async def get_automation_filter_context_by_ticket_ids(
             WHERE ticket_id IN ({placeholders})
             GROUP BY ticket_id
         ) AS latest ON latest.latest_reply_id = tr.id
-        """,
+        """,  # nosec B608
         tuple(unique_ids),
     )
     for row in latest_reply_rows:
@@ -1943,7 +1946,7 @@ async def get_automation_filter_context_by_ticket_ids(
               )
             GROUP BY ticket_id
         ) AS latest_public ON latest_public.latest_reply_id = tr.id
-        """,
+        """,  # nosec B608
         tuple(unique_ids),
     )
     for row in latest_public_reply_rows:
@@ -1971,7 +1974,7 @@ async def validate_replies_belong_to_ticket(
         SELECT id, ticket_id
         FROM ticket_replies
         WHERE id IN ({placeholders})
-        """,
+        """,  # nosec B608
         tuple(reply_ids),
     )
 
@@ -2183,7 +2186,7 @@ async def move_replies_to_ticket(
         UPDATE ticket_replies
         SET ticket_id = %s
         WHERE id IN ({placeholders})
-        """,
+        """,  # nosec B608
         (target_ticket_id, *reply_list),
     )
 

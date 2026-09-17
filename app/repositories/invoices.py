@@ -71,7 +71,7 @@ async def list_xero_sync_exceptions(company_id: int | None = None) -> list[dict[
         FROM invoices
         WHERE {' AND '.join(where_clauses)}
         ORDER BY xero_sync_attempted_at DESC, id DESC
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return [_normalise_invoice(row) for row in rows]

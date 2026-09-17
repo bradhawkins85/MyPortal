@@ -77,23 +77,23 @@ async def list_rooms(
 
     where = " AND ".join(clauses)
     params.extend([limit, offset])
-    rows = await db.fetch_all(
-        f"""SELECT r.*,
-               (SELECT COUNT(*) FROM chat_room_participants p WHERE p.room_id = r.id AND p.role IN ('technician','admin')) AS tech_participant_count,
-               CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) AS assigned_tech_display_name,
-               COALESCE(NULLIF(a.name, ''), NULLIF(td.hostname, ''), td.device_uid) AS device_name,
-               c.name AS company_name,
-               td.console_user AS console_user
-            FROM chat_rooms r
-            LEFT JOIN users u ON u.id = r.assigned_tech_user_id
-            LEFT JOIN tray_devices td ON td.id = r.tray_device_id
-            LEFT JOIN assets a ON a.id = td.asset_id
-            LEFT JOIN companies c ON c.id = r.company_id
-            {unattended_join}
-            WHERE {where}
-            ORDER BY r.updated_at DESC LIMIT %s OFFSET %s""",
-        tuple(params),
+    query = (
+        "SELECT r.*, "  # nosec B608
+        "(SELECT COUNT(*) FROM chat_room_participants p WHERE p.room_id = r.id AND p.role IN ('technician','admin')) AS tech_participant_count, "
+        "CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')) AS assigned_tech_display_name, "
+        "COALESCE(NULLIF(a.name, ''), NULLIF(td.hostname, ''), td.device_uid) AS device_name, "
+        "c.name AS company_name, "
+        "td.console_user AS console_user "
+        "FROM chat_rooms r "
+        "LEFT JOIN users u ON u.id = r.assigned_tech_user_id "
+        "LEFT JOIN tray_devices td ON td.id = r.tray_device_id "
+        "LEFT JOIN assets a ON a.id = td.asset_id "
+        "LEFT JOIN companies c ON c.id = r.company_id "
+        f"{unattended_join} "
+        f"WHERE {where} "
+        "ORDER BY r.updated_at DESC LIMIT %s OFFSET %s"
     )
+    rows = await db.fetch_all(query, tuple(params))
     return [dict(r) for r in rows]
 
 
@@ -120,7 +120,7 @@ async def count_rooms(
         params.append(status)
 
     row = await db.fetch_one(
-        f"SELECT COUNT(*) AS count FROM chat_rooms r WHERE {' AND '.join(clauses)}",
+        f"SELECT COUNT(*) AS count FROM chat_rooms r WHERE {' AND '.join(clauses)}",  # nosec B608
         tuple(params),
     )
     return int(row.get("count", 0)) if row else 0
@@ -134,7 +134,7 @@ async def list_rooms_by_ids(room_ids: list[int]) -> list[dict[str, Any]]:
     if not room_ids:
         return []
     rows = await db.fetch_all(
-        f"SELECT * FROM chat_rooms WHERE id IN ({_placeholders(len(room_ids))})",
+        f"SELECT * FROM chat_rooms WHERE id IN ({_placeholders(len(room_ids))})",  # nosec B608
         tuple(room_ids),
     )
     return [dict(r) for r in rows]

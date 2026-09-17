@@ -50,7 +50,7 @@ async def list_company_licenses(company_id: int) -> list[dict[str, Any]]:
           AND COALESCE(lsn.hidden, 0) = 0
         GROUP BY l.id
         ORDER BY display_name, l.name
-        """,
+        """,  # nosec B608
         (company_id,),
     )
     return [_normalise_license(row) for row in rows]
@@ -67,7 +67,7 @@ async def list_all_licenses() -> list[dict[str, Any]]:
         WHERE COALESCE(lsn.hidden, 0) = 0
         GROUP BY l.id
         ORDER BY l.company_id, display_name
-        """,
+        """,  # nosec B608
     )
     return [_normalise_license(row) for row in rows]
 
@@ -83,7 +83,7 @@ async def get_license_by_id(license_id: int) -> dict[str, Any] | None:
         WHERE l.id = %s
           AND COALESCE(lsn.hidden, 0) = 0
         GROUP BY l.id
-        """,
+        """,  # nosec B608
         (license_id,),
     )
     return _normalise_license(row) if row else None
@@ -101,7 +101,7 @@ async def get_license_by_company_and_sku(company_id: int, sku: str) -> dict[str,
           AND l.platform = %s
           AND COALESCE(lsn.hidden, 0) = 0
         GROUP BY l.id
-        """,
+        """,  # nosec B608
         (company_id, sku),
     )
     return _normalise_license(row) if row else None

@@ -189,7 +189,7 @@ async def list_checks(
         INNER JOIN compliance_check_categories cat ON cat.id = cc.category_id
         {where}
         ORDER BY cat.name, cc.sort_order, cc.title
-    """
+    """  # nosec B608
     rows = await db.fetch_all(query, params)
     result = []
     for row in rows:

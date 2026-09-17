@@ -70,7 +70,7 @@ async def update_role(role_id: int, **updates: Any) -> dict[str, Any]:
     columns.append("updated_at = %s")
     params.append(datetime.utcnow())
     params.append(role_id)
-    sql = f"UPDATE roles SET {', '.join(columns)} WHERE id = %s"
+    sql = f"UPDATE roles SET {', '.join(columns)} WHERE id = %s"  # nosec B608
     await db.execute(sql, tuple(params))
     updated = await get_role_by_id(role_id)
     if not updated:

@@ -13,6 +13,8 @@ import pytest
 
 from app.core.database import db
 from app.repositories import (
+    auth,
+    business_continuity_plans,
     companies,
     company_memberships,
     compliance_checks,
@@ -28,6 +30,8 @@ from app.repositories import (
     roles,
     scheduled_invoices,
     service_status,
+    subscriptions,
+    tray,
     users,
 )
 
@@ -108,7 +112,10 @@ def test_users_allowlisted_update_helper_separates_identifiers_and_values():
         (lambda: company_memberships.update_membership(7, role_id=INJECTION), "execute"),
         (lambda: ports.update_port(7, name=INJECTION), "execute"),
         (lambda: port_pricing.update_pricing_version(7, notes=INJECTION), "execute"),
+        (lambda: auth.update_session(7, csrf_token=INJECTION), "execute"),
+        (lambda: business_continuity_plans.update_plan(7, title=INJECTION), "execute"),
         (lambda: service_status.update_service(7, {"name": INJECTION}), "execute"),
+        (lambda: subscriptions.update_subscription("sub-7", status=INJECTION), "execute"),
         (lambda: companies.create_company(name=INJECTION), "execute_returning_lastrowid"),
         (lambda: service_status.create_service({"name": INJECTION}), "execute_returning_lastrowid"),
     ],
@@ -143,6 +150,18 @@ def test_repository_values_are_bound_outside_sql(monkeypatch, call, expected_met
     assert INJECTION not in sql
     assert INJECTION in params
     assert "%s" in sql
+
+
+def test_business_continuity_plan_filters_bind_values_outside_sql(monkeypatch):
+    fetch_all = AsyncMock(return_value=[])
+    monkeypatch.setattr(db, "fetch_all", fetch_all)
+
+    asyncio.run(business_continuity_plans.list_plans(status=INJECTION))
+
+    sql, params = fetch_all.await_args.args
+    assert "WHERE status = %s" in sql
+    assert INJECTION not in sql
+    assert params == (INJECTION,)
 
 
 def test_compliance_assignment_rejects_unknown_update_fields_before_database_execution(
@@ -202,6 +221,24 @@ def test_compliance_assignment_binds_values_and_preserves_company_scoping(monkey
     assert "WHERE id = %(id)s AND company_id = %(company_id)s" in sql
 
 
+def test_scheduled_invoice_list_filters_bind_values_outside_sql(monkeypatch):
+    fetch_all = AsyncMock(return_value=[])
+    monkeypatch.setattr(db, "fetch_all", fetch_all)
+
+    asyncio.run(
+        scheduled_invoices.list_scheduled_invoices(
+            status=INJECTION,
+            limit=5,
+        )
+    )
+
+    sql, params = fetch_all.await_args.args
+    assert "WHERE status = %s" in sql
+    assert "LIMIT %s" in sql
+    assert INJECTION not in sql
+    assert params == (INJECTION, 5)
+
+
 def test_scheduled_invoice_patch_binds_values_outside_sql(monkeypatch):
     execute = AsyncMock()
     monkeypatch.setattr(db, "execute", execute)
@@ -224,6 +261,52 @@ def test_scheduled_invoice_patch_binds_values_outside_sql(monkeypatch):
     assert INJECTION not in sql
     assert INJECTION in params
     assert "UPDATE scheduled_invoices SET status = %s WHERE id = %s" == sql
+
+
+def test_subscription_list_filters_and_pagination_bind_values_outside_sql(monkeypatch):
+    fetch_all = AsyncMock(return_value=[])
+    monkeypatch.setattr(db, "fetch_all", fetch_all)
+
+    asyncio.run(
+        subscriptions.list_subscriptions(
+            status=INJECTION,
+            limit=5,
+            offset=10,
+        )
+    )
+
+    sql, params = fetch_all.await_args.args
+    assert "WHERE status = %s" in sql
+    assert "LIMIT %s" in sql
+    assert "OFFSET %s" in sql
+    assert INJECTION not in sql
+    assert params == (INJECTION, 5, 10)
+
+
+def test_tray_queued_command_limit_is_bound(monkeypatch):
+    fetch_all = AsyncMock(return_value=[])
+    monkeypatch.setattr(tray.db, "fetch_all", fetch_all)
+    monkeypatch.setattr(tray.db, "is_sqlite", lambda: False)
+
+    asyncio.run(tray.get_queued_commands_for_device(11, limit="7"))
+
+    sql, params = fetch_all.await_args.args
+    assert "LIMIT %s" in sql
+    assert "LIMIT 7" not in sql
+    assert params == (11, 7)
+
+
+def test_tray_queued_command_rejects_non_numeric_limit_before_query(monkeypatch):
+    fetch_all = AsyncMock(return_value=[])
+    monkeypatch.setattr(tray.db, "fetch_all", fetch_all)
+    monkeypatch.setattr(tray.db, "is_sqlite", lambda: False)
+
+    with pytest.raises(ValueError):
+        asyncio.run(
+            tray.get_queued_commands_for_device(11, limit="1; DROP TABLE tray_command_log")
+        )
+
+    fetch_all.assert_not_awaited()
 
 
 def test_bulk_in_clause_uses_one_placeholder_and_binding_per_item(monkeypatch):

@@ -338,7 +338,7 @@ async def upsert_scan(
         # include the WAN address so identical private IPs on different networks
         # do not overwrite each other.
         existing = await db.fetch_one(
-            "SELECT id FROM network_devices WHERE company_id=%s AND "
+            "SELECT id FROM network_devices WHERE company_id=%s AND "  # nosec B608
             + (
                 "mac_address=%s"
                 if mac

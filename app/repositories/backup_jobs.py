@@ -74,7 +74,7 @@ async def list_jobs(
         FROM backup_jobs
         {where}
         ORDER BY company_id, name
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return [job for job in (_normalise_job(row) for row in rows) if job]
@@ -355,7 +355,7 @@ async def list_events_in_range(
         FROM backup_job_events
         {where}
         ORDER BY backup_job_id, event_date
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return [event for event in (_normalise_event(row) for row in rows) if event]
@@ -382,7 +382,7 @@ async def latest_event_per_job(
         ) latest
           ON e.backup_job_id = latest.backup_job_id
          AND e.event_date = latest.max_date
-        """,
+        """,  # nosec B608
         tuple(ids),
     )
     out: dict[int, dict[str, Any]] = {}

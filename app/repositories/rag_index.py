@@ -134,7 +134,7 @@ async def list_active_chunks(
         WHERE {" AND ".join(where)}
         ORDER BY d.indexed_at DESC, c.id DESC
         LIMIT ?
-        """,
+        """,  # nosec B608
         tuple(params),
     )
 

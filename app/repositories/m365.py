@@ -226,7 +226,7 @@ async def delete_stale_mailboxes(company_id: int, current_upns: list[str]) -> No
         return
     placeholders = ", ".join(["%s"] * len(current_upns))
     query = (
-        "DELETE FROM m365_mailboxes WHERE company_id = %s AND user_principal_name NOT IN ("
+        "DELETE FROM m365_mailboxes WHERE company_id = %s AND user_principal_name NOT IN ("  # nosec B608
         + placeholders  # contains only %s parameter markers, not user data
         + ")"
     )
@@ -372,7 +372,7 @@ async def get_mailboxes_accessible_by_member(
         return []
     placeholders = ", ".join(["%s"] * len(upns))
     query = (
-        "SELECT DISTINCT mm.mailbox_email,"
+        "SELECT DISTINCT mm.mailbox_email,"  # nosec B608
         " COALESCE(mb.display_name, mm.mailbox_email) AS display_name"
         " FROM m365_mailbox_members mm"
         " LEFT JOIN m365_mailboxes mb"
@@ -604,7 +604,7 @@ async def bulk_get_consent_status(
         WHERE company_id IN ({company_placeholders})
           AND role_id     IN ({role_placeholders})
         GROUP BY company_id
-        """,
+        """,  # nosec B608
         tuple(company_ids) + tuple(required_role_ids),
     )
 

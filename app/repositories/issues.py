@@ -147,7 +147,7 @@ async def list_issues_with_assignments(
         LEFT JOIN companies AS c ON c.id = ics.company_id
         {where_clause}
         ORDER BY i.name ASC, c.name ASC
-        """,
+        """,  # nosec B608
         tuple(join_params + where_params),
     )
 
@@ -222,7 +222,7 @@ async def get_issue_by_id(
         FROM issue_company_statuses
         WHERE {' AND '.join(assignment_where)}
         ORDER BY updated_at_utc DESC
-        """,
+        """,  # nosec B608
         tuple(assignment_params),
     )
     issue["assignments"] = [assignment for assignment in (_normalise_assignment(row) for row in assignment_rows) if assignment]

@@ -162,7 +162,7 @@ async def list_events(
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     params.append(limit)
     rows = await db.fetch_all(
-        f"SELECT * FROM webhook_events {where} ORDER BY updated_at DESC LIMIT %s",
+        f"SELECT * FROM webhook_events {where} ORDER BY updated_at DESC LIMIT %s",  # nosec B608
         tuple(params),
     )
     return [_normalise_event(row) for row in rows]

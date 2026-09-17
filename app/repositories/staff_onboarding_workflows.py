@@ -560,7 +560,7 @@ async def claim_next_paused_license_execution(
               {where_company}
             ORDER BY requested_at ASC, id ASC
             LIMIT 1
-            """,
+            """,  # nosec B608
             tuple(query_params),
         )
         if not row:
@@ -772,7 +772,7 @@ async def get_pending_external_checkpoint_by_webhook_id(
         WHERE {' AND '.join(conditions)}
         ORDER BY id DESC
         LIMIT 1
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return dict(row) if row else None

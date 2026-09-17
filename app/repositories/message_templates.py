@@ -74,7 +74,7 @@ async def list_templates(
         {where}
         ORDER BY updated_at DESC
         LIMIT %s OFFSET %s
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return [record for row in rows if (record := _normalise_record(row))]

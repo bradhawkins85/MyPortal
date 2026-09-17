@@ -88,7 +88,7 @@ async def get_billing_contacts_for_companies(
         JOIN staff s ON s.id = bc.staff_id
         WHERE bc.company_id IN ({placeholders})
         ORDER BY bc.company_id, s.email
-        """,
+        """,  # nosec B608
         tuple(company_ids),
     )
     

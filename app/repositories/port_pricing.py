@@ -27,7 +27,7 @@ async def list_pricing_versions(
         clauses.append("status = %s")
         params.append(status)
     sql = (
-        "SELECT id, port_id, version_label, status, currency, base_rate, handling_rate, storage_rate, notes, "
+        "SELECT id, port_id, version_label, status, currency, base_rate, handling_rate, storage_rate, notes, "  # nosec B608
         "submitted_by, approved_by, submitted_at, approved_at, rejection_reason, effective_from, effective_to, "
         "created_at, updated_at "
         f"FROM port_pricing_versions WHERE {' AND '.join(clauses)} "

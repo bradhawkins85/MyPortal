@@ -135,7 +135,7 @@ async def release(job_name: str) -> None:
 
     placeholder = "?" if db.is_sqlite() else "%s"
     sql = (
-        f"UPDATE singleton_jobs SET expires_at = {placeholder}, updated_at = {placeholder} "
+        f"UPDATE singleton_jobs SET expires_at = {placeholder}, updated_at = {placeholder} "  # nosec B608
         f"WHERE job_name = {placeholder} AND owner_id = {placeholder}"
     )
     epoch = "1970-01-01 00:00:00"

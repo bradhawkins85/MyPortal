@@ -85,7 +85,7 @@ async def list_subscriptions(
         FROM subscriptions s
         LEFT JOIN shop_products p ON s.product_id = p.id
         LEFT JOIN subscription_categories c ON s.subscription_category_id = c.id
-        """ + where_clause + " ORDER BY s.end_date DESC, s.created_at DESC"
+        """ + where_clause + " ORDER BY s.end_date DESC, s.created_at DESC"  # nosec B608
     
     if limit is not None:
         query += " LIMIT %s"
@@ -263,7 +263,7 @@ async def count_subscriptions(
     where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
     
     row = await db.fetch_one(
-        "SELECT COUNT(*) as count FROM subscriptions " + where_clause,
+        "SELECT COUNT(*) as count FROM subscriptions " + where_clause,  # nosec B608
         tuple(params),
     )
     

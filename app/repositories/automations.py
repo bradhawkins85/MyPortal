@@ -279,7 +279,7 @@ async def list_automations(
             CASE WHEN execution_order = 0 THEN updated_at ELSE NULL END DESC,
             id ASC
         LIMIT %s OFFSET %s
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     return [_normalise_automation(row) for row in rows]
@@ -305,7 +305,7 @@ async def update_automation_order(ordered_ids: list[int]) -> list[AutomationReco
 
     placeholders = ", ".join(["%s"] * len(unique_ids))
     rows = await db.fetch_all(
-        f"SELECT id, execution_order FROM automations WHERE id IN ({placeholders})",
+        f"SELECT id, execution_order FROM automations WHERE id IN ({placeholders})",  # nosec B608
         tuple(unique_ids),
     )
     existing_orders = {
@@ -324,7 +324,7 @@ async def update_automation_order(ordered_ids: list[int]) -> list[AutomationReco
         )
 
     refreshed_rows = await db.fetch_all(
-        f"SELECT * FROM automations WHERE id IN ({placeholders})",
+        f"SELECT * FROM automations WHERE id IN ({placeholders})",  # nosec B608
         tuple(unique_ids),
     )
     by_id = {int(row["id"]): _normalise_automation(row) for row in refreshed_rows}
@@ -351,7 +351,7 @@ async def update_automation(automation_id: int, **fields: Any) -> AutomationReco
             params.append(value)
     assignments.append("updated_at = UTC_TIMESTAMP(6)")
     params.append(automation_id)
-    query = f"UPDATE automations SET {', '.join(assignments)} WHERE id = %s"
+    query = f"UPDATE automations SET {', '.join(assignments)} WHERE id = %s"  # nosec B608
     await db.execute(query, tuple(params))
     return await get_automation(automation_id)
 

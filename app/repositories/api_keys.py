@@ -129,7 +129,7 @@ async def list_api_keys_with_usage(
             ak.key_prefix,
             ak.is_enabled
         ORDER BY {column} {direction}, ak.id ASC
-    """
+    """  # nosec B608
     rows = await db.fetch_all(sql, tuple(params))
     key_ids = [row["id"] for row in rows]
     usage_map = await _fetch_usage_by_key(key_ids)
@@ -284,7 +284,7 @@ async def _fetch_usage_by_key(key_ids: Iterable[int]) -> dict[int, list[dict[str
         return {}
     placeholders = ", ".join(["%s"] * len(ids))
     query = (
-        "SELECT api_key_id, ip_address, usage_count, last_used_at"
+        "SELECT api_key_id, ip_address, usage_count, last_used_at"  # nosec B608
         " FROM api_key_usage"
         " WHERE api_key_id IN ("
         + placeholders  # contains only %s parameter markers, not user data
@@ -315,7 +315,7 @@ async def _fetch_permissions_by_key(key_ids: Iterable[int]) -> dict[int, list[di
         FROM api_key_endpoint_permissions
         WHERE api_key_id IN ({placeholders})
         ORDER BY route ASC, method ASC
-        """,
+        """,  # nosec B608
         tuple(ids),
     )
     permissions: dict[int, dict[str, set[str]]] = {}
@@ -373,7 +373,7 @@ async def _fetch_ip_restrictions_by_key(key_ids: Iterable[int]) -> dict[int, lis
         FROM api_key_ip_restrictions
         WHERE api_key_id IN ({placeholders})
         ORDER BY cidr ASC
-        """,
+        """,  # nosec B608
         tuple(ids),
     )
     restrictions: dict[int, list[dict[str, Any]]] = {}

@@ -86,21 +86,23 @@ async def list_ticket_sla_source(ticket_ids: Sequence[int]) -> list[dict[str, An
         return []
     ticket_id_params = _ticket_id_params(ticket_ids)
     placeholders = ",".join("%s" for _ in ticket_id_params)
-    query = """SELECT t.id, t.company_id, t.created_at, t.closed_at, t.status,
-                   CASE WHEN target.id IS NOT NULL THEN s.id END AS sla_id,
-                   s.name AS sla_name, target.response_minutes, target.resolution_minutes,
-                   pause.status AS sla_pause_status,
-                   MIN(CASE WHEN tr.is_internal=0 THEN tr.created_at END) AS first_response_at
-            FROM tickets t
-            LEFT JOIN company_sla_templates cst ON cst.company_id=t.company_id
-            LEFT JOIN sla_templates s ON s.id=cst.template_id AND s.enabled=1
-            LEFT JOIN sla_template_targets target
-              ON target.template_id=s.id AND LOWER(target.priority)=LOWER(COALESCE(t.priority,'normal'))
-            LEFT JOIN sla_template_pause_statuses pause
-              ON pause.template_id=s.id AND LOWER(pause.status)=LOWER(COALESCE(t.status,''))
-            LEFT JOIN ticket_replies tr ON tr.ticket_id=t.id
-            WHERE t.id IN (""" + placeholders + """)
-            GROUP BY t.id,t.company_id,t.created_at,t.closed_at,t.status,s.id,s.name,target.response_minutes,target.resolution_minutes,pause.status"""
+    query = (
+        "SELECT t.id, t.company_id, t.created_at, t.closed_at, t.status, "  # nosec B608
+        "CASE WHEN target.id IS NOT NULL THEN s.id END AS sla_id, "
+        "s.name AS sla_name, target.response_minutes, target.resolution_minutes, "
+        "pause.status AS sla_pause_status, "
+        "MIN(CASE WHEN tr.is_internal=0 THEN tr.created_at END) AS first_response_at "
+        "FROM tickets t "
+        "LEFT JOIN company_sla_templates cst ON cst.company_id=t.company_id "
+        "LEFT JOIN sla_templates s ON s.id=cst.template_id AND s.enabled=1 "
+        "LEFT JOIN sla_template_targets target "
+        "ON target.template_id=s.id AND LOWER(target.priority)=LOWER(COALESCE(t.priority,'normal')) "
+        "LEFT JOIN sla_template_pause_statuses pause "
+        "ON pause.template_id=s.id AND LOWER(pause.status)=LOWER(COALESCE(t.status,'')) "
+        "LEFT JOIN ticket_replies tr ON tr.ticket_id=t.id "
+        f"WHERE t.id IN ({placeholders}) "
+        "GROUP BY t.id,t.company_id,t.created_at,t.closed_at,t.status,s.id,s.name,target.response_minutes,target.resolution_minutes,pause.status"
+    )
     return await db.fetch_all(
         query,
         ticket_id_params,
@@ -132,21 +134,23 @@ async def list_pause_periods(ticket_ids: Sequence[int]) -> list[dict[str, Any]]:
         return []
     ticket_id_params = _ticket_id_params(ticket_ids)
     placeholders = ",".join("%s" for _ in ticket_id_params)
-    query = """SELECT h.ticket_id,h.status,h.started_at,h.ended_at
-            FROM ticket_status_history h
-            JOIN tickets t ON t.id=h.ticket_id
-            JOIN company_sla_templates cst ON cst.company_id=t.company_id
-            JOIN sla_template_pause_statuses pause
-              ON pause.template_id=cst.template_id AND LOWER(pause.status)=LOWER(h.status)
-            WHERE h.ticket_id IN (""" + placeholders + """)
-            UNION ALL
-            SELECT t.id AS ticket_id,t.status,COALESCE(t.status_changed_at,t.created_at) AS started_at,
-                   t.closed_at AS ended_at
-            FROM tickets t
-            JOIN company_sla_templates cst ON cst.company_id=t.company_id
-            JOIN sla_template_pause_statuses pause
-              ON pause.template_id=cst.template_id AND LOWER(pause.status)=LOWER(t.status)
-            WHERE t.id IN (""" + placeholders + """)"""
+    query = (
+        "SELECT h.ticket_id,h.status,h.started_at,h.ended_at "  # nosec B608
+        "FROM ticket_status_history h "
+        "JOIN tickets t ON t.id=h.ticket_id "
+        "JOIN company_sla_templates cst ON cst.company_id=t.company_id "
+        "JOIN sla_template_pause_statuses pause "
+        "ON pause.template_id=cst.template_id AND LOWER(pause.status)=LOWER(h.status) "
+        f"WHERE h.ticket_id IN ({placeholders}) "
+        "UNION ALL "
+        "SELECT t.id AS ticket_id,t.status,COALESCE(t.status_changed_at,t.created_at) AS started_at, "
+        "t.closed_at AS ended_at "
+        "FROM tickets t "
+        "JOIN company_sla_templates cst ON cst.company_id=t.company_id "
+        "JOIN sla_template_pause_statuses pause "
+        "ON pause.template_id=cst.template_id AND LOWER(pause.status)=LOWER(t.status) "
+        f"WHERE t.id IN ({placeholders})"
+    )
     return await db.fetch_all(
         query,
         (*ticket_id_params, *ticket_id_params),

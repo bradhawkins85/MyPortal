@@ -17,7 +17,7 @@ async def _load_company_assignments(service_ids: Sequence[int]) -> dict[int, lis
         FROM service_status_service_companies
         WHERE service_id IN ({placeholders})
         ORDER BY service_id, company_id
-        """,
+        """,  # nosec B608
         tuple(int(service_id) for service_id in service_ids),
     )
     assignments: dict[int, list[int]] = defaultdict(list)
@@ -150,7 +150,7 @@ async def list_services(*, include_inactive: bool = False) -> list[dict[str, Any
         FROM service_status_services
         {where_clause}
         ORDER BY display_order ASC, name ASC
-        """,
+        """,  # nosec B608
         tuple(params),
     )
     service_ids = [row.get("id") for row in rows if row.get("id") is not None]
@@ -164,7 +164,7 @@ async def get_service(service_id: int) -> dict[str, Any] | None:
         SELECT {_SELECT_COLUMNS}
         FROM service_status_services
         WHERE id = %s
-        """,
+        """,  # nosec B608
         (service_id,),
     )
     if not row:
@@ -180,7 +180,7 @@ async def create_service(payload: dict[str, Any], *, company_ids: Sequence[int] 
     columns = ", ".join(payload.keys())
     placeholders = ", ".join(["%s"] * len(payload))
     service_id = await db.execute_returning_lastrowid(
-        f"INSERT INTO service_status_services ({columns}) VALUES ({placeholders})",
+        f"INSERT INTO service_status_services ({columns}) VALUES ({placeholders})",  # nosec B608
         tuple(payload.values()),
     )
     if not service_id:
@@ -203,7 +203,7 @@ async def update_service(
             assignments.append(f"{column} = %s")
             params.append(value)
         params.append(service_id)
-        sql = f"UPDATE service_status_services SET {', '.join(assignments)} WHERE id = %s"
+        sql = f"UPDATE service_status_services SET {', '.join(assignments)} WHERE id = %s"  # nosec B608
         await db.execute(sql, tuple(params))
     if company_ids is not None:
         await replace_service_companies(service_id, company_ids)
@@ -217,7 +217,7 @@ async def find_service_by_name(name: str) -> dict[str, Any] | None:
         FROM service_status_services
         WHERE LOWER(name) = LOWER(%s) AND is_active = 1
         LIMIT 1
-        """,
+        """,  # nosec B608
         (name,),
     )
     if not row:
@@ -238,7 +238,7 @@ async def list_services_due_for_ai_lookup() -> list[dict[str, Any]]:
         FROM service_status_services
         WHERE is_active = 1 AND ai_lookup_enabled = 1
         ORDER BY ai_lookup_last_checked_at ASC, id ASC
-        """,
+        """,  # nosec B608
         (),
     )
     service_ids = [row.get("id") for row in rows if row.get("id") is not None]

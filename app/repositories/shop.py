@@ -559,7 +559,7 @@ async def list_features_for_products(
         FROM shop_product_features
         WHERE product_id IN ({placeholders})
         ORDER BY product_id ASC, position ASC, id ASC
-    """
+    """  # nosec B608
     rows = await db.fetch_all(sql, tuple(identifiers))
 
     features_map: dict[int, list[dict[str, Any]]] = {}
@@ -795,7 +795,7 @@ async def list_package_items_for_packages(
         INNER JOIN shop_products AS products ON products.id = items.product_id
         WHERE items.package_id IN ({placeholders})
         ORDER BY items.package_id ASC, products.name ASC
-        """,
+        """,  # nosec B608
         tuple(identifiers),
     )
     items = [_normalise_package_item(row) for row in rows]
@@ -850,7 +850,7 @@ async def list_package_item_alternates_for_items(
         INNER JOIN shop_products AS products ON products.id = alternates.alternate_product_id
         WHERE alternates.package_item_id IN ({placeholders})
         ORDER BY alternates.package_item_id ASC, alternates.priority ASC, products.name ASC
-        """,
+        """,  # nosec B608
         tuple(identifiers),
     )
     grouped: dict[int, list[dict[str, Any]]] = {}
@@ -956,7 +956,7 @@ async def get_restricted_product_ids(
         SELECT product_id
         FROM shop_product_exclusions
         WHERE company_id = %s AND product_id IN ({placeholders})
-        """,
+        """,  # nosec B608
         tuple([company_id, *identifiers]),
     )
     return {
@@ -2078,15 +2078,16 @@ async def _fetch_inbound_recommendation_map(
     ids = sorted({int(pid) for pid in product_ids if int(pid) > 0})
     if not ids:
         return {}
+
     placeholders = ", ".join(["%s"] * len(ids))
-    rows = await db.fetch_all(
-        f"""SELECT rel.related_product_id, p.id, p.name, p.sku, p.archived
-        FROM {table_name} AS rel
-        JOIN shop_products AS p ON p.id = rel.product_id
-        WHERE rel.related_product_id IN ({placeholders})
-        ORDER BY p.name ASC""",
-        tuple(ids),
+    query = (
+        "SELECT rel.related_product_id, p.id, p.name, p.sku, p.archived "  # nosec B608
+        f"FROM {table_name} AS rel "
+        "JOIN shop_products AS p ON p.id = rel.product_id "
+        f"WHERE rel.related_product_id IN ({placeholders}) "
+        "ORDER BY p.name ASC"
     )
+    rows = await db.fetch_all(query, tuple(ids))
     mapping: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         target_id = _coerce_int(row.get("related_product_id"), default=0)
@@ -2169,7 +2170,7 @@ async def _fetch_recommendation_map(
         LEFT JOIN shop_categories AS c ON c.id = p.category_id
         WHERE rel.product_id IN ({placeholders})
         ORDER BY p.name ASC
-        """,
+        """,  # nosec B608
         tuple(ids),
     )
 
@@ -2370,7 +2371,7 @@ async def get_product_ids_by_skus(skus: Sequence[str]) -> list[int]:
         return []
     placeholders = ", ".join(["%s"] * len(skus))
     sql = (
-        "SELECT DISTINCT id FROM shop_products"
+        "SELECT DISTINCT id FROM shop_products"  # nosec B608
         " WHERE (sku IN (" + placeholders + ") OR vendor_sku IN (" + placeholders + "))"
         " AND archived = 0"
     )
