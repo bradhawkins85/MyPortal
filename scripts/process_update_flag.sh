@@ -59,12 +59,47 @@ build_upgrade_command() {
   esac
 }
 
+validate_flag_file() {
+  if [[ -L "$UPDATE_FLAG_FILE" ]]; then
+    echo "Error: Refusing to process symlinked update flag: $UPDATE_FLAG_FILE" >&2
+    exit 1
+  fi
+
+  if command -v stat >/dev/null 2>&1; then
+    local flag_mode
+    local project_mode
+    local flag_owner
+    local project_owner
+    flag_mode=$(stat -c '%a' "$UPDATE_FLAG_FILE" 2>/dev/null || true)
+    project_mode=$(stat -c '%a' "$PROJECT_ROOT" 2>/dev/null || true)
+    flag_owner=$(stat -c '%u' "$UPDATE_FLAG_FILE" 2>/dev/null || true)
+    project_owner=$(stat -c '%u' "$PROJECT_ROOT" 2>/dev/null || true)
+
+    if [[ -n "$flag_mode" ]] && (( (8#$flag_mode & 18) != 0 )); then
+      echo "Error: Refusing to process insecure update flag permissions ($flag_mode)." >&2
+      exit 1
+    fi
+
+    if [[ -n "$project_mode" ]] && (( (8#$project_mode & 2) != 0 )); then
+      echo "Error: Refusing to process updates from a world-writable project root ($PROJECT_ROOT)." >&2
+      exit 1
+    fi
+
+    if [[ -n "$flag_owner" && -n "$project_owner" && "$flag_owner" != "0" && "$flag_owner" != "$project_owner" ]]; then
+      echo "Error: Refusing to process update flag owned by unexpected uid $flag_owner." >&2
+      exit 1
+    fi
+  fi
+}
+
 mkdir -p "$FLAG_DIR"
 chmod 750 "$FLAG_DIR" >/dev/null 2>&1 || true
 
 if [[ ! -f "$UPDATE_FLAG_FILE" ]]; then
   exit 0
 fi
+
+validate_flag_file
 
 (
   flock -n 200 || exit 0

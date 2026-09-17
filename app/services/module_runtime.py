@@ -24,17 +24,6 @@ _DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
         "prompt": "",
         "api_key": "",
     },
-    "plausible": {
-        "base_url": "",
-        "site_domain": "",
-        "api_key": "",
-        "track_opens": True,
-        "track_clicks": True,
-        "send_to_plausible": False,
-        "track_pageviews": False,
-        "pepper": "",
-        "send_pii": False,
-    },
     "smtp2go": {
         "api_key": "",
         "enable_tracking": True,
@@ -229,7 +218,6 @@ def _redact_module_settings(slug: str, settings: dict[str, Any]) -> dict[str, An
     redacted = dict(settings)
     for field in {
         "ollama": ("api_key",),
-        "plausible": ("api_key", "pepper"),
         "smtp2go": ("api_key", "webhook_secret"),
         "solidtime": ("api_token", "webhook_secret"),
     }.get(slug, ()):

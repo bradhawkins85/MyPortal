@@ -10,3 +10,5 @@ def test_process_update_flag_script_uses_system_update_flag_and_upgrade_helper()
     assert "APP_UPGRADE_MODE" in contents
     assert "requested_mode" in contents
     assert "flock" in contents
+    assert "validate_flag_file()" in contents
+    assert "Refusing to process symlinked update flag" in contents

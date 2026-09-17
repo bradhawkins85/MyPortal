@@ -863,23 +863,6 @@ def _default_xero_settings() -> dict[str, Any]:
 
 DEFAULT_MODULES: list[dict[str, Any]] = [
     {
-        "slug": "plausible",
-        "name": "Plausible Analytics",
-        "description": "Privacy-first analytics integration for email tracking and authenticated user pageviews.",
-        "icon": "📊",
-        "settings": {
-            "base_url": "",
-            "site_domain": "",
-            "api_key": "",
-            "track_opens": True,
-            "track_clicks": True,
-            "send_to_plausible": False,
-            "track_pageviews": False,
-            "pepper": "",
-            "send_pii": False,
-        },
-    },
-    {
         "slug": "syncro",
         "name": "Syncro",
         "description": "Synchronise tickets and contacts from SyncroMSP.",
@@ -1754,46 +1737,6 @@ def _coerce_settings(
         _env = os.getenv("APPRISE_TITLE", "").strip()
         if _env:
             merged["title"] = _env
-    elif slug == "plausible":
-        overrides = payload or {}
-        api_key_override = overrides.get("api_key")
-        if api_key_override is None:
-            api_key = str(merged.get("api_key") or "").strip()
-        else:
-            candidate = str(api_key_override or "").strip()
-            if not candidate and existing_settings and existing_settings.get("api_key"):
-                api_key = str(existing_settings.get("api_key") or "").strip()
-            else:
-                api_key = candidate
-
-        # Handle pepper field similarly to api_key (preserve existing if not provided)
-        pepper_override = overrides.get("pepper")
-        if pepper_override is None:
-            pepper = str(merged.get("pepper") or "").strip()
-        else:
-            candidate = str(pepper_override or "").strip()
-            if not candidate and existing_settings and existing_settings.get("pepper"):
-                pepper = str(existing_settings.get("pepper") or "").strip()
-            else:
-                pepper = candidate
-
-        base_url_value = str(merged.get("base_url", "")).strip()
-        base_url = base_url_value.rstrip("/") if base_url_value else ""
-        merged.update(
-            {
-                "base_url": base_url,
-                "site_domain": str(merged.get("site_domain", "")).strip(),
-                "api_key": api_key,
-                "track_opens": _ensure_bool(merged.get("track_opens"), True),
-                "track_clicks": _ensure_bool(merged.get("track_clicks"), True),
-                "send_to_plausible": _ensure_bool(
-                    merged.get("send_to_plausible"), False
-                ),
-                "track_pageviews": _ensure_bool(merged.get("track_pageviews"), False),
-                "pepper": pepper,
-                "send_pii": _ensure_bool(merged.get("send_pii"), False),
-            }
-        )
     elif slug == "imap":
         manage_url = (
             str(merged.get("manage_url") or "").strip() or "/admin/modules/imap"
@@ -2358,7 +2301,6 @@ def _redact_module_settings(module: dict[str, Any]) -> dict[str, Any]:
         "xero": ("client_secret", "refresh_token", "access_token", "webhook_key"),
         "sms-gateway": ("authorization",),
         "unifi-talk": ("password",),
-        "plausible": ("api_key", "pepper"),
         "smtp2go": ("api_key", "webhook_secret"),
         "m365-admin": ("client_secret",),
         "password-pusher": ("api_key",),
@@ -2447,7 +2389,6 @@ _NON_TRIGGERABLE_MODULE_SLUGS = {
     "ollama-mcp",  # Ollama MCP - inbound query surface, not an action module
     "call-recordings",  # Call Recordings - configuration only, not an action module
     "unifi-talk",  # Unifi Talk - SFTP import module, not an action module
-    "plausible",  # Plausible - email tracking config only
     "m365-admin",  # M365 Admin - configuration only, not an action module
     "hudu",  # Hudu - documentation/password management, not a trigger action module
     "huntress",  # Huntress - report data ingester, not a trigger action module
@@ -2929,7 +2870,6 @@ async def trigger_module(
         "create-task": _invoke_create_task,
         "call-recordings": _validate_call_recordings,
         "unifi-talk": _invoke_unifi_talk,
-        "plausible": _validate_plausible,
         "update-ticket": _invoke_update_ticket,
         "update-ticket-description": _invoke_update_ticket_description,
         "ai-rename-ticket": _invoke_ai_rename_ticket,
@@ -4753,62 +4693,6 @@ async def _validate_syncro(
         "base_url": base_url,
         "has_api_key": bool(api_key),
         "rate_limit_per_minute": rate_limit,
-    }
-
-
-async def _validate_plausible(
-    settings: Mapping[str, Any],
-    payload: Mapping[str, Any],
-    *,
-    event_future: asyncio.Future[int | None] | None = None,
-) -> dict[str, Any]:
-    base_url = str(settings.get("base_url") or "").strip().rstrip("/")
-    site_domain = str(settings.get("site_domain") or "").strip()
-    api_key = str(settings.get("api_key") or "").strip()
-    track_opens = _ensure_bool(settings.get("track_opens"), True)
-    track_clicks = _ensure_bool(settings.get("track_clicks"), True)
-    send_to_plausible = _ensure_bool(settings.get("send_to_plausible"), False)
-    track_pageviews = _ensure_bool(settings.get("track_pageviews"), False)
-    pepper = str(settings.get("pepper") or "").strip()
-    env_pepper = str(os.getenv("PLAUSIBLE_PEPPER", "") or "").strip()
-    if not pepper and env_pepper:
-        pepper = env_pepper
-    send_pii = _ensure_bool(settings.get("send_pii"), False)
-
-    if send_to_plausible or track_pageviews:
-        if not base_url:
-            raise ValueError("Plausible base URL is not configured")
-        parsed = urlparse(base_url)
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            raise ValueError(
-                "Plausible base URL must include http/https and a hostname"
-            )
-        if not site_domain:
-            raise ValueError("Plausible site domain is not configured")
-
-        # Warn if pageview tracking is enabled without a pepper
-        if track_pageviews and not pepper:
-            logger.warning(
-                "Plausible pageview tracking enabled without pepper - using default (not secure)"
-            )
-
-        # Warn if PII is enabled (should only be for self-hosted, compliant instances)
-        if send_pii:
-            logger.warning(
-                "Plausible configured to send PII - ensure this is a self-hosted, compliant instance"
-            )
-
-    return {
-        "status": "ok",
-        "base_url": base_url,
-        "site_domain": site_domain,
-        "has_api_key": bool(api_key),
-        "track_opens": track_opens,
-        "track_clicks": track_clicks,
-        "send_to_plausible": send_to_plausible,
-        "track_pageviews": track_pageviews,
-        "has_pepper": bool(pepper),
-        "send_pii": send_pii,
     }
 
 

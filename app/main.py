@@ -70,6 +70,7 @@ from app.api.routes import (
     essential8 as essential8_api,
     compliance_checks as compliance_checks_api,
     email_blocklist as email_blocklist_api,
+    email_tracking as email_tracking_api,
     forms as forms_api,
     invoices as invoices_api,
     issues as issues_api,
@@ -550,43 +551,6 @@ SWAGGER_UI_PATH = settings.swagger_ui_url or "/docs"
 PROTECTED_OPENAPI_PATH = "/internal/openapi.json"
 
 
-async def _get_extra_csp_script_sources() -> list[str]:
-    """Get additional CSP script sources from enabled modules.
-    
-    This function retrieves script sources that need to be allowed in the
-    Content-Security-Policy, such as analytics scripts from enabled modules.
-    
-    Returns:
-        List of valid HTTPS URLs to allow as script sources
-    """
-    sources = []
-    
-    try:
-        # Check for Plausible analytics module
-        module_list = await modules_service.list_modules()
-        module_lookup = {module.get("slug"): module for module in module_list if module.get("slug")}
-        
-        plausible_module = module_lookup.get("plausible")
-        if plausible_module and plausible_module.get("enabled"):
-            plausible_settings = plausible_module.get("settings") or {}
-            base_url = (plausible_settings.get("base_url") or "")
-            if isinstance(base_url, str):
-                base_url = base_url.strip().rstrip("/")
-            else:
-                base_url = ""
-            
-            # Validate base_url - must be HTTPS with actual content after the protocol
-            if base_url.startswith("https://") and len(base_url) > 8:  # len("https://") = 8
-                # Add the base URL as a script source (this allows loading /js/script.js from it)
-                sources.append(base_url)
-    except Exception:
-        # If we fail to get module config, return empty list
-        # The CSP will still work with default sources
-        sources = []
-    
-    return sources
-
-
 # Configure CORS with security-first defaults
 # If ALLOWED_ORIGINS is not configured, only allow same-origin requests (empty list)
 allowed_origins = [origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()] if settings.allowed_origins else []
@@ -674,8 +638,6 @@ elif settings.ip_whitelist_enabled:
 app.add_middleware(
     SecurityHeadersMiddleware,
     exempt_paths=("/static",),
-    get_extra_script_sources=_get_extra_csp_script_sources,
-    get_extra_connect_sources=_get_extra_csp_script_sources,
 )
 
 # Add request logging middleware
@@ -800,33 +762,6 @@ app.add_middleware(
         # browser session. Requiring CSRF here blocks legitimate automation.
         "/api/staff/workflow-webhooks",
     ),
-)
-
-# Add Plausible tracking middleware for authenticated pageviews
-# This middleware sends custom events to Plausible Analytics when users access pages
-# It includes privacy protections (hashed user IDs) and only tracks authenticated users
-from app.security.plausible_tracking import PlausibleTrackingMiddleware
-
-def _get_plausible_module_settings() -> dict[str, Any]:
-    """Synchronous function to get Plausible module settings for middleware."""
-    # We use a cached module lookup to avoid async issues in middleware
-    # This is populated in _build_base_context
-    return getattr(_get_plausible_module_settings, '_cached_module', {})
-
-app.add_middleware(
-    PlausibleTrackingMiddleware,
-    exempt_paths=(
-        "/static",
-        "/api",
-        "/health",
-        "/healthz",
-        "/readyz",
-        "/manifest.webmanifest",
-        "/service-worker.js",
-        "/ws",
-        "/mcp",
-    ),
-    get_module_settings=_get_plausible_module_settings,
 )
 
 templates = Jinja2Templates(directory=str(templates_config.template_path))
@@ -1130,6 +1065,7 @@ app.include_router(audit_logs.router)
 app.include_router(api_keys.router)
 app.include_router(scheduler_api.router)
 app.include_router(tickets_api.router)
+app.include_router(email_tracking_api.router)
 app.include_router(email_blocklist_api.router)
 app.include_router(automations_api.router)
 app.include_router(modules_api.router)
@@ -2154,63 +2090,7 @@ async def _build_base_context(
         module_lookup = {module.get("slug"): module for module in module_list if module.get("slug")}
         request.state.module_lookup = module_lookup
     
-    # Cache Plausible module for middleware use
-    plausible_module = (module_lookup or {}).get("plausible")
-    if plausible_module:
-        # Store in function attribute for middleware to access
-        _get_plausible_module_settings._cached_module = plausible_module
-
-    # Get Plausible analytics configuration for app-wide tracking
     plausible_config = {"enabled": False}
-    if plausible_module and plausible_module.get("enabled"):
-        plausible_settings = plausible_module.get("settings") or {}
-        base_url = str(plausible_settings.get("base_url") or "").strip().rstrip("/")
-        site_domain = str(plausible_settings.get("site_domain") or "").strip()
-        track_pageviews = bool(plausible_settings.get("track_pageviews"))
-        pepper = str(plausible_settings.get("pepper") or "").strip()
-        send_pii = bool(plausible_settings.get("send_pii"))
-        
-        # Validate base_url and site_domain to prevent injection attacks
-        # base_url must be a valid HTTPS URL
-        # site_domain must be a valid domain name (alphanumeric, dots, hyphens)
-        valid_base_url = False
-        valid_site_domain = False
-        
-        if base_url:
-            try:
-                from urllib.parse import urlparse
-                parsed = urlparse(base_url)
-                # Must be https or http, have a netloc, and no suspicious characters
-                if parsed.scheme in ("https", "http") and parsed.netloc and not any(c in base_url for c in ["<", ">", '"', "'"]):
-                    valid_base_url = True
-            except Exception:
-                valid_base_url = False
-        
-        if site_domain:
-            # Domain must only contain alphanumeric, dots, hyphens, underscores and optional port
-            # No spaces, quotes, or HTML-like characters
-            if re.match(r"^[A-Za-z0-9._-]+(?::\d+)?$", site_domain) and not any(
-                c in site_domain for c in ["<", ">", '"', "'"]
-            ):
-                valid_site_domain = True
-        
-        if valid_base_url and valid_site_domain:
-            plausible_config = {
-                "enabled": True,
-                "base_url": base_url,
-                "site_domain": site_domain,
-                "track_pageviews": track_pageviews,
-            }
-            
-            # Add hashed user ID for client-side tracking if pageview tracking enabled
-            if track_pageviews and user and user.get("id"):
-                from app.security.plausible_tracking import hash_user_id_for_plausible
-                
-                user_id = user.get("id")
-                # Hash user ID for privacy using shared utility
-                hashed_user_id = hash_user_id_for_plausible(user_id, pepper, send_pii)
-                
-                plausible_config["hashed_user_id"] = hashed_user_id
 
     context: dict[str, Any] = {
         "request": request,

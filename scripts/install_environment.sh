@@ -789,7 +789,6 @@ ensure_env_default "UVICORN_AUTO_UPDATE_RETRY_DELAY" "5"
 ensure_env_secret "SESSION_SECRET" 48
 ensure_env_secret "TOTP_ENCRYPTION_KEY" 48
 ensure_env_secret "SMTP2GO_WEBHOOK_SECRET" 32
-ensure_env_secret "PLAUSIBLE_PEPPER" 32
 ensure_env_secret "MCP_TOKEN" 32
 if [[ "$ENVIRONMENT" == "production" ]]; then
   # The production installer owns the local database account, so do not leave

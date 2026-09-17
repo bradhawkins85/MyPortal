@@ -160,7 +160,7 @@ def test_send_email_uses_smtp_from_as_sender(monkeypatch):
     assert captured["login"] == "user@example.com"
 
 
-def test_send_email_adds_tracking_when_plausible_enabled(monkeypatch):
+def test_send_email_adds_tracking_when_enabled(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "smtp_host", "smtp.example.com")
     monkeypatch.setattr(settings, "smtp_port", 587)
@@ -237,27 +237,13 @@ def test_send_email_adds_tracking_when_plausible_enabled(monkeypatch):
     monkeypatch.setattr(email_service.webhook_monitor, "record_manual_success", fake_record_manual_success)
     monkeypatch.setattr(email_service.webhook_monitor, "record_manual_failure", fake_record_manual_failure)
 
-    async def fake_get_module(slug: str, *, redact: bool = True):
-        assert slug == "plausible"
-        return {"slug": slug, "enabled": True, "settings": {"track_opens": True, "track_clicks": True}}
-
-    async def fake_get_module_settings(slug: str):
-        assert slug == "plausible"
-        return {"track_opens": True, "track_clicks": True}
-
-    monkeypatch.setattr(email_service.module_runtime_service, "get_module", fake_get_module)
-    monkeypatch.setattr(
-        email_service.module_runtime_service,
-        "get_module_settings",
-        fake_get_module_settings,
-    )
-
     result = asyncio.run(
         email_service.send_email(
             subject="Subject",
             recipients=["user@example.com"],
             text_body="Hello",
             html_body="<p>Hello</p><a href=\"https://example.com\">Link</a>",
+            enable_tracking=True,
         )
     )
 

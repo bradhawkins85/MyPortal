@@ -1,11 +1,10 @@
-"""Email tracking service for Plausible Analytics integration.
+"""Email tracking service.
 
 Provides functionality for:
 - Generating unique tracking IDs for emails
 - Inserting tracking pixels into email HTML
 - Rewriting links for click tracking
 - Recording tracking events
-- Sending events to Plausible Analytics
 """
 
 from __future__ import annotations
@@ -16,14 +15,11 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 
-import httpx
 from itsdangerous import BadSignature, URLSafeSerializer
 from loguru import logger
 
 from app.core.config import get_settings
 from app.core.database import db
-from app.services.module_gate import require_module_enabled
-from app.services import module_runtime as module_runtime_service
 
 
 def generate_tracking_id() -> str:
@@ -346,84 +342,3 @@ async def get_reply_tracking_status(reply_id: int) -> dict[str, Any] | None:
         )
         return None
 
-
-async def send_event_to_plausible(
-    event_type: str,
-    tracking_id: str,
-    event_url: str | None = None,
-    user_agent: str | None = None,
-    ip_address: str | None = None,
-) -> bool:
-    """Send a tracking event to Plausible Analytics.
-    
-    Args:
-        event_type: Type of event ('open' or 'click')
-        tracking_id: Tracking ID from the email
-        event_url: URL that was clicked (for click events)
-        user_agent: User agent from the request
-        ip_address: IP address from the request
-        
-    Returns:
-        True if event was sent successfully, False otherwise
-    """
-    try:
-        module_settings = await module_runtime_service.get_module_settings('plausible')
-        if not module_settings or not module_settings.get('send_to_plausible'):
-            # Plausible integration not configured or disabled
-            return False
-        
-        base_url = module_settings.get('base_url', '').rstrip('/')
-        site_domain = module_settings.get('site_domain', '')
-        
-        if not base_url or not site_domain:
-            logger.warning("Plausible base_url or site_domain not configured")
-            return False
-        
-        settings = get_settings()
-        if not settings.portal_url:
-            logger.warning("portal_url not configured, cannot send event to Plausible")
-            return False
-        portal_url = settings.portal_url.rstrip('/')
-        
-        # Build event data
-        event_name = f"email_{event_type}"
-        event_data = {
-            'domain': site_domain,
-            'name': event_name,
-            'url': event_url or f"{portal_url}/email-tracking/{tracking_id}",
-            'props': {
-                'tracking_id': tracking_id,
-                'event_type': event_type,
-            }
-        }
-        
-        # Send to Plausible
-        api_url = f"{base_url}/api/event"
-        headers = {
-            'Content-Type': 'application/json',
-        }
-        if user_agent:
-            headers['User-Agent'] = user_agent
-        if ip_address:
-            headers['X-Forwarded-For'] = ip_address
-        
-        await require_module_enabled("plausible")
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(api_url, json=event_data, headers=headers)
-            response.raise_for_status()
-        
-        logger.info(
-            "Sent tracking event to Plausible",
-            tracking_id=tracking_id,
-            event_type=event_type,
-        )
-        return True
-        
-    except Exception as exc:
-        logger.error(
-            "Failed to send tracking event to Plausible",
-            tracking_id=tracking_id,
-            event_type=event_type,
-            error=str(exc),
-        )
-        return False

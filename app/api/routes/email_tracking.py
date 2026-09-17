@@ -96,13 +96,6 @@ async def tracking_pixel(
             referrer=referrer,
         )
         
-        # Optionally send to Plausible (if configured)
-        await email_tracking.send_event_to_plausible(
-            event_type='open',
-            tracking_id=tracking_id,
-            user_agent=user_agent,
-            ip_address=ip_address,
-        )
     except Exception as exc:
         # Log error but still return the pixel
         logger.error(
@@ -175,14 +168,6 @@ async def tracking_click(
             referrer=referrer,
         )
         
-        # Optionally send to Plausible (if configured)
-        await email_tracking.send_event_to_plausible(
-            event_type='click',
-            tracking_id=tid,
-            event_url=destination_url,
-            user_agent=user_agent,
-            ip_address=ip_address,
-        )
     except Exception as exc:
         # Log error but still redirect
         logger.error(

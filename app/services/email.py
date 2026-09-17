@@ -12,7 +12,6 @@ from typing import Any, Iterable, Mapping, Sequence
 from loguru import logger
 
 from app.core.config import get_settings
-from app.services import module_runtime as module_runtime_service
 from app.services import webhook_monitor
 
 
@@ -296,35 +295,8 @@ async def send_email(
             )
             # Fall through to SMTP relay
     
-    # Apply email tracking if enabled (legacy Plausible tracking)
+    # Apply email tracking when requested by the caller.
     tracking_requested = enable_tracking
-    module_settings: dict[str, Any] | None = None
-    try:
-        plausible_module = await module_runtime_service.get_module(
-            "plausible", redact=False
-        )
-        if plausible_module and plausible_module.get("enabled"):
-            tracking_requested = True
-
-        # Load module settings when tracking is requested or the module is enabled
-        if tracking_requested or (plausible_module and plausible_module.get("enabled")):
-            try:
-                module_settings = await module_runtime_service.get_module_settings(
-                    "plausible"
-                )
-            except Exception as settings_exc:  # pragma: no cover - defensive logging
-                logger.warning(
-                    "Plausible settings unavailable; using tracking defaults",
-                    reply_id=ticket_reply_id,
-                    error=str(settings_exc),
-                )
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.warning(
-            "Plausible settings unavailable; tracking fallback in use",
-            reply_id=ticket_reply_id,
-            error=str(exc),
-        )
-
     if tracking_requested:
         try:
             from app.services import email_tracking
@@ -336,8 +308,8 @@ async def send_email(
                     reply_id=ticket_reply_id,
                 )
             else:
-                track_opens = module_settings.get("track_opens", True) if module_settings else True
-                track_clicks = module_settings.get("track_clicks", True) if module_settings else True
+                track_opens = True
+                track_clicks = True
 
                 if track_opens or track_clicks:
                     tracking_id = email_tracking.generate_tracking_id()
@@ -359,7 +331,7 @@ async def send_email(
                     )
                 else:
                     logger.info(
-                        "Email tracking disabled by Plausible module settings",
+                        "Email tracking disabled",
                         reply_id=ticket_reply_id,
                         track_opens=track_opens,
                         track_clicks=track_clicks,

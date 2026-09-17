@@ -1097,25 +1097,6 @@ def test_validate_xero_reports_missing_credentials():
     assert result["has_tenant_id"] is False
 
 
-def test_validate_plausible_uses_env_pepper(monkeypatch):
-    monkeypatch.setenv("PLAUSIBLE_PEPPER", "env-pepper")
-
-    result = asyncio.run(
-        modules._validate_plausible(
-        {
-            "base_url": "https://plausible.io",
-            "site_domain": "example.com",
-            "track_pageviews": True,
-            "send_to_plausible": True,
-            "pepper": "",
-        },
-        {},
-        )
-    )
-
-    assert result["has_pepper"] is True
-
-
 def test_update_module_preserves_uptimekuma_secret_when_blank(monkeypatch):
     """Saving UptimeKuma settings with a blank secret field must not clear an existing hash."""
     import hashlib
