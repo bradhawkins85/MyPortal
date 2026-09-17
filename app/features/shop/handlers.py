@@ -16,6 +16,7 @@ from fastapi import File, Form, HTTPException, Query, Request, UploadFile, statu
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.security.flash import flash_redirect
+from app.services.file_storage import delete_stored_file, store_product_image
 from app.services.sanitization import sanitize_rich_text
 
 
@@ -2266,7 +2267,7 @@ async def admin_create_shop_product(
     stored_path: Path | None = None
     if image is not None:
         if image.filename:
-            image_url, stored_path = await _main().store_product_image(
+            image_url, stored_path = await store_product_image(
                 upload=image,
                 uploads_root=_main()._private_uploads_path,
                 max_size=5 * 1024 * 1024,
@@ -2557,7 +2558,7 @@ async def admin_update_shop_product(
     stored_path: Path | None = None
     if image is not None:
         if image.filename:
-            image_url, stored_path = await _main().store_product_image(
+            image_url, stored_path = await store_product_image(
                 upload=image,
                 uploads_root=_main()._private_uploads_path,
                 max_size=5 * 1024 * 1024,
@@ -2674,7 +2675,7 @@ async def admin_update_shop_product(
 
     if previous_image_url and previous_image_url != updated.get("image_url"):
         try:
-            _main().delete_stored_file(previous_image_url, _main()._private_uploads_path)
+            delete_stored_file(previous_image_url, _main()._private_uploads_path)
         except HTTPException as exc:
             _main().log_error(
                 "Failed to remove replaced product image",
@@ -3004,7 +3005,7 @@ async def admin_delete_shop_product(request: Request, product_id: int):
     image_url = product.get("image_url")
     if image_url:
         try:
-            _main().delete_stored_file(image_url, _main()._private_uploads_path)
+            delete_stored_file(image_url, _main()._private_uploads_path)
         except HTTPException as exc:
             _main().log_error(
                 "Failed to remove deleted product image",
