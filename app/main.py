@@ -4399,8 +4399,12 @@ async def repair_m365_permissions(request: Request):
     except m365_service.M365Error as exc:
         return flash_redirect("/m365/diagnostics", str(exc), "error")
 
-    if outcome.get("granted"):
+    if outcome.get("granted") and outcome.get("purview_repaired"):
+        msg = "Missing permissions and Purview configuration have been repaired successfully."
+    elif outcome.get("granted"):
         msg = "Missing permissions have been granted successfully."
+    elif outcome.get("purview_repaired"):
+        msg = "Purview service-principal registration and role-group membership have been repaired successfully."
     else:
         msg = "No new permissions were needed – all permissions are already granted."
 
@@ -5500,16 +5504,22 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             "success",
         )
     if state_data.get("return_to") == "diagnostics":
-        # Re-run the diagnostics check so the page shows fresh results after repair.
+        # Re-run all diagnostics and complete the Purview-native setup now that
+        # delegated consent and the EOP role assignment are available.
         try:
             await m365_service.check_enterprise_app_permissions(company_id)
+            await m365_service.run_purview_preflight(company_id, repair=True)
         except m365_service.M365Error as exc:
             log_error(
                 "M365 diagnostics re-check failed after permission repair",
                 company_id=company_id,
                 error=str(exc),
             )
-        return flash_redirect("/m365/diagnostics", "Permissions repaired and re-checked", "success")
+        return flash_redirect(
+            "/m365/diagnostics",
+            "Permissions and Purview configuration repaired and re-checked",
+            "success",
+        )
     return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
 
