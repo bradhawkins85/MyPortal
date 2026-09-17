@@ -3942,13 +3942,19 @@ def _purview_check(
     return result
 
 
-async def run_purview_preflight(company_id: int) -> dict[str, Any]:
+async def run_purview_preflight(
+    company_id: int,
+    *,
+    repair: bool = False,
+) -> dict[str, Any]:
     """Validate every app-only Purview prerequisite without changing broad roles.
 
     Graph is authoritative for the EOP resource assignment.  The similarly named
     Office 365 Exchange Online assignment is deliberately never accepted here.
     Purview-native registration and role membership are checked through the SCC
     session because those objects are not represented by Entra directory roles.
+    When *repair* is true, missing Purview registration and eDiscoveryManager
+    membership are created after the compliance organization is reachable.
     """
     checked_at = datetime.now(timezone.utc)
     correlation_id = str(uuid.uuid4())
@@ -3977,6 +3983,7 @@ async def run_purview_preflight(company_id: int) -> dict[str, Any]:
     enterprise_sp = next(iter(sp_payload.get("value") or []), {})
     object_id = str(enterprise_sp.get("id") or "")
     checks: list[dict[str, str]] = []
+    repaired: list[str] = []
 
     permission_configured = False
     app_object_id = str(creds.get("app_object_id") or "")
@@ -4007,14 +4014,6 @@ async def run_purview_preflight(company_id: int) -> dict[str, Any]:
         # Some least-privilege app tokens can inspect assignments but cannot read
         # the app-registration manifest.  Report this independently, not as pass.
         pass
-    checks.append(_purview_check(
-        "eop_permission", "EOP Exchange.ManageAsApp application permission",
-        "Passed" if permission_configured else "Requires Admin Action",
-        "Configured on Microsoft Exchange Online Protection." if permission_configured else
-        "The application permission is absent or its app-registration manifest could not be read. Office 365 Exchange Online Exchange.ManageAsApp is not sufficient for Purview.",
-        None if permission_configured else PURVIEW_ADMIN_CONSENT_STEPS,
-    ))
-
     consent_granted = False
     if object_id:
         assignments = await _graph_get(
@@ -4034,6 +4033,18 @@ async def run_purview_preflight(company_id: int) -> dict[str, Any]:
             if str(resource.get("appId") or "").lower() == _SCC_APP_ID:
                 consent_granted = True
                 break
+    # An assignment on the exact EOP resource proves both that the application
+    # permission exists and that tenant-wide consent was granted.  This is more
+    # authoritative than requiredResourceAccess, which least-privilege app
+    # tokens may be unable to read and which can lag a manual assignment.
+    permission_configured = permission_configured or consent_granted
+    checks.append(_purview_check(
+        "eop_permission", "EOP Exchange.ManageAsApp application permission",
+        "Passed" if permission_configured else "Requires Admin Action",
+        "Configured on Microsoft Exchange Online Protection." if permission_configured else
+        "The application permission is absent or its app-registration manifest could not be read. Office 365 Exchange Online Exchange.ManageAsApp is not sufficient for Purview.",
+        None if permission_configured else PURVIEW_ADMIN_CONSENT_STEPS,
+    ))
     checks.append(_purview_check(
         "admin_consent", "Tenant-wide admin consent", "Passed" if consent_granted else "Requires Admin Action",
         "The EOP application role is assigned to the enterprise application." if consent_granted else
@@ -4071,6 +4082,20 @@ async def run_purview_preflight(company_id: int) -> dict[str, Any]:
                 or str(row.get("AppId") or "").lower() == client_id.lower()
                 for row in principal_rows if isinstance(row, dict)
             )
+            if repair and not registration_ok and object_id:
+                await _scc_invoke_command(
+                    scc_token,
+                    tenant_id,
+                    "New-ServicePrincipal",
+                    {
+                        "AppId": client_id,
+                        "ObjectId": object_id,
+                        "DisplayName": "MyPortal Purview eDiscovery",
+                    },
+                    organization=tenant_domain,
+                )
+                registration_ok = True
+                repaired.append("service_principal")
             members = await _scc_invoke_command(
                 scc_token, tenant_id, "Get-RoleGroupMember",
                 {"Identity": "eDiscoveryManager"}, organization=tenant_domain,
@@ -4086,6 +4111,16 @@ async def run_purview_preflight(company_id: int) -> dict[str, Any]:
                 }
                 for row in member_rows if isinstance(row, dict)
             )
+            if repair and registration_ok and not membership_ok and object_id:
+                await _scc_invoke_command(
+                    scc_token,
+                    tenant_id,
+                    "Add-RoleGroupMember",
+                    {"Identity": "eDiscoveryManager", "Member": object_id},
+                    organization=tenant_domain,
+                )
+                membership_ok = True
+                repaired.append("ediscovery_manager")
         except M365Error as exc:
             scc_error = str(exc)
             correlation_id = getattr(exc, "correlation_id", None) or correlation_id
@@ -4119,6 +4154,7 @@ async def run_purview_preflight(company_id: int) -> dict[str, Any]:
         "timestamp": checked_at.isoformat(),
         "correlation_id": correlation_id,
         "checks": checks,
+        "repaired": repaired,
     }
 
 
@@ -4414,7 +4450,13 @@ async def repair_enterprise_app_permissions(
         access_token=access_token,
     )
     results = await check_enterprise_app_permissions(company_id)
-    return {"granted": granted, "results": results}
+    purview = await run_purview_preflight(company_id, repair=True)
+    return {
+        "granted": granted,
+        "results": results,
+        "purview": purview,
+        "purview_repaired": bool(purview["repaired"]),
+    }
 
 
 async def _ensure_exchange_admin_role(
