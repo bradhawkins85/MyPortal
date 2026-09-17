@@ -6,7 +6,6 @@ from copy import deepcopy
 from typing import Any
 
 from app.repositories import integration_modules as module_repo
-from app.services.module_constants import ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS
 
 
 # Keep these defaults aligned with the matching ``DEFAULT_MODULES[*]["settings"]``
@@ -251,33 +250,6 @@ async def get_module(slug: str, *, redact: bool = True) -> dict[str, Any] | None
     if redact:
         resolved["settings"] = _redact_module_settings(slug, resolved["settings"])
     return resolved
-
-
-async def list_modules() -> list[dict[str, Any]]:
-    """Return runtime-resolved modules for UI/service consumers.
-
-    This mirrors ``app.services.modules.list_modules()`` so callers can obtain
-    the same redacted module inventory without importing the higher-level
-    orchestration service. Always-on ticket action pseudo-modules are excluded
-    here for parity with that existing UI-facing listing behavior.
-    """
-
-    modules = await module_repo.list_modules()
-    resolved_modules: list[dict[str, Any]] = []
-    for module in modules:
-        slug = str(module.get("slug") or "").strip()
-        if slug in ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS:
-            continue
-        resolved = dict(module)
-        resolved["settings"] = _redact_module_settings(
-            slug,
-            _resolve_module_settings(
-                slug,
-                _coerce_settings_payload(module.get("settings")),
-            ),
-        )
-        resolved_modules.append(resolved)
-    return resolved_modules
 
 
 async def get_module_settings(slug: str) -> dict[str, Any] | None:
