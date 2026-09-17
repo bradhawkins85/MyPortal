@@ -60,3 +60,115 @@ def test_admin_reporting_ai_query_reports_disabled_module_reason(monkeypatch):
 
     assert response.status_code == 400
     assert json.loads(response.body) == {"error": "Module disabled"}
+
+
+def test_admin_reporting_ai_query_redacts_raw_module_error(monkeypatch):
+    async def fake_require_super_admin_page(_request):
+        return {"id": 1, "is_super_admin": True}, None
+
+    async def form():
+        return {"instruction": "show tickets", "current_sql": ""}
+
+    async def describe_schema():
+        return {"tables": [], "relations": []}
+
+    async def trigger_module(*_args, **_kwargs):
+        return {
+            "status": "failed",
+            "last_error": "Traceback: ****** select * from users",
+        }
+
+    logged = {}
+
+    def fake_log_error(message, **kwargs):
+        logged["message"] = message
+        logged["kwargs"] = kwargs
+
+    monkeypatch.setattr(
+        reporting_handlers,
+        "_main",
+        lambda: SimpleNamespace(_require_super_admin_page=fake_require_super_admin_page),
+    )
+    monkeypatch.setattr(
+        "app.services.report_query_builder.describe_schema", describe_schema
+    )
+    monkeypatch.setattr("app.services.modules.trigger_module", trigger_module)
+    monkeypatch.setattr(reporting_handlers, "log_error", fake_log_error)
+
+    response = asyncio.run(
+        reporting_handlers.admin_reporting_ai_query(SimpleNamespace(form=form))
+    )
+
+    assert response.status_code == 503
+    assert json.loads(response.body) == {
+        "error": "The AI query service is unavailable. Check that an LLM module is enabled and configured."
+    }
+    assert logged["message"] == "Reporting AI query module failed"
+    assert logged["kwargs"]["status"] == "failed"
+    assert logged["kwargs"]["reason_type"] == "str"
+    assert logged["kwargs"]["reason_length"] > 0
+    assert "select * from users" not in json.dumps(logged["kwargs"])
+
+
+def test_admin_reporting_ai_query_preserves_validation_message(monkeypatch):
+    async def fake_require_super_admin_page(_request):
+        return {"id": 1, "is_super_admin": True}, None
+
+    async def form():
+        return {"instruction": "show tickets", "current_sql": ""}
+
+    async def describe_schema():
+        return {"tables": [], "relations": []}
+
+    async def trigger_module(*_args, **_kwargs):
+        return {"status": "ok", "response": "{\"sql\": \"delete from tickets\"}"}
+
+    monkeypatch.setattr(
+        reporting_handlers,
+        "_main",
+        lambda: SimpleNamespace(_require_super_admin_page=fake_require_super_admin_page),
+    )
+    monkeypatch.setattr(
+        "app.services.report_query_builder.describe_schema", describe_schema
+    )
+    monkeypatch.setattr("app.services.modules.trigger_module", trigger_module)
+
+    response = asyncio.run(
+        reporting_handlers.admin_reporting_ai_query(SimpleNamespace(form=form))
+    )
+
+    assert response.status_code == 400
+    assert json.loads(response.body) == {"error": "Only SELECT statements are allowed."}
+
+
+def test_admin_reporting_ai_query_reports_missing_skipped_reason_safely(monkeypatch):
+    async def fake_require_super_admin_page(_request):
+        return {"id": 1, "is_super_admin": True}, None
+
+    async def form():
+        return {"instruction": "show tickets", "current_sql": ""}
+
+    async def describe_schema():
+        return {"tables": [], "relations": []}
+
+    async def trigger_module(*_args, **_kwargs):
+        return {"status": "skipped"}
+
+    monkeypatch.setattr(
+        reporting_handlers,
+        "_main",
+        lambda: SimpleNamespace(_require_super_admin_page=fake_require_super_admin_page),
+    )
+    monkeypatch.setattr(
+        "app.services.report_query_builder.describe_schema", describe_schema
+    )
+    monkeypatch.setattr("app.services.modules.trigger_module", trigger_module)
+
+    response = asyncio.run(
+        reporting_handlers.admin_reporting_ai_query(SimpleNamespace(form=form))
+    )
+
+    assert response.status_code == 400
+    assert json.loads(response.body) == {
+        "error": "The configured LLM module did not generate a query."
+    }

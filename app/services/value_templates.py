@@ -14,11 +14,12 @@ from app.services import (
 )
 
 _TOKEN_PATTERN = re.compile(r"\{\{\s*([^\s{}]+)\s*\}\}")
-_VAR_TOKEN_PATTERN = re.compile(
-    r"\$\{\s*([^{}]+?)\s*\}(?:\.format\(\s*[\"\']([^\"\']*)[\"\']\s*\))?"
-)
 _VAR_METHOD_PATTERN = re.compile(r"\.([A-Za-z_][A-Za-z0-9_]*)\(([^()]*)\)")
 _UPPER_TOKEN_SANITISER = re.compile(r"[^A-Z0-9]+")
+_VAR_TOKEN_OPENER_LENGTH = 2
+_VAR_TOKEN_CLOSER_LENGTH = 1
+_MAX_VAR_TOKEN_LENGTH = 2048
+_MAX_VAR_FORMAT_LENGTH = 512
 
 
 def build_base_token_map(context: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -384,6 +385,92 @@ def _python_date_format(pattern: str) -> str:
     return rendered
 
 
+def _try_parse_var_format(text: str, start: int) -> tuple[int, str | None]:
+    if not text.startswith(".format(", start):
+        return start, None
+
+    cursor = start + len(".format(")
+    text_length = len(text)
+    format_limit = min(text_length, start + _MAX_VAR_FORMAT_LENGTH)
+    while cursor < format_limit and text[cursor].isspace():
+        cursor += 1
+    if cursor >= format_limit or text[cursor] not in {'"', "'"}:
+        return start, None
+
+    quote = text[cursor]
+    pattern_start = cursor + 1
+    pattern_end = text.find(quote, pattern_start, format_limit)
+    if pattern_end < 0:
+        return start, None
+
+    cursor = pattern_end + 1
+    while cursor < format_limit and text[cursor].isspace():
+        cursor += 1
+    if cursor >= format_limit or text[cursor] != ")":
+        return start, None
+
+    return cursor + 1, text[pattern_start:pattern_end]
+
+
+def _iter_var_token_matches(text: str) -> list[tuple[int, int, str, str | None]]:
+    matches: list[tuple[int, int, str, str | None]] = []
+    search_from = 0
+    text_length = len(text)
+
+    while search_from < text_length:
+        start = text.find("${", search_from)
+        if start < 0:
+            break
+
+        close_limit = min(
+            text_length,
+            start
+            + _VAR_TOKEN_OPENER_LENGTH
+            + _MAX_VAR_TOKEN_LENGTH
+            + _VAR_TOKEN_CLOSER_LENGTH,
+        )
+        close_index = text.find("}", start + 2, close_limit)
+        if close_index < 0:
+            search_from = start + 2
+            continue
+
+        expression = text[start + 2:close_index].strip()
+        if not expression or "{" in expression or "}" in expression:
+            search_from = start + 2
+            continue
+
+        end, format_pattern = _try_parse_var_format(text, close_index + 1)
+        matches.append((start, end, expression, format_pattern))
+        search_from = end
+
+    return matches
+
+
+def _replace_var_tokens(value: str, context: Mapping[str, Any] | None) -> str:
+    """Replace supported ${...} tokens.
+
+    Malformed or oversized expressions are left unchanged.
+    """
+    matches = _iter_var_token_matches(value)
+    if not matches:
+        return value
+
+    parts: list[str] = []
+    last_index = 0
+
+    for start, end, expression, format_pattern in matches:
+        parts.append(value[last_index:start])
+        resolved = _resolve_vars_value(context, expression)
+        rendered = _format_vars_value(resolved, format_pattern)
+        parts.append(
+            rendered if isinstance(rendered, str) else _stringify_template_value(rendered)
+        )
+        last_index = end
+
+    parts.append(value[last_index:])
+    return "".join(parts)
+
+
 def _format_vars_value(value: Any, pattern: str | None) -> Any:
     if pattern and isinstance(value, (date, datetime, time)):
         return value.strftime(_python_date_format(pattern))
@@ -406,11 +493,7 @@ def render_string(
     # First, process conditional expressions
     processed_value = conditional_expressions.process_conditionals(value, token_map)
 
-    def _replace_var(match: re.Match[str]) -> str:
-        resolved = _resolve_vars_value(context, match.group(1))
-        return str(_format_vars_value(resolved, match.group(2)))
-
-    processed_value = _VAR_TOKEN_PATTERN.sub(_replace_var, processed_value)
+    processed_value = _replace_var_tokens(processed_value, context)
 
     # Check if the entire processed result is a single token (for type coercion)
     # This must be done BEFORE token replacement to preserve types

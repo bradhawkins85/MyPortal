@@ -87,4 +87,5 @@ Default local URLs:
   ```bash
   pytest
   ```
+- Passkey deployment and user guidance is documented in `docs/passkeys.md`.
 - Additional setup and deployment guidance is included with the repository documentation.

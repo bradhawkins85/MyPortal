@@ -3056,6 +3056,7 @@ async def list_quote_items(quote_number: str, company_id: int) -> list[dict[str,
             p.description,
             p.image_url,
             p.product_link,
+            p.subscription_category_id,
             p.stock,
             p.stock_nsw,
             p.stock_qld,
@@ -3108,6 +3109,9 @@ def _normalise_quote_item(row: dict[str, Any]) -> dict[str, Any]:
     normalised["sku"] = row.get("sku")
     normalised["description"] = row.get("description")
     normalised["image_url"] = row.get("image_url")
+    normalised["subscription_category_id"] = _coerce_optional_int(
+        row.get("subscription_category_id")
+    )
     normalised["status"] = str(row.get("status") or "").strip()
     normalised["notes"] = row.get("notes")
     normalised["po_number"] = row.get("po_number")

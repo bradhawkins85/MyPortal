@@ -491,8 +491,13 @@ async def join_room(
     if tech_mxid:
         try:
             await matrix_service.invite_user(matrix_room_id, tech_mxid)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_error(
+                "Failed to invite technician to Matrix room",
+                room_id=room_id,
+                mxid=tech_mxid,
+                error=str(exc),
+            )
         try:
             await matrix_service.set_user_power_level(matrix_room_id, tech_mxid, 100)
         except Exception as exc:
@@ -500,8 +505,13 @@ async def join_room(
     elif bot_mxid:
         try:
             await matrix_service.invite_user(matrix_room_id, bot_mxid)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_error(
+                "Failed to invite bot user to Matrix room",
+                room_id=room_id,
+                mxid=bot_mxid,
+                error=str(exc),
+            )
 
     participant_mxid = tech_mxid or bot_mxid
     if participant_mxid:
@@ -604,8 +614,12 @@ async def close_room(
             room["matrix_room_id"],
             "This chat has been closed.",
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        log_error(
+            "Failed to post Matrix chat closure notice",
+            room_id=room_id,
+            error=str(exc),
+        )
 
     await audit_service.log_action(
         action="close",

@@ -1194,7 +1194,7 @@ def _extract_numeric_ticket_id(ticket: dict[str, Any]) -> int | None:
                 try:
                     return int(digits)
                 except (ValueError, TypeError):
-                    pass
+                    return None
 
     # Fall back to the Syncro ID if number parsing fails
     syncro_id = ticket.get("id")
@@ -1202,7 +1202,7 @@ def _extract_numeric_ticket_id(ticket: dict[str, Any]) -> int | None:
         try:
             return int(syncro_id)
         except (ValueError, TypeError):
-            pass
+            return None
 
     return None
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -47,18 +48,14 @@ async def download_recordings_from_sftp(
     ssh = paramiko.SSHClient()
     
     # Try to load system host keys first for better security
-    try:
+    with suppress(Exception):
         ssh.load_system_host_keys()
-    except Exception:
-        pass  # If system keys aren't available, continue
     
     # Load user known_hosts if available
     known_hosts_path = Path.home() / ".ssh" / "known_hosts"
     if known_hosts_path.exists():
-        try:
+        with suppress(Exception):
             ssh.load_host_keys(str(known_hosts_path))
-        except Exception:
-            pass
     
     # Always use RejectPolicy for security - requires proper known_hosts configuration
     # To configure: ssh-keyscan -H <hostname> >> ~/.ssh/known_hosts

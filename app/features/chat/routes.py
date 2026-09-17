@@ -319,8 +319,13 @@ async def tray_chat_popup(
         try:
             from app.api.routes.tray import _attach_room_to_device as _attach
             await _attach(room_id_new, device_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_error(
+                "tray_chat_popup: failed to attach room to device",
+                room_id=room_id_new,
+                device_id=device_id,
+                error=str(exc),
+            )
 
         # Apply auto-assign rules.
         try:

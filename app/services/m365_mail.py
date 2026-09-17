@@ -1530,7 +1530,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                         )
                         received_at = parsed_date.astimezone(timezone.utc)
                     except (TypeError, ValueError):
-                        pass
+                        received_at = None
 
                 # Extract In-Reply-To and References from internet message headers
                 in_reply_to_ids: list[str] = []
@@ -1788,14 +1788,22 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 await tickets_service.refresh_ticket_ai_summary(
                                     int(ticket_id)
                                 )
-                            except RuntimeError:
-                                pass
+                            except RuntimeError as exc:
+                                log_error(
+                                    "M365 mail ticket AI summary refresh skipped",
+                                    ticket_id=int(ticket_id),
+                                    error=str(exc),
+                                )
                             try:
                                 await tickets_service.refresh_ticket_ai_tags(
                                     int(ticket_id)
                                 )
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                log_error(
+                                    "M365 mail ticket AI tag refresh skipped",
+                                    ticket_id=int(ticket_id),
+                                    error=str(exc),
+                                )
                 except Exception as exc:  # pragma: no cover - defensive logging
                     error_text = str(exc)
                     errors.append({"message_id": msg_id, "error": error_text})

@@ -158,7 +158,7 @@ class SessionManager:
                 if scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https":
                     secure = True
             except Exception:  # pragma: no cover - defensive
-                pass
+                secure = self._is_secure()
         response.set_cookie(
             self.session_cookie_name,
             session.session_token,
@@ -254,12 +254,12 @@ def ensure_datetime(value: Any) -> datetime:
         return value
     if value is None:
         return datetime.utcnow()
-    if isinstance(value, str):
-        try:
-            return datetime.fromisoformat(value)
-        except ValueError:
-            pass
-    return datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S")
+    if not isinstance(value, str):
+        return datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S")
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
 
 
 def secrets_token() -> str:

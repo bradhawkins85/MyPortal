@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from app.repositories import call_recordings as call_recordings_repo
-from app.services import modules as modules_service
+from app.services import module_runtime as modules_service
 from app.services import webhook_monitor
 from app.services.transcription import WhisperXSettings
 
@@ -355,8 +355,7 @@ def _grandstream_parse_create_time(value: Any) -> datetime | None:
     try:
         return datetime.fromtimestamp(float(text), tz=timezone.utc)
     except (OverflowError, OSError, ValueError):
-        pass
-    return _coerce_datetime_value(text)
+        return _coerce_datetime_value(text)
 
 
 def _grandstream_parse_duration(value: Any) -> int | None:

@@ -53,7 +53,7 @@ class VoiceMonitorWorker:
                 await authorize_attempt(attempt, global_limit=self.global_limit, tenant_limit=self.tenant_limit)
                 await asyncio.wait_for(self.stopping.wait(), timeout=self.poll_seconds)
             except asyncio.TimeoutError:
-                pass
+                continue
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
         if self._post_tasks:

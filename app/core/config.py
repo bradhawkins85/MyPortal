@@ -145,6 +145,9 @@ class Settings(BaseSettings):
     )
     sms_auth: str | None = Field(default=None, validation_alias="SMS_AUTH")
     portal_url: AnyHttpUrl | None = Field(default=None, validation_alias="PORTAL_URL")
+    passkey_rp_id: str = Field(default="", validation_alias="PASSKEY_RP_ID")
+    passkey_rp_name: str = Field(default="", validation_alias="PASSKEY_RP_NAME")
+    passkey_allowed_origins: str = Field(default="", validation_alias="PASSKEY_ALLOWED_ORIGINS")
     azure_client_id: str | None = Field(
         default=None, validation_alias="AZURE_CLIENT_ID"
     )
@@ -802,10 +805,10 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("allowed_origins")
+    @field_validator("allowed_origins", "passkey_allowed_origins")
     @classmethod
     def _validate_allowed_origins(cls, value: str) -> str:
-        """Validate comma-separated CORS origins and reject wildcard origins."""
+        """Validate comma-separated origins and reject wildcard origins."""
 
         if not value.strip():
             return value
@@ -826,6 +829,18 @@ class Settings(BaseSettings):
                 ) from exc
 
         return value
+
+    def passkey_allowed_origin_list(self) -> list[str]:
+        origins = [origin.strip() for origin in self.passkey_allowed_origins.split(",") if origin.strip()]
+        if origins:
+            return origins
+        if self.portal_url:
+            from urllib.parse import urlsplit
+
+            parts = urlsplit(self.portal_url.unicode_string())
+            if parts.scheme and parts.netloc:
+                return [f"{parts.scheme}://{parts.netloc}"]
+        return ["http://localhost:8000"]
 
     @field_validator(
         "essential8_compliance_marketing_url",

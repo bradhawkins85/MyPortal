@@ -510,7 +510,7 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
         if isinstance(data, dict):
             return data
     except (json.JSONDecodeError, ValueError):
-        pass
+        data = None
 
     # 2. Strip markdown fenced code blocks
     md_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", stripped, re.DOTALL)
@@ -520,7 +520,7 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
             if isinstance(data, dict):
                 return data
         except (json.JSONDecodeError, ValueError):
-            pass
+            data = None
 
     # 3. Find the first { … last } substring
     start = stripped.find("{")
@@ -531,7 +531,7 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
             if isinstance(data, dict):
                 return data
         except (json.JSONDecodeError, ValueError):
-            pass
+            data = None
 
     return None
 

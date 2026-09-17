@@ -1739,18 +1739,18 @@ def _evaluate_qty_expression(expression: str, context: dict[str, Any]) -> float:
     try:
         return float(expression)
     except ValueError:
-        pass
-
-    try:
-        evaluated = expression.format_map(_TemplateValues(context))
-        return float(evaluated)
-    except (ValueError, KeyError):
-        logger.warning(
-            "Failed to evaluate quantity expression, defaulting to 1",
-            expression=expression,
-            context_keys=list(context.keys()),
-        )
-        return 1.0
+        try:
+            if not isinstance(expression, str):
+                raise ValueError("quantity expression must be a string")
+            evaluated = expression.format_map(_TemplateValues(context))
+            return float(evaluated)
+        except (ValueError, KeyError):
+            logger.warning(
+                "Failed to evaluate quantity expression, defaulting to 1",
+                expression=expression,
+                context_keys=list(context.keys()),
+            )
+            return 1.0
 
 
 async def _render_recurring_template_value(
@@ -2057,7 +2057,7 @@ async def build_recurring_invoice_items(
                 unit_amount = float(price_override)
                 line_item["UnitAmount"] = unit_amount
             except (TypeError, ValueError):
-                pass
+                line_item.pop("UnitAmount", None)
         elif product_code in xero_item_rates:
             # Use rate fetched from Xero
             unit_amount = float(_quantize(xero_item_rates[product_code]))

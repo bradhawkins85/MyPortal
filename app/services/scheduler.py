@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re
+from contextlib import suppress
 from asyncio.subprocess import PIPE
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1732,10 +1733,8 @@ class SchedulerService:
             slugs.append(slug)
 
         if not slugs:
-            try:
+            with suppress(OSError):
                 _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
-            except OSError:
-                pass
             return
 
         try:
@@ -1789,9 +1788,7 @@ class SchedulerService:
 
         if not failed:
             try:
-                _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
-            except FileNotFoundError:
-                pass
+                _FEATURE_PACK_RELOAD_FLAG_PATH.unlink(missing_ok=True)
             except OSError as exc:
                 log_error(
                     "Failed to clear feature pack reload flag",
@@ -1921,11 +1918,8 @@ class SchedulerService:
 
     def _ensure_update_flag_directory(self) -> None:
         _SYSTEM_UPDATE_FLAG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        try:
+        with suppress(OSError):
             os.chmod(_SYSTEM_UPDATE_FLAG_PATH.parent, 0o700)
-        except OSError:
-            # Best-effort permission hardening; failures are non-fatal for scheduling.
-            pass
 
     async def _get_git_ref(self, ref: str) -> str | None:
         process = await asyncio.create_subprocess_exec(

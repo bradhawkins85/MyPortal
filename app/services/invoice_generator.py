@@ -674,6 +674,7 @@ async def generate_subscription_invoice(
     recurring_item: dict[str, Any],
     quantity: int,
     unit_amount: Decimal,
+    coterm_end_date: date | datetime | str | None = None,
 ) -> dict[str, Any]:
     """Invoice one subscription charge locally, then sync it using its send policy."""
     if int(recurring_item.get("company_id") or 0) != int(company_id):
@@ -681,12 +682,25 @@ async def generate_subscription_invoice(
     if quantity <= 0 or unit_amount < 0:
         raise ValueError("Subscription invoice quantity and unit amount must be valid")
 
+    description = str(
+        recurring_item.get("description_template")
+        or recurring_item.get("product_code")
+        or "Subscription"
+    )
+    if coterm_end_date:
+        if isinstance(coterm_end_date, datetime):
+            coterm_text = coterm_end_date.date().isoformat()
+        elif isinstance(coterm_end_date, date):
+            coterm_text = coterm_end_date.isoformat()
+        else:
+            try:
+                coterm_text = date.fromisoformat(str(coterm_end_date)[:10]).isoformat()
+            except ValueError as exc:
+                raise ValueError("Co-term end date must be a valid ISO date") from exc
+        description = f"{description}\nCo-Term Expiry: {coterm_text}"
+
     line_item = {
-        "Description": str(
-            recurring_item.get("description_template")
-            or recurring_item.get("product_code")
-            or "Subscription"
-        ),
+        "Description": description,
         "Quantity": quantity,
         "UnitAmount": float(unit_amount),
         "ItemCode": str(recurring_item.get("product_code") or ""),

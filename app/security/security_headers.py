@@ -5,6 +5,7 @@ common web vulnerabilities including XSS, clickjacking, and MIME-sniffing attack
 """
 from __future__ import annotations
 
+from contextlib import suppress
 import re
 from typing import Awaitable, Callable, Iterable
 from urllib.parse import urlparse
@@ -73,15 +74,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Add extra script sources (e.g., Plausible analytics)
         if self._get_extra_script_sources:
-            try:
+            with suppress(Exception):
                 extra_sources = await self._get_extra_script_sources()
                 for source in extra_sources:
                     if source and self._is_valid_csp_source(source):
                         script_sources.append(source)
-            except Exception:
-                # If we fail to get extra sources, continue with defaults
-                # This ensures CSP is always present even if source lookup fails
-                pass
 
         # Build connect-src directive
         connect_sources = ["'self'", "https://cal.com", "https://app.cal.com"]
@@ -96,14 +93,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
         # Add extra connect sources (e.g., analytics APIs)
         if self._get_extra_connect_sources:
-            try:
+            with suppress(Exception):
                 extra_sources = await self._get_extra_connect_sources()
                 for source in extra_sources:
                     if source and self._is_valid_csp_source(source):
                         connect_sources.append(source)
-            except Exception:
-                # If we fail to get extra sources, continue with defaults
-                pass
         
         form_action_sources = ["'self'"]
         if validated_portal_url:

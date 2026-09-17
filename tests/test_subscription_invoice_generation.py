@@ -33,13 +33,14 @@ def test_subscription_invoice_contains_only_selected_item_and_honours_auto_send(
         },
         quantity=3,
         unit_amount=Decimal("12.50"),
+        coterm_end_date="2027-06-30",
     ))
 
     assert result["status"] == "succeeded"
     assert captured["include_recurring_items"] is False
     assert captured["include_ticket_items"] is False
     assert captured["recurring_line_items"] == [{
-        "Description": "Managed subscription",
+        "Description": "Managed subscription\nCo-Term Expiry: 2027-06-30",
         "Quantity": 3,
         "UnitAmount": 12.5,
         "ItemCode": "SUB-1",

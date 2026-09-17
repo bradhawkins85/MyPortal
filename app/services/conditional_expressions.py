@@ -10,17 +10,131 @@ import re
 from typing import Any
 
 
-# Pattern to match conditional expressions
-# Format: {{if condition then value_if_true [else value_if_false]}}
-_CONDITIONAL_PATTERN = re.compile(
-    r"\{\{\s*if\s+(.+?)\s+then\s+(.+?)(?:\s+else\s+(.+?))?\s*\}\}",
-    re.IGNORECASE
-)
+_CONDITIONAL_OPENER_LENGTH = 2
+_CONDITIONAL_CLOSER_LENGTH = 2
+_MAX_CONDITIONAL_LENGTH = 4096
 
 # Pattern to match comparison operators
 _COMPARISON_PATTERN = re.compile(
     r"^(.+?)\s*(>=|<=|>|<|==|!=)\s*(.+?)$"
 )
+
+
+def _skip_whitespace(text: str, start: int, end: int) -> int:
+    while start < end and text[start].isspace():
+        start += 1
+    return start
+
+
+def _find_clause_keyword(text: str, keyword: str) -> int:
+    keyword_lower = keyword.lower()
+    keyword_length = len(keyword)
+    in_single_quote = False
+    in_double_quote = False
+    index = 0
+    text_length = len(text)
+
+    while index <= text_length - keyword_length:
+        char = text[index]
+
+        if char == "\\" and (in_single_quote or in_double_quote):
+            index += 2
+            continue
+        if char == "'" and not in_double_quote:
+            in_single_quote = not in_single_quote
+            index += 1
+            continue
+        if char == '"' and not in_single_quote:
+            in_double_quote = not in_double_quote
+            index += 1
+            continue
+
+        if not in_single_quote and not in_double_quote:
+            if (
+                text[index:index + keyword_length].lower() == keyword_lower
+                and (index == 0 or text[index - 1].isspace())
+                and (
+                    index + keyword_length == text_length
+                    or text[index + keyword_length].isspace()
+                )
+            ):
+                return index
+        index += 1
+
+    return -1
+
+
+def _parse_conditional_body(body: str) -> tuple[str, str, str | None] | None:
+    then_keyword = "then"
+    else_keyword = "else"
+    then_index = _find_clause_keyword(body, then_keyword)
+    if then_index < 0:
+        return None
+
+    condition = body[:then_index].strip()
+    remainder = body[then_index + len(then_keyword):].strip()
+    if not condition or not remainder:
+        return None
+
+    else_index = _find_clause_keyword(remainder, else_keyword)
+    if else_index < 0:
+        return condition, remainder, None
+
+    then_value = remainder[:else_index].strip()
+    else_value = remainder[else_index + len(else_keyword):].strip()
+    if not then_value or not else_value:
+        return None
+
+    return condition, then_value, else_value
+
+
+def _iter_conditional_matches(
+    text: str,
+) -> list[tuple[int, int, str, str, str | None]]:
+    matches: list[tuple[int, int, str, str, str | None]] = []
+    search_from = 0
+    text_length = len(text)
+
+    while search_from < text_length:
+        start = text.find("{{", search_from)
+        if start < 0:
+            break
+
+        parse_limit = min(
+            text_length,
+            start
+            + _CONDITIONAL_OPENER_LENGTH
+            + _MAX_CONDITIONAL_LENGTH
+            + _CONDITIONAL_CLOSER_LENGTH,
+        )
+        cursor = _skip_whitespace(text, start + 2, parse_limit)
+        if cursor >= parse_limit:
+            search_from = start + 2
+            continue
+        if text[cursor:cursor + 2].lower() != "if":
+            search_from = start + 2
+            continue
+
+        after_if = cursor + 2
+        if after_if >= parse_limit or not text[after_if].isspace():
+            search_from = start + 2
+            continue
+
+        close_index = text.find("}}", after_if, parse_limit)
+        if close_index < 0:
+            search_from = start + 2
+            continue
+
+        parsed = _parse_conditional_body(text[after_if:close_index].strip())
+        if parsed is None:
+            search_from = close_index + 2
+            continue
+
+        condition, then_value, else_value = parsed
+        matches.append((start, close_index + 2, condition, then_value, else_value))
+        search_from = close_index + 2
+
+    return matches
 
 
 def _parse_value(value_str: str) -> str | int | float:
@@ -44,7 +158,7 @@ def _parse_value(value_str: str) -> str | int | float:
             return float(value_str)
         return int(value_str)
     except (ValueError, TypeError):
-        pass
+        return value_str
     
     # Return as-is (will be treated as variable reference)
     return value_str
@@ -65,7 +179,7 @@ def _resolve_value(value: str | int | float, token_map: dict[str, Any]) -> Any:
                     return float(resolved)
                 return int(resolved)
         except (ValueError, TypeError):
-            pass
+            return resolved
         return resolved
     
     # Not a token, return the string as-is
@@ -158,16 +272,19 @@ def _evaluate_condition(condition: str, token_map: dict[str, Any]) -> bool:
 def find_conditionals(text: str) -> list[tuple[str, str, str, str | None]]:
     """Find all conditional expressions in the text.
     
-    Returns a list of tuples: (full_match, condition, then_value, else_value)
+    Returns a list of tuples: (full_match, condition, then_value, else_value).
+
+    Malformed or oversized conditional expressions are ignored and left
+    unchanged by callers.
     """
-    results = []
-    for match in _CONDITIONAL_PATTERN.finditer(text):
-        full_match = match.group(0)
-        condition = match.group(1)
-        then_value = match.group(2)
-        else_value = match.group(3) if match.lastindex >= 3 else None
-        results.append((full_match, condition, then_value, else_value))
-    return results
+    if not text or not isinstance(text, str):
+        return []
+
+    return [
+        (text[start:end], condition, then_value, else_value)
+        for start, end, condition, then_value, else_value
+        in _iter_conditional_matches(text)
+    ]
 
 
 def evaluate_conditional(
@@ -213,15 +330,18 @@ def process_conditionals(text: str, token_map: dict[str, Any]) -> str:
     """
     if not text or not isinstance(text, str):
         return text
-    
-    result = text
-    conditionals = find_conditionals(result)
-    
-    # Process from longest to shortest to avoid conflicts
-    conditionals.sort(key=lambda x: len(x[0]), reverse=True)
-    
-    for full_match, condition, then_value, else_value in conditionals:
-        evaluated = evaluate_conditional(condition, then_value, else_value, token_map)
-        result = result.replace(full_match, evaluated)
-    
-    return result
+
+    matches = _iter_conditional_matches(text)
+    if not matches:
+        return text
+
+    parts: list[str] = []
+    last_index = 0
+    for start, end, condition, then_value, else_value in matches:
+        parts.append(text[last_index:start])
+        parts.append(
+            evaluate_conditional(condition, then_value, else_value, token_map)
+        )
+        last_index = end
+    parts.append(text[last_index:])
+    return "".join(parts)

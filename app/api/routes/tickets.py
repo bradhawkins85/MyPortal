@@ -1077,8 +1077,12 @@ async def update_ticket(
         await tickets_service.update_ticket_description(ticket_id, description_value)
     try:
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
-    except RuntimeError:
-        pass
+    except RuntimeError as exc:
+        log_error(
+            "Ticket AI summary refresh skipped after create",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
     await tickets_service.broadcast_ticket_event(action="updated", ticket_id=ticket_id)
     await tickets_service.emit_ticket_updated_event(
@@ -1273,8 +1277,12 @@ async def add_reply(
     )
     try:
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
-    except RuntimeError:
-        pass
+    except RuntimeError as exc:
+        log_error(
+            "Ticket AI summary refresh skipped after reply",
+            ticket_id=ticket_id,
+            error=str(exc),
+        )
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
     await tickets_service.emit_ticket_updated_event(
         ticket_id,
@@ -1340,7 +1348,7 @@ async def add_reply(
                             int(trello_company_id)
                         )
                     except (TypeError, ValueError):
-                        pass
+                        trello_company_id = None
                 actor_record = current_user or {}
                 first_name = str(actor_record.get("first_name") or "").strip()
                 last_name = str(actor_record.get("last_name") or "").strip()

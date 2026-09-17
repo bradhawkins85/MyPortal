@@ -25,6 +25,7 @@ from app.services.module_gate import require_module_enabled
 from loguru import logger
 
 from app.core.config import get_settings
+from app.services import module_runtime as module_runtime_service
 from app.core.database import db
 
 
@@ -748,12 +749,9 @@ async def send_email_via_api(
     """
     settings = get_settings()
     
-    # Get SMTP2Go configuration from integration module
-    from app.services import modules as modules_service
-    
     attempt = 0
     try:
-        module_settings = await modules_service.get_module_settings('smtp2go')
+        module_settings = await module_runtime_service.get_module_settings("smtp2go")
         if not module_settings:
             raise SMTP2GoError("SMTP2Go module not configured")
         
@@ -1080,7 +1078,7 @@ async def send_email_via_api(
             try:
                 response_text = exc.response.text
             except Exception:
-                pass
+                response_text = None
         
         logger.error(
             "SMTP2Go API HTTP error",
@@ -1474,9 +1472,9 @@ async def process_webhook_event(
                     occurred_at=occurred_at,
                 )
             elif internal_event_type in {"processed", "delivered"}:
-                from app.services import modules as modules_service
-
-                module_settings = await modules_service.get_module_settings("smtp2go")
+                module_settings = await module_runtime_service.get_module_settings(
+                    "smtp2go"
+                )
                 delay_seconds = coerce_int(
                     (module_settings or {}).get("not_engaged_delay_seconds"),
                     86400,

@@ -7,6 +7,7 @@ from pydantic import EmailStr, TypeAdapter, ValidationError
 
 from app.api.dependencies.auth import get_current_user, require_helpdesk_technician, require_super_admin
 from app.api.dependencies.database import require_database
+from app.core.logging import log_error
 from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_addresses as company_addresses_repo
@@ -59,9 +60,13 @@ async def create_company(
             updated = await company_repo.get_company_by_id(company_id)
             if updated:
                 created = updated
-        except Exception:
+        except Exception as exc:
             # If lookup fails, still return the created company
-            pass
+            log_error(
+                "Post-create company ID lookup failed",
+                company_id=company_id,
+                error=str(exc),
+            )
 
     await audit_service.record(
         action="company.create",
@@ -183,9 +188,13 @@ async def update_company(
             refreshed = await company_repo.get_company_by_id(company_id)
             if refreshed:
                 final_record = refreshed
-        except Exception:
+        except Exception as exc:
             # If lookup fails, still return the updated company
-            pass
+            log_error(
+                "Post-update company ID lookup failed",
+                company_id=company_id,
+                error=str(exc),
+            )
 
     await audit_service.record(
         action="company.update",

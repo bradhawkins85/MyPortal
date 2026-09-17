@@ -247,7 +247,7 @@ async def logout(access_token: str) -> None:
     try:
         await _request("POST", "/_matrix/client/v3/logout", headers=headers, json={})
     except MatrixError:
-        pass
+        return
 
 
 async def set_display_name(user_id: str, display_name: str, *, access_token: str) -> None:
@@ -260,7 +260,7 @@ async def set_display_name(user_id: str, display_name: str, *, access_token: str
             json={"displayname": display_name},
         )
     except MatrixError:
-        pass
+        return
 
 
 def sanitize_localpart(name: str) -> str:

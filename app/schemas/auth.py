@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -137,3 +137,44 @@ class TOTPAuthenticator(BaseModel):
 
 class TOTPListResponse(BaseModel):
     items: list[TOTPAuthenticator]
+
+
+class PasskeyBeginRegistrationRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+
+
+class PasskeyCredentialRequest(BaseModel):
+    challenge_id: str = Field(min_length=1, max_length=64)
+    credential: dict[str, Any]
+
+
+class PasskeyFinishRegistrationRequest(PasskeyCredentialRequest):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class PasskeyItem(BaseModel):
+    id: int
+    name: str
+    created_at: datetime
+    last_used_at: Optional[datetime] = None
+    transports: list[str] = []
+    credential_device_type: Optional[str] = None
+    credential_backed_up: bool = False
+
+
+class PasskeyListResponse(BaseModel):
+    items: list[PasskeyItem]
+
+
+class PasskeyChallengeResponse(BaseModel):
+    challenge_id: str
+    public_key: dict[str, Any]
+    expires_at: datetime
+
+
+class PasskeyRenameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class PasskeyDeleteRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
