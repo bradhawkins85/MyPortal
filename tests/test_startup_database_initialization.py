@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, call
 
 import aiomysql
@@ -95,3 +96,43 @@ async def test_startup_database_initialization_retries_os_errors(monkeypatch):
     assert disconnect.await_count == 1
     assert connect.await_count == 1
     assert sleep.await_args_list == [call(3)]
+
+
+@pytest.mark.anyio
+async def test_on_startup_skips_system_update_check(monkeypatch):
+    run_system_update = AsyncMock()
+    startup_db = AsyncMock()
+    change_log_sync = AsyncMock()
+    ensure_modules = AsyncMock()
+    refresh_schedules = AsyncMock()
+    scheduler_start = AsyncMock()
+    bootstrap_template = AsyncMock()
+    seed_demo = AsyncMock(return_value={"skipped": True})
+    fetch_tray = AsyncMock()
+    plugin_loader = SimpleNamespace(load_all=AsyncMock())
+
+    async def list_tasks(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(main_module.scheduler_service, "run_system_update", run_system_update)
+    monkeypatch.setattr(main_module, "_initialise_database_for_startup", startup_db)
+    monkeypatch.setattr(main_module.change_log_service, "sync_change_log_sources", change_log_sync)
+    monkeypatch.setattr(main_module.modules_service, "ensure_default_modules", ensure_modules)
+    monkeypatch.setattr(main_module.automations_service, "refresh_all_schedules", refresh_schedules)
+    monkeypatch.setattr(main_module.scheduler_service, "start", scheduler_start)
+    monkeypatch.setattr(main_module.modules_service, "start_xero_token_keepalive", lambda: None)
+    monkeypatch.setattr(main_module.scheduled_tasks_repo, "list_tasks", list_tasks)
+    monkeypatch.setattr("app.services.bcp_template.bootstrap_default_template", bootstrap_template)
+    monkeypatch.setattr("app.services.demo_seeding.seed_demo_data", seed_demo)
+    monkeypatch.setattr("app.services.tray_installer.fetch_latest_tray_installers", fetch_tray)
+    monkeypatch.setattr(main_module, "init_plugin_loader", lambda dirs: plugin_loader)
+    monkeypatch.setattr(main_module.feature_registry, "load_many", AsyncMock())
+    monkeypatch.setattr(main_module.settings, "feature_packs", "")
+    monkeypatch.setattr(main_module.settings, "enable_background_relationships", False)
+    monkeypatch.setattr(main_module.settings, "matrix_enabled", False)
+
+    await main_module.on_startup()
+
+    run_system_update.assert_not_awaited()
+    startup_db.assert_awaited_once()
+    scheduler_start.assert_awaited_once()

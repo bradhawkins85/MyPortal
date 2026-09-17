@@ -2765,10 +2765,6 @@ async def _render_impersonation_dashboard(
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    try:
-        await scheduler_service.run_system_update()
-    except Exception as exc:
-        log_error("Startup system update failed", error=str(exc))
     await _initialise_database_for_startup()
     async def _bootstrap_default_bcp_template() -> None:
         from app.services.bcp_template import bootstrap_default_template
