@@ -977,17 +977,16 @@ async def admin_create_sla_template(request: Request):
         priorities, responses, resolutions
     ):
         priority = str(priority_value or "").strip().lower()
-        invalid_sla_window = False
         try:
             response = int(response_value or 0)
             resolution = int(resolution_value or 0)
         except (TypeError, ValueError):
-            invalid_sla_window = True
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse("/admin/sla-templates?error=invalid", status_code=303)
         if (
             not priority
             or len(priority) > 32
             or priority in seen_priorities
-            or invalid_sla_window
             or response < 1
             or resolution < response
         ):
