@@ -33,6 +33,13 @@ Administrator or Compliance Administrator assignment does not replace this
 Purview RBAC setup and does not prove that the tenant's Purview organization has
 finished provisioning.
 
+The preflight also verifies that the enterprise application itself has either
+the **Exchange Administrator** or **Compliance Administrator** Entra directory
+role. The diagnostics repair action assigns Compliance Administrator using the
+delegated administrator session, then verifies the assignment before probing
+Purview. Assigning the role to the interactive user instead of the enterprise
+application does not satisfy app-only authentication.
+
 ## API
 
 The authenticated endpoints are documented interactively at `/docs` under the
