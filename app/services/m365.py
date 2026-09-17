@@ -12,6 +12,7 @@ import secrets
 import shutil
 import string
 import tempfile
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote, unquote, urlsplit
@@ -74,6 +75,13 @@ _COMPLIANCE_ROLE_VERIFY_DELAY_SECONDS = 2.0
 _SCC_SCOPE = "https://ps.compliance.protection.outlook.com/.default"
 _SCC_ORGANIZATION_PATTERN = re.compile(
     r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.onmicrosoft\.com"
+)
+
+PURVIEW_ADMIN_CONSENT_STEPS = (
+    "App registrations → select MyPortal application; API permissions → "
+    "Add a permission → APIs my organization uses; select Microsoft Exchange "
+    "Online Protection; Application permissions → Exchange → "
+    "Exchange.ManageAsApp; Grant admin consent for the organization."
 )
 
 # Skype and Teams Tenant Admin API service principal app ID.
@@ -3918,6 +3926,199 @@ async def verify_tenant_permissions(
         "missing": missing,
         "present": present,
         "updated": False,
+    }
+
+
+def _purview_check(
+    key: str,
+    label: str,
+    status: str,
+    detail: str,
+    remediation: str | None = None,
+) -> dict[str, str]:
+    result = {"key": key, "label": label, "status": status, "detail": detail}
+    if remediation:
+        result["remediation"] = remediation
+    return result
+
+
+async def run_purview_preflight(company_id: int) -> dict[str, Any]:
+    """Validate every app-only Purview prerequisite without changing broad roles.
+
+    Graph is authoritative for the EOP resource assignment.  The similarly named
+    Office 365 Exchange Online assignment is deliberately never accepted here.
+    Purview-native registration and role membership are checked through the SCC
+    session because those objects are not represented by Entra directory roles.
+    """
+    checked_at = datetime.now(timezone.utc)
+    correlation_id = str(uuid.uuid4())
+    creds = await get_credentials(company_id)
+    if not creds:
+        raise M365Error("No M365 credentials found for company")
+    tenant_id = str(creds.get("tenant_id") or "")
+    client_id = str(creds.get("client_id") or "")
+    graph_token = await acquire_access_token(company_id, force_client_credentials=True)
+    domain_payload = await _graph_get(
+        graph_token, "https://graph.microsoft.com/v1.0/domains?$select=id,isInitial"
+    )
+    tenant_domain = next(
+        (
+            str(item.get("id") or "")
+            for item in domain_payload.get("value", [])
+            if isinstance(item, dict) and item.get("isInitial")
+        ),
+        "",
+    )
+    sp_payload = await _graph_get(
+        graph_token,
+        "https://graph.microsoft.com/v1.0/servicePrincipals"
+        f"?$filter=appId eq '{client_id}'&$select=id,appId",
+    )
+    enterprise_sp = next(iter(sp_payload.get("value") or []), {})
+    object_id = str(enterprise_sp.get("id") or "")
+    checks: list[dict[str, str]] = []
+
+    permission_configured = False
+    app_object_id = str(creds.get("app_object_id") or "")
+    try:
+        if app_object_id:
+            application = await _graph_get(
+                graph_token,
+                f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}"
+                "?$select=requiredResourceAccess",
+            )
+        else:
+            application_response = await _graph_get(
+                graph_token,
+                "https://graph.microsoft.com/v1.0/applications"
+                f"?$filter=appId eq '{client_id}'&$select=requiredResourceAccess",
+            )
+            application = next(iter(application_response.get("value") or []), {})
+        permission_configured = any(
+            str(resource.get("resourceAppId") or "").lower() == _SCC_APP_ID
+            and any(
+                str(access.get("id") or "").lower() == _SCC_MANAGE_AS_APP_ROLE
+                and str(access.get("type") or "").lower() == "role"
+                for access in resource.get("resourceAccess") or []
+            )
+            for resource in application.get("requiredResourceAccess") or []
+        )
+    except M365Error:
+        # Some least-privilege app tokens can inspect assignments but cannot read
+        # the app-registration manifest.  Report this independently, not as pass.
+        pass
+    checks.append(_purview_check(
+        "eop_permission", "EOP Exchange.ManageAsApp application permission",
+        "Passed" if permission_configured else "Requires Admin Action",
+        "Configured on Microsoft Exchange Online Protection." if permission_configured else
+        "The application permission is absent or its app-registration manifest could not be read. Office 365 Exchange Online Exchange.ManageAsApp is not sufficient for Purview.",
+        None if permission_configured else PURVIEW_ADMIN_CONSENT_STEPS,
+    ))
+
+    consent_granted = False
+    if object_id:
+        assignments = await _graph_get(
+            graph_token,
+            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(object_id)}/appRoleAssignments",
+        )
+        resource_ids = {
+            str(item.get("resourceId") or "")
+            for item in assignments.get("value") or []
+            if str(item.get("appRoleId") or "").lower() == _SCC_MANAGE_AS_APP_ROLE
+        }
+        for resource_id in resource_ids:
+            resource = await _graph_get(
+                graph_token,
+                f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(resource_id)}?$select=appId",
+            )
+            if str(resource.get("appId") or "").lower() == _SCC_APP_ID:
+                consent_granted = True
+                break
+    checks.append(_purview_check(
+        "admin_consent", "Tenant-wide admin consent", "Passed" if consent_granted else "Requires Admin Action",
+        "The EOP application role is assigned to the enterprise application." if consent_granted else
+        "Tenant-wide consent for the EOP permission has not been verified.",
+        None if consent_granted else PURVIEW_ADMIN_CONSENT_STEPS,
+    ))
+
+    registration_command = (
+        'New-ServicePrincipal `\n'
+        f'  -AppId "{client_id}" `\n'
+        f'  -ObjectId "{object_id}" `\n'
+        '  -DisplayName "MyPortal Purview eDiscovery"'
+    )
+    membership_command = (
+        'Add-RoleGroupMember `\n  -Identity "eDiscoveryManager" `\n'
+        f'  -Member "{object_id}"'
+    )
+    org_ok = registration_ok = membership_ok = False
+    scc_error = ""
+    if consent_granted and tenant_domain:
+        try:
+            scc_token, _ = await _acquire_scc_access_token(company_id)
+            await _scc_invoke_command(
+                scc_token, tenant_id, "Get-OrganizationConfig", organization=tenant_domain
+            )
+            org_ok = True
+            principals = await _scc_invoke_command(
+                scc_token, tenant_id, "Get-ServicePrincipal", organization=tenant_domain
+            )
+            principal_rows = principals.get("value") or principals.get("Value") or []
+            if isinstance(principal_rows, dict):
+                principal_rows = [principal_rows]
+            registration_ok = any(
+                str(row.get("ObjectId") or row.get("Identity") or "").lower() == object_id.lower()
+                or str(row.get("AppId") or "").lower() == client_id.lower()
+                for row in principal_rows if isinstance(row, dict)
+            )
+            members = await _scc_invoke_command(
+                scc_token, tenant_id, "Get-RoleGroupMember",
+                {"Identity": "eDiscoveryManager"}, organization=tenant_domain,
+            )
+            member_rows = members.get("value") or members.get("Value") or []
+            if isinstance(member_rows, dict):
+                member_rows = [member_rows]
+            membership_ok = any(
+                object_id.lower() in {
+                    str(row.get("ExternalDirectoryObjectId") or "").lower(),
+                    str(row.get("Identity") or "").lower(),
+                    str(row.get("Name") or "").lower(),
+                }
+                for row in member_rows if isinstance(row, dict)
+            )
+        except M365Error as exc:
+            scc_error = str(exc)
+            correlation_id = getattr(exc, "correlation_id", None) or correlation_id
+    org_help = (
+        "Confirm https://purview.microsoft.com loads, including Settings → Role groups "
+        "and eDiscovery, then retry after Microsoft has completed provisioning."
+    )
+    checks.extend([
+        _purview_check("organization", "Purview compliance organization availability",
+                       "Passed" if org_ok else "Failed",
+                       "The compliance organization loaded successfully." if org_ok else
+                       ("The compliance organization could not be loaded. " + (scc_error or "It may not be provisioned yet.")),
+                       None if org_ok else org_help),
+        _purview_check("service_principal", "Purview/Exchange service-principal registration",
+                       "Passed" if registration_ok else "Requires Admin Action",
+                       "The enterprise application is registered in Purview." if registration_ok else
+                       "Purview does not expose this enterprise application service principal.",
+                       None if registration_ok else registration_command),
+        _purview_check("ediscovery_manager", "eDiscoveryManager role-group membership",
+                       "Passed" if membership_ok else "Requires Admin Action",
+                       "The enterprise application is an eDiscoveryManager member." if membership_ok else
+                       "The enterprise application object ID is not a verified role-group member.",
+                       None if membership_ok else membership_command + '\n\nGet-RoleGroupMember -Identity "eDiscoveryManager"'),
+    ])
+    return {
+        "ready": all(check["status"] == "Passed" for check in checks),
+        "tenant_domain": tenant_domain,
+        "tenant_id": tenant_id,
+        "client_id": client_id,
+        "enterprise_application_object_id": object_id,
+        "timestamp": checked_at.isoformat(),
+        "correlation_id": correlation_id,
+        "checks": checks,
     }
 
 
