@@ -38,13 +38,16 @@ def anyio_backend() -> str:
 _MAILBOX_REPORTS_ROLE = "230c1aed-a721-4c5d-9cb4-a90514e508ef"  # Reports.Read.All
 _MAILBOX_SETTINGS_ROLE = "40f97065-369a-49f4-947c-6a255697ae91"  # MailboxSettings.Read
 _MAIL_READWRITE_ROLE = "e2a3a72e-5f79-4c64-b1b1-878b674786c9"  # Mail.ReadWrite
+_SP_OBJECT_ID = "11111111-1111-4111-8111-111111111111"
+_APP_OBJECT_ID = "22222222-2222-4222-8222-222222222222"
+_NEW_SP_OBJECT_ID = "33333333-3333-4333-8333-333333333333"
 
 
 def _fake_creds(client_id: str = "app-client-id") -> dict[str, Any]:
     return {"client_id": client_id, "tenant_id": "tenant-123"}
 
 
-def _sp_response(sp_id: str = "sp-object-id") -> dict[str, Any]:
+def _sp_response(sp_id: str = _SP_OBJECT_ID) -> dict[str, Any]:
     return {"value": [{"id": sp_id}]}
 
 
@@ -82,7 +85,7 @@ async def test_try_grant_missing_permissions_grants_missing_roles():
         if _GRAPH_APP_ID in url:
             return _graph_sp_response()
         # service principal lookup for the company app
-        return _sp_response("sp-123")
+        return _sp_response(_SP_OBJECT_ID)
 
     async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
         granted.append(payload)
@@ -172,7 +175,7 @@ async def test_try_grant_missing_permissions_grants_exo_and_teams_when_graph_com
         if "roleManagement/directory/roleAssignments" in url:
             return {"value": [{"id": "existing-role"}]}  # admin roles already assigned
         # service principal lookup for the company app
-        return _sp_response("sp-123")
+        return _sp_response(_SP_OBJECT_ID)
 
     async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
         granted.append(payload)
@@ -318,7 +321,7 @@ async def test_provision_app_registration_skips_409_role_assignments():
         # All other calls succeed
         if url.endswith("/addPassword"):
             return {"secretText": "test-secret", "keyId": "key-id-1"}
-        return {"id": "created-id", "appId": "new-client-id"}
+        return {"id": _APP_OBJECT_ID, "appId": "new-client-id"}
 
     async def mock_graph_get(token: str, url: str, **kwargs: Any) -> dict:
         if "filter=displayName" in url:
@@ -327,9 +330,9 @@ async def test_provision_app_registration_skips_409_role_assignments():
             return _graph_sp_response()
         if "servicePrincipals" in url and _TEAMS_APP_ID in url:
             # Include appRoles so the ManageAsApp role-existence check passes
-            return {"value": [{"id": "new-sp-id", "appRoles": [{"id": _TEAMS_MANAGE_AS_APP_ROLE}]}]}
+            return {"value": [{"id": _NEW_SP_OBJECT_ID, "appRoles": [{"id": _TEAMS_MANAGE_AS_APP_ROLE}]}]}
         # EXO SP lookup returns a valid SP so grant is attempted
-        return {"value": [{"id": "new-sp-id"}]}
+        return {"value": [{"id": _NEW_SP_OBJECT_ID}]}
 
     with (
         patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
@@ -475,7 +478,7 @@ async def test_try_grant_missing_permissions_grants_sharepoint_when_missing():
             return _teams_sp_response()
         if "roleManagement/directory/roleAssignments" in url:
             return {"value": [{"id": "existing-role"}]}  # admin roles already assigned
-        return _sp_response("sp-123")
+        return _sp_response(_SP_OBJECT_ID)
 
     async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
         granted.append(payload)
@@ -534,7 +537,7 @@ async def test_try_grant_missing_permissions_grants_sharepoint_when_role_lookup_
             return _teams_sp_response()
         if "roleManagement/directory/roleAssignments" in url:
             return {"value": [{"id": "existing-role"}]}
-        return _sp_response("sp-123")
+        return _sp_response(_SP_OBJECT_ID)
 
     async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
         granted.append(payload)
@@ -569,7 +572,7 @@ async def test_check_enterprise_app_permissions_marks_sharepoint_as_fail_when_mi
             m365_service,
             "_graph_get",
             AsyncMock(side_effect=[
-                {"value": [{"id": "sp-object-id"}]},  # company SP lookup
+                {"value": [{"id": _SP_OBJECT_ID}]},  # company SP lookup
                 {"value": []},  # appRoleAssignments (none assigned)
             ]),
         ),
@@ -618,12 +621,12 @@ async def test_ensure_exchange_admin_role_assigns_when_missing():
     ):
         result = await m365_service._ensure_exchange_admin_role(
             access_token="admin-token",
-            sp_object_id="sp-123",
+            sp_object_id=_SP_OBJECT_ID,
         )
 
     assert result is True, "Should return True when role was newly assigned"
     assert len(posted) == 1
-    assert posted[0]["principalId"] == "sp-123"
+    assert posted[0]["principalId"] == _SP_OBJECT_ID
     assert posted[0]["roleDefinitionId"] == _EXO_ADMIN_ROLE_TEMPLATE_ID
     assert posted[0]["directoryScopeId"] == "/"
 
@@ -648,7 +651,7 @@ async def test_ensure_exchange_admin_role_noop_when_already_assigned():
     ):
         result = await m365_service._ensure_exchange_admin_role(
             access_token="admin-token",
-            sp_object_id="sp-123",
+            sp_object_id=_SP_OBJECT_ID,
         )
 
     assert result is False, "Should return False when role is already assigned"
@@ -673,7 +676,7 @@ async def test_ensure_exchange_admin_role_logs_on_failure():
     ):
         result = await m365_service._ensure_exchange_admin_role(
             access_token="admin-token",
-            sp_object_id="sp-123",
+            sp_object_id=_SP_OBJECT_ID,
         )
 
     assert result is False, "Should return False when assignment fails"
@@ -769,12 +772,12 @@ async def test_ensure_teams_service_admin_role_assigns_when_missing():
     ):
         result = await m365_service._ensure_teams_service_admin_role(
             access_token="admin-token",
-            sp_object_id="sp-123",
+            sp_object_id=_SP_OBJECT_ID,
         )
 
     assert result is True, "Should return True when role was newly assigned"
     assert len(posted) == 1
-    assert posted[0]["principalId"] == "sp-123"
+    assert posted[0]["principalId"] == _SP_OBJECT_ID
     assert posted[0]["roleDefinitionId"] == _TEAMS_ADMIN_ROLE_TEMPLATE_ID
     assert posted[0]["directoryScopeId"] == "/"
 
@@ -799,7 +802,7 @@ async def test_ensure_teams_service_admin_role_noop_when_already_assigned():
     ):
         result = await m365_service._ensure_teams_service_admin_role(
             access_token="admin-token",
-            sp_object_id="sp-123",
+            sp_object_id=_SP_OBJECT_ID,
         )
 
     assert result is False, "Should return False when role is already assigned"
@@ -823,7 +826,7 @@ async def test_ensure_teams_service_admin_role_logs_on_failure():
     ):
         result = await m365_service._ensure_teams_service_admin_role(
             access_token="admin-token",
-            sp_object_id="sp-123",
+            sp_object_id=_SP_OBJECT_ID,
         )
 
     assert result is False, "Should return False when assignment fails"
@@ -847,7 +850,7 @@ async def test_try_grant_missing_permissions_grants_teams_manage_as_app():
             return _teams_sp_response()
         if "roleManagement/directory/roleAssignments" in url:
             return {"value": [{"id": "existing-role"}]}  # admin roles already assigned
-        return _sp_response("sp-123")
+        return _sp_response(_SP_OBJECT_ID)
 
     async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
         granted.append(payload)
@@ -914,7 +917,7 @@ async def test_try_grant_missing_permissions_skips_teams_when_role_absent_from_s
             return {"value": [{"id": "teams-sp-id", "appRoles": []}]}
         if "roleManagement/directory/roleAssignments" in url:
             return {"value": [{"id": "existing-role"}]}  # admin roles already assigned
-        return _sp_response("sp-123")
+        return _sp_response(_SP_OBJECT_ID)
 
     async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
         posted.append(payload)

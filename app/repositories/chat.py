@@ -585,9 +585,6 @@ async def save_sync_state(next_batch: str) -> None:
             (next_batch, now),
         )
 
-_AI_QUEUE_ACTIVE_STATUSES = ("queued", "processing")
-
-
 def _json_dumps(value: Any) -> str | None:
     if value is None:
         return None

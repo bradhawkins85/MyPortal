@@ -817,7 +817,7 @@ async def create_contact_page(
     responsibility_or_agency: str = Form(None),
 ):
     """Create a contact from the Contacts & Claims page."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
 
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
@@ -846,7 +846,7 @@ async def update_contact_page(
     responsibility_or_agency: str = Form(None),
 ):
     """Update a contact from the Contacts & Claims page."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
 
     updated = await bcp_repo.update_contact(
         contact_id,
@@ -866,7 +866,7 @@ async def update_contact_page(
 @router.post("/contacts/{contact_id}/delete", include_in_schema=False)
 async def delete_contact_page(request: Request, contact_id: int):
     """Delete a contact from the Contacts & Claims page."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
 
     deleted = await bcp_repo.delete_contact(contact_id)
     if not deleted:
@@ -928,7 +928,7 @@ async def create_training_item_endpoint(
     follow_up_actions: str = Form(None),
 ):
     """Create a new training item."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
@@ -986,7 +986,7 @@ async def update_training_item_endpoint(
     follow_up_actions: str = Form(None),
 ):
     """Update a training item."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     # Parse training date
     try:
@@ -1037,7 +1037,7 @@ async def delete_training_item_endpoint(
     training_id: int,
 ):
     """Delete a training item."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     before = await bcp_repo.get_training_item_by_id(training_id)
     
     deleted = await bcp_repo.delete_training_item(training_id)
@@ -1069,7 +1069,7 @@ async def create_review_item_endpoint(
     approval_snapshot: str = Form(None),
 ):
     """Create a new review item."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
@@ -1123,7 +1123,7 @@ async def update_review_item_endpoint(
     approval_snapshot: str = Form(None),
 ):
     """Update a review item."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     # Parse review date
     try:
@@ -1170,7 +1170,7 @@ async def delete_review_item_endpoint(
     review_id: int,
 ):
     """Delete a review item."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     before = await bcp_repo.get_review_item_by_id(review_id)
     
     deleted = await bcp_repo.delete_review_item(review_id)
@@ -1245,7 +1245,7 @@ async def create_bcp_role(
     responsibilities: str = Form(None),
 ):
     """Create a new BCP role."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
@@ -1265,7 +1265,7 @@ async def update_bcp_role(
     responsibilities: str = Form(None),
 ):
     """Update a BCP role."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
 
     # IDOR check: ensure the role belongs to this company's plan.
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -1289,7 +1289,7 @@ async def delete_bcp_role(
     role_id: int,
 ):
     """Delete a BCP role."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
 
     # IDOR check: ensure the role belongs to this company's plan.
     plan = await bcp_repo.get_plan_by_company(company_id)
@@ -1316,7 +1316,7 @@ async def assign_user_to_role(
     contact_info: str = Form(None),
 ):
     """Assign a user to a BCP role."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     assignment = await bcp_repo.create_role_assignment(
         role_id,
@@ -1348,7 +1348,7 @@ async def update_role_assignment_endpoint(
     contact_info: str = Form(None),
 ):
     """Update a role assignment."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     before = await bcp_repo.get_role_assignment_by_id(assignment_id)
     
     updated = await bcp_repo.update_role_assignment(
@@ -1380,7 +1380,7 @@ async def delete_role_assignment_endpoint(
     assignment_id: int,
 ):
     """Delete a role assignment."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     before = await bcp_repo.get_role_assignment_by_id(assignment_id)
     
     deleted = await bcp_repo.delete_role_assignment(assignment_id)
@@ -1402,7 +1402,7 @@ async def delete_role_assignment_endpoint(
 @router.post("/roles/seed", include_in_schema=False)
 async def seed_example_role(request: Request):
     """Seed the example Team Leader role."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
@@ -1583,7 +1583,7 @@ async def update_plan(
     version: str = Form(None),
 ):
     """Update BCP plan overview."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
@@ -1618,7 +1618,7 @@ async def add_objective(
     objective_text: str = Form(...),
 ):
     """Add a new objective to the plan."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     plan = await bcp_repo.get_plan_by_company(company_id)
     if not plan:
@@ -1645,7 +1645,7 @@ async def delete_objective(
     objective_id: int,
 ):
     """Delete an objective."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     deleted = await bcp_repo.delete_objective(objective_id)
     if not deleted:
@@ -1674,7 +1674,7 @@ async def create_risk(
     contingency_plans: str = Form(None),
 ):
     """Create a new risk."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
 
     from app.services.risk_calculator import calculate_risk
     from app.services import audit

@@ -23,9 +23,8 @@ if TYPE_CHECKING:
     from app.core.features import FeatureRegistry
 
 try:  # pragma: no cover - import-time guard for environments without watchfiles
-    from watchfiles import Change, awatch
+    from watchfiles import awatch
 except ImportError:  # pragma: no cover
-    Change = None  # type: ignore[assignment]
     awatch = None  # type: ignore[assignment]
 
 

@@ -1382,7 +1382,6 @@ async def create_or_update_impact(
                      fines, legal_liability, rto_hours, losses_comments),
                 )
                 await conn.commit()
-                impact_id = cursor.lastrowid
     
     # Return the updated activity with impact
     return await get_critical_activity_by_id(critical_activity_id)

@@ -12,7 +12,6 @@ from app.core.config import get_settings
 
 _settings = get_settings()
 
-_M_LIMIT_EXCEEDED = "M_LIMIT_EXCEEDED"
 _DEFAULT_TIMEOUT = 30.0
 _SYNC_TIMEOUT_MS = 30_000
 _SAFE_MATRIX_PATH_RE = re.compile(r"^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]+$")

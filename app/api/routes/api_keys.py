@@ -165,7 +165,6 @@ async def update_api_key(
         ]
         permissions_argument: list[dict[str, Any]] | None = permissions_payload
     else:
-        permissions_payload = existing.get("permissions", [])
         permissions_argument = None
 
     if "is_enabled" in fields_set:

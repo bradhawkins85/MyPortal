@@ -1348,7 +1348,7 @@ async def add_reply(
                             int(trello_company_id)
                         )
                     except (TypeError, ValueError):
-                        trello_company_id = None
+                        pass
                 actor_record = current_user or {}
                 first_name = str(actor_record.get("first_name") or "").strip()
                 last_name = str(actor_record.get("last_name") or "").strip()

@@ -311,7 +311,7 @@ async def portal_ticket_reply(request: Request, ticket_id: int):
                 try:
                     allowed_company_ids.add(int(active_company_id))
                 except (TypeError, ValueError):
-                    active_company_id = None
+                    pass
             if not allowed_company_ids:
                 for entry in available_companies:
                     try:

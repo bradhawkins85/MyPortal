@@ -138,7 +138,7 @@ class VoiceMonitorWorker:
                 if heartbeat:
                     heartbeat.cancel()
                     with suppress(asyncio.CancelledError):
-                        await heartbeat
+                        _ = await heartbeat
 
     @staticmethod
     def _transcription_permitted(attempt: dict) -> bool:

@@ -48,7 +48,7 @@ async def _ensure_connection() -> None:
         return
     result = connect()
     if isawaitable(result):
-        await result
+        _ = await result
 
 
 def _serialise(value: Any) -> str | None:
