@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import Mapping
-
 import nh3
 
 _ALLOWED_TAGS: frozenset[str] = frozenset(

@@ -114,8 +114,6 @@ def _read_audio_title(audio_path: Path) -> str | None:
         # Only try to read ID3 tags from MP3 files
         if audio_path.suffix.lower() == ".mp3":
             from mutagen.mp3 import MP3
-            from mutagen.id3 import ID3, TIT2
-            
             try:
                 audio = MP3(str(audio_path))
                 if audio.tags and "TIT2" in audio.tags:
@@ -482,7 +480,7 @@ async def _sync_grandstream_ucm(
 
         try:
             rows = list(_iter_grandstream_csv_rows(csv_path))
-        except Exception as exc:  # pragma: no cover - defensive logging
+        except Exception:  # pragma: no cover - defensive logging
             logger.exception(
                 "Failed to read Grandstream CSV index", csv_path=str(csv_path)
             )
@@ -1439,7 +1437,7 @@ async def transcribe_recording(recording_id: int, *, force: bool = False) -> dic
             logger.info(f"Successfully transcribed recording {recording_id}")
             return updated
 
-    except ValueError as e:
+    except ValueError:
         # ValueError is raised for known errors (file not found, invalid JSON)
         # These have already been logged and webhook recorded, so just re-raise
         raise

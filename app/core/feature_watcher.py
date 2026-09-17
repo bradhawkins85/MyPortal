@@ -14,10 +14,13 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
 from app.core.logging import log_error, log_info
 from app.core.features import module_name_for_slug
+
+if TYPE_CHECKING:
+    from app.core.features import FeatureRegistry
 
 try:  # pragma: no cover - import-time guard for environments without watchfiles
     from watchfiles import Change, awatch

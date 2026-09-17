@@ -2304,8 +2304,7 @@ async def bcp_bia_edit(request: Request, activity_id: int):
     user, company_id = await _require_bcp_view(request)
     
     build_base_context, templates = _get_page_rendering()
-    from app.services.time_utils import humanize_hours
-    
+
     # Get the activity
     activity = await bcp_repo.get_critical_activity_by_id(activity_id)
     if not activity:

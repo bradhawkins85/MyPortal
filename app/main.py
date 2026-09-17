@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
+from importlib import import_module
 import json
-import math
 import random
 import re
 import secrets
@@ -12,14 +11,13 @@ from contextlib import suppress
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta, timezone
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import Decimal
 from html import escape
 from pathlib import Path, PurePosixPath
-from typing import Any, cast
+from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-import aiomysql
 import httpx
 from fastapi import (
     Depends,
@@ -35,7 +33,6 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
-from fastapi.params import Form as FormField
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (
@@ -51,7 +48,6 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from itsdangerous import BadSignature, URLSafeSerializer
-from pydantic import ValidationError
 from starlette.datastructures import FormData, URL
 from http import HTTPStatus
 
@@ -98,7 +94,6 @@ from app.api.routes import (
     tray as tray_api,
     users,
     system,
-    xero,
     chat as chat_api,
     features as features_api,
     defender as defender_api,
@@ -113,15 +108,11 @@ from app.core.logging import configure_logging, log_error, log_info, log_warning
 from loguru import logger
 from app.repositories import access_activity as access_activity_repo
 from app.repositories import audit_logs as audit_repo
-from app.repositories import api_keys as api_key_repo
 from app.repositories import auth as auth_repo
 from app.repositories import assets as assets_repo
-from app.repositories import billing_contacts as billing_contacts_repo
 from app.repositories import companies as company_repo
 from app.repositories import company_memberships as membership_repo
-from app.repositories import company_recurring_invoice_items as recurring_items_repo
 from app.repositories import change_log as change_log_repo
-from app.repositories import assets as asset_repo
 from app.repositories import licenses as license_repo
 from app.repositories import license_sku_friendly_names as sku_friendly_repo
 from app.repositories import forms as forms_repo
@@ -130,38 +121,19 @@ from app.repositories import m365 as m365_repo
 from app.repositories import notifications as notifications_repo
 from app.repositories import chat as chat_repo
 from app.repositories import defender as defender_repo
-from app.repositories import reporting as reporting_repo
 from app.repositories import roles as role_repo
-from app.repositories import shop as shop_repo
-from app.repositories import stock_feed as stock_feed_repo
 from app.repositories import cart as cart_repo
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
-from app.repositories import subscription_categories as subscription_categories_repo
-from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import staff as staff_repo
-from app.repositories import staff_onboarding_workflows as staff_workflow_repo
-from app.repositories import staff_requests as staff_requests_repo
-from app.repositories import pending_staff_access as pending_staff_access_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import rag_relationships as rag_relationship_repo
 from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import ticket_expenses as expenses_repo
-from app.repositories import ticket_views as ticket_views_repo
-from app.repositories import ticket_statuses as ticket_status_repo
-from app.repositories import automations as automation_repo
-from app.repositories import integration_modules as integration_modules_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
 from app.security.menu_permissions import MENU_PERMISSIONS, catalogue_for_api, menu_has_access, normalize_access_level, normalize_menu_permissions
-from app.repositories import issues as issues_repo
-from app.repositories import asset_custom_fields as asset_custom_fields_repo
-from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.repositories import site_settings as site_settings_repo
-from app.schemas.staff_onboarding_workflows import (
-    CompanyWorkflowPolicyUpsertSchema,
-    WorkflowConfigSchema,
-)
 from app.security.cache_control import CacheControlMiddleware
 from app.security.client_ip import get_client_ip
 from app.security.csrf import CSRFMiddleware
@@ -185,11 +157,8 @@ from app.services import background as background_tasks
 from app.services import automations as automations_service
 from app.services import change_log as change_log_service
 from app.services import cron_calendar as cron_calendar_service
-from app.services import company_domains
 from app.services import company_access
 from app.services import dashboard as dashboard_service
-from app.services import email as email_service
-from app.services import m365_mail as m365_mail_service
 from app.services import user_m365_contacts as user_m365_contacts_service
 from app.services import rag_relationships as rag_relationship_service
 from app.services import m365 as m365_service
@@ -197,29 +166,16 @@ from app.services import cis_benchmark as cis_benchmark_service
 from app.services import m365_best_practices as m365_best_practices_service
 from app.services import modules as modules_service
 from app.services import passkeys as passkeys_service
-from app.services import notification_event_settings as event_settings_service
 from app.services import message_templates as message_templates_service
-from app.services import products as products_service
-from app.services import shop as shop_service
-from app.services import shop_packages as shop_packages_service
-from app.services import staff_access as staff_access_service
-from app.services import staff_field_config as staff_field_config_service
-from app.services import staff_onboarding_workflows as staff_onboarding_workflow_service
 from app.services import labour_types as labour_types_service
-from app.services import subscription_shop_integration
 from app.services import tickets as tickets_service
 from app.services import rag_index as rag_index_service
-from app.services import ticket_attachments as attachments_service
 from app.services import template_variables
 from app.services import webhook_monitor
-from app.services import xero as xero_service
 from app.services import integration_operations as integration_operations_service
 from app.services import issues as issues_service
-from app.services import reports as reports_service
-from app.services import reporting as reporting_service
 from app.services import service_status as service_status_service
 from app.services import system_state as system_state_service
-from app.services import backup_jobs as backup_jobs_service
 from app.services import impersonation as impersonation_service
 from app.services.realtime import refresh_notifier
 from app.services.redis import close_redis_client, get_redis_client
@@ -230,7 +186,6 @@ from app.services.opnform import (
     normalize_opnform_embed_code,
     normalize_opnform_form_url,
 )
-from app.services.file_storage import delete_stored_file, store_product_image, store_report_cover_image
 
 configure_logging()
 settings = get_settings()
@@ -252,6 +207,27 @@ _ticket_dashboard_reference_lock = asyncio.Lock()
 _M365_PROVISION_PKCE_TTL_SECONDS = 600
 _m365_provision_pkce_cache: dict[str, tuple[str, datetime]] = {}
 _m365_provision_pkce_lock = asyncio.Lock()
+
+_LEGACY_SERVICE_EXPORTS = {
+    "backup_jobs_service": "app.services.backup_jobs",
+    "email_service": "app.services.email",
+    "m365_mail_service": "app.services.m365_mail",
+    "shop_packages_service": "app.services.shop_packages",
+    "shop_service": "app.services.shop",
+    "staff_access_service": "app.services.staff_access",
+    "staff_field_config_service": "app.services.staff_field_config",
+    "staff_onboarding_workflow_service": "app.services.staff_onboarding_workflows",
+    "xero_service": "app.services.xero",
+}
+
+
+def __getattr__(name: str) -> Any:
+    module_path = _LEGACY_SERVICE_EXPORTS.get(name)
+    if module_path is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = import_module(module_path)
+    globals()[name] = module
+    return module
 
 
 async def _store_m365_provision_code_verifier(verifier: str) -> str:
@@ -4172,7 +4148,7 @@ async def enable_m365_user_archive(request: Request):
 
     try:
         await m365_service.enable_user_archive(company_id, upn)
-    except m365_service.M365Error as exc:
+    except m365_service.M365Error:
         logger.exception("Failed to enable in-place archive for UPN %s", upn)
         return JSONResponse(
             {"error": "Unable to enable in-place and auto-expanding archive at this time."},
@@ -4304,7 +4280,7 @@ async def get_m365_mailbox_permissions(request: Request, upn: str):
     try:
         permissions = await m365_service.get_mailbox_permissions(company_id, upn)
         return JSONResponse(permissions)
-    except m365_service.M365Error as exc:
+    except m365_service.M365Error:
         logger.exception("Failed to get mailbox permissions for UPN %s", upn)
         return JSONResponse(
             {"error": "Unable to retrieve mailbox permissions at this time."},
@@ -5926,7 +5902,7 @@ async def admin_refresh_service_tags(request: Request, service_id: int):
         await service_status_service.refresh_service_tags(service_id)
     except ValueError as exc:
         return flash_redirect(f"/admin/service-status?serviceId={service_id}", str(exc), "error")
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception:  # pragma: no cover - defensive
         return flash_redirect(f"/admin/service-status?serviceId={service_id}", "Failed to refresh tags.", "error")
     return flash_redirect(f"/admin/service-status?serviceId={service_id}", "Tags refreshed.", "success")
 
@@ -7406,7 +7382,6 @@ async def admin_tray_configurations_page(request: Request):
 
     configurations = await tray_repo.list_menu_configs()
     for cfg in configurations:
-        scope = cfg.get("scope")
         ref = cfg.get("scope_ref_id")
         cfg["scope_target_label"] = f"#{ref}" if ref else None
     extra = {
@@ -8397,10 +8372,10 @@ async def admin_forms_page(request: Request):
         company_map = permissions_map.get(int(form_id), {})
         company_count = 0
         user_count = 0
-        for users in company_map.values():
-            if users:
+        for company_users in company_map.values():
+            if company_users:
                 company_count += 1
-                user_count += len(users)
+                user_count += len(company_users)
         form_assignment_summary[int(form_id)] = {
             "companies": company_count,
             "users": user_count,

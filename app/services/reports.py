@@ -25,7 +25,6 @@ from app.repositories import licenses as licenses_repo
 from app.repositories import m365_best_practices as m365_bp_repo
 from app.repositories import report_sections as report_sections_repo
 from app.repositories import shop as shop_repo
-from app.repositories import staff as staff_repo
 from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import voice_monitor as voice_monitor_repo
 from app.services import m365_best_practices as m365_bp_service
@@ -1147,8 +1146,6 @@ async def _huntress_company_linked(company_id: int) -> bool:
     """True when Huntress is enabled and the company has an organisation ID."""
     # Local import to avoid a circular dependency between reports/modules/huntress.
     from app.services import huntress as huntress_service
-    from app.services import modules as modules_service
-
     try:
         if not await huntress_service.is_module_enabled():
             return False

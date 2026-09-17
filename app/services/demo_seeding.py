@@ -42,7 +42,6 @@ from app.repositories import issues as issues_repo
 from app.repositories import business_continuity_plans as bc_plans_repo
 from app.repositories import m365_best_practices as bp_repo
 from app.repositories import subscriptions as subscriptions_repo
-from app.repositories import subscription_categories as sub_cat_repo
 
 _DEMO_COMPANY_NAME = "Demo Company"
 

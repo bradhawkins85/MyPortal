@@ -1187,11 +1187,6 @@ async def run_intune_ios_benchmarks(token: str) -> list[dict[str, Any]]:
         results.append(_pass("intune_ios_passcode_required", "Passcode required", "All iOS policies require a passcode."))
 
     # Jailbreak blocked
-    no_jailbreak_block = [
-        p.get("displayName", "Unnamed")
-        for p in ios_policies
-        if not p.get("deviceThreatProtectionRequiredSecurityLevel") and not p.get("jailBroken") == "Block"
-    ]
     # Many policies use securityRequireVerifyApps or managedEmailProfileRequired; check jailBroken field
     jailbreak_blocked = [
         p.get("displayName", "Unnamed")

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import Request, status
+from fastapi import Request
 from fastapi.responses import RedirectResponse
 
 from app.security.flash import flash_redirect

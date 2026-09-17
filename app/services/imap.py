@@ -4,7 +4,6 @@ import base64
 import email
 import hashlib
 import imaplib
-import io
 import json
 import re
 import secrets
@@ -25,7 +24,6 @@ from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import staff as staff_repo
 from app.repositories import users as users_repo
 from app.repositories import tickets as tickets_repo
-from app.repositories import ticket_attachments as attachments_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import modules as modules_service
 from app.services import system_state

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -10,7 +10,6 @@ from loguru import logger
 
 from app.core.database import db
 from app.repositories import billing_contacts as billing_contacts_repo
-from app.repositories import subscriptions as subscriptions_repo
 from app.services import email as email_service
 
 

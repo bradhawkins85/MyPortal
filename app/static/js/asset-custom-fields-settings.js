@@ -4,7 +4,6 @@
   const modal = document.getElementById('field-modal');
   const form = document.querySelector('[data-field-form]');
   const modalTitle = document.querySelector('[data-modal-title]');
-  const fieldsContainer = document.querySelector('[data-fields-container]');
   const emptyState = document.querySelector('[data-empty-state]');
   const fieldsTable = document.querySelector('[data-fields-table]');
   const fieldsTbody = document.querySelector('[data-fields-tbody]');

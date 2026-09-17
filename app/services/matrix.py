@@ -3,15 +3,12 @@ from __future__ import annotations
 import asyncio
 import html
 import re
-import secrets
-import time
 import uuid
 from typing import Any
 
 import httpx
 
 from app.core.config import get_settings
-from app.core.logging import log_error, log_info, log_warning
 
 _settings = get_settings()
 

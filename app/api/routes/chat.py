@@ -23,7 +23,7 @@ from app.schemas.chat import (
     AiTagSynonymGroupUpdate,
     AiTagSynonymGroupResponse,
 )
-from app.security.encryption import decrypt_secret, encrypt_secret
+from app.security.encryption import decrypt_secret
 from app.services import audit as audit_service
 from app.services import chat_ticket_sync
 from app.services import chat_ntfy_notifications
