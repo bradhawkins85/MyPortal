@@ -1,0 +1,7 @@
+{
+  "guid": "968d6bb5-ff52-4c0d-bb76-330c7b196b70",
+  "occurred_at": "2026-09-17T00:00:00Z",
+  "change_type": "Feature",
+  "summary": "Added current-company Windows 10 computer reports for devices synced within the last 30, 60, and 90 days.",
+  "content_hash": "927d3e09af725204008371461625e09a879e9286307bd377f4f99f2865e2f03a"
+}
