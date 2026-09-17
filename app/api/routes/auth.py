@@ -275,6 +275,13 @@ def _set_passkey_login_cookie(response: Response, request: Request, token: str) 
     )
 
 
+def _validated_passkey_login_cookie(request: Request) -> str | None:
+    token = request.cookies.get(_passkey_login_cookie_name())
+    if not passkeys_service.is_valid_browser_binding_token(token):
+        return None
+    return token
+
+
 def _get_passkey_credential_id(credential: dict[str, Any]) -> str:
     credential_id = credential.get("id")
     if not isinstance(credential_id, str) or not credential_id.strip():
@@ -1065,7 +1072,7 @@ async def begin_passkey_authentication(
     request: Request,
     _: None = Depends(require_database),
 ) -> Response:
-    browser_binding = request.cookies.get(_passkey_login_cookie_name()) or passkeys_service.generate_browser_binding_token()
+    browser_binding = _validated_passkey_login_cookie(request) or passkeys_service.generate_browser_binding_token()
     options = passkeys_service.authentication_options()
     await auth_repo.create_passkey_challenge(
         challenge_id=options["challenge_id"],
@@ -1095,7 +1102,7 @@ async def finish_passkey_authentication(
     request: Request,
     _: None = Depends(require_database),
 ) -> Response:
-    browser_binding = request.cookies.get(_passkey_login_cookie_name())
+    browser_binding = _validated_passkey_login_cookie(request)
     failure_detail = "Passkey sign-in failed. Use another sign-in option and try again."
     if not browser_binding:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail)
