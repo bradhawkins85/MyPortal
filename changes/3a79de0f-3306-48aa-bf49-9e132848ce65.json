@@ -1,0 +1,7 @@
+{
+  "guid": "3a79de0f-3306-48aa-bf49-9e132848ce65",
+  "occurred_at": "2026-09-17T00:00Z",
+  "change_type": "Fix",
+  "summary": "Grant and diagnose the Purview-specific Exchange.ManageAsApp permission independently, and report actionable Purview provisioning and RBAC prerequisites.",
+  "content_hash": "d15f97023b7337df7b9b3bf510deed6e9c3b4d3a9a7b0dfa9898c677b2bb53b7"
+}

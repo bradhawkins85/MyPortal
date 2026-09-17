@@ -48,6 +48,11 @@ _EXO_SCOPE = "https://outlook.office365.com/.default"
 # Exchange.ManageAsApp application role – grants app-only access to Exchange Online
 # PowerShell cmdlets when combined with an appropriate Exchange RBAC role assignment.
 _EXO_MANAGE_AS_APP_ROLE = "dc50a0fb-09a3-484d-be87-e023b12c6440"
+# Security & Compliance PowerShell is a different resource service principal
+# from Office 365 Exchange Online.  Purview tokens require the EOP assignment;
+# granting the identically named role only on EXO does not authorize them.
+_SCC_APP_ID = "00000007-0000-0ff1-ce00-000000000000"
+_SCC_MANAGE_AS_APP_ROLE = _EXO_MANAGE_AS_APP_ROLE
 # Azure AD built-in Exchange Administrator directory role template ID.
 # Assigning this role (or a suitable Exchange RBAC role) to the app's service
 # principal is required *in addition to* the Exchange.ManageAsApp app role for
@@ -304,6 +309,13 @@ ENTERPRISE_APP_CATALOG: list[dict[str, Any]] = [
         "app_id": _EXO_APP_ID,
         "permissions": [
             {"id": _EXO_MANAGE_AS_APP_ROLE, "name": "Exchange.ManageAsApp"},
+        ],
+    },
+    {
+        "name": "Microsoft Exchange Online Protection",
+        "app_id": _SCC_APP_ID,
+        "permissions": [
+            {"id": _SCC_MANAGE_AS_APP_ROLE, "name": "Exchange.ManageAsApp"},
         ],
     },
     {
@@ -2207,53 +2219,57 @@ async def _grant_provisioned_roles(
             sp_object_id=sp_object_id,
         )
 
-        # 2. Grant Exchange Online Exchange.ManageAsApp role (best-effort).
-        try:
-            exo_sp_response = await _graph_get(
-                access_token,
-                f"https://graph.microsoft.com/v1.0/servicePrincipals"
-                f"?$filter=appId eq '{_EXO_APP_ID}'&$select=id",
-            )
-            exo_sp_list = exo_sp_response.get("value", [])
-            if exo_sp_list:
-                exo_sp_id: str = exo_sp_list[0]["id"]
+        # 2. Grant ManageAsApp on both PowerShell resources. Purview uses the
+        # EOP resource, not the similarly named Office 365 Exchange Online API.
+        for resource_app_id, resource_name in (
+            (_EXO_APP_ID, "Office 365 Exchange Online"),
+            (_SCC_APP_ID, "Microsoft Exchange Online Protection"),
+        ):
+            try:
+                resource_response = await _graph_get(
+                    access_token,
+                    f"https://graph.microsoft.com/v1.0/servicePrincipals"
+                    f"?$filter=appId eq '{resource_app_id}'&$select=id,appId",
+                )
+                resource_list = [
+                    item for item in resource_response.get("value", [])
+                    if resource_app_id != _SCC_APP_ID
+                    or str(item.get("appId") or "").lower() == resource_app_id
+                ]
+                if not resource_list:
+                    log_info(
+                        f"{resource_name} service principal not found in tenant; "
+                        "skipping Exchange.ManageAsApp role grant",
+                    )
+                    continue
+                resource_sp_id: str = resource_list[0]["id"]
                 try:
                     await _post_app_role_assignment_with_retry(
                         access_token,
                         f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
                         {
                             "principalId": sp_object_id,
-                            "resourceId": exo_sp_id,
+                            "resourceId": resource_sp_id,
                             "appRoleId": _EXO_MANAGE_AS_APP_ROLE,
                         },
                     )
                     log_info(
-                        "Granted Exchange.ManageAsApp role",
+                        f"Granted {resource_name} Exchange.ManageAsApp role",
                         sp_object_id=sp_object_id,
                     )
                 except M365Error as exc:
                     if exc.http_status == 409:
                         log_info(
-                            "Exchange.ManageAsApp role already assigned, skipping",
+                            f"{resource_name} Exchange.ManageAsApp role already assigned, skipping",
                             sp_object_id=sp_object_id,
                         )
                     else:
                         log_error(
-                            "Failed to grant Exchange.ManageAsApp role; "
-                            "Get-MailboxPermission will not be available",
+                            f"Failed to grant {resource_name} Exchange.ManageAsApp role",
                             error=str(exc),
                         )
-            else:
-                log_info(
-                    "Exchange Online service principal not found in tenant; "
-                    "skipping Exchange.ManageAsApp role grant",
-                )
-        except M365Error as exc:
-            log_error(
-                "Failed to look up Exchange Online service principal; "
-                "Get-MailboxPermission will not be available",
-                error=str(exc),
-            )
+            except M365Error as exc:
+                log_error(f"Failed to look up {resource_name} service principal", error=str(exc))
 
         # 2b. Grant Skype and Teams Tenant Admin API Teams.ManageAsApp role (best-effort).
         # Required for Teams PowerShell cmdlets (Get-CsTeamsMeetingPolicy etc.) via
@@ -4311,6 +4327,7 @@ async def try_grant_missing_permissions(
         # We also retrieve the Graph SP's appRoles to filter out any required
         # permissions that don't exist in this tenant.
         exo_sp_id: str | None = None
+        scc_sp_id: str | None = None
         teams_sp_id: str | None = None
         try:
             exo_sp_resp = await _graph_get(
@@ -4321,6 +4338,21 @@ async def try_grant_missing_permissions(
             exo_sp_list = exo_sp_resp.get("value", [])
             if exo_sp_list:
                 exo_sp_id = exo_sp_list[0]["id"]
+        except M365Error:
+            pass
+
+        try:
+            scc_sp_resp = await _graph_get(
+                access_token,
+                "https://graph.microsoft.com/v1.0/servicePrincipals"
+                f"?$filter=appId eq '{_SCC_APP_ID}'&$select=id,appId",
+            )
+            scc_sp_list = [
+                item for item in scc_sp_resp.get("value", [])
+                if str(item.get("appId") or "").lower() == _SCC_APP_ID
+            ]
+            if scc_sp_list:
+                scc_sp_id = scc_sp_list[0]["id"]
         except M365Error:
             pass
 
@@ -4343,6 +4375,7 @@ async def try_grant_missing_permissions(
             pass
 
         exo_needed = exo_sp_id is not None and exo_sp_id not in manage_as_app_resource_ids
+        scc_needed = scc_sp_id is not None and scc_sp_id not in manage_as_app_resource_ids
         teams_needed = (
             teams_sp_id is not None
             and teams_sp_has_role
@@ -4437,6 +4470,29 @@ async def try_grant_missing_permissions(
                             )
             except M365Error:
                 pass
+
+        # Purview has its own Exchange.ManageAsApp resource assignment. This
+        # is the key repair performed by reconnect for existing installations.
+        if scc_needed and scc_sp_id:
+            try:
+                await _graph_post(
+                    access_token,
+                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
+                    {
+                        "principalId": sp_object_id,
+                        "resourceId": scc_sp_id,
+                        "appRoleId": _SCC_MANAGE_AS_APP_ROLE,
+                    },
+                )
+                granted.append(_SCC_MANAGE_AS_APP_ROLE)
+                log_info("Granted Purview Exchange.ManageAsApp via connect flow", company_id=company_id)
+            except M365Error as exc:
+                if exc.http_status != 409:
+                    log_error(
+                        "try_grant_missing_permissions: failed to grant Purview Exchange.ManageAsApp",
+                        company_id=company_id,
+                        error=str(exc),
+                    )
 
         # Best-effort: grant Teams.ManageAsApp if not already assigned.
         # Exchange.ManageAsApp and Teams.ManageAsApp share the same role GUID but

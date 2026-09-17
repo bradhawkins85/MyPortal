@@ -17,11 +17,21 @@ mailbox, matching the prior console workflow.
 
 ## Permissions
 
-The tenant enterprise app must be able to use Security & Compliance PowerShell
-and must be assigned the Purview **Compliance Search** and **Search And Purge**
-roles. Exchange app-only access is also required for the Managed Folder
-Assistant follow-up. Only authenticated super administrators and users with the
+The tenant enterprise app must be able to use Security & Compliance PowerShell.
+That requires `Exchange.ManageAsApp` on the **Microsoft Exchange Online
+Protection** resource (`00000007-0000-0ff1-ce00-000000000000`); the assignment
+with the same name on **Office 365 Exchange Online** is separate and is used by
+the Managed Folder Assistant follow-up. MyPortal provisioning, reconnect repair,
+and permission diagnostics now handle both resource assignments independently.
+Only authenticated super administrators and users with the
 `helpdesk.technician` permission can access the UI or API.
+
+Microsoft's best-effort app-only eDiscovery setup also requires the enterprise
+application service principal to be registered with `New-ServicePrincipal` and
+added to the Purview `eDiscoveryManager` role group. An Entra Exchange
+Administrator or Compliance Administrator assignment does not replace this
+Purview RBAC setup and does not prove that the tenant's Purview organization has
+finished provisioning.
 
 ## API
 
@@ -63,6 +73,8 @@ search again. Role assignment success and the later Purview search result are
 reported separately because the assignment does not establish Purview provisioning
 or app-only command support.
 
-`Exchange.ManageAsApp` application permission and administrator consent remain a
-separate prerequisite. MyPortal does not consent permissions, provision Purview,
-or make unsupported app-only eDiscovery PowerShell commands supported.
+The Microsoft Exchange Online Protection `Exchange.ManageAsApp` application
+permission and administrator consent remain a separate prerequisite from the
+Entra directory roles. MyPortal does not provision the tenant's Purview
+organization or make Microsoft's best-effort app-only eDiscovery PowerShell
+configuration a supported Microsoft API scenario.

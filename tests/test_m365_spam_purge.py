@@ -316,7 +316,9 @@ async def test_run_search_exhausts_retries_and_marks_failed(monkeypatch):
     failed_updates = [d for d in update_calls if d.get("search_status") == "failed"]
     assert failed_updates, "Search should be marked failed after exhausting retries"
     error_message = failed_updates[-1].get("error_message", "")
-    assert "Confirm that the app is assigned Exchange or Compliance Administrator" in error_message
+    assert "administrator-role check is separate" in error_message
+    assert "Microsoft Exchange Online Protection" in error_message
+    assert "eDiscoveryManager" in error_message
     assert "organization container" not in error_message
 
 
