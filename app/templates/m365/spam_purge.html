@@ -31,7 +31,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="purge-grid" data-spam-purge-config='{{ {"refresh": (active_jobs | default([]) | length) > 0} | tojson | e }}'>
+<div class="purge-grid" data-spam-purge-config='{{ {"refresh": active_jobs | default(false)} | tojson | e }}'>
   <section class="card card--panel" id="new-spam-search">
     <header class="card__header">
       <div><h2 class="card__title">Define a compliance search</h2><p class="card__subtitle">Search first. Review the result count and details before starting a separate purge.</p></div>
