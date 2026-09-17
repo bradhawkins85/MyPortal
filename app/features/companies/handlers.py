@@ -981,7 +981,8 @@ async def admin_create_sla_template(request: Request):
             response = int(response_value or 0)
             resolution = int(resolution_value or 0)
         except (TypeError, ValueError):
-            response = resolution = 0
+            response = 0
+            resolution = 0
         if (
             not priority
             or len(priority) > 32

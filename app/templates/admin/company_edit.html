@@ -2051,10 +2051,6 @@
           const staffId = this.value;
           if (!staffId) return;
           
-          const option = this.options[this.selectedIndex];
-          const email = option.dataset.email || '';
-          const name = option.dataset.name || '';
-          
           try {
             const response = await fetch(`/admin/companies/${companyId}/billing-contacts/add`, {
               method: 'POST',

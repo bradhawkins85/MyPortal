@@ -1289,12 +1289,6 @@ async def place_order(request: Request) -> RedirectResponse:
         )
 
     try:
-        def _normalize_price(value: Any) -> Decimal:
-            try:
-                return Decimal(str(value or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            except (InvalidOperation, TypeError, ValueError):
-                return Decimal("0.00")
-
         line_items: list[str] = []
         order_total = Decimal("0.00")
         for index, item in enumerate(items, start=1):

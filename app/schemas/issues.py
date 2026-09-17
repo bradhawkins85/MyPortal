@@ -1,10 +1,9 @@
 from __future__ import annotations
-from __future__ import annotations
 
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.services import issues as issues_service
 
@@ -13,14 +12,16 @@ class IssueAssignmentBase(BaseModel):
     company_name: str = Field(..., min_length=1, max_length=255)
     status: str = Field(default=issues_service.DEFAULT_STATUS, max_length=32)
 
-    @validator("company_name")
+    @field_validator("company_name")
+    @classmethod
     def validate_company_name(cls, value: str) -> str:
         cleaned = value.strip()
         if not cleaned:
             raise ValueError("Company name is required")
         return cleaned
 
-    @validator("status")
+    @field_validator("status")
+    @classmethod
     def validate_status(cls, value: str) -> str:
         try:
             return issues_service.normalise_status(value)
@@ -48,21 +49,24 @@ class IssueBase(BaseModel):
     slug: Optional[str] = Field(default=None, max_length=255)
     description: Optional[str] = Field(default=None, max_length=2000)
 
-    @validator("name")
+    @field_validator("name")
+    @classmethod
     def validate_name(cls, value: str) -> str:
         cleaned = value.strip()
         if not cleaned:
             raise ValueError("Issue name is required")
         return cleaned
 
-    @validator("slug")
+    @field_validator("slug")
+    @classmethod
     def validate_slug(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
         cleaned = value.strip()
         return cleaned or None
 
-    @validator("description")
+    @field_validator("description")
+    @classmethod
     def validate_description(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
@@ -80,14 +84,16 @@ class IssueUpdate(BaseModel):
     new_slug: Optional[str] = Field(default=None, max_length=255)
     add_companies: List[IssueAssignmentCreate] = Field(default_factory=list)
 
-    @validator("description")
+    @field_validator("description")
+    @classmethod
     def validate_description(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
         cleaned = value.strip()
         return cleaned or None
 
-    @validator("new_name")
+    @field_validator("new_name")
+    @classmethod
     def validate_new_name(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
@@ -96,7 +102,8 @@ class IssueUpdate(BaseModel):
             raise ValueError("New issue name cannot be empty")
         return cleaned
 
-    @validator("new_slug")
+    @field_validator("new_slug")
+    @classmethod
     def validate_new_slug(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
@@ -125,14 +132,16 @@ class IssueStatusUpdate(BaseModel):
     company_name: str = Field(..., min_length=1, max_length=255)
     status: str = Field(..., max_length=32)
 
-    @validator("issue_name", "company_name")
+    @field_validator("issue_name", "company_name")
+    @classmethod
     def validate_required(cls, value: str) -> str:
         cleaned = value.strip()
         if not cleaned:
             raise ValueError("Field is required")
         return cleaned
 
-    @validator("status")
+    @field_validator("status")
+    @classmethod
     def validate_status(cls, value: str) -> str:
         try:
             return issues_service.normalise_status(value)

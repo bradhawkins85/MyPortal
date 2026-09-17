@@ -63,12 +63,14 @@ def _quote_item_stock_status(item: dict[str, Any]) -> tuple[str, bool]:
     if item.get("subscription_category_id") is not None:
         return "Available", True
 
-    try:
-        stock = int(item.get("stock") or 0)
-        quoted_quantity = int(item.get("quantity") or 0)
-    except (TypeError, ValueError):
-        stock = 0
-        quoted_quantity = 0
+    def _coerce_quantity(value: Any) -> int:
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    stock = _coerce_quantity(item.get("stock"))
+    quoted_quantity = _coerce_quantity(item.get("quantity"))
 
     if stock <= 0:
         return "Out of stock", False

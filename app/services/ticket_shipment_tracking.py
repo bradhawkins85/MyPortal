@@ -291,7 +291,7 @@ def _extract_json_object(raw_text: str) -> dict[str, Any] | None:
                     parsed = json.loads(fenced[start : end + 1])
                     return parsed if isinstance(parsed, dict) else None
                 except json.JSONDecodeError:
-                    parsed = None
+                    pass
 
     start = text.find("{")
     end = text.rfind("}")
@@ -300,7 +300,7 @@ def _extract_json_object(raw_text: str) -> dict[str, Any] | None:
             parsed = json.loads(text[start : end + 1])
             return parsed if isinstance(parsed, dict) else None
         except json.JSONDecodeError:
-            parsed = None
+            pass
     return None
 
 

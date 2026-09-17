@@ -4176,7 +4176,7 @@ async def try_grant_missing_permissions(
             if exo_sp_list:
                 exo_sp_id = exo_sp_list[0]["id"]
         except M365Error:
-            exo_sp_id = None
+            pass
 
         teams_sp_has_role: bool = False
         try:
@@ -4194,8 +4194,7 @@ async def try_grant_missing_permissions(
                     for r in teams_sp_obj.get("appRoles", [])
                 )
         except M365Error:
-            teams_sp_id = None
-            teams_sp_has_role = False
+            pass
 
         exo_needed = exo_sp_id is not None and exo_sp_id not in manage_as_app_resource_ids
         teams_needed = (
@@ -4291,7 +4290,7 @@ async def try_grant_missing_permissions(
                                 error=str(exc),
                             )
             except M365Error:
-                exo_sp_id = None
+                pass
 
         # Best-effort: grant Teams.ManageAsApp if not already assigned.
         # Exchange.ManageAsApp and Teams.ManageAsApp share the same role GUID but
@@ -4323,7 +4322,7 @@ async def try_grant_missing_permissions(
                                 error=str(exc),
                             )
             except M365Error:
-                teams_sp_id = None
+                pass
 
         # Best-effort: assign the Exchange Administrator directory role so that
         # Exchange Online PowerShell cmdlets (Get-MailboxPermission) succeed.

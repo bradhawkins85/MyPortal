@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_STATE_DIR = _PROJECT_ROOT / "var" / "state"
 _SYSTEM_UPDATE_FLAG_PATH = _PROJECT_ROOT / "var" / "state" / "system_update.flag"
 _SYSTEM_UPDATE_STATUS_PATH = _PROJECT_ROOT / "var" / "state" / "system_update.status"
 _DEFAULT_UPGRADE_MODE = "graceful"

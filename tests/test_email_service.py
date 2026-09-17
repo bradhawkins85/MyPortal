@@ -245,10 +245,12 @@ def test_send_email_adds_tracking_when_plausible_enabled(monkeypatch):
         assert slug == "plausible"
         return {"track_opens": True, "track_clicks": True}
 
-    from app.services import modules as modules_service
-
-    monkeypatch.setattr(modules_service, "get_module", fake_get_module)
-    monkeypatch.setattr(modules_service, "get_module_settings", fake_get_module_settings)
+    monkeypatch.setattr(email_service.module_runtime_service, "get_module", fake_get_module)
+    monkeypatch.setattr(
+        email_service.module_runtime_service,
+        "get_module_settings",
+        fake_get_module_settings,
+    )
 
     result = asyncio.run(
         email_service.send_email(

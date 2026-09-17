@@ -449,7 +449,7 @@ async def send_email(
     except EmailDispatchError as exc:
         if event_id is not None:
             try:
-                event_record = await webhook_monitor.record_manual_failure(
+                await webhook_monitor.record_manual_failure(
                     event_id,
                     attempt_number=1,
                     status="error",

@@ -846,7 +846,7 @@ async def update_contact_page(
     responsibility_or_agency: str = Form(None),
 ):
     """Update a contact from the Contacts & Claims page."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
 
     updated = await bcp_repo.update_contact(
         contact_id,
@@ -866,7 +866,7 @@ async def update_contact_page(
 @router.post("/contacts/{contact_id}/delete", include_in_schema=False)
 async def delete_contact_page(request: Request, contact_id: int):
     """Delete a contact from the Contacts & Claims page."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
 
     deleted = await bcp_repo.delete_contact(contact_id)
     if not deleted:

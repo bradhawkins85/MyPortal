@@ -23,7 +23,7 @@ async def _ensure_connection() -> None:
         return
     result = connect()
     if hasattr(result, "__await__"):
-        await result
+        _ = await result
 
 
 def _make_aware(value: Any) -> datetime | None:

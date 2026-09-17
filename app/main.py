@@ -1443,7 +1443,7 @@ def _prepare_notification_metadata(metadata: Any) -> list[dict[str, str]]:
 
     if isinstance(serialised, Mapping):
         items: list[dict[str, str]] = []
-        for key in sorted(serialised.keys(), key=lambda item: str(item)):
+        for key in sorted(serialised.keys(), key=str):
             if str(key) in _NOTIFICATION_METADATA_HIDDEN_KEYS:
                 continue
             value = serialised[key]
@@ -2427,25 +2427,6 @@ bcp.configure_page_rendering(
     templates=templates,
 )
 
-
-_NOTIFICATION_SORT_CHOICES: list[tuple[str, str]] = [
-    ("created_at", "Created date"),
-    ("event_type", "Event type"),
-    ("read_at", "Read date"),
-]
-
-_NOTIFICATION_ORDER_CHOICES: list[tuple[str, str]] = [
-    ("desc", "Newest first"),
-    ("asc", "Oldest first"),
-]
-
-_NOTIFICATION_READ_OPTIONS: list[tuple[str, str]] = [
-    ("all", "All notifications"),
-    ("unread", "Unread only"),
-    ("read", "Read only"),
-]
-
-_NOTIFICATION_PAGE_SIZES: list[int] = [10, 25, 50, 100]
 
 _PORTAL_STATUS_BADGE_MAP: dict[str, str] = {
     "open": "badge--warning",
@@ -5542,10 +5523,6 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     payload = response.json()
     refresh_token = payload.get("refresh_token")
     access_token = payload.get("access_token")
-    expires_in = payload.get("expires_in")
-    expires_at = None
-    if isinstance(expires_in, (int, float)):
-        expires_at = datetime.utcnow() + timedelta(seconds=float(expires_in))
     await m365_repo.update_tokens(
         company_id=company_id,
         refresh_token=encrypt_secret(refresh_token) if refresh_token else None,
@@ -8815,10 +8792,6 @@ async def _render_portal_tickets_page(
 
     if status_filter_value is None and selected_status_slugs:
         status_filter_value = _encode_status_value(selected_status_slugs)
-    if selected_status_slugs:
-        selected_status_slugs = list(dict.fromkeys(selected_status_slugs))
-    else:
-        selected_status_slugs = None
 
     extra = {
         "title": "Tickets",
@@ -8921,7 +8894,7 @@ async def _render_portal_ticket_detail(
                 try:
                     allowed_company_ids.add(int(active_company_id))
                 except (TypeError, ValueError):
-                    active_company_id = None
+                    pass
             if not allowed_company_ids:
                 for entry in available_companies:
                     try:

@@ -18,7 +18,7 @@ _BACKGROUND_TASKS: dict[str, asyncio.Task[Any]] = {}
 
 async def _maybe_await(result: Any) -> None:
     if inspect.isawaitable(result):
-        await result  # type: ignore[func-returns-value]
+        _ = await result  # type: ignore[func-returns-value]
 
 
 def queue_background_task(

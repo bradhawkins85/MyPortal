@@ -1479,7 +1479,6 @@ async def _execute_policy_step(
         if not site_ids and step_type == "m365_add_sharepoint_site_member":
             raise WorkflowStepError(f"{step_type} requires one or more site IDs")
         m365_user_id = await _resolve_step_user_id()
-        encoded_user_id = quote(m365_user_id, safe="")
         access_token = await m365_service.acquire_access_token(
             company_id, force_client_credentials=True
         )

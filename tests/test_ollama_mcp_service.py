@@ -49,11 +49,11 @@ def _module(**overrides):
 
 
 def _patch_module(monkeypatch, record):
-    async def fake_get_module(slug):
+    async def fake_get_module(slug, **kwargs):
         assert slug == "ollama-mcp"
         return record
 
-    monkeypatch.setattr(ollama_service.module_repo, "get_module", fake_get_module)
+    monkeypatch.setattr(ollama_service.modules_service, "get_module", fake_get_module)
 
 
 @pytest.mark.anyio("asyncio")
@@ -763,6 +763,46 @@ async def test_get_application_logs_search_filter(monkeypatch, tmp_path):
 
 
 @pytest.mark.anyio("asyncio")
+async def test_get_application_logs_keeps_malformed_matching_lines_with_since_filter(
+    monkeypatch, tmp_path
+):
+    _patch_module(monkeypatch, _module())
+
+    log_file = tmp_path / "app.log"
+    log_file.write_text(
+        "2026-01-15T09:59:00.000+0000 | INFO | req-1 | - | Too old\n"
+        "2026-13-15T10:01:00.000+0000 | INFO | req-2 | - | Keep malformed line\n",
+        encoding="utf-8",
+    )
+
+    from pathlib import Path
+
+    class _FakeSettings:
+        fail2ban_log_path = Path(str(log_file))
+        error_log_path = None
+        mcp_log_tools_enabled = True
+        mcp_log_max_lines = 500
+
+    monkeypatch.setattr(ollama_service, "_get_app_settings", lambda: _FakeSettings())
+
+    response = await ollama_service.handle_rpc_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 43,
+            "method": "tools/call",
+            "params": {
+                "name": "get_application_logs",
+                "arguments": {"since": "2026-01-15T10:00:00+00:00"},
+            },
+        },
+        "Bearer secret",
+    )
+
+    lines = response["result"]["structuredContent"]["lines"]
+    assert [line["message"] for line in lines] == ["Keep malformed line"]
+
+
+@pytest.mark.anyio("asyncio")
 async def test_log_tools_disabled_excludes_from_allowed(monkeypatch):
     """When MCP_LOG_TOOLS_ENABLED=false log tools must not be callable."""
     _patch_module(
@@ -788,4 +828,3 @@ async def test_log_tools_disabled_excludes_from_allowed(monkeypatch):
         )
     assert exc.value.status_code == 403
     assert exc.value.rpc_code == ollama_service.ERR_FORBIDDEN
-

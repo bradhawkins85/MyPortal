@@ -210,7 +210,7 @@
       manage.textContent = 'Manage';
       return manage;
     }
-    const stock = Number(product && product.stock);
+    const stock = Number(product?.stock);
     const modal = document.getElementById('product-details-modal');
     const cartAllowed = modal && modal.getAttribute('data-cart-allowed') === 'true';
     if (!cartAllowed || !Number.isFinite(stock) || stock <= 0) {
