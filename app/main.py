@@ -2446,6 +2446,12 @@ async def _render_template(
     return response
 
 
+bcp.configure_page_rendering(
+    build_base_context=_build_base_context,
+    templates=templates,
+)
+
+
 _NOTIFICATION_SORT_CHOICES: list[tuple[str, str]] = [
     ("created_at", "Created date"),
     ("event_type", "Event type"),

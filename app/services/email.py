@@ -12,6 +12,7 @@ from typing import Any, Iterable, Mapping, Sequence
 from loguru import logger
 
 from app.core.config import get_settings
+from app.services import module_runtime as module_runtime_service
 from app.services import webhook_monitor
 
 
@@ -195,9 +196,9 @@ async def send_email(
     modified_html_body = html_body
     
     try:
-        from app.services import modules as modules_service
-        
-        smtp2go_module = await modules_service.get_module("smtp2go", redact=False)
+        smtp2go_module = await module_runtime_service.get_module(
+            "smtp2go", redact=False
+        )
         if smtp2go_module and smtp2go_module.get("enabled"):
             smtp2go_enabled = True
     except Exception as exc:  # pragma: no cover - defensive logging
@@ -299,16 +300,18 @@ async def send_email(
     tracking_requested = enable_tracking
     module_settings: dict[str, Any] | None = None
     try:
-        from app.services import modules as modules_service
-
-        plausible_module = await modules_service.get_module("plausible", redact=False)
+        plausible_module = await module_runtime_service.get_module(
+            "plausible", redact=False
+        )
         if plausible_module and plausible_module.get("enabled"):
             tracking_requested = True
 
         # Load module settings when tracking is requested or the module is enabled
         if tracking_requested or (plausible_module and plausible_module.get("enabled")):
             try:
-                module_settings = await modules_service.get_module_settings("plausible")
+                module_settings = await module_runtime_service.get_module_settings(
+                    "plausible"
+                )
             except Exception as settings_exc:  # pragma: no cover - defensive logging
                 logger.warning(
                     "Plausible settings unavailable; using tracking defaults",
