@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib import import_module
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
@@ -22,7 +23,9 @@ async def trigger_module(
 ) -> dict[str, Any]:
     handler = _trigger_module_handler
     if handler is None:
-        raise RuntimeError("Module trigger handler has not been registered.")
+        modules_service = import_module("app.services.modules")
+        handler = modules_service.trigger_module
+        register_trigger_module_handler(handler)
     return await handler(
         module_slug,
         payload or {},

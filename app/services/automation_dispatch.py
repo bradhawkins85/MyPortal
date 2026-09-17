@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib import import_module
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
@@ -22,5 +23,7 @@ async def handle_event(
 ) -> list[dict[str, Any]]:
     handler = _event_handler
     if handler is None:
-        raise RuntimeError("Automation event handler has not been registered.")
+        automations_service = import_module("app.services.automations")
+        handler = automations_service.handle_event
+        register_event_handler(handler)
     return await handler(event_name, context)

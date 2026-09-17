@@ -265,6 +265,14 @@ async def get_module(slug: str, *, redact: bool = True) -> dict[str, Any] | None
 
 
 async def list_modules() -> list[dict[str, Any]]:
+    """Return runtime-resolved modules for UI/service consumers.
+
+    This mirrors ``app.services.modules.list_modules()`` so callers can obtain
+    the same redacted module inventory without importing the higher-level
+    orchestration service. Always-on ticket action pseudo-modules are excluded
+    here for parity with that existing UI-facing listing behavior.
+    """
+
     modules = await module_repo.list_modules()
     resolved_modules: list[dict[str, Any]] = []
     for module in modules:
