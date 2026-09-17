@@ -123,7 +123,7 @@ async def update_plan(
 
 async def delete_plan(plan_id: int) -> bool:
     """Delete a plan."""
-    query = "DELETE FROM business_continuity_plans WHERE id = %s"  # nosec B608
+    query = "DELETE FROM business_continuity_plans WHERE id = %s"
     await db.execute(query, (plan_id,))
     return True
 
