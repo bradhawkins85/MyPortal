@@ -1,0 +1,7 @@
+{
+  "guid": "cf5e7db9-0031-4b3b-ace4-4671a13491c2",
+  "occurred_at": "2026-09-17T00:00Z",
+  "change_type": "Fix",
+  "summary": "Restored cart runtime dependencies after the feature-pack cleanup to prevent errors when adding products to the cart.",
+  "content_hash": "aeb3b36d6ca2c5296a010ad429dd1ae1f041ca4c60c5594b642ed6e281300357"
+}

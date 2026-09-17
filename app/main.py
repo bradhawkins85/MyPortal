@@ -208,21 +208,24 @@ _M365_PROVISION_PKCE_TTL_SECONDS = 600
 _m365_provision_pkce_cache: dict[str, tuple[str, datetime]] = {}
 _m365_provision_pkce_lock = asyncio.Lock()
 
-_LEGACY_SERVICE_EXPORTS = {
+_LEGACY_MODULE_EXPORTS = {
     "backup_jobs_service": "app.services.backup_jobs",
     "email_service": "app.services.email",
     "m365_mail_service": "app.services.m365_mail",
     "shop_packages_service": "app.services.shop_packages",
+    "shop_repo": "app.repositories.shop",
     "shop_service": "app.services.shop",
     "staff_access_service": "app.services.staff_access",
     "staff_field_config_service": "app.services.staff_field_config",
     "staff_onboarding_workflow_service": "app.services.staff_onboarding_workflows",
+    "subscription_shop_integration": "app.services.subscription_shop_integration",
+    "subscriptions_repo": "app.repositories.subscriptions",
     "xero_service": "app.services.xero",
 }
 
 
 def __getattr__(name: str) -> Any:
-    module_path = _LEGACY_SERVICE_EXPORTS.get(name)
+    module_path = _LEGACY_MODULE_EXPORTS.get(name)
     if module_path is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     module = import_module(module_path)
