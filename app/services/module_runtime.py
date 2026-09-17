@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import Any
 
 from app.repositories import integration_modules as module_repo
+from app.services.module_constants import ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS
 
 
 # Keep these defaults aligned with the matching ``DEFAULT_MODULES[*]["settings"]``
@@ -66,18 +67,6 @@ _DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
         "manage_url": "/admin/modules/solidtime",
     },
 }
-
-_ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS = {
-    "suggest-assets",
-    "create-ticket",
-    "create-task",
-    "update-ticket",
-    "update-ticket-description",
-    "ai-rename-ticket",
-    "add-ticket-reply",
-    "smart-attachment-removal",
-}
-
 
 def _ensure_bool(value: Any, default: bool = False) -> bool:
     if isinstance(value, bool):
@@ -277,7 +266,7 @@ async def list_modules() -> list[dict[str, Any]]:
     resolved_modules: list[dict[str, Any]] = []
     for module in modules:
         slug = str(module.get("slug") or "").strip()
-        if slug in _ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS:
+        if slug in ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS:
             continue
         resolved = dict(module)
         resolved["settings"] = _redact_module_settings(

@@ -39,6 +39,7 @@ from app.repositories import webhook_events as webhook_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import call_recordings as call_recordings_service
 from app.services import module_dispatch
+from app.services.module_constants import ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS
 from app.services import email as email_service, webhook_monitor
 from app.services import unifi_talk as unifi_talk_service
 from app.services.realtime import RefreshNotifier, refresh_notifier
@@ -1261,9 +1262,7 @@ _ALWAYS_ON_TICKET_ACTION_MODULES: tuple[dict[str, Any], ...] = (
         "enabled": True,
     },
 )
-_ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS = {
-    module["slug"] for module in _ALWAYS_ON_TICKET_ACTION_MODULES
-}
+_ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS = ALWAYS_ON_TICKET_ACTION_MODULE_SLUGS
 _ALWAYS_ON_TICKET_ACTION_MODULES_BY_SLUG = {
     module["slug"]: module for module in _ALWAYS_ON_TICKET_ACTION_MODULES
 }
