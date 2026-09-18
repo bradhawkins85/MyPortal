@@ -1,4 +1,5 @@
 """Tests for subscription_renewals service."""
+
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
@@ -15,6 +16,23 @@ from app.services import subscription_renewals as renewals_service
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def _use_default_renewal_message_template(monkeypatch):
+    async def render_default(_slug, context, *, default_content, default_content_type):
+        return (
+            renewals_service.message_templates_service.render_content(
+                default_content, context, escape_html=True
+            ),
+            default_content_type,
+        )
+
+    monkeypatch.setattr(
+        renewals_service.message_templates_service,
+        "render_template_content",
+        render_default,
+    )
 
 
 def _sub(
@@ -42,7 +60,9 @@ def _sub(
     }
 
 
-def _scheduled_invoice_state(*, customer_id: int, renewal_date: date) -> dict[str, object]:
+def _scheduled_invoice_state(
+    *, customer_id: int, renewal_date: date
+) -> dict[str, object]:
     return {
         "id": 44,
         "customer_id": customer_id,
@@ -60,6 +80,48 @@ def _scheduled_invoice_state(*, customer_id: int, renewal_date: date) -> dict[st
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),
     }
+
+
+@pytest.mark.anyio
+async def test_custom_renewal_template_changes_wording_and_keeps_secure_table(
+    monkeypatch,
+):
+    async def render_custom(_slug, context, **_kwargs):
+        content = "<p>Hello {{ recipient.name }}</p><p>Custom sign-off</p>"
+        return (
+            renewals_service.message_templates_service.render_content(
+                content, context, escape_html=True
+            ),
+            "text/html",
+        )
+
+    monkeypatch.setattr(
+        renewals_service.message_templates_service,
+        "render_template_content",
+        render_custom,
+    )
+    text_message, html_message = await renewals_service._build_renewal_message(
+        company_name="Example & Co",
+        renewal_date=date(2026, 11, 17),
+        billing_contact={"first_name": "Brad <Admin>"},
+        renewal_items=[
+            {
+                "subscription_name": "Managed <Plan>",
+                "renewal_date": date(2026, 11, 17),
+                "renewal_term": "Annual",
+                "assigned_users": ["Alex <alex@example.com>"],
+                "renewal_quantity": 1,
+                "unit_price": Decimal("20.00"),
+                "line_total": Decimal("20.00"),
+            }
+        ],
+    )
+
+    assert "Custom sign-off" in text_message
+    assert "Total renewal cost: 20.00" in text_message
+    assert "Brad &lt;Admin&gt;" in html_message
+    assert "Managed &lt;Plan&gt;" in html_message
+    assert html_message.count("<tbody><tr>") == 1
 
 
 def _install_scheduled_invoice_mocks(monkeypatch, state: dict[str, object] | None):
@@ -110,7 +172,9 @@ def _install_scheduled_invoice_mocks(monkeypatch, state: dict[str, object] | Non
         fake_create_scheduled_invoice,
     )
     monkeypatch.setattr(invoices_repo, "patch_scheduled_invoice", fake_patch)
-    monkeypatch.setattr(invoices_repo, "get_scheduled_invoice", fake_get_scheduled_invoice)
+    monkeypatch.setattr(
+        invoices_repo, "get_scheduled_invoice", fake_get_scheduled_invoice
+    )
     monkeypatch.setattr(invoices_repo, "delete_invoice_lines", fake_delete_lines)
     monkeypatch.setattr(invoices_repo, "add_invoice_line", fake_add_line)
     return patch_calls, line_calls, lambda: stored
@@ -264,15 +328,21 @@ async def test_creates_60_day_reminder_with_pending_decrease_details(monkeypatch
     async def fake_update_subscription(subscription_id, **kwargs):
         update_calls.append({"subscription_id": subscription_id, **kwargs})
 
-    monkeypatch.setattr(renewals_service.tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(
+        renewals_service.tickets_service, "create_ticket", fake_create_ticket
+    )
     monkeypatch.setattr(
         renewals_service.tickets_repo,
         "get_reply_by_external_reference",
         AsyncMock(return_value=None),
     )
-    monkeypatch.setattr(renewals_service.tickets_repo, "create_reply", fake_create_reply)
+    monkeypatch.setattr(
+        renewals_service.tickets_repo, "create_reply", fake_create_reply
+    )
     monkeypatch.setattr(renewals_service.email_service, "send_email", fake_send_email)
-    monkeypatch.setattr(subscriptions_repo, "update_subscription", fake_update_subscription)
+    monkeypatch.setattr(
+        subscriptions_repo, "update_subscription", fake_update_subscription
+    )
     monkeypatch.setattr(
         renewals_service.invoice_generator,
         "generate_invoice",
@@ -289,14 +359,25 @@ async def test_creates_60_day_reminder_with_pending_decrease_details(monkeypatch
     assert create_ticket_calls[0]["requester_staff_id"] == 101
     assert create_ticket_calls[0]["company_id"] == 22
     assert create_ticket_calls[0]["module_slug"] == "subscriptions"
-    assert "Renewing quantity: 5" in create_ticket_calls[0]["description"]
-    assert "Unassigned licenses: 3" in create_ticket_calls[0]["description"]
-    assert "Default billing currency 100.00" in create_ticket_calls[0]["description"]
+    assert create_ticket_calls[0]["description"].startswith("Hi Bill To,")
+    assert "60-day reminder" in create_ticket_calls[0]["description"]
+    assert "Managed Plan | 2025-03-02" in create_ticket_calls[0]["description"]
+    assert "| 5 | 20.00 | 100.00" in create_ticket_calls[0]["description"]
+    assert "Default billing currency" not in create_ticket_calls[0]["description"]
+    assert "Description:" not in create_ticket_calls[0]["description"]
+    assert "License:" not in create_ticket_calls[0]["description"]
     assert "Alex Example <alex@example.com>" in create_reply_calls[0]["body"]
     assert email_calls[0]["recipients"] == ["billing@example.com"]
-    assert "Renewing quantity: 5" in email_calls[0]["text_body"]
+    assert "invoice 30 days before" in email_calls[0]["text_body"]
+    assert "will not be renewed" in email_calls[0]["text_body"]
+    assert "Total renewal cost: 100.00" in email_calls[0]["text_body"]
+    assert "MyPortal Accounts Team" in email_calls[0]["text_body"]
+    assert "<table" in email_calls[0]["html_body"]
+    assert email_calls[0]["html_body"].count("<tbody><tr>") == 1
     assert line_calls[0]["price"] == Decimal("20.00")
-    assert line_calls[0]["term_end"] - line_calls[0]["term_start"] == timedelta(days=364)
+    assert line_calls[0]["term_end"] - line_calls[0]["term_start"] == timedelta(
+        days=364
+    )
     assert update_calls == [{"subscription_id": "sub-1", "status": "pending_renewal"}]
     state = get_state()
     assert state is not None
@@ -393,7 +474,9 @@ async def test_generates_30_day_invoice_with_current_renewal_quantity(monkeypatc
             }
         ),
     )
-    monkeypatch.setattr(subscriptions_repo, "update_subscription", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        subscriptions_repo, "update_subscription", AsyncMock(return_value=None)
+    )
 
     async def fake_generate_invoice(company_id, **kwargs):
         invoice_calls.append({"company_id": company_id, **kwargs})
@@ -408,7 +491,9 @@ async def test_generates_30_day_invoice_with_current_renewal_quantity(monkeypatc
         "generate_invoice",
         fake_generate_invoice,
     )
-    monkeypatch.setattr(renewals_service.xero_service, "sync_invoice", fake_sync_invoice)
+    monkeypatch.setattr(
+        renewals_service.xero_service, "sync_invoice", fake_sync_invoice
+    )
 
     result = await renewals_service.create_renewal_invoices_for_date(target)
 
@@ -439,7 +524,9 @@ async def test_generates_30_day_invoice_with_current_renewal_quantity(monkeypatc
 async def test_skips_duplicate_reminders_and_invoices(monkeypatch):
     target = date(2025, 2, 1)
     renewal_date = target + timedelta(days=30)
-    subscription = _sub("sub-3", customer_id=41, end_date=renewal_date, status="pending_renewal")
+    subscription = _sub(
+        "sub-3", customer_id=41, end_date=renewal_date, status="pending_renewal"
+    )
     existing = _scheduled_invoice_state(customer_id=41, renewal_date=renewal_date)
     existing["reminder_ticket_id"] = 88
     existing["reminder_reply_id"] = 99
@@ -493,11 +580,17 @@ async def test_skips_duplicate_reminders_and_invoices(monkeypatch):
         "get_company_by_id",
         AsyncMock(return_value={"id": 41, "name": "Duplicate Co"}),
     )
-    monkeypatch.setattr(subscriptions_repo, "update_subscription", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        subscriptions_repo, "update_subscription", AsyncMock(return_value=None)
+    )
     generate_mock = AsyncMock()
     create_ticket_mock = AsyncMock()
-    monkeypatch.setattr(renewals_service.invoice_generator, "generate_invoice", generate_mock)
-    monkeypatch.setattr(renewals_service.tickets_service, "create_ticket", create_ticket_mock)
+    monkeypatch.setattr(
+        renewals_service.invoice_generator, "generate_invoice", generate_mock
+    )
+    monkeypatch.setattr(
+        renewals_service.tickets_service, "create_ticket", create_ticket_mock
+    )
 
     result = await renewals_service.create_renewal_invoices_for_date(target)
 
@@ -556,7 +649,13 @@ async def test_records_invalid_billing_email_for_staff_follow_up(monkeypatch):
     monkeypatch.setattr(
         renewals_service.company_repo,
         "get_company_by_id",
-        AsyncMock(return_value={"id": 51, "name": "Contoso", "xero_auto_send_subscription_invoices": 1}),
+        AsyncMock(
+            return_value={
+                "id": 51,
+                "name": "Contoso",
+                "xero_auto_send_subscription_invoices": 1,
+            }
+        ),
     )
     monkeypatch.setattr(
         renewals_service.billing_contacts_repo,
@@ -587,7 +686,9 @@ async def test_records_invalid_billing_email_for_staff_follow_up(monkeypatch):
         create_ticket_calls.append(dict(kwargs))
         return {"id": 88, **kwargs}
 
-    monkeypatch.setattr(renewals_service.tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(
+        renewals_service.tickets_service, "create_ticket", fake_create_ticket
+    )
     monkeypatch.setattr(
         renewals_service.tickets_repo,
         "create_reply",
@@ -595,7 +696,9 @@ async def test_records_invalid_billing_email_for_staff_follow_up(monkeypatch):
     )
     email_mock = AsyncMock()
     monkeypatch.setattr(renewals_service.email_service, "send_email", email_mock)
-    monkeypatch.setattr(subscriptions_repo, "update_subscription", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        subscriptions_repo, "update_subscription", AsyncMock(return_value=None)
+    )
 
     result = await renewals_service.create_renewal_invoices_for_date(target)
 
@@ -670,7 +773,9 @@ async def test_creates_reminder_ticket_when_billing_contact_is_missing(monkeypat
         create_ticket_calls.append(dict(kwargs))
         return {"id": 188, **kwargs}
 
-    monkeypatch.setattr(renewals_service.tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(
+        renewals_service.tickets_service, "create_ticket", fake_create_ticket
+    )
     monkeypatch.setattr(
         renewals_service.tickets_repo,
         "create_reply",
@@ -678,7 +783,9 @@ async def test_creates_reminder_ticket_when_billing_contact_is_missing(monkeypat
     )
     email_mock = AsyncMock()
     monkeypatch.setattr(renewals_service.email_service, "send_email", email_mock)
-    monkeypatch.setattr(subscriptions_repo, "update_subscription", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        subscriptions_repo, "update_subscription", AsyncMock(return_value=None)
+    )
 
     result = await renewals_service.create_renewal_invoices_for_date(target)
 
@@ -705,7 +812,9 @@ async def test_excludes_cancelled_or_non_renewing_subscriptions(monkeypatch):
         "list_subscriptions",
         AsyncMock(
             return_value=[
-                _sub("sub-cancelled", 1, target + timedelta(days=60), status="canceled"),
+                _sub(
+                    "sub-cancelled", 1, target + timedelta(days=60), status="canceled"
+                ),
                 _sub("sub-manual", 1, target + timedelta(days=30), auto_renew=False),
             ]
         ),
@@ -725,17 +834,43 @@ async def test_get_next_invoice_subscription_not_found(monkeypatch):
         AsyncMock(return_value=None),
     )
 
-    result = await renewals_service.get_next_scheduled_invoice_for_subscription("sub-999")
+    result = await renewals_service.get_next_scheduled_invoice_for_subscription(
+        "sub-999"
+    )
     assert result is None
 
 
 def test_build_renewal_forecast_groups_windows_and_reminders():
     today = date(2026, 1, 1)
     subscriptions = [
-        _sub("sub-7", customer_id=10, end_date=today + timedelta(days=7), unit_price="10.00", quantity=1),
-        _sub("sub-30", customer_id=10, end_date=today + timedelta(days=30), unit_price="20.00", quantity=2),
-        _sub("sub-60", customer_id=10, end_date=today + timedelta(days=60), unit_price="30.00", quantity=3),
-        _sub("sub-120", customer_id=10, end_date=today + timedelta(days=120), unit_price="40.00", quantity=4),
+        _sub(
+            "sub-7",
+            customer_id=10,
+            end_date=today + timedelta(days=7),
+            unit_price="10.00",
+            quantity=1,
+        ),
+        _sub(
+            "sub-30",
+            customer_id=10,
+            end_date=today + timedelta(days=30),
+            unit_price="20.00",
+            quantity=2,
+        ),
+        _sub(
+            "sub-60",
+            customer_id=10,
+            end_date=today + timedelta(days=60),
+            unit_price="30.00",
+            quantity=3,
+        ),
+        _sub(
+            "sub-120",
+            customer_id=10,
+            end_date=today + timedelta(days=120),
+            unit_price="40.00",
+            quantity=4,
+        ),
     ]
 
     result = renewals_service.build_renewal_forecast(
@@ -784,8 +919,14 @@ def test_build_churn_risk_report_returns_auditable_reasons():
     assert result["high"] == 1
     assert result["total_at_risk"] == 1
     assert result["items"][0]["level"] == "high"
-    assert "Auto-renew is disabled inside the 30-day renewal window." in result["items"][0]["reasons"]
-    assert "Pending decrease requests indicate a planned contraction." in result["items"][0]["reasons"]
+    assert (
+        "Auto-renew is disabled inside the 30-day renewal window."
+        in result["items"][0]["reasons"]
+    )
+    assert (
+        "Pending decrease requests indicate a planned contraction."
+        in result["items"][0]["reasons"]
+    )
     assert result["items"][0]["evidence"]["payment_health"] == "overdue"
 
 

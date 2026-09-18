@@ -1,0 +1,7 @@
+{
+  "guid": "e4b3b888-bb5d-47b8-a40f-1049c39054d8",
+  "occurred_at": "2026-09-18T00:00:00Z",
+  "change_type": "improvement",
+  "summary": "Make subscription renewal reminders personal, concise, table-based, and globally configurable.",
+  "content_hash": "configurable-subscription-renewal-reminder-template"
+}
