@@ -29,14 +29,27 @@ from app.services import tickets as tickets_service
 from app.services import xero as xero_service
 
 
-_REMINDER_WINDOW_DAYS = 60
-_INVOICE_WINDOW_DAYS = 30
+_ANNUAL_REMINDER_WINDOW_DAYS = 60
+_ANNUAL_INVOICE_WINDOW_DAYS = 30
+_MONTHLY_REMINDER_WINDOW_DAYS = 30
+_MONTHLY_INVOICE_WINDOW_DAYS = 21
+_MAX_REMINDER_WINDOW_DAYS = max(
+    _ANNUAL_REMINDER_WINDOW_DAYS, _MONTHLY_REMINDER_WINDOW_DAYS
+)
 _RENEWAL_TEMPLATE_SLUG = "subscription-renewal-reminder"
+_MONTHLY_RENEWAL_TEMPLATE_SLUG = "monthly-subscription-renewal-reminder"
 _ITEMS_TABLE_TOKEN = "__MYPORTAL_RENEWAL_ITEMS_TABLE__"
 _DEFAULT_RENEWAL_TEMPLATE = """\
 <p>Hi {{ recipient.name }},</p>
 <p>This is your 60-day reminder that the services listed below are due for renewal.</p>
 <p>We will generate an invoice 30 days before the renewal date. Services with invoices that remain unpaid on their expiry date will not be renewed and may incur additional charges to reinstate their licences.</p>
+{{ renewal.items_table }}
+<p>Kind regards,<br>MyPortal Accounts Team</p>
+"""
+_DEFAULT_MONTHLY_RENEWAL_TEMPLATE = """\
+<p>Hi {{ recipient.name }},</p>
+<p>This is your 30-day reminder that the monthly services listed below are due for renewal.</p>
+<p>We will generate an invoice 21 days before the renewal date. Services with invoices that remain unpaid on their expiry date will not be renewed and may incur additional charges to reinstate their licences.</p>
 {{ renewal.items_table }}
 <p>Kind regards,<br>MyPortal Accounts Team</p>
 """
@@ -68,16 +81,24 @@ def _billing_contact_name(contact: dict[str, Any] | None) -> str:
     )
 
 
-def _ticket_external_reference(company_id: int, renewal_date: date) -> str:
-    return f"subscription-renewal:{company_id}:{renewal_date.isoformat()}"
+def _ticket_external_reference(
+    company_id: int, renewal_date: date, renewal_cycle: str = "annual"
+) -> str:
+    cycle_part = "" if renewal_cycle == "annual" else f"{renewal_cycle}:"
+    return f"subscription-renewal:{cycle_part}{company_id}:{renewal_date.isoformat()}"
 
 
 def _reply_external_reference(
     company_id: int,
     renewal_date: date,
     subscription_ids: list[str] | None = None,
+    renewal_cycle: str = "annual",
 ) -> str:
-    reference = f"subscription-renewal-reply:{company_id}:{renewal_date.isoformat()}"
+    cycle_part = "" if renewal_cycle == "annual" else f"{renewal_cycle}:"
+    reference = (
+        f"subscription-renewal-reply:{cycle_part}{company_id}:"
+        f"{renewal_date.isoformat()}"
+    )
     if subscription_ids:
         digest = sha256("\n".join(sorted(subscription_ids)).encode()).hexdigest()[:16]
         return f"{reference}:{digest}"
@@ -107,6 +128,20 @@ def _term_days_for_product(product: dict[str, Any]) -> int:
     if commitment_type == "monthly":
         return 30
     return 365
+
+
+def _renewal_cycle(product: dict[str, Any]) -> str:
+    billing_plan = shop_service.get_subscription_billing_plan(product or {})
+    commitment_type = billing_plan[0] if billing_plan else str(
+        product.get("commitment_type") or ""
+    ).strip().lower()
+    return "monthly" if commitment_type == "monthly" else "annual"
+
+
+def _renewal_windows(renewal_cycle: str) -> tuple[int, int]:
+    if renewal_cycle == "monthly":
+        return _MONTHLY_REMINDER_WINDOW_DAYS, _MONTHLY_INVOICE_WINDOW_DAYS
+    return _ANNUAL_REMINDER_WINDOW_DAYS, _ANNUAL_INVOICE_WINDOW_DAYS
 
 
 def _term_label(product: dict[str, Any]) -> str:
@@ -252,9 +287,11 @@ async def _build_renewal_message(
     renewal_date: date,
     billing_contact: dict[str, Any] | None,
     renewal_items: list[dict[str, Any]],
+    renewal_cycle: str = "annual",
 ) -> tuple[str, str]:
+    is_monthly = renewal_cycle == "monthly"
     rendered, content_type = await message_templates_service.render_template_content(
-        _RENEWAL_TEMPLATE_SLUG,
+        _MONTHLY_RENEWAL_TEMPLATE_SLUG if is_monthly else _RENEWAL_TEMPLATE_SLUG,
         {
             "recipient": {"name": _billing_contact_name(billing_contact)},
             "company": {"name": company_name},
@@ -263,7 +300,11 @@ async def _build_renewal_message(
                 "items_table": _ITEMS_TABLE_TOKEN,
             },
         },
-        default_content=_DEFAULT_RENEWAL_TEMPLATE,
+        default_content=(
+            _DEFAULT_MONTHLY_RENEWAL_TEMPLATE
+            if is_monthly
+            else _DEFAULT_RENEWAL_TEMPLATE
+        ),
         default_content_type="text/html",
     )
     table_html = _build_renewal_table_html(renewal_items)
@@ -323,9 +364,10 @@ async def _select_billing_contact(
 async def _ensure_scheduled_invoice(
     company_id: int,
     renewal_date: date,
+    renewal_cycle: str,
 ) -> dict[str, Any]:
     existing = await invoices_repo.get_scheduled_invoice_by_customer_and_date(
-        company_id, renewal_date
+        company_id, renewal_date, renewal_cycle
     )
     if existing:
         if existing.get("status") == "canceled" and existing.get("invoice_id") is None:
@@ -338,6 +380,7 @@ async def _ensure_scheduled_invoice(
         customer_id=company_id,
         scheduled_for_date=renewal_date,
         status="scheduled",
+        renewal_cycle=renewal_cycle,
     )
 
 
@@ -436,6 +479,7 @@ async def _build_group_renewal_items(
                 "unassigned_quantity": unassigned_quantity,
                 "renewal_date": subscription["end_date"],
                 "renewal_term": _term_label(product),
+                "renewal_cycle": _renewal_cycle(product),
                 "unit_price": unit_price,
                 "line_total": line_total,
                 "product_code": product_code,
@@ -495,6 +539,7 @@ async def _process_reminder(
     renewal_items: list[dict[str, Any]],
     issue_log: list[dict[str, Any]],
     is_additional_batch: bool = False,
+    renewal_cycle: str = "annual",
 ) -> bool:
     company_id = int(company["id"])
     billing_contact, billing_email, billing_error = await _select_billing_contact(
@@ -511,8 +556,11 @@ async def _process_reminder(
         renewal_date=renewal_date,
         billing_contact=billing_contact,
         renewal_items=renewal_items,
+        renewal_cycle=renewal_cycle,
     )
-    ticket_reference = _ticket_external_reference(company_id, renewal_date)
+    ticket_reference = _ticket_external_reference(
+        company_id, renewal_date, renewal_cycle
+    )
     ticket = await tickets_repo.get_ticket_by_external_reference(ticket_reference)
     if ticket is None:
         ticket = await tickets_service.create_ticket(
@@ -545,6 +593,7 @@ async def _process_reminder(
         [str(item["subscription_id"]) for item in renewal_items]
         if is_additional_batch
         else None,
+        renewal_cycle,
     )
     reply = None
     if not is_additional_batch and scheduled_invoice.get("reminder_reply_id") is not None:
@@ -854,7 +903,7 @@ def build_churn_risk_report(
 
 
 async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
-    """Process subscription renewals due within the configured 60/30 day windows.
+    """Process annual 60/30-day and monthly 30/21-day renewal windows.
 
     Args:
         target_date: The application-local date for the scheduler run.
@@ -872,7 +921,7 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
     """
     logger.info("Starting subscription renewal processing", target_date=target_date)
     subscriptions = await subscriptions_repo.list_subscriptions(
-        end_before=target_date + timedelta(days=_REMINDER_WINDOW_DAYS + 1),
+        end_before=target_date + timedelta(days=_MAX_REMINDER_WINDOW_DAYS + 1),
         end_after=target_date - timedelta(days=1),
     )
     eligible_subscriptions = [
@@ -881,7 +930,7 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
         if subscription.get("status") in {"active", "pending_renewal"}
         and bool(subscription.get("auto_renew", True))
         and isinstance(subscription.get("end_date"), date)
-        and 0 <= (subscription["end_date"] - target_date).days <= _REMINDER_WINDOW_DAYS
+        and 0 <= (subscription["end_date"] - target_date).days <= _MAX_REMINDER_WINDOW_DAYS
     ]
 
     if not eligible_subscriptions:
@@ -899,11 +948,19 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
             "issues": [],
         }
 
-    grouped: dict[tuple[int, date], list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[tuple[int, date, str], list[dict[str, Any]]] = defaultdict(list)
     for subscription in eligible_subscriptions:
-        grouped[(int(subscription["customer_id"]), subscription["end_date"])].append(
-            subscription
-        )
+        product = await shop_repo.get_product_by_id(int(subscription["product_id"])) or {}
+        renewal_cycle = _renewal_cycle(product)
+        reminder_window, _invoice_window = _renewal_windows(renewal_cycle)
+        if (subscription["end_date"] - target_date).days <= reminder_window:
+            grouped[
+                (
+                    int(subscription["customer_id"]),
+                    subscription["end_date"],
+                    renewal_cycle,
+                )
+            ].append(subscription)
 
     reminder_count = 0
     invoice_count = 0
@@ -911,8 +968,11 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
     processed_subscription_ids: list[str] = []
     issues: list[dict[str, Any]] = []
 
-    for (company_id, renewal_date), group_subscriptions in grouped.items():
-        scheduled_invoice = await _ensure_scheduled_invoice(company_id, renewal_date)
+    for (company_id, renewal_date, renewal_cycle), group_subscriptions in grouped.items():
+        reminder_window, invoice_window = _renewal_windows(renewal_cycle)
+        scheduled_invoice = await _ensure_scheduled_invoice(
+            company_id, renewal_date, renewal_cycle
+        )
         existing_lines = await invoices_repo.get_invoice_lines(
             int(scheduled_invoice["id"])
         )
@@ -956,7 +1016,7 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
             if scheduled_invoice.get("reminder_sent_at") is not None
             else renewal_items
         )
-        if reminder_items and 0 <= days_until_renewal <= _REMINDER_WINDOW_DAYS and (
+        if reminder_items and 0 <= days_until_renewal <= reminder_window and (
             scheduled_invoice.get("reminder_sent_at") is None
             or scheduled_invoice.get("reminder_email_sent_at") is None
             or bool(new_subscription_ids)
@@ -968,6 +1028,7 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
                 renewal_items=reminder_items,
                 issue_log=issues,
                 is_additional_batch=scheduled_invoice.get("reminder_sent_at") is not None,
+                renewal_cycle=renewal_cycle,
             ):
                 reminder_count += 1
                 group_changed = True
@@ -987,7 +1048,7 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
         )
         if (
             invoice_items
-            and 0 <= days_until_renewal <= _INVOICE_WINDOW_DAYS
+            and 0 <= days_until_renewal <= invoice_window
             and (scheduled_invoice.get("invoice_id") is None or new_subscription_ids)
         ):
             if await _process_invoice(
@@ -1004,7 +1065,9 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
             skipped_count += 1
 
     unique_processed_ids = sorted(set(processed_subscription_ids))
-    unique_customers = {company_id for company_id, _renewal_date in grouped}
+    unique_customers = {
+        company_id for company_id, _renewal_date, _renewal_cycle in grouped
+    }
     logger.info(
         "Subscription renewal processing completed",
         target_date=target_date,
@@ -1035,9 +1098,11 @@ async def get_next_scheduled_invoice_for_subscription(
     if not subscription:
         return None
 
+    product = await shop_repo.get_product_by_id(int(subscription["product_id"])) or {}
     invoice = await invoices_repo.get_scheduled_invoice_by_customer_and_date(
         subscription["customer_id"],
         subscription["end_date"],
+        _renewal_cycle(product),
     )
 
     return invoice

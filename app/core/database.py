@@ -476,6 +476,21 @@ class Database:
             flags=re.IGNORECASE,
         )
         sql = re.sub(r'\s+AFTER\s+\w+(?=\s*;|\s*$)', '', sql, flags=re.IGNORECASE)
+
+        # SQLite cannot replace an index inside ALTER TABLE. Convert the
+        # MySQL form used when widening a uniqueness key into standalone
+        # index statements so fallback databases retain the same invariant.
+        sql = re.sub(
+            r"ALTER\s+TABLE\s+(\w+)\s+DROP\s+INDEX\s+(\w+)\s*,\s*"
+            r"ADD\s+UNIQUE\s+KEY\s+(\w+)\s*\(([^)]+)\)\s*;",
+            lambda match: (
+                f"DROP INDEX IF EXISTS {match.group(2)}; "
+                f"CREATE UNIQUE INDEX {match.group(3)} ON {match.group(1)} "
+                f"({match.group(4)});"
+            ),
+            sql,
+            flags=re.IGNORECASE,
+        )
         
         # Handle ENUM types - convert to VARCHAR with CHECK constraint
         # This is a simplified approach; complex ENUMs may need manual handling

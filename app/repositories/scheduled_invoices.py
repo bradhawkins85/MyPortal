@@ -28,6 +28,7 @@ def _normalize_scheduled_invoice(row: dict[str, Any]) -> dict[str, Any]:
         "id": int(row["id"]),
         "customer_id": int(row["customer_id"]),
         "scheduled_for_date": row["scheduled_for_date"],
+        "renewal_cycle": str(row.get("renewal_cycle") or "annual"),
         "status": row["status"],
         "reminder_ticket_id": (
             int(row["reminder_ticket_id"])
@@ -94,15 +95,15 @@ async def get_scheduled_invoice(invoice_id: int) -> dict[str, Any] | None:
 
 
 async def get_scheduled_invoice_by_customer_and_date(
-    customer_id: int, scheduled_date: date
+    customer_id: int, scheduled_date: date, renewal_cycle: str = "annual"
 ) -> dict[str, Any] | None:
     """Get a scheduled invoice for a specific customer and date."""
     row = await db.fetch_one(
         """
         SELECT * FROM scheduled_invoices
-        WHERE customer_id = %s AND scheduled_for_date = %s
+        WHERE customer_id = %s AND scheduled_for_date = %s AND renewal_cycle = %s
         """,
-        (customer_id, scheduled_date),
+        (customer_id, scheduled_date, renewal_cycle),
     )
     if not row:
         return None
@@ -154,19 +155,23 @@ async def list_scheduled_invoices(
 
 
 async def create_scheduled_invoice(
-    customer_id: int, scheduled_for_date: date, status: str = "scheduled"
+    customer_id: int,
+    scheduled_for_date: date,
+    status: str = "scheduled",
+    renewal_cycle: str = "annual",
 ) -> dict[str, Any]:
     """Create a new scheduled invoice."""
     await db.execute(
         """
-        INSERT INTO scheduled_invoices (customer_id, scheduled_for_date, status)
-        VALUES (%s, %s, %s)
+        INSERT INTO scheduled_invoices (
+            customer_id, scheduled_for_date, status, renewal_cycle
+        ) VALUES (%s, %s, %s, %s)
         """,
-        (customer_id, scheduled_for_date, status),
+        (customer_id, scheduled_for_date, status, renewal_cycle),
     )
     
     created = await get_scheduled_invoice_by_customer_and_date(
-        customer_id, scheduled_for_date
+        customer_id, scheduled_for_date, renewal_cycle
     )
     if not created:
         raise RuntimeError("Failed to create scheduled invoice")
