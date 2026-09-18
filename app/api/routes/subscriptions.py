@@ -26,7 +26,7 @@ class SubscriptionResponse(BaseModel):
     
     id: str
     customer_id: int = Field(..., alias="customerId")
-    product_id: int = Field(..., alias="productId")
+    product_id: int | None = Field(None, alias="productId")
     product_name: str | None = Field(None, alias="productName")
     subscription_category_id: int | None = Field(None, alias="subscriptionCategoryId")
     category_name: str | None = Field(None, alias="categoryName")
@@ -37,6 +37,11 @@ class SubscriptionResponse(BaseModel):
     prorated_price: str | None = Field(None, alias="proratedPrice")
     status: str
     auto_renew: bool = Field(..., alias="autoRenew")
+    vendor: str | None = None
+    external_name: str | None = Field(None, alias="externalName")
+    external_sku: str | None = Field(None, alias="externalSku")
+    billing_frequency: str | None = Field(None, alias="billingFrequency")
+    reminder_only: bool = Field(False, alias="reminderOnly")
     created_at: str | None = Field(None, alias="createdAt")
     updated_at: str | None = Field(None, alias="updatedAt")
     
@@ -48,10 +53,16 @@ class CreateExistingSubscriptionRequest(BaseModel):
     """An externally billed subscription to begin managing in MyPortal."""
 
     customer_id: int = Field(..., alias="customerId", gt=0)
-    product_id: int = Field(..., alias="productId", gt=0)
+    product_id: int | None = Field(None, alias="productId", gt=0)
     start_date: date = Field(..., alias="startDate")
     quantity: int = Field(default=1, ge=1, le=9999)
     auto_renew: bool = Field(default=True, alias="autoRenew")
+    end_date: date | None = Field(None, alias="endDate")
+    vendor: str | None = Field(None, min_length=1, max_length=255)
+    external_name: str | None = Field(None, alias="externalName", max_length=255)
+    external_sku: str | None = Field(None, alias="externalSku", max_length=255)
+    billing_frequency: str | None = Field(None, alias="billingFrequency", pattern="^(annual|monthly)$")
+    reminder_only: bool = Field(default=False, alias="reminderOnly")
 
     class Config:
         populate_by_name = True
@@ -94,41 +105,50 @@ async def create_existing_subscription(
             detail="Super admin privileges required to create existing subscriptions",
         )
 
-    product = await shop_repo.get_product_by_id(payload.product_id)
-    if not product or product.get("subscription_category_id") is None:
+    product = await shop_repo.get_product_by_id(payload.product_id) if payload.product_id else None
+    if payload.product_id and (not product or product.get("subscription_category_id") is None):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A valid subscription product is required",
         )
-    existing = await subscriptions_repo.list_subscriptions(
-        customer_id=payload.customer_id,
-        product_id=payload.product_id,
-        limit=1,
-    )
-    if any(item.get("status") in {"active", "pending_renewal"} for item in existing):
+    if not product and not str(payload.external_name or "").strip():
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="The customer already has an active subscription for this product",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A Shop product or third-party subscription name is required",
+        )
+    if not product and not str(payload.vendor or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A vendor is required for a standalone third-party subscription",
         )
 
     commitment, _payment_frequency = (
-        shop_service.get_subscription_billing_plan(product) or ("annual", "annual")
+        shop_service.get_subscription_billing_plan(product or {})
+        or (payload.billing_frequency or "annual", payload.billing_frequency or "annual")
     )
     term_days = 30 if commitment == "monthly" else 365
-    unit_price = Decimal(str(shop_service.get_product_price(product, is_vip=False)))
+    end_date = payload.end_date or payload.start_date + timedelta(days=term_days)
+    if end_date <= payload.start_date:
+        raise HTTPException(status_code=400, detail="End date must be after start date")
+    unit_price = Decimal(str(shop_service.get_product_price(product, is_vip=False))) if product else Decimal("0")
     subscription = await subscriptions_repo.create_subscription(
         customer_id=payload.customer_id,
         product_id=payload.product_id,
-        subscription_category_id=int(product["subscription_category_id"]),
+        subscription_category_id=int(product["subscription_category_id"]) if product else None,
         start_date=payload.start_date,
-        end_date=payload.start_date + timedelta(days=term_days),
+        end_date=end_date,
         quantity=payload.quantity,
         unit_price=unit_price,
         status="active",
         auto_renew=payload.auto_renew,
         created_by=int(current_user["id"]),
+        vendor=(payload.vendor or "").strip() or None,
+        external_name=(payload.external_name or "").strip() or None,
+        external_sku=(payload.external_sku or "").strip() or None,
+        billing_frequency=payload.billing_frequency or commitment,
+        reminder_only=payload.reminder_only,
     )
-    if payload.auto_renew:
+    if payload.auto_renew and not payload.reminder_only:
         # This term was already billed externally. Schedule the recurring item
         # at the next commitment boundary rather than billing the current term.
         renewal_subscription = {
@@ -325,7 +345,7 @@ async def update_subscription(
         auto_renew=update_data.auto_renew,
         end_date=update_data.end_date,
     )
-    if update_data.status == "canceled":
+    if update_data.status == "canceled" and not subscription.get("reminder_only"):
         from app.services.subscription_billing import sync_subscription_recurring_item
 
         canceled = await subscriptions_repo.get_subscription(subscription_id)
@@ -384,7 +404,10 @@ async def delete_subscription(
     # for audit/history and must never be deleted with the subscription.
     from app.services.subscription_billing import deactivate_subscription_recurring_item
 
-    await deactivate_subscription_recurring_item(subscription, cancellation_date=date.today())
+    if not subscription.get("reminder_only"):
+        await deactivate_subscription_recurring_item(
+            subscription, cancellation_date=date.today()
+        )
 
     # Delete the subscription
     await subscriptions_repo.delete_subscription(subscription_id)

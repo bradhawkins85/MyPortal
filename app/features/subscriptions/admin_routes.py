@@ -88,6 +88,8 @@ async def _render_creation_form(
                 "start_date": date.today().isoformat(),
                 "quantity": "1",
                 "auto_renew": True,
+                "reminder_only": True,
+                "billing_frequency": "annual",
             },
             "form_errors": errors or {},
             "failure_message": failure_message,
@@ -120,7 +122,15 @@ async def admin_create_subscription(request: Request):
         "start_date": str(form.get("start_date", "")).strip(),
         "quantity": str(form.get("quantity", "")).strip(),
         "auto_renew": form.get("auto_renew") == "on",
+        "end_date": str(form.get("end_date", "")).strip() or None,
+        "vendor": str(form.get("vendor", "")).strip(),
+        "external_name": str(form.get("external_name", "")).strip() or None,
+        "external_sku": str(form.get("external_sku", "")).strip() or None,
+        "billing_frequency": str(form.get("billing_frequency", "")).strip(),
+        "reminder_only": form.get("reminder_only") == "on",
     }
+    if not values["product_id"]:
+        values["product_id"] = None
     try:
         payload = CreateExistingSubscriptionRequest.model_validate(values)
     except ValidationError as exc:
@@ -129,6 +139,10 @@ async def admin_create_subscription(request: Request):
             "product_id": "Subscription product",
             "start_date": "Start date",
             "quantity": "Quantity",
+            "end_date": "Renewal date",
+            "vendor": "Vendor",
+            "external_name": "Subscription name",
+            "billing_frequency": "Billing frequency",
         }
         errors: dict[str, str] = {}
         for issue in exc.errors():

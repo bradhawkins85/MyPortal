@@ -59,6 +59,7 @@
                     <th>ID</th>
                     <th>Product</th>
                     <th>Category</th>
+                    <th>Vendor</th>
                     <th>Customer</th>
                     <th>Quantity</th>
                     <th>Start Date</th>
@@ -76,8 +77,9 @@
                     {% for sub in subscriptions %}
                     <tr>
                         <td><code>{{ sub.id[:8] }}</code></td>
-                        <td>{{ sub.product_name or 'N/A' }}</td>
+                        <td>{{ sub.product_name or sub.external_name or 'N/A' }}{% if sub.external_sku %}<br><small>{{ sub.external_sku }}</small>{% endif %}</td>
                         <td>{{ sub.category_name or 'N/A' }}</td>
+                        <td>{{ sub.vendor or 'MyPortal' }}{% if sub.reminder_only %}<br><span class="badge">Reminder only</span>{% endif %}</td>
                         <td>Company #{{ sub.customer_id }}</td>
                         <td>{{ sub.quantity }}{% if sub.voice_monitor_contract %} monitored number{% if sub.quantity != 1 %}s{% endif %}<br><small>{{ sub.voice_monitor_contract.included_attempts }} calls/month included</small>{% endif %}</td>
                         <td>{{ sub.start_date }}</td>
@@ -138,7 +140,7 @@
                     {% endfor %}
                 {% else %}
                     <tr>
-                        <td colspan="{% if is_super_admin %}11{% else %}10{% endif %}" class="text-center text-muted">
+                        <td colspan="{% if is_super_admin %}12{% else %}11{% endif %}" class="text-center text-muted">
                             No subscriptions found
                         </td>
                     </tr>
