@@ -401,12 +401,12 @@ async def _process_reminder(
         ticket = await tickets_service.create_ticket(
             subject=subject,
             description=message,
-            requester_id=(
+            requester_id=None,
+            requester_staff_id=(
                 int(billing_contact["staff_id"])
                 if billing_contact and billing_contact.get("staff_id") is not None
                 else None
             ),
-            requester_staff_id=None,
             company_id=company_id,
             assigned_user_id=None,
             priority="Medium",

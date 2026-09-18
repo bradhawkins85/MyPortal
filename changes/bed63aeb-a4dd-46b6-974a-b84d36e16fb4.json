@@ -1,0 +1,7 @@
+{
+  "guid": "bed63aeb-a4dd-46b6-974a-b84d36e16fb4",
+  "occurred_at": "2026-09-18T00:00:00Z",
+  "change_type": "fix",
+  "summary": "Fixed subscription renewal reminder tickets to reference billing contacts as staff requesters.",
+  "content_hash": "subscription-renewal-staff-requester-foreign-key-fix"
+}
