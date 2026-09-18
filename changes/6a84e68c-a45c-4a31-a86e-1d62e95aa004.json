@@ -1,0 +1,7 @@
+{
+  "guid": "6a84e68c-a45c-4a31-a86e-1d62e95aa004",
+  "occurred_at": "2026-09-18T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added 30-day reminders and 21-day invoice generation for monthly subscription renewals.",
+  "content_hash": "monthly-subscription-renewal-reminders-and-invoices"
+}

@@ -46,6 +46,7 @@ def _sub(
     status: str = "active",
     auto_renew: bool = True,
     product_name: str = "Managed Plan",
+    commitment_type: str = "annual",
 ) -> dict[str, object]:
     return {
         "id": sub_id,
@@ -57,6 +58,8 @@ def _sub(
         "quantity": quantity,
         "status": status,
         "auto_renew": auto_renew,
+        "commitment_type": commitment_type,
+        "payment_frequency": commitment_type,
     }
 
 
@@ -124,6 +127,47 @@ async def test_custom_renewal_template_changes_wording_and_keeps_secure_table(
     assert html_message.count("<tbody><tr>") == 1
 
 
+@pytest.mark.anyio
+async def test_monthly_renewal_uses_its_own_message_template(monkeypatch):
+    requested_slugs: list[str] = []
+
+    async def render_default(slug, context, *, default_content, default_content_type):
+        requested_slugs.append(slug)
+        return (
+            renewals_service.message_templates_service.render_content(
+                default_content, context, escape_html=True
+            ),
+            default_content_type,
+        )
+
+    monkeypatch.setattr(
+        renewals_service.message_templates_service,
+        "render_template_content",
+        render_default,
+    )
+    text_message, _html_message = await renewals_service._build_renewal_message(
+        company_name="Monthly Co",
+        renewal_date=date(2025, 2, 1),
+        billing_contact={"first_name": "Bill"},
+        renewal_items=[
+            {
+                "subscription_name": "Monthly Plan",
+                "renewal_date": date(2025, 2, 1),
+                "renewal_term": "Monthly commitment · monthly payment",
+                "assigned_users": [],
+                "renewal_quantity": 1,
+                "unit_price": Decimal("10.00"),
+                "line_total": Decimal("10.00"),
+            }
+        ],
+        renewal_cycle="monthly",
+    )
+
+    assert requested_slugs == ["monthly-subscription-renewal-reminder"]
+    assert "30-day reminder" in text_message
+    assert "invoice 21 days before" in text_message
+
+
 def _install_scheduled_invoice_mocks(
     monkeypatch,
     state: dict[str, object] | None,
@@ -137,16 +181,21 @@ def _install_scheduled_invoice_mocks(
     ]
     patch_calls: list[dict[str, object]] = []
 
-    async def fake_get_by_customer_and_date(_customer_id, _scheduled_date):
+    async def fake_get_by_customer_and_date(
+        _customer_id, _scheduled_date, _renewal_cycle="annual"
+    ):
         return dict(stored) if stored is not None else None
 
-    async def fake_create_scheduled_invoice(*, customer_id, scheduled_for_date, status):
+    async def fake_create_scheduled_invoice(
+        *, customer_id, scheduled_for_date, status, renewal_cycle="annual"
+    ):
         nonlocal stored
         stored = _scheduled_invoice_state(
             customer_id=customer_id,
             renewal_date=scheduled_for_date,
         )
         stored["status"] = status
+        stored["renewal_cycle"] = renewal_cycle
         return dict(stored)
 
     async def fake_patch(scheduled_invoice_id, **updates):
@@ -214,6 +263,70 @@ async def test_no_subscriptions_returns_zero_counts(monkeypatch):
         "processed_subscription_ids": [],
         "issues": [],
     }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("days_before", "expected_reminders", "expected_invoices"),
+    [(31, 0, 0), (30, 1, 0), (22, 0, 0), (21, 0, 1)],
+)
+async def test_monthly_renewal_uses_30_day_reminder_and_21_day_invoice_windows(
+    monkeypatch, days_before, expected_reminders, expected_invoices
+):
+    target = date(2025, 1, 1)
+    renewal_date = target + timedelta(days=days_before)
+    subscription = _sub(
+        "monthly-sub",
+        customer_id=20,
+        end_date=renewal_date,
+        commitment_type="monthly",
+    )
+    state = _scheduled_invoice_state(customer_id=20, renewal_date=renewal_date)
+    if days_before < 30:
+        state["reminder_sent_at"] = datetime.now(timezone.utc)
+        state["reminder_email_sent_at"] = datetime.now(timezone.utc)
+    _install_scheduled_invoice_mocks(
+        monkeypatch, state if days_before <= 30 else None,
+        tracked_subscription_ids=("monthly-sub",) if days_before < 30 else (),
+    )
+    monkeypatch.setattr(
+        subscriptions_repo, "list_subscriptions", AsyncMock(return_value=[subscription])
+    )
+    monkeypatch.setattr(
+        renewals_service.shop_repo,
+        "get_product_by_id",
+        AsyncMock(
+            return_value={
+                "commitment_type": "monthly",
+                "payment_frequency": "monthly",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        renewals_service,
+        "_build_group_renewal_items",
+        AsyncMock(return_value=[{"subscription_id": "monthly-sub"}]),
+    )
+    monkeypatch.setattr(renewals_service, "_sync_scheduled_invoice_lines", AsyncMock())
+    monkeypatch.setattr(renewals_service, "_mark_pending_renewal", AsyncMock())
+    monkeypatch.setattr(
+        renewals_service.company_repo,
+        "get_company_by_id",
+        AsyncMock(return_value={"id": 20, "name": "Monthly Co"}),
+    )
+    reminder = AsyncMock(return_value=True)
+    invoice = AsyncMock(return_value=True)
+    monkeypatch.setattr(renewals_service, "_process_reminder", reminder)
+    monkeypatch.setattr(renewals_service, "_process_invoice", invoice)
+
+    result = await renewals_service.create_renewal_invoices_for_date(target)
+
+    assert result["reminder_count"] == expected_reminders
+    assert result["invoice_count"] == expected_invoices
+    assert reminder.await_count == expected_reminders
+    assert invoice.await_count == expected_invoices
+    if reminder.await_count:
+        assert reminder.await_args.kwargs["renewal_cycle"] == "monthly"
 
 
 @pytest.mark.anyio
@@ -646,6 +759,11 @@ async def test_replacement_subscription_id_is_reminded_and_billed(monkeypatch):
         AsyncMock(return_value=[replacement]),
     )
     monkeypatch.setattr(
+        renewals_service.shop_repo,
+        "get_product_by_id",
+        AsyncMock(return_value={"commitment_type": "annual"}),
+    )
+    monkeypatch.setattr(
         renewals_service,
         "_build_group_renewal_items",
         AsyncMock(return_value=[renewal_item]),
@@ -1012,6 +1130,11 @@ async def test_get_next_invoice_returns_existing_invoice(monkeypatch):
         "get_subscription",
         AsyncMock(return_value=sub),
     )
+    monkeypatch.setattr(
+        renewals_service.shop_repo,
+        "get_product_by_id",
+        AsyncMock(return_value={"commitment_type": "annual"}),
+    )
     invoice = {"id": "inv-42", "customer_id": 10}
     monkeypatch.setattr(
         invoices_repo,
@@ -1033,6 +1156,11 @@ async def test_get_next_invoice_no_invoice_returns_none(monkeypatch):
         subscriptions_repo,
         "get_subscription",
         AsyncMock(return_value=sub),
+    )
+    monkeypatch.setattr(
+        renewals_service.shop_repo,
+        "get_product_by_id",
+        AsyncMock(return_value={"commitment_type": "annual"}),
     )
     monkeypatch.setattr(
         invoices_repo,
