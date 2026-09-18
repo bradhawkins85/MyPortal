@@ -262,16 +262,6 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
-        # Run subscription renewal job daily at 02:00 (store timezone)
-        if not self._scheduler.get_job("subscription-renewals"):
-            self._scheduler.add_job(
-                self._run_subscription_renewals,
-                CronTrigger(hour=2, minute=0, timezone=self._scheduler.timezone),
-                id="subscription-renewals",
-                replace_existing=True,
-                coalesce=True,
-                max_instances=1,
-            )
         # Run M365 credential renewal check daily at 03:00
         if not self._scheduler.get_job("m365-credential-renewal"):
             self._scheduler.add_job(
@@ -910,6 +900,22 @@ class SchedulerService:
                     else:
                         status = "skipped"
                         details = "Company context required"
+                elif command == "process_subscription_renewals":
+                    if task.get("company_id") is not None:
+                        status = "skipped"
+                        details = "This task must target all companies"
+                    else:
+                        settings = get_settings()
+                        try:
+                            target_date = datetime.now(
+                                ZoneInfo(str(settings.default_timezone or "UTC"))
+                            ).date()
+                        except Exception:  # pragma: no cover - defensive fallback
+                            target_date = datetime.now(timezone.utc).date()
+                        result = await subscription_renewals.create_renewal_invoices_for_date(
+                            target_date
+                        )
+                        details = json.dumps(result, default=str)
                 elif command == "unbill_time_entries":
                     company_id = task.get("company_id")
                     result = await unbill_time_entries_service.unbill_time_entries(
