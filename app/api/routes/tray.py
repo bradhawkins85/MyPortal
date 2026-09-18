@@ -296,7 +296,10 @@ async def sync_trmm_agent(
 
     try:
         asset_id = await asset_importer.sync_tactical_agent(
-            int(company_id), agent_id=agent_id, tray_device_uid=tray_agent_id
+            int(company_id),
+            agent_id=agent_id,
+            tray_device_uid=tray_agent_id,
+            create_asset_if_missing=payload.create_asset_if_missing,
         )
     except tacticalrmm_service.TacticalRMMConfigurationError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

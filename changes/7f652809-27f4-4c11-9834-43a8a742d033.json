@@ -1,0 +1,7 @@
+{
+  "guid": "7f652809-27f4-4c11-9834-43a8a742d033",
+  "occurred_at": "2026-09-18T00:00Z",
+  "change_type": "Fix",
+  "summary": "Allow TrayAgent TRMM sync requests to create missing MyPortal assets immediately.",
+  "content_hash": "0f38a4b05031c5f3ebe3c209369e165534931999f0d62bc811bfde3a5f225833"
+}
