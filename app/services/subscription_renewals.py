@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from hashlib import sha256
 from html import escape, unescape
 from html.parser import HTMLParser
 from typing import Any
@@ -71,8 +72,29 @@ def _ticket_external_reference(company_id: int, renewal_date: date) -> str:
     return f"subscription-renewal:{company_id}:{renewal_date.isoformat()}"
 
 
-def _reply_external_reference(company_id: int, renewal_date: date) -> str:
-    return f"subscription-renewal-reply:{company_id}:{renewal_date.isoformat()}"
+def _reply_external_reference(
+    company_id: int,
+    renewal_date: date,
+    subscription_ids: list[str] | None = None,
+) -> str:
+    reference = f"subscription-renewal-reply:{company_id}:{renewal_date.isoformat()}"
+    if subscription_ids:
+        digest = sha256("\n".join(sorted(subscription_ids)).encode()).hexdigest()[:16]
+        return f"{reference}:{digest}"
+    return reference
+
+
+def _new_subscription_ids(
+    renewal_items: list[dict[str, Any]],
+    existing_lines: list[dict[str, Any]],
+) -> set[str]:
+    """Return current subscription IDs not previously tracked for this renewal."""
+    tracked_ids = {str(line["subscription_id"]) for line in existing_lines}
+    return {
+        str(item["subscription_id"])
+        for item in renewal_items
+        if str(item["subscription_id"]) not in tracked_ids
+    }
 
 
 def _term_days_for_product(product: dict[str, Any]) -> int:
@@ -472,6 +494,7 @@ async def _process_reminder(
     scheduled_invoice: dict[str, Any],
     renewal_items: list[dict[str, Any]],
     issue_log: list[dict[str, Any]],
+    is_additional_batch: bool = False,
 ) -> bool:
     company_id = int(company["id"])
     billing_contact, billing_email, billing_error = await _select_billing_contact(
@@ -516,9 +539,15 @@ async def _process_reminder(
         "reminder_ticket_id": int(ticket["id"]),
         "reminder_error": None,
     }
-    reply_reference = _reply_external_reference(company_id, renewal_date)
+    reply_reference = _reply_external_reference(
+        company_id,
+        renewal_date,
+        [str(item["subscription_id"]) for item in renewal_items]
+        if is_additional_batch
+        else None,
+    )
     reply = None
-    if scheduled_invoice.get("reminder_reply_id") is not None:
+    if not is_additional_batch and scheduled_invoice.get("reminder_reply_id") is not None:
         reply = {"id": int(scheduled_invoice["reminder_reply_id"])}
     else:
         reply = await tickets_repo.get_reply_by_external_reference(
@@ -537,7 +566,9 @@ async def _process_reminder(
     patch_updates["reminder_reply_id"] = int(reply["id"])
     patch_updates["reminder_sent_at"] = now
 
-    if billing_email and scheduled_invoice.get("reminder_email_sent_at") is None:
+    if billing_email and (
+        is_additional_batch or scheduled_invoice.get("reminder_email_sent_at") is None
+    ):
         sent, _ = await email_service.send_email(
             subject=subject,
             recipients=[billing_email],
@@ -882,6 +913,9 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
 
     for (company_id, renewal_date), group_subscriptions in grouped.items():
         scheduled_invoice = await _ensure_scheduled_invoice(company_id, renewal_date)
+        existing_lines = await invoices_repo.get_invoice_lines(
+            int(scheduled_invoice["id"])
+        )
         renewal_items = await _build_group_renewal_items(
             company_id, group_subscriptions
         )
@@ -899,6 +933,7 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
             skipped_count += 1
             continue
 
+        new_subscription_ids = _new_subscription_ids(renewal_items, existing_lines)
         await _sync_scheduled_invoice_lines(int(scheduled_invoice["id"]), renewal_items)
         await _mark_pending_renewal(group_subscriptions)
         processed_subscription_ids.extend(
@@ -912,16 +947,27 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
         days_until_renewal = (renewal_date - target_date).days
         group_changed = False
 
-        if 0 <= days_until_renewal <= _REMINDER_WINDOW_DAYS and (
+        reminder_items = (
+            [
+                item
+                for item in renewal_items
+                if item["subscription_id"] in new_subscription_ids
+            ]
+            if scheduled_invoice.get("reminder_sent_at") is not None
+            else renewal_items
+        )
+        if reminder_items and 0 <= days_until_renewal <= _REMINDER_WINDOW_DAYS and (
             scheduled_invoice.get("reminder_sent_at") is None
             or scheduled_invoice.get("reminder_email_sent_at") is None
+            or bool(new_subscription_ids)
         ):
             if await _process_reminder(
                 company=company,
                 renewal_date=renewal_date,
                 scheduled_invoice=scheduled_invoice,
-                renewal_items=renewal_items,
+                renewal_items=reminder_items,
                 issue_log=issues,
+                is_additional_batch=scheduled_invoice.get("reminder_sent_at") is not None,
             ):
                 reminder_count += 1
                 group_changed = True
@@ -930,15 +976,25 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
                 or scheduled_invoice
             )
 
+        invoice_items = (
+            [
+                item
+                for item in renewal_items
+                if item["subscription_id"] in new_subscription_ids
+            ]
+            if scheduled_invoice.get("invoice_id") is not None
+            else renewal_items
+        )
         if (
-            0 <= days_until_renewal <= _INVOICE_WINDOW_DAYS
-            and scheduled_invoice.get("invoice_id") is None
+            invoice_items
+            and 0 <= days_until_renewal <= _INVOICE_WINDOW_DAYS
+            and (scheduled_invoice.get("invoice_id") is None or new_subscription_ids)
         ):
             if await _process_invoice(
                 company=company,
                 renewal_date=renewal_date,
                 scheduled_invoice=scheduled_invoice,
-                renewal_items=renewal_items,
+                renewal_items=invoice_items,
                 issue_log=issues,
             ):
                 invoice_count += 1

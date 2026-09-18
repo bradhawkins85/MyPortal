@@ -124,9 +124,17 @@ async def test_custom_renewal_template_changes_wording_and_keeps_secure_table(
     assert html_message.count("<tbody><tr>") == 1
 
 
-def _install_scheduled_invoice_mocks(monkeypatch, state: dict[str, object] | None):
+def _install_scheduled_invoice_mocks(
+    monkeypatch,
+    state: dict[str, object] | None,
+    *,
+    tracked_subscription_ids: tuple[str, ...] = (),
+):
     stored = state
-    line_calls: list[dict[str, object]] = []
+    line_calls: list[dict[str, object]] = [
+        {"subscription_id": subscription_id}
+        for subscription_id in tracked_subscription_ids
+    ]
     patch_calls: list[dict[str, object]] = []
 
     async def fake_get_by_customer_and_date(_customer_id, _scheduled_date):
@@ -158,6 +166,11 @@ def _install_scheduled_invoice_mocks(monkeypatch, state: dict[str, object] | Non
         assert invoice_id == stored["id"]
         line_calls.clear()
 
+    async def fake_get_lines(invoice_id):
+        assert stored is not None
+        assert invoice_id == stored["id"]
+        return list(line_calls)
+
     async def fake_add_line(**kwargs):
         line_calls.append(dict(kwargs))
 
@@ -176,6 +189,7 @@ def _install_scheduled_invoice_mocks(monkeypatch, state: dict[str, object] | Non
         invoices_repo, "get_scheduled_invoice", fake_get_scheduled_invoice
     )
     monkeypatch.setattr(invoices_repo, "delete_invoice_lines", fake_delete_lines)
+    monkeypatch.setattr(invoices_repo, "get_invoice_lines", fake_get_lines)
     monkeypatch.setattr(invoices_repo, "add_invoice_line", fake_add_line)
     return patch_calls, line_calls, lambda: stored
 
@@ -401,6 +415,7 @@ async def test_generates_30_day_invoice_with_current_renewal_quantity(monkeypatc
     patch_calls, line_calls, get_state = _install_scheduled_invoice_mocks(
         monkeypatch,
         existing,
+        tracked_subscription_ids=("sub-2",),
     )
     invoice_calls: list[dict[str, object]] = []
     sync_calls: list[tuple[int, bool]] = []
@@ -539,6 +554,7 @@ async def test_skips_duplicate_reminders_and_invoices(monkeypatch):
     _patch_calls, _line_calls, _get_state = _install_scheduled_invoice_mocks(
         monkeypatch,
         existing,
+        tracked_subscription_ids=("sub-3",),
     )
 
     monkeypatch.setattr(
@@ -599,6 +615,62 @@ async def test_skips_duplicate_reminders_and_invoices(monkeypatch):
     assert result["skipped_count"] == 1
     create_ticket_mock.assert_not_awaited()
     generate_mock.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_replacement_subscription_id_is_reminded_and_billed(monkeypatch):
+    target = date(2025, 2, 1)
+    renewal_date = target + timedelta(days=30)
+    replacement = _sub("sub-new", customer_id=41, end_date=renewal_date)
+    existing = _scheduled_invoice_state(customer_id=41, renewal_date=renewal_date)
+    existing.update(
+        {
+            "status": "issued",
+            "reminder_sent_at": datetime.now(timezone.utc),
+            "reminder_email_sent_at": datetime.now(timezone.utc),
+            "invoice_id": 71,
+        }
+    )
+    _install_scheduled_invoice_mocks(
+        monkeypatch,
+        existing,
+        tracked_subscription_ids=("sub-deleted",),
+    )
+    renewal_item = {
+        "subscription_id": "sub-new",
+        "subscription_name": "Managed Plan",
+    }
+    monkeypatch.setattr(
+        subscriptions_repo,
+        "list_subscriptions",
+        AsyncMock(return_value=[replacement]),
+    )
+    monkeypatch.setattr(
+        renewals_service,
+        "_build_group_renewal_items",
+        AsyncMock(return_value=[renewal_item]),
+    )
+    monkeypatch.setattr(
+        renewals_service, "_sync_scheduled_invoice_lines", AsyncMock()
+    )
+    monkeypatch.setattr(renewals_service, "_mark_pending_renewal", AsyncMock())
+    monkeypatch.setattr(
+        renewals_service.company_repo,
+        "get_company_by_id",
+        AsyncMock(return_value={"id": 41, "name": "Replacement Co"}),
+    )
+    reminder = AsyncMock(return_value=True)
+    invoice = AsyncMock(return_value=True)
+    monkeypatch.setattr(renewals_service, "_process_reminder", reminder)
+    monkeypatch.setattr(renewals_service, "_process_invoice", invoice)
+
+    result = await renewals_service.create_renewal_invoices_for_date(target)
+
+    assert result["reminder_count"] == 1
+    assert result["invoice_count"] == 1
+    assert reminder.await_args.kwargs["renewal_items"] == [renewal_item]
+    assert reminder.await_args.kwargs["is_additional_batch"] is True
+    assert invoice.await_args.kwargs["renewal_items"] == [renewal_item]
 
 
 @pytest.mark.anyio
