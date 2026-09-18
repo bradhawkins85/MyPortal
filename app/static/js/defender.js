@@ -109,6 +109,17 @@ document.addEventListener('DOMContentLoaded', () => {
     button.disabled = true;
     try { await send(`/api/defender/devices/${button.dataset.deviceId}/commands/${button.dataset.defenderCommand}`, { method: 'POST', body: '{}' }); button.textContent = 'Queued'; } catch (error) { alert(error.message); button.disabled = false; }
   }));
+  document.querySelectorAll('[data-defender-management]').forEach((button) => button.addEventListener('click', async () => {
+    const currentlyManaged = button.dataset.managed === 'true';
+    if (currentlyManaged && !confirm('Exclude this device from Defender management? Defender checks and pending commands will stop.')) return;
+    button.disabled = true;
+    try {
+      await send(`/api/defender/devices/${button.dataset.deviceId}/management`, {
+        method: 'PUT', body: JSON.stringify({ managed: !currentlyManaged }),
+      });
+      location.reload();
+    } catch (error) { alert(error.message); button.disabled = false; }
+  }));
   document.querySelectorAll('[data-detection-action]').forEach((button) => button.addEventListener('click', async () => {
     button.disabled = true;
     try { await send(`/api/defender/detections/${button.dataset.detectionId}/actions`, { method: 'POST', body: JSON.stringify({ action: button.dataset.detectionAction }) }); location.reload(); } catch (error) { alert(error.message); button.disabled = false; }

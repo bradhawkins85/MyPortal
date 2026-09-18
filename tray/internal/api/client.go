@@ -346,8 +346,9 @@ func (c *Client) ReportDefenderCommandResult(ctx context.Context, commandID int6
 	return nil
 }
 
-// GetDefenderPolicy checks whether Defender reporting is enabled. The server
-// intentionally returns 404 for devices whose company has not opted in.
+// GetDefenderPolicy checks whether Defender processing is enabled for this
+// specific device. Company-disabled and individually excluded devices both
+// produce a disabled policy, so callers must not run local Defender scripts.
 func (c *Client) GetDefenderPolicy(ctx context.Context) (*DefenderPolicy, error) {
 	resp, err := c.get(ctx, "/api/tray/defender/policy")
 	if err != nil {

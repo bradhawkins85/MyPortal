@@ -123,6 +123,7 @@ def test_defender_routes_cover_portal_tray_and_ticket_workflows():
         "/api/defender/exclusions",
         "/api/defender/settings",
         "/api/defender/devices/{device_id}/commands/{command_type}",
+        "/api/defender/devices/{device_id}/management",
         "/api/defender/detections/{detection_id}/actions",
         "/api/defender/devices/{device_id}/ticket",
         "/api/defender/detections/{detection_id}/ticket",
@@ -242,6 +243,35 @@ def test_status_report_persists_embedded_protection_history(monkeypatch):
     assert reported == [(7, 42, "det-123")]
 
 
+def test_excluded_device_policy_disables_agent_processing(monkeypatch):
+    monkeypatch.setattr(
+        defender_repo, "device_is_managed",
+        lambda _device_id, _company_id: asyncio.sleep(0, result=False),
+    )
+
+    result = asyncio.run(defender_repo.policy(7, 42))
+
+    assert result == {"enabled": False, "exclusions": []}
+
+
+def test_tray_policy_returns_early_for_excluded_device(monkeypatch):
+    request = Request({"type": "http", "method": "GET", "path": "/api/tray/defender/policy", "headers": []})
+
+    async def tray(_request, *, require_managed=True):
+        assert require_managed is False
+        return {"id": 7, "company_id": 42}
+
+    monkeypatch.setattr(defender, "_tray", tray)
+    monkeypatch.setattr(
+        defender.repo, "policy",
+        lambda _device_id, _company_id: asyncio.sleep(0, result={"enabled": False, "exclusions": []}),
+    )
+
+    result = asyncio.run(defender.tray_policy(request))
+
+    assert result == {"enabled": False, "exclusions": []}
+
+
 def test_defender_ui_exposes_management_workflows():
     template = Path("app/templates/defender/index.html").read_text()
     assert "Tamper protection" in template
@@ -250,6 +280,9 @@ def test_defender_ui_exposes_management_workflows():
     assert 'data-defender-command="full_scan"' in template
     assert 'data-defender-command="signature_update"' in template
     assert 'data-defender-command="enable_firewall"' in template
+    assert "Exclude from management" in template
+    assert "Include in management" in template
+    assert "data-defender-management" in template
     assert "Domain:" in template
     assert "Private:" in template
     assert "Public:" in template
