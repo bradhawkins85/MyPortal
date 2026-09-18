@@ -254,7 +254,11 @@ async def _sync_tactical_tray_device_link(
 
 
 async def sync_tactical_agent(
-    company_id: int, *, agent_id: str, tray_device_uid: str
+    company_id: int,
+    *,
+    agent_id: str,
+    tray_device_uid: str,
+    create_asset_if_missing: bool = True,
 ) -> int:
     """Import and link one TRMM agent immediately after tray installation."""
 
@@ -274,6 +278,9 @@ async def sync_tactical_agent(
         existing_asset_id = int(existing_asset["id"])
         await tray_repo.link_device_to_asset(int(device["id"]), existing_asset_id)
         return existing_asset_id
+
+    if not create_asset_if_missing:
+        raise ValueError("Tactical RMM asset has not been imported into MyPortal")
 
     if not _clean_string(company.get("tacticalrmm_client_id")):
         raise tacticalrmm.TacticalRMMConfigurationError(

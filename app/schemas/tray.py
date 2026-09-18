@@ -37,6 +37,7 @@ class TrayTRMMSyncRequest(BaseModel):
 
     agent_id: str = Field(min_length=1, max_length=255)
     tray_agent_id: str = Field(min_length=1, max_length=255)
+    create_asset_if_missing: bool = True
 
 
 class TrayTRMMSyncResponse(BaseModel):
