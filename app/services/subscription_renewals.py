@@ -175,6 +175,12 @@ def _calculate_renewal_quantity(
 def _license_lookup_keys(
     subscription: dict[str, Any], product: dict[str, Any]
 ) -> list[str]:
+    # An explicitly configured Microsoft SKU is the authoritative link to the
+    # platform value imported for a Microsoft licence.  Keep the historical
+    # fuzzy matching below for products that have not opted into this link.
+    microsoft_sku = str(product.get("microsoft_sku") or "").strip()
+    if microsoft_sku:
+        return [microsoft_sku.casefold()]
     values = [
         product.get("vendor_sku"),
         product.get("sku"),

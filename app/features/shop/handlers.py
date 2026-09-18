@@ -1293,6 +1293,7 @@ async def admin_shop_page(
     search: str = Query("", alias="search"),
 ):
     from app.repositories import companies as company_repo
+    from app.repositories import license_sku_friendly_names as sku_friendly_repo
     from app.repositories import shop as shop_repo
     from app.repositories import stock_feed as stock_feed_repo
     from app.repositories import subscription_categories as subscription_categories_repo
@@ -1315,13 +1316,15 @@ async def admin_shop_page(
     )
     companies_task = asyncio.create_task(company_repo.list_companies())
     subscription_categories_task = asyncio.create_task(subscription_categories_repo.list_categories())
+    microsoft_sku_mappings_task = asyncio.create_task(sku_friendly_repo.list_mappings())
 
-    categories, filter_categories, products, companies, subscription_categories = await asyncio.gather(
+    categories, filter_categories, products, companies, subscription_categories, microsoft_sku_mappings = await asyncio.gather(
         categories_task,
         filter_categories_task,
         products_task,
         companies_task,
         subscription_categories_task,
+        microsoft_sku_mappings_task,
     )
     total_count = len(products)
 
@@ -1359,6 +1362,7 @@ async def admin_shop_page(
         "show_archived": show_archived,
         "search_term": search_term,
         "subscription_categories": subscription_categories,
+        "microsoft_sku_mappings": microsoft_sku_mappings,
         "total_count": total_count,
     }
     return await _main()._render_template("admin/shop.html", request, current_user, extra=extra)
@@ -2096,6 +2100,7 @@ async def admin_create_shop_product(
     name: str = Form(...),
     sku: str = Form(...),
     vendor_sku: str = Form(...),
+    microsoft_sku: str | None = Form(default=None),
     description: str | None = Form(default=None),
     invoice_description: str | None = Form(default=None),
     product_link: str | None = Form(default=None),
@@ -2212,6 +2217,11 @@ async def admin_create_shop_product(
     calls_per_day_value = _validate_voice_monitor_calls_per_day(
         subscription_category_name, voice_monitor_calls_per_day
     )
+    microsoft_sku_value = (
+        microsoft_sku.strip().upper()
+        if subscription_category_value and microsoft_sku and microsoft_sku.strip()
+        else None
+    )
 
     # Price options define their own commitment and billing frequency.  Keep
     # legacy selector columns empty for newly edited subscription products.
@@ -2280,6 +2290,7 @@ async def admin_create_shop_product(
             name=cleaned_name,
             sku=cleaned_sku,
             vendor_sku=cleaned_vendor_sku,
+            microsoft_sku=microsoft_sku_value,
             description=description_value,
             invoice_description=invoice_description_value,
             product_link=product_link_value,
@@ -2337,6 +2348,7 @@ async def admin_update_shop_product(
     name: str = Form(...),
     sku: str = Form(...),
     vendor_sku: str = Form(...),
+    microsoft_sku: str | None = Form(default=None),
     description: str | None = Form(default=None),
     invoice_description: str | None = Form(default=None),
     product_link: str | None = Form(default=None),
@@ -2483,6 +2495,11 @@ async def admin_update_shop_product(
     calls_per_day_value = _validate_voice_monitor_calls_per_day(
         subscription_category_name, voice_monitor_calls_per_day
     )
+    microsoft_sku_value = (
+        microsoft_sku.strip().upper()
+        if subscription_category_value and microsoft_sku and microsoft_sku.strip()
+        else None
+    )
 
     # Price options define their own commitment and billing frequency.  Keep
     # legacy selector columns empty for newly edited subscription products.
@@ -2602,6 +2619,7 @@ async def admin_update_shop_product(
             name=cleaned_name,
             sku=cleaned_sku,
             vendor_sku=cleaned_vendor_sku,
+            microsoft_sku=microsoft_sku_value,
             description=description_value,
             invoice_description=invoice_description_value,
             product_link=product_link_value,

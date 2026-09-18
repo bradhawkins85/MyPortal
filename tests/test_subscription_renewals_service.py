@@ -85,6 +85,86 @@ def _scheduled_invoice_state(
     }
 
 
+def test_microsoft_sku_is_authoritative_license_lookup_key():
+    product = {
+        "microsoft_sku": " O365_BUSINESS_ESSENTIALS ",
+        "vendor_sku": "legacy-vendor",
+        "sku": "legacy-product",
+        "name": "Business Basic",
+    }
+
+    assert renewals_service._license_lookup_keys({}, product) == [
+        "o365_business_essentials"
+    ]
+
+
+def test_license_lookup_keeps_legacy_behaviour_without_microsoft_sku():
+    product = {
+        "microsoft_sku": None,
+        "vendor_sku": "Legacy-Vendor",
+        "sku": "Legacy-Product",
+        "name": "Managed Plan",
+    }
+
+    assert renewals_service._license_lookup_keys(
+        {"product_name": "Subscription Name"}, product
+    ) == ["legacy-vendor", "legacy-product", "managed plan", "subscription name"]
+
+
+@pytest.mark.anyio
+async def test_renewal_items_use_assignees_from_microsoft_sku(monkeypatch):
+    subscription = _sub(
+        "sub-ms", customer_id=7, end_date=date(2026, 11, 17), quantity=1
+    )
+    monkeypatch.setattr(
+        renewals_service.change_requests_repo,
+        "list_pending_changes_for_subscriptions",
+        AsyncMock(return_value={"sub-ms": []}),
+    )
+    monkeypatch.setattr(
+        renewals_service.shop_repo,
+        "get_product_by_id",
+        AsyncMock(
+            return_value={
+                "id": 1,
+                "name": "Business Basic",
+                "sku": "WRONG-SKU",
+                "vendor_sku": "WRONG-VENDOR",
+                "microsoft_sku": "O365_BUSINESS_ESSENTIALS",
+                "commitment_type": "annual",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        renewals_service.license_repo,
+        "list_company_licenses",
+        AsyncMock(
+            return_value=[
+                {
+                    "id": 11,
+                    "platform": "O365_BUSINESS_ESSENTIALS",
+                    "display_name": "Microsoft 365 Business Basic",
+                },
+                {"id": 12, "platform": "WRONG-SKU", "display_name": "Wrong"},
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        renewals_service.license_repo,
+        "list_staff_by_license_for_company",
+        AsyncMock(
+            return_value={
+                11: [{"id": 3, "first_name": "Alex", "email": "alex@example.com"}],
+                12: [{"id": 4, "first_name": "Wrong", "email": "wrong@example.com"}],
+            }
+        ),
+    )
+
+    items = await renewals_service._build_group_renewal_items(7, [subscription])
+
+    assert items[0]["assigned_users"] == ["Alex <alex@example.com>"]
+
+
 @pytest.mark.anyio
 async def test_custom_renewal_template_changes_wording_and_keeps_secure_table(
     monkeypatch,

@@ -1099,6 +1099,8 @@
         editForm.querySelector('#edit-product-name').value = product.name || '';
         editForm.querySelector('#edit-product-sku').value = product.sku || '';
         editForm.querySelector('#edit-product-vendor').value = product.vendor_sku || '';
+        const microsoftSkuField = editForm.querySelector('#edit-product-microsoft-sku');
+        if (microsoftSkuField) microsoftSkuField.value = product.microsoft_sku || '';
         editForm.querySelector('#edit-product-description').value = product.description || '';
         const productLinkField = editForm.querySelector('#edit-product-link');
         if (productLinkField) {
