@@ -1410,6 +1410,7 @@ async def create_product(
     name: str,
     sku: str,
     vendor_sku: str,
+    microsoft_sku: str | None = None,
     price: Decimal,
     stock: int,
     description: str | None = None,
@@ -1433,16 +1434,17 @@ async def create_product(
             await cursor.execute(
                 """
                 INSERT INTO shop_products
-                    (name, sku, vendor_sku, description, invoice_description, image_url, price, vip_price, stock,
+                    (name, sku, vendor_sku, microsoft_sku, description, invoice_description, image_url, price, vip_price, stock,
                      category_id, subscription_category_id, commitment_type, payment_frequency,
                      price_monthly_commitment, price_annual_monthly_payment, price_annual_annual_payment,
                      product_link, voice_monitor_calls_per_day)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     name,
                     sku,
                     vendor_sku,
+                    microsoft_sku,
                     description,
                     invoice_description,
                     image_url,
@@ -1831,6 +1833,7 @@ async def update_product(
     name: str,
     sku: str,
     vendor_sku: str,
+    microsoft_sku: str | None = None,
     description: str | None,
     invoice_description: str | None = None,
     price: Decimal,
@@ -1862,6 +1865,7 @@ async def update_product(
                     name = %s,
                     sku = %s,
                     vendor_sku = %s,
+                    microsoft_sku = %s,
                     description = %s,
                     invoice_description = %s,
                     image_url = %s,
@@ -1892,6 +1896,7 @@ async def update_product(
                     name,
                     sku,
                     vendor_sku,
+                    microsoft_sku,
                     description,
                     invoice_description,
                     image_url,
