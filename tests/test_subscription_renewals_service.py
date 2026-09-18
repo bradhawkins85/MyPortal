@@ -610,6 +610,91 @@ async def test_records_invalid_billing_email_for_staff_follow_up(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_creates_reminder_ticket_when_billing_contact_is_missing(monkeypatch):
+    target = date(2025, 1, 1)
+    renewal_date = target + timedelta(days=60)
+    subscription = _sub("sub-no-contact", customer_id=52, end_date=renewal_date)
+    _patch_calls, _line_calls, get_state = _install_scheduled_invoice_mocks(
+        monkeypatch,
+        None,
+    )
+    create_ticket_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        subscriptions_repo, "list_subscriptions", AsyncMock(return_value=[subscription])
+    )
+    monkeypatch.setattr(
+        renewals_service.change_requests_repo,
+        "list_pending_changes_for_subscriptions",
+        AsyncMock(return_value={"sub-no-contact": []}),
+    )
+    monkeypatch.setattr(
+        renewals_service.shop_repo,
+        "get_product_by_id",
+        AsyncMock(return_value={"id": 1, "name": "Managed Plan", "sku": "SKU-1"}),
+    )
+    monkeypatch.setattr(
+        renewals_service.license_repo,
+        "list_company_licenses",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        renewals_service.license_repo,
+        "list_staff_by_license_for_company",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        renewals_service.company_repo,
+        "get_company_by_id",
+        AsyncMock(return_value={"id": 52, "name": "No Contact Co"}),
+    )
+    monkeypatch.setattr(
+        renewals_service.billing_contacts_repo,
+        "list_billing_contacts_for_company",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        renewals_service.tickets_repo,
+        "get_ticket_by_external_reference",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        renewals_service.tickets_repo,
+        "get_reply_by_external_reference",
+        AsyncMock(return_value=None),
+    )
+
+    async def fake_create_ticket(**kwargs):
+        create_ticket_calls.append(dict(kwargs))
+        return {"id": 188, **kwargs}
+
+    monkeypatch.setattr(renewals_service.tickets_service, "create_ticket", fake_create_ticket)
+    monkeypatch.setattr(
+        renewals_service.tickets_repo,
+        "create_reply",
+        AsyncMock(return_value={"id": 199}),
+    )
+    email_mock = AsyncMock()
+    monkeypatch.setattr(renewals_service.email_service, "send_email", email_mock)
+    monkeypatch.setattr(subscriptions_repo, "update_subscription", AsyncMock(return_value=None))
+
+    result = await renewals_service.create_renewal_invoices_for_date(target)
+
+    assert result["reminder_count"] == 1
+    assert result["error_count"] == 1
+    assert result["issues"][0]["stage"] == "reminder"
+    assert "no billing contact" in result["issues"][0]["message"].lower()
+    assert create_ticket_calls[0]["requester_id"] is None
+    assert create_ticket_calls[0]["company_id"] == 52
+    email_mock.assert_not_awaited()
+    state = get_state()
+    assert state is not None
+    assert state["reminder_ticket_id"] == 188
+    assert state["reminder_sent_at"] is not None
+    assert "no billing contact" in str(state["reminder_error"]).lower()
+
+
+@pytest.mark.anyio
 async def test_excludes_cancelled_or_non_renewing_subscriptions(monkeypatch):
     target = date(2025, 1, 1)
     monkeypatch.setattr(

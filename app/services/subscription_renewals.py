@@ -385,21 +385,6 @@ async def _process_reminder(
     billing_contact, billing_email, billing_error = await _select_billing_contact(
         company_id
     )
-    if billing_contact is None:
-        await _record_issue(
-            scheduled_invoice_id=int(scheduled_invoice["id"]),
-            field="reminder_error",
-            message=billing_error or "No billing contact is configured for this company.",
-        )
-        issue_log.append(
-            {
-                "company_id": company_id,
-                "renewal_date": renewal_date.isoformat(),
-                "stage": "reminder",
-                "message": billing_error or "No billing contact is configured for this company.",
-            }
-        )
-        return False
 
     now = datetime.now(timezone.utc)
     company_name = str(company.get("name") or f"Company {company_id}")
@@ -416,7 +401,11 @@ async def _process_reminder(
         ticket = await tickets_service.create_ticket(
             subject=subject,
             description=message,
-            requester_id=int(billing_contact["staff_id"]),
+            requester_id=(
+                int(billing_contact["staff_id"])
+                if billing_contact and billing_contact.get("staff_id") is not None
+                else None
+            ),
             requester_staff_id=None,
             company_id=company_id,
             assigned_user_id=None,
