@@ -4,6 +4,8 @@ Owns the portal subscription pages:
 
 * ``GET  /subscriptions``                              — portal subscription list.
 * ``POST /subscriptions/{subscription_id}/request-change`` — request a change.
+* ``PATCH /subscriptions/{subscription_id}/quantity`` — directly adjust an
+  externally billed, reminder-only subscription.
 
 Handler code migrated from ``app/main.py``.
 """
@@ -27,7 +29,6 @@ from app.services.voice_monitor_billing import (
     contract_display,
     is_voice_monitor_subscription,
 )
-
 
 router = APIRouter(tags=["Subscriptions"])
 
@@ -322,7 +323,9 @@ async def request_subscription_change(request: Request, subscription_id: str):
     description = "\n".join(description_parts)
 
     user_id = user.get("id")
-    from app.services import tickets as tickets_service  # noqa: PLC0415 – avoid circular import
+    from app.services import (
+        tickets as tickets_service,
+    )  # noqa: PLC0415 – avoid circular import
 
     try:
         ticket = await tickets_service.create_ticket(
@@ -369,6 +372,71 @@ async def request_subscription_change(request: Request, subscription_id: str):
                 "message": "Change request submitted but ticket creation failed",
             }
         )
+
+
+@router.patch("/subscriptions/{subscription_id}/quantity", response_class=JSONResponse)
+async def update_reminder_only_quantity(request: Request, subscription_id: str):
+    """Directly update quantity for an externally managed subscription."""
+    user, membership, _, company_id, redirect = await _load_subscription_context(
+        request
+    )
+    if redirect:
+        return redirect
+    can_write = bool(
+        user.get("is_super_admin")
+        or _main()._membership_menu_can(
+            user, membership, "menu.subscriptions", write=True
+        )
+        or (
+            membership
+            and membership.get("can_manage_licenses")
+            and membership.get("can_access_cart")
+        )
+    )
+    if not can_write:
+        raise HTTPException(
+            status_code=403, detail="Subscription read/write permission required"
+        )
+
+    subscription = await subscriptions_repo.get_subscription(subscription_id)
+    if not subscription or int(subscription.get("customer_id", 0)) != company_id:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    if not subscription.get("reminder_only"):
+        raise HTTPException(
+            status_code=409,
+            detail="Only reminder-only subscriptions can be adjusted directly. Use the standard subscription change workflow instead.",
+        )
+    try:
+        payload = await request.json()
+        quantity = int(payload.get("quantity"))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400, detail="Quantity must be a valid integer"
+        ) from exc
+    if not 1 <= quantity <= 9999:
+        raise HTTPException(
+            status_code=400, detail="Quantity must be between 1 and 9999"
+        )
+
+    previous_quantity = int(subscription.get("quantity") or 0)
+    if quantity != previous_quantity:
+        await subscriptions_repo.update_subscription(subscription_id, quantity=quantity)
+        log_info(
+            "Reminder-only subscription quantity adjusted",
+            subscription_id=subscription_id,
+            company_id=company_id,
+            previous_quantity=previous_quantity,
+            quantity=quantity,
+            user_id=user.get("id"),
+        )
+    return JSONResponse(
+        {
+            "success": True,
+            "subscription_id": subscription_id,
+            "previous_quantity": previous_quantity,
+            "quantity": quantity,
+        }
+    )
 
 
 __all__ = ["router"]

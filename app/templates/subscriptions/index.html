@@ -78,8 +78,12 @@
         <tbody>
           {% for subscription in subscriptions %}
           <tr id="subscription-{{ subscription.id }}">
-            <td data-column="product_name" data-value="{{ subscription.product_name or '' }}">{{ subscription.product_name or '—' }}</td>
-            <td data-column="category_name" data-value="{{ subscription.category_name or '' }}">{{ subscription.category_name or '—' }}</td>
+            <td data-column="product_name" data-value="{{ subscription.product_name or subscription.external_name or '' }}">
+              {{ subscription.product_name or subscription.external_name or '—' }}
+              {% if subscription.external_sku %}<br><small class="text-muted">{{ subscription.external_sku }}</small>{% endif %}
+              {% if subscription.vendor %}<br><small class="text-muted">Vendor: {{ subscription.vendor }}</small>{% endif %}
+            </td>
+            <td data-column="category_name" data-value="{{ subscription.category_name or '' }}">{{ subscription.category_name or '—' }}{% if subscription.reminder_only %}<br><span class="tag tag--secondary">Reminder only</span>{% endif %}</td>
             <td data-column="quantity" data-value="{{ subscription.quantity }}">{{ subscription.quantity }}{% if subscription.voice_monitor_contract %} monitored number{% if subscription.quantity != 1 %}s{% endif %}{% endif %}</td>
             <td data-column="unit_price" data-value="{{ subscription.unit_price }}">${{ subscription.unit_price }}{% if subscription.voice_monitor_contract %} / number<br><small>{{ subscription.voice_monitor_contract.included_attempts }} calls included/month; ${{ subscription.voice_monitor_contract.attempt_overage_price }}/extra attempt + ${{ subscription.voice_monitor_contract.connected_minute_price }}/connected minute; ${{ subscription.voice_monitor_contract.transcription_surcharge }}/completed transcription</small>{% endif %}</td>
             <td data-column="start_date" data-value="{{ subscription.start_date }}">{{ subscription.start_date }}</td>
@@ -116,8 +120,12 @@
             {% if can_request_changes %}
             <td>
               <div class="button-group">
+                {% if subscription.reminder_only %}
+                <button type="button" class="button button--small" data-subscription-adjust="{{ subscription.id }}" data-current-quantity="{{ subscription.quantity }}" data-subscription-name="{{ subscription.product_name or subscription.external_name or 'Subscription' }}">Adjust quantity</button>
+                {% else %}
                 <button type="button" class="button button--small button--success" data-subscription-add="{{ subscription.id }}" data-current-quantity="{{ subscription.quantity }}" data-end-date="{{ subscription.end_date }}">Add licenses</button>
                 <button type="button" class="button button--small button--warning" data-subscription-decrease="{{ subscription.id }}" data-current-quantity="{{ subscription.quantity }}" data-end-date="{{ subscription.end_date }}">Request decrease</button>
+                {% endif %}
                 {% if is_super_admin %}
                 <button type="button" class="button button--small button--danger" data-subscription-delete="{{ subscription.id }}">Delete</button>
                 {% endif %}
@@ -172,6 +180,29 @@
       <button type="button" class="button button--secondary" data-dialog-close>Cancel</button>
       <button type="button" class="button" id="preview-change-btn">Preview Change</button>
       <button type="submit" class="button" id="submit-change" style="display: none;">Confirm</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="quantity-dialog" class="dialog" aria-labelledby="quantity-dialog-title">
+  <form class="dialog__container" id="quantity-form">
+    <header class="dialog__header">
+      <div>
+        <h3 class="dialog__title" id="quantity-dialog-title">Adjust external subscription quantity</h3>
+        <p class="text-muted" id="quantity-subscription-name"></p>
+      </div>
+      <button type="button" class="dialog__close" aria-label="Close" data-quantity-dialog-close><span aria-hidden="true">&times;</span></button>
+    </header>
+    <div class="dialog__body">
+      <div class="form-field">
+        <label class="form-field__label" for="adjusted-quantity">Current vendor quantity</label>
+        <input class="form-input" id="adjusted-quantity" name="quantity" type="number" min="1" max="9999" step="1" required>
+        <p class="form-field__hint">Enter the quantity currently held with the external vendor. This updates reminders only and will not generate an invoice.</p>
+      </div>
+    </div>
+    <footer class="dialog__footer">
+      <button type="button" class="button button--secondary" data-quantity-dialog-close>Cancel</button>
+      <button type="submit" class="button" data-quantity-submit>Save quantity</button>
     </footer>
   </form>
 </dialog>
@@ -251,10 +282,16 @@
     const existingForm = document.getElementById('existing-subscription-form');
     const existingErrors = document.querySelector('[data-existing-subscription-errors]');
     const existingSubmit = document.querySelector('[data-existing-subscription-submit]');
+    const quantityDialog = document.getElementById('quantity-dialog');
+    const quantityForm = document.getElementById('quantity-form');
+    const adjustedQuantity = document.getElementById('adjusted-quantity');
+    const quantitySubscriptionName = document.getElementById('quantity-subscription-name');
+    const quantitySubmit = document.querySelector('[data-quantity-submit]');
     
     let currentSubscriptionId = null;
     let currentChangeType = null;
     let currentPreview = null;
+    let adjustedSubscriptionId = null;
 
     function showExistingErrors(messages) {
       if (!existingErrors) return;
@@ -486,6 +523,44 @@
         openAddDialog(subscriptionId, currentQuantity, endDate);
       });
     });
+
+    document.querySelectorAll('[data-subscription-adjust]').forEach((button) => {
+      button.addEventListener('click', () => {
+        adjustedSubscriptionId = button.dataset.subscriptionAdjust;
+        adjustedQuantity.value = button.dataset.currentQuantity;
+        quantitySubscriptionName.textContent = button.dataset.subscriptionName;
+        if (typeof quantityDialog.showModal === 'function') quantityDialog.showModal();
+      });
+    });
+
+    document.querySelectorAll('[data-quantity-dialog-close]').forEach((button) => {
+      button.addEventListener('click', () => quantityDialog?.close());
+    });
+
+    if (quantityForm) {
+      quantityForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (!quantityForm.reportValidity() || !adjustedSubscriptionId) return;
+        quantitySubmit.disabled = true;
+        try {
+          const response = await fetch(`/subscriptions/${adjustedSubscriptionId}/quantity`, {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || ''},
+            body: JSON.stringify({quantity: Number(adjustedQuantity.value)}),
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(body.detail || 'Unable to update quantity.');
+          quantityDialog.close();
+          showToast('External subscription quantity updated.', 'success');
+          setTimeout(() => window.location.reload(), 1000);
+        } catch (error) {
+          showToast(error.message || 'Unable to update quantity.', 'error');
+        } finally {
+          quantitySubmit.disabled = false;
+        }
+      });
+    }
 
     document.querySelectorAll('[data-open-existing-subscription]').forEach((button) => {
       button.addEventListener('click', () => {

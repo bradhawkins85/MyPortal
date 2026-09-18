@@ -17,7 +17,11 @@ def test_manual_subscription_template_exposes_required_fields():
         "app/templates/admin/subscription_create.html", encoding="utf-8"
     ).read()
 
-    for field in ("customer_id", "product_id", "start_date", "quantity", "auto_renew"):
+    for field in (
+        "customer_id", "product_id", "start_date", "end_date", "quantity",
+        "auto_renew", "vendor", "external_name", "external_sku",
+        "billing_frequency", "reminder_only",
+    ):
         assert f'name="{field}"' in template
     assert 'action="/admin/subscriptions/create"' in template
     assert 'include "partials/csrf.html"' in template
@@ -31,6 +35,9 @@ def test_manual_subscription_creation_delegates_to_existing_operation(monkeypatc
         "start_date": "2026-09-01",
         "quantity": "5",
         "auto_renew": "on",
+        "vendor": "Microsoft",
+        "billing_frequency": "annual",
+        "reminder_only": "on",
     }
     user = {"id": 7, "is_super_admin": True}
     captured = {}
@@ -57,6 +64,12 @@ def test_manual_subscription_creation_delegates_to_existing_operation(monkeypatc
         "start_date": captured["start_date"],
         "quantity": 5,
         "auto_renew": True,
+        "end_date": None,
+        "vendor": "Microsoft",
+        "external_name": None,
+        "external_sku": None,
+        "billing_frequency": "annual",
+        "reminder_only": True,
     }
     assert captured["start_date"].isoformat() == "2026-09-01"
 
@@ -68,6 +81,8 @@ def test_manual_subscription_creation_returns_clear_validation_errors(monkeypatc
         "product_id": "34",
         "start_date": "not-a-date",
         "quantity": "0",
+        "vendor": "Microsoft",
+        "billing_frequency": "annual",
     }
     rendered = {}
 

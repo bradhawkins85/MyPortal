@@ -72,7 +72,9 @@ def _normalize_invoice_line(row: dict[str, Any]) -> dict[str, Any]:
         "id": int(row["id"]),
         "scheduled_invoice_id": int(row["scheduled_invoice_id"]),
         "subscription_id": row["subscription_id"],
-        "product_id": int(row["product_id"]),
+        "product_id": (
+            int(row["product_id"]) if row.get("product_id") is not None else None
+        ),
         "term_start": row["term_start"],
         "term_end": row["term_end"],
         "price": Decimal(str(row["price"])),
@@ -232,7 +234,7 @@ async def add_invoice_line(
     *,
     invoice_id: int,
     subscription_id: str,
-    product_id: int,
+    product_id: int | None,
     term_start: date,
     term_end: date,
     price: Decimal,

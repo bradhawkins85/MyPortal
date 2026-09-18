@@ -12,7 +12,10 @@ from app.features.subscriptions import PACK
 EXPECTED = {
     ("GET", "/subscriptions"),
     ("POST", "/subscriptions/{subscription_id}/request-change"),
+    ("PATCH", "/subscriptions/{subscription_id}/quantity"),
     ("GET", "/admin/subscriptions"),
+    ("GET", "/admin/subscriptions/create"),
+    ("POST", "/admin/subscriptions/create"),
 }
 
 

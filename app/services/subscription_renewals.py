@@ -38,6 +38,8 @@ _MAX_REMINDER_WINDOW_DAYS = max(
 )
 _RENEWAL_TEMPLATE_SLUG = "subscription-renewal-reminder"
 _MONTHLY_RENEWAL_TEMPLATE_SLUG = "monthly-subscription-renewal-reminder"
+_THIRD_PARTY_ANNUAL_TEMPLATE_SLUG = "third-party-annual-subscription-renewal-reminder"
+_THIRD_PARTY_MONTHLY_TEMPLATE_SLUG = "third-party-monthly-subscription-renewal-reminder"
 _ITEMS_TABLE_TOKEN = "__MYPORTAL_RENEWAL_ITEMS_TABLE__"
 _DEFAULT_RENEWAL_TEMPLATE = """\
 <p>Hi {{ recipient.name }},</p>
@@ -50,6 +52,12 @@ _DEFAULT_MONTHLY_RENEWAL_TEMPLATE = """\
 <p>Hi {{ recipient.name }},</p>
 <p>This is your 30-day reminder that the monthly services listed below are due for renewal.</p>
 <p>We will generate an invoice 21 days before the renewal date. Services with invoices that remain unpaid on their expiry date will not be renewed and may incur additional charges to reinstate their licences.</p>
+{{ renewal.items_table }}
+<p>Kind regards,<br>MyPortal Accounts Team</p>
+"""
+_DEFAULT_THIRD_PARTY_RENEWAL_TEMPLATE = """\
+<p>Hi {{ recipient.name }},</p>
+<p>This is a reminder that the externally billed subscriptions below are due for renewal. Your vendor will invoice you directly; MyPortal will not issue an invoice.</p>
 {{ renewal.items_table }}
 <p>Kind regards,<br>MyPortal Accounts Team</p>
 """
@@ -294,10 +302,17 @@ async def _build_renewal_message(
     billing_contact: dict[str, Any] | None,
     renewal_items: list[dict[str, Any]],
     renewal_cycle: str = "annual",
+    third_party: bool = False,
 ) -> tuple[str, str]:
     is_monthly = renewal_cycle == "monthly"
     rendered, content_type = await message_templates_service.render_template_content(
-        _MONTHLY_RENEWAL_TEMPLATE_SLUG if is_monthly else _RENEWAL_TEMPLATE_SLUG,
+        (
+            _THIRD_PARTY_MONTHLY_TEMPLATE_SLUG
+            if is_monthly
+            else _THIRD_PARTY_ANNUAL_TEMPLATE_SLUG
+        ) if third_party else (
+            _MONTHLY_RENEWAL_TEMPLATE_SLUG if is_monthly else _RENEWAL_TEMPLATE_SLUG
+        ),
         {
             "recipient": {"name": _billing_contact_name(billing_contact)},
             "company": {"name": company_name},
@@ -307,9 +322,9 @@ async def _build_renewal_message(
             },
         },
         default_content=(
-            _DEFAULT_MONTHLY_RENEWAL_TEMPLATE
-            if is_monthly
-            else _DEFAULT_RENEWAL_TEMPLATE
+            _DEFAULT_THIRD_PARTY_RENEWAL_TEMPLATE
+            if third_party
+            else (_DEFAULT_MONTHLY_RENEWAL_TEMPLATE if is_monthly else _DEFAULT_RENEWAL_TEMPLATE)
         ),
         default_content_type="text/html",
     )
@@ -423,7 +438,8 @@ async def _build_group_renewal_items(
 
     renewal_items: list[dict[str, Any]] = []
     for subscription in subscriptions:
-        product = products_by_id.get(int(subscription["product_id"]), {})
+        product_id = subscription.get("product_id")
+        product = products_by_id.get(int(product_id), {}) if product_id is not None else {}
         renewal_quantity = _calculate_renewal_quantity(
             subscription,
             pending_changes.get(str(subscription["id"]), []),
@@ -446,11 +462,13 @@ async def _build_group_renewal_items(
         extra_assigned_user_count = max(len(assigned_staff) - renewal_quantity, 0)
         unassigned_quantity = max(renewal_quantity - len(renewing_assigned_staff), 0)
         unit_price = _as_money(subscription.get("unit_price"))
-        term_days = _term_days_for_product(product)
+        frequency = subscription.get("billing_frequency") or _renewal_cycle(product)
+        term_days = 30 if frequency == "monthly" else _term_days_for_product(product)
         next_term_start = subscription["end_date"] + timedelta(days=1)
         next_term_end = next_term_start + timedelta(days=term_days - 1)
         subscription_name = str(
             subscription.get("product_name")
+            or subscription.get("external_name")
             or product.get("name")
             or f"Subscription {subscription['id']}"
         ).strip()
@@ -467,13 +485,13 @@ async def _build_group_renewal_items(
             or ""
         ).strip()
         product_code = str(
-            product.get("sku") or product.get("vendor_sku") or ""
+            subscription.get("external_sku") or product.get("sku") or product.get("vendor_sku") or ""
         ).strip()
         line_total = (unit_price * renewal_quantity).quantize(Decimal("0.01"))
         renewal_items.append(
             {
                 "subscription_id": str(subscription["id"]),
-                "product_id": int(subscription["product_id"]),
+                "product_id": int(product_id) if product_id is not None else None,
                 "subscription_name": subscription_name,
                 "license_name": license_name,
                 "description": description,
@@ -484,8 +502,10 @@ async def _build_group_renewal_items(
                 "extra_assigned_user_count": extra_assigned_user_count,
                 "unassigned_quantity": unassigned_quantity,
                 "renewal_date": subscription["end_date"],
-                "renewal_term": _term_label(product),
-                "renewal_cycle": _renewal_cycle(product),
+                "renewal_term": "Monthly commitment" if frequency == "monthly" else _term_label(product),
+                "renewal_cycle": frequency,
+                "reminder_only": bool(subscription.get("reminder_only")),
+                "vendor": subscription.get("vendor"),
                 "unit_price": unit_price,
                 "line_total": line_total,
                 "product_code": product_code,
@@ -563,6 +583,7 @@ async def _process_reminder(
         billing_contact=billing_contact,
         renewal_items=renewal_items,
         renewal_cycle=renewal_cycle,
+        third_party=any(bool(item.get("reminder_only")) for item in renewal_items),
     )
     ticket_reference = _ticket_external_reference(
         company_id, renewal_date, renewal_cycle
@@ -956,8 +977,9 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
 
     grouped: dict[tuple[int, date, str], list[dict[str, Any]]] = defaultdict(list)
     for subscription in eligible_subscriptions:
-        product = await shop_repo.get_product_by_id(int(subscription["product_id"])) or {}
-        renewal_cycle = _renewal_cycle(product)
+        product_id = subscription.get("product_id")
+        product = await shop_repo.get_product_by_id(int(product_id)) or {} if product_id is not None else {}
+        renewal_cycle = subscription.get("billing_frequency") or _renewal_cycle(product)
         reminder_window, _invoice_window = _renewal_windows(renewal_cycle)
         if (subscription["end_date"] - target_date).days <= reminder_window:
             grouped[
@@ -1043,14 +1065,17 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
                 or scheduled_invoice
             )
 
+        invoice_eligible_items = [
+            item for item in renewal_items if not item.get("reminder_only")
+        ]
         invoice_items = (
             [
                 item
-                for item in renewal_items
+                for item in invoice_eligible_items
                 if item["subscription_id"] in new_subscription_ids
             ]
             if scheduled_invoice.get("invoice_id") is not None
-            else renewal_items
+            else invoice_eligible_items
         )
         if (
             invoice_items
