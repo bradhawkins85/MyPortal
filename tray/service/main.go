@@ -240,6 +240,19 @@ func (d *daemon) defenderCommandLoop() {
 
 func (d *daemon) processDefenderCommands() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	policy, err := d.client.GetDefenderPolicy(ctx)
+	cancel()
+	if err != nil {
+		// Fail closed: never run a privileged local command unless the portal
+		// has just confirmed that this device is still managed.
+		logger.Warn("Defender command policy: %v", err)
+		return
+	}
+	if !policy.Enabled {
+		return
+	}
+
+	ctx, cancel = context.WithTimeout(context.Background(), 15*time.Second)
 	commands, err := d.client.GetDefenderCommands(ctx)
 	cancel()
 	if err != nil {
@@ -247,6 +260,20 @@ func (d *daemon) processDefenderCommands() {
 		return
 	}
 	for _, command := range commands {
+		// A device can be excluded after this poll claimed its commands. Check
+		// again immediately before every execution so that an in-flight change
+		// cannot cause a queued Defender PowerShell action to run later.
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		policy, err := d.client.GetDefenderPolicy(ctx)
+		cancel()
+		if err != nil {
+			logger.Warn("Defender command %d policy check: %v", command.ID, err)
+			return
+		}
+		if !policy.Enabled {
+			logger.Info("Skipping Defender commands because this device is not managed")
+			return
+		}
 		logger.Info("Executing Defender command %d (%s)", command.ID, command.CommandType)
 		executeErr := defender.Execute(command.CommandType, command.DetectionUID)
 		status := "completed"
@@ -256,8 +283,8 @@ func (d *daemon) processDefenderCommands() {
 			result["message"] = executeErr.Error()
 			logger.Warn("Defender command %d failed: %v", command.ID, executeErr)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		err := d.client.ReportDefenderCommandResult(ctx, command.ID, status, result)
+		ctx, cancel = context.WithTimeout(context.Background(), 15*time.Second)
+		err = d.client.ReportDefenderCommandResult(ctx, command.ID, status, result)
 		cancel()
 		if err != nil {
 			logger.Warn("Defender command %d result upload: %v", command.ID, err)

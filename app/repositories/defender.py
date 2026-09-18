@@ -33,8 +33,30 @@ async def device_belongs_to_company(device_id: int, company_id: int) -> bool:
     )
     return bool(row)
 
+async def device_is_managed(device_id: int, company_id: int) -> bool:
+    row = await db.fetch_one(
+        "SELECT defender_managed FROM tray_devices WHERE id=%s AND company_id=%s AND LOWER(os)='windows'",
+        (device_id, company_id),
+    )
+    return bool(row and row.get("defender_managed"))
+
+async def set_device_managed(device_id: int, company_id: int, managed: bool) -> bool:
+    if not await device_belongs_to_company(device_id, company_id):
+        return False
+    await db.execute(
+        "UPDATE tray_devices SET defender_managed=%s WHERE id=%s AND company_id=%s",
+        (managed, device_id, company_id),
+    )
+    if not managed:
+        await db.execute(
+            """UPDATE defender_commands SET status='cancelled', completed_at=UTC_TIMESTAMP()
+            WHERE tray_device_id=%s AND company_id=%s AND status IN ('pending','claimed')""",
+            (device_id, company_id),
+        )
+    return True
+
 async def dashboard(company_id: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    devices = await db.fetch_all("""SELECT td.id, td.asset_id, td.hostname, td.last_seen_utc, ds.health_status, ds.antivirus_enabled,
+    devices = await db.fetch_all("""SELECT td.id, td.asset_id, td.hostname, td.last_seen_utc, td.defender_managed, ds.health_status, ds.antivirus_enabled,
         ds.realtime_protection_enabled, ds.tamper_protection_enabled,
         ds.firewall_domain_enabled, ds.firewall_private_enabled, ds.firewall_public_enabled,
         ds.signatures_updated_at, ds.last_scan_at, ds.threat_count, ds.details_json, ds.updated_at,
@@ -142,6 +164,8 @@ async def delete_exclusion_list(list_id: int) -> None:
     await db.execute("DELETE FROM defender_exclusion_lists WHERE id=%s", (list_id,))
 
 async def policy(device_id: int, company_id: int) -> dict[str, Any]:
+    if not await device_is_managed(device_id, company_id):
+        return {"enabled": False, "exclusions": []}
     rows = await db.fetch_all("""SELECT exclusion_type, value FROM defender_exclusions
       WHERE scope='global' OR (company_id=%s AND (scope='company' OR tray_device_id=%s))
       UNION SELECT deli.exclusion_type, deli.value FROM defender_exclusion_list_items deli

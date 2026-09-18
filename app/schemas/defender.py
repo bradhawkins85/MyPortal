@@ -3,6 +3,10 @@ from datetime import datetime
 from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
+class DefenderDeviceManagementUpdate(BaseModel):
+    """Enable or exclude one endpoint from Defender checks and commands."""
+    managed: bool
+
 class DefenderStatusReport(BaseModel):
     antivirus_enabled: bool = False
     realtime_protection_enabled: bool = False
