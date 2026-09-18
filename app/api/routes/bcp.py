@@ -1902,7 +1902,7 @@ async def delete_distribution_entry(
     entry_id: int,
 ):
     """Delete a distribution list entry."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     deleted = await bcp_repo.delete_distribution_entry(entry_id)
     if not deleted:
@@ -2001,7 +2001,7 @@ async def update_insurance_policy(
     payment_terms: str = Form(None),
 ):
     """Update an insurance policy."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     # Parse date if provided
     review_date = None
@@ -2035,7 +2035,7 @@ async def delete_insurance_policy(
     policy_id: int,
 ):
     """Delete an insurance policy."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     deleted = await bcp_repo.delete_insurance_policy(policy_id)
     if not deleted:
@@ -2179,7 +2179,7 @@ async def update_backup_item(
     steps: str = Form(None),
 ):
     """Update a backup item."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     updated = await bcp_repo.update_backup_item(
         backup_id,
@@ -2202,7 +2202,7 @@ async def delete_backup_item(
     backup_id: int,
 ):
     """Delete a backup item."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     deleted = await bcp_repo.delete_backup_item(backup_id)
     if not deleted:
@@ -2428,7 +2428,7 @@ async def update_critical_activity_endpoint(
     losses_comments: str = Form(None),
 ):
     """Update a critical activity with impact data."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     # Validate importance if provided
     if importance is not None and not (1 <= importance <= 5):
@@ -2481,7 +2481,7 @@ async def delete_critical_activity_endpoint(
     activity_id: int,
 ):
     """Delete a critical activity."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     deleted = await bcp_repo.delete_critical_activity(activity_id)
     if not deleted:
@@ -2855,7 +2855,7 @@ async def update_contact_endpoint(
     responsibility_or_agency: str = Form(None),
 ):
     """Update a contact."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     updated = await bcp_repo.update_contact(
         contact_id,
@@ -2878,7 +2878,7 @@ async def delete_contact_endpoint(
     contact_id: int,
 ):
     """Delete a contact."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     deleted = await bcp_repo.delete_contact(contact_id)
     if not deleted:
@@ -3301,7 +3301,7 @@ async def update_emergency_kit_item_endpoint(
     notes: str = Form(None),
 ):
     """Update an emergency kit item."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     updated = await bcp_repo.update_emergency_kit_item(
         item_id,
@@ -3324,7 +3324,7 @@ async def mark_emergency_kit_item_checked_endpoint(
     item_id: int,
 ):
     """Mark an emergency kit item as checked today."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     from datetime import datetime
     
@@ -3347,7 +3347,7 @@ async def delete_emergency_kit_item_endpoint(
     item_id: int,
 ):
     """Delete an emergency kit item."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     # Get the item to determine its category for redirect
     item = await bcp_repo.get_emergency_kit_item_by_id(item_id)
@@ -3759,7 +3759,7 @@ async def update_recovery_contact_endpoint(
     phone: str = Form(None),
 ):
     """Update a recovery contact."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     updated = await bcp_repo.update_recovery_contact(
         contact_id,
@@ -3781,7 +3781,7 @@ async def delete_recovery_contact_endpoint(
     contact_id: int,
 ):
     """Delete a recovery contact."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     deleted = await bcp_repo.delete_recovery_contact(contact_id)
     if not deleted:
@@ -3925,7 +3925,7 @@ async def update_insurance_claim_endpoint(
     follow_up_actions: str = Form(None),
 ):
     """Update an insurance claim."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     # Parse date if provided
     claim_date_obj = None
@@ -3956,7 +3956,7 @@ async def delete_insurance_claim_endpoint(
     claim_id: int,
 ):
     """Delete an insurance claim."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     deleted = await bcp_repo.delete_insurance_claim(claim_id)
     if not deleted:
@@ -4088,7 +4088,7 @@ async def update_market_change_endpoint(
     options: str = Form(None),
 ):
     """Update a market change record."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     updated = await bcp_repo.update_market_change(
         change_id,
@@ -4109,7 +4109,7 @@ async def delete_market_change_endpoint(
     change_id: int,
 ):
     """Delete a market change record."""
-    user, company_id = await _require_bcp_edit(request)
+    await _require_bcp_edit(request)
     
     deleted = await bcp_repo.delete_market_change(change_id)
     if not deleted:
