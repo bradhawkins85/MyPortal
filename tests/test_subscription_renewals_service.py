@@ -285,7 +285,8 @@ async def test_creates_60_day_reminder_with_pending_decrease_details(monkeypatch
     assert result["reminder_count"] == 1
     assert result["invoice_count"] == 0
     assert result["error_count"] == 0
-    assert create_ticket_calls[0]["requester_id"] == 101
+    assert create_ticket_calls[0]["requester_id"] is None
+    assert create_ticket_calls[0]["requester_staff_id"] == 101
     assert create_ticket_calls[0]["company_id"] == 22
     assert create_ticket_calls[0]["module_slug"] == "subscriptions"
     assert "Renewing quantity: 5" in create_ticket_calls[0]["description"]
@@ -602,7 +603,8 @@ async def test_records_invalid_billing_email_for_staff_follow_up(monkeypatch):
     assert result["error_count"] == 1
     assert result["issues"][0]["stage"] == "reminder"
     assert "invalid email address" in result["issues"][0]["message"].lower()
-    assert create_ticket_calls[0]["requester_id"] == 101
+    assert create_ticket_calls[0]["requester_id"] is None
+    assert create_ticket_calls[0]["requester_staff_id"] == 101
     email_mock.assert_not_awaited()
     state = get_state()
     assert state is not None
@@ -685,6 +687,7 @@ async def test_creates_reminder_ticket_when_billing_contact_is_missing(monkeypat
     assert result["issues"][0]["stage"] == "reminder"
     assert "no billing contact" in result["issues"][0]["message"].lower()
     assert create_ticket_calls[0]["requester_id"] is None
+    assert create_ticket_calls[0]["requester_staff_id"] is None
     assert create_ticket_calls[0]["company_id"] == 52
     email_mock.assert_not_awaited()
     state = get_state()
