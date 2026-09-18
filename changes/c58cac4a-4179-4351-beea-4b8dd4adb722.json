@@ -1,0 +1,7 @@
+{
+  "guid": "c58cac4a-4179-4351-beea-4b8dd4adb722",
+  "occurred_at": "2026-09-18T00:00Z",
+  "change_type": "Fix",
+  "summary": "Process replacement subscription IDs independently for renewal reminders and invoices.",
+  "content_hash": "c93856aacec0cfd420b083d3140cdf8c2b1607b3c1bc9548722f98a273fe2720"
+}
