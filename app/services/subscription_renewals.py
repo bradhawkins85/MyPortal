@@ -1,10 +1,12 @@
 """Service for managing subscription renewals and scheduled invoices."""
+
 from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from html import escape
+from html import escape, unescape
+from html.parser import HTMLParser
 from typing import Any
 
 from email_validator import EmailNotValidError, validate_email
@@ -20,6 +22,7 @@ from app.repositories import subscriptions as subscriptions_repo
 from app.repositories import tickets as tickets_repo
 from app.services import email as email_service
 from app.services import invoice_generator
+from app.services import message_templates as message_templates_service
 from app.services import shop as shop_service
 from app.services import tickets as tickets_service
 from app.services import xero as xero_service
@@ -27,7 +30,15 @@ from app.services import xero as xero_service
 
 _REMINDER_WINDOW_DAYS = 60
 _INVOICE_WINDOW_DAYS = 30
-_DEFAULT_CURRENCY_LABEL = "Default billing currency"
+_RENEWAL_TEMPLATE_SLUG = "subscription-renewal-reminder"
+_ITEMS_TABLE_TOKEN = "__MYPORTAL_RENEWAL_ITEMS_TABLE__"
+_DEFAULT_RENEWAL_TEMPLATE = """\
+<p>Hi {{ recipient.name }},</p>
+<p>This is your 60-day reminder that the services listed below are due for renewal.</p>
+<p>We will generate an invoice 30 days before the renewal date. Services with invoices that remain unpaid on their expiry date will not be renewed and may incur additional charges to reinstate their licences.</p>
+{{ renewal.items_table }}
+<p>Kind regards,<br>MyPortal Accounts Team</p>
+"""
 
 
 def _as_money(value: Any) -> Decimal:
@@ -39,8 +50,8 @@ def _as_money(value: Any) -> Decimal:
         return Decimal("0.00")
 
 
-def _format_money(amount: Decimal, currency: str = _DEFAULT_CURRENCY_LABEL) -> str:
-    return f"{currency} {amount.quantize(Decimal('0.01'))}"
+def _format_money(amount: Decimal) -> str:
+    return f"{amount.quantize(Decimal('0.01'))}"
 
 
 def _billing_contact_name(contact: dict[str, Any] | None) -> str:
@@ -49,7 +60,11 @@ def _billing_contact_name(contact: dict[str, Any] | None) -> str:
     first_name = str(contact.get("first_name") or "").strip()
     last_name = str(contact.get("last_name") or "").strip()
     full_name = " ".join(part for part in (first_name, last_name) if part).strip()
-    return full_name or str(contact.get("email") or "Billing contact").strip() or "Billing contact"
+    return (
+        full_name
+        or str(contact.get("email") or "Billing contact").strip()
+        or "Billing contact"
+    )
 
 
 def _ticket_external_reference(company_id: int, renewal_date: date) -> str:
@@ -62,7 +77,11 @@ def _reply_external_reference(company_id: int, renewal_date: date) -> str:
 
 def _term_days_for_product(product: dict[str, Any]) -> int:
     billing_plan = shop_service.get_subscription_billing_plan(product or {})
-    commitment_type = billing_plan[0] if billing_plan else str(product.get("commitment_type") or "").strip().lower()
+    commitment_type = (
+        billing_plan[0]
+        if billing_plan
+        else str(product.get("commitment_type") or "").strip().lower()
+    )
     if commitment_type == "monthly":
         return 30
     return 365
@@ -96,7 +115,9 @@ def _calculate_renewal_quantity(
     return max(0, int(subscription.get("quantity") or 0) - pending_decrease)
 
 
-def _license_lookup_keys(subscription: dict[str, Any], product: dict[str, Any]) -> list[str]:
+def _license_lookup_keys(
+    subscription: dict[str, Any], product: dict[str, Any]
+) -> list[str]:
     values = [
         product.get("vendor_sku"),
         product.get("sku"),
@@ -121,60 +142,124 @@ def _format_assigned_user(staff: dict[str, Any]) -> str:
     return full_name or email or f"Staff #{staff.get('id')}"
 
 
-def _build_renewal_message(
+def _build_renewal_table_html(renewal_items: list[dict[str, Any]]) -> str:
+    """Return the trusted, escaped renewal details inserted into the email template."""
+    total_cost = sum(
+        (item["line_total"] for item in renewal_items), Decimal("0.00")
+    ).quantize(Decimal("0.01"))
+    headers = (
+        "Service",
+        "Renewal date",
+        "Renewal term",
+        "Assigned users",
+        "Quantity",
+        "Unit price",
+        "Cost",
+    )
+    rows: list[str] = []
+    for item in renewal_items:
+        assigned_users = ", ".join(item["assigned_users"]) or "None assigned"
+        cells = (
+            item["subscription_name"],
+            item["renewal_date"].isoformat(),
+            item["renewal_term"],
+            assigned_users,
+            str(item["renewal_quantity"]),
+            _format_money(item["unit_price"]),
+            _format_money(item["line_total"]),
+        )
+        rows.append(
+            "<tr>"
+            + "".join(
+                f'<td style="padding:8px;border-bottom:1px solid #d9dde3;vertical-align:top">{escape(value)}</td>'
+                for value in cells
+            )
+            + "</tr>"
+        )
+    header_html = "".join(
+        f'<th scope="col" style="padding:8px;text-align:left;border-bottom:2px solid #9aa3ad">{heading}</th>'
+        for heading in headers
+    )
+    return (
+        '<table style="width:100%;border-collapse:collapse;margin:20px 0 12px">'
+        f"<thead><tr>{header_html}</tr></thead><tbody>{''.join(rows)}</tbody></table>"
+        f'<p style="text-align:right"><strong>Total renewal cost: {_format_money(total_cost)}</strong></p>'
+    )
+
+
+class _RenewalHTMLTextParser(HTMLParser):
+    """Create a readable plain-text alternative without executing template markup."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"p", "tr"}:
+            self.parts.append("\n")
+        elif tag in {"br"}:
+            self.parts.append("\n")
+        elif tag in {"td", "th"} and self.parts and not self.parts[-1].endswith("\n"):
+            self.parts.append(" | ")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"p", "tr", "table"}:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+    def text(self) -> str:
+        lines = (
+            " ".join(line.split())
+            for line in unescape("".join(self.parts)).splitlines()
+        )
+        return "\n".join(line for line in lines if line).strip()
+
+
+def _html_to_text(content: str) -> str:
+    parser = _RenewalHTMLTextParser()
+    parser.feed(content)
+    parser.close()
+    return parser.text()
+
+
+async def _build_renewal_message(
     *,
     company_name: str,
     renewal_date: date,
     billing_contact: dict[str, Any] | None,
     renewal_items: list[dict[str, Any]],
-) -> str:
-    total_cost = sum(
-        (item["line_total"] for item in renewal_items),
-        Decimal("0.00"),
-    ).quantize(Decimal("0.01"))
-    lines = [
-        f"Subscription renewal reminder for {company_name}",
-        f"Billing contact: {_billing_contact_name(billing_contact)}",
-        f"Renewal date: {renewal_date.isoformat()}",
-        "",
-    ]
-    for item in renewal_items:
-        assigned_users = item["assigned_users"] or ["None assigned"]
-        lines.extend(
-            [
-                f"Subscription: {item['subscription_name']}",
-                f"License: {item['license_name']}",
-                f"Description: {item['description'] or 'No description provided'}",
-                f"Renewing quantity: {item['renewal_quantity']}",
-                f"Assigned users: {', '.join(assigned_users)}",
-            ]
-        )
-        if item["extra_assigned_user_count"] > 0:
-            lines.append(
-                "Additional currently assigned users above renewing quantity: "
-                f"{item['extra_assigned_user_count']}"
-            )
-        lines.extend(
-            [
-                f"Unassigned licenses: {item['unassigned_quantity']}",
-                f"Renewal term: {item['renewal_term']}",
-                f"Unit price: {_format_money(item['unit_price'], item['currency'])}",
-                f"Line total: {_format_money(item['line_total'], item['currency'])}",
-                "",
-            ]
-        )
-    lines.extend(
-        [
-            f"Total renewal cost: {_format_money(total_cost)}",
-            "",
-            "This renewal notice was generated automatically.",
-        ]
+) -> tuple[str, str]:
+    rendered, content_type = await message_templates_service.render_template_content(
+        _RENEWAL_TEMPLATE_SLUG,
+        {
+            "recipient": {"name": _billing_contact_name(billing_contact)},
+            "company": {"name": company_name},
+            "renewal": {
+                "date": renewal_date.isoformat(),
+                "items_table": _ITEMS_TABLE_TOKEN,
+            },
+        },
+        default_content=_DEFAULT_RENEWAL_TEMPLATE,
+        default_content_type="text/html",
     )
-    return "\n".join(lines).strip()
+    table_html = _build_renewal_table_html(renewal_items)
+    if content_type == "text/html":
+        html_message = (
+            rendered.replace(_ITEMS_TABLE_TOKEN, table_html)
+            if _ITEMS_TABLE_TOKEN in rendered
+            else f"{rendered}{table_html}"
+        )
+        return _html_to_text(html_message), html_message
 
-
-def _build_html_from_text(message: str) -> str:
-    return "<br>".join(escape(line) for line in message.splitlines())
+    table_text = _html_to_text(table_html)
+    text_message = (
+        rendered.replace(_ITEMS_TABLE_TOKEN, table_text)
+        if _ITEMS_TABLE_TOKEN in rendered
+        else f"{rendered.rstrip()}\n\n{table_text}"
+    )
+    return text_message, "<br>".join(escape(line) for line in text_message.splitlines())
 
 
 async def _select_billing_contact(
@@ -204,8 +289,12 @@ async def _select_billing_contact(
             continue
         return contact, normalised, None
 
-    return first_contact, None, invalid_reasons[0] if invalid_reasons else (
-        "No valid billing contact email address is configured for this company."
+    return (
+        first_contact,
+        None,
+        invalid_reasons[0]
+        if invalid_reasons
+        else ("No valid billing contact email address is configured for this company."),
     )
 
 
@@ -306,7 +395,9 @@ async def _build_group_renewal_items(
             or subscription.get("category_name")
             or ""
         ).strip()
-        product_code = str(product.get("sku") or product.get("vendor_sku") or "").strip()
+        product_code = str(
+            product.get("sku") or product.get("vendor_sku") or ""
+        ).strip()
         line_total = (unit_price * renewal_quantity).quantize(Decimal("0.01"))
         renewal_items.append(
             {
@@ -324,7 +415,6 @@ async def _build_group_renewal_items(
                 "renewal_date": subscription["end_date"],
                 "renewal_term": _term_label(product),
                 "unit_price": unit_price,
-                "currency": _DEFAULT_CURRENCY_LABEL,
                 "line_total": line_total,
                 "product_code": product_code,
                 "term_start": next_term_start,
@@ -332,7 +422,9 @@ async def _build_group_renewal_items(
             }
         )
 
-    renewal_items.sort(key=lambda item: (item["subscription_name"], item["license_name"]))
+    renewal_items.sort(
+        key=lambda item: (item["subscription_name"], item["license_name"])
+    )
     return renewal_items
 
 
@@ -388,8 +480,10 @@ async def _process_reminder(
 
     now = datetime.now(timezone.utc)
     company_name = str(company.get("name") or f"Company {company_id}")
-    subject = f"Subscription renewal reminder for {company_name} ({renewal_date.isoformat()})"
-    message = _build_renewal_message(
+    subject = (
+        f"Subscription renewal reminder for {company_name} ({renewal_date.isoformat()})"
+    )
+    message, html_message = await _build_renewal_message(
         company_name=company_name,
         renewal_date=renewal_date,
         billing_contact=billing_contact,
@@ -447,7 +541,7 @@ async def _process_reminder(
         sent, _ = await email_service.send_email(
             subject=subject,
             recipients=[billing_email],
-            html_body=_build_html_from_text(message),
+            html_body=html_message,
             text_body=message,
         )
         if sent:
@@ -474,7 +568,9 @@ async def _process_reminder(
     return True
 
 
-def _build_invoice_line_items(renewal_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _build_invoice_line_items(
+    renewal_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     line_items: list[dict[str, Any]] = []
     for item in renewal_items:
         line_items.append(
@@ -507,14 +603,16 @@ async def _process_invoice(
         await _record_issue(
             scheduled_invoice_id=int(scheduled_invoice["id"]),
             field="invoice_error",
-            message=billing_error or "No valid billing contact email is configured for this company.",
+            message=billing_error
+            or "No valid billing contact email is configured for this company.",
         )
         issue_log.append(
             {
                 "company_id": company_id,
                 "renewal_date": renewal_date.isoformat(),
                 "stage": "invoice",
-                "message": billing_error or "No valid billing contact email is configured for this company.",
+                "message": billing_error
+                or "No valid billing contact email is configured for this company.",
             }
         )
         return False
@@ -587,7 +685,8 @@ def build_renewal_forecast(
 ) -> dict[str, Any]:
     """Build a lightweight renewal forecast dashboard payload."""
     active_subscriptions = [
-        sub for sub in subscriptions
+        sub
+        for sub in subscriptions
         if sub.get("status") in {"active", "pending_renewal"}
         and isinstance(sub.get("end_date"), date)
     ]
@@ -660,7 +759,8 @@ def build_churn_risk_report(
             reasons.append("Auto-renew is disabled.")
 
         pending_decreases = [
-            change for change in pending_changes_by_subscription.get(sub["id"], [])
+            change
+            for change in pending_changes_by_subscription.get(sub["id"], [])
             if change.get("change_type") == "decrease"
         ]
         if pending_decreases:
@@ -754,7 +854,9 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
     ]
 
     if not eligible_subscriptions:
-        logger.info("No subscriptions due for renewal processing", target_date=target_date)
+        logger.info(
+            "No subscriptions due for renewal processing", target_date=target_date
+        )
         return {
             "processed_count": 0,
             "reminder_count": 0,
@@ -780,7 +882,9 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
 
     for (company_id, renewal_date), group_subscriptions in grouped.items():
         scheduled_invoice = await _ensure_scheduled_invoice(company_id, renewal_date)
-        renewal_items = await _build_group_renewal_items(company_id, group_subscriptions)
+        renewal_items = await _build_group_renewal_items(
+            company_id, group_subscriptions
+        )
         if not renewal_items:
             if (
                 scheduled_invoice.get("status") != "issued"
@@ -821,13 +925,15 @@ async def create_renewal_invoices_for_date(target_date: date) -> dict[str, Any]:
             ):
                 reminder_count += 1
                 group_changed = True
-            scheduled_invoice = await invoices_repo.get_scheduled_invoice(
-                int(scheduled_invoice["id"])
-            ) or scheduled_invoice
+            scheduled_invoice = (
+                await invoices_repo.get_scheduled_invoice(int(scheduled_invoice["id"]))
+                or scheduled_invoice
+            )
 
-        if 0 <= days_until_renewal <= _INVOICE_WINDOW_DAYS and scheduled_invoice.get(
-            "invoice_id"
-        ) is None:
+        if (
+            0 <= days_until_renewal <= _INVOICE_WINDOW_DAYS
+            and scheduled_invoice.get("invoice_id") is None
+        ):
             if await _process_invoice(
                 company=company,
                 renewal_date=renewal_date,

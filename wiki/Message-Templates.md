@@ -36,3 +36,12 @@ still picking up context-specific values like `{{ ticket.id }}` or
 
 Templates can also be used inside areas that support template variables such as
 smtp trigger bodies, SMS messages, or ntfy notifications.
+
+## Subscription renewal reminder
+
+The default `subscription-renewal-reminder` HTML template controls the wording
+and signature of the 60-day renewal email. Global administrators can edit it in
+**Administration → Message Templates**. The template supports
+`{{ recipient.name }}`, `{{ company.name }}`, `{{ renewal.date }}`, and
+`{{ renewal.items_table }}`. Keep `{{ renewal.items_table }}` in the template
+so the generated renewal-details table and total cost remain in the email.
