@@ -47,7 +47,7 @@ def test_admin_reporting_clone_prefills_create_form(monkeypatch):
     monkeypatch.setattr(
         reporting_handlers,
         "_list_reporting_eligible_users",
-        lambda: _eligible_users(),
+        lambda _company_id: _eligible_users(),
     )
     monkeypatch.setattr(reporting_repo, "get_query", fake_get_query)
     monkeypatch.setattr(
@@ -58,7 +58,9 @@ def test_admin_reporting_clone_prefills_create_form(monkeypatch):
     )
 
     response = asyncio.run(
-        reporting_handlers.admin_reporting_clone(SimpleNamespace(), 12)
+        reporting_handlers.admin_reporting_clone(
+            SimpleNamespace(state=SimpleNamespace(active_company_id=42)), 12
+        )
     )
 
     assert response.status_code == 200

@@ -65,7 +65,7 @@
 
       <fieldset class="form-fieldset">
         <legend>Permissions</legend>
-        <p class="form-hint">Super admins always have access. Tick the technicians who should also be able to run this report.</p>
+        <p class="form-hint">Super admins always have access. Tick the MyPortal users from the selected company who should also be able to run this report.</p>
         {% if eligible_users %}
           <div class="checkbox-grid">
             {% for entry in eligible_users %}
@@ -77,7 +77,7 @@
             {% endfor %}
           </div>
         {% else %}
-          <p class="form-hint">No eligible technician users were found.</p>
+          <p class="form-hint">No eligible MyPortal users were found for the selected company.</p>
         {% endif %}
       </fieldset>
 

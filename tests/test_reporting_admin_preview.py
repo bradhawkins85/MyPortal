@@ -73,7 +73,7 @@ def test_admin_reporting_test_renders_unsaved_query_without_updating(monkeypatch
         ),
     )
     monkeypatch.setattr(
-        reporting_handlers, "_list_reporting_eligible_users", lambda: _empty_users()
+        reporting_handlers, "_list_reporting_eligible_users", lambda _company_id: _empty_users()
     )
     monkeypatch.setattr(reporting_repo, "get_query", fake_get_query)
     monkeypatch.setattr(reporting_repo, "update_query", fail_update)
@@ -144,7 +144,7 @@ def test_admin_reporting_create_previews_unsaved_query_without_creating(monkeypa
         ),
     )
     monkeypatch.setattr(
-        reporting_handlers, "_list_reporting_eligible_users", lambda: _empty_users()
+        reporting_handlers, "_list_reporting_eligible_users", lambda _company_id: _empty_users()
     )
     monkeypatch.setattr(reporting_repo, "create_query", fail_create)
     monkeypatch.setattr(reporting_service, "run_query_with_context", fake_run_query)
