@@ -23,17 +23,26 @@ def _main():
 
 
 async def _portal_context(request: Request, *, write: bool = False):
-    user, redirect = await _main()._require_authenticated_user(request)
+    main_module = _main()
+    user, redirect = await main_module._require_authenticated_user(request)
     if redirect:
         return None, None, None, redirect
+    has_access = (
+        bool(user.get("is_super_admin"))
+        or bool(user.get("is_company_admin"))
+        or main_module._menu_can(user.get("menu_access"), "menu.defender", write=write)
+    )
+    if not has_access:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Read/write Windows Defender access required"
+            if write
+            else "Windows Defender access required",
+        )
     company_id = user.get("company_id")
     if company_id is None:
         raise HTTPException(400, "No active company")
     membership = None
-    can_write = (bool(user.get("is_super_admin")) or bool(user.get("is_company_admin"))
-                 or _main()._menu_can(user.get("menu_access"), "menu.defender", write=True))
-    if write and not can_write:
-        return user, membership, int(company_id), RedirectResponse("/", status_code=303)
     return user, membership, int(company_id), None
 
 @router.get("/defender", response_class=HTMLResponse)

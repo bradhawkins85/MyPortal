@@ -1,0 +1,7 @@
+{
+  "guid": "f0d3dc28-1437-4d8d-81bc-380b46e4b1f7",
+  "occurred_at": "2026-09-19T00:00Z",
+  "change_type": "Security",
+  "summary": "Complete the role-permission coverage audit and close Defender and RAG authorization gaps.",
+  "content_hash": "ac080602434aaf5bcc256030da31bd7e9af4ae80f32e6379c184f49db874f5e9"
+}

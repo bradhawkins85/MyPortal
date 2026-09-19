@@ -99,6 +99,7 @@ from app.api.routes import (
     features as features_api,
     defender as defender_api,
 )
+from app.api.dependencies.auth import require_super_admin
 from uuid import uuid4
 
 from app.core.config import get_settings, get_templates_config
@@ -6038,7 +6039,7 @@ async def attach_ticket_requester_mobile(request: Request, ticket_id: int):
 
 
 @app.get("/api/rag/relationships/metrics", response_class=JSONResponse)
-async def rag_relationship_metrics():
+async def rag_relationship_metrics(_: dict = Depends(require_super_admin)):
     from app.repositories import rag_relationships as rel_repo
 
     return JSONResponse(await rel_repo.metrics())
