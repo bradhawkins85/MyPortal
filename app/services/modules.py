@@ -1205,6 +1205,14 @@ _ALWAYS_ON_TICKET_ACTION_MODULES: tuple[dict[str, Any], ...] = (
         "enabled": True,
     },
     {
+        "slug": "assign-approval-configuration",
+        "name": "Assign Approval Configuration",
+        "description": "Assign a company-scoped change approval workflow to a matching ticket.",
+        "icon": "✓",
+        "settings": {},
+        "enabled": True,
+    },
+    {
         "slug": "update-ticket",
         "name": "Update Ticket",
         "description": "Update ticket fields such as status, priority, assigned user, category, and requester.",
@@ -2449,6 +2457,12 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             {"name": "tasks", "label": "Tasks (JSON array)", "type": "json"},
         ],
     },
+    "assign-approval-configuration": {
+        "fields": [
+            {"name": "configuration_id", "label": "Approval configuration ID", "type": "integer", "required": True},
+            {"name": "ticket_id", "label": "Ticket ID", "type": "string"},
+        ],
+    },
     "update-ticket": {
         "fields": [
             {"name": "ticket_id", "label": "Ticket ID", "type": "string"},
@@ -2868,6 +2882,7 @@ async def trigger_module(
         "sms-gateway": _invoke_sms_gateway,
         "create-ticket": _invoke_create_ticket,
         "create-task": _invoke_create_task,
+        "assign-approval-configuration": _invoke_assign_approval_configuration,
         "call-recordings": _validate_call_recordings,
         "unifi-talk": _invoke_unifi_talk,
         "update-ticket": _invoke_update_ticket,
@@ -4652,6 +4667,37 @@ async def _invoke_create_task(
         response_body=response_body,
     )
     return _build_event_result(updated_event, extra=extra)
+
+
+async def _invoke_assign_approval_configuration(
+    settings: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    event_future: asyncio.Future[int | None] | None = None,
+) -> dict[str, Any]:
+    """Attach a reusable approval configuration to an automation ticket context."""
+    from app.repositories import approval_matrix as approval_matrix_repo
+
+    context = payload.get("context") if isinstance(payload.get("context"), Mapping) else {}
+    ticket_value = payload.get("ticket_id") or context.get("ticket_id")
+    configuration_value = payload.get("configuration_id")
+    try:
+        ticket_id = int(ticket_value)
+        configuration_id = int(configuration_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("ticket_id and configuration_id must be valid integers") from exc
+    workflow = await approval_matrix_repo.assign_to_ticket(
+        ticket_id=ticket_id,
+        configuration_id=configuration_id,
+        assigned_by_user_id=None,
+    )
+    return {
+        "status": "ok",
+        "ticket_id": ticket_id,
+        "configuration_id": configuration_id,
+        "workflow_id": workflow.get("id"),
+        "pending_count": workflow.get("pending_count", 0),
+    }
 
 
 async def _invoke_chatgpt_mcp(

@@ -51,6 +51,7 @@ from app.repositories import ticket_clocks as ticket_clocks_repo
 from app.repositories import tickets as tickets_repo
 from app.repositories import email_blocklist as email_blocklist_repo
 from app.repositories import attachment_blocklist as attachment_blocklist_repo
+from app.repositories import approval_matrix as approval_matrix_repo
 from app.repositories import users as user_repo
 from app.repositories import site_settings as site_settings_repo
 from app.services import agent as agent_service
@@ -67,6 +68,91 @@ from app.services.sanitization import sanitize_rich_text
 
 
 router = APIRouter(tags=["Tickets"])
+
+
+@router.get("/admin/companies/{company_id:int}/change-approval-matrix", response_class=HTMLResponse)
+async def admin_change_approval_matrix(company_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    configurations = await approval_matrix_repo.list_configurations(company_id)
+    contacts = await staff_repo.list_enabled_staff_users(company_id)
+    technicians = await membership_repo.list_users_with_permission(main_module.HELPDESK_PERMISSION_KEY)
+    return await main_module._render_template(
+        "admin/change_approval_matrix.html", request, current_user,
+        extra={"title": "Change Approval Matrix", "company": company,
+               "configurations": configurations, "contacts": contacts,
+               "technicians": technicians},
+    )
+
+
+@router.post("/admin/companies/{company_id:int}/change-approval-matrix", response_class=HTMLResponse)
+async def admin_create_change_approval(company_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    form = await parse_csrf_form(request)
+    name = str(form.get("name") or "").strip()
+    try:
+        technician_id = int(form.get("technicianUserId") or 0)
+    except (TypeError, ValueError):
+        technician_id = 0
+    if not name or len(name) > 120 or not technician_id:
+        return flash_redirect(f"/admin/companies/{company_id}/change-approval-matrix", "A name and technician are required.", "error")
+    allowed_technicians = await membership_repo.list_users_with_permission(main_module.HELPDESK_PERMISSION_KEY)
+    if technician_id not in {int(item["id"]) for item in allowed_technicians}:
+        return flash_redirect(f"/admin/companies/{company_id}/change-approval-matrix", "Select a valid technician.", "error")
+    allowed_contacts = {int(item["staff_id"]) for item in await staff_repo.list_enabled_staff_users(company_id)}
+    raw_contacts = form.getlist("contactStaffIds") if hasattr(form, "getlist") else []
+    contact_ids = [int(value) for value in raw_contacts if str(value).isdigit() and int(value) in allowed_contacts]
+    await approval_matrix_repo.create_configuration(
+        company_id=company_id, name=name, technician_user_id=technician_id,
+        contact_staff_ids=contact_ids, description=str(form.get("description") or "").strip()[:500] or None,
+    )
+    return flash_redirect(f"/admin/companies/{company_id}/change-approval-matrix", "Approval type created.", "success")
+
+
+@router.post("/admin/tickets/{ticket_id:int}/approval-configuration", response_class=HTMLResponse)
+async def admin_assign_ticket_approval(ticket_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    form = await parse_csrf_form(request)
+    try:
+        configuration_id = int(form.get("approvalConfigurationId") or 0)
+        await approval_matrix_repo.assign_to_ticket(
+            ticket_id=ticket_id, configuration_id=configuration_id,
+            assigned_by_user_id=int(current_user["id"]),
+        )
+    except (TypeError, ValueError) as exc:
+        return flash_redirect(f"/admin/tickets/{ticket_id}", str(exc), "error")
+    return flash_redirect(f"/admin/tickets/{ticket_id}", "Change approval requirements assigned.", "success")
+
+
+@router.post("/admin/tickets/{ticket_id:int}/approvals/{decision_id:int}", response_class=HTMLResponse)
+async def admin_set_ticket_approval(ticket_id: int, decision_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    form = await parse_csrf_form(request)
+    try:
+        updated = await approval_matrix_repo.set_decision(
+            ticket_id=ticket_id, decision_id=decision_id,
+            decision_status=str(form.get("decision") or "").lower(),
+            decided_by_user_id=int(current_user["id"]),
+        )
+    except ValueError as exc:
+        return flash_redirect(f"/admin/tickets/{ticket_id}", str(exc), "error")
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Approval not found")
+    return flash_redirect(f"/admin/tickets/{ticket_id}", "Approval decision updated.", "success")
 
 _RELATED_STOP_WORDS = {
     "about", "after", "again", "also", "and", "are", "attachment", "attachments",
@@ -1451,6 +1537,19 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
 
     await tickets_repo.update_ticket(ticket_id, **update_fields)
     await tickets_repo.set_ticket_status(ticket_id, status_value)
+    approval_configuration_raw = form.get("approvalConfigurationId")
+    if approval_configuration_raw:
+        try:
+            await approval_matrix_repo.assign_to_ticket(
+                ticket_id=ticket_id,
+                configuration_id=int(approval_configuration_raw),
+                assigned_by_user_id=int(current_user["id"]),
+            )
+        except (TypeError, ValueError) as exc:
+            return await main_module._render_ticket_detail(
+                request, current_user, ticket_id=ticket_id,
+                error_message=str(exc), status_code=status.HTTP_400_BAD_REQUEST,
+            )
     if shipment_tracking_url:
         try:
             await shipment_watch_service.upsert_watch(

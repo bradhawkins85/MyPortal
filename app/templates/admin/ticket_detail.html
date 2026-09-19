@@ -156,6 +156,16 @@
                 </select>
               </div>
               <div class="form-field">
+                <span class="form-label">Change Type</span>
+                {% if ticket.company_id %}
+                  <select class="form-input" name="approvalConfigurationId" {% if not ticket_approval_configurations %}disabled{% endif %}>
+                    <option value="">Select change type</option>
+                    {% for option in ticket_approval_configurations %}<option value="{{ option.id }}" {% if ticket_approval_workflow and option.id == ticket_approval_workflow.configuration_id %}selected{% endif %}>{{ option.name }}</option>{% endfor %}
+                  </select>
+                  {% if not ticket_approval_configurations %}<p class="form-help">No approval types are configured for this company.</p>{% endif %}
+                {% else %}<p class="form-help">Link a company before selecting a change type.</p>{% endif %}
+              </div>
+              <div class="form-field">
                 <label class="form-label" for="ticket-requester-detail">Requester</label>
                 <select
                   id="ticket-requester-detail"
@@ -833,6 +843,15 @@
                 </div>
               </div>
             </details>
+          {% endif %}
+
+          {% if ticket_approval_workflow and ticket_approval_workflow.pending_count %}
+          <section class="card card--panel" data-ticket-approvals>
+            <header class="card__header"><div><h2 class="card__title">Pending Approvals</h2><p class="card__subtitle">{{ ticket_approval_workflow.configuration_name }} · {{ ticket_approval_workflow.pending_count }} outstanding</p></div></header>
+            <div class="table-wrapper"><table class="table"><thead><tr><th>Required approver</th><th>Role</th><th>Status</th><th>Decision</th></tr></thead><tbody>
+              {% for approval in ticket_approval_workflow.decisions %}<tr><td>{{ approval.approver_name }}{% if approval.approver_email %}<div class="form-help">{{ approval.approver_email }}</div>{% endif %}</td><td>{{ approval.approver_kind|title }}</td><td><span class="status status--{{ 'warning' if approval.status == 'pending' else ('success' if approval.status == 'approved' else 'danger') }}">{{ approval.status|title }}</span></td><td><form method="post" action="/admin/tickets/{{ ticket.id }}/approvals/{{ approval.id }}" class="button-group">{% include "partials/csrf.html" %}<button class="button button--small button--ghost" name="decision" value="approved" type="submit">Approve</button><button class="button button--small button--ghost" name="decision" value="denied" type="submit">Deny</button></form></td></tr>{% endfor %}
+            </tbody></table></div>
+          </section>
           {% endif %}
 
           <details class="card card--panel card-collapsible" data-ticket-tasks-card>

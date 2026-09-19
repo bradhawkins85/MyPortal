@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/tables.html" import table_column_picker %}
+
+{% block header_title %}Change Approval Matrix{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions([{"label": "Company details", "type": "link", "href": "/admin/companies/" ~ company.id ~ "/edit"}]) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  <section class="card card--panel admin-grid__full">
+    <header class="card__header">
+      <div><h2 class="card__title">{{ company.name }}</h2><p class="card__subtitle">Company-specific change types and the people whose approval is required.</p></div>
+    </header>
+    <div class="card__body">
+      <form method="post" action="/admin/companies/{{ company.id }}/change-approval-matrix" class="form-grid">
+        {% include "partials/csrf.html" %}
+        <div class="form-field"><label class="form-label" for="approval-name">Change type</label><input class="form-input" id="approval-name" name="name" maxlength="120" required placeholder="e.g. Production firewall change" /></div>
+        <div class="form-field"><label class="form-label" for="approval-technician">Technician</label><select class="form-input" id="approval-technician" name="technicianUserId" required><option value="">Select technician</option>{% for technician in technicians %}<option value="{{ technician.id }}">{{ technician.first_name or '' }} {{ technician.last_name or '' }} ({{ technician.email }})</option>{% endfor %}</select><p class="form-help">Every approval option requires a responsible technician.</p></div>
+        <div class="form-field"><label class="form-label" for="approval-contacts">Approver contacts</label><select class="form-input" id="approval-contacts" name="contactStaffIds" multiple size="5">{% for contact in contacts %}<option value="{{ contact.staff_id }}">{{ contact.first_name }} {{ contact.last_name }} ({{ contact.email }})</option>{% endfor %}</select><p class="form-help">Use Ctrl/Cmd to select multiple contacts.</p></div>
+        <div class="form-field"><label class="form-label" for="approval-description">Guidance</label><textarea class="form-input" id="approval-description" name="description" maxlength="500" rows="3"></textarea></div>
+        <div class="form-actions"><button class="button button--primary" type="submit">Add approval type</button></div>
+      </form>
+    </div>
+  </section>
+  <section class="card card--panel admin-grid__full">
+    <header class="card__header"><div class="card__controls"><input type="search" class="form-input card__control" placeholder="Filter approval types" data-table-filter="approval-matrix-table" /></div></header>
+    <div class="table-wrapper"><table class="table" id="approval-matrix-table" data-table data-page-size-max="25"><thead><tr><th data-sort="string">Change type</th><th data-sort="string">Technician</th><th data-sort="number">Contacts</th><th data-sort="string">Status</th></tr></thead><tbody>
+      {% for configuration in configurations %}<tr><td>{{ configuration.name }}{% if configuration.description %}<div class="form-help">{{ configuration.description }}</div>{% endif %}</td><td>{{ configuration.technician_name }}</td><td>{{ configuration.contact_count }}</td><td><span class="status status--{{ 'success' if configuration.is_active else 'neutral' }}">{{ 'Active' if configuration.is_active else 'Inactive' }}</span></td></tr>{% else %}<tr><td colspan="4" class="table__empty">No change approval types have been configured for this company.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+</div>
+{% endblock %}
