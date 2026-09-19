@@ -139,8 +139,8 @@ async def _has_helpdesk_permission(current_user: dict) -> bool:
 async def _validate_ticket_assignee(assigned_user_id: int | None) -> None:
     if assigned_user_id is None:
         return
-    has_permission = await membership_repo.user_has_permission(
-        assigned_user_id, tickets_service.HELPDESK_PERMISSION_KEY
+    has_permission = await membership_repo.user_has_role_permission(
+        assigned_user_id, tickets_service.TICKET_ASSIGNEE_PERMISSION_KEY
     )
     if not has_permission:
         raise HTTPException(

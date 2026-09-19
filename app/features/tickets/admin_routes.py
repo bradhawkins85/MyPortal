@@ -100,7 +100,9 @@ def _integer_form_list(form: Any, name: str) -> list[int]:
 
 
 async def _approval_selector_options(company_id: int, main_module: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
-    all_technical_users = await membership_repo.list_users_with_permission(main_module.HELPDESK_PERMISSION_KEY)
+    all_technical_users = await membership_repo.list_users_with_permission(
+        tickets_service.TICKET_ASSIGNEE_PERMISSION_KEY
+    )
     membership_rows = await db.fetch_all(
         "SELECT user_id, role_id FROM company_memberships WHERE company_id = %s AND LOWER(status) = 'active'",
         (company_id,),
@@ -981,9 +983,9 @@ async def admin_create_ticket(request: Request):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     if assigned_user_id is not None:
-        has_permission = await membership_repo.user_has_permission(
+        has_permission = await membership_repo.user_has_role_permission(
             assigned_user_id,
-            main_module.HELPDESK_PERMISSION_KEY,
+            tickets_service.TICKET_ASSIGNEE_PERMISSION_KEY,
         )
         if not has_permission:
             return await main_module._render_tickets_dashboard(
@@ -1573,9 +1575,9 @@ async def admin_update_ticket_details(ticket_id: int, request: Request):
                 error_message="Select a valid assignee.",
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
-        has_permission = await membership_repo.user_has_permission(
+        has_permission = await membership_repo.user_has_role_permission(
             assigned_user_id,
-            main_module.HELPDESK_PERMISSION_KEY,
+            tickets_service.TICKET_ASSIGNEE_PERMISSION_KEY,
         )
         if not has_permission:
             return await main_module._render_ticket_detail(
