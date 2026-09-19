@@ -2459,7 +2459,7 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "assign-approval-configuration": {
         "fields": [
-            {"name": "configuration_id", "label": "Approval configuration ID", "type": "integer", "required": True},
+            {"name": "approval_guid", "label": "Approval GUID", "type": "string", "required": True},
             {"name": "ticket_id", "label": "Ticket ID", "type": "string"},
         ],
     },
@@ -4680,21 +4680,22 @@ async def _invoke_assign_approval_configuration(
 
     context = payload.get("context") if isinstance(payload.get("context"), Mapping) else {}
     ticket_value = payload.get("ticket_id") or context.get("ticket_id")
-    configuration_value = payload.get("configuration_id")
+    approval_guid = str(payload.get("approval_guid") or "").strip()
     try:
         ticket_id = int(ticket_value)
-        configuration_id = int(configuration_value)
     except (TypeError, ValueError) as exc:
-        raise ValueError("ticket_id and configuration_id must be valid integers") from exc
-    workflow = await approval_matrix_repo.assign_to_ticket(
+        raise ValueError("ticket_id must be a valid integer") from exc
+    if not approval_guid:
+        raise ValueError("approval_guid is required")
+    workflow = await approval_matrix_repo.assign_to_ticket_by_guid(
         ticket_id=ticket_id,
-        configuration_id=configuration_id,
+        approval_guid=approval_guid,
         assigned_by_user_id=None,
     )
     return {
         "status": "ok",
         "ticket_id": ticket_id,
-        "configuration_id": configuration_id,
+        "approval_guid": approval_guid,
         "workflow_id": workflow.get("id"),
         "pending_count": workflow.get("pending_count", 0),
     }

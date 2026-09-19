@@ -28,6 +28,7 @@
 
 {% set approval_columns = [
   {"key": "name", "label": "Approval type", "default_visible": true},
+  {"key": "guid", "label": "GUID", "default_visible": true},
   {"key": "technician", "label": "Required technician", "default_visible": true},
   {"key": "contacts", "label": "Required contacts", "default_visible": true},
   {"key": "status", "label": "Status", "default_visible": true},
@@ -74,18 +75,19 @@
       </header>
       <div class="table-wrapper">
         <table class="table" id="approvals-table" data-table data-table-id="approvals" data-page-size-max="25">
-          <thead><tr><th data-sort="string" data-column-key="name">Approval type</th><th data-sort="string" data-column-key="technician">Required technician</th><th data-sort="number" data-column-key="contacts">Required contacts</th><th data-sort="string" data-column-key="status">Status</th><th class="table__actions" data-column-key="actions">Actions</th></tr></thead>
+          <thead><tr><th data-sort="string" data-column-key="name">Approval type</th><th data-sort="string" data-column-key="guid">GUID</th><th data-sort="string" data-column-key="technician">Required technician</th><th data-sort="number" data-column-key="contacts">Required contacts</th><th data-sort="string" data-column-key="status">Status</th><th class="table__actions" data-column-key="actions">Actions</th></tr></thead>
           <tbody>
           {% for configuration in configurations %}
             <tr>
               <td data-column-key="name">{{ configuration.name }}{% if configuration.description %}<div class="form-help">{{ configuration.description }}</div>{% endif %}</td>
+              <td data-column-key="guid"><code>{{ configuration.guid }}</code></td>
               <td data-column-key="technician">{{ configuration.technician_name }}</td>
               <td data-column-key="contacts" data-value="{{ configuration.contact_count }}">{{ configuration.contact_count }}</td>
               <td data-column-key="status"><span class="status status--{{ 'success' if configuration.is_active else 'neutral' }}">{{ 'Active' if configuration.is_active else 'Inactive' }}</span></td>
               <td class="table__actions" data-column-key="actions"><a class="button button--small" href="#approval-{{ configuration.id }}">Edit</a></td>
             </tr>
           {% else %}
-            <tr><td colspan="5" class="table__empty">No change approval types have been configured for {{ company.name }}.</td></tr>
+            <tr><td colspan="6" class="table__empty">No change approval types have been configured for {{ company.name }}.</td></tr>
           {% endfor %}
           </tbody>
         </table>

@@ -1,9 +1,11 @@
 from unittest.mock import AsyncMock
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
 from app.repositories import approval_matrix
+from app.services import modules
 
 
 @pytest.mark.anyio
@@ -111,3 +113,78 @@ def test_approval_selector_migration_preserves_legacy_technician():
     assert "approval_configuration_company_roles" in migration
     assert "approval_configuration_job_titles" in migration
     assert "SELECT id, technician_user_id, 0 FROM approval_configurations" in migration
+
+
+@pytest.mark.anyio
+async def test_create_configuration_assigns_a_guid(monkeypatch):
+    insert = AsyncMock(return_value=12)
+    monkeypatch.setattr(approval_matrix.db, "execute_returning_lastrowid", insert)
+    monkeypatch.setattr(approval_matrix.db, "execute", AsyncMock())
+    monkeypatch.setattr(approval_matrix, "_replace_selector_options", AsyncMock())
+    monkeypatch.setattr(
+        approval_matrix,
+        "get_configuration",
+        AsyncMock(return_value={"id": 12}),
+    )
+
+    await approval_matrix.create_configuration(
+        company_id=4,
+        name="Firewall change",
+        technician_user_id=7,
+        contact_staff_ids=[],
+    )
+
+    query, params = insert.await_args.args
+    assert "(guid, company_id" in query
+    assert str(UUID(params[0])) == params[0]
+
+
+@pytest.mark.anyio
+async def test_assign_to_ticket_by_guid_resolves_public_identifier(monkeypatch):
+    approval_guid = "e30ad5d9-f3a2-4a16-b53d-b77f5ec1505e"
+    monkeypatch.setattr(
+        approval_matrix,
+        "get_configuration_by_guid",
+        AsyncMock(return_value={"id": 31}),
+    )
+    assign = AsyncMock(return_value={"id": 8})
+    monkeypatch.setattr(approval_matrix, "assign_to_ticket", assign)
+
+    result = await approval_matrix.assign_to_ticket_by_guid(
+        ticket_id=5,
+        approval_guid=approval_guid,
+    )
+
+    assert result == {"id": 8}
+    assign.assert_awaited_once_with(
+        ticket_id=5,
+        configuration_id=31,
+        assigned_by_user_id=None,
+    )
+
+
+def test_approvals_table_displays_guid_column():
+    template = Path("app/templates/admin/approvals.html").read_text(encoding="utf-8")
+
+    assert '"key": "guid", "label": "GUID"' in template
+    assert 'data-column-key="guid"><code>{{ configuration.guid }}</code>' in template
+
+
+@pytest.mark.anyio
+async def test_automation_assigns_approval_by_guid(monkeypatch):
+    approval_guid = "e30ad5d9-f3a2-4a16-b53d-b77f5ec1505e"
+    assign = AsyncMock(return_value={"id": 8, "pending_count": 2})
+    monkeypatch.setattr(approval_matrix, "assign_to_ticket_by_guid", assign)
+
+    result = await modules._invoke_assign_approval_configuration(
+        {},
+        {"approval_guid": approval_guid, "context": {"ticket_id": 5}},
+    )
+
+    assign.assert_awaited_once_with(
+        ticket_id=5,
+        approval_guid=approval_guid,
+        assigned_by_user_id=None,
+    )
+    assert result["approval_guid"] == approval_guid
+    assert result["pending_count"] == 2

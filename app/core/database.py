@@ -467,6 +467,18 @@ class Database:
         # Replace JSON column type with TEXT
         sql = re.sub(r'\bJSON\b', 'TEXT', sql, flags=re.IGNORECASE)
 
+        # SQLite has no UUID() function. Generate canonical version-4 UUID text
+        # for MySQL migrations that backfill public identifiers.
+        sql = re.sub(
+            r'\bUUID\(\)',
+            "(lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || "
+            "substr(lower(hex(randomblob(2))), 2) || '-' || "
+            "substr('89ab', abs(random()) % 4 + 1, 1) || "
+            "substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))))",
+            sql,
+            flags=re.IGNORECASE,
+        )
+
         # SQLite supports ADD COLUMN, but not MySQL's idempotency or placement
         # modifiers. Migration tracking ensures each file is only applied once.
         sql = re.sub(
