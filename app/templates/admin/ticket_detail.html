@@ -156,16 +156,6 @@
                 </select>
               </div>
               <div class="form-field">
-                <span class="form-label">Change Type</span>
-                {% if ticket.company_id %}
-                  <select class="form-input" name="approvalConfigurationId" {% if not ticket_approval_configurations %}disabled{% endif %}>
-                    <option value="">Select change type</option>
-                    {% for option in ticket_approval_configurations %}<option value="{{ option.id }}" {% if ticket_approval_workflow and option.id == ticket_approval_workflow.configuration_id %}selected{% endif %}>{{ option.name }}</option>{% endfor %}
-                  </select>
-                  {% if not ticket_approval_configurations %}<p class="form-help">No approval types are configured for this company.</p>{% endif %}
-                {% else %}<p class="form-help">Link a company before selecting a change type.</p>{% endif %}
-              </div>
-              <div class="form-field">
                 <label class="form-label" for="ticket-requester-detail">Requester</label>
                 <select
                   id="ticket-requester-detail"
@@ -219,6 +209,16 @@
                     <div data-outlook-contact-results></div>
                   </div>
                 {% endif %}
+              </div>
+              <div class="form-field">
+                <span class="form-label">Change Type</span>
+                {% if ticket.company_id %}
+                  <select class="form-input" name="approvalConfigurationId" {% if not ticket_approval_configurations %}disabled{% endif %}>
+                    <option value="">Select change type</option>
+                    {% for option in ticket_approval_configurations %}<option value="{{ option.id }}" {% if ticket_approval_workflow and option.id == ticket_approval_workflow.configuration_id %}selected{% endif %}>{{ option.name }}</option>{% endfor %}
+                  </select>
+                  {% if not ticket_approval_configurations %}<p class="form-help">No approval types are configured for this company.</p>{% endif %}
+                {% else %}<p class="form-help">Link a company before selecting a change type.</p>{% endif %}
               </div>
               <div class="form-field">
                 <label class="form-label" for="ticket-review-date-detail">Review Date</label>
