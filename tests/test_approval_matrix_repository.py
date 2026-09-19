@@ -97,6 +97,8 @@ def test_department_groupings_are_driven_by_company_job_titles():
     repository = Path("app/repositories/approval_matrix.py").read_text(encoding="utf-8")
 
     assert 'FROM staff WHERE company_id = %s AND enabled = 1' in routes
+    assert "TRIM(position)" not in routes
+    assert "), position)" not in repository
     assert '"department_manager"' not in routes
     assert '"department_manager"' not in repository
 

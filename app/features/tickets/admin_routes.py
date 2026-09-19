@@ -111,7 +111,7 @@ async def _approval_selector_options(company_id: int, main_module: Any) -> tuple
     technical_role_ids = {int(row["role_id"]) for row in membership_rows if int(row["user_id"]) in eligible_user_ids}
     technical_roles = [role for role in await role_repo.list_roles() if int(role["id"]) in technical_role_ids]
     title_rows = await db.fetch_all(
-        """SELECT DISTINCT COALESCE(NULLIF(TRIM(job_title), ''), NULLIF(TRIM(position), '')) AS job_title
+        """SELECT DISTINCT NULLIF(TRIM(job_title), '') AS job_title
            FROM staff WHERE company_id = %s AND enabled = 1
            HAVING job_title IS NOT NULL ORDER BY job_title""",
         (company_id,),
