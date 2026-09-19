@@ -2,6 +2,23 @@
 {% from "macros/header.html" import page_header_actions %}
 {% from "macros/tables.html" import table_column_picker %}
 
+{% macro checkbox_list(label, name, options, selected=[], id_prefix='new', value_key='id', label_key='name', help='') %}
+  <fieldset class="form-field approval-selector">
+    <legend class="form-label">{{ label }}</legend>
+    <div class="approval-selector__list">
+      {% for option in options %}
+        {% set value = option[value_key] if option is mapping else option[0] %}
+        {% set text = option[label_key] if option is mapping else option[1] %}
+        <label class="approval-selector__option" for="{{ id_prefix }}-{{ name }}-{{ loop.index }}">
+          <input id="{{ id_prefix }}-{{ name }}-{{ loop.index }}" type="checkbox" name="{{ name }}" value="{{ value }}" {% if value in selected %}checked{% endif %} />
+          <span>{{ text }}</span>
+        </label>
+      {% else %}<span class="form-help">No options are available for this company.</span>{% endfor %}
+    </div>
+    {% if help %}<p class="form-help">{{ help }}</p>{% endif %}
+  </fieldset>
+{% endmacro %}
+
 {% block header_title %}<span class="header__title-text">Approvals</span>{% endblock %}
 {% block header_actions %}
   {% if company %}
@@ -18,6 +35,12 @@
 ] %}
 
 {% block content %}
+<style>
+  .approval-selector { min-width: 0; margin: 0; padding: 0; border: 0; }
+  .approval-selector__list { display: grid; gap: .45rem; max-height: 12rem; overflow: auto; padding: .65rem; border: 1px solid var(--color-border); border-radius: var(--radius-md, .5rem); background: var(--color-surface); }
+  .approval-selector__option { display: flex; align-items: center; gap: .55rem; min-height: 2rem; cursor: pointer; }
+  .approval-selector__option input { flex: 0 0 auto; }
+</style>
 <div class="admin-grid admin-grid--columns">
   {% if not company %}
     <section class="card card--panel admin-grid__full">
@@ -32,8 +55,12 @@
         <form method="post" action="/admin/approvals" class="form-grid">
           {% include "partials/csrf.html" %}
           <div class="form-field"><label class="form-label" for="approval-name">Change type</label><input class="form-input" id="approval-name" name="name" maxlength="120" required placeholder="e.g. Production firewall change" /></div>
-          <div class="form-field"><label class="form-label" for="approval-technician">Required technician</label><select class="form-input" id="approval-technician" name="technicianUserId" required><option value="">Select technician</option>{% for technician in technicians %}<option value="{{ technician.id }}">{{ technician.first_name or '' }} {{ technician.last_name or '' }} ({{ technician.email }})</option>{% endfor %}</select></div>
-          <div class="form-field"><label class="form-label" for="approval-contacts">Required contacts</label><select class="form-input" id="approval-contacts" name="contactStaffIds" multiple size="5" required>{% for contact in contacts %}<option value="{{ contact.staff_id }}">{{ contact.first_name }} {{ contact.last_name }} ({{ contact.email }})</option>{% endfor %}</select><p class="form-help">Select one or more contacts from {{ company.name }}. Use Ctrl/Cmd to select multiple contacts.</p></div>
+          {{ checkbox_list('Technical employees', 'technicianUserIds', technicians, [], 'new', 'id', 'email', 'Only technical employees assigned to ' ~ company.name ~ ' are shown.') }}
+          {{ checkbox_list('Technical roles', 'technicalRoleIds', technical_roles, [], 'new', 'id', 'name', 'Non-technical company roles are excluded.') }}
+          {{ checkbox_list('Employees', 'contactStaffIds', contacts, [], 'new', 'staff_id', 'email', 'Only enabled employees belonging to ' ~ company.name ~ ' are shown.') }}
+          {{ checkbox_list('Company roles', 'companyRoles', company_roles, [], 'new') }}
+          {% set title_options = [] %}{% for title in job_titles %}{% set _ = title_options.append((title, title)) %}{% endfor %}
+          {{ checkbox_list('Department / job titles', 'jobTitles', title_options, [], 'new', 'id', 'name', 'Loaded from the enabled staff records for ' ~ company.name ~ '.') }}
           <div class="form-field"><label class="form-label" for="approval-description">Description</label><textarea class="form-input" id="approval-description" name="description" maxlength="500" rows="3" placeholder="Explain when this approval type should be used."></textarea></div>
           <div class="form-actions"><button class="button button--primary" type="submit">Create approval type</button></div>
         </form>
@@ -71,8 +98,11 @@
           <form method="post" action="/admin/approvals/{{ configuration.id }}" class="form-grid">
             {% include "partials/csrf.html" %}
             <div class="form-field"><label class="form-label" for="approval-name-{{ configuration.id }}">Change type</label><input class="form-input" id="approval-name-{{ configuration.id }}" name="name" maxlength="120" required value="{{ configuration.name }}" /></div>
-            <div class="form-field"><label class="form-label" for="approval-technician-{{ configuration.id }}">Required technician</label><select class="form-input" id="approval-technician-{{ configuration.id }}" name="technicianUserId" required>{% for technician in technicians %}<option value="{{ technician.id }}" {% if technician.id == configuration.technician_user_id %}selected{% endif %}>{{ technician.first_name or '' }} {{ technician.last_name or '' }} ({{ technician.email }})</option>{% endfor %}</select></div>
-            <div class="form-field"><label class="form-label" for="approval-contacts-{{ configuration.id }}">Required contacts</label><select class="form-input" id="approval-contacts-{{ configuration.id }}" name="contactStaffIds" multiple size="5" required>{% for contact in contacts %}<option value="{{ contact.staff_id }}" {% if contact.staff_id in configuration.contact_ids %}selected{% endif %}>{{ contact.first_name }} {{ contact.last_name }} ({{ contact.email }})</option>{% endfor %}</select></div>
+            {{ checkbox_list('Technical employees', 'technicianUserIds', technicians, configuration.technician_ids, 'edit-' ~ configuration.id, 'id', 'email') }}
+            {{ checkbox_list('Technical roles', 'technicalRoleIds', technical_roles, configuration.technical_role_ids, 'edit-' ~ configuration.id, 'id', 'name') }}
+            {{ checkbox_list('Employees', 'contactStaffIds', contacts, configuration.contact_ids, 'edit-' ~ configuration.id, 'staff_id', 'email') }}
+            {{ checkbox_list('Company roles', 'companyRoles', company_roles, configuration.company_roles, 'edit-' ~ configuration.id) }}
+            {{ checkbox_list('Department / job titles', 'jobTitles', title_options, configuration.job_titles, 'edit-' ~ configuration.id, 'id', 'name', 'Loaded from the enabled staff records for ' ~ company.name ~ '.') }}
             <div class="form-field"><label class="form-label" for="approval-description-{{ configuration.id }}">Description</label><textarea class="form-input" id="approval-description-{{ configuration.id }}" name="description" maxlength="500" rows="3">{{ configuration.description or '' }}</textarea></div>
             <div class="form-actions"><button class="button button--primary" type="submit">Save changes</button></div>
           </form>

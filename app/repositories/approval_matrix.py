@@ -44,12 +44,38 @@ async def get_configuration(configuration_id: int) -> dict[str, Any] | None:
         """,
         (configuration_id,),
     )]
+    result["technicians"] = [dict(item) for item in await db.fetch_all(
+        """SELECT u.id AS user_id, u.first_name, u.last_name, u.email
+           FROM approval_configuration_technicians act
+           JOIN users u ON u.id = act.user_id
+           WHERE act.configuration_id = %s ORDER BY act.sort_order, u.email""",
+        (configuration_id,),
+    )]
+    result["technical_roles"] = [dict(item) for item in await db.fetch_all(
+        """SELECT r.id AS role_id, r.name
+           FROM approval_configuration_technical_roles acr
+           JOIN roles r ON r.id = acr.role_id
+           WHERE acr.configuration_id = %s ORDER BY r.name""",
+        (configuration_id,),
+    )]
+    result["company_roles"] = [item["role_key"] for item in await db.fetch_all(
+        "SELECT role_key FROM approval_configuration_company_roles WHERE configuration_id = %s ORDER BY role_key",
+        (configuration_id,),
+    )]
+    result["job_titles"] = [item["job_title"] for item in await db.fetch_all(
+        "SELECT job_title FROM approval_configuration_job_titles WHERE configuration_id = %s ORDER BY job_title",
+        (configuration_id,),
+    )]
     return result
 
 
 async def create_configuration(*, company_id: int, name: str, technician_user_id: int,
                                contact_staff_ids: list[int], description: str | None = None,
-                               workflow_type: str = "change") -> dict[str, Any]:
+                               workflow_type: str = "change",
+                               technician_user_ids: list[int] | None = None,
+                               technical_role_ids: list[int] | None = None,
+                               company_roles: list[str] | None = None,
+                               job_titles: list[str] | None = None) -> dict[str, Any]:
     configuration_id = await db.execute_returning_lastrowid(
         """INSERT INTO approval_configurations
            (company_id, name, description, workflow_type, technician_user_id)
@@ -61,6 +87,10 @@ async def create_configuration(*, company_id: int, name: str, technician_user_id
             "INSERT INTO approval_configuration_contacts (configuration_id, staff_id, sort_order) VALUES (%s, %s, %s)",
             (configuration_id, staff_id, order),
         )
+    await _replace_selector_options(
+        int(configuration_id), technician_user_ids or [technician_user_id],
+        technical_role_ids or [], company_roles or [], job_titles or [],
+    )
     return (await get_configuration(int(configuration_id))) or {"id": configuration_id}
 
 
@@ -88,6 +118,10 @@ async def update_configuration(
     technician_user_id: int,
     contact_staff_ids: list[int],
     description: str | None = None,
+    technician_user_ids: list[int] | None = None,
+    technical_role_ids: list[int] | None = None,
+    company_roles: list[str] | None = None,
+    job_titles: list[str] | None = None,
 ) -> bool:
     owned = await db.fetch_one(
         "SELECT id FROM approval_configurations WHERE id = %s AND company_id = %s",
@@ -110,7 +144,43 @@ async def update_configuration(
             "INSERT INTO approval_configuration_contacts (configuration_id, staff_id, sort_order) VALUES (%s, %s, %s)",
             (configuration_id, staff_id, order),
         )
+    await _replace_selector_options(
+        configuration_id, technician_user_ids or [technician_user_id],
+        technical_role_ids or [], company_roles or [], job_titles or [],
+    )
     return True
+
+
+async def _replace_selector_options(configuration_id: int, technician_user_ids: list[int],
+                                    technical_role_ids: list[int], company_roles: list[str],
+                                    job_titles: list[str]) -> None:
+    """Replace normalized selectors after the caller has validated their scope."""
+    table_names = (
+        "approval_configuration_technicians", "approval_configuration_technical_roles",
+        "approval_configuration_company_roles", "approval_configuration_job_titles",
+    )
+    for table in table_names:
+        await db.execute(f"DELETE FROM {table} WHERE configuration_id = %s", (configuration_id,))  # nosec B608
+    for order, user_id in enumerate(dict.fromkeys(technician_user_ids)):
+        await db.execute(
+            "INSERT INTO approval_configuration_technicians (configuration_id, user_id, sort_order) VALUES (%s, %s, %s)",
+            (configuration_id, user_id, order),
+        )
+    for role_id in dict.fromkeys(technical_role_ids):
+        await db.execute(
+            "INSERT INTO approval_configuration_technical_roles (configuration_id, role_id) VALUES (%s, %s)",
+            (configuration_id, role_id),
+        )
+    for role_key in dict.fromkeys(company_roles):
+        await db.execute(
+            "INSERT INTO approval_configuration_company_roles (configuration_id, role_key) VALUES (%s, %s)",
+            (configuration_id, role_key),
+        )
+    for job_title in dict.fromkeys(job_titles):
+        await db.execute(
+            "INSERT INTO approval_configuration_job_titles (configuration_id, job_title) VALUES (%s, %s)",
+            (configuration_id, job_title),
+        )
 
 
 async def set_configuration_active(configuration_id: int, company_id: int, is_active: bool) -> bool:
@@ -155,27 +225,71 @@ async def assign_to_ticket(*, ticket_id: int, configuration_id: int,
            VALUES (%s, %s, %s, %s, %s)""",
         (ticket_id, configuration_id, configuration["name"], configuration["workflow_type"], assigned_by_user_id),
     )
-    technician = await db.fetch_one(
-        "SELECT id, email, first_name, last_name FROM users WHERE id = %s",
-        (configuration["technician_user_id"],),
-    )
-    if not technician:
-        raise ValueError("The configured technician no longer exists")
-    technician_name = " ".join(filter(None, (technician.get("first_name"), technician.get("last_name")))) or technician["email"]
-    await db.execute(
-        """INSERT INTO ticket_approval_decisions
-           (workflow_id, approver_kind, approver_user_id, approver_name, approver_email, sort_order)
-           VALUES (%s, 'technician', %s, %s, %s, 0)""",
-        (workflow_id, technician["id"], technician_name, technician.get("email")),
-    )
-    for order, contact in enumerate(configuration["contacts"], start=1):
+    technicians = list(configuration.get("technicians") or [])
+    role_ids = [int(item["role_id"]) for item in configuration.get("technical_roles") or []]
+    if role_ids:
+        placeholders = ", ".join(["%s"] * len(role_ids))
+        rows = await db.fetch_all(
+            f"""SELECT DISTINCT u.id AS user_id, u.email, u.first_name, u.last_name
+                FROM company_memberships m JOIN users u ON u.id = m.user_id
+                WHERE m.company_id = %s AND LOWER(m.status) = 'active'
+                  AND m.role_id IN ({placeholders})""",  # nosec B608
+            (configuration["company_id"], *role_ids),
+        )
+        technicians.extend(dict(item) for item in rows)
+    seen_users: set[int] = set()
+    order = 0
+    for technician in technicians:
+        user_id = int(technician.get("user_id") or technician.get("id") or 0)
+        if not user_id or user_id in seen_users:
+            continue
+        seen_users.add(user_id)
+        technician_name = " ".join(filter(None, (technician.get("first_name"), technician.get("last_name")))) or technician.get("email") or "Technician"
+        await db.execute(
+            """INSERT INTO ticket_approval_decisions
+               (workflow_id, approver_kind, approver_user_id, approver_name, approver_email, sort_order)
+               VALUES (%s, 'technician', %s, %s, %s, %s)""",
+            (workflow_id, user_id, technician_name, technician.get("email"), order),
+        )
+        order += 1
+
+    contacts = list(configuration["contacts"])
+    selected_titles = {str(title).strip().casefold() for title in configuration.get("job_titles") or []}
+    company_roles = set(configuration.get("company_roles") or [])
+    if selected_titles or company_roles:
+        staff_rows = await db.fetch_all(
+            """SELECT id AS staff_id, first_name, last_name, email, COALESCE(NULLIF(job_title, ''), position) AS job_title
+               FROM staff WHERE company_id = %s AND enabled = 1""",
+            (configuration["company_id"],),
+        )
+        for staff in staff_rows:
+            title = str(staff.get("job_title") or "").strip().casefold()
+            matches_role = (
+                ("any_manager" in company_roles and "manager" in title)
+                or ("general_manager" in company_roles and title in {"general manager", "gm"})
+                or ("finance_manager" in company_roles and title in {"finance manager", "financial manager", "chief financial officer", "cfo"})
+                or ("it_manager" in company_roles and title in {"it manager", "ict manager", "technology manager"})
+                or ("hr_manager" in company_roles and title in {"hr manager", "human resources manager", "people manager"})
+                or ("operations_manager" in company_roles and title in {"operations manager", "operational manager"})
+            )
+            if title in selected_titles or matches_role:
+                contacts.append(dict(staff))
+    seen_staff: set[int] = set()
+    for contact in contacts:
+        staff_id = int(contact["staff_id"])
+        if staff_id in seen_staff:
+            continue
+        seen_staff.add(staff_id)
         contact_name = " ".join(filter(None, (contact.get("first_name"), contact.get("last_name")))) or contact.get("email") or "Contact"
         await db.execute(
             """INSERT INTO ticket_approval_decisions
                (workflow_id, approver_kind, approver_staff_id, approver_name, approver_email, sort_order)
                VALUES (%s, 'contact', %s, %s, %s, %s)""",
-            (workflow_id, contact["staff_id"], contact_name, contact.get("email"), order),
+            (workflow_id, staff_id, contact_name, contact.get("email"), order),
         )
+        order += 1
+    if not order:
+        raise ValueError("The configured approval has no eligible approvers")
     return (await get_ticket_workflow(ticket_id)) or {}
 
 

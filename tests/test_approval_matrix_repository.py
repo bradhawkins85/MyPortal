@@ -1,4 +1,5 @@
 from unittest.mock import AsyncMock
+from pathlib import Path
 
 import pytest
 
@@ -75,3 +76,36 @@ async def test_update_configuration_requires_company_ownership(monkeypatch):
 
     assert updated is False
     execute.assert_not_awaited()
+
+
+def test_approval_configuration_uses_checkbox_lists_for_all_multi_value_selectors():
+    template = Path("app/templates/admin/approvals.html").read_text(encoding="utf-8")
+
+    assert 'type="checkbox"' in template
+    assert 'name="{{ name }}"' in template
+    assert "technicianUserIds" in template
+    assert "technicalRoleIds" in template
+    assert "contactStaffIds" in template
+    assert "companyRoles" in template
+    assert "jobTitles" in template
+    assert " multiple" not in template
+    assert "Department / job titles" in template
+
+
+def test_department_groupings_are_driven_by_company_job_titles():
+    routes = Path("app/features/tickets/admin_routes.py").read_text(encoding="utf-8")
+    repository = Path("app/repositories/approval_matrix.py").read_text(encoding="utf-8")
+
+    assert 'FROM staff WHERE company_id = %s AND enabled = 1' in routes
+    assert '"department_manager"' not in routes
+    assert '"department_manager"' not in repository
+
+
+def test_approval_selector_migration_preserves_legacy_technician():
+    migration = Path("migrations/379_approval_selector_options.sql").read_text(encoding="utf-8")
+
+    assert "approval_configuration_technicians" in migration
+    assert "approval_configuration_technical_roles" in migration
+    assert "approval_configuration_company_roles" in migration
+    assert "approval_configuration_job_titles" in migration
+    assert "SELECT id, technician_user_id, 0 FROM approval_configurations" in migration

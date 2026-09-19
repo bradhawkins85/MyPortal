@@ -53,6 +53,7 @@ from app.repositories import email_blocklist as email_blocklist_repo
 from app.repositories import attachment_blocklist as attachment_blocklist_repo
 from app.repositories import approval_matrix as approval_matrix_repo
 from app.repositories import users as user_repo
+from app.repositories import roles as role_repo
 from app.repositories import site_settings as site_settings_repo
 from app.services import agent as agent_service
 from app.services import labour_types as labour_types_service
@@ -85,25 +86,79 @@ def _approval_redirect(message: str, category: str = "success") -> RedirectRespo
     return flash_redirect("/admin/approvals", message, category)
 
 
-async def _approval_form_values(form: Any, company_id: int, main_module: Any) -> tuple[str, str | None, int, list[int], str | None]:
+COMPANY_ROLE_OPTIONS = (
+    ("any_manager", "Any Manager"), ("general_manager", "General Manager (GM)"),
+    ("finance_manager", "Finance Manager"), ("it_manager", "IT Manager"),
+    ("hr_manager", "Human Resources Manager"),
+    ("operations_manager", "Operations Manager"),
+)
+
+
+def _integer_form_list(form: Any, name: str) -> list[int]:
+    values = form.getlist(name) if hasattr(form, "getlist") else []
+    return list(dict.fromkeys(int(value) for value in values if str(value).isdigit()))
+
+
+async def _approval_selector_options(company_id: int, main_module: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    all_technical_users = await membership_repo.list_users_with_permission(main_module.HELPDESK_PERMISSION_KEY)
+    membership_rows = await db.fetch_all(
+        "SELECT user_id, role_id FROM company_memberships WHERE company_id = %s AND LOWER(status) = 'active'",
+        (company_id,),
+    )
+    company_user_ids = {int(row["user_id"]) for row in membership_rows}
+    technicians = [item for item in all_technical_users if int(item["id"]) in company_user_ids]
+    eligible_user_ids = {int(item["id"]) for item in technicians if not item.get("is_super_admin")}
+    technical_role_ids = {int(row["role_id"]) for row in membership_rows if int(row["user_id"]) in eligible_user_ids}
+    technical_roles = [role for role in await role_repo.list_roles() if int(role["id"]) in technical_role_ids]
+    title_rows = await db.fetch_all(
+        """SELECT DISTINCT COALESCE(NULLIF(TRIM(job_title), ''), NULLIF(TRIM(position), '')) AS job_title
+           FROM staff WHERE company_id = %s AND enabled = 1
+           HAVING job_title IS NOT NULL ORDER BY job_title""",
+        (company_id,),
+    )
+    return technicians, technical_roles, [str(row["job_title"]) for row in title_rows]
+
+
+async def _approval_form_values(form: Any, company_id: int, main_module: Any) -> tuple[dict[str, Any], str | None]:
     name = str(form.get("name") or "").strip()
     description = str(form.get("description") or "").strip()[:500] or None
-    try:
-        technician_id = int(form.get("technicianUserId") or 0)
-    except (TypeError, ValueError):
-        technician_id = 0
+    technicians, technical_roles, job_titles = await _approval_selector_options(company_id, main_module)
+    technician_ids = _integer_form_list(form, "technicianUserIds")
+    role_ids = _integer_form_list(form, "technicalRoleIds")
+    allowed_technicians = {int(item["id"]) for item in technicians}
+    allowed_roles = {int(item["id"]) for item in technical_roles}
+    technician_ids = [value for value in technician_ids if value in allowed_technicians]
+    role_ids = [value for value in role_ids if value in allowed_roles]
+    contact_ids = [value for value in _integer_form_list(form, "contactStaffIds") if value in {
+        int(item["staff_id"]) for item in await staff_repo.list_enabled_staff_users(company_id)
+    }]
+    allowed_company_roles = {key for key, _ in COMPANY_ROLE_OPTIONS}
+    company_roles = [value for value in form.getlist("companyRoles") if value in allowed_company_roles]
+    allowed_job_titles = {title.casefold(): title for title in job_titles}
+    selected_job_titles = list(dict.fromkeys(
+        allowed_job_titles[value.strip().casefold()] for value in form.getlist("jobTitles")
+        if value.strip().casefold() in allowed_job_titles
+    ))
+    fallback_technician_id = technician_ids[0] if technician_ids else None
+    if fallback_technician_id is None and role_ids:
+        role_members = await db.fetch_all(
+            "SELECT user_id, role_id FROM company_memberships WHERE company_id = %s AND LOWER(status) = 'active'",
+            (company_id,),
+        )
+        fallback_technician_id = next(
+            (int(row["user_id"]) for row in role_members if int(row["role_id"]) in role_ids), None
+        )
+    values = {"name": name, "description": description, "technician_user_ids": technician_ids,
+              "technical_role_ids": role_ids, "contact_staff_ids": contact_ids,
+              "company_roles": company_roles, "job_titles": selected_job_titles,
+              "legacy_technician_id": fallback_technician_id}
     if not name or len(name) > 120:
-        return name, description, technician_id, [], "Enter a change type name of 120 characters or fewer."
-    allowed_technicians = await membership_repo.list_users_with_permission(main_module.HELPDESK_PERMISSION_KEY)
-    if technician_id not in {int(item["id"]) for item in allowed_technicians}:
-        return name, description, technician_id, [], "Select a valid technician."
-    allowed_contacts = {int(item["staff_id"]) for item in await staff_repo.list_enabled_staff_users(company_id)}
-    raw_contacts = form.getlist("contactStaffIds") if hasattr(form, "getlist") else []
-    requested_contacts = [int(value) for value in raw_contacts if str(value).isdigit()]
-    contact_ids = list(dict.fromkeys(value for value in requested_contacts if value in allowed_contacts))
-    if not contact_ids:
-        return name, description, technician_id, [], "Select at least one approver contact from the selected company."
-    return name, description, technician_id, contact_ids, None
+        return values, "Enter a change type name of 120 characters or fewer."
+    if not (technician_ids or role_ids):
+        return values, "Select at least one technical employee or technical role from the selected company."
+    if not (contact_ids or company_roles or selected_job_titles):
+        return values, "Select at least one employee, company role, or job title approver."
+    return values, None
 
 
 @router.get("/admin/approvals", response_class=HTMLResponse)
@@ -122,11 +177,16 @@ async def admin_approvals(request: Request):
         for configuration in configurations:
             detail = await approval_matrix_repo.get_configuration(int(configuration["id"]))
             configuration["contact_ids"] = [int(item["staff_id"]) for item in (detail or {}).get("contacts", [])]
-    technicians = await membership_repo.list_users_with_permission(main_module.HELPDESK_PERMISSION_KEY)
+            configuration["technician_ids"] = [int(item["user_id"]) for item in (detail or {}).get("technicians", [])]
+            configuration["technical_role_ids"] = [int(item["role_id"]) for item in (detail or {}).get("technical_roles", [])]
+            configuration["company_roles"] = list((detail or {}).get("company_roles", []))
+            configuration["job_titles"] = list((detail or {}).get("job_titles", []))
+    technicians, technical_roles, job_titles = await _approval_selector_options(int(company_id), main_module) if company else ([], [], [])
     return await main_module._render_template(
         "admin/approvals.html", request, current_user,
         extra={"title": "Approvals", "company": company, "configurations": configurations,
-               "contacts": contacts, "technicians": technicians},
+               "contacts": contacts, "technicians": technicians, "technical_roles": technical_roles,
+               "company_roles": COMPANY_ROLE_OPTIONS, "job_titles": job_titles},
     )
 
 
@@ -140,14 +200,14 @@ async def admin_create_change_approval(company_id: int, request: Request):
     if not active_company_id or int(active_company_id) != company_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Approval configurations are limited to the selected company")
     form = await parse_csrf_form(request)
-    name, description, technician_id, contact_ids, error = await _approval_form_values(form, company_id, main_module)
+    values, error = await _approval_form_values(form, company_id, main_module)
     if error:
         return _approval_redirect(error, "error")
-    if await approval_matrix_repo.configuration_name_exists(company_id, name):
+    if await approval_matrix_repo.configuration_name_exists(company_id, values["name"]):
         return _approval_redirect("An approval type with that name already exists for this company.", "error")
     await approval_matrix_repo.create_configuration(
-        company_id=company_id, name=name, technician_user_id=technician_id,
-        contact_staff_ids=contact_ids, description=description,
+        company_id=company_id, name=values.pop("name"), description=values.pop("description"),
+        technician_user_id=values.pop("legacy_technician_id"), **values,
     )
     return _approval_redirect("Approval type created.")
 
@@ -170,14 +230,15 @@ async def admin_update_approval(configuration_id: int, request: Request):
     if not company_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select a company first")
     form = await parse_csrf_form(request)
-    name, description, technician_id, contact_ids, error = await _approval_form_values(form, int(company_id), main_module)
+    values, error = await _approval_form_values(form, int(company_id), main_module)
     if error:
         return _approval_redirect(error, "error")
-    if await approval_matrix_repo.configuration_name_exists(int(company_id), name, exclude_configuration_id=configuration_id):
+    if await approval_matrix_repo.configuration_name_exists(int(company_id), values["name"], exclude_configuration_id=configuration_id):
         return _approval_redirect("An approval type with that name already exists for this company.", "error")
     updated = await approval_matrix_repo.update_configuration(
-        configuration_id=configuration_id, company_id=int(company_id), name=name,
-        description=description, technician_user_id=technician_id, contact_staff_ids=contact_ids,
+        configuration_id=configuration_id, company_id=int(company_id),
+        name=values.pop("name"), description=values.pop("description"),
+        technician_user_id=values.pop("legacy_technician_id"), **values,
     )
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Approval configuration not found")
