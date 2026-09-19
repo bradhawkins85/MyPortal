@@ -73,48 +73,131 @@ router = APIRouter(tags=["Tickets"])
 @router.get("/admin/companies/{company_id:int}/change-approval-matrix", response_class=HTMLResponse)
 async def admin_change_approval_matrix(company_id: int, request: Request):
     main_module = _main()
-    current_user, redirect = await main_module._require_helpdesk_page(request)
+    current_user, redirect = await main_module._require_super_admin_page(request)
     if redirect:
         return redirect
-    company = await company_repo.get_company_by_id(company_id)
-    if not company:
+    if not await company_repo.get_company_by_id(company_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
-    configurations = await approval_matrix_repo.list_configurations(company_id)
-    contacts = await staff_repo.list_enabled_staff_users(company_id)
+    return RedirectResponse("/admin/approvals", status_code=status.HTTP_303_SEE_OTHER)
+
+
+def _approval_redirect(message: str, category: str = "success") -> RedirectResponse:
+    return flash_redirect("/admin/approvals", message, category)
+
+
+async def _approval_form_values(form: Any, company_id: int, main_module: Any) -> tuple[str, str | None, int, list[int], str | None]:
+    name = str(form.get("name") or "").strip()
+    description = str(form.get("description") or "").strip()[:500] or None
+    try:
+        technician_id = int(form.get("technicianUserId") or 0)
+    except (TypeError, ValueError):
+        technician_id = 0
+    if not name or len(name) > 120:
+        return name, description, technician_id, [], "Enter a change type name of 120 characters or fewer."
+    allowed_technicians = await membership_repo.list_users_with_permission(main_module.HELPDESK_PERMISSION_KEY)
+    if technician_id not in {int(item["id"]) for item in allowed_technicians}:
+        return name, description, technician_id, [], "Select a valid technician."
+    allowed_contacts = {int(item["staff_id"]) for item in await staff_repo.list_enabled_staff_users(company_id)}
+    raw_contacts = form.getlist("contactStaffIds") if hasattr(form, "getlist") else []
+    requested_contacts = [int(value) for value in raw_contacts if str(value).isdigit()]
+    contact_ids = list(dict.fromkeys(value for value in requested_contacts if value in allowed_contacts))
+    if not contact_ids:
+        return name, description, technician_id, [], "Select at least one approver contact from the selected company."
+    return name, description, technician_id, contact_ids, None
+
+
+@router.get("/admin/approvals", response_class=HTMLResponse)
+async def admin_approvals(request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    company_id = getattr(request.state, "active_company_id", None)
+    company = await company_repo.get_company_by_id(int(company_id)) if company_id else None
+    configurations = []
+    contacts = []
+    if company:
+        configurations = await approval_matrix_repo.list_configurations(int(company_id), include_inactive=True)
+        contacts = await staff_repo.list_enabled_staff_users(int(company_id))
+        for configuration in configurations:
+            detail = await approval_matrix_repo.get_configuration(int(configuration["id"]))
+            configuration["contact_ids"] = [int(item["staff_id"]) for item in (detail or {}).get("contacts", [])]
     technicians = await membership_repo.list_users_with_permission(main_module.HELPDESK_PERMISSION_KEY)
     return await main_module._render_template(
-        "admin/change_approval_matrix.html", request, current_user,
-        extra={"title": "Change Approval Matrix", "company": company,
-               "configurations": configurations, "contacts": contacts,
-               "technicians": technicians},
+        "admin/approvals.html", request, current_user,
+        extra={"title": "Approvals", "company": company, "configurations": configurations,
+               "contacts": contacts, "technicians": technicians},
     )
 
 
 @router.post("/admin/companies/{company_id:int}/change-approval-matrix", response_class=HTMLResponse)
 async def admin_create_change_approval(company_id: int, request: Request):
     main_module = _main()
-    current_user, redirect = await main_module._require_helpdesk_page(request)
+    current_user, redirect = await main_module._require_super_admin_page(request)
     if redirect:
         return redirect
+    active_company_id = getattr(request.state, "active_company_id", None)
+    if not active_company_id or int(active_company_id) != company_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Approval configurations are limited to the selected company")
     form = await parse_csrf_form(request)
-    name = str(form.get("name") or "").strip()
-    try:
-        technician_id = int(form.get("technicianUserId") or 0)
-    except (TypeError, ValueError):
-        technician_id = 0
-    if not name or len(name) > 120 or not technician_id:
-        return flash_redirect(f"/admin/companies/{company_id}/change-approval-matrix", "A name and technician are required.", "error")
-    allowed_technicians = await membership_repo.list_users_with_permission(main_module.HELPDESK_PERMISSION_KEY)
-    if technician_id not in {int(item["id"]) for item in allowed_technicians}:
-        return flash_redirect(f"/admin/companies/{company_id}/change-approval-matrix", "Select a valid technician.", "error")
-    allowed_contacts = {int(item["staff_id"]) for item in await staff_repo.list_enabled_staff_users(company_id)}
-    raw_contacts = form.getlist("contactStaffIds") if hasattr(form, "getlist") else []
-    contact_ids = [int(value) for value in raw_contacts if str(value).isdigit() and int(value) in allowed_contacts]
+    name, description, technician_id, contact_ids, error = await _approval_form_values(form, company_id, main_module)
+    if error:
+        return _approval_redirect(error, "error")
+    if await approval_matrix_repo.configuration_name_exists(company_id, name):
+        return _approval_redirect("An approval type with that name already exists for this company.", "error")
     await approval_matrix_repo.create_configuration(
         company_id=company_id, name=name, technician_user_id=technician_id,
-        contact_staff_ids=contact_ids, description=str(form.get("description") or "").strip()[:500] or None,
+        contact_staff_ids=contact_ids, description=description,
     )
-    return flash_redirect(f"/admin/companies/{company_id}/change-approval-matrix", "Approval type created.", "success")
+    return _approval_redirect("Approval type created.")
+
+
+@router.post("/admin/approvals", response_class=HTMLResponse)
+async def admin_create_approval(request: Request):
+    company_id = getattr(request.state, "active_company_id", None)
+    if not company_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select a company first")
+    return await admin_create_change_approval(int(company_id), request)
+
+
+@router.post("/admin/approvals/{configuration_id:int}", response_class=HTMLResponse)
+async def admin_update_approval(configuration_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    company_id = getattr(request.state, "active_company_id", None)
+    if not company_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select a company first")
+    form = await parse_csrf_form(request)
+    name, description, technician_id, contact_ids, error = await _approval_form_values(form, int(company_id), main_module)
+    if error:
+        return _approval_redirect(error, "error")
+    if await approval_matrix_repo.configuration_name_exists(int(company_id), name, exclude_configuration_id=configuration_id):
+        return _approval_redirect("An approval type with that name already exists for this company.", "error")
+    updated = await approval_matrix_repo.update_configuration(
+        configuration_id=configuration_id, company_id=int(company_id), name=name,
+        description=description, technician_user_id=technician_id, contact_staff_ids=contact_ids,
+    )
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Approval configuration not found")
+    return _approval_redirect("Approval type updated.")
+
+
+@router.post("/admin/approvals/{configuration_id:int}/status", response_class=HTMLResponse)
+async def admin_set_approval_status(configuration_id: int, request: Request):
+    main_module = _main()
+    current_user, redirect = await main_module._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    company_id = getattr(request.state, "active_company_id", None)
+    if not company_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Select a company first")
+    form = await parse_csrf_form(request)
+    is_active = str(form.get("isActive") or "").lower() == "true"
+    if not await approval_matrix_repo.set_configuration_active(configuration_id, int(company_id), is_active):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Approval configuration not found")
+    return _approval_redirect("Approval type activated." if is_active else "Approval type deactivated.")
 
 
 @router.post("/admin/tickets/{ticket_id:int}/approval-configuration", response_class=HTMLResponse)

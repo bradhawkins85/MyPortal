@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/tables.html" import table_column_picker %}
+
+{% block header_title %}<span class="header__title-text">Approvals</span>{% endblock %}
+{% block header_actions %}
+  {% if company %}
+    {{ page_header_actions([{"label": "Add approval type", "type": "link", "variant": "primary", "href": "#new-approval-type"}]) }}
+  {% endif %}
+{% endblock %}
+
+{% set approval_columns = [
+  {"key": "name", "label": "Approval type", "default_visible": true},
+  {"key": "technician", "label": "Required technician", "default_visible": true},
+  {"key": "contacts", "label": "Required contacts", "default_visible": true},
+  {"key": "status", "label": "Status", "default_visible": true},
+  {"key": "actions", "label": "Actions", "default_visible": true}
+] %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  {% if not company %}
+    <section class="card card--panel admin-grid__full">
+      <div class="card__body"><p>Select a company from the left navigation to manage its approval workflows.</p></div>
+    </section>
+  {% else %}
+    <section class="card card--panel admin-grid__full" id="new-approval-type">
+      <header class="card__header">
+        <div><h2 class="card__title">New approval type</h2><p class="card__subtitle">Create a company-specific change workflow with every required approver.</p></div>
+      </header>
+      <div class="card__body">
+        <form method="post" action="/admin/approvals" class="form-grid">
+          {% include "partials/csrf.html" %}
+          <div class="form-field"><label class="form-label" for="approval-name">Change type</label><input class="form-input" id="approval-name" name="name" maxlength="120" required placeholder="e.g. Production firewall change" /></div>
+          <div class="form-field"><label class="form-label" for="approval-technician">Required technician</label><select class="form-input" id="approval-technician" name="technicianUserId" required><option value="">Select technician</option>{% for technician in technicians %}<option value="{{ technician.id }}">{{ technician.first_name or '' }} {{ technician.last_name or '' }} ({{ technician.email }})</option>{% endfor %}</select></div>
+          <div class="form-field"><label class="form-label" for="approval-contacts">Required contacts</label><select class="form-input" id="approval-contacts" name="contactStaffIds" multiple size="5" required>{% for contact in contacts %}<option value="{{ contact.staff_id }}">{{ contact.first_name }} {{ contact.last_name }} ({{ contact.email }})</option>{% endfor %}</select><p class="form-help">Select one or more contacts from {{ company.name }}. Use Ctrl/Cmd to select multiple contacts.</p></div>
+          <div class="form-field"><label class="form-label" for="approval-description">Description</label><textarea class="form-input" id="approval-description" name="description" maxlength="500" rows="3" placeholder="Explain when this approval type should be used."></textarea></div>
+          <div class="form-actions"><button class="button button--primary" type="submit">Create approval type</button></div>
+        </form>
+      </div>
+    </section>
+
+    <section class="card card--panel admin-grid__full">
+      <header class="card__header">
+        <div class="card__controls"><input type="search" class="form-input card__control" placeholder="Filter approval types" aria-label="Filter approval types" data-table-filter="approvals-table" /></div>
+        <div class="card__controls card__controls--right">{{ table_column_picker("approvals", approval_columns) }}</div>
+      </header>
+      <div class="table-wrapper">
+        <table class="table" id="approvals-table" data-table data-table-id="approvals" data-page-size-max="25">
+          <thead><tr><th data-sort="string" data-column-key="name">Approval type</th><th data-sort="string" data-column-key="technician">Required technician</th><th data-sort="number" data-column-key="contacts">Required contacts</th><th data-sort="string" data-column-key="status">Status</th><th class="table__actions" data-column-key="actions">Actions</th></tr></thead>
+          <tbody>
+          {% for configuration in configurations %}
+            <tr>
+              <td data-column-key="name">{{ configuration.name }}{% if configuration.description %}<div class="form-help">{{ configuration.description }}</div>{% endif %}</td>
+              <td data-column-key="technician">{{ configuration.technician_name }}</td>
+              <td data-column-key="contacts" data-value="{{ configuration.contact_count }}">{{ configuration.contact_count }}</td>
+              <td data-column-key="status"><span class="status status--{{ 'success' if configuration.is_active else 'neutral' }}">{{ 'Active' if configuration.is_active else 'Inactive' }}</span></td>
+              <td class="table__actions" data-column-key="actions"><a class="button button--small" href="#approval-{{ configuration.id }}">Edit</a></td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5" class="table__empty">No change approval types have been configured for {{ company.name }}.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% for configuration in configurations %}
+      <details class="card card--panel card-collapsible admin-grid__full" id="approval-{{ configuration.id }}">
+        <summary class="card__header card__header--collapsible"><span class="card__title">Edit {{ configuration.name }}</span><span class="card__toggle-icon" aria-hidden="true"></span></summary>
+        <div class="card__body">
+          <form method="post" action="/admin/approvals/{{ configuration.id }}" class="form-grid">
+            {% include "partials/csrf.html" %}
+            <div class="form-field"><label class="form-label" for="approval-name-{{ configuration.id }}">Change type</label><input class="form-input" id="approval-name-{{ configuration.id }}" name="name" maxlength="120" required value="{{ configuration.name }}" /></div>
+            <div class="form-field"><label class="form-label" for="approval-technician-{{ configuration.id }}">Required technician</label><select class="form-input" id="approval-technician-{{ configuration.id }}" name="technicianUserId" required>{% for technician in technicians %}<option value="{{ technician.id }}" {% if technician.id == configuration.technician_user_id %}selected{% endif %}>{{ technician.first_name or '' }} {{ technician.last_name or '' }} ({{ technician.email }})</option>{% endfor %}</select></div>
+            <div class="form-field"><label class="form-label" for="approval-contacts-{{ configuration.id }}">Required contacts</label><select class="form-input" id="approval-contacts-{{ configuration.id }}" name="contactStaffIds" multiple size="5" required>{% for contact in contacts %}<option value="{{ contact.staff_id }}" {% if contact.staff_id in configuration.contact_ids %}selected{% endif %}>{{ contact.first_name }} {{ contact.last_name }} ({{ contact.email }})</option>{% endfor %}</select></div>
+            <div class="form-field"><label class="form-label" for="approval-description-{{ configuration.id }}">Description</label><textarea class="form-input" id="approval-description-{{ configuration.id }}" name="description" maxlength="500" rows="3">{{ configuration.description or '' }}</textarea></div>
+            <div class="form-actions"><button class="button button--primary" type="submit">Save changes</button></div>
+          </form>
+          <form method="post" action="/admin/approvals/{{ configuration.id }}/status" class="form-actions">
+            {% include "partials/csrf.html" %}<input type="hidden" name="isActive" value="{{ 'false' if configuration.is_active else 'true' }}" />
+            <button class="button {{ 'button--danger' if configuration.is_active else '' }}" type="submit">{{ 'Deactivate' if configuration.is_active else 'Activate' }}</button>
+          </form>
+        </div>
+      </details>
+    {% endfor %}
+  {% endif %}
+</div>
+{% endblock %}
