@@ -191,6 +191,14 @@ async def get_first_membership_with_permission(user_id: int, permission: str) ->
 
 
 async def user_has_permission(user_id: int, permission: str) -> bool:
+    # A selected Super Admin simulation role is authoritative for this request:
+    # do not fall through to the account's real Super Admin bypass or direct
+    # user grants.
+    from app.services.role_switching import effective_role_has_permission
+
+    simulated_decision = effective_role_has_permission(permission)
+    if simulated_decision is not None:
+        return simulated_decision
     # Check if user is super admin first
     user_record = await user_repo.get_user_by_id(user_id)
     if user_record and bool(user_record.get("is_super_admin")):
