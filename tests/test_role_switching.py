@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import anyio
 
+from app import main
 from app.services import role_switching
 
 
@@ -70,3 +71,42 @@ def test_role_switcher_markup_is_persistent_and_orders_super_admin_first():
     assert switcher < menu
     assert super_admin < roles_loop
     assert "role_switcher_allowed" in template
+
+
+def test_effective_company_membership_prefers_selected_role(monkeypatch):
+    persisted = {"company_id": 4, "can_manage_assets": False}
+
+    async def get_membership(_user_id, _company_id):
+        return persisted
+
+    monkeypatch.setattr(main.user_company_repo, "get_user_company", get_membership)
+    request = _request()
+    request.state.selected_role = {"id": 12}
+    request.state.active_membership = {
+        "company_id": 4,
+        "can_manage_assets": True,
+        "menu_permissions": {"menu.assets": "write"},
+    }
+
+    membership = anyio.run(
+        main._get_effective_company_membership, request, 1, 4
+    )
+
+    assert membership is request.state.active_membership
+    assert membership["menu_permissions"]["menu.assets"] == "write"
+
+
+def test_effective_company_membership_uses_persisted_membership_without_role(monkeypatch):
+    persisted = {"company_id": 4, "menu_permissions": {"menu.assets": "read"}}
+
+    async def get_membership(_user_id, _company_id):
+        return persisted
+
+    monkeypatch.setattr(main.user_company_repo, "get_user_company", get_membership)
+    request = _request()
+
+    membership = anyio.run(
+        main._get_effective_company_membership, request, 7, 4
+    )
+
+    assert membership is persisted

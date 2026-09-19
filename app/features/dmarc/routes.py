@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse
 from app.repositories import dmarc as repo
 from app.repositories import user_companies as memberships
 from app.security.menu_permissions import menu_has_access
-from app.services import audit, dmarc
+from app.services import audit, dmarc, role_switching
 
 router = APIRouter(tags=["DMARC"])
 
@@ -28,7 +28,10 @@ async def _context_with_access(
     company_id = user.get("company_id")
     if company_id is None:
         raise HTTPException(400, "Select a company")
-    membership = await memberships.get_user_company(int(user["id"]), int(company_id))
+    membership = role_switching.effective_membership(
+        request,
+        await memberships.get_user_company(int(user["id"]), int(company_id)),
+    )
     menu_permissions = (membership or {}).get("menu_permissions")
     requires_write = permission == "dmarc.manage"
     is_super_admin = bool(user.get("is_super_admin"))

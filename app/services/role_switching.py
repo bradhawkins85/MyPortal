@@ -101,6 +101,7 @@ async def apply_selected_role(request: Request, user: dict[str, Any], session: A
 def effective_membership(request: Request, membership: dict[str, Any] | None) -> dict[str, Any] | None:
     """Prefer the request's simulated membership over a persisted membership."""
 
-    if getattr(request.state, "selected_role", None) is not None:
-        return getattr(request.state, "active_membership", None)
+    state = getattr(request, "state", None)
+    if state is not None and getattr(state, "selected_role", None) is not None:
+        return getattr(state, "active_membership", None)
     return membership
