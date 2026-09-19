@@ -660,6 +660,9 @@ async def test_list_users_with_permission_includes_super_admin(monkeypatch):
 
     result = await membership_repo.list_users_with_permission("helpdesk.technician")
 
+    fetch_mock.assert_awaited_once()
+    query = fetch_mock.await_args.args[0]
+    assert "OR u.is_super_admin = 1" in query
     assert result == [
         {
             "id": 9,

@@ -224,6 +224,13 @@ async def user_has_permission(user_id: int, permission: str) -> bool:
 
 
 async def list_users_with_permission(permission: str) -> List[dict[str, Any]]:
+    """Return role-qualified users and Super Admins for privileged selectors.
+
+    Super Admin accounts intentionally remain eligible even when they have no
+    active membership carrying ``permission``.  Ticket assignment selectors
+    use this helper, and administrators must be assignable without weakening
+    the role-permission filter for ordinary users.
+    """
     rows = await db.fetch_all(
         """
         SELECT
