@@ -340,6 +340,15 @@
                           {% endif %}
                           <button type="submit" class="button button--small">Sync now</button>
                         </form>
+                        <form action="/admin/modules/m365-mail/accounts/{{ account.id }}/sync" method="post" class="inline-form" onsubmit="return confirm('Import this mailbox for recovery without sending ticket notifications?');">
+                          {% if csrf_token %}
+                            <input type="hidden" name="_csrf" value="{{ csrf_token }}" />
+                          {% endif %}
+                          <input type="hidden" name="recovery" value="1" />
+                          <label class="sr-only" for="recovery-folder-{{ account.id }}">Recovery folder for {{ account.name }}</label>
+                          <input id="recovery-folder-{{ account.id }}" class="form-input form-input--small" type="text" name="recoveryFolder" placeholder="All configured folder" maxlength="255" aria-label="Optional recovery folder" />
+                          <button type="submit" class="button button--small button--ghost">Recovery import</button>
+                        </form>
                         <form action="/admin/modules/m365-mail/accounts/{{ account.id }}/delete" method="post" class="inline-form" onsubmit="return confirm({{ ('Delete mailbox ' ~ account.name ~ '?') | tojson | forceescape }});">
                           {% if csrf_token %}
                             <input type="hidden" name="_csrf" value="{{ csrf_token }}" />

@@ -222,6 +222,11 @@ async def send_email(
                 text_body=text_body,
                 sender=sender,
                 reply_to=reply_to,
+                bcc=(
+                    [str(settings.outbound_audit_bcc)]
+                    if settings.outbound_audit_bcc
+                    else None
+                ),
                 tracking_id=tracking_id,
                 attachments=[
                     {"filename": name, "content": base64.b64encode(content).decode("ascii")}
@@ -336,6 +341,8 @@ async def send_email(
     from_address = sender or settings.smtp_from or settings.smtp_user or "no-reply@localhost"
     message["From"] = from_address
     message["To"] = ", ".join(to_addresses)
+    if settings.outbound_audit_bcc:
+        message["Bcc"] = str(settings.outbound_audit_bcc)
     if reply_to:
         message["Reply-To"] = reply_to
 

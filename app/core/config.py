@@ -8,6 +8,7 @@ from pydantic import (
     AnyHttpUrl,
     AliasChoices,
     BaseModel,
+    EmailStr,
     Field,
     TypeAdapter,
     ValidationError,
@@ -121,6 +122,14 @@ class Settings(BaseSettings):
     smtp_port: int = Field(default=587, validation_alias="SMTP_PORT")
     smtp_user: str | None = Field(default=None, validation_alias="SMTP_USER")
     smtp_from: str | None = Field(default=None, validation_alias="SMTP_FROM")
+    outbound_audit_bcc: EmailStr | None = Field(
+        default=None,
+        validation_alias="OUTBOUND_AUDIT_BCC",
+        description=(
+            "Environment-only shared mailbox that receives a blind copy of every "
+            "outbound email. This value is intentionally not stored in module settings."
+        ),
+    )
     smtp_password: str | None = Field(default=None, validation_alias="SMTP_PASS")
     smtp_use_tls: bool = Field(default=True, validation_alias="SMTP_SECURE")
     dmarc_max_compressed_bytes: int = Field(default=5 * 1024 * 1024, validation_alias="DMARC_MAX_COMPRESSED_BYTES", ge=1024)
@@ -237,6 +246,14 @@ class Settings(BaseSettings):
     def ensure_builtin_feature_packs_present(cls, value: Any) -> str:
         """Merge legacy FEATURE_PACKS values with bundled feature packs."""
         return _normalize_feature_packs(value)
+
+    @field_validator("outbound_audit_bcc", mode="before")
+    @classmethod
+    def normalise_optional_audit_mailbox(cls, value: Any) -> Any:
+        """Treat a blank env value as disabled; otherwise validate as an email."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     feature_pack_watch: bool = Field(
         default=False,

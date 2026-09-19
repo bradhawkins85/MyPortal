@@ -405,7 +405,14 @@ async def admin_sync_m365_mail_account(account_id: int, request: Request):
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
         return redirect
-    result = await m365_mail_service.sync_account(account_id)
+    form = await request.form()
+    recovery = _form_bool(form, "recovery")
+    folder_override = str(form.get("recoveryFolder") or "").strip() or None
+    result = await m365_mail_service.sync_account(
+        account_id,
+        recovery=recovery,
+        folder_override=folder_override if recovery else None,
+    )
     status_value = str(result.get("status") or "").lower()
     processed = int(result.get("processed") or 0)
     error_count = len(result.get("errors") or [])

@@ -1061,8 +1061,18 @@ async def list_sync_history(
     return await mail_repo.list_sync_history(account_id, limit=limit)
 
 
-async def sync_account(account_id: int) -> dict[str, Any]:
-    """Synchronise a single Office 365 mailbox via Microsoft Graph API."""
+async def sync_account(
+    account_id: int,
+    *,
+    recovery: bool = False,
+    folder_override: str | None = None,
+) -> dict[str, Any]:
+    """Synchronise a mailbox, optionally as a notification-free recovery import.
+
+    The environment-configured audit mailbox is never processed by routine syncs.
+    A super administrator must explicitly use recovery mode, which may also select
+    a folder without changing the persistent connector configuration.
+    """
 
     started_at = datetime.now(timezone.utc)
 
@@ -1077,6 +1087,21 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         )
         return result
 
+    account = await mail_repo.get_account(account_id)
+    audit_mailbox = str(get_settings().outbound_audit_bcc or "").strip().casefold()
+    account_mailbox = _normalise_string(
+        (account or {}).get("user_principal_name")
+    ).casefold()
+    if audit_mailbox and account_mailbox == audit_mailbox and not recovery:
+        result = {
+            "status": "skipped",
+            "reason": "Audit mailbox requires manual recovery import",
+        }
+        await _record_sync_history_safe(
+            account_id=account_id, started_at=started_at, result=result
+        )
+        return result
+
     module = await modules_service.get_module(_MODULE_SLUG, redact=False)
     if not module or not module.get("enabled"):
         result = {"status": "skipped", "reason": "Module disabled"}
@@ -1084,9 +1109,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
             account_id=account_id, started_at=started_at, result=result
         )
         return result
-
-    account = await mail_repo.get_account(account_id)
-    if not account or not account.get("active", True):
+    if not account or (not account.get("active", True) and not recovery):
         log_info(
             "Skipping M365 mail sync because account is inactive", account_id=account_id
         )
@@ -1112,8 +1135,14 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         )
         return result
 
-    folder = _normalise_string(account.get("folder"), default="Inbox") or "Inbox"
-    process_unread_only = bool(account.get("process_unread_only", True))
+    folder = (
+        _normalise_string(folder_override, default="")
+        if recovery and folder_override is not None
+        else _normalise_string(account.get("folder"), default="Inbox")
+    ) or "Inbox"
+    process_unread_only = (
+        False if recovery else bool(account.get("process_unread_only", True))
+    )
     mark_as_read = bool(account.get("mark_as_read", True))
     delete_after_import = bool(account.get("delete_after_import", False))
     last_synced_at = _parse_graph_datetime(account.get("last_synced_at"))
@@ -1729,6 +1758,8 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 else None
                             ),
                             record_initial_reply=not create_initial_reply_after_inline_persist,
+                            trigger_automations=not recovery,
+                            send_creation_notification=not recovery,
                         )
                         is_new_ticket = True
                         ticket_id = (
@@ -1902,7 +1933,7 @@ async def sync_account(account_id: int) -> dict[str, Any]:
                                 )
 
                             # Trigger ticket updated event for email replies
-                            if reply_added:
+                            if reply_added and not recovery:
                                 reply_outcome = "reply_added"
                                 try:
                                     actor_info: dict[str, Any] = {}
@@ -2042,6 +2073,8 @@ async def sync_account(account_id: int) -> dict[str, Any]:
         "processed": processed,
         "errors": errors,
         "message_actions": message_actions,
+        "recovery": recovery,
+        "folder": folder,
     }
     await _record_sync_history_safe(
         account_id=account_id, started_at=started_at, result=result
