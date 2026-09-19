@@ -258,7 +258,7 @@ async def assign_to_ticket(*, ticket_id: int, configuration_id: int,
     company_roles = set(configuration.get("company_roles") or [])
     if selected_titles or company_roles:
         staff_rows = await db.fetch_all(
-            """SELECT id AS staff_id, first_name, last_name, email, COALESCE(NULLIF(job_title, ''), position) AS job_title
+            """SELECT id AS staff_id, first_name, last_name, email, NULLIF(TRIM(job_title), '') AS job_title
                FROM staff WHERE company_id = %s AND enabled = 1""",
             (configuration["company_id"],),
         )

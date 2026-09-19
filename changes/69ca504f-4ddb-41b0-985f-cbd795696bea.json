@@ -1,0 +1,7 @@
+{
+  "guid": "69ca504f-4ddb-41b0-985f-cbd795696bea",
+  "occurred_at": "2026-09-19T00:00Z",
+  "change_type": "Fix",
+  "summary": "Fixed the approvals page and approval assignment queries to use the canonical staff job title column.",
+  "content_hash": "62465279cf5d5d63bb47ac13905fcfd117b7504d4c747c62e59bd6330b60ee55"
+}
