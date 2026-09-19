@@ -510,7 +510,8 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
         if isinstance(data, dict):
             return data
     except (json.JSONDecodeError, ValueError):
-        pass
+        # A miss is expected here: fenced and embedded JSON are tried below.
+        data = None
 
     # 2. Strip markdown fenced code blocks
     md_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", stripped, re.DOTALL)
@@ -520,7 +521,8 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
             if isinstance(data, dict):
                 return data
         except (json.JSONDecodeError, ValueError):
-            pass
+            # A malformed fence may still contain an embedded JSON object.
+            data = None
 
     # 3. Find the first { … last } substring
     start = stripped.find("{")
@@ -531,7 +533,8 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
             if isinstance(data, dict):
                 return data
         except (json.JSONDecodeError, ValueError):
-            pass
+            # Invalid/non-object model output intentionally falls back to None.
+            data = None
 
     return None
 

@@ -31,6 +31,19 @@ from app.services.realtime import RefreshNotifier, refresh_notifier
 HELPDESK_PERMISSION_KEY = "helpdesk.technician"
 
 
+def parse_company_id(value: object) -> int | None:
+    """Return a positive company ID, or ``None`` for an invalid selection.
+
+    Callers must treat ``None`` as no active selection and still apply their
+    accessible-company checks rather than granting access.
+    """
+    try:
+        company_id = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return company_id if company_id > 0 else None
+
+
 def reply_assignment_error(ticket: Mapping[str, Any], *, is_internal: bool) -> str | None:
     """Return the assignment validation error that prevents a ticket reply."""
     has_company = ticket.get("company_id") is not None

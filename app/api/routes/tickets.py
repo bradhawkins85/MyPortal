@@ -1341,14 +1341,13 @@ async def add_reply(
             )
             if card_id:
                 trello_company: dict[str, Any] | None = None
-                trello_company_id = ticket_payload.get("company_id")
+                trello_company_id = tickets_service.parse_company_id(
+                    ticket_payload.get("company_id")
+                )
                 if trello_company_id is not None:
-                    try:
-                        trello_company = await company_repo.get_company_by_id(
-                            int(trello_company_id)
-                        )
-                    except (TypeError, ValueError):
-                        pass
+                    trello_company = await company_repo.get_company_by_id(
+                        trello_company_id
+                    )
                 actor_record = current_user or {}
                 first_name = str(actor_record.get("first_name") or "").strip()
                 last_name = str(actor_record.get("last_name") or "").strip()
