@@ -1,0 +1,7 @@
+{
+  "guid": "7250746a-b77a-45dc-bf1e-671ca8748090",
+  "occurred_at": "2026-09-19T00:00:00Z",
+  "change_type": "security",
+  "summary": "Harden passkey browser-binding cookie validation and document CodeQL alert 2642 disposition",
+  "content_hash": "bc285eaea585c0f88eb3897743118de3eda1471fe45ad406693752156bb95d06"
+}

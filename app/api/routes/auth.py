@@ -265,6 +265,11 @@ def _request_is_secure(request: Request) -> bool:
 
 
 def _set_passkey_login_cookie(response: Response, request: Request, token: str) -> None:
+    # Keep the sink guarded as well as its callers.  Besides providing defence
+    # in depth, this makes the request-cookie-to-response-cookie trust boundary
+    # explicit for static analysis.
+    if not passkeys_service.is_valid_browser_binding_token(token):
+        raise ValueError("Invalid passkey browser binding token")
     response.set_cookie(
         _passkey_login_cookie_name(),
         token,
@@ -279,6 +284,13 @@ def _validated_passkey_login_cookie(request: Request) -> str | None:
     token = request.cookies.get(_passkey_login_cookie_name())
     if not passkeys_service.is_valid_browser_binding_token(token):
         return None
+    return token
+
+
+def _new_passkey_login_binding() -> str:
+    token = passkeys_service.generate_browser_binding_token()
+    if not passkeys_service.is_valid_browser_binding_token(token):
+        raise RuntimeError("Passkey browser binding token generation failed")
     return token
 
 
@@ -1072,7 +1084,7 @@ async def begin_passkey_authentication(
     request: Request,
     _: None = Depends(require_database),
 ) -> Response:
-    browser_binding = _validated_passkey_login_cookie(request) or passkeys_service.generate_browser_binding_token()
+    browser_binding = _validated_passkey_login_cookie(request) or _new_passkey_login_binding()
     options = passkeys_service.authentication_options()
     await auth_repo.create_passkey_challenge(
         challenge_id=options["challenge_id"],
