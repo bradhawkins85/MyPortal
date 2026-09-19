@@ -114,6 +114,7 @@ async def update_session(
     impersonator_user_id: Any = _SENTINEL,
     impersonator_session_id: Any = _SENTINEL,
     impersonation_started_at: Any = _SENTINEL,
+    selected_role_id: Any = _SENTINEL,
 ) -> None:
     updates: list[str] = []
     params: list[Any] = []
@@ -144,6 +145,9 @@ async def update_session(
     if impersonation_started_at is not _SENTINEL:
         updates.append("impersonation_started_at = %s")
         params.append(impersonation_started_at)
+    if selected_role_id is not _SENTINEL:
+        updates.append("selected_role_id = %s")
+        params.append(selected_role_id)
     if not updates:
         return
     params.append(session_id)

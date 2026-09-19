@@ -29,6 +29,7 @@ class SessionData:
     impersonator_user_id: int | None = None
     impersonator_session_id: int | None = None
     impersonation_started_at: datetime | None = None
+    selected_role_id: int | None = None
 
 
 class SessionManager:
@@ -142,6 +143,10 @@ class SessionManager:
         await auth_repo.update_session(session.id, active_company_id=company_id)
         session.active_company_id = company_id
 
+    async def set_selected_role(self, session: SessionData, role_id: int | None) -> None:
+        await auth_repo.update_session(session.id, selected_role_id=role_id)
+        session.selected_role_id = role_id
+
     def hydrate_session(self, record: dict[str, Any]) -> SessionData:
         """Create session data from a database record without mutating state."""
         return self._map_session(record)
@@ -244,6 +249,11 @@ class SessionManager:
             impersonation_started_at=(
                 ensure_datetime(record.get("impersonation_started_at"))
                 if record.get("impersonation_started_at")
+                else None
+            ),
+            selected_role_id=(
+                int(record["selected_role_id"])
+                if record.get("selected_role_id") is not None
                 else None
             ),
         )

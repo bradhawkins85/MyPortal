@@ -61,6 +61,25 @@
           </form>
         </div>
         {% endif %}
+        {% if role_switcher_allowed | default(false) %}
+        <div class="company-switcher role-switcher">
+          <form action="/switch-role" method="post" data-role-switcher>
+            {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
+            {% set role_return_url = request.url.path %}
+            {% if request.url.query %}{% set role_return_url = role_return_url + '?' + request.url.query %}{% endif %}
+            <input type="hidden" name="returnUrl" value="{{ role_return_url }}" />
+            <label for="role-switcher" class="company-switcher__label">View as role</label>
+            <div class="company-switcher__field">
+              <select id="role-switcher" name="roleId" class="company-switcher__select" aria-label="View portal as role">
+                <option value="super_admin" {% if not selected_role_id %}selected{% endif %}>Super Admin mode</option>
+                {% for role in role_switcher_roles %}
+                  <option value="{{ role.id }}" {% if role.id == selected_role_id %}selected{% endif %}>{{ role.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </form>
+        </div>
+        {% endif %}
         <ul class="menu">
           {% if is_impersonating %}
             <li class="menu__item menu__item--impersonation" data-impersonation-banner>
@@ -1011,6 +1030,18 @@
               form.requestSubmit();
             } else {
               form.submit();
+            }
+          });
+        }
+
+        const roleForm = document.querySelector('[data-role-switcher]');
+        const roleSelect = roleForm ? roleForm.querySelector('select[name="roleId"]') : null;
+        if (roleForm && roleSelect) {
+          roleSelect.addEventListener('change', function () {
+            if (typeof roleForm.requestSubmit === 'function') {
+              roleForm.requestSubmit();
+            } else {
+              roleForm.submit();
             }
           });
         }

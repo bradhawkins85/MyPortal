@@ -11,6 +11,7 @@ from app.repositories import users as user_repo
 from app.security.session import SessionData, session_manager
 from app.services import issues as issues_service
 from app.services import tray as tray_service
+from app.services.role_switching import apply_selected_role, effective_membership
 
 
 async def get_current_session(request: Request) -> SessionData:
@@ -59,7 +60,7 @@ async def get_current_user(
                     detail="Two-factor authentication enrolment is required before continuing",
                     headers={"X-MyPortal-2FA-Enrolment-Required": "true"},
                 )
-    return user
+    return await apply_selected_role(request, user, session)
 
 
 async def require_super_admin(current_user: dict = Depends(get_current_user)):
@@ -127,12 +128,14 @@ async def get_optional_user(request: Request) -> dict | None:
     user_id = user.get("id")
     if isinstance(user_id, int):
         set_request_context(user_id=user_id)
+    user = await apply_selected_role(request, user, session)
     request.state.active_company_id = session.active_company_id
     if session.active_company_id is not None:
         try:
             membership = await user_company_repo.get_user_company(user["id"], int(session.active_company_id))
         except Exception:  # pragma: no cover - defensive
             membership = None
+        membership = effective_membership(request, membership)
         if membership is not None:
             request.state.active_membership = membership
     return user

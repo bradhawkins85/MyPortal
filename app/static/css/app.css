@@ -224,6 +224,10 @@ html {
   box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
 }
 
+.role-switcher {
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
 .menu {
   list-style: none;
   margin: 0;

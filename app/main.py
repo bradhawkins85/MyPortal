@@ -180,6 +180,7 @@ from app.services import issues as issues_service
 from app.services import service_status as service_status_service
 from app.services import system_state as system_state_service
 from app.services import impersonation as impersonation_service
+from app.services import role_switching
 from app.services.realtime import refresh_notifier
 from app.services.redis import close_redis_client, get_redis_client
 from app.services.sanitization import sanitize_rich_text
@@ -1133,7 +1134,7 @@ async def _require_authenticated_user(request: Request) -> tuple[dict[str, Any] 
     if active_company_id is not None:
         user["company_id"] = active_company_id
     request.state.active_company_id = active_company_id
-    return user, None
+    return await role_switching.apply_selected_role(request, user, session), None
 
 
 async def _require_super_admin_page(request: Request) -> tuple[dict[str, Any] | None, RedirectResponse | None]:
@@ -1999,7 +2000,10 @@ async def _build_base_context(
                 request.state.impersonator_profile = impersonator_user
     available_companies = getattr(request.state, "available_companies", None)
     if available_companies is None:
-        available_companies = await company_access.list_accessible_companies(user)
+        access_user = user
+        if getattr(request.state, "role_switcher_allowed", False):
+            access_user = {**user, "is_super_admin": True}
+        available_companies = await company_access.list_accessible_companies(access_user)
         request.state.available_companies = available_companies
     active_company_id = getattr(request.state, "active_company_id", None)
     if active_company_id is None and session:
@@ -2013,6 +2017,7 @@ async def _build_base_context(
     membership = None
     if active_company_id is not None:
         membership = await user_company_repo.get_user_company(user["id"], int(active_company_id))
+        membership = role_switching.effective_membership(request, membership)
         request.state.active_membership = membership
 
     membership_data = membership or {}
@@ -2093,6 +2098,12 @@ async def _build_base_context(
         module_lookup = {module.get("slug"): module for module in module_list if module.get("slug")}
         request.state.module_lookup = module_lookup
     
+    role_switcher_allowed = bool(getattr(request.state, "role_switcher_allowed", False))
+    role_switcher_roles: list[dict[str, Any]] = []
+    if role_switcher_allowed:
+        role_switcher_roles = sorted(await role_repo.list_roles(), key=lambda item: str(item.get("name") or "").casefold())
+    selected_role = getattr(request.state, "selected_role", None)
+
     context: dict[str, Any] = {
         "request": request,
         "app_name": settings.app_name,
@@ -2106,6 +2117,9 @@ async def _build_base_context(
         "csrf_token": session.csrf_token if session else None,
         "staff_permission": staff_permission_level,
         "is_super_admin": is_super_admin,
+        "role_switcher_allowed": role_switcher_allowed,
+        "role_switcher_roles": role_switcher_roles,
+        "selected_role_id": selected_role.get("id") if selected_role else None,
         "is_helpdesk_technician": is_helpdesk_technician,
         "has_admin_technician_access": has_admin_technician_access,
         "is_company_admin": is_super_admin or _menu_can(menu_access, "menu.admin.company"),
@@ -2260,6 +2274,7 @@ async def _get_optional_user(
     user = await user_repo.get_user_by_id(session.user_id)
     if not user:
         return None, None
+    user = await role_switching.apply_selected_role(request, user, session)
     request.state.active_company_id = session.active_company_id
     membership = None
     if session.active_company_id is not None:
@@ -2267,6 +2282,7 @@ async def _get_optional_user(
             membership = await user_company_repo.get_user_company(user["id"], int(session.active_company_id))
         except Exception:  # pragma: no cover - defensive
             membership = None
+        membership = role_switching.effective_membership(request, membership)
         if membership is not None:
             request.state.active_membership = membership
     return user, membership
@@ -3195,7 +3211,10 @@ async def switch_company(
     return_url_raw = _first_non_blank(("returnUrl", "return_url"), body_data, query_params)
     return_url: str | None = return_url_raw if isinstance(return_url_raw, str) else None
 
-    companies = await company_access.list_accessible_companies(user)
+    access_user = user
+    if getattr(request.state, "role_switcher_allowed", False):
+        access_user = {**user, "is_super_admin": True}
+    companies = await company_access.list_accessible_companies(access_user)
     request.state.available_companies = companies
 
     if any(company.get("company_id") == company_id for company in companies):
@@ -3205,6 +3224,37 @@ async def switch_company(
 
     destination = _sanitize_local_redirect_target(return_url, fallback="/")
 
+    return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/switch-role", response_class=RedirectResponse)
+async def switch_role(request: Request):
+    """Select an effective role for the current Super Admin session."""
+
+    session = await session_manager.load_session(request)
+    if not session:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    actor = await user_repo.get_user_by_id(session.user_id)
+    if not actor or not actor.get("is_super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+
+    body_data = await _extract_switch_company_payload(request)
+    role_id_raw = _first_non_blank(("roleId", "role_id"), body_data, request.query_params)
+    role_id: int | None = None
+    if role_id_raw not in (None, "", "super_admin"):
+        try:
+            role_id = int(role_id_raw)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role identifier") from None
+        if await role_repo.get_role_by_id(role_id) is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+
+    await session_manager.set_selected_role(session, role_id)
+    return_url_raw = _first_non_blank(("returnUrl", "return_url"), body_data, request.query_params)
+    destination = _sanitize_local_redirect_target(
+        return_url_raw if isinstance(return_url_raw, str) else None,
+        fallback="/",
+    )
     return RedirectResponse(url=destination, status_code=status.HTTP_303_SEE_OTHER)
 
 
