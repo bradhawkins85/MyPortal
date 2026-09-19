@@ -29,6 +29,9 @@ from app.services.sanitization import sanitize_rich_text
 from app.services.realtime import RefreshNotifier, refresh_notifier
 
 HELPDESK_PERMISSION_KEY = "helpdesk.technician"
+# Ticket assignment is more restrictive than general ticket access.  The
+# Technician Yes/No role setting maps to this legacy permission.
+TICKET_ASSIGNEE_PERMISSION_KEY = "company.switch_all"
 
 
 def parse_company_id(value: object) -> int | None:
@@ -2143,7 +2146,9 @@ async def load_dashboard_state(
     if include_reference_data:
         modules = await import_module("app.services.modules").list_modules()
         companies = await company_repo.list_companies()
-        technicians = await membership_repo.list_users_with_permission(HELPDESK_PERMISSION_KEY)
+        technicians = await membership_repo.list_users_with_permission(
+            TICKET_ASSIGNEE_PERMISSION_KEY
+        )
 
     company_lookup: dict[int, dict[str, Any]] = {}
     if include_reference_data:

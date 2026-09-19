@@ -641,6 +641,39 @@ async def test_list_users_with_permission_filters_and_sorts(monkeypatch):
 
 
 @pytest.mark.anyio("asyncio")
+async def test_ticket_assignee_permission_excludes_general_ticket_users(monkeypatch):
+    rows = [
+        {
+            "user_id": 5,
+            "email": "technician@example.com",
+            "first_name": "Technician",
+            "last_name": "User",
+            "mobile_phone": None,
+            "company_id": 3,
+            "is_super_admin": 0,
+            "permissions": json.dumps(
+                {"menu": {"menu.admin.technician": "write", "menu.tickets": "write"}}
+            ),
+        },
+        {
+            "user_id": 8,
+            "email": "ticket-user@example.com",
+            "first_name": "Ticket",
+            "last_name": "User",
+            "mobile_phone": None,
+            "company_id": 2,
+            "is_super_admin": 0,
+            "permissions": json.dumps({"menu": {"menu.tickets": "write"}}),
+        },
+    ]
+    monkeypatch.setattr(membership_repo.db, "fetch_all", AsyncMock(return_value=rows))
+
+    result = await membership_repo.list_users_with_permission("company.switch_all")
+
+    assert [user["id"] for user in result] == [5]
+
+
+@pytest.mark.anyio("asyncio")
 async def test_list_users_with_permission_includes_super_admin(monkeypatch):
     rows = [
         {
@@ -689,3 +722,60 @@ async def test_user_has_permission_allows_super_admin(monkeypatch):
     assert result is True
     list_mock.assert_awaited_once_with(3, status="active")
     user_mock.assert_awaited_once_with(3)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_user_has_role_permission_excludes_user_specific_grants(monkeypatch):
+    monkeypatch.setattr(
+        membership_repo.user_repo,
+        "get_user_by_id",
+        AsyncMock(return_value={"id": 4, "is_super_admin": 0}),
+    )
+    monkeypatch.setattr(
+        membership_repo,
+        "list_memberships_for_user",
+        AsyncMock(
+            return_value=[
+                {
+                    "company_id": 7,
+                    "permissions": {"menu": {"menu.admin.technician": "none"}},
+                }
+            ]
+        ),
+    )
+    user_grants = AsyncMock(return_value=["company.switch_all"])
+    monkeypatch.setattr(
+        membership_repo.user_permissions_repo,
+        "list_user_permissions",
+        user_grants,
+    )
+
+    result = await membership_repo.user_has_role_permission(4, "company.switch_all")
+
+    assert result is False
+    user_grants.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_user_has_role_permission_accepts_technician_role(monkeypatch):
+    monkeypatch.setattr(
+        membership_repo.user_repo,
+        "get_user_by_id",
+        AsyncMock(return_value={"id": 5, "is_super_admin": 0}),
+    )
+    monkeypatch.setattr(
+        membership_repo,
+        "list_memberships_for_user",
+        AsyncMock(
+            return_value=[
+                {
+                    "company_id": 7,
+                    "permissions": {"menu": {"menu.admin.technician": "write"}},
+                }
+            ]
+        ),
+    )
+
+    result = await membership_repo.user_has_role_permission(5, "company.switch_all")
+
+    assert result is True

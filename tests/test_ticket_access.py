@@ -17,7 +17,7 @@ from app.api.routes import tickets as tickets_routes
 from app.core.database import db
 from app import main as main_module
 from app.main import app, scheduler_service
-from app.services.tickets import HELPDESK_PERMISSION_KEY, TicketStatusDefinition
+from app.services.tickets import TICKET_ASSIGNEE_PERMISSION_KEY, TicketStatusDefinition
 from app.security.session import SessionData, session_manager
 
 
@@ -1048,7 +1048,7 @@ def test_admin_ticket_assign_options_only_include_helpdesk_users(monkeypatch):
     response = asyncio.run(main_module._render_tickets_dashboard(request, user))
 
     assert response.status_code == status.HTTP_200_OK
-    assert captured["permission"] == HELPDESK_PERMISSION_KEY
+    assert captured["permission"] == TICKET_ASSIGNEE_PERMISSION_KEY
     options = captured["extra"].get("ticket_user_options")
     assert options == [{"id": 1, "email": "tech@example.com"}]
     lookup = captured["extra"].get("ticket_user_lookup")

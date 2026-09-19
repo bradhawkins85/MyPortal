@@ -223,6 +223,24 @@ async def user_has_permission(user_id: int, permission: str) -> bool:
     return False
 
 
+async def user_has_role_permission(user_id: int, permission: str) -> bool:
+    """Return whether a user is a Super Admin or an active role grants a permission.
+
+    Unlike :func:`user_has_permission`, this deliberately excludes per-user
+    grants.  It is intended for eligibility rules, such as ticket assignment,
+    that explicitly require membership of a qualifying role.
+    """
+    user_record = await user_repo.get_user_by_id(user_id)
+    if user_record and bool(user_record.get("is_super_admin")):
+        return True
+
+    memberships = await list_memberships_for_user(user_id, status="active")
+    return any(
+        _permission_matches(membership.get("permissions") or [], permission)
+        for membership in memberships
+    )
+
+
 async def list_users_with_permission(permission: str) -> List[dict[str, Any]]:
     """Return role-qualified users and Super Admins for privileged selectors.
 

@@ -9997,7 +9997,7 @@ async def _render_ticket_detail(
 
     companies = await company_repo.list_companies()
     technician_users = await membership_repo.list_users_with_permission(
-        HELPDESK_PERMISSION_KEY
+        tickets_service.TICKET_ASSIGNEE_PERMISSION_KEY
     )
     requester_options: list[dict[str, Any]] = []
     watcher_staff_options: list[dict[str, Any]] = []
