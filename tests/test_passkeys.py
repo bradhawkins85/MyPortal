@@ -215,7 +215,9 @@ async def test_finish_passkey_authentication_rejects_ineligible_user(monkeypatch
         "invalid",
         _valid_browser_binding("A") + "A",
         _valid_browser_binding("A")[:-1] + ";",
+        _valid_browser_binding("A")[:-1] + "é",
         _valid_browser_binding("A")[:-1] + "\n",
+        _valid_browser_binding("A")[:-1] + "\x00",
     ],
 )
 async def test_finish_passkey_authentication_rejects_missing_or_invalid_cookie(monkeypatch, cookie_value):
@@ -237,6 +239,41 @@ async def test_finish_passkey_authentication_rejects_missing_or_invalid_cookie(m
 
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "Passkey sign-in failed. Use another sign-in option and try again."
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("rejection", ["mismatched binding", "expired", "replayed"])
+async def test_finish_passkey_authentication_rejects_unconsumable_challenge(monkeypatch, rejection):
+    browser_binding = _valid_browser_binding("E")
+    recorded = {}
+
+    async def fake_get_passkey_challenge(challenge_id):
+        return {"challenge_id": challenge_id, "challenge": "expected-challenge"}
+
+    async def fake_consume_passkey_challenge(**kwargs):
+        recorded["consumed"] = kwargs
+        return False
+
+    monkeypatch.setattr(auth_routes.auth_repo, "get_passkey_challenge", fake_get_passkey_challenge)
+    monkeypatch.setattr(auth_routes.auth_repo, "consume_passkey_challenge", fake_consume_passkey_challenge)
+    monkeypatch.setattr(
+        auth_routes.passkeys_service,
+        "verify_authentication",
+        lambda **kwargs: pytest.fail(f"verification must not run for an {rejection} challenge"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await auth_routes.finish_passkey_authentication(
+            PasskeyCredentialRequest(challenge_id="challenge-1", credential={"id": "credential-1"}),
+            _request(
+                "/auth/passkeys/authenticate/verify",
+                cookie=f"myportal_session_passkey_login={browser_binding}",
+            ),
+            None,
+        )
+
+    assert exc_info.value.status_code == 401
+    assert recorded["consumed"]["browser_binding_hash"] == passkeys_service.browser_binding_hash(browser_binding)
 
 
 @pytest.mark.anyio
@@ -315,7 +352,9 @@ async def test_begin_passkey_authentication_sets_secure_cookie_in_production(mon
         "invalid",
         _valid_browser_binding("A") + "A",
         _valid_browser_binding("A")[:-1] + ";",
+        _valid_browser_binding("A")[:-1] + "é",
         _valid_browser_binding("A")[:-1] + "\n",
+        _valid_browser_binding("A")[:-1] + "\x00",
     ],
 )
 async def test_begin_passkey_authentication_replaces_invalid_cookie(monkeypatch, cookie_value):
@@ -344,7 +383,49 @@ async def test_begin_passkey_authentication_replaces_invalid_cookie(monkeypatch,
     response = await auth_routes.begin_passkey_authentication(request, None)
 
     assert recorded["challenge"]["browser_binding_hash"] == passkeys_service.browser_binding_hash(generated_binding)
-    assert cookie_value not in response.headers["set-cookie"]
+    set_cookie = response.headers["set-cookie"]
+    assert set_cookie.startswith(f"{auth_routes._passkey_login_cookie_name()}={generated_binding};")
+    assert cookie_value not in set_cookie
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "",
+        "short",
+        _valid_browser_binding() + "A",
+        _valid_browser_binding()[:-1] + ";",
+        _valid_browser_binding()[:-1] + "é",
+        _valid_browser_binding()[:-1] + "\r",
+        _valid_browser_binding()[:-1] + "\x00",
+    ],
+)
+def test_passkey_cookie_sink_rejects_malformed_tokens(token):
+    response = auth_routes.Response()
+
+    with pytest.raises(ValueError, match="Invalid passkey browser binding token"):
+        auth_routes._set_passkey_login_cookie(
+            response,
+            _request("/auth/passkeys/authenticate/options"),
+            token,
+        )
+
+    assert "set-cookie" not in response.headers
+
+
+@pytest.mark.anyio
+async def test_begin_passkey_authentication_rejects_invalid_generated_binding(monkeypatch):
+    async def fail_create_passkey_challenge(**kwargs):
+        raise AssertionError("an invalid binding must not reach challenge hashing or persistence")
+
+    monkeypatch.setattr(auth_routes.auth_repo, "create_passkey_challenge", fail_create_passkey_challenge)
+    monkeypatch.setattr(auth_routes.passkeys_service, "generate_browser_binding_token", lambda: "invalid")
+
+    with pytest.raises(RuntimeError, match="token generation failed"):
+        await auth_routes.begin_passkey_authentication(
+            _request("/auth/passkeys/authenticate/options"),
+            None,
+        )
 
 
 @pytest.mark.anyio
