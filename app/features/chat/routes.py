@@ -21,6 +21,7 @@ from app.repositories import users as user_repo
 from app.security.encryption import encrypt_secret
 from app.security.session import SessionData
 from app.services import matrix as matrix_service
+from app.services import role_switching
 from app.services import tray as tray_service
 from app.services import matrix_ai_waiting_assistant
 from app.core.logging import log_error, log_info
@@ -62,6 +63,9 @@ async def chat_index(
     current_user = await user_repo.get_user_by_id(session.user_id)
     if not current_user:
         return RedirectResponse("/login", status_code=303)
+    current_user = await role_switching.apply_selected_role(request, current_user, session)
+    if current_user.get("company_id") is None and session.active_company_id is not None:
+        current_user["company_id"] = session.active_company_id
 
     is_super_admin = bool(current_user.get("is_super_admin"))
     is_helpdesk = bool(current_user.get("is_helpdesk_technician"))
@@ -69,7 +73,10 @@ async def chat_index(
     if not is_super_admin and not is_helpdesk:
         membership = None
         if company_id is not None:
-            membership = await user_company_repo.get_user_company(current_user["id"], int(company_id))
+            membership = role_switching.effective_membership(
+                request,
+                await user_company_repo.get_user_company(current_user["id"], int(company_id)),
+            )
         can_access = bool(membership and membership.get("can_access_chat"))
         company = None
         if can_access and company_id is not None:

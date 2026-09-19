@@ -85,7 +85,9 @@ async def _load_subscription_context(request: Request):
             detail="Invalid company identifier",
         )
 
-    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    membership = await _main()._get_effective_company_membership(
+        request, user["id"], company_id
+    )
     has_license = bool(membership and membership.get("can_manage_licenses"))
     has_cart = bool(membership and membership.get("can_access_cart"))
     can_view_subscriptions = _main()._membership_menu_can(

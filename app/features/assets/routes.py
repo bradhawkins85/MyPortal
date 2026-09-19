@@ -105,7 +105,9 @@ async def _load_asset_context(request: Request, permission_key: str = "menu.asse
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier"
         ) from exc
 
-    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    membership = await main_module._get_effective_company_membership(
+        request, user["id"], company_id
+    )
     can_view_assets = main_module._membership_menu_can(user, membership, permission_key)
     if not (is_super_admin or can_view_assets):
         return (

@@ -1974,6 +1974,21 @@ def _membership_menu_can(user: dict[str, Any], membership: dict[str, Any] | None
     return _menu_can(menu_access, key, write=write)
 
 
+async def _get_effective_company_membership(
+    request: Request, user_id: int, company_id: int
+) -> dict[str, Any] | None:
+    """Load membership data without discarding an active role simulation.
+
+    Super admins do not normally need a persisted company membership.  While
+    viewing as a role, page loaders must therefore use the virtual membership
+    installed by :func:`role_switching.apply_selected_role` rather than the
+    (usually absent) database row.
+    """
+
+    membership = await user_company_repo.get_user_company(user_id, company_id)
+    return role_switching.effective_membership(request, membership)
+
+
 async def _build_base_context(
     request: Request,
     user: dict[str, Any],
@@ -2355,7 +2370,7 @@ async def _load_license_context(
         company_id = int(company_id_raw)
     except (TypeError, ValueError):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier")
-    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    membership = await _get_effective_company_membership(request, user["id"], company_id)
     can_manage = bool(membership and membership.get("can_manage_licenses"))
     can_order = bool(membership and membership.get("can_order_licenses"))
     can_view_licenses = _membership_menu_can(user, membership, "menu.m365.licenses")
@@ -2437,7 +2452,7 @@ async def _load_company_section_context(
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
 
-    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    membership = await _get_effective_company_membership(request, user["id"], company_id)
     has_permission = bool(membership and membership.get(permission_field))
     if not (is_super_admin or has_permission):
         return (
@@ -3389,7 +3404,7 @@ async def _load_m365_best_practices_context(request: Request, *, super_admin_onl
         company_id = int(company_id_raw)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
-    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    membership = await _get_effective_company_membership(request, user["id"], company_id)
     can_view = bool(membership and membership.get("can_view_m365_best_practices"))
     if super_admin_only:
         if not is_super_admin:
@@ -3938,7 +3953,7 @@ async def _load_m365_mailbox_context(request: Request, *, mailbox_permission: st
         company_id = int(company_id_raw)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid company identifier") from exc
-    membership = await user_company_repo.get_user_company(user["id"], company_id)
+    membership = await _get_effective_company_membership(request, user["id"], company_id)
     mailbox_menu_key = "menu.m365.user_mailboxes" if mailbox_permission == "can_view_m365_user_mailboxes" else "menu.m365.shared_mailboxes"
     can_access = bool(
         is_super_admin
