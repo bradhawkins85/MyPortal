@@ -283,14 +283,20 @@ async def test_try_grant_missing_permissions_continues_on_partial_failure():
 
 @pytest.mark.anyio("asyncio")
 async def test_try_grant_missing_permissions_swallows_unexpected_errors():
-    """Any unexpected exception is caught and logged rather than raised."""
+    """Unexpected failures are observable without leaking exception content."""
 
     async def mock_graph_get(*args: Any, **kwargs: Any) -> dict:
-        raise RuntimeError("network failure")
+        raise RuntimeError("network failure bearer secret-token")
+
+    logged: list[tuple[str, dict[str, Any]]] = []
+
+    def capture_error(message: str, **fields: Any) -> None:
+        logged.append((message, fields))
 
     with (
         patch.object(m365_service, "get_credentials", AsyncMock(return_value=_fake_creds())),
         patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+        patch.object(m365_service, "log_error", side_effect=capture_error),
     ):
         # Must not raise
         result = await m365_service.try_grant_missing_permissions(
@@ -298,6 +304,8 @@ async def test_try_grant_missing_permissions_swallows_unexpected_errors():
             access_token="token",
         )
     assert result is False, "Should return False when an unexpected error occurs"
+    assert logged == [("try_grant_missing_permissions: unexpected error", {"company_id": 1, "exception_type": "RuntimeError"})]
+    assert "secret-token" not in repr(logged)
 
 
 # ---------------------------------------------------------------------------

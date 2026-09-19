@@ -690,6 +690,11 @@ class M365Error(RuntimeError):
         self.graph_error_code: str | None = graph_error_code
 
 
+def _safe_m365_error_fields(exc: M365Error) -> dict[str, Any]:
+    """Return actionable Graph diagnostics without logging response payloads."""
+    return {"http_status": exc.http_status, "graph_error_code": exc.graph_error_code}
+
+
 class M365NoDelegatedTokenError(M365Error):
     """Raised when a delegated admin token is required but not available.
 
@@ -4694,8 +4699,12 @@ async def try_grant_missing_permissions(
             exo_sp_list = exo_sp_resp.get("value", [])
             if exo_sp_list:
                 exo_sp_id = exo_sp_list[0]["id"]
-        except M365Error:
-            pass
+        except M365Error as exc:
+            log_warning(
+                "M365 permission repair could not discover Exchange service principal",
+                company_id=company_id,
+                **_safe_m365_error_fields(exc),
+            )
 
         try:
             scc_sp_resp = await _graph_get(
@@ -4709,8 +4718,12 @@ async def try_grant_missing_permissions(
             ]
             if scc_sp_list:
                 scc_sp_id = scc_sp_list[0]["id"]
-        except M365Error:
-            pass
+        except M365Error as exc:
+            log_warning(
+                "M365 permission repair could not discover Purview service principal",
+                company_id=company_id,
+                **_safe_m365_error_fields(exc),
+            )
 
         teams_sp_has_role: bool = False
         try:
@@ -4727,8 +4740,12 @@ async def try_grant_missing_permissions(
                     r.get("id") == _TEAMS_MANAGE_AS_APP_ROLE
                     for r in teams_sp_obj.get("appRoles", [])
                 )
-        except M365Error:
-            pass
+        except M365Error as exc:
+            log_warning(
+                "M365 permission repair could not discover Teams service principal",
+                company_id=company_id,
+                **_safe_m365_error_fields(exc),
+            )
 
         exo_needed = exo_sp_id is not None and exo_sp_id not in manage_as_app_resource_ids
         scc_needed = scc_sp_id is not None and scc_sp_id not in manage_as_app_resource_ids
@@ -4787,7 +4804,7 @@ async def try_grant_missing_permissions(
                             "try_grant_missing_permissions: failed to grant role",
                             company_id=company_id,
                             role_id=role_id,
-                            error=str(exc),
+                            **_safe_m365_error_fields(exc),
                         )
 
             if granted:
@@ -4822,10 +4839,14 @@ async def try_grant_missing_permissions(
                                 "try_grant_missing_permissions: "
                                 "failed to grant Exchange.ManageAsApp",
                                 company_id=company_id,
-                                error=str(exc),
+                                **_safe_m365_error_fields(exc),
                             )
-            except M365Error:
-                pass
+            except M365Error as exc:
+                log_error(
+                    "try_grant_missing_permissions: unexpected Exchange grant failure",
+                    company_id=company_id,
+                    **_safe_m365_error_fields(exc),
+                )
 
         # Purview has its own Exchange.ManageAsApp resource assignment. This
         # is the key repair performed by reconnect for existing installations.
@@ -4847,7 +4868,7 @@ async def try_grant_missing_permissions(
                     log_error(
                         "try_grant_missing_permissions: failed to grant Purview Exchange.ManageAsApp",
                         company_id=company_id,
-                        error=str(exc),
+                        **_safe_m365_error_fields(exc),
                     )
 
         # Best-effort: grant Teams.ManageAsApp if not already assigned.
@@ -4877,10 +4898,14 @@ async def try_grant_missing_permissions(
                                 "try_grant_missing_permissions: "
                                 "failed to grant Teams.ManageAsApp",
                                 company_id=company_id,
-                                error=str(exc),
+                                **_safe_m365_error_fields(exc),
                             )
-            except M365Error:
-                pass
+            except M365Error as exc:
+                log_error(
+                    "try_grant_missing_permissions: unexpected Teams grant failure",
+                    company_id=company_id,
+                    **_safe_m365_error_fields(exc),
+                )
 
         # Best-effort: assign the Exchange Administrator directory role so that
         # Exchange Online PowerShell cmdlets (Get-MailboxPermission) succeed.
@@ -4921,7 +4946,7 @@ async def try_grant_missing_permissions(
                     log_error(
                         "try_grant_missing_permissions: failed to register app self-owner",
                         company_id=company_id,
-                        error=str(exc),
+                        **_safe_m365_error_fields(exc),
                     )
 
         return bool(granted)
@@ -4929,7 +4954,7 @@ async def try_grant_missing_permissions(
         log_error(
             "try_grant_missing_permissions: unexpected error",
             company_id=company_id,
-            error=str(exc),
+            exception_type=type(exc).__name__,
         )
         return False
 

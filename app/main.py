@@ -8856,11 +8856,9 @@ async def _render_portal_ticket_detail(
             available_companies = await company_access.list_accessible_companies(user)
             active_company_id = getattr(request.state, "active_company_id", None)
             allowed_company_ids: set[int] = set()
-            if active_company_id is not None:
-                try:
-                    allowed_company_ids.add(int(active_company_id))
-                except (TypeError, ValueError):
-                    pass
+            parsed_active_company_id = tickets_service.parse_company_id(active_company_id)
+            if parsed_active_company_id is not None:
+                allowed_company_ids.add(parsed_active_company_id)
             if not allowed_company_ids:
                 for entry in available_companies:
                     try:
