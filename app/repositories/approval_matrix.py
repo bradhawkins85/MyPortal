@@ -5,7 +5,13 @@ from typing import Any
 from app.core.database import db
 
 
-async def list_configurations(company_id: int, *, workflow_type: str = "change") -> list[dict[str, Any]]:
+async def list_configurations(
+    company_id: int,
+    *,
+    workflow_type: str = "change",
+    include_inactive: bool = False,
+) -> list[dict[str, Any]]:
+    active_clause = "" if include_inactive else " AND ac.is_active = 1"
     rows = await db.fetch_all(
         """
         SELECT ac.*, u.email AS technician_email,
@@ -14,7 +20,7 @@ async def list_configurations(company_id: int, *, workflow_type: str = "change")
         FROM approval_configurations ac
         JOIN users u ON u.id = ac.technician_user_id
         LEFT JOIN approval_configuration_contacts acc ON acc.configuration_id = ac.id
-        WHERE ac.company_id = %s AND ac.workflow_type = %s
+        WHERE ac.company_id = %s AND ac.workflow_type = %s""" + active_clause + """
         GROUP BY ac.id, u.email, u.first_name, u.last_name
         ORDER BY ac.name ASC, ac.id ASC
         """,
@@ -56,6 +62,69 @@ async def create_configuration(*, company_id: int, name: str, technician_user_id
             (configuration_id, staff_id, order),
         )
     return (await get_configuration(int(configuration_id))) or {"id": configuration_id}
+
+
+async def configuration_name_exists(
+    company_id: int,
+    name: str,
+    *,
+    workflow_type: str = "change",
+    exclude_configuration_id: int | None = None,
+) -> bool:
+    query = """SELECT id FROM approval_configurations
+               WHERE company_id = %s AND workflow_type = %s AND LOWER(name) = LOWER(%s)"""
+    params: list[Any] = [company_id, workflow_type, name]
+    if exclude_configuration_id is not None:
+        query += " AND id <> %s"
+        params.append(exclude_configuration_id)
+    return bool(await db.fetch_one(query, tuple(params)))
+
+
+async def update_configuration(
+    *,
+    configuration_id: int,
+    company_id: int,
+    name: str,
+    technician_user_id: int,
+    contact_staff_ids: list[int],
+    description: str | None = None,
+) -> bool:
+    owned = await db.fetch_one(
+        "SELECT id FROM approval_configurations WHERE id = %s AND company_id = %s",
+        (configuration_id, company_id),
+    )
+    if not owned:
+        return False
+    await db.execute(
+        """UPDATE approval_configurations
+           SET name = %s, description = %s, technician_user_id = %s
+           WHERE id = %s AND company_id = %s""",
+        (name, description, technician_user_id, configuration_id, company_id),
+    )
+    await db.execute(
+        "DELETE FROM approval_configuration_contacts WHERE configuration_id = %s",
+        (configuration_id,),
+    )
+    for order, staff_id in enumerate(dict.fromkeys(contact_staff_ids)):
+        await db.execute(
+            "INSERT INTO approval_configuration_contacts (configuration_id, staff_id, sort_order) VALUES (%s, %s, %s)",
+            (configuration_id, staff_id, order),
+        )
+    return True
+
+
+async def set_configuration_active(configuration_id: int, company_id: int, is_active: bool) -> bool:
+    owned = await db.fetch_one(
+        "SELECT id FROM approval_configurations WHERE id = %s AND company_id = %s",
+        (configuration_id, company_id),
+    )
+    if not owned:
+        return False
+    await db.execute(
+        "UPDATE approval_configurations SET is_active = %s WHERE id = %s AND company_id = %s",
+        (1 if is_active else 0, configuration_id, company_id),
+    )
+    return True
 
 
 async def delete_configuration(configuration_id: int, company_id: int) -> bool:

@@ -31,3 +31,47 @@ async def test_set_decision_only_accepts_final_statuses():
             decision_status="pending",
             decided_by_user_id=1,
         )
+
+
+@pytest.mark.anyio
+async def test_ticket_configuration_list_only_returns_active_company_rows(monkeypatch):
+    fetch_all = AsyncMock(return_value=[])
+    monkeypatch.setattr(approval_matrix.db, "fetch_all", fetch_all)
+
+    await approval_matrix.list_configurations(42)
+
+    query, params = fetch_all.await_args.args
+    assert "ac.company_id = %s" in query
+    assert "ac.is_active = 1" in query
+    assert params == (42, "change")
+
+
+@pytest.mark.anyio
+async def test_admin_configuration_list_can_include_inactive_rows(monkeypatch):
+    fetch_all = AsyncMock(return_value=[])
+    monkeypatch.setattr(approval_matrix.db, "fetch_all", fetch_all)
+
+    await approval_matrix.list_configurations(7, include_inactive=True)
+
+    query, params = fetch_all.await_args.args
+    assert "ac.is_active = 1" not in query
+    assert params == (7, "change")
+
+
+@pytest.mark.anyio
+async def test_update_configuration_requires_company_ownership(monkeypatch):
+    monkeypatch.setattr(approval_matrix.db, "fetch_one", AsyncMock(return_value=None))
+    execute = AsyncMock()
+    monkeypatch.setattr(approval_matrix.db, "execute", execute)
+
+    updated = await approval_matrix.update_configuration(
+        configuration_id=3,
+        company_id=99,
+        name="Restricted change",
+        description=None,
+        technician_user_id=2,
+        contact_staff_ids=[4],
+    )
+
+    assert updated is False
+    execute.assert_not_awaited()
