@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}Add externally billed subscription - {{ app_name }}{% endblock %}
+{% block header_title %}<span class="header__title-text">Add externally billed subscription</span>{% endblock %}
+{% block header_actions %}<a class="button button--ghost" href="/subscriptions">Back to subscriptions</a>{% endblock %}
+
+{% block content %}
+<section class="card card--panel external-subscription-card">
+  <header class="card__header">
+    <div>
+      <h2 class="card__title">Third-party subscription reminder</h2>
+      <p class="card__description">Record a subscription billed by an external vendor for {{ company.name if company else 'your company' }}. It will send renewal reminders only and will never generate a MyPortal invoice.</p>
+    </div>
+  </header>
+
+  {% if failure_message %}<div class="alert alert--danger" role="alert">{{ failure_message }}</div>{% endif %}
+  {% if form_errors %}
+  <div class="alert alert--danger" role="alert">
+    <strong>Please correct the following:</strong>
+    <ul>{% for error in form_errors.values() %}<li>{{ error }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  <div class="alert alert--info" role="status">
+    <strong>Externally billed / third-party</strong><br>
+    This record is not linked to a Shop product. Billing remains with the vendor; MyPortal only tracks its renewal.
+  </div>
+
+  <form method="post" action="/subscriptions/create" class="external-subscription-form" novalidate>
+    {% include "partials/csrf.html" %}
+    <div class="form-grid">
+      <div class="form-field">
+        <label class="form-label" for="vendor">Vendor name <span aria-hidden="true">*</span></label>
+        <input class="form-input" id="vendor" name="vendor" maxlength="255" value="{{ form_values.vendor or '' }}" list="subscription-vendors" required aria-invalid="{{ 'true' if form_errors.vendor else 'false' }}">
+        <datalist id="subscription-vendors"><option value="Microsoft"><option value="Adobe"><option value="Amazon Web Services"><option value="Google"></datalist>
+        {% if form_errors.vendor %}<p class="form-error">{{ form_errors.vendor }}</p>{% endif %}
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="external_name">Subscription name <span aria-hidden="true">*</span></label>
+        <input class="form-input" id="external_name" name="external_name" maxlength="255" value="{{ form_values.external_name or '' }}" required aria-invalid="{{ 'true' if form_errors.external_name else 'false' }}">
+        {% if form_errors.external_name %}<p class="form-error">{{ form_errors.external_name }}</p>{% endif %}
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="external_sku">Vendor SKU <span class="field-optional">(optional)</span></label>
+        <input class="form-input" id="external_sku" name="external_sku" maxlength="255" value="{{ form_values.external_sku or '' }}">
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="billing_frequency">Billing frequency <span aria-hidden="true">*</span></label>
+        <select class="form-input" id="billing_frequency" name="billing_frequency" required>
+          <option value="annual" {% if form_values.billing_frequency == 'annual' %}selected{% endif %}>Annual</option>
+          <option value="monthly" {% if form_values.billing_frequency == 'monthly' %}selected{% endif %}>Monthly</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="start_date">Start date <span aria-hidden="true">*</span></label>
+        <input class="form-input" id="start_date" name="start_date" type="date" value="{{ form_values.start_date }}" required aria-invalid="{{ 'true' if form_errors.start_date else 'false' }}">
+        {% if form_errors.start_date %}<p class="form-error">{{ form_errors.start_date }}</p>{% endif %}
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="end_date">Renewal or expiry date <span aria-hidden="true">*</span></label>
+        <input class="form-input" id="end_date" name="end_date" type="date" value="{{ form_values.end_date or '' }}" required aria-invalid="{{ 'true' if form_errors.end_date else 'false' }}">
+        {% if form_errors.end_date %}<p class="form-error">{{ form_errors.end_date }}</p>{% endif %}
+      </div>
+      <div class="form-field">
+        <label class="form-label" for="quantity">Quantity <span aria-hidden="true">*</span></label>
+        <input class="form-input" id="quantity" name="quantity" type="number" min="1" max="9999" step="1" value="{{ form_values.quantity }}" required aria-invalid="{{ 'true' if form_errors.quantity else 'false' }}">
+        {% if form_errors.quantity %}<p class="form-error">{{ form_errors.quantity }}</p>{% endif %}
+      </div>
+    </div>
+    <label class="checkbox-row" for="auto_renew">
+      <input id="auto_renew" name="auto_renew" type="checkbox" {% if form_values.auto_renew %}checked{% endif %}>
+      <span>Automatically continue renewal reminders after this term</span>
+    </label>
+    <div class="form-actions">
+      <a class="button button--ghost" href="/subscriptions">Cancel</a>
+      <button class="button" type="submit">Create reminder</button>
+    </div>
+  </form>
+</section>
+
+<style>
+.external-subscription-card { max-width: 62rem; margin: 0 auto; }
+.external-subscription-form { display: grid; gap: 1.5rem; }
+.external-subscription-form .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.external-subscription-form .form-field { min-width: 0; }
+.external-subscription-form .form-error { color: var(--color-danger); margin: .35rem 0 0; }
+.external-subscription-form .checkbox-row { display: flex; align-items: flex-start; gap: .6rem; }
+.external-subscription-form .form-actions { display: flex; justify-content: flex-end; gap: .75rem; }
+.external-subscription-card .alert { margin-bottom: 1rem; }
+@media (max-width: 720px) { .external-subscription-form .form-grid { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}

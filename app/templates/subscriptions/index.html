@@ -6,6 +6,9 @@
 {% block title %}Subscriptions{% endblock %}
 
 {% block header_actions %}
+{% if can_request_changes %}
+<a class="button" href="/subscriptions/create">Add external subscription</a>
+{% endif %}
 {% if is_super_admin %}
 <div class="header-title-menu">
   <details class="header-title-menu__dropdown" data-header-menu>

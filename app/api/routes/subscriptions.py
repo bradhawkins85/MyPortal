@@ -59,7 +59,9 @@ class CreateExistingSubscriptionRequest(BaseModel):
     auto_renew: bool = Field(default=True, alias="autoRenew")
     end_date: date | None = Field(None, alias="endDate")
     vendor: str | None = Field(None, min_length=1, max_length=255)
-    external_name: str | None = Field(None, alias="externalName", max_length=255)
+    external_name: str | None = Field(
+        None, alias="externalName", min_length=1, max_length=255
+    )
     external_sku: str | None = Field(None, alias="externalSku", max_length=255)
     billing_frequency: str | None = Field(None, alias="billingFrequency", pattern="^(annual|monthly)$")
     reminder_only: bool = Field(default=False, alias="reminderOnly")
@@ -104,6 +106,20 @@ async def create_existing_subscription(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Super admin privileges required to create existing subscriptions",
         )
+
+    return await create_existing_subscription_record(payload, current_user)
+
+
+async def create_existing_subscription_record(
+    payload: CreateExistingSubscriptionRequest,
+    current_user: dict[str, Any],
+) -> SubscriptionResponse:
+    """Create an existing subscription after the caller has authorised its scope.
+
+    The public API retains its super-admin guard above.  Portal routes may use
+    this shared operation only after enforcing their own company-scoped write
+    permission and constraining externally billed records to reminder-only.
+    """
 
     product = await shop_repo.get_product_by_id(payload.product_id) if payload.product_id else None
     if payload.product_id and (not product or product.get("subscription_category_id") is None):

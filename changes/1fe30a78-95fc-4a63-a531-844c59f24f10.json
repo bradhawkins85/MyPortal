@@ -1,0 +1,7 @@
+{
+  "guid": "1fe30a78-95fc-4a63-a531-844c59f24f10",
+  "occurred_at": "2026-09-19T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Allow authorised users to create externally billed subscription reminders from the subscriptions portal.",
+  "content_hash": "portal-external-subscription-creation"
+}
