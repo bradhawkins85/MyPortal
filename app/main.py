@@ -9582,6 +9582,14 @@ async def _render_ticket_detail(
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
+    from app.repositories import approval_matrix as approval_matrix_repo
+    try:
+        ticket_approval_workflow = await approval_matrix_repo.get_ticket_workflow(ticket_id)
+    except RuntimeError as exc:
+        if "not initialised" not in str(exc):
+            raise
+        ticket_approval_workflow = None
+
     sanitized_description = sanitize_rich_text(str(ticket.get("description") or ""))
     ticket = {
         **ticket,
@@ -9934,6 +9942,16 @@ async def _render_ticket_detail(
         # Get all enabled staff for the company as watcher options
         watcher_staff_options = await staff_repo.list_enabled_staff_users(ticket_company_id)
 
+    try:
+        ticket_approval_configurations = (
+            await approval_matrix_repo.list_configurations(ticket_company_id)
+            if ticket_company_id is not None else []
+        )
+    except RuntimeError as exc:
+        if "not initialised" not in str(exc):
+            raise
+        ticket_approval_configurations = []
+
 
     ticket_mention_staff_options = [
         {
@@ -10186,6 +10204,8 @@ async def _render_ticket_detail(
         "ticket_company_phone_display": ticket_company_phone_display,
         "ticket_requester_lookup_name": ticket_requester_lookup_name,
         "ticket_watcher_staff_options": watcher_staff_options,
+        "ticket_approval_configurations": ticket_approval_configurations,
+        "ticket_approval_workflow": ticket_approval_workflow,
         "ticket_mention_staff_options": ticket_mention_staff_options,
         "ticket_priority_options": priority_options,
         "ticket_return_url": request.url.path,

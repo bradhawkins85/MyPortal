@@ -1,0 +1,7 @@
+{
+  "guid": "ba283068-98c1-4a68-a65d-e78349d82bc9",
+  "occurred_at": "2026-09-19T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added company-scoped change approval matrices, ticket approval decisions, and approval automation.",
+  "content_hash": "change-approval-matrix-ticket-workflow"
+}
