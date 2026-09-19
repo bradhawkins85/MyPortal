@@ -75,3 +75,11 @@ class M365MailSyncResponse(BaseModel):
     errors: list[dict[str, object]] | None = None
     reason: str | None = None
     error: str | None = None
+    recovery: bool | None = None
+    folder: str | None = None
+
+
+class M365MailRecoveryImportRequest(BaseModel):
+    """Options for an explicit, notification-free mailbox recovery import."""
+
+    folder: str | None = Field(default=None, min_length=1, max_length=255)

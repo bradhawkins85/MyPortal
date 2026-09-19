@@ -13,6 +13,7 @@ def test_send_email_success(monkeypatch):
     monkeypatch.setattr(settings, "smtp_user", "noreply@example.com")
     monkeypatch.setattr(settings, "smtp_password", "secret")
     monkeypatch.setattr(settings, "smtp_use_tls", True)
+    monkeypatch.setattr(settings, "outbound_audit_bcc", "audit@example.com")
 
     captured: dict[str, object] = {}
     event_store: dict[int, dict[str, object]] = {}
@@ -99,6 +100,7 @@ def test_send_email_success(monkeypatch):
     message = captured["message"]
     assert message["Subject"] == "Subject"
     assert "user@example.com" in message["To"]
+    assert message["Bcc"] == "audit@example.com"
     assert captured["enqueue_event"]["payload"]["recipients"] == ["user@example.com"]
     assert event_metadata["status"] == "succeeded"
     assert event_metadata["response_status"] == 250

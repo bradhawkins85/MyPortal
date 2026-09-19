@@ -764,6 +764,13 @@ async def send_email_via_api(
         to = _normalise_email_address_list(to)
         cc = _normalise_email_address_list(cc)
         bcc = _normalise_email_address_list(bcc)
+        # Enforce the operational audit copy at the transport boundary.  Doing
+        # this here also covers automation/module calls which bypass email.py.
+        audit_bcc = str(settings.outbound_audit_bcc or "").strip()
+        if audit_bcc and audit_bcc.casefold() not in {
+            address.casefold() for address in bcc
+        }:
+            bcc.append(audit_bcc)
 
         # Suppress blocklisted recipients before any SMTP2Go API attempt.
         try:
