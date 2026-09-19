@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID, uuid4
 
 from app.core.database import db
 
@@ -69,6 +70,19 @@ async def get_configuration(configuration_id: int) -> dict[str, Any] | None:
     return result
 
 
+async def get_configuration_by_guid(approval_guid: str) -> dict[str, Any] | None:
+    """Return an approval configuration identified by its public GUID."""
+    try:
+        canonical_guid = str(UUID(str(approval_guid).strip()))
+    except (AttributeError, TypeError, ValueError):
+        return None
+    row = await db.fetch_one(
+        "SELECT id FROM approval_configurations WHERE guid = %s",
+        (canonical_guid,),
+    )
+    return await get_configuration(int(row["id"])) if row else None
+
+
 async def create_configuration(*, company_id: int, name: str, technician_user_id: int,
                                contact_staff_ids: list[int], description: str | None = None,
                                workflow_type: str = "change",
@@ -78,9 +92,9 @@ async def create_configuration(*, company_id: int, name: str, technician_user_id
                                job_titles: list[str] | None = None) -> dict[str, Any]:
     configuration_id = await db.execute_returning_lastrowid(
         """INSERT INTO approval_configurations
-           (company_id, name, description, workflow_type, technician_user_id)
-           VALUES (%s, %s, %s, %s, %s)""",
-        (company_id, name, description, workflow_type, technician_user_id),
+           (guid, company_id, name, description, workflow_type, technician_user_id)
+           VALUES (%s, %s, %s, %s, %s, %s)""",
+        (str(uuid4()), company_id, name, description, workflow_type, technician_user_id),
     )
     for order, staff_id in enumerate(dict.fromkeys(contact_staff_ids)):
         await db.execute(
@@ -291,6 +305,19 @@ async def assign_to_ticket(*, ticket_id: int, configuration_id: int,
     if not order:
         raise ValueError("The configured approval has no eligible approvers")
     return (await get_ticket_workflow(ticket_id)) or {}
+
+
+async def assign_to_ticket_by_guid(*, ticket_id: int, approval_guid: str,
+                                   assigned_by_user_id: int | None = None) -> dict[str, Any]:
+    """Assign an approval by its stable public identifier."""
+    configuration = await get_configuration_by_guid(approval_guid)
+    if not configuration:
+        raise ValueError("Approval configuration GUID not found")
+    return await assign_to_ticket(
+        ticket_id=ticket_id,
+        configuration_id=int(configuration["id"]),
+        assigned_by_user_id=assigned_by_user_id,
+    )
 
 
 async def get_ticket_workflow(ticket_id: int, *, workflow_type: str = "change") -> dict[str, Any] | None:
