@@ -113,7 +113,7 @@ async def count_active_super_admins() -> int:
 async def list_users_for_company(company_id: int) -> List[dict[str, Any]]:
     rows = await db.fetch_all(
         """
-        SELECT id, email
+        SELECT id, email, first_name, last_name, is_super_admin
         FROM users
         WHERE company_id = %s
         ORDER BY LOWER(email), id

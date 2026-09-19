@@ -61,10 +61,14 @@ def _reporting_user_label(record: Any) -> str:
     return name or email or f"User #{record.get('id')}"
 
 
-async def _list_reporting_eligible_users() -> list[dict[str, Any]]:
+async def _list_reporting_eligible_users(
+    company_id: int | None,
+) -> list[dict[str, Any]]:
     from app.repositories import users as user_repo
 
-    rows = await user_repo.list_users()
+    if company_id is None:
+        return []
+    rows = await user_repo.list_users_for_company(int(company_id))
     eligible: list[dict[str, Any]] = []
     for record in rows or []:
         if record.get("is_super_admin"):
@@ -390,7 +394,9 @@ async def admin_reporting_new(request: Request):
     user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
         return redirect
-    eligible = await _list_reporting_eligible_users()
+    eligible = await _list_reporting_eligible_users(
+        getattr(request.state, "active_company_id", None)
+    )
     extra = {
         "title": "New report",
         "form_heading": "New report",
@@ -501,7 +507,9 @@ async def admin_reporting_edit(request: Request, report_id: int):
     record = await reporting_repo.get_query(int(report_id))
     if not record:
         return flash_redirect("/admin/reporting", "Report not found", "error")
-    eligible = await _list_reporting_eligible_users()
+    eligible = await _list_reporting_eligible_users(
+        getattr(request.state, "active_company_id", None)
+    )
     granted_ids = set(await reporting_repo.list_permission_user_ids(int(report_id)))
     extra = {
         "title": f"Edit report · {record['name']}",
@@ -532,7 +540,9 @@ async def admin_reporting_clone(request: Request, report_id: int):
     if not record:
         return flash_redirect("/admin/reporting", "Report not found", "error")
 
-    eligible = await _list_reporting_eligible_users()
+    eligible = await _list_reporting_eligible_users(
+        getattr(request.state, "active_company_id", None)
+    )
     granted_ids = set(await reporting_repo.list_permission_user_ids(int(report_id)))
     clone_name = f"{record['name']} (Copy)"
     cloned_report = {
@@ -595,7 +605,9 @@ async def admin_reporting_create(request: Request):
             "form_action": "/admin/reporting",
             "test_action": "/admin/reporting",
             "report": payload,
-            "eligible_users": await _list_reporting_eligible_users(),
+            "eligible_users": await _list_reporting_eligible_users(
+                getattr(request.state, "active_company_id", None)
+            ),
             "granted_user_ids": set(payload["user_ids"]),
             "max_rows": reporting_service.MAX_RESULT_ROWS,
             "builder_schema": await report_query_builder.describe_schema(),
@@ -672,7 +684,9 @@ async def admin_reporting_update(request: Request, report_id: int):
                 log_error("Reporting test query execution failed", error=str(exc))
                 test_error = f"Report failed to execute: {exc}"
 
-        eligible = await _list_reporting_eligible_users()
+        eligible = await _list_reporting_eligible_users(
+            getattr(request.state, "active_company_id", None)
+        )
         preview_report = {**record, **payload}
         extra = {
             "title": f"Edit report · {record['name']}",
