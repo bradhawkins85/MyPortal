@@ -52,6 +52,7 @@ INSTANCE_ROOT="${MYPORTAL_INSTANCE_ROOT:-/opt/myportal/instances}"
 CURRENT_LINK="${MYPORTAL_CURRENT_LINK:-/opt/myportal/current}"
 UPSTREAM_FILE="${MYPORTAL_NGINX_UPSTREAM_FILE:-/etc/nginx/conf.d/myportal-active.inc}"
 READY_TIMEOUT="${MYPORTAL_READY_TIMEOUT:-60}"
+READY_REQUEST_TIMEOUT="${MYPORTAL_READY_REQUEST_TIMEOUT:-10}"
 DRAIN_SECONDS="${MYPORTAL_DRAIN_SECONDS:-15}"
 SMOKE_PATH="${MYPORTAL_SMOKE_PATH:-/healthz}"
 SYSTEM_UPDATE_STATUS_FILE="${SHARED_ROOT}/state/system_update.status"
@@ -216,10 +217,15 @@ read_active() {
 }
 
 wait_for_version() {
-  local port="$1" expected="$2" elapsed=0 body="" reported="<unavailable>"
+  local port="$1" expected="$2" elapsed=0 body="" reported="<unavailable>" last_body="no response"
   local endpoint="http://127.0.0.1:${port}/readyz"
   while ((elapsed < READY_TIMEOUT)); do
-    body=$(curl -fsS --max-time 2 "$endpoint" 2>/dev/null || true)
+    # Startup can make the readiness handler slower than its steady-state
+    # response time (notably while database pools and feature packs settle).
+    # Allow an individual request enough time to finish while retaining the
+    # outer retry window for connection-refused and not-ready responses.
+    body=$(curl -fsS --max-time "$READY_REQUEST_TIMEOUT" "$endpoint" 2>/dev/null || true)
+    [[ -n "$body" ]] && last_body="$body"
     reported=$(python3 -c 'import json,sys
 try:
     payload=json.loads(sys.argv[1])
@@ -242,7 +248,8 @@ raise SystemExit(not (payload.get("status") == "ok" and payload.get("version") =
     sleep 1; ((elapsed+=1))
   done
   echo "Instance version verification failed: endpoint=${endpoint} expected=${expected} reported=${reported}" >&2
-  echo "Verification command: curl -fsS --max-time 2 ${endpoint}" >&2
+  echo "last readiness response: ${last_body}" >&2
+  echo "Verification command: curl -fsS --max-time ${READY_REQUEST_TIMEOUT} ${endpoint}" >&2
   return 1
 }
 
