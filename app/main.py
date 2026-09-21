@@ -10602,7 +10602,11 @@ async def readiness_probe() -> JSONResponse:
     status_code = HTTPStatus.OK if ok else HTTPStatus.SERVICE_UNAVAILABLE
     return JSONResponse(
         status_code=status_code,
-        content={"status": "ok" if ok else "not_ready", "checks": checks},
+        content={
+            "status": "ok" if ok else "not_ready",
+            "version": _APP_VERSION,
+            "checks": checks,
+        },
     )
 
 

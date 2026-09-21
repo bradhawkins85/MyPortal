@@ -26,18 +26,12 @@ Wants=network-online.target
 Type=notify
 User=myportal
 Group=myportal
-WorkingDirectory=/opt/myportal
 EnvironmentFile=/etc/myportal.env
 EnvironmentFile=-/etc/myportal.%i.env
-# Default port mapping: blue=8001, green=8002.  Override by setting
+# Default port mapping is selected by ExecStart. Override it with
 # MYPORTAL_INSTANCE_PORT in /etc/myportal.<instance>.env.
-Environment=MYPORTAL_INSTANCE_PORT=8000
 Environment=APP_INSTANCE_ID=%i
-ExecStart=/opt/myportal/scripts/start_with_auto_update.sh \
-    /opt/myportal/.venv/bin/uvicorn app.main:app \
-    --host 127.0.0.1 \
-    --port ${MYPORTAL_INSTANCE_PORT} \
-    --workers 2
+ExecStart=/bin/sh -ec 'case %i in blue) default_port=8001;; green) default_port=8002;; *) exit 64;; esac; release=$$(readlink -f /opt/myportal/instances/%i); test -n "$$release"; cd "$$release"; exec "$$release/.venv/bin/uvicorn" app.main:app --host 127.0.0.1 --port "$${MYPORTAL_INSTANCE_PORT:-$$default_port}" --workers 2'
 # Graceful reload: SIGHUP causes uvicorn to gracefully restart workers
 # without dropping accepted connections.
 ExecReload=/bin/kill -s HUP $MAINPID
@@ -47,7 +41,8 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/opt/myportal
+ReadOnlyPaths=/opt/myportal/releases /opt/myportal/instances
+ReadWritePaths=/opt/myportal/shared
 
 [Install]
 WantedBy=multi-user.target
