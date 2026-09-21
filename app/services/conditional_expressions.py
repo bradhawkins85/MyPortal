@@ -6,18 +6,45 @@ Supports syntax like:
 """
 from __future__ import annotations
 
-import re
 from typing import Any
 
 
 _CONDITIONAL_OPENER_LENGTH = 2
 _CONDITIONAL_CLOSER_LENGTH = 2
 _MAX_CONDITIONAL_LENGTH = 4096
+_COMPARISON_OPERATORS = frozenset({">", "<", ">=", "<=", "==", "!="})
 
-# Pattern to match comparison operators
-_COMPARISON_PATTERN = re.compile(
-    r"^(.+?)\s*(>=|<=|>|<|==|!=)\s*(.+?)$"
-)
+
+def split_comparison(expression: str) -> tuple[str, str, str] | None:
+    """Split a bounded comparison expression with a single linear scan.
+
+    Expressions longer than the conditional grammar's 4096-character limit
+    are rejected before scanning. Missing operators or operands return
+    ``None``. Whitespace is trimmed only after an operator has been located,
+    keeping both successful and malformed parsing O(n).
+    """
+    if not isinstance(expression, str):
+        return None
+    if len(expression) > _MAX_CONDITIONAL_LENGTH:
+        raise ValueError(
+            f"comparison expression exceeds {_MAX_CONDITIONAL_LENGTH} characters"
+        )
+
+    for index, char in enumerate(expression):
+        if char not in "<>!=":
+            continue
+        operator = expression[index:index + 2]
+        if operator not in _COMPARISON_OPERATORS:
+            operator = char
+        if operator not in _COMPARISON_OPERATORS:
+            continue
+
+        left = expression[:index].strip()
+        right = expression[index + len(operator):].strip()
+        if not left or not right:
+            return None
+        return left, operator, right
+    return None
 
 
 def _skip_whitespace(text: str, start: int, end: int) -> int:
@@ -237,12 +264,11 @@ def _evaluate_condition(condition: str, token_map: dict[str, Any]) -> bool:
     
     Supports comparison operators: >, <, >=, <=, ==, !=
     """
-    # Try to parse as comparison
-    match = _COMPARISON_PATTERN.match(condition.strip())
-    if match:
-        left_str = match.group(1)
-        operator = match.group(2)
-        right_str = match.group(3)
+    # Reject direct callers before parsing; conditionals found in templates are
+    # already bounded by _iter_conditional_matches.
+    comparison = split_comparison(condition)
+    if comparison:
+        left_str, operator, right_str = comparison
         
         # Parse and resolve values
         left_val = _parse_value(left_str)
