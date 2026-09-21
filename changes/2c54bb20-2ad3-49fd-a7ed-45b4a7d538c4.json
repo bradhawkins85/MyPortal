@@ -1,0 +1,7 @@
+{
+  "guid": "2c54bb20-2ad3-49fd-a7ed-45b4a7d538c4",
+  "occurred_at": "2026-09-21T00:00Z",
+  "change_type": "Fix",
+  "summary": "Stop tray documentation and nested CI workflow changes from requiring unavailable installer checksum manifests during upgrades.",
+  "content_hash": "f534001ffd883f956ffd26f62a6d0867f1240e4bdb3608dc70af07a20658694f"
+}
