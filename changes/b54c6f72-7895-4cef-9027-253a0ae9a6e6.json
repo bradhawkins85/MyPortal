@@ -1,0 +1,7 @@
+{
+  "guid": "b54c6f72-7895-4cef-9027-253a0ae9a6e6",
+  "occurred_at": "2026-09-21T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Repair upload directory write permissions and assign upload-link ownership before blue-green service startup.",
+  "content_hash": "6eefc06d1dc290fbe9e9cd093cf388b154450f5456387699c4308a9646213c47"
+}

@@ -1,7 +1,7 @@
 """Service for fetching the latest MyPortal Tray installers from GitHub Releases.
 
-On startup (and optionally on demand) the app calls :func:`fetch_latest_tray_installers`
-which:
+Scheduled and administrator-triggered actions call
+:func:`fetch_latest_tray_installers`, which:
 
 1. Queries the GitHub Releases API for the latest release of the configured
    repository.

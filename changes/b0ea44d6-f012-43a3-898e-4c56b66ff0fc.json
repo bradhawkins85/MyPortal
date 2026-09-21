@@ -1,0 +1,7 @@
+{
+  "guid": "b0ea44d6-f012-43a3-898e-4c56b66ff0fc",
+  "occurred_at": "2026-09-21T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Stop external update checks and installer downloads from blocking application startup.",
+  "content_hash": "2cd3b383019161ffdc346bf076987576436807489436e8556180748624871cde2"
+}

@@ -1,0 +1,7 @@
+{
+  "guid": "78b01276-0439-46b1-aa69-58cb94a60ddc",
+  "occurred_at": "2026-09-21T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Remove malformed duplicate-suffix blue-green units and report the correct systemd service names.",
+  "content_hash": "208e16e6db4a3ca6162f546b765093747611609e688aecbeeece967569355126"
+}
