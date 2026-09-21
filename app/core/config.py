@@ -86,6 +86,7 @@ class Settings(BaseSettings):
     )
     totp_encryption_key: str = Field(validation_alias="TOTP_ENCRYPTION_KEY")
     database_host: str | None = Field(default=None, validation_alias="DB_HOST")
+    database_port: int = Field(default=3306, validation_alias="DB_PORT", ge=1, le=65535)
     database_user: str | None = Field(default=None, validation_alias="DB_USER")
     database_password: str | None = Field(default=None, validation_alias="DB_PASSWORD")
     database_name: str | None = Field(default=None, validation_alias="DB_NAME")
