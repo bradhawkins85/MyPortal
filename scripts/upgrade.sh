@@ -40,6 +40,9 @@ SYSTEM_UPDATE_STATUS_FILE="${SHARED_ROOT}/state/system_update.status"
 REQUESTED_UPGRADE_MODE="rolling"
 RESTART_MODE="rolling"
 UPGRADE_READY_WAIT_SECONDS=0
+DEPLOYMENT_PLAN='{}'
+DEPLOYMENT_ACTION="staged-cutover"
+DEPLOYMENT_REASON="planner_not_run"
 
 usage() {
   cat <<'EOF'
@@ -74,10 +77,38 @@ status=${status}
 mode=${RESTART_MODE}
 requested_mode=${REQUESTED_UPGRADE_MODE}
 reason=${reason}
+deployment_plan=${DEPLOYMENT_PLAN}
 message=${message}
 ready_wait_seconds=${UPGRADE_READY_WAIT_SECONDS}
 EOF
   chmod 640 "$tmp" && mv -f "$tmp" "$SYSTEM_UPDATE_STATUS_FILE"
+}
+
+generate_deployment_plan() {
+  local base="$1" target="$2"
+  DEPLOYMENT_PLAN=$(PYTHONPATH="$PROJECT_ROOT" python3 -m app.services.deployment_plan "$base" "$target")
+  DEPLOYMENT_ACTION=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["action"])' "$DEPLOYMENT_PLAN")
+  DEPLOYMENT_REASON=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["reason"])' "$DEPLOYMENT_PLAN")
+}
+
+publish_paths_without_worker_reload() {
+  local revision="$1" category="$2" destination release path
+  destination="${SHARED_ROOT}/published/${category}/${revision}"
+  rm -rf "$destination"
+  mkdir -p "$destination"
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    mkdir -p "$destination/$(dirname "$path")"
+    git show "${revision}:${path}" >"$destination/$path"
+    for release in "$(readlink -f "$INSTANCE_ROOT/blue" 2>/dev/null || true)" \
+                   "$(readlink -f "$INSTANCE_ROOT/green" 2>/dev/null || true)"; do
+      [[ -n "$release" && -d "$release" ]] || continue
+      mkdir -p "$release/$(dirname "$path")"
+      chmod u+w "$release" "$release/$(dirname "$path")" 2>/dev/null || true
+      install -m 0644 "$destination/$path" "$release/$path"
+    done
+  done < <(python3 -c 'import json,sys; p=json.loads(sys.argv[1]); c=sys.argv[2]; prefixes={"static":"app/static/","template":"app/templates/","feature_pack":"app/features/","tray":"tray/"}; print("\n".join(x for x in p["changed_paths"] if x.startswith(prefixes[c])))' "$DEPLOYMENT_PLAN" "$category")
+  ln -sfn "$destination" "${SHARED_ROOT}/published/${category}/current"
 }
 
 validate_origin_remote() {
@@ -519,8 +550,46 @@ PREVIOUS_RELEASE=$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)
 git fetch --quiet origin main
 TARGET_REVISION=$(git rev-parse 'origin/main^{commit}')
 RELEASE_DIR="${RELEASE_ROOT}/${TARGET_REVISION}"
+PLAN_BASE="${PREVIOUS_RELEASE##*/}"
+if [[ -z "$PLAN_BASE" ]] || ! git cat-file -e "${PLAN_BASE}^{commit}" 2>/dev/null; then
+  PLAN_BASE=$(git rev-parse 'HEAD^{commit}')
+fi
+generate_deployment_plan "$PLAN_BASE" "$TARGET_REVISION"
 
-write_upgrade_status preparing "Preparing immutable release ${TARGET_REVISION}."
+# The plan is calculated and recorded before any live release is changed.
+write_upgrade_status preparing "Deployment plan ${DEPLOYMENT_ACTION} for ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
+case "$DEPLOYMENT_ACTION" in
+  no-op)
+    write_upgrade_status succeeded "No production changes were required for ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
+    exit 0
+    ;;
+  static-publish)
+    publish_paths_without_worker_reload "$TARGET_REVISION" static
+    write_upgrade_status succeeded "Versioned static assets ${TARGET_REVISION} published without reloading workers." "$DEPLOYMENT_REASON"
+    exit 0
+    ;;
+  template-reload)
+    publish_paths_without_worker_reload "$TARGET_REVISION" static
+    publish_paths_without_worker_reload "$TARGET_REVISION" template
+    write_upgrade_status succeeded "Templates published and caches invalidated without reloading workers." "$DEPLOYMENT_REASON"
+    exit 0
+    ;;
+  feature-pack-reload)
+    publish_paths_without_worker_reload "$TARGET_REVISION" feature_pack
+    python3 -c 'import json,sys; print("\n".join(json.loads(sys.argv[1])["feature_packs"]))' "$DEPLOYMENT_PLAN" >"${SHARED_ROOT}/state/feature_pack_reload.flag"
+    write_upgrade_status succeeded "Feature packs published for in-process reload without cycling workers." "$DEPLOYMENT_REASON"
+    exit 0
+    ;;
+  tray-publish)
+    publish_paths_without_worker_reload "$TARGET_REVISION" tray
+    write_upgrade_status succeeded "Tray release files ${TARGET_REVISION} published without reloading workers." "$DEPLOYMENT_REASON"
+    exit 0
+    ;;
+  migration-only|staged-cutover) ;;
+  *) echo "Unknown deployment action: ${DEPLOYMENT_ACTION}" >&2; exit 1 ;;
+esac
+
+write_upgrade_status preparing "Preparing immutable release ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
 prepare_release "$TARGET_REVISION" "$RELEASE_DIR"
 # The inactive slot may still point at a release produced before persistent
 # upload links were introduced. Repair both assigned releases before systemd
@@ -533,7 +602,7 @@ if is_additive_migration_only_release "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISIO
   # explicitly declared compatible and the database lock applied them once.
   atomic_link "$RELEASE_DIR" "$CURRENT_LINK"
   RESTART_MODE="migration-only"
-  write_upgrade_status succeeded "Additive migration release ${TARGET_REVISION} applied; application workers were not reloaded."
+  write_upgrade_status succeeded "Additive migration release ${TARGET_REVISION} applied; application workers were not reloaded." "$DEPLOYMENT_REASON"
   echo "Successfully applied migration-only release ${TARGET_REVISION}."
   exit 0
 fi
