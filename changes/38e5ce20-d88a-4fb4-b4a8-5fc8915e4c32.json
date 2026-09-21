@@ -1,0 +1,7 @@
+{
+  "guid": "38e5ce20-d88a-4fb4-b4a8-5fc8915e4c32",
+  "occurred_at": "2026-09-21T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Prevent systemd from timing out healthy Uvicorn workers while waiting for unsupported readiness notifications.",
+  "content_hash": "7818e864079295456f341748002d81157f62c5fef9358e14487ed0c0c42d8379"
+}

@@ -277,7 +277,9 @@ After=network-online.target mysql.service redis.service
 Wants=network-online.target
 
 [Service]
-Type=notify
+# Uvicorn does not implement systemd's sd_notify protocol. Readiness is
+# exposed by the application's health endpoints instead.
+Type=simple
 User=${service_user}
 Group=${service_group}
 WorkingDirectory=${PROJECT_ROOT}

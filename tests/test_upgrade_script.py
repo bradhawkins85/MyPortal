@@ -219,6 +219,16 @@ def test_systemd_launches_uvicorn_as_module_without_console_script_shebang():
     assert '"$$release/.venv/bin/uvicorn"' not in unit
 
 
+def test_systemd_does_not_wait_for_unsupported_uvicorn_notifications():
+    unit = (ROOT / "deploy/systemd/myportal@.service").read_text()
+    installer = (ROOT / "scripts/install_environment.sh").read_text()
+
+    assert "Type=simple" in unit
+    assert "\nType=notify\n" not in unit
+    assert "Type=simple" in installer
+    assert "\nType=notify\n" not in installer
+
+
 def test_systemd_rejects_duplicate_service_suffix_with_actionable_error():
     unit = (ROOT / "deploy/systemd/myportal@.service").read_text()
 

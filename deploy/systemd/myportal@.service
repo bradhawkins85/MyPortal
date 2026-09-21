@@ -23,7 +23,11 @@ After=network-online.target mysql.service redis.service
 Wants=network-online.target
 
 [Service]
-Type=notify
+# Uvicorn does not send sd_notify(3) readiness messages. The deployment
+# coordinator performs its own /readyz check before routing traffic, so using
+# Type=notify would leave systemd waiting until TimeoutStartSec and then kill a
+# healthy process.
+Type=simple
 User=myportal
 Group=myportal
 EnvironmentFile=/etc/myportal.env
