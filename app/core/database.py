@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator, Iterable, Any
+import types
 import re
 import hashlib
 import time
@@ -28,7 +29,7 @@ class Database:
         self._settings = get_settings()
         self._use_sqlite = self._should_use_sqlite()
 
-    def _require_aiomysql(self):
+    def _require_aiomysql(self) -> types.ModuleType:
         if aiomysql is None:
             raise RuntimeError(
                 "MySQL support requires aiomysql; install project dependencies before running MySQL migrations."
