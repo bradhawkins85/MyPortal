@@ -1,0 +1,7 @@
+{
+  "guid": "ee17af85-47e7-46fb-9a7a-e8112c863b8d",
+  "occurred_at": "2026-09-21T00:00Z",
+  "change_type": "Enhancement",
+  "summary": "Expanded ticket search to match ticket descriptions and comment bodies while retaining existing ticket access scopes.",
+  "content_hash": "c5bb8418dbd8b4a4a94a716bb286dda1fa318a3646019de886ceb047757c24f8"
+}
