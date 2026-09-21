@@ -83,6 +83,62 @@ def test_release_has_private_dependencies_and_shared_mutable_state():
     assert 'ln -sfn "$ENV_FILE" "$release/.env"' in SCRIPT
 
 
+def test_atomic_link_runs_with_nounset(tmp_path):
+    function = SCRIPT[SCRIPT.index("atomic_link() {") : SCRIPT.index("\ninstance_port()")]
+    target = tmp_path / "release"
+    target.mkdir()
+    link = tmp_path / "current"
+
+    result = subprocess.run(
+        ["bash", "-c", "set -Eeuo pipefail\n" + function + '\natomic_link "$TARGET" "$LINK"'],
+        text=True,
+        capture_output=True,
+        env={**os.environ, "TARGET": str(target), "LINK": str(link)},
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert link.resolve() == target
+
+
+def test_deleted_migration_is_not_treated_as_additive_release(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Upgrade Test"], cwd=repo, check=True)
+    migrations = repo / "migrations"
+    migrations.mkdir()
+    migration = migrations / "001_expand.sql"
+    migration.write_text("-- phase: expand\n-- compatible-from: *\n-- compatible-to: *\nSELECT 1;\n")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "old"], cwd=repo, check=True)
+    old_revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    migration.unlink()
+    subprocess.run(["git", "add", "-u"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "delete migration"], cwd=repo, check=True)
+    target_revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    function = SCRIPT[
+        SCRIPT.index("is_additive_migration_only_release() {") : SCRIPT.index("\ncommand -v git")
+    ]
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -Eeuo pipefail\n" + function + '\nif is_additive_migration_only_release "$OLD" "$TARGET"; then exit 9; fi',
+        ],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        env={**os.environ, "OLD": old_revision, "TARGET": target_revision},
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "fatal:" not in result.stderr
+
+
 def test_migration_environment_preserves_special_characters(tmp_path):
     release = tmp_path / "release"
     (release / ".venv" / "bin").mkdir(parents=True)

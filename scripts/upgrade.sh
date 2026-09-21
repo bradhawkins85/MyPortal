@@ -124,7 +124,8 @@ PY
 }
 
 atomic_link() {
-  local target="$1" link="$2" tmp="${link}.new.$$"
+  local target="$1" link="$2" tmp
+  tmp="${link}.new.$$"
   mkdir -p "$(dirname "$link")"
   ln -s "$target" "$tmp"
   mv -Tf "$tmp" "$link"
@@ -280,18 +281,26 @@ run_migration_phase() {
 }
 
 is_additive_migration_only_release() {
-  local old_revision="$1" target_revision="$2" changed
+  local old_revision="$1" target_revision="$2" status path extra metadata
   [[ -n "$old_revision" ]] || return 1
-  changed=$(git diff --name-only "$old_revision" "$target_revision")
-  [[ -n "$changed" ]] || return 1
-  while IFS= read -r path; do
+  git cat-file -e "${old_revision}^{commit}" 2>/dev/null || return 1
+  git cat-file -e "${target_revision}^{commit}" 2>/dev/null || return 1
+  git diff --quiet "$old_revision" "$target_revision" && return 1
+
+  while IFS=$'\t' read -r status path extra; do
+    # Deletions, renames, copies, and type changes are never additive. Checking
+    # the status also prevents git-show attempts for paths absent from target.
+    [[ "$status" == A || "$status" == M ]] || return 1
+    [[ -z "$extra" ]] || return 1
     [[ "$path" == migrations/*.sql || "$path" == changes/*.json ]] || return 1
     if [[ "$path" == migrations/*.sql ]]; then
-      git show "${target_revision}:${path}" | grep -Eiq '^--[[:space:]]*phase:[[:space:]]*expand[[:space:]]*$' || return 1
-      git show "${target_revision}:${path}" | grep -Eiq '^--[[:space:]]*compatible-from:[[:space:]]*\*[[:space:]]*$' || return 1
-      git show "${target_revision}:${path}" | grep -Eiq '^--[[:space:]]*compatible-to:[[:space:]]*\*[[:space:]]*$' || return 1
+      metadata=$(git show "${target_revision}:${path}" 2>/dev/null) || return 1
+      grep -Eiq '^--[[:space:]]*phase:[[:space:]]*expand[[:space:]]*$' <<<"$metadata" || return 1
+      grep -Eiq '^--[[:space:]]*compatible-from:[[:space:]]*\*[[:space:]]*$' <<<"$metadata" || return 1
+      grep -Eiq '^--[[:space:]]*compatible-to:[[:space:]]*\*[[:space:]]*$' <<<"$metadata" || return 1
     fi
-  done <<<"$changed"
+  done < <(git diff --name-status "$old_revision" "$target_revision")
+  return 0
 }
 
 command -v git >/dev/null && command -v curl >/dev/null && command -v nginx >/dev/null && command -v systemctl >/dev/null
