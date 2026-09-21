@@ -92,6 +92,10 @@ class Settings(BaseSettings):
     migration_lock_timeout: int = Field(
         default=60, validation_alias="MIGRATION_LOCK_TIMEOUT"
     )
+    migration_bootstrap_on_start: bool = Field(
+        default=False,
+        description="Run migrations during application startup (development/test only).",
+    )
     redis_url: str | None = Field(default=None, validation_alias="REDIS_URL")
     m365_it_external_email_address: str = Field(
         default="", validation_alias="M365_IT_EXTERNAL_EMAIL_ADDRESS"
