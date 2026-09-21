@@ -6,11 +6,28 @@ umask 027
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
+
+resolve_environment_file() {
+  local system_env="${1:-/etc/myportal.env}" selected
+  if [[ -n "${MYPORTAL_ENV_FILE:-}" ]]; then
+    selected="$MYPORTAL_ENV_FILE"
+  elif [[ -f "$system_env" ]]; then
+    # This is the EnvironmentFile used by deploy/systemd/myportal@.service.
+    # Migrations must use the same credentials as the serving application.
+    selected="$system_env"
+  else
+    # Backward compatibility for installations created by the legacy installer.
+    selected="${PROJECT_ROOT}/.env"
+  fi
+
+  # Resolve symlink chains as well as relative paths. Otherwise invoking this
+  # script through /opt/myportal/current can chain one release's .env to the
+  # previous release instead of the persistent deployment configuration.
+  python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$selected"
+}
+
 VENV_DIR="${PROJECT_ROOT}/.venv" # retained only to find the coordinator Python
-ENV_FILE="${MYPORTAL_ENV_FILE:-${PROJECT_ROOT}/.env}"
-# Release directories live somewhere else, so their configuration symlink must
-# never retain a caller-supplied relative path.
-ENV_FILE=$(python3 -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$ENV_FILE")
+ENV_FILE=$(resolve_environment_file)
 RELEASE_ROOT="${MYPORTAL_RELEASE_ROOT:-/opt/myportal/releases}"
 SHARED_ROOT="${MYPORTAL_SHARED_ROOT:-/opt/myportal/shared}"
 INSTANCE_ROOT="${MYPORTAL_INSTANCE_ROOT:-/opt/myportal/instances}"

@@ -8,6 +8,64 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = (ROOT / "scripts/upgrade.sh").read_text()
 
 
+def _resolve_environment_file(
+    tmp_path: Path, system_env: Path, **environment: str
+) -> str:
+    function = SCRIPT[
+        SCRIPT.index("resolve_environment_file() {") : SCRIPT.index('\nVENV_DIR=')
+    ]
+    project_root = tmp_path / "checkout"
+    project_root.mkdir()
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -Eeuo pipefail\n" + function + '\nresolve_environment_file "$SYSTEM_ENV"',
+        ],
+        text=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "PROJECT_ROOT": str(project_root),
+            "SYSTEM_ENV": str(system_env),
+            **environment,
+        },
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+def test_upgrade_defaults_to_systemd_environment_file(tmp_path):
+    system_env = tmp_path / "myportal.env"
+    system_env.write_text("DB_NAME=production\n")
+
+    selected = _resolve_environment_file(
+        tmp_path,
+        system_env,
+        MYPORTAL_ENV_FILE="",
+    )
+
+    assert selected == str(system_env)
+
+
+def test_explicit_environment_file_takes_precedence_and_resolves_symlinks(tmp_path):
+    system_env = tmp_path / "myportal.env"
+    system_env.write_text("DB_NAME=wrong\n")
+    configured_env = tmp_path / "persistent.env"
+    configured_env.write_text("DB_NAME=expected\n")
+    env_link = tmp_path / "configured.env"
+    env_link.symlink_to(configured_env)
+
+    selected = _resolve_environment_file(
+        tmp_path,
+        system_env,
+        MYPORTAL_ENV_FILE=str(env_link),
+    )
+
+    assert selected == str(configured_env)
+
+
 def test_upgrade_prepares_revision_without_mutating_control_checkout():
     assert 'git fetch --quiet origin main' in SCRIPT
     assert 'git archive "$revision"' in SCRIPT
