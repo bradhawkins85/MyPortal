@@ -147,41 +147,20 @@ def test_retry_rebuilds_only_a_broken_release_runtime():
     assert 'install_dependencies "$release"' in existing
 
 
-def test_runtime_validation_executes_uvicorn_to_detect_stale_shebang(tmp_path):
+def test_runtime_validation_uses_release_python_module_import():
     function = SCRIPT[
         SCRIPT.index("release_runtime_ready() {") : SCRIPT.index("\nprepare_release()")
     ]
 
-    assert '"${release}/.venv/bin/uvicorn" --version' in function
+    assert '"${release}/.venv/bin/python" -c \'import uvicorn\'' in function
+    assert '.venv/bin/uvicorn' not in function
 
-    release = tmp_path / "release"
-    bin_dir = release / ".venv" / "bin"
-    bin_dir.mkdir(parents=True)
-    python = bin_dir / "python"
-    python.write_text("#!/bin/sh\nexit 0\n")
-    python.chmod(0o755)
-    uvicorn = bin_dir / "uvicorn"
-    uvicorn.write_text("#!/path/from/removed/staging/.venv/bin/python\n")
-    uvicorn.chmod(0o755)
 
-    broken = subprocess.run(
-        ["bash", "-c", "set -Eeuo pipefail\n" + function + '\nrelease_runtime_ready "$RELEASE"'],
-        text=True,
-        capture_output=True,
-        env={**os.environ, "RELEASE": str(release)},
-        check=False,
-    )
-    assert broken.returncode != 0
+def test_systemd_launches_uvicorn_as_module_without_console_script_shebang():
+    unit = (ROOT / "deploy/systemd/myportal@.service").read_text()
 
-    uvicorn.write_text("#!/bin/sh\nexit 0\n")
-    healthy = subprocess.run(
-        ["bash", "-c", "set -Eeuo pipefail\n" + function + '\nrelease_runtime_ready "$RELEASE"'],
-        text=True,
-        capture_output=True,
-        env={**os.environ, "RELEASE": str(release)},
-        check=False,
-    )
-    assert healthy.returncode == 0, healthy.stderr
+    assert '"$$release/.venv/bin/python" -m uvicorn' in unit
+    assert '"$$release/.venv/bin/uvicorn"' not in unit
 
 
 def test_atomic_link_runs_with_nounset(tmp_path):

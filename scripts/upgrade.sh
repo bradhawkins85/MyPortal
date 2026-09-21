@@ -215,11 +215,10 @@ make_release_service_readable() {
 
 release_runtime_ready() {
   local release="$1"
-  [[ -x "${release}/.venv/bin/python" && -x "${release}/.venv/bin/uvicorn" ]] || return 1
-  "${release}/.venv/bin/python" -c 'import uvicorn' >/dev/null 2>&1 || return 1
-  # Executing the generated console script also verifies that its shebang still
-  # points at a real interpreter (venv scripts are not relocatable).
-  "${release}/.venv/bin/uvicorn" --version >/dev/null 2>&1
+  [[ -x "${release}/.venv/bin/python" ]] || return 1
+  # The systemd unit launches uvicorn as a module through this interpreter and
+  # deliberately does not depend on a generated console-script shebang.
+  "${release}/.venv/bin/python" -c 'import uvicorn' >/dev/null 2>&1
 }
 
 prepare_release() {
@@ -272,34 +271,6 @@ prepare_release() {
     return 1
   fi
   make_release_service_readable "$release"
-}
-
-run_release_manage() {
-  local release="$1"
-  shift
-  # Do not source .env in a shell: characters such as $, #, !, spaces, and
-  # quotes must reach the application without expansion.  Disable dotenv
-  # interpolation and make the protected file authoritative over any stale
-  # DB_* values inherited by the upgrade process.
-  ENV_CONFIG_FILE="$ENV_FILE" "${release}/.venv/bin/python" - \
-    "${release}/manage.py" "$@" <<'PY'
-import os
-import sys
-
-from dotenv import dotenv_values
-
-env_file = os.environ["ENV_CONFIG_FILE"]
-try:
-    configured = dotenv_values(env_file, interpolate=False)
-except (OSError, UnicodeError, ValueError) as exc:
-    raise SystemExit(f"Unable to read application environment file {env_file}: {exc}") from None
-
-for name, value in configured.items():
-    if value is not None:
-        os.environ[name] = value
-
-os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
-PY
 }
 
 run_release_manage() {

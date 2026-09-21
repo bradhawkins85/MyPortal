@@ -45,8 +45,13 @@ cutover leaves the existing upstream unchanged.
 The release virtual environment is created only after the revision reaches its
 final `/opt/myportal/releases/<git-sha>` path because Python console scripts
 contain absolute interpreter paths. When retrying a release prepared by an
-older updater, the coordinator validates the `uvicorn` entry point and rebuilds
-only a broken virtual environment.
+older updater, the coordinator validates that the release interpreter can
+import `uvicorn` and rebuilds only a broken virtual environment.
+
+The systemd instances invoke `uvicorn` with the release interpreter using
+`python -m uvicorn`. They do not execute the generated `bin/uvicorn` wrapper,
+so a stale console-script shebang from a previously prepared release cannot
+prevent the service from starting.
 
 The deployer fetches (it never pulls or restores), exports the target commit to
 a staging directory, installs a private virtual environment, and makes the
