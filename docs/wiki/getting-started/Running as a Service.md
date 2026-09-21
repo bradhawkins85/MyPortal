@@ -68,7 +68,8 @@ After=network-online.target mysql.service redis.service
 Wants=network-online.target
 
 [Service]
-Type=notify
+# Uvicorn does not emit systemd readiness notifications.
+Type=simple
 User=myportal
 Group=myportal
 WorkingDirectory=/opt/myportal
@@ -96,9 +97,9 @@ Key points:
   Configure behaviour via `UVICORN_AUTO_UPDATE_ENABLED`,
   `UVICORN_AUTO_UPDATE_ATTEMPTS`, and
   `UVICORN_AUTO_UPDATE_RETRY_DELAY` in the environment file.
-- `Type=notify` allows Uvicorn to report readiness to systemd. Remove the
-  directive if you are not using Uvicorn's `--factory` or `--lifespan`
-  support.
+- `Type=simple` is required because Uvicorn does not emit systemd
+  `sd_notify` readiness messages. Blue/green deployments validate `/readyz`
+  before routing traffic to a new worker.
 - The service runs as the dedicated `myportal` user with a restricted
   home directory and `NoNewPrivileges` enabled.
 - `ProtectSystem` and `ProtectHome` restrict filesystem access while

@@ -2645,11 +2645,14 @@ async def _render_impersonation_dashboard(
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    try:
-        await scheduler_service.run_system_update()
-    except Exception as exc:
-        log_error("Startup system update failed", error=str(exc))
+    # Startup must not depend on GitHub or other external services. The system
+    # update command performs a remote Git query and tray downloads can take
+    # minutes; awaiting either here prevents Uvicorn from completing lifespan
+    # startup and causes systemd's Type=notify unit to remain "activating".
+    # Both operations remain available through their scheduled/admin actions.
+    log_info("Application startup phase", phase="database_connect")
     await db.connect()
+    log_info("Application startup phase complete", phase="database_connect")
     # Production schema changes are an explicit deployment phase.  Keeping this
     # behind an opt-in is useful for isolated developer/test databases without
     # allowing every production worker to race the deploy coordinator.
@@ -2733,14 +2736,6 @@ async def on_startup() -> None:
         else:
             log_info("Demo data seeded on startup", **{k: v for k, v in result.items() if k != "skipped"})
 
-    async def _fetch_tray_msi() -> None:
-        from app.services import tray_installer as tray_installer_service
-
-        await tray_installer_service.fetch_latest_tray_installers(
-            repo=settings.github_tray_msi_repo,
-            github_token=settings.github_token,
-        )
-
     startup_tasks = [
         ("sync_change_log_sources", change_log_service.sync_change_log_sources()),
         ("ensure_default_modules", modules_service.ensure_default_modules()),
@@ -2748,9 +2743,9 @@ async def on_startup() -> None:
         ("bootstrap_default_bcp_template", _bootstrap_default_bcp_template()),
         ("migrate_sync_m365_data_tasks", _migrate_sync_m365_data_tasks()),
         ("seed_demo_data_once", _seed_demo_data_once()),
-        ("fetch_latest_tray_msi", _fetch_tray_msi()),
     ]
 
+    log_info("Application startup phase", phase="local_bootstrap_tasks")
     results = await asyncio.gather(
         *(task for _, task in startup_tasks), return_exceptions=True
     )
@@ -2767,6 +2762,7 @@ async def on_startup() -> None:
                 )
         elif name == "bootstrap_default_bcp_template":
             log_info("BCP default template bootstrapped")
+    log_info("Application startup phase complete", phase="local_bootstrap_tasks")
 
     global _rag_relationship_stop, _rag_relationship_tasks
     _rag_relationship_stop = asyncio.Event()
