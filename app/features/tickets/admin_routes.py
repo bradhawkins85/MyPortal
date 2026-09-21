@@ -88,6 +88,9 @@ def _approval_redirect(message: str, category: str = "success") -> RedirectRespo
 
 COMPANY_ROLE_OPTIONS = (
     ("any_manager", "Any Manager"), ("general_manager", "General Manager (GM)"),
+    ("department_manager", "Department Manager"),
+    ("any_supervisor", "Any Supervisor"),
+    ("department_supervisor", "Department Supervisor"),
     ("finance_manager", "Finance Manager"), ("it_manager", "IT Manager"),
     ("hr_manager", "Human Resources Manager"),
     ("operations_manager", "Operations Manager"),
