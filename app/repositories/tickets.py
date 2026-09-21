@@ -90,15 +90,23 @@ def _append_ticket_search_filter(
     prefixed_subject = f"{column_prefix}subject"
     prefixed_description = f"{column_prefix}description"
     prefixed_external_reference = f"{column_prefix}external_reference"
+    prefixed_ticket_id = f"{column_prefix}id"
 
     if mode == "fulltext":
         searchable_columns = [prefixed_subject, prefixed_description]
         if include_external_reference:
             searchable_columns.append(prefixed_external_reference)
         where.append(
+            "("
             f"MATCH ({', '.join(searchable_columns)}) AGAINST (%s IN BOOLEAN MODE)"
+            " OR EXISTS ("
+            "SELECT 1 FROM ticket_replies AS tr_search "
+            f"WHERE tr_search.ticket_id = {prefixed_ticket_id} "
+            "AND MATCH (tr_search.body) AGAINST (%s IN BOOLEAN MODE)"
+            ")"
+            ")"
         )
-        params.append(value)
+        params.extend([value, value])
         return
 
     like_clause = [
@@ -111,6 +119,14 @@ def _append_ticket_search_filter(
             f"LOWER(COALESCE({prefixed_external_reference}, '')) LIKE LOWER(%s)"
         )
         like_params.append(value)
+    like_clause.append(
+        "EXISTS ("
+        "SELECT 1 FROM ticket_replies AS tr_search "
+        f"WHERE tr_search.ticket_id = {prefixed_ticket_id} "
+        "AND LOWER(COALESCE(tr_search.body, '')) LIKE LOWER(%s)"
+        ")"
+    )
+    like_params.append(value)
     where.append(f"({' OR '.join(like_clause)})")
     params.extend(like_params)
 
