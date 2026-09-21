@@ -420,6 +420,43 @@ def test_upgrade_installs_instance_unit_before_restarting_a_slot():
     assert "systemctl enable myportal@blue.service myportal@green.service" in SCRIPT
 
 
+def test_upgrade_installs_and_starts_blue_green_nginx_after_backend_validation():
+    nginx_install = SCRIPT[
+        SCRIPT.index("install_blue_green_nginx_config() {") : SCRIPT.index(
+            "\nmake_release_service_readable()"
+        )
+    ]
+
+    assert 'deploy/nginx/myportal-bluegreen.conf' in nginx_install
+    assert 'available_dir="/etc/nginx/sites-available"' in nginx_install
+    assert 'installed_config="${available_dir}/myportal.conf"' in nginx_install
+    assert '/etc/nginx/conf.d/myportal.conf' in nginx_install
+    assert 'ln -sfn "$installed_config" "${enabled_dir}/myportal.conf"' in nginx_install
+    assert 'systemctl enable --now nginx' in nginx_install
+
+    validation = SCRIPT.index('smoke_test "$(instance_port "$inactive")" "$revision"')
+    install = SCRIPT.index(
+        'install_blue_green_nginx_config "$release" "$inactive" "$active"',
+        validation,
+    )
+    cutover = SCRIPT.index('write_upstream "$inactive" "$active"', install)
+    assert validation < install < cutover
+
+
+def test_first_nginx_start_uses_the_validated_candidate_upstream():
+    install = SCRIPT[
+        SCRIPT.index("install_blue_green_nginx_config() {") : SCRIPT.index(
+            "\nmake_release_service_readable()"
+        )
+    ]
+
+    assert 'write_upstream_file "$active" "$inactive"' in install
+    write = install.index('write_upstream_file "$active" "$inactive"')
+    validate = install.index("\n  nginx -t", write)
+    start = install.index("systemctl enable --now nginx", validate)
+    assert write < validate < start
+
+
 def test_pre_cutover_failure_does_not_rewrite_working_upstream():
     rollback = SCRIPT[SCRIPT.index("rollback() {") : SCRIPT.index("\nrun_rolling_restart()")]
 

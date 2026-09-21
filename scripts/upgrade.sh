@@ -133,13 +133,17 @@ atomic_link() {
 
 instance_port() { [[ "$1" == blue ]] && printf 8001 || printf 8002; }
 
-write_upstream() {
+write_upstream_file() {
   local active="$1" inactive="$2" tmp="${UPSTREAM_FILE}.new.$$"
   mkdir -p "$(dirname "$UPSTREAM_FILE")"
   printf 'server 127.0.0.1:%s max_fails=1 fail_timeout=5s;\nserver 127.0.0.1:%s down;\n' \
     "$(instance_port "$active")" "$(instance_port "$inactive")" >"$tmp"
   chmod 644 "$tmp"
   mv -f "$tmp" "$UPSTREAM_FILE"
+}
+
+write_upstream() {
+  write_upstream_file "$1" "$2"
   nginx -t
   nginx -s reload
 }
@@ -207,6 +211,42 @@ install_blue_green_service_unit() {
     echo "Unable to register myportal@.service; check systemd and ${installed_unit}." >&2
     return 1
   fi
+}
+
+install_blue_green_nginx_config() {
+  local release="$1" active="$2" inactive="$3"
+  local source_config="${release}/deploy/nginx/myportal-bluegreen.conf"
+  local available_dir="/etc/nginx/sites-available"
+  local enabled_dir="/etc/nginx/sites-enabled"
+  local installed_config
+
+  if [[ ! -r "$source_config" ]]; then
+    echo "Blue/green nginx configuration is missing from release: ${source_config}" >&2
+    return 1
+  fi
+  if [[ "${EUID:-$(id -u)}" != 0 ]]; then
+    echo "Blue/green nginx setup requires root. Re-run the upgrade with sudo." >&2
+    return 1
+  fi
+
+  # Debian-family packages use sites-available/sites-enabled, while other
+  # nginx packages load conf.d directly. Install into the layout nginx already
+  # provides instead of requiring a manual proxy setup after the workers start.
+  if [[ -d "$available_dir" && -d "$enabled_dir" ]]; then
+    installed_config="${available_dir}/myportal.conf"
+    install -m 0644 "$source_config" "$installed_config"
+    ln -sfn "$installed_config" "${enabled_dir}/myportal.conf"
+  else
+    installed_config="/etc/nginx/conf.d/myportal.conf"
+    install -d -m 0755 "$(dirname "$installed_config")"
+    install -m 0644 "$source_config" "$installed_config"
+  fi
+
+  # The include is mandatory for nginx -t. Point it at the already validated
+  # candidate so a first-time nginx start cannot expose a dead legacy backend.
+  write_upstream_file "$active" "$inactive"
+  nginx -t
+  systemctl enable --now nginx
 }
 
 make_release_service_readable() {
@@ -420,6 +460,11 @@ run_rolling_restart() {
   systemctl restart "myportal@${inactive}.service"
   wait_for_version "$(instance_port "$inactive")" "$revision"
   smoke_test "$(instance_port "$inactive")" "$revision"
+
+  # Install and start the public listener only after its first backend has
+  # passed readiness and smoke checks. This also promotes legacy deployments
+  # whose workers existed but whose blue/green nginx site was never enabled.
+  install_blue_green_nginx_config "$release" "$inactive" "$active"
 
   # nginx accepts no new work on the old slot after this validated reload.
   write_upstream "$inactive" "$active"

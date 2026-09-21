@@ -29,11 +29,19 @@ printf '%s\n' \
 sudo nginx -t
 ```
 
-Install `deploy/nginx/myportal-bluegreen.conf`, then run:
+Run the upgrade coordinator:
 
 ```console
 sudo /opt/myportal/control/scripts/upgrade.sh --rolling
 ```
+
+The coordinator installs `deploy/nginx/myportal-bluegreen.conf` using the
+host's `sites-available`/`sites-enabled` layout when present, or `conf.d` on
+other nginx installations. It validates the configuration and enables and
+starts nginx only after the candidate application instance has passed its
+readiness and smoke checks. The manual include creation above remains useful
+when validating nginx before the first upgrade, but the coordinator also
+creates it automatically.
 
 The upgrade installs or refreshes `deploy/systemd/myportal@.service`, reloads
 systemd, and enables both instance units before it starts the inactive slot.
