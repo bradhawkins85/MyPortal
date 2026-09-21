@@ -312,6 +312,17 @@ smoke_test() {
   wait_for_version "$port" "$expected"
 }
 
+make_dependency_layer_service_readable() {
+  local layer="$1"
+  [[ -d "$layer" ]] || return 1
+  # The upgrade runs as root under umask 027, while systemd runs the release as
+  # myportal. The release's .venv is a symlink into this shared layer, so
+  # hardening only the release tree does not make its interpreter executable.
+  chmod a+rx "${SHARED_ROOT}/dependency-layers" "$layer"
+  find "$layer" -type d -exec chmod a+rx,a-w {} +
+  find "$layer" -type f -exec chmod a+rX,a-w {} +
+}
+
 install_dependencies() {
   local release="$1" key layer staging start=$SECONDS
   local lock="${release}/requirements.lock"
@@ -320,6 +331,10 @@ install_dependencies() {
   key=$(printf '%s' "$key" | sha256sum | awk '{print $1}')
   layer="${SHARED_ROOT}/dependency-layers/${key}"
   mkdir -p "${SHARED_ROOT}/dependency-layers"
+  # Repair cached layers created by older upgrades before testing or reusing
+  # them. Root being able to execute Python did not prove the service user
+  # could traverse and execute the symlink target.
+  [[ ! -d "$layer" ]] || make_dependency_layer_service_readable "$layer"
   if [[ -x "${layer}/bin/python" && -f "${layer}/.verified" ]] && \
      (cd "$release" && "${layer}/bin/python" -m pip check >/dev/null && "${layer}/bin/python" -c 'import uvicorn'); then
     ln -s "$layer" "${release}/.venv"
@@ -336,6 +351,7 @@ install_dependencies() {
   (cd "$release" && "$staging/bin/python" -m pip check && "$staging/bin/python" -c 'import uvicorn')
   printf '%s\n' "$key" >"$staging/.verified"
   mv "$staging" "$layer"
+  make_dependency_layer_service_readable "$layer"
   ln -s "$layer" "${release}/.venv"
   record_step dependency_layer miss "lock_or_interpreter_${key}" "$((SECONDS-start))"
 }
@@ -531,9 +547,19 @@ EOF
 release_runtime_ready() {
   local release="$1"
   [[ -x "${release}/.venv/bin/python" ]] || return 1
-  # The systemd unit launches uvicorn as a module through this interpreter and
-  # deliberately does not depend on a generated console-script shebang.
-  "${release}/.venv/bin/python" -c 'import uvicorn' >/dev/null 2>&1
+  # Validate as the same unprivileged account used by systemd. A root-only
+  # dependency layer passes an ordinary -x/import check but fails ExecStart
+  # with status 126 (permission denied).
+  runuser --user myportal -- "${release}/.venv/bin/python" -c 'import uvicorn' >/dev/null 2>&1
+}
+
+validate_release_metadata() {
+  local revision="$1" release="$2" recorded
+  recorded=$(tr -d '\r\n' <"$release/version.txt" 2>/dev/null || true)
+  if [[ ! "$revision" =~ ^[0-9a-f]{40}$ || "${release##*/}" != "$revision" || "$recorded" != "$revision" ]]; then
+    echo "Release preparation failed: cause=bad_release_metadata release=${release} expected=${revision} recorded=${recorded:-<missing>}" >&2
+    return 1
+  fi
 }
 
 validate_release_metadata() {
@@ -583,6 +609,10 @@ prepare_release() {
     make_release_service_readable "$release"
     validate_release_uploads "$release"
     validate_release_metadata "$revision" "$release"
+    if ! release_runtime_ready "$release"; then
+      echo "Release preparation failed: cause=runtime_not_executable_by_service_user release=${release} interpreter=${release}/.venv/bin/python" >&2
+      return 1
+    fi
     return 0
   fi
   rm -rf "$staging"; mkdir -p "$staging"
@@ -609,6 +639,10 @@ prepare_release() {
   make_release_service_readable "$release"
   validate_release_uploads "$release"
   validate_release_metadata "$revision" "$release"
+  if ! release_runtime_ready "$release"; then
+    echo "Release preparation failed: cause=runtime_not_executable_by_service_user release=${release} interpreter=${release}/.venv/bin/python" >&2
+    return 1
+  fi
 }
 
 run_release_manage() {
