@@ -22,9 +22,11 @@ from app.core.config import get_settings
 from app.features.orders import routes as orders_routes
 from app.repositories import cart as cart_repo
 from app.repositories import companies as company_repo
+from app.repositories import freight_rules as freight_rules_repo
 from app.repositories import shop as shop_repo
 from app.repositories import users as user_repo
 from app.security.session import session_manager
+from app.services import freight_rules as freight_rules_service
 from app.services.sanitization import sanitize_rich_text
 
 router = APIRouter(tags=["Quotes"])
@@ -144,6 +146,7 @@ def _build_quote_pdf_html(
     quote: dict[str, Any],
     items: list[dict[str, Any]],
     include_line_images: bool,
+    freight_amount: Decimal = Decimal("0.00"),
     watermark_expired: bool = False,
 ) -> str:
     quote_number = escape(str(quote.get("quote_number") or ""))
@@ -154,6 +157,8 @@ def _build_quote_pdf_html(
         Decimal(str(item.get("price") or "0")) * int(item.get("quantity") or 0)
         for item in items
     )
+    freight_amount = Decimal(str(freight_amount or "0")).quantize(Decimal("0.01"))
+    total = subtotal + freight_amount
 
     rows = []
     for item in items:
@@ -177,6 +182,17 @@ def _build_quote_pdf_html(
             f"<td class='num'>{_format_money(line_total)}</td>"
             "</tr>"
         )
+
+    rows.append(
+        "<tr class='freight-line'>"
+        "<td><strong>Freight (estimate)</strong><br>"
+        "<span class='muted'>Estimated only; freight will be adjusted accordingly on the final invoice.</span></td>"
+        "<td><span class='muted'>—</span></td>"
+        "<td class='num'>1</td>"
+        f"<td class='num'>{_format_money(freight_amount)}</td>"
+        f"<td class='num'>{_format_money(freight_amount)}</td>"
+        "</tr>"
+    )
 
     def _remove_rich_text_images(html_value: str) -> str:
         return re.sub(r"<img\b[^>]*>", "", html_value, flags=re.IGNORECASE)
@@ -307,12 +323,36 @@ def _build_quote_pdf_html(
       <thead><tr><th>Product</th><th>Stock status</th><th class="num">Qty</th><th class="num">Unit</th><th class="num">Total</th></tr></thead>
       <tbody>{''.join(rows)}</tbody>
     </table>
-    <div class="totals"><div class="grand"><span>Total</span><span>{_format_money(subtotal)}</span></div></div>
+    <div class="totals"><div class="grand"><span>Total</span><span>{_format_money(total)}</span></div></div>
   </section>
   {''.join(detail_pages)}
 </body>
 </html>
 """
+
+
+async def _calculate_quote_freight(items: list[dict[str, Any]]) -> Decimal:
+    """Calculate the current estimated freight for a quote's physical items."""
+    product_lookup = {
+        int(item["product_id"]): item
+        for item in items
+        if item.get("product_id") is not None
+    }
+    freight_items = [
+        {
+            **item,
+            "unit_price": item.get("price"),
+            "line_total": Decimal(str(item.get("price") or "0"))
+            * int(item.get("quantity") or 0),
+        }
+        for item in items
+    ]
+    summary = freight_rules_service.calculate_cart_freight(
+        freight_items,
+        product_lookup,
+        await freight_rules_repo.list_rules(active_only=True),
+    )
+    return Decimal(str(summary["freight_total"]))
 
 
 @router.get("/quotes", response_class=HTMLResponse)
@@ -455,6 +495,7 @@ async def export_quote_pdf(
         quote=quote_summary,
         items=quote_items,
         include_line_images=with_images,
+        freight_amount=await _calculate_quote_freight(quote_items),
     )
     pdf_bytes = HTML(string=html, base_url=str(request.base_url)).write_pdf()
     filename = f"{quote_number}-{'with-images' if with_images else 'no-images'}.pdf"
@@ -499,6 +540,7 @@ async def download_quote_magic_pdf(
         quote=quote_summary,
         items=quote_items,
         include_line_images=with_images,
+        freight_amount=await _calculate_quote_freight(quote_items),
         watermark_expired=_is_quote_expired(quote_summary.get("expires_at")),
     )
     pdf_bytes = HTML(string=html, base_url=str(request.base_url)).write_pdf()
