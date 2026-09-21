@@ -213,6 +213,37 @@ make_release_service_readable() {
   find "$release" -type f -exec chmod a+rX,a-w {} +
 }
 
+prepare_shared_uploads() {
+  local shared legacy name
+  for name in private_uploads uploads; do
+    shared="${SHARED_ROOT}/${name}"
+    if [[ "$name" == private_uploads ]]; then
+      legacy="${PROJECT_ROOT}/private_uploads"
+    else
+      legacy="${PROJECT_ROOT}/app/static/uploads"
+    fi
+    if [[ ! -d "$shared" ]]; then
+      install -d -m 0750 -o myportal -g myportal "$shared"
+      # Seed persistent storage for installations upgrading from the original
+      # single-checkout layout. Never remove or replace the legacy data.
+      if [[ -d "$legacy" ]]; then
+        cp -a "$legacy"/. "$shared"/
+      fi
+      chown -R myportal:myportal "$shared"
+    else
+      chown myportal:myportal "$shared"
+    fi
+  done
+}
+
+link_shared_uploads() {
+  local release="$1"
+  mkdir -p "${release}/app/static"
+  rm -rf "${release}/private_uploads" "${release}/app/static/uploads"
+  ln -s "${SHARED_ROOT}/private_uploads" "${release}/private_uploads"
+  ln -s "${SHARED_ROOT}/uploads" "${release}/app/static/uploads"
+}
+
 release_runtime_ready() {
   local release="$1"
   [[ -x "${release}/.venv/bin/python" ]] || return 1
@@ -228,12 +259,15 @@ prepare_release() {
   # The service needs to traverse deployment-owned parents to reach both the
   # instance symlink and its immutable release target.
   chmod a+rx "$RELEASE_ROOT" "$INSTANCE_ROOT" "$SHARED_ROOT"
+  prepare_shared_uploads
   if [[ -e "$release" ]]; then
     # A previous attempt may have prepared this revision with missing or stale
     # configuration. Refresh only the symlink; never copy or regenerate secrets.
     if [[ -f "$ENV_FILE" && "$(readlink "$release/.env" 2>/dev/null || true)" != "$ENV_FILE" ]]; then
       ln -sfn "$ENV_FILE" "$release/.env"
     fi
+    chmod u+w "$release" "${release}/app" "${release}/app/static"
+    link_shared_uploads "$release"
     # Older scripts moved a completed virtualenv from a temporary directory,
     # leaving console-script shebangs pointed at a path that no longer exists.
     # Rebuild only an unusable runtime; never mutate a healthy active release.
@@ -262,6 +296,7 @@ prepare_release() {
   # private to this revision.
   rm -rf "$staging/var"
   ln -s "$SHARED_ROOT" "$staging/var"
+  link_shared_uploads "$staging"
   # Publish the code path before creating its virtualenv. Entry-point scripts
   # embed an absolute interpreter path and break if the venv is subsequently
   # renamed from the staging path to the release path.

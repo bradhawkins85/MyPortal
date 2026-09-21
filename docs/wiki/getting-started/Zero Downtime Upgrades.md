@@ -9,7 +9,9 @@ directories. The Git checkout is a **control checkout**, never a serving tree.
   templates, and a release-local `.venv`. A prepared directory is made
   read-only before it is published.
 * `/opt/myportal/shared` contains mutable state and application data. Each
-  release's `var` symlink points here.
+  release's `var`, `private_uploads`, and `app/static/uploads` paths point here.
+  Existing upload data from a legacy single-checkout installation is copied
+  into shared storage on first use and is never removed from the old location.
 * `/opt/myportal/instances/{blue,green}` independently selects the release for
   each service. `/opt/myportal/current` selects static/error assets exposed by
   nginx and is changed only after cutover succeeds.
@@ -52,6 +54,10 @@ The systemd instances invoke `uvicorn` with the release interpreter using
 `python -m uvicorn`. They do not execute the generated `bin/uvicorn` wrapper,
 so a stale console-script shebang from a previously prepared release cannot
 prevent the service from starting.
+
+Upload directories are persistent writable storage rather than part of an
+immutable release. The upgrade creates them with ownership for the `myportal`
+service account and links both upload paths into every prepared release.
 
 The deployer fetches (it never pulls or restores), exports the target commit to
 a staging directory, installs a private virtual environment, and makes the

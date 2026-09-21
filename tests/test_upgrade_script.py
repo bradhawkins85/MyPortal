@@ -72,7 +72,7 @@ def test_upgrade_prepares_revision_without_mutating_control_checkout():
     assert 'RELEASE_DIR="${RELEASE_ROOT}/${TARGET_REVISION}"' in SCRIPT
     assert "git pull" not in SCRIPT
     assert "git restore" not in SCRIPT
-    assert "chown -R" not in SCRIPT
+    assert 'chown -R myportal:myportal "$PROJECT_ROOT"' not in SCRIPT
 
 
 def test_release_has_private_dependencies_and_shared_mutable_state():
@@ -82,6 +82,29 @@ def test_release_has_private_dependencies_and_shared_mutable_state():
     assert 'ln -s "$ENV_FILE" "$staging/.env"' in SCRIPT
     assert 'ln -sfn "$ENV_FILE" "$release/.env"' in SCRIPT
     assert 'chmod a+rx "$RELEASE_ROOT" "$INSTANCE_ROOT" "$SHARED_ROOT"' in SCRIPT
+    assert 'ln -s "${SHARED_ROOT}/private_uploads" "${release}/private_uploads"' in SCRIPT
+    assert 'ln -s "${SHARED_ROOT}/uploads" "${release}/app/static/uploads"' in SCRIPT
+
+
+def test_upload_storage_is_seeded_without_removing_legacy_data():
+    function = SCRIPT[
+        SCRIPT.index("prepare_shared_uploads() {") : SCRIPT.index("\nlink_shared_uploads()")
+    ]
+
+    assert 'cp -a "$legacy"/. "$shared"/' in function
+    assert 'rm -rf "$legacy"' not in function
+    assert 'mv "$legacy"' not in function
+    assert 'install -d -m 0750 -o myportal -g myportal' in function
+
+
+def test_release_upload_paths_point_to_persistent_shared_storage():
+    function = SCRIPT[
+        SCRIPT.index("link_shared_uploads() {") : SCRIPT.index("\nrelease_runtime_ready()")
+    ]
+
+    assert '"${release}/private_uploads"' in function
+    assert '"${release}/app/static/uploads"' in function
+    assert function.count("ln -s") == 2
 
 
 def test_release_permissions_allow_unprivileged_service_to_read_and_traverse(tmp_path):
