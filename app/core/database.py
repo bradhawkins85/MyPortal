@@ -149,6 +149,7 @@ class Database:
             logger.info("Connecting to MySQL at {host}", host=self._settings.database_host)
             self._pool = await mysql.create_pool(
                 host=self._settings.database_host,
+                port=self._settings.database_port,
                 user=self._settings.database_user,
                 password=self._settings.database_password,
                 db=self._settings.database_name,
