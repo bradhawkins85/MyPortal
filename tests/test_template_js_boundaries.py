@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from jinja2 import Environment
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = REPO_ROOT / "app" / "templates"
@@ -33,6 +33,16 @@ MAILBOX_TEMPLATES = [
     "m365/spam_purge.html",
     "m365/user_mailboxes.html",
 ]
+
+
+def _render_block(relative_path: str, block_name: str, context: dict) -> str:
+    env = Environment(
+        loader=FileSystemLoader(TEMPLATES_DIR),
+        autoescape=select_autoescape(("html", "xml")),
+    )
+    template = env.get_template(relative_path)
+    render_context = template.new_context(context)
+    return "".join(template.blocks[block_name](render_context))
 
 
 def _template_text(relative_path: str) -> str:
@@ -166,3 +176,60 @@ def test_json_data_attributes_round_trip_safely(snippet: str, context: dict, exp
     assert match, rendered
     payload = json.loads(html.unescape(match.group(1)))
     assert payload == expected
+
+
+def test_reporting_delete_confirmation_is_inert_rendered_data() -> None:
+    report_name = 'Quarterly "sales" \\ review\n</form><script>alert(1)</script>&'
+    rendered = _render_block(
+        "admin/reporting.html",
+        "content",
+        {
+            "reports": [
+                {
+                    "id": 17,
+                    "name": report_name,
+                    "slug": "quarterly-sales",
+                    "description": "",
+                    "is_system": False,
+                    "updated_at_iso": None,
+                }
+            ],
+            "csrf_token": "csrf-test-token",
+        },
+    )
+
+    form_match = re.search(
+        r'<form[^>]+action="/admin/reporting/17/delete"[^>]*>', rendered
+    )
+    assert form_match, rendered
+    form_tag = form_match.group(0)
+    assert "onsubmit=" not in form_tag
+    confirmation_match = re.search(r'data-confirm="([^"]*)"', form_tag)
+    assert confirmation_match, form_tag
+    assert html.unescape(confirmation_match.group(1)) == f'Delete report "{report_name}"?'
+    assert '<input type="hidden" name="_csrf" value="csrf-test-token" />' in rendered
+    assert rendered.count("<script>alert(1)</script>") == 0
+
+
+def test_targeted_templates_keep_jinja_out_of_javascript_parse_boundaries() -> None:
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed")
+
+    for relative_path in ("admin/reporting.html", "admin/backup_jobs.html"):
+        template_text = _template_text(relative_path)
+        scripts = re.findall(
+            r"<script\b(?![^>]*\bsrc=)[^>]*>(.*?)</script>",
+            template_text,
+            re.S | re.I,
+        )
+        assert all("{{" not in script and "{%" not in script for script in scripts)
+        for script in scripts:
+            result = subprocess.run(
+                [node, "--check", "-"],
+                input=script,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 0, f"{relative_path}: {result.stderr}"
