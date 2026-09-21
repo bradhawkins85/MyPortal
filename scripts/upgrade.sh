@@ -173,6 +173,29 @@ run_rolling_restart() {
   trap - ERR
 }
 
+run_migration_phase() {
+  local release="$1" serving="$2" target="$3" args=()
+  [[ "${UPG01_MAINTENANCE_MODE:-false}" == "true" ]] && args+=(--maintenance)
+  write_upgrade_status migrating "Applying and validating schema changes before cutover."
+  "${release}/.venv/bin/python" "${release}/manage.py" migrate \
+    --serving-release "${serving:-none}" --target-release "$target" "${args[@]}"
+}
+
+is_additive_migration_only_release() {
+  local old_revision="$1" target_revision="$2" changed
+  [[ -n "$old_revision" ]] || return 1
+  changed=$(git diff --name-only "$old_revision" "$target_revision")
+  [[ -n "$changed" ]] || return 1
+  while IFS= read -r path; do
+    [[ "$path" == migrations/*.sql || "$path" == changes/*.json ]] || return 1
+    if [[ "$path" == migrations/*.sql ]]; then
+      git show "${target_revision}:${path}" | grep -Eiq '^--[[:space:]]*phase:[[:space:]]*expand[[:space:]]*$' || return 1
+      git show "${target_revision}:${path}" | grep -Eiq '^--[[:space:]]*compatible-from:[[:space:]]*\*[[:space:]]*$' || return 1
+      git show "${target_revision}:${path}" | grep -Eiq '^--[[:space:]]*compatible-to:[[:space:]]*\*[[:space:]]*$' || return 1
+    fi
+  done <<<"$changed"
+}
+
 command -v git >/dev/null && command -v curl >/dev/null && command -v nginx >/dev/null && command -v systemctl >/dev/null
 cd "$PROJECT_ROOT"
 validate_origin_remote "$(git config --get remote.origin.url)"
@@ -184,6 +207,16 @@ RELEASE_DIR="${RELEASE_ROOT}/${TARGET_REVISION}"
 
 write_upgrade_status preparing "Preparing immutable release ${TARGET_REVISION}."
 prepare_release "$TARGET_REVISION" "$RELEASE_DIR"
+run_migration_phase "$RELEASE_DIR" "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"
+if is_additive_migration_only_release "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"; then
+  # Schema-only expands need no worker signal: the serving revision was
+  # explicitly declared compatible and the database lock applied them once.
+  atomic_link "$RELEASE_DIR" "$CURRENT_LINK"
+  RESTART_MODE="migration-only"
+  write_upgrade_status succeeded "Additive migration release ${TARGET_REVISION} applied; application workers were not reloaded."
+  echo "Successfully applied migration-only release ${TARGET_REVISION}."
+  exit 0
+fi
 run_rolling_restart "$TARGET_REVISION" "$RELEASE_DIR"
 write_upgrade_status succeeded "Release ${TARGET_REVISION} is serving; previous release retained."
 echo "Successfully deployed ${TARGET_REVISION} from ${RELEASE_DIR}."

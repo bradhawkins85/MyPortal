@@ -2650,7 +2650,13 @@ async def on_startup() -> None:
     except Exception as exc:
         log_error("Startup system update failed", error=str(exc))
     await db.connect()
-    await db.run_migrations()
+    # Production schema changes are an explicit deployment phase.  Keeping this
+    # behind an opt-in is useful for isolated developer/test databases without
+    # allowing every production worker to race the deploy coordinator.
+    if settings.migration_bootstrap_on_start:
+        if settings.environment.strip().lower() == "production":
+            raise RuntimeError("MIGRATION_BOOTSTRAP_ON_START is not permitted in production")
+        await db.run_migrations()
     async def _bootstrap_default_bcp_template() -> None:
         from app.services.bcp_template import bootstrap_default_template
 

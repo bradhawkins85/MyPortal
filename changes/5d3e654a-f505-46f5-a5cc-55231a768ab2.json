@@ -1,0 +1,7 @@
+{
+  "guid": "5d3e654a-f505-46f5-a5cc-55231a768ab2",
+  "occurred_at": "2026-09-21T06:54:45.658421+00:00",
+  "change_type": "Changed",
+  "summary": "Move production SQL migrations into a locked pre-cutover deployment phase",
+  "content_hash": "98636615b6e970a95cfd6c7ac042e9236a6fdac9c1969b1ea99cb22035bb7cea"
+}

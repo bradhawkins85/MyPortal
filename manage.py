@@ -55,9 +55,26 @@ async def rebuild(args: argparse.Namespace) -> None:
         await db.disconnect()
 
 
+async def migrate(args: argparse.Namespace) -> None:
+    """Run the deployment's single, locked schema phase."""
+    await db.connect()
+    try:
+        await db.run_migrations(
+            serving_release=args.serving_release,
+            target_release=args.target_release,
+            maintenance=args.maintenance,
+        )
+    finally:
+        await db.disconnect()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="manage.py")
     sub = parser.add_subparsers(dest="command", required=True)
+    migrate_parser = sub.add_parser("migrate", help="apply and validate pending migrations")
+    migrate_parser.add_argument("--serving-release")
+    migrate_parser.add_argument("--target-release", required=True)
+    migrate_parser.add_argument("--maintenance", action="store_true")
     rebuild_parser = sub.add_parser("rebuild-rag-relationships")
     rebuild_parser.add_argument("--all", action="store_true")
     rebuild_parser.add_argument("--tickets", action="store_true")
@@ -69,7 +86,9 @@ def main() -> None:
     rebuild_parser.add_argument("--company")
     rebuild_parser.add_argument("--document")
     args = parser.parse_args()
-    if args.command == "rebuild-rag-relationships":
+    if args.command == "migrate":
+        asyncio.run(migrate(args))
+    elif args.command == "rebuild-rag-relationships":
         asyncio.run(rebuild(args))
 
 
