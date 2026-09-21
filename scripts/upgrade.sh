@@ -216,13 +216,14 @@ read_active() {
 }
 
 wait_for_version() {
-  local port="$1" expected="$2" elapsed=0 body
+  local port="$1" expected="$2" elapsed=0 body last_body="no response"
   while ((elapsed < READY_TIMEOUT)); do
     body=$(curl -fsS --max-time 2 "http://127.0.0.1:${port}/readyz" 2>/dev/null || true)
+    [[ -n "$body" ]] && last_body="$body"
     if [[ "$body" == *'"status":"ok"'* && "$body" == *"\"version\":\"${expected}\""* ]]; then return 0; fi
     sleep 1; ((elapsed+=1))
   done
-  echo "Instance on port ${port} did not report expected version ${expected}" >&2
+  echo "Instance on port ${port} did not report expected version ${expected}; last readiness response: ${last_body}" >&2
   return 1
 }
 
@@ -472,6 +473,10 @@ prepare_release() {
     if [[ -f "$ENV_FILE" && "$(readlink "$release/.env" 2>/dev/null || true)" != "$ENV_FILE" ]]; then
       ln -sfn "$ENV_FILE" "$release/.env"
     fi
+    # Repair markers left missing or stale by interrupted and legacy updaters.
+    # /readyz uses this marker to prove which immutable release is serving.
+    chmod u+w "$release/version.txt" 2>/dev/null || true
+    printf '%s\n' "$revision" >"$release/version.txt"
     chmod u+w "$release" "${release}/app" "${release}/app/static"
     link_shared_uploads "$release"
     # Older scripts moved a completed virtualenv from a temporary directory,

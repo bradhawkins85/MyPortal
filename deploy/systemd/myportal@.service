@@ -12,10 +12,11 @@
 #   systemctl enable --now myportal@blue.service
 #   systemctl enable --now myportal@green.service
 #
-# Set MYPORTAL_INSTANCE_PORT in /etc/myportal.<instance>.env to override
-# the default port mapping below.  Each instance file should also pin
-# APP_INSTANCE_ID (read by app/services/singleton_jobs.py) so log lines
-# clearly identify which instance fired each job.
+# Each instance file may pin APP_INSTANCE_ID (read by
+# app/services/singleton_jobs.py) so log lines clearly identify which instance
+# fired each job. Ports are intentionally fixed because the deployment
+# coordinator and nginx use this same blue/green mapping for direct readiness
+# checks and cutover.
 
 [Unit]
 Description=MyPortal customer portal (%i instance)
@@ -32,10 +33,8 @@ User=myportal
 Group=myportal
 EnvironmentFile=/etc/myportal.env
 EnvironmentFile=-/etc/myportal.%i.env
-# Default port mapping is selected by ExecStart. Override it with
-# MYPORTAL_INSTANCE_PORT in /etc/myportal.<instance>.env.
 Environment=APP_INSTANCE_ID=%i
-ExecStart=/bin/sh -ec 'case %i in blue) default_port=8001;; green) default_port=8002;; *) echo "Invalid MyPortal instance %i; use myportal@blue.service or myportal@green.service (one .service suffix)." >&2; exit 64;; esac; release=$$(readlink -f /opt/myportal/instances/%i); test -n "$$release"; cd "$$release"; exec "$$release/.venv/bin/python" -m uvicorn app.main:app --host 0.0.0.0 --port "$${MYPORTAL_INSTANCE_PORT:-$$default_port}" --workers 2'
+ExecStart=/bin/sh -ec 'case %i in blue) port=8001;; green) port=8002;; *) echo "Invalid MyPortal instance %i; use myportal@blue.service or myportal@green.service (one .service suffix)." >&2; exit 64;; esac; release=$$(readlink -f /opt/myportal/instances/%i); test -n "$$release"; cd "$$release"; exec "$$release/.venv/bin/python" -m uvicorn app.main:app --host 0.0.0.0 --port "$$port" --workers 2'
 # Graceful reload: SIGHUP causes uvicorn to gracefully restart workers
 # without dropping accepted connections.
 ExecReload=/bin/kill -s HUP $MAINPID
