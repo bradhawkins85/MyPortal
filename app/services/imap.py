@@ -1661,12 +1661,6 @@ async def _save_email_attachment(
 
 
 async def sync_account(account_id: int) -> dict[str, Any]:
-    if system_state.is_restart_pending():
-        log_info(
-            "Skipping IMAP sync because system restart is pending",
-            account_id=account_id,
-        )
-        return {"status": "skipped", "reason": "pending_restart"}
     module = await modules_service.get_module("imap", redact=False)
     if not module or not module.get("enabled"):
         return {"status": "skipped", "reason": "Module disabled"}
