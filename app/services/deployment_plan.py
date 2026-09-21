@@ -36,9 +36,9 @@ class DeploymentPlan:
 def _category(path: str) -> tuple[str, str | None]:
     if path in PLANNER_PATHS:
         return "planner", None
-    if path.startswith(("docs/", "changes/", "tests/", ".github/")) or path in {
+    if path.startswith(("docs/", "changes/", "tests/", ".github/", "tray/.github/")) or path in {
         "README.md", "LICENSE", ".gitignore", ".gitleaks.toml",
-    }:
+    } or (path.startswith("tray/") and path.endswith(".md")):
         return "docs", None
     if path.startswith("app/static/"):
         return "static", None

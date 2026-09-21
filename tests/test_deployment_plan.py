@@ -12,6 +12,8 @@ from app.services.scheduler import SchedulerService
     ("entries", "action", "reload"),
     [
         ([("M", "README.md"), ("A", "tests/test_widget.py")], "no-op", False),
+        ([("M", "tray/README.md")], "no-op", False),
+        ([("M", "tray/.github/workflows/tray-build.yml")], "no-op", False),
         ([("M", "changes/a.json")], "no-op", False),
         ([("M", "app/static/css/main.css")], "static-publish", False),
         ([("M", "app/templates/base.html")], "template-reload", False),
@@ -52,6 +54,8 @@ def test_scheduler_uses_the_shared_planner():
         ([('A', 'migrations/999.sql')], False, False, 'dependency_inputs_unchanged', 'tray_inputs_unchanged'),
         ([('M', 'app/main.py')], False, False, 'dependency_inputs_unchanged', 'tray_inputs_unchanged'),
         ([('M', 'requirements.lock')], True, False, 'dependency_inputs_changed', 'tray_inputs_unchanged'),
+        ([('M', 'tray/README.md')], False, False, 'dependency_inputs_unchanged', 'tray_inputs_unchanged'),
+        ([('M', 'tray/.github/workflows/tray-build.yml')], False, False, 'dependency_inputs_unchanged', 'tray_inputs_unchanged'),
         ([('M', 'tray/go.mod')], False, True, 'dependency_inputs_unchanged', 'tray_inputs_changed'),
         ([('M', 'app/main.py'), ('M', 'tray/go.sum')], False, True, 'dependency_inputs_unchanged', 'tray_inputs_changed'),
     ],
