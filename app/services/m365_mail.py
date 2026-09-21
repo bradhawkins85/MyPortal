@@ -1076,17 +1076,6 @@ async def sync_account(
 
     started_at = datetime.now(timezone.utc)
 
-    if system_state.is_restart_pending():
-        log_info(
-            "Skipping M365 mail sync because system restart is pending",
-            account_id=account_id,
-        )
-        result = {"status": "skipped", "reason": "pending_restart"}
-        await _record_sync_history_safe(
-            account_id=account_id, started_at=started_at, result=result
-        )
-        return result
-
     account = await mail_repo.get_account(account_id)
     audit_mailbox = str(get_settings().outbound_audit_bcc or "").strip().casefold()
     account_mailbox = _normalise_string(

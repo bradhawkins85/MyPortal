@@ -200,6 +200,20 @@ def test_retry_repairs_release_permissions_before_returning():
     assert 'make_release_service_readable "$release"' in retry_branch
 
 
+def test_retry_repairs_the_release_version_marker():
+    prepare = SCRIPT[SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")]
+    existing = prepare[: prepare.index("return 0")]
+
+    assert 'printf \'%s\\n\' "$revision" >"$release/version.txt"' in existing
+
+
+def test_readiness_timeout_reports_the_last_response():
+    wait = SCRIPT[SCRIPT.index("wait_for_version() {") : SCRIPT.index("\nsmoke_test()")]
+
+    assert 'last_body="no response"' in wait
+    assert 'last readiness response: ${last_body}' in wait
+
+
 def test_virtualenv_is_created_only_after_release_reaches_final_path():
     prepare = SCRIPT[SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")]
     publish = prepare.index('mv "$staging" "$release"')
@@ -350,6 +364,15 @@ def test_systemd_launches_uvicorn_as_module_without_console_script_shebang():
 
     assert '"$$release/.venv/bin/python" -m uvicorn' in unit
     assert '"$$release/.venv/bin/uvicorn"' not in unit
+
+
+def test_systemd_uses_the_ports_checked_by_blue_green_coordinator():
+    unit = (ROOT / "deploy/systemd/myportal@.service").read_text()
+
+    assert "blue) port=8001" in unit
+    assert "green) port=8002" in unit
+    assert "MYPORTAL_INSTANCE_PORT" not in unit
+    assert '--port "$$port"' in unit
 
 
 def test_systemd_does_not_wait_for_unsupported_uvicorn_notifications():
