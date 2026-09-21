@@ -103,12 +103,7 @@ def _sanitize_requirement_evidence_filename(filename: str | None) -> str:
     return f"{safe_stem[:max_stem_length]}{safe_suffix}"
 
 
-def _allocate_requirement_evidence_storage_path(
-    *,
-    company_id: int,
-    requirement_id: int,
-    safe_name: str,
-) -> tuple[Path, Path]:
+def _allocate_requirement_evidence_storage_path() -> tuple[Path, Path]:
     storage_dir = _requirement_upload_dir()
     if storage_dir.exists() and storage_dir.is_symlink():
         raise HTTPException(
@@ -117,24 +112,16 @@ def _allocate_requirement_evidence_storage_path(
         )
     storage_dir.mkdir(parents=True, exist_ok=True)
     storage_root = storage_dir.resolve(strict=True)
-    suffix = Path(safe_name).suffix.lower()
-    storage_name = f"company_{company_id}_requirement_{requirement_id}_{uuid4().hex}{suffix}"
+    # The on-disk name deliberately contains no request-derived data.  The
+    # original, sanitised name is metadata only; this UUID is the storage key.
+    storage_name = f"{uuid4().hex}.evidence"
     storage_path = storage_root / storage_name
     return storage_root, storage_path
 
 
-def _open_requirement_evidence_storage_file(
-    *,
-    company_id: int,
-    requirement_id: int,
-    safe_name: str,
-) -> tuple[Path, Path, BinaryIO]:
+def _open_requirement_evidence_storage_file() -> tuple[Path, Path, BinaryIO]:
     for _ in range(5):
-        storage_root, storage_path = _allocate_requirement_evidence_storage_path(
-            company_id=company_id,
-            requirement_id=requirement_id,
-            safe_name=safe_name,
-        )
+        storage_root, storage_path = _allocate_requirement_evidence_storage_path()
         try:
             return storage_root, storage_path, storage_path.open("xb")
         except FileExistsError:
@@ -702,11 +689,7 @@ async def upload_requirement_evidence(
     storage_path: Path | None = None
     created_file = False
     try:
-        storage_root, storage_path, storage_handle = _open_requirement_evidence_storage_file(
-            company_id=company_id,
-            requirement_id=requirement_id,
-            safe_name=safe_name,
-        )
+        storage_root, storage_path, storage_handle = _open_requirement_evidence_storage_file()
         created_file = True
         with storage_handle as handle:
             while True:

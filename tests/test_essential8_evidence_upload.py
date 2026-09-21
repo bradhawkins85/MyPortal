@@ -72,6 +72,8 @@ def _configure_upload_dependencies(monkeypatch, tmp_path):
         ("../evidence.pdf", "evidence.pdf"),
         ("/var/tmp/proof.txt", "proof.txt"),
         ("..\\..\\windows\\report.csv", "report.csv"),
+        ("folder/./nested/../archive.tar.gz", "archive.tar.gz"),
+        ("report.../?<>.exe", "___.exe"),
     ],
 )
 async def test_upload_requirement_evidence_uses_safe_metadata_and_contained_storage(
@@ -96,7 +98,7 @@ async def test_upload_requirement_evidence_uses_safe_metadata_and_contained_stor
     assert len(add_calls) == 1
     stored_relative_path = add_calls[0]["file_path"]
     assert stored_relative_path.startswith("compliance/essential8/")
-    assert stored_relative_path.endswith(Path(expected_name).suffix)
+    assert stored_relative_path.endswith(".evidence")
     assert stored_relative_path.rsplit("/", 1)[-1] != expected_name
     stored_path = tmp_path / Path(stored_relative_path)
     assert stored_path.parent == upload_dir
@@ -139,6 +141,7 @@ async def test_upload_requirement_evidence_truncates_long_metadata_name(monkeypa
     assert len(response["file_name"]) == 255
     assert response["file_name"].endswith(".pdf")
     assert len(add_calls[0]["file_path"].rsplit("/", 1)[-1]) < 255
+    assert add_calls[0]["file_path"].endswith(".evidence")
 
 
 @pytest.mark.anyio("asyncio")
@@ -184,7 +187,7 @@ async def test_upload_requirement_evidence_retries_on_storage_collision_without_
         ]
     )
     monkeypatch.setattr(essential8_routes, "uuid4", lambda: next(uuids))
-    existing_path = upload_dir / "company_9_requirement_17_collision.pdf"
+    existing_path = upload_dir / "collision.evidence"
     existing_path.parent.mkdir(parents=True, exist_ok=True)
     existing_path.write_bytes(b"keep-me")
 
@@ -198,7 +201,7 @@ async def test_upload_requirement_evidence_retries_on_storage_collision_without_
     )
 
     assert existing_path.read_bytes() == b"keep-me"
-    assert response["file_path"].endswith("replacement.pdf")
+    assert response["file_path"].endswith("replacement.evidence")
     assert (tmp_path / Path(add_calls[0]["file_path"])).read_bytes() == b"new-bytes"
 
 
@@ -222,7 +225,7 @@ async def test_upload_requirement_evidence_cleans_up_partial_file_on_oversize(mo
         )
 
     assert exc_info.value.status_code == status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
-    assert not (upload_dir / "company_9_requirement_17_oversize.pdf").exists()
+    assert not (upload_dir / "oversize.evidence").exists()
 
 
 @pytest.mark.anyio("asyncio")
@@ -249,7 +252,35 @@ async def test_upload_requirement_evidence_cleans_up_only_its_partial_file_on_in
 
     assert upload.closed is True
     assert neighbour.read_bytes() == b"keep-me"
-    assert not (upload_dir / "company_9_requirement_17_interrupted.pdf").exists()
+    assert not (upload_dir / "interrupted.evidence").exists()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_upload_requirement_evidence_does_not_follow_storage_name_symlink(monkeypatch, tmp_path):
+    _, _, upload_dir = _configure_upload_dependencies(monkeypatch, tmp_path)
+    uuids = iter([SimpleNamespace(hex="collision"), SimpleNamespace(hex="replacement")])
+    monkeypatch.setattr(essential8_routes, "uuid4", lambda: next(uuids))
+    target = tmp_path / "outside.txt"
+    target.write_bytes(b"do-not-overwrite")
+    upload_dir.mkdir(parents=True)
+    candidate = upload_dir / "collision.evidence"
+    try:
+        candidate.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlinks not supported on this platform")
+
+    response = await essential8_routes.upload_requirement_evidence(
+        company_id=9,
+        requirement_id=17,
+        title="Quarterly evidence",
+        description=None,
+        evidence_file=_make_upload(b"new-bytes", "../../report.pdf", "application/pdf"),
+        user={"id": 41, "company_id": 9},
+    )
+
+    assert target.read_bytes() == b"do-not-overwrite"
+    assert candidate.is_symlink()
+    assert response["file_path"].endswith("replacement.evidence")
 
 
 @pytest.mark.anyio("asyncio")
