@@ -234,23 +234,36 @@ async def test_delete_account_no_op_for_missing(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-async def test_sync_account_skips_when_restart_pending(monkeypatch):
-    """sync_account returns skipped status when restart is pending."""
+async def test_sync_account_checks_mailbox_when_restart_pending(monkeypatch):
+    """A pending application upgrade must not pause inbound email imports."""
     monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: True)
+
+    async def fake_get_account(account_id: int):
+        return None
+
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        return {"enabled": False}
+
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
+    monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
 
     result = await m365_mail.sync_account(1)
 
     assert result["status"] == "skipped"
-    assert result["reason"] == "pending_restart"
+    assert result["reason"] == "Module disabled"
 
 
 async def test_sync_account_skips_when_module_disabled(monkeypatch):
     """sync_account returns skipped when module is disabled."""
     monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
 
+    async def fake_get_account(account_id: int):
+        return None
+
     async def fake_get_module(slug: str, *, redact: bool = True):
         return {"enabled": False}
 
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
     monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
 
     result = await m365_mail.sync_account(1)
