@@ -245,7 +245,8 @@ install_dependencies() {
 }
 
 validate_tray_artifacts() {
-  local revision="$1" source="${TRAY_ARTIFACT_ROOT}/${revision}" start=$SECONDS artifact
+  local revision="$1" source start=$SECONDS artifact
+  source="${TRAY_ARTIFACT_ROOT}/${revision}"
   [[ -f "${source}/SHA256SUMS" ]] || { echo "Tray checksum manifest missing for ${revision}" >&2; return 1; }
   [[ -f "${source}/REVISION" && "$(tr -d '\r\n' <"${source}/REVISION")" == "$revision" ]] || {
     echo "Tray artifacts are stale or do not identify revision ${revision}" >&2; return 1;
@@ -264,7 +265,8 @@ validate_tray_artifacts() {
 }
 
 publish_tray_artifacts() {
-  local revision="$1" destination="${SHARED_ROOT}/published/tray/${revision}"
+  local revision="$1" destination
+  destination="${SHARED_ROOT}/published/tray/${revision}"
   rm -rf "$destination"
   mkdir -p "$destination"
   cp -a "${TRAY_ARTIFACT_ROOT}/${revision}/." "$destination/"
