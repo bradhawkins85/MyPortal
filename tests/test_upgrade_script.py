@@ -566,6 +566,57 @@ def test_cutover_checks_expected_version_before_nginx_switch():
     assert "nginx -t" in SCRIPT
 
 
+def _run_version_check(tmp_path: Path, response: str, expected: str = "target-revision"):
+    function = SCRIPT[SCRIPT.index("wait_for_version() {") : SCRIPT.index("\nsmoke_test()")]
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    curl = fake_bin / "curl"
+    curl.write_text("#!/bin/sh\nprintf '%s' \"$READY_RESPONSE\"\n")
+    curl.chmod(0o755)
+    return subprocess.run(
+        ["bash", "-c", "set -Eeuo pipefail\n" + function + '\nwait_for_version 8001 "$EXPECTED"'],
+        text=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "READY_RESPONSE": response,
+            "EXPECTED": expected,
+            "READY_TIMEOUT": "1",
+        },
+        check=False,
+    )
+
+
+def test_version_check_parses_readiness_json_instead_of_matching_format(tmp_path):
+    result = _run_version_check(
+        tmp_path,
+        '{ "checks": {}, "version": "target-revision", "status": "ok" }',
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_version_check_failure_reports_endpoint_expected_and_reported(tmp_path):
+    result = _run_version_check(
+        tmp_path,
+        '{"status":"ok","version":"repository-timestamp"}',
+    )
+
+    assert result.returncode != 0
+    assert "endpoint=http://127.0.0.1:8001/readyz" in result.stderr
+    assert "expected=target-revision" in result.stderr
+    assert "reported=repository-timestamp" in result.stderr
+    assert "curl -fsS --max-time 2 http://127.0.0.1:8001/readyz" in result.stderr
+
+
+def test_existing_release_version_metadata_is_repaired_before_restart():
+    prepare = SCRIPT[SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")]
+    existing = prepare[: prepare.index("return 0")]
+
+    assert 'printf \'%s\\n\' "$revision" >"$release/version.txt"' in existing
+
+
 def test_upgrade_installs_instance_unit_before_restarting_a_slot():
     install_unit = SCRIPT.index('install_blue_green_service_unit "$RELEASE_DIR"')
     rolling_restart = SCRIPT.index('run_rolling_restart "$TARGET_REVISION"')

@@ -1,0 +1,7 @@
+{
+  "guid": "0a6835f8-a096-4ccc-9751-c3e3b02c0531",
+  "occurred_at": "2026-09-21T00:00Z",
+  "change_type": "Fix",
+  "summary": "Repair release revision metadata and add actionable readiness version diagnostics during blue-green upgrades.",
+  "content_hash": "7706f0ea46d55c7b5a3636f8a4eaa3e7e26fd65eb062a38c27b8394a39cc58e8"
+}
