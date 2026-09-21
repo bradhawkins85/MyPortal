@@ -7,6 +7,7 @@ umask 027
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 VENV_DIR="${PROJECT_ROOT}/.venv" # retained only to find the coordinator Python
+ENV_FILE="${MYPORTAL_ENV_FILE:-${PROJECT_ROOT}/.env}"
 RELEASE_ROOT="${MYPORTAL_RELEASE_ROOT:-/opt/myportal/releases}"
 SHARED_ROOT="${MYPORTAL_SHARED_ROOT:-/opt/myportal/shared}"
 INSTANCE_ROOT="${MYPORTAL_INSTANCE_ROOT:-/opt/myportal/instances}"
@@ -67,6 +68,38 @@ validate_origin_remote() {
   esac
   if [[ "$url" =~ ^https://[^/@]+:[^/@]+@ ]]; then
     echo "Refusing credential-bearing HTTPS remotes" >&2; return 1
+  fi
+}
+
+validate_required_configuration() {
+  local missing
+  missing=$(ENV_CONFIG_FILE="$ENV_FILE" python3 - <<'PY'
+import os
+from pathlib import Path
+
+required = ("SESSION_SECRET", "TOTP_ENCRYPTION_KEY")
+values = dict(os.environ)
+env_file = Path(os.environ["ENV_CONFIG_FILE"])
+
+if env_file.is_file():
+    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.removeprefix("export ").split("=", 1)
+        name, value = name.strip(), value.strip()
+        if name not in values:
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                value = value[1:-1]
+            values[name] = value
+
+print(" ".join(name for name in required if not values.get(name)))
+PY
+  )
+  if [[ -n "$missing" ]]; then
+    echo "Missing required application configuration: ${missing}." >&2
+    echo "Set the values in ${ENV_FILE} (or export them) before running the upgrade." >&2
+    return 1
   fi
 }
 
@@ -132,6 +165,11 @@ prepare_release() {
   rm -rf "$staging"; mkdir -p "$staging"
   git archive "$revision" | tar -x -C "$staging"
   printf '%s\n' "$revision" >"$staging/version.txt"
+  # Settings resolves .env relative to the immutable release. Reuse the
+  # installation's protected configuration rather than copying its secrets.
+  if [[ -f "$ENV_FILE" ]]; then
+    ln -s "$ENV_FILE" "$staging/.env"
+  fi
   # Mutable state is shared, while code, templates, assets, and dependencies are
   # private to this revision.
   rm -rf "$staging/var"
@@ -200,6 +238,7 @@ is_additive_migration_only_release() {
 command -v git >/dev/null && command -v curl >/dev/null && command -v nginx >/dev/null && command -v systemctl >/dev/null
 cd "$PROJECT_ROOT"
 validate_origin_remote "$(git config --get remote.origin.url)"
+validate_required_configuration
 UPGRADE_STARTED_AT=$(date --iso-8601=seconds)
 PREVIOUS_RELEASE=$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)
 git fetch --quiet origin main
