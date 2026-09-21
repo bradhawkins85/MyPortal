@@ -163,6 +163,12 @@ def test_layout_accepts_all_panel_types():
                     "report": "dashboard-tickets-created-30-days",
                     "chart": "line",
                 },
+                {
+                    "id": "e",
+                    "type": "stat_strip",
+                    "title": "Backup status",
+                    "report": "stat-strip-backup-today",
+                },
             ],
         }
     )
@@ -171,6 +177,7 @@ def test_layout_accepts_all_panel_types():
         "stat",
         "variable",
         "graph",
+        "stat_strip",
     ]
     assert layout["panels"][2]["variable"] == "APP_VERSION"
 
@@ -223,7 +230,10 @@ def test_dashboard_builder_uses_form_elements_collection():
     assert "builderForm?.elements.type.addEventListener" in script
     assert "dialog?.elements.type" not in script
     assert "setToolbarVisibility" in script
-    assert "[data-dashboard-add], [data-dashboard-import], [data-dashboard-export], [data-dashboard-save]" in script
+    assert (
+        "[data-dashboard-add], [data-dashboard-import], [data-dashboard-export], [data-dashboard-save]"
+        in script
+    )
 
 
 def test_stat_colours_and_custom_panel_size_are_validated():

@@ -130,6 +130,12 @@
     return `<div class="dashboard-panel__table-wrap"><table class="dashboard-panel__table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
+  function statStrip(panel) {
+    const items = panel.stat_strip_data || [];
+    if (!items.length) return '<p>No stat strip data.</p>';
+    return `<div class="stat-strip dashboard-panel__stat-strip">${items.map(item => `<div class="stat-strip__stat stat-strip__stat--${esc(item.variant || 'neutral')}"><span class="stat-strip__stat-label">${esc(item.label)}</span><span class="stat-strip__stat-value">${esc(item.value)}</span></div>`).join('')}</div>`;
+  }
+
   function render() {
     grid.innerHTML = '';
     state.panels.forEach(panel => {
@@ -149,6 +155,7 @@
       if (panel.error) body = `<p class="error">${esc(panel.error)}</p>`;
       else if (panel.type === 'link') body = `<a class="dashboard-panel__link" href="${esc(panel.url)}"><span class="button">${esc(panel.label)}</span></a>`;
       else if (panel.type === 'graph') body = chart(panel);
+      else if (panel.type === 'stat_strip') body = statStrip(panel);
       else if (panel.table_data) body = table(panel);
       else if (Array.isArray(panel.value)) body = `<ul class="dashboard-panel__list">${panel.value.map(value => `<li>${esc(value)}</li>`).join('')}</ul>`;
       else body = `<div class="dashboard-panel__value">${esc(panel.value)}</div>`;
@@ -222,7 +229,7 @@
   function updateBuilderVisibility() {
     const type = builderForm.elements.type.value;
     const func = builderForm.elements.function.value;
-    dialog.querySelector('[data-panel-report]').hidden = !['stat', 'graph'].includes(type);
+    dialog.querySelector('[data-panel-report]').hidden = !['stat', 'stat_strip', 'graph'].includes(type);
     dialog.querySelector('[data-panel-function]').hidden = type !== 'stat';
     dialog.querySelector('[data-panel-detail-report]').hidden = type !== 'stat';
     dialog.querySelector('[data-panel-count-colours]').hidden = type !== 'stat' || func !== 'count';
@@ -337,6 +344,7 @@
       compare_value: Number(form.get('compare_value')), less_colour: form.get('less_colour'),
       equal_colour: form.get('equal_colour'), greater_colour: form.get('greater_colour')
     });
+    if (type === 'stat_strip') panel.report = form.get('report');
     if (type === 'graph') Object.assign(panel, {report: form.get('report'), chart: form.get('chart')});
     if (previous) state.panels[state.panels.indexOf(previous)] = panel;
     else state.panels.push(panel);
