@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/counters.html" import counter_strip %}
 {% block header_title %}Company overview report{% endblock %}
 {% block title %}Company overview report{% endblock %}
 {% block header_actions %}<div class="header-actions header-actions--right">
@@ -13,10 +14,11 @@
   {% for row in report.rows %}{% if row.type == 'divider' %}<div class="report-divider{% if row.title %} report-divider--labelled{% endif %}" role="separator" style="--report-divider-height: {{ row.height }}px">{% if row.title %}<span>{{ row.title }}</span>{% endif %}</div>{% else %}<section class="report-layout-row">
     {% if row.title %}<h2 class="report-layout-row__title">{{ row.title }}</h2>{% endif %}
     <div class="report-layout-row__grid" style="--report-columns: {{ row.columns|length }}">
-    {% for cell in row.columns %}<article class="report-cell report-cell--{{ cell.display }}"{% if cell.variant != 'neutral' %} style="--report-cell-colour:{{ cell.variant }}"{% endif %}>
+    {% for cell in row.columns %}<article class="report-cell report-cell--{{ cell.display }}"{% if cell.variant is defined and cell.variant != 'neutral' %} style="--report-cell-colour:{{ cell.variant }}"{% endif %}>
       <h3>{{ cell.title or cell.name }}</h3>
       {% if cell.error %}<p class="report-error">{{ cell.error }}</p>
       {% elif cell.display == 'stat' %}<div class="report-stat">{{ cell.value }}{{ cell.suffix }}</div>
+      {% elif cell.display == 'stat_strip' %}{{ counter_strip(cell.stat_strip_data, class='report-stat-strip') }}
       {% elif cell.result.rows %}<div class="table-wrapper"><table class="table report-table"><thead><tr>{% for column in cell.result.columns %}<th>{{ column|replace('_', ' ')|title }}</th>{% endfor %}</tr></thead><tbody>
         {% for item in cell.result.rows %}<tr>{% for column in cell.result.columns %}<td>{{ item.get(column) if item.get(column) is not none else '—' }}</td>{% endfor %}</tr>{% endfor %}
       </tbody></table></div>{% else %}<p class="report-empty">No results.</p>{% endif %}
