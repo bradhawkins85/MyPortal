@@ -232,9 +232,28 @@ def test_cutover_checks_expected_version_before_nginx_switch():
     assert "nginx -t" in SCRIPT
 
 
+def test_upgrade_installs_instance_unit_before_restarting_a_slot():
+    install_unit = SCRIPT.index('install_blue_green_service_unit "$RELEASE_DIR"')
+    rolling_restart = SCRIPT.index('run_rolling_restart "$TARGET_REVISION"')
+
+    assert install_unit < rolling_restart
+    assert 'install -m 0644 "$source_unit" "$installed_unit"' in SCRIPT
+    assert "systemctl daemon-reload" in SCRIPT
+    assert "systemctl enable myportal@blue.service myportal@green.service" in SCRIPT
+
+
+def test_pre_cutover_failure_does_not_rewrite_working_upstream():
+    rollback = SCRIPT[SCRIPT.index("rollback() {") : SCRIPT.index("\nrun_rolling_restart()")]
+
+    assert '[[ "$upstream_switched" == true ]] && write_upstream' in rollback
+    switch = SCRIPT.index('write_upstream "$inactive" "$active"')
+    marked = SCRIPT.index("upstream_switched=true", switch)
+    assert switch < marked
+
+
 def test_failure_rolls_back_links_and_upstream():
     assert "rollback()" in SCRIPT
-    assert 'trap \'rollback "$active" "$inactive" "$old_inactive"\' ERR' in SCRIPT
+    assert 'trap \'rollback "$active" "$inactive" "$old_inactive" "$upstream_switched"\' ERR' in SCRIPT
     assert 'write_upstream "$old_active" "$new_instance"' in SCRIPT
     assert 'atomic_link "$PREVIOUS_RELEASE" "$CURRENT_LINK"' in SCRIPT
 

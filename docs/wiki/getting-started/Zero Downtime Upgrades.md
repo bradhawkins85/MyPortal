@@ -27,12 +27,17 @@ printf '%s\n' \
 sudo nginx -t
 ```
 
-Install `deploy/systemd/myportal@.service` and
-`deploy/nginx/myportal-bluegreen.conf`, then run:
+Install `deploy/nginx/myportal-bluegreen.conf`, then run:
 
 ```console
 sudo /opt/myportal/control/scripts/upgrade.sh --rolling
 ```
+
+The upgrade installs or refreshes `deploy/systemd/myportal@.service`, reloads
+systemd, and enables both instance units before it starts the inactive slot.
+This also upgrades older installations that previously had only
+`myportal.service`. The upgrade must therefore run as root (normally via
+`sudo`). A failure before nginx cutover leaves the existing upstream unchanged.
 
 The deployer fetches (it never pulls or restores), exports the target commit to
 a staging directory, installs a private virtual environment, and makes the

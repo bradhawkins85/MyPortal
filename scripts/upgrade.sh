@@ -178,6 +178,31 @@ install_dependencies() {
   "${release}/.venv/bin/python" -m pip install --disable-pip-version-check "$release"
 }
 
+install_blue_green_service_unit() {
+  local release="$1"
+  local source_unit="${release}/deploy/systemd/myportal@.service"
+  local installed_unit="/etc/systemd/system/myportal@.service"
+
+  if [[ ! -r "$source_unit" ]]; then
+    echo "Blue/green systemd unit is missing from release: ${source_unit}" >&2
+    return 1
+  fi
+  if [[ "${EUID:-$(id -u)}" != 0 ]]; then
+    echo "Blue/green service setup requires root. Re-run the upgrade with sudo." >&2
+    return 1
+  fi
+
+  # Older installations have only myportal.service. Install (or update) the
+  # instance template before attempting to start either deployment slot.
+  install -m 0644 "$source_unit" "$installed_unit"
+  systemctl daemon-reload
+  systemctl enable myportal@blue.service myportal@green.service >/dev/null
+  if ! systemctl cat myportal@.service >/dev/null; then
+    echo "Unable to register myportal@.service; check systemd and ${installed_unit}." >&2
+    return 1
+  fi
+}
+
 prepare_release() {
   local revision="$1" release="$2" staging
   staging="${release}.staging.$$"
@@ -237,22 +262,24 @@ PY
 }
 
 rollback() {
-  local old_active="$1" new_instance="$2" old_instance_release="$3"
+  local old_active="$1" new_instance="$2" old_instance_release="$3" upstream_switched="$4"
   echo "Deployment failed; restoring ${old_active}." >&2
   if [[ -n "$old_instance_release" && -d "$old_instance_release" ]]; then
     atomic_link "$old_instance_release" "$INSTANCE_ROOT/$new_instance"
     systemctl restart "myportal@${new_instance}.service" >/dev/null 2>&1 || true
   fi
-  write_upstream "$old_active" "$new_instance" || true
+  # A startup failure happens before nginx is changed. Do not replace a legacy
+  # installation's working upstream with a blue slot that has never existed.
+  [[ "$upstream_switched" == true ]] && write_upstream "$old_active" "$new_instance" || true
   [[ -n "$PREVIOUS_RELEASE" && -d "$PREVIOUS_RELEASE" ]] && atomic_link "$PREVIOUS_RELEASE" "$CURRENT_LINK"
   write_upgrade_status failed "Cutover failed; previous release and upstream restored."
 }
 
 run_rolling_restart() {
-  local revision="$1" release="$2" active inactive old_inactive start=$SECONDS
+  local revision="$1" release="$2" active inactive old_inactive upstream_switched=false start=$SECONDS
   active=$(read_active); [[ "$active" == blue ]] && inactive=green || inactive=blue
   old_inactive=$(readlink -f "$INSTANCE_ROOT/$inactive" 2>/dev/null || true)
-  trap 'rollback "$active" "$inactive" "$old_inactive"' ERR
+  trap 'rollback "$active" "$inactive" "$old_inactive" "$upstream_switched"' ERR
 
   # Only the non-serving slot changes during preparation and validation.
   atomic_link "$release" "$INSTANCE_ROOT/$inactive"
@@ -262,6 +289,7 @@ run_rolling_restart() {
 
   # nginx accepts no new work on the old slot after this validated reload.
   write_upstream "$inactive" "$active"
+  upstream_switched=true
   sleep "$DRAIN_SECONDS"
   atomic_link "$release" "$CURRENT_LINK"
   UPGRADE_READY_WAIT_SECONDS=$((SECONDS-start))
@@ -325,6 +353,7 @@ if is_additive_migration_only_release "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISIO
   echo "Successfully applied migration-only release ${TARGET_REVISION}."
   exit 0
 fi
+install_blue_green_service_unit "$RELEASE_DIR"
 run_rolling_restart "$TARGET_REVISION" "$RELEASE_DIR"
 write_upgrade_status succeeded "Release ${TARGET_REVISION} is serving; previous release retained."
 echo "Successfully deployed ${TARGET_REVISION} from ${RELEASE_DIR}."
