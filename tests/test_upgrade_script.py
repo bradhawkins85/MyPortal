@@ -8,6 +8,19 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = (ROOT / "scripts/upgrade.sh").read_text()
 
 
+def test_failed_upgrade_clears_pending_update_flag():
+    cleanup = SCRIPT[
+        SCRIPT.index("clear_update_flag_on_failure() {") : SCRIPT.index(
+            "\nresolve_environment_file()"
+        )
+    ]
+
+    assert 'SYSTEM_UPDATE_FLAG_FILE="${PROJECT_ROOT}/var/state/system_update.flag"' in SCRIPT
+    assert "if ((status != 0))" in cleanup
+    assert 'rm -f -- "$SYSTEM_UPDATE_FLAG_FILE"' in cleanup
+    assert "trap clear_update_flag_on_failure EXIT" in cleanup
+
+
 def _resolve_environment_file(
     tmp_path: Path, system_env: Path, **environment: str
 ) -> str:

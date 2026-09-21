@@ -6,6 +6,24 @@ umask 027
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
+SYSTEM_UPDATE_FLAG_FILE="${PROJECT_ROOT}/var/state/system_update.flag"
+
+# The flag pauses mail import while an update is waiting to be applied.  A
+# failed coordinator run is terminal for that request, so never leave the flag
+# behind and indefinitely block IMAP or Microsoft 365 imports.  The cron
+# wrapper also clears consumed flags, but this trap covers direct invocations
+# and failures that abort before control returns to the wrapper.
+clear_update_flag_on_failure() {
+  local status=$?
+  trap - EXIT
+  if ((status != 0)) && [[ -e "$SYSTEM_UPDATE_FLAG_FILE" || -L "$SYSTEM_UPDATE_FLAG_FILE" ]]; then
+    rm -f -- "$SYSTEM_UPDATE_FLAG_FILE"
+    echo "Upgrade aborted with status ${status}; cleared pending update flag ${SYSTEM_UPDATE_FLAG_FILE}." >&2
+  fi
+  exit "$status"
+}
+
+trap clear_update_flag_on_failure EXIT
 
 resolve_environment_file() {
   local system_env="${1:-/etc/myportal.env}" selected
