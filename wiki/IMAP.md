@@ -45,7 +45,20 @@ Manual synchronisation is available through the API or the workspace actions.
 When a deployment marks a pending restart (for example while `scripts/upgrade.sh`
 is running) the importer temporarily pauses new IMAP fetches. The scheduler
 retries automatically once the restart flag clears so imports resume after the
-update completes.
+update completes. Failed upgrades also clear the consumed flag so an aborted
+blue/green deployment cannot leave mail import paused indefinitely.
+
+If an older failed deployment left the flag behind, first confirm that no
+upgrade process is active, then clear it manually from the installation root:
+
+```bash
+pgrep -af '[s]cripts/(upgrade|process_update_flag)\.sh'
+sudo rm -f -- /opt/myportal/var/state/system_update.flag
+```
+
+For a non-default installation, replace `/opt/myportal` with the control
+checkout containing `scripts/upgrade.sh`. Mail imports resume on their next
+scheduled run; no application restart is required.
 
 ## Ticket association
 
