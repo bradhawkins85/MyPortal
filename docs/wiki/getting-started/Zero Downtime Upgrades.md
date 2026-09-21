@@ -48,6 +48,11 @@ validation. The previous known-good release is deliberately retained.
 
 ## Configuration
 
+The upgrade coordinator reads `/etc/myportal.env` by default, matching the
+`EnvironmentFile` used by `myportal@.service`. Set `MYPORTAL_ENV_FILE` only for
+a nonstandard deployment; legacy installations without `/etc/myportal.env`
+continue to use the control checkout's `.env` file.
+
 `MYPORTAL_READY_TIMEOUT` bounds readiness in seconds,
 `MYPORTAL_DRAIN_SECONDS` bounds the drain period, and
 `MYPORTAL_SMOKE_PATH` selects an idempotent smoke endpoint. Path overrides for

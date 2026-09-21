@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -5,6 +6,64 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = (ROOT / "scripts/upgrade.sh").read_text()
+
+
+def _resolve_environment_file(
+    tmp_path: Path, system_env: Path, **environment: str
+) -> str:
+    function = SCRIPT[
+        SCRIPT.index("resolve_environment_file() {") : SCRIPT.index('\nVENV_DIR=')
+    ]
+    project_root = tmp_path / "checkout"
+    project_root.mkdir()
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -Eeuo pipefail\n" + function + '\nresolve_environment_file "$SYSTEM_ENV"',
+        ],
+        text=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "PROJECT_ROOT": str(project_root),
+            "SYSTEM_ENV": str(system_env),
+            **environment,
+        },
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.strip()
+
+
+def test_upgrade_defaults_to_systemd_environment_file(tmp_path):
+    system_env = tmp_path / "myportal.env"
+    system_env.write_text("DB_NAME=production\n")
+
+    selected = _resolve_environment_file(
+        tmp_path,
+        system_env,
+        MYPORTAL_ENV_FILE="",
+    )
+
+    assert selected == str(system_env)
+
+
+def test_explicit_environment_file_takes_precedence_and_resolves_symlinks(tmp_path):
+    system_env = tmp_path / "myportal.env"
+    system_env.write_text("DB_NAME=wrong\n")
+    configured_env = tmp_path / "persistent.env"
+    configured_env.write_text("DB_NAME=expected\n")
+    env_link = tmp_path / "configured.env"
+    env_link.symlink_to(configured_env)
+
+    selected = _resolve_environment_file(
+        tmp_path,
+        system_env,
+        MYPORTAL_ENV_FILE=str(env_link),
+    )
+
+    assert selected == str(configured_env)
 
 
 def test_upgrade_prepares_revision_without_mutating_control_checkout():
@@ -21,6 +80,49 @@ def test_release_has_private_dependencies_and_shared_mutable_state():
     assert 'ln -s "$SHARED_ROOT" "$staging/var"' in SCRIPT
     assert 'find "$staging" -type f -exec chmod a-w' in SCRIPT
     assert 'ln -s "$ENV_FILE" "$staging/.env"' in SCRIPT
+    assert 'ln -sfn "$ENV_FILE" "$release/.env"' in SCRIPT
+
+
+def test_migration_environment_preserves_special_characters(tmp_path):
+    release = tmp_path / "release"
+    (release / ".venv" / "bin").mkdir(parents=True)
+    (release / ".venv" / "bin" / "python").symlink_to(Path(os.sys.executable))
+    (release / "manage.py").write_text(
+        "import json, os\n"
+        "print(json.dumps({key: os.environ.get(key) for key in "
+        "['DB_HOST', 'DB_PORT', 'DB_USER', 'DB_PASSWORD', 'DB_NAME']}))\n"
+    )
+    env_file = tmp_path / "application.env"
+    password = "space $dollar #hash !bang 'single'"
+    env_file.write_text(
+        "DB_HOST=db.internal.example\n"
+        "DB_PORT=3307\n"
+        "DB_USER=myportal_app\n"
+        f'DB_PASSWORD="{password}"\n'
+        "DB_NAME=existing_portal\n"
+    )
+    function = SCRIPT[SCRIPT.index("run_release_manage() {") : SCRIPT.index("\nrun_migration_phase()")]
+    result = subprocess.run(
+        ["bash", "-c", "set -Eeuo pipefail\n" + function + '\nrun_release_manage "$RELEASE" check'],
+        text=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "ENV_FILE": str(env_file),
+            "RELEASE": str(release),
+            "DB_PASSWORD": "stale-inherited-password",
+        },
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "DB_HOST": "db.internal.example",
+        "DB_PORT": "3307",
+        "DB_USER": "myportal_app",
+        "DB_PASSWORD": password,
+        "DB_NAME": "existing_portal",
+    }
 
 
 def _run_configuration_validation(tmp_path: Path, contents: str, **environment: str):
@@ -79,6 +181,13 @@ def test_failure_rolls_back_links_and_upstream():
     assert 'trap \'rollback "$active" "$inactive" "$old_inactive"\' ERR' in SCRIPT
     assert 'write_upstream "$old_active" "$new_instance"' in SCRIPT
     assert 'atomic_link "$PREVIOUS_RELEASE" "$CURRENT_LINK"' in SCRIPT
+
+
+def test_failed_migration_is_reported_before_release_activation():
+    migration = SCRIPT.index('run_migration_phase "$RELEASE_DIR"')
+    cutover = SCRIPT.index('run_rolling_restart "$TARGET_REVISION"')
+    assert migration < cutover
+    assert "Database migration failed; release was not activated." in SCRIPT
 
 
 def test_drain_stops_new_work_before_waiting_for_inflight_requests():
