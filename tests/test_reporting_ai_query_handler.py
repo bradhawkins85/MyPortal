@@ -19,7 +19,9 @@ def test_admin_reporting_ai_query_returns_json_error_for_unreadable_form(monkeyp
     monkeypatch.setattr(
         reporting_handlers,
         "_main",
-        lambda: SimpleNamespace(_require_super_admin_page=fake_require_super_admin_page),
+        lambda: SimpleNamespace(
+            _require_super_admin_page=fake_require_super_admin_page
+        ),
     )
 
     request = SimpleNamespace(form=broken_form)
@@ -47,7 +49,9 @@ def test_admin_reporting_ai_query_reports_disabled_module_reason(monkeypatch):
     monkeypatch.setattr(
         reporting_handlers,
         "_main",
-        lambda: SimpleNamespace(_require_super_admin_page=fake_require_super_admin_page),
+        lambda: SimpleNamespace(
+            _require_super_admin_page=fake_require_super_admin_page
+        ),
     )
     monkeypatch.setattr(
         "app.services.report_query_builder.describe_schema", describe_schema
@@ -87,7 +91,9 @@ def test_admin_reporting_ai_query_redacts_raw_module_error(monkeypatch):
     monkeypatch.setattr(
         reporting_handlers,
         "_main",
-        lambda: SimpleNamespace(_require_super_admin_page=fake_require_super_admin_page),
+        lambda: SimpleNamespace(
+            _require_super_admin_page=fake_require_super_admin_page
+        ),
     )
     monkeypatch.setattr(
         "app.services.report_query_builder.describe_schema", describe_schema
@@ -121,12 +127,14 @@ def test_admin_reporting_ai_query_preserves_validation_message(monkeypatch):
         return {"tables": [], "relations": []}
 
     async def trigger_module(*_args, **_kwargs):
-        return {"status": "ok", "response": "{\"sql\": \"delete from tickets\"}"}
+        return {"status": "ok", "response": '{"sql": "delete from tickets"}'}
 
     monkeypatch.setattr(
         reporting_handlers,
         "_main",
-        lambda: SimpleNamespace(_require_super_admin_page=fake_require_super_admin_page),
+        lambda: SimpleNamespace(
+            _require_super_admin_page=fake_require_super_admin_page
+        ),
     )
     monkeypatch.setattr(
         "app.services.report_query_builder.describe_schema", describe_schema
@@ -139,6 +147,62 @@ def test_admin_reporting_ai_query_preserves_validation_message(monkeypatch):
 
     assert response.status_code == 400
     assert json.loads(response.body) == {"error": "Only SELECT statements are allowed."}
+
+
+def test_admin_reporting_ai_query_redacts_unrecognized_validation_error(monkeypatch):
+    from app.services import reporting as reporting_service
+
+    async def fake_require_super_admin_page(_request):
+        return {"id": 1, "is_super_admin": True}, None
+
+    async def form():
+        return {"instruction": "show tickets", "current_sql": ""}
+
+    async def describe_schema():
+        return {"tables": [], "relations": []}
+
+    async def trigger_module(*_args, **_kwargs):
+        return {"status": "ok", "response": '{"sql": "select 1"}'}
+
+    secret = "password=database-secret\nTraceback: SELECT * FROM credentials"
+
+    def fail_validation(_sql):
+        raise reporting_service.ReportingQueryError(secret)
+
+    logged = {}
+
+    def fake_log_error(message, **kwargs):
+        logged["message"] = message
+        logged["kwargs"] = kwargs
+
+    monkeypatch.setattr(
+        reporting_handlers,
+        "_main",
+        lambda: SimpleNamespace(
+            _require_super_admin_page=fake_require_super_admin_page
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.report_query_builder.describe_schema", describe_schema
+    )
+    monkeypatch.setattr("app.services.modules.trigger_module", trigger_module)
+    monkeypatch.setattr("app.services.reporting.validate_select_query", fail_validation)
+    monkeypatch.setattr(reporting_handlers, "log_error", fake_log_error)
+
+    response = asyncio.run(
+        reporting_handlers.admin_reporting_ai_query(SimpleNamespace(form=form))
+    )
+
+    assert response.status_code == 400
+    assert json.loads(response.body) == {
+        "error": "The generated SQL query did not pass validation."
+    }
+    assert logged == {
+        "message": "Reporting AI query validation failed with an unrecognized code",
+        "kwargs": {"error_type": "ReportingQueryError"},
+    }
+    assert secret not in response.body.decode()
+    assert secret not in json.dumps(logged)
 
 
 def test_admin_reporting_ai_query_reports_missing_skipped_reason_safely(monkeypatch):
@@ -157,7 +221,9 @@ def test_admin_reporting_ai_query_reports_missing_skipped_reason_safely(monkeypa
     monkeypatch.setattr(
         reporting_handlers,
         "_main",
-        lambda: SimpleNamespace(_require_super_admin_page=fake_require_super_admin_page),
+        lambda: SimpleNamespace(
+            _require_super_admin_page=fake_require_super_admin_page
+        ),
     )
     monkeypatch.setattr(
         "app.services.report_query_builder.describe_schema", describe_schema
