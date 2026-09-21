@@ -95,6 +95,7 @@ def test_upload_storage_is_seeded_without_removing_legacy_data():
     assert 'rm -rf "$legacy"' not in function
     assert 'mv "$legacy"' not in function
     assert 'install -d -m 0750 -o myportal -g myportal' in function
+    assert 'chown -R myportal:myportal "$shared"' in function
 
 
 def test_release_upload_paths_point_to_persistent_shared_storage():
@@ -105,6 +106,18 @@ def test_release_upload_paths_point_to_persistent_shared_storage():
     assert '"${release}/private_uploads"' in function
     assert '"${release}/app/static/uploads"' in function
     assert function.count("ln -s") == 2
+
+
+def test_release_uploads_are_validated_before_service_startup():
+    validation = SCRIPT[
+        SCRIPT.index("validate_release_uploads() {") : SCRIPT.index("\nrelease_runtime_ready()")
+    ]
+    prepare = SCRIPT[SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")]
+
+    assert '[[ ! -L "$path"' in validation
+    assert 'readlink -f "$path"' in validation
+    assert 'runuser --user myportal -- test -w "$path"' in validation
+    assert prepare.count('validate_release_uploads "$release"') == 2
 
 
 def test_release_permissions_allow_unprivileged_service_to_read_and_traverse(tmp_path):
