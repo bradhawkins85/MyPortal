@@ -43,6 +43,8 @@ UPGRADE_READY_WAIT_SECONDS=0
 DEPLOYMENT_PLAN='{}'
 DEPLOYMENT_ACTION="staged-cutover"
 DEPLOYMENT_REASON="planner_not_run"
+STEP_REPORT=""
+TRAY_ARTIFACT_ROOT="${MYPORTAL_TRAY_ARTIFACT_ROOT:-${SHARED_ROOT}/artifacts/tray}"
 
 usage() {
   cat <<'EOF'
@@ -78,10 +80,18 @@ mode=${RESTART_MODE}
 requested_mode=${REQUESTED_UPGRADE_MODE}
 reason=${reason}
 deployment_plan=${DEPLOYMENT_PLAN}
+steps=${STEP_REPORT}
 message=${message}
 ready_wait_seconds=${UPGRADE_READY_WAIT_SECONDS}
 EOF
   chmod 640 "$tmp" && mv -f "$tmp" "$SYSTEM_UPDATE_STATUS_FILE"
+}
+
+record_step() {
+  local name="$1" outcome="$2" reason="$3" duration="${4:-0}"
+  local entry="${name}:${outcome}:${reason}:${duration}s"
+  [[ -z "$STEP_REPORT" ]] && STEP_REPORT="$entry" || STEP_REPORT="${STEP_REPORT};${entry}"
+  echo "Upgrade step ${name}: ${outcome} (${reason}, ${duration}s)." >&2
 }
 
 generate_deployment_plan() {
@@ -207,10 +217,58 @@ smoke_test() {
 }
 
 install_dependencies() {
-  local release="$1"
-  python3 -m venv "${release}/.venv"
-  "${release}/.venv/bin/python" -m pip install --disable-pip-version-check --upgrade pip setuptools wheel
-  "${release}/.venv/bin/python" -m pip install --disable-pip-version-check "$release"
+  local release="$1" key layer staging start=$SECONDS
+  local lock="${release}/requirements.lock"
+  [[ -s "$lock" ]] || { echo "Required dependency lock is missing: ${lock}" >&2; return 1; }
+  key=$(cat "${release}/pyproject.toml" "$lock"; python3 -c 'import sys; print(sys.implementation.name, *sys.version_info[:2])')
+  key=$(printf '%s' "$key" | sha256sum | awk '{print $1}')
+  layer="${SHARED_ROOT}/dependency-layers/${key}"
+  mkdir -p "${SHARED_ROOT}/dependency-layers"
+  if [[ -x "${layer}/bin/python" && -f "${layer}/.verified" ]] && \
+     (cd "$release" && "${layer}/bin/python" -m pip check >/dev/null && "${layer}/bin/python" -c 'import uvicorn'); then
+    ln -s "$layer" "${release}/.venv"
+    record_step dependency_layer hit "verified_${key}" "$((SECONDS-start))"
+    return 0
+  fi
+  rm -rf "$layer"
+  staging="${layer}.staging.$$"
+  rm -rf "$staging"
+  python3 -m venv "$staging"
+  # Use the venv's bundled pip. Packaging tools are never upgraded as part of
+  # deployment, and every runtime dependency comes from the committed lock.
+  "$staging/bin/python" -m pip install --disable-pip-version-check --requirement "$lock"
+  (cd "$release" && "$staging/bin/python" -m pip check && "$staging/bin/python" -c 'import uvicorn')
+  printf '%s\n' "$key" >"$staging/.verified"
+  mv "$staging" "$layer"
+  ln -s "$layer" "${release}/.venv"
+  record_step dependency_layer miss "lock_or_interpreter_${key}" "$((SECONDS-start))"
+}
+
+validate_tray_artifacts() {
+  local revision="$1" source="${TRAY_ARTIFACT_ROOT}/${revision}" start=$SECONDS artifact
+  [[ -f "${source}/SHA256SUMS" ]] || { echo "Tray checksum manifest missing for ${revision}" >&2; return 1; }
+  [[ -f "${source}/REVISION" && "$(tr -d '\r\n' <"${source}/REVISION")" == "$revision" ]] || {
+    echo "Tray artifacts are stale or do not identify revision ${revision}" >&2; return 1;
+  }
+  for artifact in myportal-tray.msi myportal-tray.pkg; do
+    [[ -s "${source}/${artifact}" ]] || { echo "Required tray artifact missing: ${artifact}" >&2; return 1; }
+    grep -Eq "(^|[[:space:]])${artifact}$" "${source}/SHA256SUMS" || {
+      echo "Tray checksum manifest does not contain ${artifact}" >&2; return 1;
+    }
+  done
+  grep -Eq '(^|[[:space:]])REVISION$' "${source}/SHA256SUMS" || {
+    echo "Tray checksum manifest does not contain REVISION" >&2; return 1;
+  }
+  (cd "$source" && sha256sum --check --strict SHA256SUMS)
+  record_step tray_artifacts verified "tray_inputs_changed_${revision}" "$((SECONDS-start))"
+}
+
+publish_tray_artifacts() {
+  local revision="$1" destination="${SHARED_ROOT}/published/tray/${revision}"
+  rm -rf "$destination"
+  mkdir -p "$destination"
+  cp -a "${TRAY_ARTIFACT_ROOT}/${revision}/." "$destination/"
+  ln -sfn "$destination" "${SHARED_ROOT}/published/tray/current"
 }
 
 install_blue_green_service_unit() {
@@ -556,8 +614,26 @@ if [[ -z "$PLAN_BASE" ]] || ! git cat-file -e "${PLAN_BASE}^{commit}" 2>/dev/nul
 fi
 generate_deployment_plan "$PLAN_BASE" "$TARGET_REVISION"
 
-# The plan is calculated and recorded before any live release is changed.
+# The plan and every subsequent decision are recorded before preparation or
+# live-release changes begin.
 write_upgrade_status preparing "Deployment plan ${DEPLOYMENT_ACTION} for ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
+
+# Artifact validation is preparation, not cutover. A missing or stale CI
+# artifact therefore fails before any release, instance, or active link moves.
+if python3 -c 'import json,sys; raise SystemExit(not json.loads(sys.argv[1])["validate_tray_artifacts"])' "$DEPLOYMENT_PLAN"; then
+  if ! validate_tray_artifacts "$TARGET_REVISION"; then
+    record_step tray_artifacts failed "missing_stale_or_invalid_${TARGET_REVISION}" 0
+    write_upgrade_status failed "Required tray artifacts failed validation; the active release was not touched." "$DEPLOYMENT_REASON"
+    exit 1
+  fi
+else
+  record_step tray_artifacts skipped "tray_inputs_unchanged" 0
+fi
+case "$DEPLOYMENT_ACTION" in
+  migration-only|staged-cutover) ;;
+  *) record_step dependency_layer skipped "no_python_release_required" 0 ;;
+esac
+
 case "$DEPLOYMENT_ACTION" in
   no-op)
     write_upgrade_status succeeded "No production changes were required for ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
@@ -581,8 +657,8 @@ case "$DEPLOYMENT_ACTION" in
     exit 0
     ;;
   tray-publish)
-    publish_paths_without_worker_reload "$TARGET_REVISION" tray
-    write_upgrade_status succeeded "Tray release files ${TARGET_REVISION} published without reloading workers." "$DEPLOYMENT_REASON"
+    publish_tray_artifacts "$TARGET_REVISION"
+    write_upgrade_status succeeded "Verified CI tray artifacts ${TARGET_REVISION} published without reloading workers." "$DEPLOYMENT_REASON"
     exit 0
     ;;
   migration-only|staged-cutover) ;;

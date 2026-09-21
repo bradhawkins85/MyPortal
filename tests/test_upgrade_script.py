@@ -76,7 +76,10 @@ def test_upgrade_prepares_revision_without_mutating_control_checkout():
 
 
 def test_release_has_private_dependencies_and_shared_mutable_state():
-    assert 'python3 -m venv "${release}/.venv"' in SCRIPT
+    assert 'python3 -m venv "$staging"' in SCRIPT
+    assert '"$staging/bin/python" -m pip install --disable-pip-version-check --requirement "$lock"' in SCRIPT
+    assert 'pip install --disable-pip-version-check --upgrade pip setuptools wheel' not in SCRIPT
+    assert 'ln -s "$layer" "${release}/.venv"' in SCRIPT
     assert 'ln -s "$SHARED_ROOT" "$staging/var"' in SCRIPT
     assert 'find "$release" -type f -exec chmod a+rX,a-w' in SCRIPT
     assert 'ln -s "$ENV_FILE" "$staging/.env"' in SCRIPT
@@ -192,6 +195,85 @@ def test_virtualenv_is_created_only_after_release_reaches_final_path():
     assert publish < install
     assert 'install_dependencies "$staging"' not in prepare
     assert 'rm -rf "$release"' in prepare[install:]
+
+
+def test_preparation_uses_verified_dependency_cache_and_reports_decision():
+    install = SCRIPT[SCRIPT.index("install_dependencies() {") : SCRIPT.index("\ninstall_blue_green_service_unit()")]
+
+    assert 'requirements.lock' in install
+    assert 'pyproject.toml' in install
+    assert 'sys.implementation.name' in install
+    assert 'pip check' in install
+    assert 'record_step dependency_layer hit' in install
+    assert 'record_step dependency_layer miss' in install
+
+
+def test_dependency_cache_hit_and_invalid_layer_fallback(tmp_path):
+    functions = SCRIPT[
+        SCRIPT.index("record_step() {") : SCRIPT.index("\ninstall_blue_green_service_unit()")
+    ]
+    shared = tmp_path / "shared"
+    release_one = tmp_path / "release-one"
+    release_two = tmp_path / "release-two"
+    release_three = tmp_path / "release-three"
+    for release in (release_one, release_two, release_three):
+        release.mkdir()
+        (release / "pyproject.toml").write_text("[project]\nname='fixture'\nversion='1'\n")
+        (release / "requirements.lock").write_text("# exact fixture lock\n")
+    command = f"""
+set -Eeuo pipefail
+SHARED_ROOT={shared!s}
+STEP_REPORT=''
+python3() {{
+  if [[ "${{1:-}}" == -m && "${{2:-}}" == venv ]]; then
+    mkdir -p "$3/bin"
+    printf '#!/bin/sh\\nexit 0\\n' >"$3/bin/python"
+    chmod +x "$3/bin/python"
+  else
+    command python3 "$@"
+  fi
+}}
+{functions}
+install_dependencies {release_one!s}
+install_dependencies {release_two!s}
+rm {release_two!s}/.venv/.verified
+install_dependencies {release_three!s}
+printf '%s' "$STEP_REPORT"
+"""
+
+    result = subprocess.run(["bash", "-c", command], text=True, capture_output=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+    outcomes = [entry.split(":")[1] for entry in result.stdout.split(";")]
+    assert outcomes == ["miss", "hit", "miss"]
+
+
+def test_tray_artifacts_are_verified_before_release_preparation():
+    validation = SCRIPT.index('validate_tray_artifacts "$TARGET_REVISION"')
+    preparation = SCRIPT.index('prepare_release "$TARGET_REVISION"')
+
+    assert validation < preparation
+    assert 'sha256sum --check --strict SHA256SUMS' in SCRIPT
+    assert 'Tray artifacts are stale or do not identify revision' in SCRIPT
+    assert 'Required tray artifact missing' in SCRIPT
+    assert 'publish_tray_artifacts "$TARGET_REVISION"' in SCRIPT
+
+
+def test_restart_does_not_install_or_mutate_dependencies():
+    restart = (ROOT / "scripts/restart.sh").read_text()
+
+    assert "pip install" not in restart
+    assert "cleanup_invalid_distribution \"$PYTHON_BIN\"" not in restart
+
+
+def test_server_installer_does_not_invoke_tray_toolchains():
+    installer = (ROOT / "scripts/install_environment.sh").read_text()
+    tail = installer[installer.index('if [[ "$ENVIRONMENT" == "production" ]]'):]
+
+    assert "install_dotnet\n" not in tail
+    assert "install_wix\n" not in tail
+    assert "install_go\n" not in tail
+    assert "build_tray_installers\n" not in tail
 
 
 def test_retry_rebuilds_only_a_broken_release_runtime():

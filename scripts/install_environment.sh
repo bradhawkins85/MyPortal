@@ -817,14 +817,12 @@ fi
 
 install_pwsh
 install_exo_module
-install_dotnet
-install_wix
-install_go
 install_sip_client
 ensure_virtualenv
 install_dependencies
 install_and_start_systemd_service
-build_tray_installers
+# Tray binaries and installers are release artifacts built by CI. Installing
+# the server must not install Go/.NET/WiX or compile unrelated client software.
 
 cat <<MESSAGE
 MyPortal ${ENVIRONMENT} environment is ready.
