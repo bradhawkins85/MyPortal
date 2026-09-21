@@ -230,10 +230,21 @@ def test_dashboard_builder_uses_form_elements_collection():
     assert "builderForm?.elements.type.addEventListener" in script
     assert "dialog?.elements.type" not in script
     assert "setToolbarVisibility" in script
-    assert (
-        "[data-dashboard-add], [data-dashboard-import], [data-dashboard-export], [data-dashboard-save]"
-        in script
-    )
+    assert "document.querySelector('[data-dashboard-edit-layout]')" in script
+
+
+def test_dashboard_actions_are_in_header_menu_and_editing_is_opt_in():
+    script = Path("app/static/js/dashboard.js").read_text()
+    template = Path("app/templates/dashboard.html").read_text()
+
+    assert "menu_id='dashboard-actions-menu'" in template
+    assert 'data-dashboard-toolbar' not in template
+    for label in ("Edit Layout", "Assign To Company", "Add Panel", "Import", "Export", "Save Layout"):
+        assert f'\"label\":\"{label}\"' in template
+    assert "editable = false;" in script
+    assert "editable = !editable;" in script
+    assert "element.draggable = editable" in script
+    assert "const controls = editable ?" in script
 
 
 def test_stat_colours_and_custom_panel_size_are_validated():
@@ -404,7 +415,7 @@ def test_dashboard_supports_free_placement_auto_height_and_dirty_save_state():
     assert "dashboard-panel__resize" not in script
     assert "function makeRoom(moved)" in script
     assert "function setDirty(value = true)" in script
-    assert "data-dashboard-save disabled" in template
+    assert '"data-dashboard-save":"", "hidden":true, "disabled":true' in template
 
 
 def test_zero_panel_height_is_preserved_for_automatic_sizing():
