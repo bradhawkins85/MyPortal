@@ -1,0 +1,7 @@
+{
+  "guid": "26a7ab70-6cdc-43f4-b13a-5a0d8af3c436",
+  "occurred_at": "2026-09-21T00:00Z",
+  "change_type": "Improvement",
+  "summary": "Use one fail-closed deployment plan for scheduler and shell upgrades, allowing documentation, static, template, migration, feature-pack, and tray-only releases to avoid unnecessary worker reloads.",
+  "content_hash": "029a0c4b709b0fe2e218e7b0c3714ea4bcaefe922d0bf3af9241d21d215c9e40"
+}

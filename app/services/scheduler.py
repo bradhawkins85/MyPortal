@@ -41,6 +41,7 @@ from app.services import tray_installer as tray_installer_service
 from app.services import unbill_time_entries as unbill_time_entries_service
 from app.services import value_templates
 from app.services import webhook_monitor
+from app.services.deployment_plan import build_deployment_plan
 from app.services import xero as xero_service
 from app.services import service_status as service_status_service
 from app.services import ticket_shipment_tracking as shipment_watch_service
@@ -1562,11 +1563,15 @@ class SchedulerService:
                 if force_restart
                 else self._classify_full_upgrade_reason(changed_files)
             )
+            deployment_plan = build_deployment_plan(
+                [("M", path) for path in (changed_files or [])]
+            ).to_dict()
             flag_payload = (
                 f"requested_at={timestamp}\n"
                 f"requested_from_ui={str(force_restart).lower()}\n"
                 f"requested_mode={requested_mode}\n"
                 f"requested_reason={requested_reason}\n"
+                f"deployment_plan={json.dumps(deployment_plan, separators=(',', ':'), sort_keys=True)}\n"
                 f"local_head={local_head}\n"
                 f"remote_head={remote_head}\n"
             )
@@ -1906,24 +1911,10 @@ class SchedulerService:
 
     @staticmethod
     def _classify_full_upgrade_reason(changed_files: list[str] | None) -> str:
-        if not changed_files:
-            return "application_reload_required"
-
-        stripped = [path.strip() for path in changed_files if path and path.strip()]
-        if not stripped:
-            return "application_reload_required"
-
-        if any(path == "pyproject.toml" for path in stripped):
-            return "dependency_manifest_changed"
-        if any(path.startswith("migrations/") for path in stripped):
-            return "migrations_changed"
-        if any(path.startswith("deploy/") for path in stripped):
-            return "deployment_topology_changed"
-        if any(path.startswith("scripts/") for path in stripped):
-            return "upgrade_runtime_changed"
-        if any(path.startswith("app/") for path in stripped):
-            return "shared_app_code_changed"
-        return "application_reload_required"
+        plan = build_deployment_plan(
+            [("M", path) for path in (changed_files or [])]
+        )
+        return plan.reason
 
     def _ensure_update_flag_directory(self) -> None:
         _SYSTEM_UPDATE_FLAG_PATH.parent.mkdir(parents=True, exist_ok=True)

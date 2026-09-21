@@ -321,7 +321,8 @@ def test_system_update_falls_back_to_restart_when_changes_outside_packs(
     assert flag_path.exists()
     contents = flag_path.read_text(encoding="utf-8")
     assert "requested_mode=graceful" in contents
-    assert "requested_reason=shared_app_code_changed" in contents
+    assert "requested_reason=configuration_or_backend_changed" in contents
+    assert '"action":"staged-cutover"' in contents
     assert registry.reloaded == []
     assert not any(call[:2] == ("merge", "--ff-only") for call in merge_calls)
 
@@ -459,17 +460,18 @@ def test_system_update_schedules_with_env_mode(monkeypatch, tmp_path: Path):
     assert "rolling mode" in output
     contents = flag_path.read_text(encoding="utf-8")
     assert "requested_mode=rolling" in contents
-    assert "requested_reason=deployment_topology_changed" in contents
+    assert "requested_reason=configuration_or_backend_changed" in contents
+    assert '"action":"staged-cutover"' in contents
 
 
 def test_classify_full_upgrade_reason():
     cls = SchedulerService._classify_full_upgrade_reason
 
-    assert cls(["pyproject.toml"]) == "dependency_manifest_changed"
-    assert cls(["migrations/20260602_add_table.sql"]) == "migrations_changed"
-    assert cls(["deploy/nginx/myportal.conf"]) == "deployment_topology_changed"
-    assert cls(["scripts/upgrade.sh"]) == "upgrade_runtime_changed"
-    assert cls(["app/main.py"]) == "shared_app_code_changed"
+    assert cls(["pyproject.toml"]) == "dependency_changed"
+    assert cls(["migrations/20260602_add_table.sql"]) == "migration_with_reload_free_assets"
+    assert cls(["deploy/nginx/myportal.conf"]) == "configuration_or_backend_changed"
+    assert cls(["scripts/upgrade.sh"]) == "unknown_or_planner_change"
+    assert cls(["app/main.py"]) == "configuration_or_backend_changed"
 
 
 def test_consume_feature_pack_reload_flag_reloads_and_deletes(monkeypatch, tmp_path: Path):
