@@ -125,7 +125,8 @@ install_dependencies() {
 }
 
 prepare_release() {
-  local revision="$1" release="$2" staging="${release}.staging.$$"
+  local revision="$1" release="$2" staging
+  staging="${release}.staging.$$"
   [[ -e "$release" ]] && return 0
   mkdir -p "$RELEASE_ROOT" "$SHARED_ROOT/state" "$SHARED_ROOT/data"
   rm -rf "$staging"; mkdir -p "$staging"
