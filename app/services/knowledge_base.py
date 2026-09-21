@@ -28,31 +28,33 @@ from app.services.knowledge_base_conditionals import (
 
 PermissionScope = str
 
-_ALLOWED_TAGS: frozenset[str] = frozenset((
-    "a",
-    "abbr",
-    "blockquote",
-    "code",
-    "em",
-    "strong",
-    "ul",
-    "ol",
-    "li",
-    "p",
-    "pre",
-    "br",
-    "h2",
-    "h3",
-    "h4",
-    "table",
-    "thead",
-    "tbody",
-    "tr",
-    "th",
-    "td",
-    "img",
-    "kb-if",
-))
+_ALLOWED_TAGS: frozenset[str] = frozenset(
+    (
+        "a",
+        "abbr",
+        "blockquote",
+        "code",
+        "em",
+        "strong",
+        "ul",
+        "ol",
+        "li",
+        "p",
+        "pre",
+        "br",
+        "h2",
+        "h3",
+        "h4",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "th",
+        "td",
+        "img",
+        "kb-if",
+    )
+)
 
 _ALLOWED_ATTRIBUTES: dict[str, set[str]] = {
     "a": {"href", "title", "target"},
@@ -426,6 +428,16 @@ def _article_visible(article: Mapping[str, Any], context: ArticleAccessContext) 
             for membership in context.memberships.values()
         )
     return False
+
+
+def _article_access_metadata(article: Mapping[str, Any]) -> dict[str, Any]:
+    """Return index-only fields needed to re-authorise an article later."""
+    return {
+        "article_permission_scope": str(article.get("permission_scope") or ""),
+        "allowed_user_ids": _normalise_ids(article.get("allowed_user_ids", [])),
+        "allowed_company_ids": _normalise_ids(article.get("company_ids", [])),
+        "company_admin_ids": _normalise_ids(article.get("company_admin_ids", [])),
+    }
 
 
 def _get_primary_company_name(context: ArticleAccessContext) -> str | None:
@@ -954,7 +966,10 @@ def _score_article(
 
 
 async def list_accessible_search_articles(
-    context: ArticleAccessContext, *, limit: int | None = None
+    context: ArticleAccessContext,
+    *,
+    limit: int | None = None,
+    include_access_metadata: bool = False,
 ) -> list[dict[str, Any]]:
     """Return all articles visible to a search user for complete RAG indexing."""
 
@@ -975,16 +990,17 @@ async def list_accessible_search_articles(
             ),
         ]
         excerpt_source = "\n".join(str(part or "") for part in content_parts if part)
-        visible.append(
-            {
-                "id": int(article.get("id")),
-                "slug": str(article.get("slug")),
-                "title": str(article.get("title")),
-                "summary": article.get("summary"),
-                "excerpt": _build_excerpt(excerpt_source, "", article.get("summary")),
-                "updated_at_iso": _isoformat(article.get("updated_at_utc")),
-            }
-        )
+        result = {
+            "id": int(article.get("id")),
+            "slug": str(article.get("slug")),
+            "title": str(article.get("title")),
+            "summary": article.get("summary"),
+            "excerpt": _build_excerpt(excerpt_source, "", article.get("summary")),
+            "updated_at_iso": _isoformat(article.get("updated_at_utc")),
+        }
+        if include_access_metadata:
+            result.update(_article_access_metadata(article))
+        visible.append(result)
         if limit is not None and len(visible) >= limit:
             break
     return visible
@@ -996,6 +1012,7 @@ async def search_articles(
     *,
     limit: int = 8,
     use_ollama: bool = True,
+    include_access_metadata: bool = False,
 ) -> dict[str, Any]:
     candidates = await kb_repo.list_articles(include_unpublished=context.is_super_admin)
     visible: list[dict[str, Any]] = []
@@ -1026,16 +1043,17 @@ async def search_articles(
     for article in visible:
         content = str(article.get("content") or "")
         summary = article.get("summary")
-        results.append(
-            {
-                "id": int(article.get("id")),
-                "slug": str(article.get("slug")),
-                "title": str(article.get("title")),
-                "summary": summary,
-                "excerpt": _build_excerpt(content, query, summary),
-                "updated_at_iso": _isoformat(article.get("updated_at_utc")),
-            }
-        )
+        result = {
+            "id": int(article.get("id")),
+            "slug": str(article.get("slug")),
+            "title": str(article.get("title")),
+            "summary": summary,
+            "excerpt": _build_excerpt(content, query, summary),
+            "updated_at_iso": _isoformat(article.get("updated_at_utc")),
+        }
+        if include_access_metadata:
+            result.update(_article_access_metadata(article))
+        results.append(result)
     ollama_status = "skipped"
     ollama_model: str | None = None
     ollama_summary: str | None = None

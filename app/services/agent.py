@@ -457,9 +457,7 @@ def _calculate_answer_confidence(
         label = "medium"
     else:
         label = "low"
-    missing = [
-        source for source in preferred_sources if source not in found_sources
-    ]
+    missing = [source for source in preferred_sources if source not in found_sources]
     return round(confidence, 3), label, missing
 
 
@@ -1037,6 +1035,11 @@ async def _search_issue_sources(
                 "description": _truncate(overview.description),
                 "updated_at": overview.updated_at_iso,
                 "assignments": assignments,
+                "allowed_company_ids": [
+                    assignment["company_id"]
+                    for assignment in assignments
+                    if assignment.get("company_id") is not None
+                ],
             }
         )
     return sources
@@ -1102,6 +1105,7 @@ async def _search_service_status_sources(
                 "description": _truncate(row.get("description")),
                 "status": row.get("status"),
                 "status_message": _truncate(row.get("status_message")),
+                "allowed_company_ids": sorted(restricted_company_ids),
             }
         )
         if len(sources) >= _SYSTEM_RESULT_LIMIT:
@@ -1187,6 +1191,7 @@ async def _search_reporting_query_sources(
                 "title": report.get("name") or f"Report #{report.get('id')}",
                 "description": _truncate(report.get("description")),
                 "source_type": "reporting_query",
+                "allowed_user_ids": [user_id] if not is_super_admin else [],
             }
         )
         if len(sources) >= _SYSTEM_RESULT_LIMIT:
@@ -1483,6 +1488,7 @@ async def _search_feature_pack_sources(
             )
             normalised.append(
                 {
+                    "id": item.get("id") or item.get("key") or item.get("slug"),
                     "title": title,
                     "summary": _truncate(
                         item.get("summary")
@@ -1492,6 +1498,8 @@ async def _search_feature_pack_sources(
                     "url": item.get("url"),
                     "source_type": item.get("source_type") or slug,
                     "metadata": dict(metadata),
+                    "company_id": item.get("company_id"),
+                    "permission_scope": item.get("permission_scope"),
                 }
             )
         if normalised:
@@ -1588,8 +1596,10 @@ async def execute_agent_query(
     if _is_source_enabled(requested_source_filters, "knowledge_base"):
         try:
             if allow_empty_query and not query_text:
-                kb_results = await knowledge_base_service.list_accessible_search_articles(
-                    kb_context
+                kb_results = (
+                    await knowledge_base_service.list_accessible_search_articles(
+                        kb_context, include_access_metadata=True
+                    )
                 )
             else:
                 kb_search = await knowledge_base_service.search_articles(
@@ -1597,6 +1607,7 @@ async def execute_agent_query(
                     kb_context,
                     limit=_KB_RESULT_LIMIT,
                     use_ollama=False,
+                    include_access_metadata=True,
                 )
                 kb_results = list(kb_search.get("results") or [])
         except Exception as exc:  # pragma: no cover - defensive guard
@@ -1622,6 +1633,10 @@ async def execute_agent_query(
                 "excerpt": _truncate(article.get("excerpt")),
                 "updated_at": article.get("updated_at_iso"),
                 "url": f"/knowledge-base/articles/{slug}",
+                "article_permission_scope": article.get("article_permission_scope"),
+                "allowed_user_ids": article.get("allowed_user_ids", []),
+                "allowed_company_ids": article.get("allowed_company_ids", []),
+                "company_admin_ids": article.get("company_admin_ids", []),
             }
         )
 
@@ -1713,6 +1728,7 @@ async def execute_agent_query(
                         ticket.get("ai_summary") or ticket.get("description")
                     ),
                     "company_id": ticket.get("company_id"),
+                    "requester_id": ticket.get("requester_id"),
                 }
             )
 
@@ -1785,6 +1801,7 @@ async def execute_agent_query(
                     "vendor_sku": product.get("vendor_sku"),
                     "price": price_display,
                     "description": _truncate(product.get("description")),
+                    "company_id": company_scope,
                     "recommendations": recommendations,
                 }
             )

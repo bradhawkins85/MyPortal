@@ -1,0 +1,7 @@
+{
+  "guid": "6a0fc09b-e78f-43f5-8c20-65157ea4a4fd",
+  "occurred_at": "2026-09-21T00:00:00Z",
+  "change_type": "Security",
+  "summary": "Closed shared RAG index authorization gaps with explicit source policies, query-time permission checks, and legacy index rebuilding.",
+  "content_hash": "d5d7e45bea6a70ec8cbd71c8606f921b3cf08d9e2d88f4ab819255cd24efdd6c"
+}
