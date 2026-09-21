@@ -213,6 +213,15 @@ make_release_service_readable() {
   find "$release" -type f -exec chmod a+rX,a-w {} +
 }
 
+release_runtime_ready() {
+  local release="$1"
+  [[ -x "${release}/.venv/bin/python" && -x "${release}/.venv/bin/uvicorn" ]] || return 1
+  "${release}/.venv/bin/python" -c 'import uvicorn' >/dev/null 2>&1 || return 1
+  # Executing the generated console script also verifies that its shebang still
+  # points at a real interpreter (venv scripts are not relocatable).
+  "${release}/.venv/bin/uvicorn" --version >/dev/null 2>&1
+}
+
 prepare_release() {
   local revision="$1" release="$2" staging
   staging="${release}.staging.$$"
@@ -226,8 +235,19 @@ prepare_release() {
     if [[ -f "$ENV_FILE" && "$(readlink "$release/.env" 2>/dev/null || true)" != "$ENV_FILE" ]]; then
       ln -sfn "$ENV_FILE" "$release/.env"
     fi
-    # Repair releases prepared by older upgrade scripts with root-only
-    # traversal permissions before retrying their service startup.
+    # Older scripts moved a completed virtualenv from a temporary directory,
+    # leaving console-script shebangs pointed at a path that no longer exists.
+    # Rebuild only an unusable runtime; never mutate a healthy active release.
+    if ! release_runtime_ready "$release"; then
+      chmod -R u+w "$release"
+      rm -rf "${release}/.venv"
+      if ! install_dependencies "$release"; then
+        make_release_service_readable "$release"
+        return 1
+      fi
+    fi
+    # Repair releases prepared with root-only traversal permissions before
+    # retrying their service startup.
     make_release_service_readable "$release"
     return 0
   fi
@@ -243,9 +263,43 @@ prepare_release() {
   # private to this revision.
   rm -rf "$staging/var"
   ln -s "$SHARED_ROOT" "$staging/var"
-  install_dependencies "$staging"
-  make_release_service_readable "$staging"
+  # Publish the code path before creating its virtualenv. Entry-point scripts
+  # embed an absolute interpreter path and break if the venv is subsequently
+  # renamed from the staging path to the release path.
   mv "$staging" "$release"
+  if ! install_dependencies "$release"; then
+    rm -rf "$release"
+    return 1
+  fi
+  make_release_service_readable "$release"
+}
+
+run_release_manage() {
+  local release="$1"
+  shift
+  # Do not source .env in a shell: characters such as $, #, !, spaces, and
+  # quotes must reach the application without expansion.  Disable dotenv
+  # interpolation and make the protected file authoritative over any stale
+  # DB_* values inherited by the upgrade process.
+  ENV_CONFIG_FILE="$ENV_FILE" "${release}/.venv/bin/python" - \
+    "${release}/manage.py" "$@" <<'PY'
+import os
+import sys
+
+from dotenv import dotenv_values
+
+env_file = os.environ["ENV_CONFIG_FILE"]
+try:
+    configured = dotenv_values(env_file, interpolate=False)
+except (OSError, UnicodeError, ValueError) as exc:
+    raise SystemExit(f"Unable to read application environment file {env_file}: {exc}") from None
+
+for name, value in configured.items():
+    if value is not None:
+        os.environ[name] = value
+
+os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+PY
 }
 
 run_release_manage() {

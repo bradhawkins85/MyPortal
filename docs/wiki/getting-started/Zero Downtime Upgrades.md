@@ -42,6 +42,12 @@ traversable by the unprivileged service account. Retrying an older prepared
 release repairs root-only directory permissions. A failure before nginx
 cutover leaves the existing upstream unchanged.
 
+The release virtual environment is created only after the revision reaches its
+final `/opt/myportal/releases/<git-sha>` path because Python console scripts
+contain absolute interpreter paths. When retrying a release prepared by an
+older updater, the coordinator validates the `uvicorn` entry point and rebuilds
+only a broken virtual environment.
+
 The deployer fetches (it never pulls or restores), exports the target commit to
 a staging directory, installs a private virtual environment, and makes the
 release read-only. It points only the inactive slot at that release, starts it,

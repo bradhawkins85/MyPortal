@@ -128,6 +128,62 @@ def test_retry_repairs_release_permissions_before_returning():
     assert 'make_release_service_readable "$release"' in retry_branch
 
 
+def test_virtualenv_is_created_only_after_release_reaches_final_path():
+    prepare = SCRIPT[SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")]
+    publish = prepare.index('mv "$staging" "$release"')
+    install = prepare.index('install_dependencies "$release"', publish)
+
+    assert publish < install
+    assert 'install_dependencies "$staging"' not in prepare
+    assert 'rm -rf "$release"' in prepare[install:]
+
+
+def test_retry_rebuilds_only_a_broken_release_runtime():
+    prepare = SCRIPT[SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")]
+    existing = prepare[: prepare.index("return 0")]
+
+    assert 'if ! release_runtime_ready "$release"' in existing
+    assert 'rm -rf "${release}/.venv"' in existing
+    assert 'install_dependencies "$release"' in existing
+
+
+def test_runtime_validation_executes_uvicorn_to_detect_stale_shebang(tmp_path):
+    function = SCRIPT[
+        SCRIPT.index("release_runtime_ready() {") : SCRIPT.index("\nprepare_release()")
+    ]
+
+    assert '"${release}/.venv/bin/uvicorn" --version' in function
+
+    release = tmp_path / "release"
+    bin_dir = release / ".venv" / "bin"
+    bin_dir.mkdir(parents=True)
+    python = bin_dir / "python"
+    python.write_text("#!/bin/sh\nexit 0\n")
+    python.chmod(0o755)
+    uvicorn = bin_dir / "uvicorn"
+    uvicorn.write_text("#!/path/from/removed/staging/.venv/bin/python\n")
+    uvicorn.chmod(0o755)
+
+    broken = subprocess.run(
+        ["bash", "-c", "set -Eeuo pipefail\n" + function + '\nrelease_runtime_ready "$RELEASE"'],
+        text=True,
+        capture_output=True,
+        env={**os.environ, "RELEASE": str(release)},
+        check=False,
+    )
+    assert broken.returncode != 0
+
+    uvicorn.write_text("#!/bin/sh\nexit 0\n")
+    healthy = subprocess.run(
+        ["bash", "-c", "set -Eeuo pipefail\n" + function + '\nrelease_runtime_ready "$RELEASE"'],
+        text=True,
+        capture_output=True,
+        env={**os.environ, "RELEASE": str(release)},
+        check=False,
+    )
+    assert healthy.returncode == 0, healthy.stderr
+
+
 def test_atomic_link_runs_with_nounset(tmp_path):
     function = SCRIPT[SCRIPT.index("atomic_link() {") : SCRIPT.index("\ninstance_port()")]
     target = tmp_path / "release"
