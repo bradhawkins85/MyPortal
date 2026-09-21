@@ -3,46 +3,91 @@ from __future__ import annotations
 from typing import Any, Mapping, Sequence
 
 
-def _company_ids(memberships: Sequence[Mapping[str, Any]]) -> set[int]:
-    ids: set[int] = set()
-    for membership in memberships:
+def _int_set(values: Any) -> set[int]:
+    if not isinstance(values, (list, tuple, set)):
+        values = [values]
+    result: set[int] = set()
+    for value in values:
         try:
-            ids.add(int(membership.get("company_id") or membership.get("id")))
+            result.add(int(value))
         except (TypeError, ValueError):
             continue
-    return ids
+    return result
 
 
-def _has_flag(memberships: Sequence[Mapping[str, Any]], flag: str) -> bool:
-    return any(bool(membership.get(flag)) for membership in memberships)
+def _membership_map(
+    memberships: Sequence[Mapping[str, Any]],
+) -> dict[int, Mapping[str, Any]]:
+    result: dict[int, Mapping[str, Any]] = {}
+    for membership in memberships:
+        ids = _int_set(membership.get("company_id") or membership.get("id"))
+        if ids:
+            result[next(iter(ids))] = membership
+    return result
 
 
-def can_access_candidate(candidate: Mapping[str, Any], *, user: Mapping[str, Any], memberships: Sequence[Mapping[str, Any]]) -> bool:
+def can_access_candidate(
+    candidate: Mapping[str, Any],
+    *,
+    user: Mapping[str, Any],
+    memberships: Sequence[Mapping[str, Any]],
+) -> bool:
+    """Authorise indexed evidence using its persisted, source-specific policy.
+
+    The index is shared, so an absent, malformed, or unknown policy must never
+    inherit the permissions of the user who happened to index the document.
+    """
+
+    scope = candidate.get("permission_scope")
+    if not isinstance(scope, Mapping) or int(scope.get("version") or 0) != 1:
+        return False
+    visibility = str(scope.get("visibility") or "")
+    if visibility not in {
+        "anonymous",
+        "authenticated",
+        "company",
+        "company_admin",
+        "user",
+        "super_admin",
+    }:
+        return False
     if bool(user.get("is_super_admin")):
         return True
-    source_type = str(candidate.get("source_type") or "")
-    company_id = candidate.get("company_id")
-    company_ids = _company_ids(memberships)
-    if company_id is not None:
-        try:
-            if int(company_id) not in company_ids:
-                return False
-        except (TypeError, ValueError):
-            return False
-    if source_type in {"products", "packages"}:
-        return any(bool(m.get(flag)) for m in memberships for flag in ("can_access_shop", "can_access_orders", "can_access_cart"))
-    if source_type == "chats":
-        return _has_flag(memberships, "can_access_chat")
-    if source_type == "orders":
-        return _has_flag(memberships, "can_access_orders")
-    if source_type == "assets":
-        return _has_flag(memberships, "can_manage_assets")
-    if source_type == "staff":
-        return any(bool(m.get("can_manage_staff")) or int(m.get("staff_permission") or 0) > 0 for m in memberships)
-    if source_type == "issues":
-        return _has_flag(memberships, "can_manage_issues")
-    if source_type == "mailboxes":
-        return _has_flag(memberships, "can_view_m365_user_mailboxes") or _has_flag(memberships, "can_view_m365_shared_mailboxes")
-    if source_type == "best_practices":
-        return _has_flag(memberships, "can_view_m365_best_practices")
+    if visibility == "anonymous":
+        return True
+    try:
+        user_id = int(user.get("id") or 0)
+    except (TypeError, ValueError):
+        user_id = 0
+    if visibility == "super_admin" or user_id <= 0:
+        return False
+    if visibility == "user":
+        return user_id in _int_set(scope.get("user_ids"))
+    if visibility not in {"authenticated", "company", "company_admin"}:
+        return False
+
+    membership_by_company = _membership_map(memberships)
+    restricted_companies = _int_set(scope.get("company_ids"))
+    matching = (
+        [
+            membership_by_company[c]
+            for c in restricted_companies
+            if c in membership_by_company
+        ]
+        if restricted_companies
+        else list(membership_by_company.values())
+    )
+    if visibility == "authenticated" and not restricted_companies:
+        matching = [{}]
+    if not matching:
+        return False
+    if visibility == "company_admin" and not any(
+        bool(m.get("is_admin")) for m in matching
+    ):
+        return False
+    required_any = scope.get("required_any") or []
+    if required_any and not any(
+        any(bool(m.get(flag)) for flag in required_any) for m in matching
+    ):
+        return False
     return True

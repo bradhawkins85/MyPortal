@@ -15,18 +15,97 @@ from app.services.sanitization import sanitize_rich_text
 # Shared token regex and stop-word set used by both embed_text and BM25 retrieval so
 # that indexed vectors and query scoring operate on an identical vocabulary.
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_.:#/@+-]{1,}", re.IGNORECASE)
-_STOP_WORDS = frozenset({
-    "about", "above", "after", "again", "against", "all", "also", "and",
-    "any", "are", "because", "been", "before", "being", "below", "between",
-    "both", "but", "can", "created", "did", "does", "doing", "don", "down",
-    "during", "each", "few", "for", "from", "further", "had", "has", "have",
-    "having", "here", "how", "into", "its", "just", "more", "not", "now",
-    "off", "once", "only", "other", "our", "out", "over", "own", "same",
-    "she", "should", "some", "such", "than", "that", "the", "their", "them",
-    "then", "there", "these", "they", "think", "this", "those", "through",
-    "too", "under", "until", "usual", "very", "was", "were", "what", "when",
-    "where", "which", "while", "who", "why", "will", "with", "you", "your",
-})
+_STOP_WORDS = frozenset(
+    {
+        "about",
+        "above",
+        "after",
+        "again",
+        "against",
+        "all",
+        "also",
+        "and",
+        "any",
+        "are",
+        "because",
+        "been",
+        "before",
+        "being",
+        "below",
+        "between",
+        "both",
+        "but",
+        "can",
+        "created",
+        "did",
+        "does",
+        "doing",
+        "don",
+        "down",
+        "during",
+        "each",
+        "few",
+        "for",
+        "from",
+        "further",
+        "had",
+        "has",
+        "have",
+        "having",
+        "here",
+        "how",
+        "into",
+        "its",
+        "just",
+        "more",
+        "not",
+        "now",
+        "off",
+        "once",
+        "only",
+        "other",
+        "our",
+        "out",
+        "over",
+        "own",
+        "same",
+        "she",
+        "should",
+        "some",
+        "such",
+        "than",
+        "that",
+        "the",
+        "their",
+        "them",
+        "then",
+        "there",
+        "these",
+        "they",
+        "think",
+        "this",
+        "those",
+        "through",
+        "too",
+        "under",
+        "until",
+        "usual",
+        "very",
+        "was",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "while",
+        "who",
+        "why",
+        "will",
+        "with",
+        "you",
+        "your",
+    }
+)
 
 
 def embedding_model() -> str:
@@ -192,6 +271,9 @@ def document_from_source(
         company_id = int(company_id) if company_id is not None else None
     except (TypeError, ValueError):
         company_id = None
+    permission_scope = _permission_scope_for_source(source_type, item)
+    if permission_scope is None:
+        return None
     metadata = {
         key: value for key, value in item.items() if key not in {"permission_scope"}
     }
@@ -202,9 +284,99 @@ def document_from_source(
         text=text,
         url=item.get("url"),
         company_id=company_id,
-        permission_scope=dict(item.get("permission_scope") or {}),
+        permission_scope=permission_scope,
         metadata=metadata,
     )
+
+
+def _ids(item: Mapping[str, Any], *keys: str) -> list[int]:
+    values: list[Any] = []
+    for key in keys:
+        value = item.get(key)
+        values.extend(value if isinstance(value, (list, tuple, set)) else [value])
+    result: set[int] = set()
+    for value in values:
+        try:
+            if value is not None:
+                result.add(int(value))
+        except (TypeError, ValueError):
+            continue
+    return sorted(result)
+
+
+def _scope(
+    visibility: str,
+    *,
+    companies: list[int] | None = None,
+    users: list[int] | None = None,
+    required_any: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "version": 1,
+        "visibility": visibility,
+        "company_ids": companies or [],
+        "user_ids": users or [],
+        "required_any": required_any or [],
+    }
+
+
+def _permission_scope_for_source(
+    source_type: str, item: Mapping[str, Any]
+) -> dict[str, Any] | None:
+    """Build the complete access policy stored beside each shared document."""
+    if source_type == "knowledge_base":
+        visibility = str(item.get("article_permission_scope") or "")
+        if visibility == "anonymous":
+            return _scope("anonymous")
+        if visibility == "super_admin":
+            return _scope("super_admin")
+        if visibility == "user":
+            users = _ids(item, "allowed_user_ids")
+            return _scope("user", users=users) if users else None
+        if visibility == "company":
+            return _scope("company", companies=_ids(item, "allowed_company_ids"))
+        if visibility == "company_admin":
+            return _scope("company_admin", companies=_ids(item, "company_admin_ids"))
+        return None
+    companies = _ids(item, "company_id", "allowed_company_ids")
+    permission_flags = {
+        "products": ["can_access_shop", "can_access_orders", "can_access_cart"],
+        "packages": ["can_access_shop", "can_access_orders", "can_access_cart"],
+        "chats": ["can_access_chat"],
+        "orders": ["can_access_orders"],
+        "assets": ["can_manage_assets"],
+        "staff": ["can_manage_staff", "staff_permission"],
+        "issues": ["can_manage_issues"],
+        "mailboxes": ["can_view_m365_user_mailboxes", "can_view_m365_shared_mailboxes"],
+        "best_practices": ["can_view_m365_best_practices"],
+    }
+    if source_type in permission_flags:
+        if not companies and source_type in {"tickets", "ticket_comments", "chats"}:
+            users = _ids(item, "requester_id", "user_id", "allowed_user_ids")
+            return _scope("user", users=users) if users else None
+        return _scope(
+            "company", companies=companies, required_any=permission_flags[source_type]
+        )
+    if source_type in {"tickets", "ticket_comments", "companies", "backup_jobs"}:
+        if companies:
+            return _scope("company", companies=companies)
+        users = _ids(item, "requester_id", "user_id", "allowed_user_ids")
+        return _scope("user", users=users) if users else None
+    if source_type == "service_status":
+        return (
+            _scope("company", companies=companies)
+            if companies
+            else _scope("authenticated")
+        )
+    if source_type == "reports":
+        users = _ids(item, "allowed_user_ids", "user_id")
+        return _scope("user", users=users) if users else _scope("super_admin")
+    if source_type.startswith("feature:"):
+        supplied = item.get("permission_scope")
+        if isinstance(supplied, Mapping) and int(supplied.get("version") or 0) == 1:
+            return dict(supplied)
+        return None
+    return None
 
 
 async def index_document(document: RagDocument) -> int:
