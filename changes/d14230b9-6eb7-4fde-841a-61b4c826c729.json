@@ -1,0 +1,7 @@
+{
+  "guid": "d14230b9-6eb7-4fde-841a-61b4c826c729",
+  "occurred_at": "2026-09-21T12:30:00Z",
+  "change_type": "fixed",
+  "summary": "Repair upload paths in previously assigned blue-green releases before service startup",
+  "content_hash": "legacy-assigned-release-upload-repair-before-migration-and-systemd-start"
+}

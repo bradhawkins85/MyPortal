@@ -231,7 +231,10 @@ prepare_shared_uploads() {
       fi
       chown -R myportal:myportal "$shared"
     else
-      chown myportal:myportal "$shared"
+      # Repair ownership left by interrupted deployments or legacy data copies.
+      # Import-time directory creation (for example private_uploads/shop) must
+      # work before the application can answer its readiness probe.
+      chown -R myportal:myportal "$shared"
     fi
   done
 }
@@ -242,6 +245,49 @@ link_shared_uploads() {
   rm -rf "${release}/private_uploads" "${release}/app/static/uploads"
   ln -s "${SHARED_ROOT}/private_uploads" "${release}/private_uploads"
   ln -s "${SHARED_ROOT}/uploads" "${release}/app/static/uploads"
+}
+
+validate_release_uploads() {
+  local release="$1" path expected
+  while IFS='|' read -r path expected; do
+    if [[ ! -L "$path" || "$(readlink -f "$path" 2>/dev/null || true)" != "$expected" ]]; then
+      echo "Release upload path is not linked to persistent storage: ${path}" >&2
+      return 1
+    fi
+    if ! runuser --user myportal -- test -w "$path"; then
+      echo "Release upload path is not writable by the myportal service account: ${path}" >&2
+      return 1
+    fi
+  done <<EOF
+${release}/private_uploads|${SHARED_ROOT}/private_uploads
+${release}/app/static/uploads|${SHARED_ROOT}/uploads
+EOF
+}
+
+repair_assigned_release_uploads() {
+  local instance release path expected
+  for instance in blue green; do
+    release=$(readlink -f "${INSTANCE_ROOT}/${instance}" 2>/dev/null || true)
+    [[ -n "$release" && -d "$release" && "$release" != "$RELEASE_DIR" ]] || continue
+
+    chmod u+w "$release" "${release}/app" "${release}/app/static"
+    while IFS='|' read -r path expected; do
+      if [[ -d "$path" && ! -L "$path" ]]; then
+        # Releases made by the older updater stored uploads locally. Preserve
+        # files that are not already in shared storage before replacing the
+        # directory; -n prevents an old slot overwriting newer shared files.
+        cp -a -n "$path"/. "$expected"/
+      fi
+      rm -rf "$path"
+      ln -s "$expected" "$path"
+    done <<EOF
+${release}/private_uploads|${SHARED_ROOT}/private_uploads
+${release}/app/static/uploads|${SHARED_ROOT}/uploads
+EOF
+    chown -R myportal:myportal "${SHARED_ROOT}/private_uploads" "${SHARED_ROOT}/uploads"
+    make_release_service_readable "$release"
+    validate_release_uploads "$release"
+  done
 }
 
 release_runtime_ready() {
@@ -282,6 +328,7 @@ prepare_release() {
     # Repair releases prepared with root-only traversal permissions before
     # retrying their service startup.
     make_release_service_readable "$release"
+    validate_release_uploads "$release"
     return 0
   fi
   rm -rf "$staging"; mkdir -p "$staging"
@@ -306,6 +353,7 @@ prepare_release() {
     return 1
   fi
   make_release_service_readable "$release"
+  validate_release_uploads "$release"
 }
 
 run_release_manage() {
@@ -418,6 +466,11 @@ RELEASE_DIR="${RELEASE_ROOT}/${TARGET_REVISION}"
 
 write_upgrade_status preparing "Preparing immutable release ${TARGET_REVISION}."
 prepare_release "$TARGET_REVISION" "$RELEASE_DIR"
+# The inactive slot may still point at a release produced before persistent
+# upload links were introduced. Repair both assigned releases before systemd
+# can start or roll back either one; otherwise an old worker loops while trying
+# to create private_uploads inside its read-only release directory.
+repair_assigned_release_uploads
 run_migration_phase "$RELEASE_DIR" "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"
 if is_additive_migration_only_release "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"; then
   # Schema-only expands need no worker signal: the serving revision was
