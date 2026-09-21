@@ -231,7 +231,10 @@ prepare_shared_uploads() {
       fi
       chown -R myportal:myportal "$shared"
     else
-      chown myportal:myportal "$shared"
+      # Repair ownership left by interrupted deployments or legacy data copies.
+      # Import-time directory creation (for example private_uploads/shop) must
+      # work before the application can answer its readiness probe.
+      chown -R myportal:myportal "$shared"
     fi
   done
 }
@@ -242,6 +245,23 @@ link_shared_uploads() {
   rm -rf "${release}/private_uploads" "${release}/app/static/uploads"
   ln -s "${SHARED_ROOT}/private_uploads" "${release}/private_uploads"
   ln -s "${SHARED_ROOT}/uploads" "${release}/app/static/uploads"
+}
+
+validate_release_uploads() {
+  local release="$1" path expected
+  while IFS='|' read -r path expected; do
+    if [[ ! -L "$path" || "$(readlink -f "$path" 2>/dev/null || true)" != "$expected" ]]; then
+      echo "Release upload path is not linked to persistent storage: ${path}" >&2
+      return 1
+    fi
+    if ! runuser --user myportal -- test -w "$path"; then
+      echo "Release upload path is not writable by the myportal service account: ${path}" >&2
+      return 1
+    fi
+  done <<EOF
+${release}/private_uploads|${SHARED_ROOT}/private_uploads
+${release}/app/static/uploads|${SHARED_ROOT}/uploads
+EOF
 }
 
 release_runtime_ready() {
@@ -282,6 +302,7 @@ prepare_release() {
     # Repair releases prepared with root-only traversal permissions before
     # retrying their service startup.
     make_release_service_readable "$release"
+    validate_release_uploads "$release"
     return 0
   fi
   rm -rf "$staging"; mkdir -p "$staging"
@@ -306,6 +327,7 @@ prepare_release() {
     return 1
   fi
   make_release_service_readable "$release"
+  validate_release_uploads "$release"
 }
 
 run_release_manage() {
