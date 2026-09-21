@@ -100,7 +100,7 @@ def test_upload_storage_is_seeded_without_removing_legacy_data():
 
 def test_release_upload_paths_point_to_persistent_shared_storage():
     function = SCRIPT[
-        SCRIPT.index("link_shared_uploads() {") : SCRIPT.index("\nrelease_runtime_ready()")
+        SCRIPT.index("link_shared_uploads() {") : SCRIPT.index("\nvalidate_release_uploads()")
     ]
 
     assert '"${release}/private_uploads"' in function
@@ -118,6 +118,22 @@ def test_release_uploads_are_validated_before_service_startup():
     assert 'readlink -f "$path"' in validation
     assert 'runuser --user myportal -- test -w "$path"' in validation
     assert prepare.count('validate_release_uploads "$release"') == 2
+
+
+def test_assigned_legacy_releases_are_repaired_before_migration_and_service_start():
+    repair = SCRIPT[
+        SCRIPT.index("repair_assigned_release_uploads() {") : SCRIPT.index("\nrelease_runtime_ready()")
+    ]
+
+    assert 'for instance in blue green' in repair
+    assert 'cp -a -n "$path"/. "$expected"/' in repair
+    assert 'ln -s "$expected" "$path"' in repair
+    assert 'validate_release_uploads "$release"' in repair
+
+    invoke = SCRIPT.index("\nrepair_assigned_release_uploads\n")
+    migration = SCRIPT.index('run_migration_phase "$RELEASE_DIR"', invoke)
+    install_unit = SCRIPT.index('install_blue_green_service_unit "$RELEASE_DIR"', invoke)
+    assert invoke < migration < install_unit
 
 
 def test_release_permissions_allow_unprivileged_service_to_read_and_traverse(tmp_path):

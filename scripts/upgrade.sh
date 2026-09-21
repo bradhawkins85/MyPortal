@@ -264,6 +264,32 @@ ${release}/app/static/uploads|${SHARED_ROOT}/uploads
 EOF
 }
 
+repair_assigned_release_uploads() {
+  local instance release path expected
+  for instance in blue green; do
+    release=$(readlink -f "${INSTANCE_ROOT}/${instance}" 2>/dev/null || true)
+    [[ -n "$release" && -d "$release" && "$release" != "$RELEASE_DIR" ]] || continue
+
+    chmod u+w "$release" "${release}/app" "${release}/app/static"
+    while IFS='|' read -r path expected; do
+      if [[ -d "$path" && ! -L "$path" ]]; then
+        # Releases made by the older updater stored uploads locally. Preserve
+        # files that are not already in shared storage before replacing the
+        # directory; -n prevents an old slot overwriting newer shared files.
+        cp -a -n "$path"/. "$expected"/
+      fi
+      rm -rf "$path"
+      ln -s "$expected" "$path"
+    done <<EOF
+${release}/private_uploads|${SHARED_ROOT}/private_uploads
+${release}/app/static/uploads|${SHARED_ROOT}/uploads
+EOF
+    chown -R myportal:myportal "${SHARED_ROOT}/private_uploads" "${SHARED_ROOT}/uploads"
+    make_release_service_readable "$release"
+    validate_release_uploads "$release"
+  done
+}
+
 release_runtime_ready() {
   local release="$1"
   [[ -x "${release}/.venv/bin/python" ]] || return 1
@@ -440,6 +466,11 @@ RELEASE_DIR="${RELEASE_ROOT}/${TARGET_REVISION}"
 
 write_upgrade_status preparing "Preparing immutable release ${TARGET_REVISION}."
 prepare_release "$TARGET_REVISION" "$RELEASE_DIR"
+# The inactive slot may still point at a release produced before persistent
+# upload links were introduced. Repair both assigned releases before systemd
+# can start or roll back either one; otherwise an old worker loops while trying
+# to create private_uploads inside its read-only release directory.
+repair_assigned_release_uploads
 run_migration_phase "$RELEASE_DIR" "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"
 if is_additive_migration_only_release "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISION"; then
   # Schema-only expands need no worker signal: the serving revision was
