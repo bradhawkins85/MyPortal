@@ -224,7 +224,13 @@ async def assign_to_ticket(*, ticket_id: int, configuration_id: int,
     configuration = await get_configuration(configuration_id)
     if not configuration:
         raise ValueError("Approval configuration not found")
-    ticket = await db.fetch_one("SELECT company_id FROM tickets WHERE id = %s", (ticket_id,))
+    ticket = await db.fetch_one(
+        """SELECT t.company_id, NULLIF(TRIM(s.department), '') AS requester_department
+           FROM tickets t
+           LEFT JOIN staff s ON s.id = t.requester_staff_id AND s.company_id = t.company_id
+           WHERE t.id = %s""",
+        (ticket_id,),
+    )
     if not ticket or int(ticket.get("company_id") or 0) != int(configuration["company_id"]):
         raise ValueError("Approval configuration must belong to the ticket company")
     existing = await db.fetch_one(
@@ -272,14 +278,22 @@ async def assign_to_ticket(*, ticket_id: int, configuration_id: int,
     company_roles = set(configuration.get("company_roles") or [])
     if selected_titles or company_roles:
         staff_rows = await db.fetch_all(
-            """SELECT id AS staff_id, first_name, last_name, email, NULLIF(TRIM(job_title), '') AS job_title
+            """SELECT id AS staff_id, first_name, last_name, email,
+                      NULLIF(TRIM(job_title), '') AS job_title,
+                      NULLIF(TRIM(department), '') AS department
                FROM staff WHERE company_id = %s AND enabled = 1""",
             (configuration["company_id"],),
         )
+        requester_department = str(ticket.get("requester_department") or "").strip().casefold()
         for staff in staff_rows:
             title = str(staff.get("job_title") or "").strip().casefold()
+            department = str(staff.get("department") or "").strip().casefold()
+            is_requester_department = bool(requester_department and department == requester_department)
             matches_role = (
                 ("any_manager" in company_roles and "manager" in title)
+                or ("department_manager" in company_roles and is_requester_department and "manager" in title)
+                or ("any_supervisor" in company_roles and "supervisor" in title)
+                or ("department_supervisor" in company_roles and is_requester_department and "supervisor" in title)
                 or ("general_manager" in company_roles and title in {"general manager", "gm"})
                 or ("finance_manager" in company_roles and title in {"finance manager", "financial manager", "chief financial officer", "cfo"})
                 or ("it_manager" in company_roles and title in {"it manager", "ict manager", "technology manager"})

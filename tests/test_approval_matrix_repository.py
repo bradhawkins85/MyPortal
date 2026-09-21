@@ -94,15 +94,19 @@ def test_approval_configuration_uses_checkbox_lists_for_all_multi_value_selector
     assert "Department / job titles" in template
 
 
-def test_department_groupings_are_driven_by_company_job_titles():
+def test_company_role_options_include_department_and_supervisor_roles():
     routes = Path("app/features/tickets/admin_routes.py").read_text(encoding="utf-8")
     repository = Path("app/repositories/approval_matrix.py").read_text(encoding="utf-8")
 
     assert 'FROM staff WHERE company_id = %s AND enabled = 1' in routes
     assert "TRIM(position)" not in routes
     assert "), position)" not in repository
-    assert '"department_manager"' not in routes
-    assert '"department_manager"' not in repository
+    assert '("department_manager", "Department Manager")' in routes
+    assert '("any_supervisor", "Any Supervisor")' in routes
+    assert '("department_supervisor", "Department Supervisor")' in routes
+    assert '"department_manager" in company_roles and is_requester_department and "manager" in title' in repository
+    assert '"any_supervisor" in company_roles and "supervisor" in title' in repository
+    assert '"department_supervisor" in company_roles and is_requester_department and "supervisor" in title' in repository
 
 
 def test_approval_selector_migration_preserves_legacy_technician():
