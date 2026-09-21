@@ -90,7 +90,9 @@ The upgrade coordinator reads `/etc/myportal.env` by default, matching the
 a nonstandard deployment; legacy installations without `/etc/myportal.env`
 continue to use the control checkout's `.env` file.
 
-`MYPORTAL_READY_TIMEOUT` bounds readiness in seconds,
+`MYPORTAL_READY_TIMEOUT` bounds the overall readiness retry window in seconds,
+`MYPORTAL_READY_REQUEST_TIMEOUT` bounds each readiness HTTP request (defaulting
+to 10 seconds so startup-time responses are not abandoned prematurely),
 `MYPORTAL_DRAIN_SECONDS` bounds the drain period, and
 `MYPORTAL_SMOKE_PATH` selects an idempotent smoke endpoint. Path overrides for
 test or nonstandard installations are listed in `.env.example`. The deployment

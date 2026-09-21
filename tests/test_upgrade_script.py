@@ -583,6 +583,7 @@ def _run_version_check(tmp_path: Path, response: str, expected: str = "target-re
             "READY_RESPONSE": response,
             "EXPECTED": expected,
             "READY_TIMEOUT": "1",
+            "READY_REQUEST_TIMEOUT": "10",
         },
         check=False,
     )
@@ -607,7 +608,12 @@ def test_version_check_failure_reports_endpoint_expected_and_reported(tmp_path):
     assert "endpoint=http://127.0.0.1:8001/readyz" in result.stderr
     assert "expected=target-revision" in result.stderr
     assert "reported=repository-timestamp" in result.stderr
-    assert "curl -fsS --max-time 2 http://127.0.0.1:8001/readyz" in result.stderr
+    assert "curl -fsS --max-time 10 http://127.0.0.1:8001/readyz" in result.stderr
+
+
+def test_version_check_allows_slow_startup_readiness_responses():
+    assert 'READY_REQUEST_TIMEOUT="${MYPORTAL_READY_REQUEST_TIMEOUT:-10}"' in SCRIPT
+    assert 'curl -fsS --max-time "$READY_REQUEST_TIMEOUT" "$endpoint"' in SCRIPT
 
 
 def test_existing_release_version_metadata_is_repaired_before_restart():
