@@ -211,6 +211,7 @@
   aria-modal="true"
   aria-labelledby="backup-job-modal-title"
   data-backup-status-url="{{ backup_status_url | e }}"
+  data-backup-editing-job-id="{{ backup_editing_job.id if backup_editing_job else '' }}"
   hidden
 >
   <div class="modal__content" role="document">
@@ -516,9 +517,8 @@
 
   // Auto-open edit modal when ?jobId= is present in the URL (e.g. after token regen).
   // Find the matching row's data attribute to avoid duplicating the data structure.
-  {% if backup_editing_job %}
-  (function () {
-    const editId = {{ backup_editing_job.id | tojson }};
+  const editId = jobModal ? Number.parseInt(jobModal.dataset.backupEditingJobId, 10) : NaN;
+  if (Number.isInteger(editId)) {
     const buttons = document.querySelectorAll('[data-backup-job-modal-open][data-backup-job-mode="edit"]');
     for (const btn of buttons) {
       try {
@@ -526,8 +526,7 @@
         if (data.id === editId) { openJobModal('edit', data); break; }
       } catch (err) { /* ignore */ }
     }
-  })();
-  {% endif %}
+  }
 })();
 </script>
 {% endblock %}
