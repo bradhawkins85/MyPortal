@@ -302,6 +302,34 @@ os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
 PY
 }
 
+run_release_manage() {
+  local release="$1"
+  shift
+  # Do not source .env in a shell: characters such as $, #, !, spaces, and
+  # quotes must reach the application without expansion.  Disable dotenv
+  # interpolation and make the protected file authoritative over any stale
+  # DB_* values inherited by the upgrade process.
+  ENV_CONFIG_FILE="$ENV_FILE" "${release}/.venv/bin/python" - \
+    "${release}/manage.py" "$@" <<'PY'
+import os
+import sys
+
+from dotenv import dotenv_values
+
+env_file = os.environ["ENV_CONFIG_FILE"]
+try:
+    configured = dotenv_values(env_file, interpolate=False)
+except (OSError, UnicodeError, ValueError) as exc:
+    raise SystemExit(f"Unable to read application environment file {env_file}: {exc}") from None
+
+for name, value in configured.items():
+    if value is not None:
+        os.environ[name] = value
+
+os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+PY
+}
+
 rollback() {
   local old_active="$1" new_instance="$2" old_instance_release="$3" upstream_switched="$4"
   echo "Deployment failed; restoring ${old_active}." >&2
