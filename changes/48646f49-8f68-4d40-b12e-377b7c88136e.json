@@ -1,0 +1,7 @@
+{
+  "guid": "48646f49-8f68-4d40-b12e-377b7c88136e",
+  "occurred_at": "2026-09-21T00:00:00Z",
+  "change_type": "Improvement",
+  "summary": "Reuse verified locked dependency layers and publish checksum-validated CI tray artifacts only when deployment inputs change.",
+  "content_hash": "45d04149556a10b8fc1ce50be944d851c1c34fd4e0ccab3a89c6251e7ad91985"
+}

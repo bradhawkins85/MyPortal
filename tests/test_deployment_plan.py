@@ -45,6 +45,25 @@ def test_scheduler_uses_the_shared_planner():
     assert SchedulerService._classify_full_upgrade_reason(paths) == expected.reason
 
 
+@pytest.mark.parametrize(
+    ("entries", "dependencies", "tray", "dependency_reason", "tray_reason"),
+    [
+        ([('M', 'app/templates/base.html')], False, False, 'dependency_inputs_unchanged', 'tray_inputs_unchanged'),
+        ([('A', 'migrations/999.sql')], False, False, 'dependency_inputs_unchanged', 'tray_inputs_unchanged'),
+        ([('M', 'app/main.py')], False, False, 'dependency_inputs_unchanged', 'tray_inputs_unchanged'),
+        ([('M', 'requirements.lock')], True, False, 'dependency_inputs_changed', 'tray_inputs_unchanged'),
+        ([('M', 'tray/go.mod')], False, True, 'dependency_inputs_unchanged', 'tray_inputs_changed'),
+        ([('M', 'app/main.py'), ('M', 'tray/go.sum')], False, True, 'dependency_inputs_unchanged', 'tray_inputs_changed'),
+    ],
+)
+def test_plan_drives_dependency_and_artifact_work(entries, dependencies, tray, dependency_reason, tray_reason):
+    plan = build_deployment_plan(entries)
+    assert plan.install_dependencies is dependencies
+    assert plan.validate_tray_artifacts is tray
+    assert plan.dependency_reason == dependency_reason
+    assert plan.tray_reason == tray_reason
+
+
 def test_planner_cli_emits_the_same_plan(tmp_path):
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=tmp_path, check=True)

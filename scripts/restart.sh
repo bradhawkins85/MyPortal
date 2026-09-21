@@ -204,8 +204,8 @@ if [[ -z "$PYTHON_BIN" ]]; then
 fi
 
 echo "Using python interpreter at ${PYTHON_BIN}" >&2
-cleanup_invalid_distribution "$PYTHON_BIN"
-"$PYTHON_BIN" -m pip install -e "$PROJECT_ROOT"
+# Restart is deliberately side-effect free: dependency preparation belongs to
+# the verified staging phase in upgrade.sh, never the service disruption path.
 
 restart_service() {
   local custom_command

@@ -21,6 +21,10 @@ class DeploymentPlan:
     changed_paths: tuple[str, ...]
     feature_packs: tuple[str, ...]
     requires_worker_reload: bool
+    install_dependencies: bool
+    validate_tray_artifacts: bool
+    dependency_reason: str
+    tray_reason: str
 
     def to_dict(self) -> dict[str, object]:
         value = asdict(self)
@@ -106,7 +110,21 @@ def build_deployment_plan(entries: list[tuple[str, str]]) -> DeploymentPlan:
     else:  # pragma: no cover - the branches above intentionally exhaust input
         action, reason, reload = "staged-cutover", "unclassified_change", True
     ordered = tuple(sorted(categories or {"docs"}))
-    return DeploymentPlan(1, action, reason, ordered, tuple(sorted(set(paths))), tuple(sorted(packs)), reload)
+    dependency_changed = "dependency" in categories
+    tray_changed = "tray" in categories
+    return DeploymentPlan(
+        2,
+        action,
+        reason,
+        ordered,
+        tuple(sorted(set(paths))),
+        tuple(sorted(packs)),
+        reload,
+        dependency_changed,
+        tray_changed,
+        "dependency_inputs_changed" if dependency_changed else "dependency_inputs_unchanged",
+        "tray_inputs_changed" if tray_changed else "tray_inputs_unchanged",
+    )
 
 
 def plan_git_diff(base: str, target: str) -> DeploymentPlan:
