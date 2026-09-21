@@ -21,10 +21,28 @@ _APPROVED_AI_QUERY_MODULE_REASONS = {
     "Module not fully configured": "Module not fully configured",
     "pending_restart": "Module pending restart",
 }
+_REPORTING_QUERY_CLIENT_MESSAGES = {
+    "required": "SQL query is required.",
+    "multiple_statements": "Only a single SELECT statement is allowed (found multiple statements).",
+    "select_only": "Only SELECT statements are allowed.",
+    "forbidden_keyword": "Statement contains a forbidden SQL keyword.",
+    "forbidden_phrase": "Statement contains a forbidden SQL phrase.",
+}
+_AI_QUERY_CLIENT_MESSAGES = {
+    "module_no_query": "The configured LLM module did not generate a query.",
+    "response_no_query": "The configured LLM returned no SQL query.",
+    "module_disabled": "Module disabled",
+    "module_unconfigured": "Module not fully configured",
+    "module_pending_restart": "Module pending restart",
+}
 
 
 class _ClientSafeAIQueryError(ValueError):
-    """Approved message that may be returned to the reporting UI."""
+    """Identifies an approved, static message that may be returned to the UI."""
+
+    def __init__(self, client_code: str) -> None:
+        super().__init__(client_code)
+        self.client_code = client_code
 
 
 class _AIQueryModuleFailure(RuntimeError):
@@ -48,7 +66,39 @@ def _reporting_message(value: str | None, *, max_length: int = 240) -> str | Non
 
 def _approved_ai_query_module_reason(value: Any) -> str | None:
     cleaned = _reporting_message(str(value) if value is not None else None)
-    return _APPROVED_AI_QUERY_MODULE_REASONS.get(cleaned)
+    approved_reason = _APPROVED_AI_QUERY_MODULE_REASONS.get(cleaned)
+    if approved_reason == "Module disabled":
+        return "module_disabled"
+    if approved_reason == "Module not fully configured":
+        return "module_unconfigured"
+    if approved_reason == "Module pending restart":
+        return "module_pending_restart"
+    return None
+
+
+def _reporting_query_client_message(exc: Exception) -> str:
+    """Map validation error codes to static text without exposing exception data."""
+    client_code = getattr(exc, "client_code", None)
+    message = _REPORTING_QUERY_CLIENT_MESSAGES.get(client_code)
+    if message is None:
+        log_error(
+            "Reporting AI query validation failed with an unrecognized code",
+            error_type=type(exc).__name__,
+        )
+        return "The generated SQL query did not pass validation."
+    return message
+
+
+def _ai_query_client_message(exc: _ClientSafeAIQueryError) -> str:
+    """Resolve only locally issued AI error codes to approved static text."""
+    message = _AI_QUERY_CLIENT_MESSAGES.get(exc.client_code)
+    if message is None:
+        log_error(
+            "Reporting AI query failed with an unrecognized client-safe code",
+            error_type=type(exc).__name__,
+        )
+        return "The AI query request could not be completed."
+    return message
 
 
 def _reporting_user_label(record: Any) -> str:
@@ -456,9 +506,7 @@ async def admin_reporting_ai_query(request: Request):
         if response.get("status") in {"error", "failed", "skipped"}:
             reason = response.get("last_error") or response.get("reason")
             if response.get("status") == "skipped" and reason is None:
-                raise _ClientSafeAIQueryError(
-                    "The configured LLM module did not generate a query."
-                )
+                raise _ClientSafeAIQueryError("module_no_query")
             safe_reason = _approved_ai_query_module_reason(reason)
             if safe_reason:
                 raise _ClientSafeAIQueryError(safe_reason)
@@ -471,10 +519,14 @@ async def admin_reporting_ai_query(request: Request):
             raise _AIQueryModuleFailure("module failure")
         sql, summary = report_query_builder.extract_ai_sql(response)
         if not sql:
-            raise _ClientSafeAIQueryError("The configured LLM returned no SQL query.")
+            raise _ClientSafeAIQueryError("response_no_query")
         sql = reporting_service.validate_select_query(sql)
-    except (reporting_service.ReportingQueryError, _ClientSafeAIQueryError) as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
+    except reporting_service.ReportingQueryError as exc:
+        return JSONResponse(
+            {"error": _reporting_query_client_message(exc)}, status_code=400
+        )
+    except _ClientSafeAIQueryError as exc:
+        return JSONResponse({"error": _ai_query_client_message(exc)}, status_code=400)
     except _AIQueryModuleFailure:
         return JSONResponse(
             {
