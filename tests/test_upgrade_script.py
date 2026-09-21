@@ -96,6 +96,7 @@ def test_upload_storage_is_seeded_without_removing_legacy_data():
     assert 'mv "$legacy"' not in function
     assert 'install -d -m 0750 -o myportal -g myportal' in function
     assert 'chown -R myportal:myportal "$shared"' in function
+    assert 'find "$shared" -type d -exec chmod u+rwx {} +' in function
 
 
 def test_release_upload_paths_point_to_persistent_shared_storage():
@@ -106,6 +107,37 @@ def test_release_upload_paths_point_to_persistent_shared_storage():
     assert '"${release}/private_uploads"' in function
     assert '"${release}/app/static/uploads"' in function
     assert function.count("ln -s") == 2
+    assert 'chown -h myportal:myportal' in function
+
+
+def test_release_uploads_are_validated_before_service_startup():
+    validation = SCRIPT[
+        SCRIPT.index("validate_release_uploads() {") : SCRIPT.index("\nrelease_runtime_ready()")
+    ]
+    prepare = SCRIPT[SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")]
+
+    assert '[[ ! -L "$path"' in validation
+    assert 'readlink -f "$path"' in validation
+    assert 'runuser --user myportal -- test -w "$path"' in validation
+    assert prepare.count('validate_release_uploads "$release"') == 2
+
+
+def test_assigned_legacy_releases_are_repaired_before_migration_and_service_start():
+    repair = SCRIPT[
+        SCRIPT.index("repair_assigned_release_uploads() {") : SCRIPT.index("\nrelease_runtime_ready()")
+    ]
+
+    assert 'for instance in blue green' in repair
+    assert 'cp -a -n "$path"/. "$expected"/' in repair
+    assert 'ln -s "$expected" "$path"' in repair
+    assert 'chown -h myportal:myportal "$path"' in repair
+    assert '-type d -exec chmod u+rwx {} +' in repair
+    assert 'validate_release_uploads "$release"' in repair
+
+    invoke = SCRIPT.index("\nrepair_assigned_release_uploads\n")
+    migration = SCRIPT.index('run_migration_phase "$RELEASE_DIR"', invoke)
+    install_unit = SCRIPT.index('install_blue_green_service_unit "$RELEASE_DIR"', invoke)
+    assert invoke < migration < install_unit
 
 
 def test_release_uploads_are_validated_before_service_startup():

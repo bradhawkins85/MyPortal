@@ -229,13 +229,12 @@ prepare_shared_uploads() {
       if [[ -d "$legacy" ]]; then
         cp -a "$legacy"/. "$shared"/
       fi
-      chown -R myportal:myportal "$shared"
-    else
-      # Repair ownership left by interrupted deployments or legacy data copies.
-      # Import-time directory creation (for example private_uploads/shop) must
-      # work before the application can answer its readiness probe.
-      chown -R myportal:myportal "$shared"
     fi
+    # Repair both ownership and owner permissions left by immutable-release
+    # preparation or interrupted legacy deployments. chown alone does not make
+    # a root-created 0555 directory writable by its new owner.
+    chown -R myportal:myportal "$shared"
+    find "$shared" -type d -exec chmod u+rwx {} +
   done
 }
 
@@ -245,6 +244,55 @@ link_shared_uploads() {
   rm -rf "${release}/private_uploads" "${release}/app/static/uploads"
   ln -s "${SHARED_ROOT}/private_uploads" "${release}/private_uploads"
   ln -s "${SHARED_ROOT}/uploads" "${release}/app/static/uploads"
+  # The target is the writable data store, but keep the link metadata owned by
+  # the service account as well so ownership checks do not report these paths
+  # as root-owned. -h prevents chown from dereferencing the links.
+  chown -h myportal:myportal "${release}/private_uploads" "${release}/app/static/uploads"
+}
+
+validate_release_uploads() {
+  local release="$1" path expected
+  while IFS='|' read -r path expected; do
+    if [[ ! -L "$path" || "$(readlink -f "$path" 2>/dev/null || true)" != "$expected" ]]; then
+      echo "Release upload path is not linked to persistent storage: ${path}" >&2
+      return 1
+    fi
+    if ! runuser --user myportal -- test -w "$path"; then
+      echo "Release upload path is not writable by the myportal service account: ${path}" >&2
+      return 1
+    fi
+  done <<EOF
+${release}/private_uploads|${SHARED_ROOT}/private_uploads
+${release}/app/static/uploads|${SHARED_ROOT}/uploads
+EOF
+}
+
+repair_assigned_release_uploads() {
+  local instance release path expected
+  for instance in blue green; do
+    release=$(readlink -f "${INSTANCE_ROOT}/${instance}" 2>/dev/null || true)
+    [[ -n "$release" && -d "$release" && "$release" != "$RELEASE_DIR" ]] || continue
+
+    chmod u+w "$release" "${release}/app" "${release}/app/static"
+    while IFS='|' read -r path expected; do
+      if [[ -d "$path" && ! -L "$path" ]]; then
+        # Releases made by the older updater stored uploads locally. Preserve
+        # files that are not already in shared storage before replacing the
+        # directory; -n prevents an old slot overwriting newer shared files.
+        cp -a -n "$path"/. "$expected"/
+      fi
+      rm -rf "$path"
+      ln -s "$expected" "$path"
+      chown -h myportal:myportal "$path"
+    done <<EOF
+${release}/private_uploads|${SHARED_ROOT}/private_uploads
+${release}/app/static/uploads|${SHARED_ROOT}/uploads
+EOF
+    chown -R myportal:myportal "${SHARED_ROOT}/private_uploads" "${SHARED_ROOT}/uploads"
+    find "${SHARED_ROOT}/private_uploads" "${SHARED_ROOT}/uploads" -type d -exec chmod u+rwx {} +
+    make_release_service_readable "$release"
+    validate_release_uploads "$release"
+  done
 }
 
 validate_release_uploads() {
