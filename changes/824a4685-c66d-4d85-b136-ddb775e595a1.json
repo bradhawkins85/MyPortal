@@ -1,0 +1,7 @@
+{
+  "guid": "824a4685-c66d-4d85-b136-ddb775e595a1",
+  "occurred_at": "2026-09-21T00:00:00Z",
+  "change_type": "fixed",
+  "summary": "Deploy updates as immutable blue/green releases with version-gated cutover and automatic rollback.",
+  "content_hash": "immutable-blue-green-releases"
+}

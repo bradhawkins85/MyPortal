@@ -1,97 +1,48 @@
 from pathlib import Path
 
 
-def test_upgrade_script_prefers_project_virtualenv():
-    script_path = Path(__file__).resolve().parents[1] / "scripts" / "upgrade.sh"
-    contents = script_path.read_text()
-    assert 'VENV_DIR="${PROJECT_ROOT}/.venv"' in contents
-    assert '"${VENV_DIR}/bin/python"' in contents
-    assert '"${VENV_DIR}/Scripts/python.exe"' in contents
-    assert 'command -v python3' in contents and 'command -v python' in contents
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = (ROOT / "scripts/upgrade.sh").read_text()
 
 
-def test_upgrade_script_supports_explicit_modes_and_env_default():
-    script_path = Path(__file__).resolve().parents[1] / "scripts" / "upgrade.sh"
-    contents = script_path.read_text()
-
-    assert "--graceful" in contents
-    assert "--rolling" in contents
-    assert "--restart" in contents
-    assert "APP_UPGRADE_MODE" in contents
-    assert "resolve_requested_upgrade_mode()" in contents
-    assert "resolve_effective_upgrade_mode()" in contents
+def test_upgrade_prepares_revision_without_mutating_control_checkout():
+    assert 'git fetch --quiet origin main' in SCRIPT
+    assert 'git archive "$revision"' in SCRIPT
+    assert 'RELEASE_DIR="${RELEASE_ROOT}/${TARGET_REVISION}"' in SCRIPT
+    assert "git pull" not in SCRIPT
+    assert "git restore" not in SCRIPT
+    assert "chown -R" not in SCRIPT
 
 
-def test_upgrade_script_records_upgrade_status():
-    script_path = Path(__file__).resolve().parents[1] / "scripts" / "upgrade.sh"
-    contents = script_path.read_text()
-
-    assert "system_update.status" in contents
-    assert "write_upgrade_status()" in contents
-    assert "ready_wait_seconds=" in contents
+def test_release_has_private_dependencies_and_shared_mutable_state():
+    assert 'python3 -m venv "${release}/.venv"' in SCRIPT
+    assert 'ln -s "$SHARED_ROOT" "$staging/var"' in SCRIPT
+    assert 'find "$staging" -type f -exec chmod a-w' in SCRIPT
 
 
-def test_upgrade_script_installs_dependencies_on_update():
-    script_path = Path(__file__).resolve().parents[1] / "scripts" / "upgrade.sh"
-    contents = script_path.read_text()
-
-    assert "install_dependencies()" in contents
-    assert 'pip install --upgrade "$PROJECT_ROOT"' in contents
-
-    lines = contents.splitlines()
-    in_change_block = False
-    install_after_update = False
-    for line in lines:
-        stripped = line.strip()
-        if 'if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then' in stripped:
-            in_change_block = True
-        if in_change_block and stripped == "install_dependencies":
-            install_after_update = True
-            break
-    assert install_after_update
+def test_cutover_checks_expected_version_before_nginx_switch():
+    version_check = SCRIPT.index('wait_for_version "$(instance_port "$inactive")" "$revision"')
+    smoke = SCRIPT.index('smoke_test "$(instance_port "$inactive")" "$revision"')
+    cutover = SCRIPT.index('write_upstream "$inactive" "$active"')
+    assert version_check < smoke < cutover
+    assert "nginx -t" in SCRIPT
 
 
-def test_upgrade_script_installs_dependencies_on_force_restart():
-    script_path = Path(__file__).resolve().parents[1] / "scripts" / "upgrade.sh"
-    contents = script_path.read_text()
-
-    lines = contents.splitlines()
-    in_force_block = False
-    install_in_force = False
-    for line in lines:
-        stripped = line.strip()
-        if 'elif [[ "$FORCE_RESTART" == "1" ]]; then' in stripped:
-            in_force_block = True
-        if in_force_block and stripped == "install_dependencies":
-            install_in_force = True
-            break
-    assert install_in_force
+def test_failure_rolls_back_links_and_upstream():
+    assert "rollback()" in SCRIPT
+    assert 'trap \'rollback "$active" "$inactive" "$old_inactive"\' ERR' in SCRIPT
+    assert 'write_upstream "$old_active" "$new_instance"' in SCRIPT
+    assert 'atomic_link "$PREVIOUS_RELEASE" "$CURRENT_LINK"' in SCRIPT
 
 
-def test_upgrade_script_skips_restart_for_feature_pack_only_diff():
-    script_path = Path(__file__).resolve().parents[1] / "scripts" / "upgrade.sh"
-    contents = script_path.read_text()
-
-    assert "FEATURE_PACK_DIFF_SLUGS" in contents
-    assert "git diff --name-only" in contents
-    assert "app/features/" in contents
-    assert "feature_pack_reload.flag" in contents
-    assert "Feature pack hot-reload scheduled" in contents
-    assert 'if [[ "$FORCE_RESTART" != "1" ]]; then' in contents
+def test_drain_stops_new_work_before_waiting_for_inflight_requests():
+    cutover = SCRIPT.index('write_upstream "$inactive" "$active"')
+    drain = SCRIPT.index('sleep "$DRAIN_SECONDS"', cutover)
+    current = SCRIPT.index('atomic_link "$release" "$CURRENT_LINK"', drain)
+    assert cutover < drain < current
 
 
-def test_upgrade_script_promotes_sensitive_changes_to_restart():
-    script_path = Path(__file__).resolve().parents[1] / "scripts" / "upgrade.sh"
-    contents = script_path.read_text()
-
-    assert "dependency_manifest_changed|destructive_migration_phase" in contents
-    assert "printf '%s' \"restart\"" in contents
-
-
-def test_upgrade_script_refuses_untrusted_or_credentialed_remotes():
-    script_path = Path(__file__).resolve().parents[1] / "scripts" / "upgrade.sh"
-    contents = script_path.read_text()
-
-    assert "validate_origin_remote()" in contents
-    assert "https://github.com/*|git@github.com:*|ssh://git@github.com/*" in contents
-    assert "credential-bearing HTTPS remotes" in contents
+def test_remote_validation_rejects_untrusted_and_embedded_credentials():
+    assert "validate_origin_remote()" in SCRIPT
+    assert "https://github.com/*|git@github.com:*|ssh://git@github.com/*" in SCRIPT
+    assert "credential-bearing HTTPS remotes" in SCRIPT
