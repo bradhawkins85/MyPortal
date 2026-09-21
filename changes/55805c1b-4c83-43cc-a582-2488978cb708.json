@@ -1,0 +1,7 @@
+{
+  "guid": "55805c1b-4c83-43cc-a582-2488978cb708",
+  "occurred_at": "2026-09-21T23:29Z",
+  "change_type": "Fix",
+  "summary": "Make blue/green upgrades repair dependency-layer permissions, verify the restarted slot process, and report precise version failures.",
+  "content_hash": "cce1967befd968bae33cee305fb9673109a4b62a2db3d8fa4d09d0f83dba6246"
+}

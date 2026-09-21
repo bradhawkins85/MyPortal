@@ -217,7 +217,7 @@ read_active() {
 }
 
 wait_for_version() {
-  local port="$1" expected="$2" elapsed=0 body="" reported="<unavailable>" last_body="no response"
+  local port="$1" expected="$2" elapsed=0 body="" reported="<unavailable>" last_body="no response" failure="no_response"
   local endpoint="http://127.0.0.1:${port}/readyz"
   while ((elapsed < READY_TIMEOUT)); do
     # Startup can make the readiness handler slower than its steady-state
@@ -225,7 +225,10 @@ wait_for_version() {
     # Allow an individual request enough time to finish while retaining the
     # outer retry window for connection-refused and not-ready responses.
     body=$(curl -fsS --max-time "$READY_REQUEST_TIMEOUT" "$endpoint" 2>/dev/null || true)
-    [[ -n "$body" ]] && last_body="$body"
+    if [[ -n "$body" ]]; then
+      last_body="$body"
+      failure="bad_release_metadata"
+    fi
     reported=$(python3 -c 'import json,sys
 try:
     payload=json.loads(sys.argv[1])
@@ -234,6 +237,9 @@ except (json.JSONDecodeError, TypeError):
 else:
     print(payload.get("version", "<missing>") if isinstance(payload, dict) else "<invalid-response>")
 ' "$body")
+    if [[ "$reported" != "<invalid-or-empty-response>" && "$reported" != "<invalid-response>" && "$reported" != "<missing>" ]]; then
+      failure="stale_version"
+    fi
     if python3 -c 'import json,sys
 try:
     payload=json.loads(sys.argv[1])
@@ -247,10 +253,55 @@ raise SystemExit(not (payload.get("status") == "ok" and payload.get("version") =
     fi
     sleep 1; ((elapsed+=1))
   done
-  echo "Instance version verification failed: endpoint=${endpoint} expected=${expected} reported=${reported}" >&2
+  echo "Instance version verification failed: cause=${failure} endpoint=${endpoint} expected=${expected} reported=${reported}" >&2
   echo "last readiness response: ${last_body}" >&2
   echo "Verification command: curl -fsS --max-time ${READY_REQUEST_TIMEOUT} ${endpoint}" >&2
   return 1
+}
+
+restart_instance_on_release() {
+  local instance="$1" release="$2" port assigned pid process_release attempts=0
+  port=$(instance_port "$instance")
+  assigned=$(readlink -f "$INSTANCE_ROOT/$instance" 2>/dev/null || true)
+  if [[ "$assigned" != "$release" ]]; then
+    echo "Instance restart failed: cause=wrong_instance_target instance=${instance} expected=${release} assigned=${assigned:-<missing>}" >&2
+    return 1
+  fi
+
+  # A plain restart can overlap with orphaned or asynchronously stopping
+  # workers. Stop first and prove that the slot's port is no longer served;
+  # otherwise an old worker can satisfy readiness with a stale revision.
+  if ! systemctl stop "myportal@${instance}.service"; then
+    echo "Instance restart failed: cause=failed_restart phase=stop instance=${instance}" >&2
+    return 1
+  fi
+  if curl -fsS --max-time 2 "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1; then
+    echo "Instance restart failed: cause=stale_listener instance=${instance} port=${port}; an unmanaged process is still serving the slot" >&2
+    return 1
+  fi
+  if ! systemctl start "myportal@${instance}.service"; then
+    echo "Instance restart failed: cause=failed_restart phase=start instance=${instance}" >&2
+    systemctl status --no-pager "myportal@${instance}.service" >&2 || true
+    return 1
+  fi
+  if ! systemctl is-active --quiet "myportal@${instance}.service"; then
+    echo "Instance restart failed: cause=failed_restart phase=inactive_after_start instance=${instance}" >&2
+    systemctl status --no-pager "myportal@${instance}.service" >&2 || true
+    return 1
+  fi
+
+  while ((attempts < 5)); do
+    pid=$(systemctl show --property MainPID --value "myportal@${instance}.service")
+    process_release=$(readlink -f "/proc/${pid}/cwd" 2>/dev/null || true)
+    [[ -n "$pid" && "$pid" != 0 && "$process_release" == "$release" ]] && break
+    sleep 1
+    ((attempts+=1))
+  done
+  if [[ -z "$pid" || "$pid" == 0 || "$process_release" != "$release" ]]; then
+    echo "Instance restart failed: cause=wrong_instance_target instance=${instance} expected=${release} pid=${pid:-<missing>} process_release=${process_release:-<unavailable>}" >&2
+    return 1
+  fi
+  echo "Started ${instance} from ${process_release} (pid=${pid}, port=${port})." >&2
 }
 
 smoke_test() {
@@ -261,6 +312,17 @@ smoke_test() {
   wait_for_version "$port" "$expected"
 }
 
+make_dependency_layer_service_readable() {
+  local layer="$1"
+  [[ -d "$layer" ]] || return 1
+  # The upgrade runs as root under umask 027, while systemd runs the release as
+  # myportal. The release's .venv is a symlink into this shared layer, so
+  # hardening only the release tree does not make its interpreter executable.
+  chmod a+rx "${SHARED_ROOT}/dependency-layers" "$layer"
+  find "$layer" -type d -exec chmod a+rx,a-w {} +
+  find "$layer" -type f -exec chmod a+rX,a-w {} +
+}
+
 install_dependencies() {
   local release="$1" key layer staging start=$SECONDS
   local lock="${release}/requirements.lock"
@@ -269,6 +331,10 @@ install_dependencies() {
   key=$(printf '%s' "$key" | sha256sum | awk '{print $1}')
   layer="${SHARED_ROOT}/dependency-layers/${key}"
   mkdir -p "${SHARED_ROOT}/dependency-layers"
+  # Repair cached layers created by older upgrades before testing or reusing
+  # them. Root being able to execute Python did not prove the service user
+  # could traverse and execute the symlink target.
+  [[ ! -d "$layer" ]] || make_dependency_layer_service_readable "$layer"
   if [[ -x "${layer}/bin/python" && -f "${layer}/.verified" ]] && \
      (cd "$release" && "${layer}/bin/python" -m pip check >/dev/null && "${layer}/bin/python" -c 'import uvicorn'); then
     ln -s "$layer" "${release}/.venv"
@@ -285,6 +351,7 @@ install_dependencies() {
   (cd "$release" && "$staging/bin/python" -m pip check && "$staging/bin/python" -c 'import uvicorn')
   printf '%s\n' "$key" >"$staging/.verified"
   mv "$staging" "$layer"
+  make_dependency_layer_service_readable "$layer"
   ln -s "$layer" "${release}/.venv"
   record_step dependency_layer miss "lock_or_interpreter_${key}" "$((SECONDS-start))"
 }
@@ -480,9 +547,19 @@ EOF
 release_runtime_ready() {
   local release="$1"
   [[ -x "${release}/.venv/bin/python" ]] || return 1
-  # The systemd unit launches uvicorn as a module through this interpreter and
-  # deliberately does not depend on a generated console-script shebang.
-  "${release}/.venv/bin/python" -c 'import uvicorn' >/dev/null 2>&1
+  # Validate as the same unprivileged account used by systemd. A root-only
+  # dependency layer passes an ordinary -x/import check but fails ExecStart
+  # with status 126 (permission denied).
+  runuser --user myportal -- "${release}/.venv/bin/python" -c 'import uvicorn' >/dev/null 2>&1
+}
+
+validate_release_metadata() {
+  local revision="$1" release="$2" recorded
+  recorded=$(tr -d '\r\n' <"$release/version.txt" 2>/dev/null || true)
+  if [[ ! "$revision" =~ ^[0-9a-f]{40}$ || "${release##*/}" != "$revision" || "$recorded" != "$revision" ]]; then
+    echo "Release preparation failed: cause=bad_release_metadata release=${release} expected=${revision} recorded=${recorded:-<missing>}" >&2
+    return 1
+  fi
 }
 
 prepare_release() {
@@ -522,6 +599,11 @@ prepare_release() {
     # retrying their service startup.
     make_release_service_readable "$release"
     validate_release_uploads "$release"
+    validate_release_metadata "$revision" "$release"
+    if ! release_runtime_ready "$release"; then
+      echo "Release preparation failed: cause=runtime_not_executable_by_service_user release=${release} interpreter=${release}/.venv/bin/python" >&2
+      return 1
+    fi
     return 0
   fi
   rm -rf "$staging"; mkdir -p "$staging"
@@ -547,6 +629,11 @@ prepare_release() {
   fi
   make_release_service_readable "$release"
   validate_release_uploads "$release"
+  validate_release_metadata "$revision" "$release"
+  if ! release_runtime_ready "$release"; then
+    echo "Release preparation failed: cause=runtime_not_executable_by_service_user release=${release} interpreter=${release}/.venv/bin/python" >&2
+    return 1
+  fi
 }
 
 run_release_manage() {
@@ -599,7 +686,7 @@ run_rolling_restart() {
 
   # Only the non-serving slot changes during preparation and validation.
   atomic_link "$release" "$INSTANCE_ROOT/$inactive"
-  systemctl restart "myportal@${inactive}.service"
+  restart_instance_on_release "$inactive" "$release"
   wait_for_version "$(instance_port "$inactive")" "$revision"
   smoke_test "$(instance_port "$inactive")" "$revision"
 

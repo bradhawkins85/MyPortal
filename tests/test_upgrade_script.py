@@ -235,6 +235,44 @@ def test_preparation_uses_verified_dependency_cache_and_reports_decision():
     assert 'record_step dependency_layer miss' in install
 
 
+def test_dependency_layer_is_traversable_and_executable_by_service_user(tmp_path):
+    function = SCRIPT[
+        SCRIPT.index("make_dependency_layer_service_readable() {") : SCRIPT.index(
+            "\ninstall_dependencies()"
+        )
+    ]
+    shared = tmp_path / "shared"
+    layer = shared / "dependency-layers" / "fixture"
+    python = layer / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\nexit 0\n")
+    shared.chmod(0o755)
+    (shared / "dependency-layers").chmod(0o700)
+    layer.chmod(0o700)
+    python.parent.chmod(0o700)
+    python.chmod(0o700)
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -Eeuo pipefail\n"
+            + function
+            + '\nmake_dependency_layer_service_readable "$LAYER"',
+        ],
+        text=True,
+        capture_output=True,
+        env={**os.environ, "SHARED_ROOT": str(shared), "LAYER": str(layer)},
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (shared / "dependency-layers").stat().st_mode & 0o005 == 0o005
+    assert layer.stat().st_mode & 0o005 == 0o005
+    assert python.parent.stat().st_mode & 0o005 == 0o005
+    assert python.stat().st_mode & 0o005 == 0o005
+
+
 def test_dependency_cache_hit_and_invalid_layer_fallback(tmp_path):
     functions = SCRIPT[
         SCRIPT.index("record_step() {") : SCRIPT.index("\ninstall_blue_green_service_unit()")
@@ -355,8 +393,15 @@ def test_runtime_validation_uses_release_python_module_import():
         SCRIPT.index("release_runtime_ready() {") : SCRIPT.index("\nprepare_release()")
     ]
 
-    assert '"${release}/.venv/bin/python" -c \'import uvicorn\'' in function
+    assert 'runuser --user myportal -- "${release}/.venv/bin/python" -c \'import uvicorn\'' in function
     assert '.venv/bin/uvicorn' not in function
+
+
+def test_preparation_rejects_runtime_the_service_user_cannot_execute():
+    prepare = SCRIPT[SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")]
+
+    assert prepare.count('if ! release_runtime_ready "$release"; then') == 3
+    assert prepare.count("cause=runtime_not_executable_by_service_user") == 2
 
 
 def test_systemd_launches_uvicorn_as_module_without_console_script_shebang():
@@ -605,10 +650,39 @@ def test_version_check_failure_reports_endpoint_expected_and_reported(tmp_path):
     )
 
     assert result.returncode != 0
+    assert "cause=stale_version" in result.stderr
     assert "endpoint=http://127.0.0.1:8001/readyz" in result.stderr
     assert "expected=target-revision" in result.stderr
     assert "reported=repository-timestamp" in result.stderr
     assert "curl -fsS --max-time 10 http://127.0.0.1:8001/readyz" in result.stderr
+
+
+def test_version_check_distinguishes_no_response_from_stale_version(tmp_path):
+    result = _run_version_check(tmp_path, "")
+
+    assert result.returncode != 0
+    assert "cause=no_response" in result.stderr
+    assert "reported=<invalid-or-empty-response>" in result.stderr
+
+
+def test_inactive_slot_is_stopped_and_verified_against_assigned_release():
+    restart = SCRIPT[
+        SCRIPT.index("restart_instance_on_release() {") : SCRIPT.index("\nsmoke_test()")
+    ]
+
+    assert 'readlink -f "$INSTANCE_ROOT/$instance"' in restart
+    assert 'cause=wrong_instance_target' in restart
+    stop = restart.index('systemctl stop "myportal@${instance}.service"')
+    stale_listener = restart.index("cause=stale_listener", stop)
+    start = restart.index('systemctl start "myportal@${instance}.service"', stale_listener)
+    process_release = restart.index('readlink -f "/proc/${pid}/cwd"', start)
+    assert stop < stale_listener < start < process_release
+
+    rolling = SCRIPT[SCRIPT.index("run_rolling_restart() {") : SCRIPT.index("\nrun_migration_phase()")]
+    link = rolling.index('atomic_link "$release" "$INSTANCE_ROOT/$inactive"')
+    restart_call = rolling.index('restart_instance_on_release "$inactive" "$release"')
+    readiness = rolling.index('wait_for_version "$(instance_port "$inactive")" "$revision"')
+    assert link < restart_call < readiness
 
 
 def test_version_check_allows_slow_startup_readiness_responses():
