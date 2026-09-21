@@ -95,16 +95,49 @@ def test_upload_storage_is_seeded_without_removing_legacy_data():
     assert 'rm -rf "$legacy"' not in function
     assert 'mv "$legacy"' not in function
     assert 'install -d -m 0750 -o myportal -g myportal' in function
+    assert 'chown -R myportal:myportal "$shared"' in function
+    assert 'find "$shared" -type d -exec chmod u+rwx {} +' in function
 
 
 def test_release_upload_paths_point_to_persistent_shared_storage():
     function = SCRIPT[
-        SCRIPT.index("link_shared_uploads() {") : SCRIPT.index("\nrelease_runtime_ready()")
+        SCRIPT.index("link_shared_uploads() {") : SCRIPT.index("\nvalidate_release_uploads()")
     ]
 
     assert '"${release}/private_uploads"' in function
     assert '"${release}/app/static/uploads"' in function
     assert function.count("ln -s") == 2
+    assert 'chown -h myportal:myportal' in function
+
+
+def test_release_uploads_are_validated_before_service_startup():
+    validation = SCRIPT[
+        SCRIPT.index("validate_release_uploads() {") : SCRIPT.index("\nrelease_runtime_ready()")
+    ]
+    prepare = SCRIPT[SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")]
+
+    assert '[[ ! -L "$path"' in validation
+    assert 'readlink -f "$path"' in validation
+    assert 'runuser --user myportal -- test -w "$path"' in validation
+    assert prepare.count('validate_release_uploads "$release"') == 2
+
+
+def test_assigned_legacy_releases_are_repaired_before_migration_and_service_start():
+    repair = SCRIPT[
+        SCRIPT.index("repair_assigned_release_uploads() {") : SCRIPT.index("\nrelease_runtime_ready()")
+    ]
+
+    assert 'for instance in blue green' in repair
+    assert 'cp -a -n "$path"/. "$expected"/' in repair
+    assert 'ln -s "$expected" "$path"' in repair
+    assert 'chown -h myportal:myportal "$path"' in repair
+    assert '-type d -exec chmod u+rwx {} +' in repair
+    assert 'validate_release_uploads "$release"' in repair
+
+    invoke = SCRIPT.index("\nrepair_assigned_release_uploads\n")
+    migration = SCRIPT.index('run_migration_phase "$RELEASE_DIR"', invoke)
+    install_unit = SCRIPT.index('install_blue_green_service_unit "$RELEASE_DIR"', invoke)
+    assert invoke < migration < install_unit
 
 
 def test_release_permissions_allow_unprivileged_service_to_read_and_traverse(tmp_path):
@@ -184,6 +217,28 @@ def test_systemd_launches_uvicorn_as_module_without_console_script_shebang():
 
     assert '"$$release/.venv/bin/python" -m uvicorn' in unit
     assert '"$$release/.venv/bin/uvicorn"' not in unit
+
+
+def test_systemd_rejects_duplicate_service_suffix_with_actionable_error():
+    unit = (ROOT / "deploy/systemd/myportal@.service").read_text()
+
+    assert "Invalid MyPortal instance %i" in unit
+    assert "one .service suffix" in unit
+    assert "exit 64" in unit
+
+
+def test_upgrade_removes_malformed_duplicate_suffix_instances():
+    install = SCRIPT[
+        SCRIPT.index("install_blue_green_service_unit() {") : SCRIPT.index(
+            "\nmake_release_service_readable()"
+        )
+    ]
+
+    assert "systemctl disable --now myportal@blue.service.service myportal@green.service.service" in install
+    assert "systemctl reset-failed myportal@blue.service.service myportal@green.service.service" in install
+    assert install.index("systemctl disable --now") < install.index(
+        "systemctl enable myportal@blue.service myportal@green.service"
+    )
 
 
 def test_systemd_does_not_mask_shared_upload_symlinks_as_read_only():
