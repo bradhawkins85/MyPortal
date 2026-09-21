@@ -1,0 +1,7 @@
+{
+  "guid": "6f80791e-bd52-4a92-a563-fbad3328b4a1",
+  "occurred_at": "2026-09-21T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added reporting catalogue entries for every stat strip across MyPortal.",
+  "content_hash": "stat-strip-reporting-catalogue"
+}
