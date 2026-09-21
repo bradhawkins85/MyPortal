@@ -4,18 +4,22 @@
 
   const grid = app.querySelector('[data-dashboard-grid]');
   const source = app.querySelector('[data-dashboard-source]');
-  const toolbar = app.querySelector('[data-dashboard-toolbar]');
   const dialog = document.querySelector('[data-dashboard-builder]');
   const builderForm = dialog?.querySelector('form');
   const file = document.querySelector('[data-dashboard-file]');
   let state;
   let catalog;
   let editable = false;
+  let canEdit = false;
   let canAssign = false;
   let dragged;
   let editingId = null;
   let dirty = false;
-  const saveButton = app.querySelector('[data-dashboard-save]');
+  const editButton = document.querySelector('[data-dashboard-edit-layout]');
+  const assignButton = document.querySelector('[data-dashboard-assign]');
+  const editActions = Array.from(document.querySelectorAll('[data-dashboard-add], [data-dashboard-import], [data-dashboard-save]'));
+  const saveButton = document.querySelector('[data-dashboard-save]');
+  const exportButton = document.querySelector('[data-dashboard-export]');
 
   const esc = value => String(value ?? '').replace(/[&<>"']/g, character => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -73,13 +77,17 @@
   }
 
   function setToolbarVisibility() {
-    if (!toolbar) return;
-    const buttons = toolbar.querySelectorAll('[data-dashboard-add], [data-dashboard-import], [data-dashboard-export], [data-dashboard-save]');
-    toolbar.hidden = !editable;
-    buttons.forEach(button => {
+    if (editButton) {
+      editButton.hidden = !canEdit;
+      editButton.textContent = editable ? 'Finish Editing' : 'Edit Layout';
+      editButton.setAttribute('aria-pressed', String(editable));
+    }
+    editActions.forEach(button => {
       button.hidden = !editable;
       button.disabled = !editable || (button === saveButton && !dirty);
     });
+    if (exportButton) exportButton.hidden = !canEdit;
+    if (assignButton) assignButton.hidden = !canAssign;
   }
 
   function setDirty(value = true) {
@@ -265,24 +273,13 @@
     try {
       const data = await api('/api/dashboard');
       state = data.layout;
-      editable = data.editable;
+      canEdit = data.editable;
+      editable = false;
       canAssign = data.can_assign_company;
       setToolbarVisibility();
-      if (canAssign && !toolbar.querySelector('[data-dashboard-assign]')) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'button button--secondary';
-        button.dataset.dashboardAssign = '';
-        button.textContent = 'Assign to company';
-        button.addEventListener('click', async () => {
-          const id = prompt('Company ID to receive this layout');
-          if (id) await api(`/api/dashboard/companies/${encodeURIComponent(id)}`, {method: 'PUT', body: JSON.stringify(state)});
-        });
-        toolbar.prepend(button);
-      }
       source.textContent = `${state.title} · ${data.source} layout`;
       // Populate the builder before exposing edit controls for existing panels.
-      if (editable) catalog = await api('/api/dashboard/catalog');
+      if (canEdit) catalog = await api('/api/dashboard/catalog');
       render();
       setDirty(false);
     } catch (error) {
@@ -295,19 +292,28 @@
     state = data.layout;
   }
 
-  app.querySelector('[data-dashboard-save]')?.addEventListener('click', async () => {
+  editButton?.addEventListener('click', () => {
+    editable = !editable;
+    setToolbarVisibility();
+    render();
+  });
+  assignButton?.addEventListener('click', async () => {
+    const id = prompt('Company ID to receive this layout');
+    if (id) await api(`/api/dashboard/companies/${encodeURIComponent(id)}`, {method: 'PUT', body: JSON.stringify(state)});
+  });
+  saveButton?.addEventListener('click', async () => {
     await api('/api/dashboard', {method: 'PUT', body: JSON.stringify(state)});
     source.textContent = `${state.title} · personal layout saved`;
     setDirty(false);
   });
-  app.querySelector('[data-dashboard-export]')?.addEventListener('click', () => {
+  exportButton?.addEventListener('click', () => {
     const anchor = document.createElement('a');
     anchor.href = URL.createObjectURL(new Blob([JSON.stringify(state, null, 2)], {type: 'application/json'}));
     anchor.download = 'myportal-dashboard.json';
     anchor.click();
     URL.revokeObjectURL(anchor.href);
   });
-  app.querySelector('[data-dashboard-import]')?.addEventListener('click', () => file.click());
+  document.querySelector('[data-dashboard-import]')?.addEventListener('click', () => file.click());
   file?.addEventListener('change', async () => {
     try {
       state = JSON.parse(await file.files[0].text());
@@ -318,7 +324,7 @@
       alert(`Invalid dashboard JSON: ${error.message}`);
     }
   });
-  app.querySelector('[data-dashboard-add]')?.addEventListener('click', () => openBuilder());
+  document.querySelector('[data-dashboard-add]')?.addEventListener('click', () => openBuilder());
   builderForm?.elements.type.addEventListener('change', updateBuilderVisibility);
   builderForm?.elements.function.addEventListener('change', updateBuilderVisibility);
   dialog?.querySelector('[data-panel-confirm]').addEventListener('click', async event => {

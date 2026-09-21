@@ -3,22 +3,25 @@
 {% from "macros/mobile.html" import mobile_collapsible %}
 {% block title %}Dashboard{% endblock %}
 {% block header_title %}<span class="header__title-text">Dashboard</span>{% endblock %}
-{% block header_actions %}{{ page_header_actions([]) }}{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions([
+    {"label":"Edit Layout","attrs":{"data-dashboard-edit-layout":"", "hidden":true}},
+    {"label":"Assign To Company","attrs":{"data-dashboard-assign":"", "hidden":true}},
+    {"label":"Add Panel","attrs":{"data-dashboard-add":"", "hidden":true}},
+    {"label":"Import","attrs":{"data-dashboard-import":"", "hidden":true}},
+    {"label":"Export","attrs":{"data-dashboard-export":"", "hidden":true}},
+    {"label":"Save Layout","attrs":{"data-dashboard-save":"", "hidden":true, "disabled":true}}
+  ], menu_id='dashboard-actions-menu') }}
+{% endblock %}
 {% block content %}
 <section class="dashboard-workspace" data-dashboard-app>
   <header class="dashboard-hero">
     <div><p class="dashboard-hero__eyebrow">Workspace overview</p><h1>Your dashboard</h1><p>Live company insights, shortcuts and automation data in one flexible view.</p></div>
-    <div class="dashboard-toolbar" data-dashboard-toolbar hidden>
-      <button class="button button--secondary" type="button" data-dashboard-add>Add panel</button>
-      <button class="button button--secondary" type="button" data-dashboard-import>Import</button>
-      <button class="button button--secondary" type="button" data-dashboard-export>Export</button>
-      <button class="button" type="button" data-dashboard-save disabled>Save layout</button>
-    </div>
   </header>
   <div class="dashboard-context"><span class="dashboard-context__dot"></span><span data-dashboard-source>Loading dashboard…</span></div>
   <div class="u-only-mobile">
     {% call mobile_collapsible('Dashboard help', open=False, id='dashboard-help-mobile') %}
-      <p class="text-muted">Use the dashboard actions toolbar to add, import, export, or save panels when it becomes available.</p>
+      <p class="text-muted">Use the top-right Actions menu to edit the layout, add panels, import or export a layout, and save changes.</p>
     {% endcall %}
   </div>
   <div class="dashboard-grid" data-dashboard-grid aria-live="polite"><div class="dashboard-loading">Loading your panels…</div></div>

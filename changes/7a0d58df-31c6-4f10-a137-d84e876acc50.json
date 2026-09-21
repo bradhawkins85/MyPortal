@@ -1,0 +1,7 @@
+{
+  "guid": "7a0d58df-31c6-4f10-a137-d84e876acc50",
+  "occurred_at": "2026-09-21T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Moved dashboard layout controls into a top-right action menu and added an explicit edit mode that locks panels by default.",
+  "content_hash": "dashboard-header-actions-edit-mode"
+}
