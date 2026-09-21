@@ -3073,6 +3073,10 @@ async def list_quote_items(quote_number: str, company_id: int) -> list[dict[str,
             p.stock_vic,
             p.stock_sa,
             p.stock_wa,
+            p.weight,
+            p.length,
+            p.width,
+            p.height,
             IF(c.is_vip = 1 AND p.vip_price IS NOT NULL, p.vip_price, p.price) AS price
         FROM shop_quotes AS q
         INNER JOIN shop_products AS p ON p.id = q.product_id
