@@ -259,6 +259,44 @@ def test_tray_artifacts_are_verified_before_release_preparation():
     assert 'publish_tray_artifacts "$TARGET_REVISION"' in SCRIPT
 
 
+def test_tray_artifact_functions_initialize_revision_before_derived_paths(tmp_path):
+    functions = SCRIPT[
+        SCRIPT.index("record_step() {") : SCRIPT.index("\ninstall_blue_green_service_unit()")
+    ]
+    artifact_root = tmp_path / "artifacts"
+    shared_root = tmp_path / "shared"
+    revision = "fixture-revision"
+    source = artifact_root / revision
+    source.mkdir(parents=True)
+    (source / "REVISION").write_text(revision + "\n")
+    (source / "myportal-tray.msi").write_text("msi fixture\n")
+    (source / "myportal-tray.pkg").write_text("pkg fixture\n")
+    subprocess.run(
+        ["sha256sum", "REVISION", "myportal-tray.msi", "myportal-tray.pkg"],
+        cwd=source,
+        text=True,
+        stdout=(source / "SHA256SUMS").open("w"),
+        check=True,
+    )
+    command = f"""
+set -Eeuo pipefail
+TRAY_ARTIFACT_ROOT={artifact_root!s}
+SHARED_ROOT={shared_root!s}
+STEP_REPORT=''
+{functions}
+validate_tray_artifacts {revision}
+publish_tray_artifacts {revision}
+test "$(readlink "$SHARED_ROOT/published/tray/current")" = "$SHARED_ROOT/published/tray/{revision}"
+"""
+
+    result = subprocess.run(
+        ["bash", "-c", command], text=True, capture_output=True, check=False
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (shared_root / "published" / "tray" / revision / "SHA256SUMS").is_file()
+
+
 def test_restart_does_not_install_or_mutate_dependencies():
     restart = (ROOT / "scripts/restart.sh").read_text()
 
