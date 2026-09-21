@@ -562,6 +562,15 @@ validate_release_metadata() {
   fi
 }
 
+validate_release_metadata() {
+  local revision="$1" release="$2" recorded
+  recorded=$(tr -d '\r\n' <"$release/version.txt" 2>/dev/null || true)
+  if [[ ! "$revision" =~ ^[0-9a-f]{40}$ || "${release##*/}" != "$revision" || "$recorded" != "$revision" ]]; then
+    echo "Release preparation failed: cause=bad_release_metadata release=${release} expected=${revision} recorded=${recorded:-<missing>}" >&2
+    return 1
+  fi
+}
+
 prepare_release() {
   local revision="$1" release="$2" staging
   staging="${release}.staging.$$"
