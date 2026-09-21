@@ -78,9 +78,54 @@ def test_upgrade_prepares_revision_without_mutating_control_checkout():
 def test_release_has_private_dependencies_and_shared_mutable_state():
     assert 'python3 -m venv "${release}/.venv"' in SCRIPT
     assert 'ln -s "$SHARED_ROOT" "$staging/var"' in SCRIPT
-    assert 'find "$staging" -type f -exec chmod a-w' in SCRIPT
+    assert 'find "$release" -type f -exec chmod a+rX,a-w' in SCRIPT
     assert 'ln -s "$ENV_FILE" "$staging/.env"' in SCRIPT
     assert 'ln -sfn "$ENV_FILE" "$release/.env"' in SCRIPT
+    assert 'chmod a+rx "$RELEASE_ROOT" "$INSTANCE_ROOT" "$SHARED_ROOT"' in SCRIPT
+
+
+def test_release_permissions_allow_unprivileged_service_to_read_and_traverse(tmp_path):
+    release = tmp_path / "release"
+    nested = release / "app" / "templates"
+    nested.mkdir(parents=True)
+    module = release / "app" / "main.py"
+    module.write_text("app = object()\n")
+    executable = release / "manage.py"
+    executable.write_text("#!/usr/bin/env python3\n")
+    secret = tmp_path / "myportal.env"
+    secret.write_text("SESSION_SECRET=not-a-real-secret\n")
+    env_link = release / ".env"
+    env_link.symlink_to(secret)
+    release.chmod(0o700)
+    (release / "app").chmod(0o700)
+    nested.chmod(0o700)
+    module.chmod(0o600)
+    executable.chmod(0o700)
+    secret.chmod(0o600)
+    function = SCRIPT[
+        SCRIPT.index("make_release_service_readable() {") : SCRIPT.index("\nprepare_release()")
+    ]
+
+    result = subprocess.run(
+        ["bash", "-c", "set -Eeuo pipefail\n" + function + '\nmake_release_service_readable "$RELEASE"'],
+        text=True,
+        capture_output=True,
+        env={**os.environ, "RELEASE": str(release)},
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert release.stat().st_mode & 0o005 == 0o005
+    assert nested.stat().st_mode & 0o005 == 0o005
+    assert module.stat().st_mode & 0o004 == 0o004
+    assert executable.stat().st_mode & 0o005 == 0o005
+    assert secret.stat().st_mode & 0o077 == 0
+
+
+def test_retry_repairs_release_permissions_before_returning():
+    retry_branch = SCRIPT[SCRIPT.index('if [[ -e "$release" ]]') : SCRIPT.index("return 0", SCRIPT.index('if [[ -e "$release" ]]'))]
+
+    assert 'make_release_service_readable "$release"' in retry_branch
 
 
 def test_atomic_link_runs_with_nounset(tmp_path):

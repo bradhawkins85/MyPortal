@@ -203,18 +203,34 @@ install_blue_green_service_unit() {
   fi
 }
 
+make_release_service_readable() {
+  local release="$1"
+  # Releases are commonly prepared by root with umask 027. The service runs as
+  # the unprivileged myportal user, so every directory must be traversable and
+  # regular files must be readable. Do not follow symlinks: in particular, the
+  # protected environment file must retain its existing permissions.
+  find "$release" -type d -exec chmod a+rx,a-w {} +
+  find "$release" -type f -exec chmod a+rX,a-w {} +
+}
+
 prepare_release() {
   local revision="$1" release="$2" staging
   staging="${release}.staging.$$"
+  mkdir -p "$RELEASE_ROOT" "$INSTANCE_ROOT" "$SHARED_ROOT/state" "$SHARED_ROOT/data"
+  # The service needs to traverse deployment-owned parents to reach both the
+  # instance symlink and its immutable release target.
+  chmod a+rx "$RELEASE_ROOT" "$INSTANCE_ROOT" "$SHARED_ROOT"
   if [[ -e "$release" ]]; then
     # A previous attempt may have prepared this revision with missing or stale
     # configuration. Refresh only the symlink; never copy or regenerate secrets.
     if [[ -f "$ENV_FILE" && "$(readlink "$release/.env" 2>/dev/null || true)" != "$ENV_FILE" ]]; then
       ln -sfn "$ENV_FILE" "$release/.env"
     fi
+    # Repair releases prepared by older upgrade scripts with root-only
+    # traversal permissions before retrying their service startup.
+    make_release_service_readable "$release"
     return 0
   fi
-  mkdir -p "$RELEASE_ROOT" "$SHARED_ROOT/state" "$SHARED_ROOT/data"
   rm -rf "$staging"; mkdir -p "$staging"
   git archive "$revision" | tar -x -C "$staging"
   printf '%s\n' "$revision" >"$staging/version.txt"
@@ -228,8 +244,7 @@ prepare_release() {
   rm -rf "$staging/var"
   ln -s "$SHARED_ROOT" "$staging/var"
   install_dependencies "$staging"
-  find "$staging" -type d -exec chmod a-w {} +
-  find "$staging" -type f -exec chmod a-w {} +
+  make_release_service_readable "$staging"
   mv "$staging" "$release"
 }
 
