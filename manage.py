@@ -5,12 +5,12 @@ import argparse
 import asyncio
 
 from app.core.database import db
-from app.repositories import rag_relationships as rel_repo
-from app.services import rag_relationships as rel_service
-from app.services import rag_index as rag_index_service
 
 
 async def rebuild(args: argparse.Namespace) -> None:
+    from app.services import rag_relationships as rel_service
+    from app.services import rag_index as rag_index_service
+
     await db.connect()
     try:
         await db.run_migrations()

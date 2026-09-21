@@ -3,23 +3,38 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator, Iterable, Any
+import types
 import re
 import hashlib
 import time
 
-import aiomysql
 import aiosqlite
 from loguru import logger
 
 from .config import get_settings
 
+try:
+    import aiomysql
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised in dependency-missing envs
+    aiomysql = None  # type: ignore[assignment]
+    _AIOMYSQL_IMPORT_ERROR = exc
+else:
+    _AIOMYSQL_IMPORT_ERROR = None
+
 
 class Database:
     def __init__(self) -> None:
-        self._pool: aiomysql.Pool | None = None
+        self._pool: Any | None = None
         self._sqlite_conn: aiosqlite.Connection | None = None
         self._settings = get_settings()
         self._use_sqlite = self._should_use_sqlite()
+
+    def _require_aiomysql(self) -> types.ModuleType:
+        if aiomysql is None:
+            raise RuntimeError(
+                "MySQL support requires aiomysql; install project dependencies before running MySQL migrations."
+            ) from _AIOMYSQL_IMPORT_ERROR
+        return aiomysql
 
     def _should_use_sqlite(self) -> bool:
         """Determine if SQLite should be used instead of MySQL.
@@ -130,8 +145,9 @@ class Database:
             await self._sqlite_conn.execute("PRAGMA foreign_keys = ON")
             await self._sqlite_conn.commit()
         else:
+            mysql = self._require_aiomysql()
             logger.info("Connecting to MySQL at {host}", host=self._settings.database_host)
-            self._pool = await aiomysql.create_pool(
+            self._pool = await mysql.create_pool(
                 host=self._settings.database_host,
                 user=self._settings.database_user,
                 password=self._settings.database_password,
@@ -243,8 +259,9 @@ class Database:
             # Convert sqlite3.Row to dict
             return dict(row) if row else None
         else:
+            mysql = self._require_aiomysql()
             async with self.acquire() as conn:
-                async with conn.cursor(aiomysql.DictCursor) as cursor:
+                async with conn.cursor(mysql.DictCursor) as cursor:
                     adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
                     await cursor.execute(adapted_sql, adapted_params)
                     return await cursor.fetchone()
@@ -265,8 +282,9 @@ class Database:
             rows = await cursor.fetchmany(size)
             return [dict(row) for row in rows]
         else:
+            mysql = self._require_aiomysql()
             async with self.acquire() as conn:
-                async with conn.cursor(aiomysql.DictCursor) as cursor:
+                async with conn.cursor(mysql.DictCursor) as cursor:
                     adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
                     await cursor.execute(adapted_sql, adapted_params)
                     return list(await cursor.fetchmany(size))
@@ -280,8 +298,9 @@ class Database:
             # Convert sqlite3.Row objects to dicts
             return [dict(row) for row in rows]
         else:
+            mysql = self._require_aiomysql()
             async with self.acquire() as conn:
-                async with conn.cursor(aiomysql.DictCursor) as cursor:
+                async with conn.cursor(mysql.DictCursor) as cursor:
                     adapted_sql, adapted_params = self._adapt_params_for_mysql(sql, params)
                     await cursor.execute(adapted_sql, adapted_params)
                     return await cursor.fetchall()
@@ -634,10 +653,11 @@ class Database:
         """Run all pending migrations."""
         # For MySQL, ensure database exists
         if not self._use_sqlite:
+            mysql = self._require_aiomysql()
             database_name = self._settings.database_name or ""
             if not re.fullmatch(r"[A-Za-z0-9_]+", database_name):
                 raise RuntimeError("Database name contains unsupported characters")
-            temp_conn = await aiomysql.connect(
+            temp_conn = await mysql.connect(
                 host=self._settings.database_host,
                 user=self._settings.database_user,
                 password=self._settings.database_password,
@@ -693,7 +713,8 @@ class Database:
                     applied_rows = await cursor.fetchall()
                     applied = {dict(row)["name"]: dict(row) for row in applied_rows}
                 else:
-                    async with conn.cursor(aiomysql.DictCursor) as cursor:
+                    mysql = self._require_aiomysql()
+                    async with conn.cursor(mysql.DictCursor) as cursor:
                         await cursor.execute("SELECT name, checksum, state FROM migrations")
                         applied_rows = await cursor.fetchall()
                     applied = {row["name"]: row for row in applied_rows}
