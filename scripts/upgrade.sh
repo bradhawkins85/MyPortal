@@ -216,13 +216,33 @@ read_active() {
 }
 
 wait_for_version() {
-  local port="$1" expected="$2" elapsed=0 body
+  local port="$1" expected="$2" elapsed=0 body="" reported="<unavailable>"
+  local endpoint="http://127.0.0.1:${port}/readyz"
   while ((elapsed < READY_TIMEOUT)); do
-    body=$(curl -fsS --max-time 2 "http://127.0.0.1:${port}/readyz" 2>/dev/null || true)
-    if [[ "$body" == *'"status":"ok"'* && "$body" == *"\"version\":\"${expected}\""* ]]; then return 0; fi
+    body=$(curl -fsS --max-time 2 "$endpoint" 2>/dev/null || true)
+    reported=$(python3 -c 'import json,sys
+try:
+    payload=json.loads(sys.argv[1])
+except (json.JSONDecodeError, TypeError):
+    print("<invalid-or-empty-response>")
+else:
+    print(payload.get("version", "<missing>") if isinstance(payload, dict) else "<invalid-response>")
+' "$body")
+    if python3 -c 'import json,sys
+try:
+    payload=json.loads(sys.argv[1])
+except (json.JSONDecodeError, TypeError):
+    raise SystemExit(1)
+if not isinstance(payload, dict):
+    raise SystemExit(1)
+raise SystemExit(not (payload.get("status") == "ok" and payload.get("version") == sys.argv[2]))
+' "$body" "$expected"; then
+      return 0
+    fi
     sleep 1; ((elapsed+=1))
   done
-  echo "Instance on port ${port} did not report expected version ${expected}" >&2
+  echo "Instance version verification failed: endpoint=${endpoint} expected=${expected} reported=${reported}" >&2
+  echo "Verification command: curl -fsS --max-time 2 ${endpoint}" >&2
   return 1
 }
 
@@ -472,6 +492,12 @@ prepare_release() {
     if [[ -f "$ENV_FILE" && "$(readlink "$release/.env" 2>/dev/null || true)" != "$ENV_FILE" ]]; then
       ln -sfn "$ENV_FILE" "$release/.env"
     fi
+    # A release may already exist after an interrupted attempt, and older
+    # preparations retained the repository's timestamp-style version.txt.
+    # Readiness verification compares against the Git revision, so repair the
+    # generated release metadata before restarting either instance.
+    chmod u+w "$release" "$release/version.txt" 2>/dev/null || true
+    printf '%s\n' "$revision" >"$release/version.txt"
     chmod u+w "$release" "${release}/app" "${release}/app/static"
     link_shared_uploads "$release"
     # Older scripts moved a completed virtualenv from a temporary directory,
