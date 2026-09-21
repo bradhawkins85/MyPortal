@@ -55,3 +55,42 @@ def test_repeated_opening_delimiters_complete_within_time_limit(size):
             == conditional_input
         )
         assert value_templates.render_string(variable_input, {}) == variable_input
+
+
+@pytest.mark.skipif(
+    not _HAS_SIGALRM_TIMEOUT,
+    reason="SIGALRM-based timeout is only available on Unix-like platforms",
+)
+@pytest.mark.parametrize("size", [1000, 2000, 4000])
+@pytest.mark.parametrize("suffix", ["", ">"])
+def test_adversarial_comparisons_complete_within_time_limit(size, suffix):
+    """Scanner-reported ``a/space`` and ``a>/space`` cases remain linear."""
+    expression = "a" + suffix + (" " * size)
+
+    with _time_limit(0.5):
+        assert conditional_expressions.split_comparison(expression) is None
+        assert conditional_expressions._evaluate_condition(expression, {}) is True
+        value_templates._collect_tokens(
+            f"{{{{if {expression} then 'yes' else 'no'}}}}"
+        )
+
+
+def test_comparison_scanner_preserves_operators_and_trims_operands():
+    for operator in (">=", "<=", ">", "<", "==", "!="):
+        assert conditional_expressions.split_comparison(
+            f"  left  {operator}  'right value'  "
+        ) == ("left", operator, "'right value'")
+
+
+@pytest.mark.parametrize("expression", ["> value", "value >", "value ! other"])
+def test_comparison_scanner_rejects_missing_or_malformed_parts(expression):
+    assert conditional_expressions.split_comparison(expression) is None
+
+
+def test_comparison_scanner_rejects_oversized_input_before_scanning():
+    expression = "a" * (conditional_expressions._MAX_CONDITIONAL_LENGTH + 1)
+
+    with pytest.raises(ValueError, match="exceeds 4096 characters"):
+        conditional_expressions.split_comparison(expression)
+    with pytest.raises(ValueError, match="exceeds 4096 characters"):
+        conditional_expressions._evaluate_condition(expression, {})

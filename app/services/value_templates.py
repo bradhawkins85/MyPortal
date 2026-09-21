@@ -65,9 +65,15 @@ def _collect_tokens(value: Any) -> list[str]:
                         if trimmed and not (
                             trimmed.startswith('"') or trimmed.startswith("'")
                         ):
-                            # Split on comparison operators to get left and right sides
-                            comparison_parts = re.split(
-                                r"\s*(>=|<=|>|<|==|!=)\s*", trimmed
+                            # Reuse the bounded linear comparison scanner. The
+                            # conditional parser limits each part to 4096 characters.
+                            comparison = conditional_expressions.split_comparison(
+                                trimmed
+                            )
+                            comparison_parts = (
+                                (comparison[0], comparison[2])
+                                if comparison is not None
+                                else (trimmed,)
                             )
                             for token_candidate in comparison_parts:
                                 candidate = token_candidate.strip()
