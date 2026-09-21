@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'myportal-static-v5';
+const CACHE_VERSION = 'myportal-static-v6';
 const STATIC_CACHE = CACHE_VERSION;
 const PRECACHE_URLS = [
   '/static/css/app.css',
@@ -6,6 +6,7 @@ const PRECACHE_URLS = [
   '/static/js/viewport.js',
   '/static/logo.svg',
   '/static/favicon.svg'
+  ,'/static/upgrade.html'
 ];
 
 self.addEventListener('install', (event) => {
@@ -148,6 +149,15 @@ async function handleNavigationRequest(request) {
     const response = await fetch(request);
     return response;
   } catch (error) {
+    try {
+      const status = await fetch('/upgrade-status', { cache: 'no-store' });
+      if (status.ok && (await status.json()).maintenance) {
+        const upgradePage = await caches.match('/static/upgrade.html');
+        if (upgradePage) return upgradePage;
+      }
+    } catch (_) {
+      // A genuine network outage continues to use the offline response.
+    }
     return OFFLINE_RESPONSE.clone();
   }
 }

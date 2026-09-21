@@ -1,0 +1,7 @@
+{
+  "guid": "df120388-f2ee-4fc7-8fb1-e84929d67295",
+  "occurred_at": "2026-09-21T00:00Z",
+  "change_type": "Feature",
+  "summary": "Add phase-aware upgrade coordination and a resilient maintenance experience.",
+  "content_hash": "dd84819476ab4b5113021e79857a1449758e364c91cf496a7d30e3ff6d76b89b"
+}

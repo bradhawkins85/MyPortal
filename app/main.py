@@ -142,6 +142,7 @@ from app.security.csrf import CSRFMiddleware
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.security.flash import flash_redirect, set_flash
 from app.security.ip_whitelist import IPWhitelistMiddleware
+from app.security.maintenance import MaintenanceMiddleware
 from app.security.rate_limiter import (
     EndpointRateLimiter,
     EndpointRateLimiterMiddleware,
@@ -766,6 +767,13 @@ app.add_middleware(
         # browser session. Requiring CSRF here blocks legitimate automation.
         "/api/staff/workflow-webhooks",
     ),
+)
+
+# Registered last so it runs before authentication, CSRF, rate limiting and
+# database-backed handlers.  This also rejects new writes before worker drain.
+app.add_middleware(
+    MaintenanceMiddleware,
+    page_path=str(Path(__file__).parent / "static" / "upgrade.html"),
 )
 
 templates = Jinja2Templates(directory=str(templates_config.template_path))
@@ -10555,6 +10563,19 @@ async def liveness_probe() -> dict[str, str]:
     """Liveness: the process is running and event loop is responsive."""
 
     return {"status": "ok"}
+
+
+@app.get(
+    "/upgrade-status",
+    response_model=None,
+    summary="Read planned upgrade progress",
+    description="Unauthenticated, cache-disabled status used by the deployment-independent upgrade page.",
+)
+async def upgrade_status_endpoint() -> JSONResponse:
+    return JSONResponse(
+        system_state_service.get_public_upgrade_state(),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/readyz")

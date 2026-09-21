@@ -8,6 +8,16 @@ FLAG_DIR="${PROJECT_ROOT}/var/state"
 SYSTEM_UPDATE_FLAG_FILE="${FLAG_DIR}/system_update.flag"
 SYSTEM_UPDATE_STATUS_FILE="${FLAG_DIR}/system_update.status"
 
+update_coordinator() {
+  local phase="$1" message="$2" outcome="${3:-}"
+  [[ -z "${PYTHON_INTERPRETER:-}" ]] && return 0
+  PYTHONPATH="$PROJECT_ROOT" "$PYTHON_INTERPRETER" - "$UPGRADE_ID" "${POST_PULL_HEAD:-${PRE_PULL_HEAD:-unknown}}" "$phase" "$message" "${RESTART_MODE:-${REQUESTED_UPGRADE_MODE:-graceful}}" "$outcome" <<'PY'
+import sys
+from app.services.system_state import write_upgrade_state
+write_upgrade_state(upgrade_id=sys.argv[1], target_revision=sys.argv[2], phase=sys.argv[3], message=sys.argv[4], mode=sys.argv[5], outcome=sys.argv[6] or None)
+PY
+}
+
 normalise_upgrade_mode() {
   local raw="${1:-}"
   case "${raw,,}" in
@@ -392,6 +402,8 @@ UPGRADE_REASON=$(read_flag_var "requested_reason")
 UPGRADE_STARTED_AT=$(date --iso-8601=seconds)
 UPGRADE_READY_WAIT_SECONDS=0
 UPGRADE_STATUS_WRITTEN=0
+UPGRADE_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+update_coordinator "preparing" "Preparing the planned upgrade."
 
 on_exit() {
   local exit_code=$?
@@ -399,8 +411,10 @@ on_exit() {
   if [[ "$UPGRADE_STATUS_WRITTEN" == "0" ]]; then
     if [[ "$exit_code" -eq 0 ]]; then
       write_upgrade_status "succeeded" "Upgrade completed." "$UPGRADE_REASON"
+      update_coordinator "succeeded" "Upgrade completed." "succeeded"
     else
       write_upgrade_status "failed" "Upgrade failed with exit code ${exit_code}." "$UPGRADE_REASON"
+      update_coordinator "failed" "Upgrade failed; normal service has been restored." "failed"
     fi
   fi
   trap - EXIT
@@ -1061,6 +1075,7 @@ if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
     } > "${PROJECT_ROOT}/var/state/feature_pack_reload.flag"
     chmod 640 "${PROJECT_ROOT}/var/state/feature_pack_reload.flag" >/dev/null 2>&1 || true
     write_upgrade_status "succeeded" "Feature pack hot-reload scheduled for ${FEATURE_PACK_DIFF_SLUGS}." "$UPGRADE_REASON"
+    update_coordinator "succeeded" "Feature packs were updated without interruption." "succeeded"
     UPGRADE_STATUS_WRITTEN=1
   else
     RESTART_MODE=$(resolve_effective_upgrade_mode "$REQUESTED_UPGRADE_MODE" "$changed_files")
@@ -1068,12 +1083,20 @@ if [[ "$PRE_PULL_HEAD" != "$POST_PULL_HEAD" ]]; then
     install_dependencies
     build_tray_app
     if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
+      if [[ "$RESTART_MODE" == "restart" ]]; then
+        update_coordinator "draining" "Finishing active requests before restarting."
+      else
+        update_coordinator "verifying" "Applying a zero-downtime release."
+      fi
       run_restart_helper
+      update_coordinator "verifying" "Verifying the new release."
       write_upgrade_status "succeeded" "Upgrade applied using ${RESTART_MODE} mode." "$UPGRADE_REASON"
+      update_coordinator "succeeded" "The new release is ready." "succeeded"
       UPGRADE_STATUS_WRITTEN=1
     else
       echo "Auto-fallback mode detected; caller will relaunch the service." >&2
       write_upgrade_status "succeeded" "Dependencies updated; caller will relaunch the service." "$UPGRADE_REASON"
+      update_coordinator "succeeded" "Upgrade prepared for the managed relaunch." "succeeded"
       UPGRADE_STATUS_WRITTEN=1
     fi
   fi
@@ -1085,17 +1108,22 @@ elif [[ "$FORCE_RESTART" == "1" ]]; then
   install_dependencies
   build_tray_app
   if [[ "$AUTO_FALLBACK" -eq 0 ]]; then
+    update_coordinator "draining" "Finishing active requests before restarting."
     run_restart_helper
+    update_coordinator "verifying" "Verifying the new release."
     write_upgrade_status "succeeded" "Force restart completed." "$UPGRADE_REASON"
+    update_coordinator "succeeded" "The new release is ready." "succeeded"
     UPGRADE_STATUS_WRITTEN=1
   else
     echo "Auto-fallback mode detected; caller responsible for restart handling." >&2
     write_upgrade_status "succeeded" "Dependencies refreshed; caller responsible for restart handling." "$UPGRADE_REASON"
+    update_coordinator "succeeded" "Upgrade prepared for the managed relaunch." "succeeded"
     UPGRADE_STATUS_WRITTEN=1
   fi
 else
   echo "No changes detected from remote."
   UPGRADE_REASON="already_up_to_date"
   write_upgrade_status "skipped" "No changes detected from remote." "$UPGRADE_REASON"
+  update_coordinator "succeeded" "The portal is already up to date." "succeeded"
   UPGRADE_STATUS_WRITTEN=1
 fi

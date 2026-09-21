@@ -115,7 +115,10 @@ validate_flag_file
     echo "Upgrade helper completed successfully; cleared $UPDATE_FLAG_FILE" >&2
   else
     status=$?
-    echo "Error: upgrade helper exited with status ${status}. Leaving $UPDATE_FLAG_FILE in place." >&2
+    # A future schedule may retry, but this request is terminal. Removing the
+    # flag prevents an interrupted/failed update from looping forever.
+    rm -f "$UPDATE_FLAG_FILE"
+    echo "Error: upgrade helper exited with status ${status}. Cleared the consumed update flag." >&2
     exit "$status"
   fi
 ) 200>"$LOCK_FILE"
