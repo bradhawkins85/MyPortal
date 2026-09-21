@@ -295,6 +295,49 @@ EOF
   done
 }
 
+validate_release_uploads() {
+  local release="$1" path expected
+  while IFS='|' read -r path expected; do
+    if [[ ! -L "$path" || "$(readlink -f "$path" 2>/dev/null || true)" != "$expected" ]]; then
+      echo "Release upload path is not linked to persistent storage: ${path}" >&2
+      return 1
+    fi
+    if ! runuser --user myportal -- test -w "$path"; then
+      echo "Release upload path is not writable by the myportal service account: ${path}" >&2
+      return 1
+    fi
+  done <<EOF
+${release}/private_uploads|${SHARED_ROOT}/private_uploads
+${release}/app/static/uploads|${SHARED_ROOT}/uploads
+EOF
+}
+
+repair_assigned_release_uploads() {
+  local instance release path expected
+  for instance in blue green; do
+    release=$(readlink -f "${INSTANCE_ROOT}/${instance}" 2>/dev/null || true)
+    [[ -n "$release" && -d "$release" && "$release" != "$RELEASE_DIR" ]] || continue
+
+    chmod u+w "$release" "${release}/app" "${release}/app/static"
+    while IFS='|' read -r path expected; do
+      if [[ -d "$path" && ! -L "$path" ]]; then
+        # Releases made by the older updater stored uploads locally. Preserve
+        # files that are not already in shared storage before replacing the
+        # directory; -n prevents an old slot overwriting newer shared files.
+        cp -a -n "$path"/. "$expected"/
+      fi
+      rm -rf "$path"
+      ln -s "$expected" "$path"
+    done <<EOF
+${release}/private_uploads|${SHARED_ROOT}/private_uploads
+${release}/app/static/uploads|${SHARED_ROOT}/uploads
+EOF
+    chown -R myportal:myportal "${SHARED_ROOT}/private_uploads" "${SHARED_ROOT}/uploads"
+    make_release_service_readable "$release"
+    validate_release_uploads "$release"
+  done
+}
+
 release_runtime_ready() {
   local release="$1"
   [[ -x "${release}/.venv/bin/python" ]] || return 1
