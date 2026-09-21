@@ -58,6 +58,10 @@ prevent the service from starting.
 Upload directories are persistent writable storage rather than part of an
 immutable release. The upgrade creates them with ownership for the `myportal`
 service account and links both upload paths into every prepared release.
+Release immutability is enforced with read-only ownership modes rather than a
+systemd read-only bind mount, because such a mount also masks writes through
+the upload symlinks. The systemd unit explicitly declares the shared tree
+writable, while the service account has no write permission on release files.
 
 The deployer fetches (it never pulls or restores), exports the target commit to
 a staging directory, installs a private virtual environment, and makes the

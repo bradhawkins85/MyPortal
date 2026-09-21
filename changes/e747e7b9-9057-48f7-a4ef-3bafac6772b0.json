@@ -1,0 +1,7 @@
+{
+  "guid": "e747e7b9-9057-48f7-a4ef-3bafac6772b0",
+  "occurred_at": "2026-09-21T21:50:00Z",
+  "change_type": "fixed",
+  "summary": "Allow release upload symlinks to reach writable shared storage",
+  "content_hash": "systemd-release-permissions-preserve-shared-upload-writes"
+}

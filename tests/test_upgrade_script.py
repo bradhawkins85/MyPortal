@@ -186,6 +186,16 @@ def test_systemd_launches_uvicorn_as_module_without_console_script_shebang():
     assert '"$$release/.venv/bin/uvicorn"' not in unit
 
 
+def test_systemd_does_not_mask_shared_upload_symlinks_as_read_only():
+    unit = (ROOT / "deploy/systemd/myportal@.service").read_text()
+
+    read_only_line = next(line for line in unit.splitlines() if line.startswith("ReadOnlyPaths="))
+    assert "/opt/myportal/releases" not in read_only_line
+    assert read_only_line == "ReadOnlyPaths=/opt/myportal/instances"
+    assert "ReadWritePaths=/opt/myportal/shared" in unit
+    assert 'find "$release" -type d -exec chmod a+rx,a-w' in SCRIPT
+
+
 def test_atomic_link_runs_with_nounset(tmp_path):
     function = SCRIPT[SCRIPT.index("atomic_link() {") : SCRIPT.index("\ninstance_port()")]
     target = tmp_path / "release"
