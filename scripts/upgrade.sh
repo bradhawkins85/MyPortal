@@ -8,6 +8,9 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 VENV_DIR="${PROJECT_ROOT}/.venv" # retained only to find the coordinator Python
 ENV_FILE="${MYPORTAL_ENV_FILE:-${PROJECT_ROOT}/.env}"
+# Release directories live somewhere else, so their configuration symlink must
+# never retain a caller-supplied relative path.
+ENV_FILE=$(python3 -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$ENV_FILE")
 RELEASE_ROOT="${MYPORTAL_RELEASE_ROOT:-/opt/myportal/releases}"
 SHARED_ROOT="${MYPORTAL_SHARED_ROOT:-/opt/myportal/shared}"
 INSTANCE_ROOT="${MYPORTAL_INSTANCE_ROOT:-/opt/myportal/instances}"
@@ -160,7 +163,14 @@ install_dependencies() {
 prepare_release() {
   local revision="$1" release="$2" staging
   staging="${release}.staging.$$"
-  [[ -e "$release" ]] && return 0
+  if [[ -e "$release" ]]; then
+    # A previous attempt may have prepared this revision with missing or stale
+    # configuration. Refresh only the symlink; never copy or regenerate secrets.
+    if [[ -f "$ENV_FILE" && "$(readlink "$release/.env" 2>/dev/null || true)" != "$ENV_FILE" ]]; then
+      ln -sfn "$ENV_FILE" "$release/.env"
+    fi
+    return 0
+  fi
   mkdir -p "$RELEASE_ROOT" "$SHARED_ROOT/state" "$SHARED_ROOT/data"
   rm -rf "$staging"; mkdir -p "$staging"
   git archive "$revision" | tar -x -C "$staging"
@@ -178,6 +188,34 @@ prepare_release() {
   find "$staging" -type d -exec chmod a-w {} +
   find "$staging" -type f -exec chmod a-w {} +
   mv "$staging" "$release"
+}
+
+run_release_manage() {
+  local release="$1"
+  shift
+  # Do not source .env in a shell: characters such as $, #, !, spaces, and
+  # quotes must reach the application without expansion.  Disable dotenv
+  # interpolation and make the protected file authoritative over any stale
+  # DB_* values inherited by the upgrade process.
+  ENV_CONFIG_FILE="$ENV_FILE" "${release}/.venv/bin/python" - \
+    "${release}/manage.py" "$@" <<'PY'
+import os
+import sys
+
+from dotenv import dotenv_values
+
+env_file = os.environ["ENV_CONFIG_FILE"]
+try:
+    configured = dotenv_values(env_file, interpolate=False)
+except (OSError, UnicodeError, ValueError) as exc:
+    raise SystemExit(f"Unable to read application environment file {env_file}: {exc}") from None
+
+for name, value in configured.items():
+    if value is not None:
+        os.environ[name] = value
+
+os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+PY
 }
 
 rollback() {
@@ -216,8 +254,12 @@ run_migration_phase() {
   local release="$1" serving="$2" target="$3" args=()
   [[ "${UPG01_MAINTENANCE_MODE:-false}" == "true" ]] && args+=(--maintenance)
   write_upgrade_status migrating "Applying and validating schema changes before cutover."
-  "${release}/.venv/bin/python" "${release}/manage.py" migrate \
-    --serving-release "${serving:-none}" --target-release "$target" "${args[@]}"
+  if ! run_release_manage "$release" migrate \
+    --serving-release "${serving:-none}" --target-release "$target" "${args[@]}"; then
+    write_upgrade_status failed "Database migration failed; release was not activated. Verify DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and DB_NAME in ${ENV_FILE}."
+    echo "Database migration failed; release was not activated. Verify DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and DB_NAME in ${ENV_FILE}." >&2
+    return 1
+  fi
 }
 
 is_additive_migration_only_release() {
