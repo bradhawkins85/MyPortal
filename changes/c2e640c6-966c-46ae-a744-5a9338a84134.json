@@ -1,0 +1,7 @@
+{
+  "guid": "c2e640c6-966c-46ae-a744-5a9338a84134",
+  "occurred_at": "2026-09-21T21:20:00Z",
+  "change_type": "fixed",
+  "summary": "Create release virtual environments at their final path",
+  "content_hash": "avoid-stale-virtualenv-entry-point-shebangs-after-release-publish"
+}

@@ -1,0 +1,7 @@
+{
+  "guid": "f9db21b8-a77b-49ee-98c2-d01fb7df0da2",
+  "occurred_at": "2026-09-21T21:40:00Z",
+  "change_type": "fixed",
+  "summary": "Store release uploads in persistent writable shared storage",
+  "content_hash": "blue-green-upload-paths-shared-and-writable"
+}
