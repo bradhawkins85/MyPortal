@@ -178,6 +178,7 @@ from app.services import template_variables
 from app.services import webhook_monitor
 from app.services import integration_operations as integration_operations_service
 from app.services import issues as issues_service
+from app.services import invoice_generator as invoice_generator_service
 from app.services import service_status as service_status_service
 from app.services import system_state as system_state_service
 from app.services import impersonation as impersonation_service
