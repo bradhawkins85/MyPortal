@@ -2,23 +2,6 @@
 {% from "macros/header.html" import page_header_actions %}
 {% from "macros/tables.html" import table_column_picker %}
 
-{% macro checkbox_list(label, name, options, selected=[], id_prefix='new', value_key='id', label_key='name', help='') %}
-  <fieldset class="form-field approval-selector">
-    <legend class="form-label">{{ label }}</legend>
-    <div class="approval-selector__list">
-      {% for option in options %}
-        {% set value = option[value_key] if option is mapping else option[0] %}
-        {% set text = option[label_key] if option is mapping else option[1] %}
-        <label class="approval-selector__option" for="{{ id_prefix }}-{{ name }}-{{ loop.index }}">
-          <input id="{{ id_prefix }}-{{ name }}-{{ loop.index }}" type="checkbox" name="{{ name }}" value="{{ value }}" {% if value in selected %}checked{% endif %} />
-          <span>{{ text }}</span>
-        </label>
-      {% else %}<span class="form-help">No options are available for this company.</span>{% endfor %}
-    </div>
-    {% if help %}<p class="form-help">{{ help }}</p>{% endif %}
-  </fieldset>
-{% endmacro %}
-
 {% block header_title %}<span class="header__title-text">Approvals</span>{% endblock %}
 {% block header_actions %}
   {% if company %}
@@ -29,19 +12,12 @@
 {% set approval_columns = [
   {"key": "name", "label": "Approval type", "default_visible": true},
   {"key": "guid", "label": "GUID", "default_visible": true},
-  {"key": "technician", "label": "Required technician", "default_visible": true},
-  {"key": "contacts", "label": "Required contacts", "default_visible": true},
+  {"key": "description", "label": "Description", "default_visible": true},
   {"key": "status", "label": "Status", "default_visible": true},
   {"key": "actions", "label": "Actions", "default_visible": true}
 ] %}
 
 {% block content %}
-<style>
-  .approval-selector { min-width: 0; margin: 0; padding: 0; border: 0; }
-  .approval-selector__list { display: grid; gap: .45rem; max-height: 12rem; overflow: auto; padding: .65rem; border: 1px solid var(--color-border); border-radius: var(--radius-md, .5rem); background: var(--color-surface); }
-  .approval-selector__option { display: flex; align-items: center; gap: .55rem; min-height: 2rem; cursor: pointer; }
-  .approval-selector__option input { flex: 0 0 auto; }
-</style>
 <div class="admin-grid admin-grid--columns">
   {% if not company %}
     <section class="card card--panel admin-grid__full">
@@ -50,18 +26,12 @@
   {% else %}
     <section class="card card--panel admin-grid__full" id="new-approval-type">
       <header class="card__header">
-        <div><h2 class="card__title">New approval type</h2><p class="card__subtitle">Create a company-specific change workflow with every required approver.</p></div>
+        <div><h2 class="card__title">New approval type</h2><p class="card__subtitle">Create a classifier technicians can use to identify the type of ticket change.</p></div>
       </header>
       <div class="card__body">
         <form method="post" action="/admin/approvals" class="form-grid">
           {% include "partials/csrf.html" %}
           <div class="form-field"><label class="form-label" for="approval-name">Change type</label><input class="form-input" id="approval-name" name="name" maxlength="120" required placeholder="e.g. Production firewall change" /></div>
-          {{ checkbox_list('Technical employees', 'technicianUserIds', technicians, [], 'new', 'id', 'email', 'Only technical employees assigned to ' ~ company.name ~ ' are shown.') }}
-          {{ checkbox_list('Technical roles', 'technicalRoleIds', technical_roles, [], 'new', 'id', 'name', 'Non-technical company roles are excluded.') }}
-          {{ checkbox_list('Employees', 'contactStaffIds', contacts, [], 'new', 'staff_id', 'email', 'Only enabled employees belonging to ' ~ company.name ~ ' are shown.') }}
-          {{ checkbox_list('Company roles', 'companyRoles', company_roles, [], 'new') }}
-          {% set title_options = [] %}{% for title in job_titles %}{% set _ = title_options.append((title, title)) %}{% endfor %}
-          {{ checkbox_list('Department / job titles', 'jobTitles', title_options, [], 'new', 'id', 'name', 'Loaded from the enabled staff records for ' ~ company.name ~ '.') }}
           <div class="form-field"><label class="form-label" for="approval-description">Description</label><textarea class="form-input" id="approval-description" name="description" maxlength="500" rows="3" placeholder="Explain when this approval type should be used."></textarea></div>
           <div class="form-actions"><button class="button button--primary" type="submit">Create approval type</button></div>
         </form>
@@ -75,19 +45,18 @@
       </header>
       <div class="table-wrapper">
         <table class="table" id="approvals-table" data-table data-table-id="approvals" data-page-size-max="25">
-          <thead><tr><th data-sort="string" data-column-key="name">Approval type</th><th data-sort="string" data-column-key="guid">GUID</th><th data-sort="string" data-column-key="technician">Required technician</th><th data-sort="number" data-column-key="contacts">Required contacts</th><th data-sort="string" data-column-key="status">Status</th><th class="table__actions" data-column-key="actions">Actions</th></tr></thead>
+          <thead><tr><th data-sort="string" data-column-key="name">Approval type</th><th data-sort="string" data-column-key="guid">GUID</th><th data-sort="string" data-column-key="description">Description</th><th data-sort="string" data-column-key="status">Status</th><th class="table__actions" data-column-key="actions">Actions</th></tr></thead>
           <tbody>
           {% for configuration in configurations %}
             <tr>
-              <td data-column-key="name">{{ configuration.name }}{% if configuration.description %}<div class="form-help">{{ configuration.description }}</div>{% endif %}</td>
+              <td data-column-key="name">{{ configuration.name }}</td>
               <td data-column-key="guid"><code>{{ configuration.guid }}</code></td>
-              <td data-column-key="technician">{{ configuration.technician_name }}</td>
-              <td data-column-key="contacts" data-value="{{ configuration.contact_count }}">{{ configuration.contact_count }}</td>
+              <td data-column-key="description">{{ configuration.description or '—' }}</td>
               <td data-column-key="status"><span class="status status--{{ 'success' if configuration.is_active else 'neutral' }}">{{ 'Active' if configuration.is_active else 'Inactive' }}</span></td>
               <td class="table__actions" data-column-key="actions"><a class="button button--small" href="#approval-{{ configuration.id }}">Edit</a></td>
             </tr>
           {% else %}
-            <tr><td colspan="6" class="table__empty">No change approval types have been configured for {{ company.name }}.</td></tr>
+            <tr><td colspan="5" class="table__empty">No change approval types have been configured for {{ company.name }}.</td></tr>
           {% endfor %}
           </tbody>
         </table>
@@ -100,11 +69,6 @@
           <form method="post" action="/admin/approvals/{{ configuration.id }}" class="form-grid">
             {% include "partials/csrf.html" %}
             <div class="form-field"><label class="form-label" for="approval-name-{{ configuration.id }}">Change type</label><input class="form-input" id="approval-name-{{ configuration.id }}" name="name" maxlength="120" required value="{{ configuration.name }}" /></div>
-            {{ checkbox_list('Technical employees', 'technicianUserIds', technicians, configuration.technician_ids, 'edit-' ~ configuration.id, 'id', 'email') }}
-            {{ checkbox_list('Technical roles', 'technicalRoleIds', technical_roles, configuration.technical_role_ids, 'edit-' ~ configuration.id, 'id', 'name') }}
-            {{ checkbox_list('Employees', 'contactStaffIds', contacts, configuration.contact_ids, 'edit-' ~ configuration.id, 'staff_id', 'email') }}
-            {{ checkbox_list('Company roles', 'companyRoles', company_roles, configuration.company_roles, 'edit-' ~ configuration.id) }}
-            {{ checkbox_list('Department / job titles', 'jobTitles', title_options, configuration.job_titles, 'edit-' ~ configuration.id, 'id', 'name', 'Loaded from the enabled staff records for ' ~ company.name ~ '.') }}
             <div class="form-field"><label class="form-label" for="approval-description-{{ configuration.id }}">Description</label><textarea class="form-input" id="approval-description-{{ configuration.id }}" name="description" maxlength="500" rows="3">{{ configuration.description or '' }}</textarea></div>
             <div class="form-actions"><button class="button button--primary" type="submit">Save changes</button></div>
           </form>

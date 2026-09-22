@@ -80,33 +80,18 @@ async def test_update_configuration_requires_company_ownership(monkeypatch):
     execute.assert_not_awaited()
 
 
-def test_approval_configuration_uses_checkbox_lists_for_all_multi_value_selectors():
+def test_approval_configuration_does_not_require_selected_approvers():
     template = Path("app/templates/admin/approvals.html").read_text(encoding="utf-8")
-
-    assert 'type="checkbox"' in template
-    assert 'name="{{ name }}"' in template
-    assert "technicianUserIds" in template
-    assert "technicalRoleIds" in template
-    assert "contactStaffIds" in template
-    assert "companyRoles" in template
-    assert "jobTitles" in template
-    assert " multiple" not in template
-    assert "Department / job titles" in template
-
-
-def test_company_role_options_include_department_and_supervisor_roles():
     routes = Path("app/features/tickets/admin_routes.py").read_text(encoding="utf-8")
-    repository = Path("app/repositories/approval_matrix.py").read_text(encoding="utf-8")
 
-    assert 'FROM staff WHERE company_id = %s AND enabled = 1' in routes
-    assert "TRIM(position)" not in routes
-    assert "), position)" not in repository
-    assert '("department_manager", "Department Manager")' in routes
-    assert '("any_supervisor", "Any Supervisor")' in routes
-    assert '("department_supervisor", "Department Supervisor")' in routes
-    assert '"department_manager" in company_roles and is_requester_department and "manager" in title' in repository
-    assert '"any_supervisor" in company_roles and "supervisor" in title' in repository
-    assert '"department_supervisor" in company_roles and is_requester_department and "supervisor" in title' in repository
+    assert "technicianUserIds" not in template
+    assert "technicalRoleIds" not in template
+    assert "contactStaffIds" not in template
+    assert "companyRoles" not in template
+    assert "jobTitles" not in template
+    assert "Select at least one technical employee" not in routes
+    assert "job title approver" not in routes
+    assert "classifier technicians can use" in template
 
 
 def test_approval_selector_migration_preserves_legacy_technician():
@@ -141,6 +126,37 @@ async def test_create_configuration_assigns_a_guid(monkeypatch):
     query, params = insert.await_args.args
     assert "(guid, company_id" in query
     assert str(UUID(params[0])) == params[0]
+
+
+@pytest.mark.anyio
+async def test_assign_to_ticket_uses_type_as_classifier_without_decisions(monkeypatch):
+    monkeypatch.setattr(
+        approval_matrix,
+        "get_configuration",
+        AsyncMock(return_value={
+            "id": 3, "company_id": 8, "name": "Firewall change",
+            "workflow_type": "change",
+        }),
+    )
+    monkeypatch.setattr(
+        approval_matrix.db,
+        "fetch_one",
+        AsyncMock(side_effect=[{"company_id": 8}, None]),
+    )
+    insert = AsyncMock(return_value=21)
+    execute = AsyncMock()
+    monkeypatch.setattr(approval_matrix.db, "execute_returning_lastrowid", insert)
+    monkeypatch.setattr(approval_matrix.db, "execute", execute)
+    monkeypatch.setattr(
+        approval_matrix,
+        "get_ticket_workflow",
+        AsyncMock(return_value={"id": 21, "pending_count": 0, "decisions": []}),
+    )
+
+    result = await approval_matrix.assign_to_ticket(ticket_id=4, configuration_id=3)
+
+    assert result["pending_count"] == 0
+    assert all("ticket_approval_decisions" not in call.args[0] for call in execute.await_args_list)
 
 
 @pytest.mark.anyio
