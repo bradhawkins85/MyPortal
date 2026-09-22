@@ -48,8 +48,10 @@ Hot-reload cannot safely cover changes to:
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import importlib
 import importlib.metadata
+import importlib.util
 from pathlib import Path
 import re
 import sys
@@ -60,7 +62,6 @@ from typing import Any, Awaitable, Callable, Iterable
 
 from fastapi import APIRouter, FastAPI
 from loguru import logger
-
 
 HookCallable = Callable[[], Awaitable[None] | None]
 
@@ -74,7 +75,9 @@ def discover_builtin_feature_pack_slugs() -> list[str]:
     return sorted(
         entry.name
         for entry in features_dir.iterdir()
-        if entry.is_dir() and not entry.name.startswith("_") and (entry / "__init__.py").exists()
+        if entry.is_dir()
+        and not entry.name.startswith("_")
+        and (entry / "__init__.py").exists()
     )
 
 
@@ -128,10 +131,13 @@ def _validate_min_app_version(pack: "FeaturePack") -> None:
         )
 
 
-def _make_tracking_endpoint(original: Callable[..., Any], state: "FeaturePackState") -> Callable[..., Any]:
+def _make_tracking_endpoint(
+    original: Callable[..., Any], state: "FeaturePackState"
+) -> Callable[..., Any]:
     """Return a wrapper around ``original`` that increments ``state.in_flight``."""
 
     if asyncio.iscoroutinefunction(original):
+
         async def _async_wrapped(*args: Any, **kwargs: Any) -> Any:
             state.in_flight += 1
             try:
@@ -212,6 +218,15 @@ class FeaturePackState:
     last_reload_duration_ms: float | None = None
 
 
+@dataclass
+class PreparedFeaturePack:
+    """A validated pack which has not changed the live application."""
+
+    slug: str
+    state: FeaturePackState
+    modules: dict[str, Any]
+
+
 class FeatureRegistry:
     """Tracks loaded feature packs and brokers load/unload/reload calls."""
 
@@ -281,7 +296,9 @@ class FeatureRegistry:
     @staticmethod
     def _purge_sys_modules(slug: str) -> None:
         prefix = module_name_for_slug(slug)
-        for name in [n for n in list(sys.modules) if n == prefix or n.startswith(prefix + ".")]:
+        for name in [
+            n for n in list(sys.modules) if n == prefix or n.startswith(prefix + ".")
+        ]:
             sys.modules.pop(name, None)
 
     def _build_parent_router(self, pack: FeaturePack) -> APIRouter:
@@ -312,7 +329,9 @@ class FeatureRegistry:
         return flattened
 
     @staticmethod
-    def _wrap_routes_with_state(routes: Iterable[Any], state: "FeaturePackState") -> None:
+    def _wrap_routes_with_state(
+        routes: Iterable[Any], state: "FeaturePackState"
+    ) -> None:
         """Wrap each ``APIRoute`` in ``routes`` to bump ``state.in_flight``.
 
         We patch both ``route.endpoint`` *and* ``route.dependant.call``
@@ -354,7 +373,9 @@ class FeatureRegistry:
                     "Background job factory did not return a coroutine"
                 )
                 continue
-            task_name = f"feature:{state.pack.slug}:{getattr(factory, '__name__', 'job')}"
+            task_name = (
+                f"feature:{state.pack.slug}:{getattr(factory, '__name__', 'job')}"
+            )
             state.background_tasks.append(asyncio.create_task(coro, name=task_name))
 
     async def _stop_background_jobs(self, state: FeaturePackState) -> None:
@@ -392,7 +413,9 @@ class FeatureRegistry:
             if asyncio.iscoroutine(result):
                 await result
         except Exception as exc:
-            logger.bind(feature=slug).error("{name} hook failed: {error}", name=name, error=str(exc))
+            logger.bind(feature=slug).error(
+                "{name} hook failed: {error}", name=name, error=str(exc)
+            )
             raise
 
     # ------------------------------------------------------------------
@@ -433,7 +456,9 @@ class FeatureRegistry:
             for route in new_routes
         ):
             flattened_routes = self._flatten_included_routes(parent.routes)
-            self._app.router.routes = self._app.router.routes[:before] + flattened_routes
+            self._app.router.routes = (
+                self._app.router.routes[:before] + flattened_routes
+            )
             new_routes = self._app.router.routes[before:]
         state.mounted_routes = list(new_routes)
         self._wrap_routes_with_state(new_routes, state)
@@ -456,6 +481,12 @@ class FeatureRegistry:
             logger.bind(feature=slug).info("Feature pack unloaded")
 
     async def reload(self, slug: str) -> FeaturePackState:
+        """Serialize a single-pack reload with transactional batch updates."""
+
+        async with self._registry_lock:
+            return await self._reload_locked(slug)
+
+    async def _reload_locked(self, slug: str) -> FeaturePackState:
         """Atomically reload a pack.
 
         On import error the previous instance is left mounted and the
@@ -510,6 +541,163 @@ class FeatureRegistry:
                 ms=new_state.last_reload_duration_ms,
             )
             return new_state
+
+    def _import_pack_from_release(
+        self, slug: str, release_root: Path
+    ) -> tuple[FeaturePack, dict[str, Any]]:
+        """Import ``slug`` from an immutable release without retaining it live."""
+
+        if slug.startswith("plugin."):
+            raise RuntimeError(
+                "staged reload is only supported for built-in feature packs"
+            )
+        package_dir = release_root / "app" / "features" / slug
+        init_file = package_dir / "__init__.py"
+        if not init_file.is_file():
+            raise RuntimeError(f"candidate feature pack '{slug}' is missing")
+
+        prefix = module_name_for_slug(slug)
+        previous = {
+            name: module
+            for name, module in sys.modules.items()
+            if name == prefix or name.startswith(prefix + ".")
+        }
+        self._purge_sys_modules(slug)
+        try:
+            spec = importlib.util.spec_from_file_location(
+                prefix, init_file, submodule_search_locations=[str(package_dir)]
+            )
+            if spec is None or spec.loader is None:
+                raise RuntimeError(f"unable to load candidate feature pack '{slug}'")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[prefix] = module
+            spec.loader.exec_module(module)
+            pack = getattr(module, "PACK", None)
+            if pack is None:
+                factory = getattr(module, "get_pack", None)
+                pack = factory() if callable(factory) else None
+            if not isinstance(pack, FeaturePack) or pack.slug != slug:
+                raise RuntimeError(
+                    f"candidate feature pack '{slug}' has an invalid manifest"
+                )
+            _validate_min_app_version(pack)
+            candidate_modules = {
+                name: loaded
+                for name, loaded in sys.modules.items()
+                if name == prefix or name.startswith(prefix + ".")
+            }
+            return pack, candidate_modules
+        finally:
+            self._purge_sys_modules(slug)
+            sys.modules.update(previous)
+
+    async def _prepare_from_release(
+        self, slug: str, release_root: Path
+    ) -> PreparedFeaturePack:
+        pack, modules = self._import_pack_from_release(slug, release_root)
+        # Materialise FastAPI's copied routes against a throw-away app.  This
+        # validates router construction while leaving the serving route table
+        # untouched.
+        temporary_app = FastAPI()
+        parent = self._build_parent_router(pack)
+        state = FeaturePackState(
+            pack=pack, parent_router=parent, loaded_at=datetime.now(timezone.utc)
+        )
+        before = len(temporary_app.router.routes)
+        temporary_app.include_router(parent)
+        state.mounted_routes = list(temporary_app.router.routes[before:])
+        self._wrap_routes_with_state(state.mounted_routes, state)
+        return PreparedFeaturePack(slug=slug, state=state, modules=modules)
+
+    async def reload_many_from_release(
+        self, slugs: Iterable[str], release_root: str | Path, *, revision: str
+    ) -> dict[str, FeaturePackState]:
+        """Transactionally activate all ``slugs`` from one immutable release.
+
+        Preparation performs imports and router construction off-registry.
+        Startup hooks are then validated for every pack before one route-table
+        assignment commits the batch.  Any failure restores modules, routes,
+        registry entries, hooks and background jobs for the previous batch.
+        """
+
+        ordered = sorted(set(slugs))
+        root = Path(release_root).resolve()
+        if not ordered or not root.is_dir():
+            raise RuntimeError("candidate release is missing or contains no packs")
+        async with self._registry_lock:
+            previous_states = {slug: self._states.get(slug) for slug in ordered}
+            if any(state is None for state in previous_states.values()):
+                raise RuntimeError("all candidate feature packs must already be loaded")
+            prepared: list[PreparedFeaturePack] = []
+            activated: list[FeaturePackState] = []
+            module_snapshot = {
+                name: module
+                for name, module in sys.modules.items()
+                if any(
+                    name == module_name_for_slug(slug)
+                    or name.startswith(module_name_for_slug(slug) + ".")
+                    for slug in ordered
+                )
+            }
+            try:
+                for slug in ordered:
+                    prepared.append(await self._prepare_from_release(slug, root))
+                for candidate in prepared:
+                    prefix = module_name_for_slug(candidate.slug)
+                    for name in [
+                        n
+                        for n in sys.modules
+                        if n == prefix or n.startswith(prefix + ".")
+                    ]:
+                        sys.modules.pop(name, None)
+                    sys.modules.update(candidate.modules)
+                    await self._run_hook(
+                        candidate.state.pack.startup, candidate.slug, "startup"
+                    )
+                    activated.append(candidate.state)
+
+                old_route_ids = {
+                    id(route)
+                    for state in previous_states.values()
+                    if state is not None
+                    for route in state.mounted_routes
+                }
+                retained = [
+                    r for r in self._app.router.routes if id(r) not in old_route_ids
+                ]
+                new_routes = [r for item in prepared for r in item.state.mounted_routes]
+                self._app.router.routes = retained + new_routes
+                for item in prepared:
+                    self._states[item.slug] = item.state
+                    item.state.last_reload_duration_ms = 0.0
+                # Jobs are deliberately started only after every startup hook
+                # has validated and the route/registry commit has completed.
+                # This prevents a failed later pack from briefly running work
+                # belonging to an uncommitted candidate release.
+                for item in prepared:
+                    await self._start_background_jobs(item.state)
+            except Exception:
+                for state in reversed(activated):
+                    await self._stop_background_jobs(state)
+                    with suppress(Exception):
+                        await self._run_hook(
+                            state.pack.shutdown, state.pack.slug, "shutdown"
+                        )
+                for slug in ordered:
+                    self._purge_sys_modules(slug)
+                sys.modules.update(module_snapshot)
+                raise
+
+            for slug, old_state in previous_states.items():
+                assert old_state is not None
+                await self._stop_background_jobs(old_state)
+                with suppress(Exception):
+                    await self._run_hook(old_state.pack.shutdown, slug, "shutdown")
+                await self._drain(old_state)
+            logger.info(
+                "Feature pack batch committed revision={} packs={}", revision, ordered
+            )
+            return {item.slug: item.state for item in prepared}
 
     async def load_many(self, slugs: Iterable[str]) -> None:
         for slug in slugs:

@@ -3,7 +3,6 @@ import os
 import subprocess
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = (ROOT / "scripts/upgrade.sh").read_text()
 
@@ -12,7 +11,7 @@ def _resolve_environment_file(
     tmp_path: Path, system_env: Path, **environment: str
 ) -> str:
     function = SCRIPT[
-        SCRIPT.index("resolve_environment_file() {") : SCRIPT.index('\nVENV_DIR=')
+        SCRIPT.index("resolve_environment_file() {") : SCRIPT.index("\nVENV_DIR=")
     ]
     project_root = tmp_path / "checkout"
     project_root.mkdir()
@@ -20,7 +19,9 @@ def _resolve_environment_file(
         [
             "bash",
             "-c",
-            "set -Eeuo pipefail\n" + function + '\nresolve_environment_file "$SYSTEM_ENV"',
+            "set -Eeuo pipefail\n"
+            + function
+            + '\nresolve_environment_file "$SYSTEM_ENV"',
         ],
         text=True,
         capture_output=True,
@@ -67,7 +68,7 @@ def test_explicit_environment_file_takes_precedence_and_resolves_symlinks(tmp_pa
 
 
 def test_upgrade_prepares_revision_without_mutating_control_checkout():
-    assert 'git fetch --quiet origin main' in SCRIPT
+    assert "git fetch --quiet origin main" in SCRIPT
     assert 'git archive "$revision"' in SCRIPT
     assert 'RELEASE_DIR="${RELEASE_ROOT}/${TARGET_REVISION}"' in SCRIPT
     assert "git pull" not in SCRIPT
@@ -77,47 +78,63 @@ def test_upgrade_prepares_revision_without_mutating_control_checkout():
 
 def test_release_has_private_dependencies_and_shared_mutable_state():
     assert 'python3 -m venv "$staging"' in SCRIPT
-    assert '"$staging/bin/python" -m pip install --disable-pip-version-check --requirement "$lock"' in SCRIPT
-    assert 'pip install --disable-pip-version-check --upgrade pip setuptools wheel' not in SCRIPT
+    assert (
+        '"$staging/bin/python" -m pip install --disable-pip-version-check --requirement "$lock"'
+        in SCRIPT
+    )
+    assert (
+        "pip install --disable-pip-version-check --upgrade pip setuptools wheel"
+        not in SCRIPT
+    )
     assert 'ln -s "$layer" "${release}/.venv"' in SCRIPT
     assert 'ln -s "$SHARED_ROOT" "$staging/var"' in SCRIPT
     assert 'find "$release" -type f -exec chmod a+rX,a-w' in SCRIPT
     assert 'ln -s "$ENV_FILE" "$staging/.env"' in SCRIPT
     assert 'ln -sfn "$ENV_FILE" "$release/.env"' in SCRIPT
     assert 'chmod a+rx "$RELEASE_ROOT" "$INSTANCE_ROOT" "$SHARED_ROOT"' in SCRIPT
-    assert 'ln -s "${SHARED_ROOT}/private_uploads" "${release}/private_uploads"' in SCRIPT
+    assert (
+        'ln -s "${SHARED_ROOT}/private_uploads" "${release}/private_uploads"' in SCRIPT
+    )
     assert 'ln -s "${SHARED_ROOT}/uploads" "${release}/app/static/uploads"' in SCRIPT
 
 
 def test_upload_storage_is_seeded_without_removing_legacy_data():
     function = SCRIPT[
-        SCRIPT.index("prepare_shared_uploads() {") : SCRIPT.index("\nlink_shared_uploads()")
+        SCRIPT.index("prepare_shared_uploads() {") : SCRIPT.index(
+            "\nlink_shared_uploads()"
+        )
     ]
 
     assert 'cp -a "$legacy"/. "$shared"/' in function
     assert 'rm -rf "$legacy"' not in function
     assert 'mv "$legacy"' not in function
-    assert 'install -d -m 0750 -o myportal -g myportal' in function
+    assert "install -d -m 0750 -o myportal -g myportal" in function
     assert 'chown -R myportal:myportal "$shared"' in function
     assert 'find "$shared" -type d -exec chmod u+rwx {} +' in function
 
 
 def test_release_upload_paths_point_to_persistent_shared_storage():
     function = SCRIPT[
-        SCRIPT.index("link_shared_uploads() {") : SCRIPT.index("\nvalidate_release_uploads()")
+        SCRIPT.index("link_shared_uploads() {") : SCRIPT.index(
+            "\nvalidate_release_uploads()"
+        )
     ]
 
     assert '"${release}/private_uploads"' in function
     assert '"${release}/app/static/uploads"' in function
     assert function.count("ln -s") == 2
-    assert 'chown -h myportal:myportal' in function
+    assert "chown -h myportal:myportal" in function
 
 
 def test_release_uploads_are_validated_before_service_startup():
     validation = SCRIPT[
-        SCRIPT.index("validate_release_uploads() {") : SCRIPT.index("\nrelease_runtime_ready()")
+        SCRIPT.index("validate_release_uploads() {") : SCRIPT.index(
+            "\nrelease_runtime_ready()"
+        )
     ]
-    prepare = SCRIPT[SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")]
+    prepare = SCRIPT[
+        SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")
+    ]
 
     assert '[[ ! -L "$path"' in validation
     assert 'readlink -f "$path"' in validation
@@ -127,19 +144,23 @@ def test_release_uploads_are_validated_before_service_startup():
 
 def test_assigned_legacy_releases_are_repaired_before_migration_and_service_start():
     repair = SCRIPT[
-        SCRIPT.index("repair_assigned_release_uploads() {") : SCRIPT.index("\nrelease_runtime_ready()")
+        SCRIPT.index("repair_assigned_release_uploads() {") : SCRIPT.index(
+            "\nrelease_runtime_ready()"
+        )
     ]
 
-    assert 'for instance in blue green' in repair
+    assert "for instance in blue green" in repair
     assert 'cp -a -n "$path"/. "$expected"/' in repair
     assert 'ln -s "$expected" "$path"' in repair
     assert 'chown -h myportal:myportal "$path"' in repair
-    assert '-type d -exec chmod u+rwx {} +' in repair
+    assert "-type d -exec chmod u+rwx {} +" in repair
     assert 'validate_release_uploads "$release"' in repair
 
     invoke = SCRIPT.index("\nrepair_assigned_release_uploads\n")
     migration = SCRIPT.index('run_migration_phase "$RELEASE_DIR"', invoke)
-    install_unit = SCRIPT.index('install_blue_green_service_unit "$RELEASE_DIR"', invoke)
+    install_unit = SCRIPT.index(
+        'install_blue_green_service_unit "$RELEASE_DIR"', invoke
+    )
     assert invoke < migration < install_unit
 
 
@@ -162,11 +183,19 @@ def test_release_permissions_allow_unprivileged_service_to_read_and_traverse(tmp
     executable.chmod(0o700)
     secret.chmod(0o600)
     function = SCRIPT[
-        SCRIPT.index("make_release_service_readable() {") : SCRIPT.index("\nprepare_release()")
+        SCRIPT.index("make_release_service_readable() {") : SCRIPT.index(
+            "\nprepare_release()"
+        )
     ]
 
     result = subprocess.run(
-        ["bash", "-c", "set -Eeuo pipefail\n" + function + '\nmake_release_service_readable "$RELEASE"'],
+        [
+            "bash",
+            "-c",
+            "set -Eeuo pipefail\n"
+            + function
+            + '\nmake_release_service_readable "$RELEASE"',
+        ],
         text=True,
         capture_output=True,
         env={**os.environ, "RELEASE": str(release)},
@@ -182,13 +211,19 @@ def test_release_permissions_allow_unprivileged_service_to_read_and_traverse(tmp
 
 
 def test_retry_repairs_release_permissions_before_returning():
-    retry_branch = SCRIPT[SCRIPT.index('if [[ -e "$release" ]]') : SCRIPT.index("return 0", SCRIPT.index('if [[ -e "$release" ]]'))]
+    retry_branch = SCRIPT[
+        SCRIPT.index('if [[ -e "$release" ]]') : SCRIPT.index(
+            "return 0", SCRIPT.index('if [[ -e "$release" ]]')
+        )
+    ]
 
     assert 'make_release_service_readable "$release"' in retry_branch
 
 
 def test_virtualenv_is_created_only_after_release_reaches_final_path():
-    prepare = SCRIPT[SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")]
+    prepare = SCRIPT[
+        SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")
+    ]
     publish = prepare.index('mv "$staging" "$release"')
     install = prepare.index('install_dependencies "$release"', publish)
 
@@ -198,19 +233,25 @@ def test_virtualenv_is_created_only_after_release_reaches_final_path():
 
 
 def test_preparation_uses_verified_dependency_cache_and_reports_decision():
-    install = SCRIPT[SCRIPT.index("install_dependencies() {") : SCRIPT.index("\ninstall_blue_green_service_unit()")]
+    install = SCRIPT[
+        SCRIPT.index("install_dependencies() {") : SCRIPT.index(
+            "\ninstall_blue_green_service_unit()"
+        )
+    ]
 
-    assert 'requirements.lock' in install
-    assert 'pyproject.toml' in install
-    assert 'sys.implementation.name' in install
-    assert 'pip check' in install
-    assert 'record_step dependency_layer hit' in install
-    assert 'record_step dependency_layer miss' in install
+    assert "requirements.lock" in install
+    assert "pyproject.toml" in install
+    assert "sys.implementation.name" in install
+    assert "pip check" in install
+    assert "record_step dependency_layer hit" in install
+    assert "record_step dependency_layer miss" in install
 
 
 def test_dependency_cache_hit_and_invalid_layer_fallback(tmp_path):
     functions = SCRIPT[
-        SCRIPT.index("record_step() {") : SCRIPT.index("\ninstall_blue_green_service_unit()")
+        SCRIPT.index("record_step() {") : SCRIPT.index(
+            "\ninstall_blue_green_service_unit()"
+        )
     ]
     shared = tmp_path / "shared"
     release_one = tmp_path / "release-one"
@@ -218,7 +259,9 @@ def test_dependency_cache_hit_and_invalid_layer_fallback(tmp_path):
     release_three = tmp_path / "release-three"
     for release in (release_one, release_two, release_three):
         release.mkdir()
-        (release / "pyproject.toml").write_text("[project]\nname='fixture'\nversion='1'\n")
+        (release / "pyproject.toml").write_text(
+            "[project]\nname='fixture'\nversion='1'\n"
+        )
         (release / "requirements.lock").write_text("# exact fixture lock\n")
     command = f"""
 set -Eeuo pipefail
@@ -241,7 +284,9 @@ install_dependencies {release_three!s}
 printf '%s' "$STEP_REPORT"
 """
 
-    result = subprocess.run(["bash", "-c", command], text=True, capture_output=True, check=False)
+    result = subprocess.run(
+        ["bash", "-c", command], text=True, capture_output=True, check=False
+    )
 
     assert result.returncode == 0, result.stderr
     outcomes = [entry.split(":")[1] for entry in result.stdout.split(";")]
@@ -253,9 +298,9 @@ def test_tray_artifacts_are_verified_before_release_preparation():
     preparation = SCRIPT.index('prepare_release "$TARGET_REVISION"')
 
     assert validation < preparation
-    assert 'sha256sum --check --strict SHA256SUMS' in SCRIPT
-    assert 'Tray artifacts are stale or do not identify revision' in SCRIPT
-    assert 'Required tray artifact missing' in SCRIPT
+    assert "sha256sum --check --strict SHA256SUMS" in SCRIPT
+    assert "Tray artifacts are stale or do not identify revision" in SCRIPT
+    assert "Required tray artifact missing" in SCRIPT
     assert 'publish_tray_artifacts "$TARGET_REVISION"' in SCRIPT
 
 
@@ -263,12 +308,12 @@ def test_restart_does_not_install_or_mutate_dependencies():
     restart = (ROOT / "scripts/restart.sh").read_text()
 
     assert "pip install" not in restart
-    assert "cleanup_invalid_distribution \"$PYTHON_BIN\"" not in restart
+    assert 'cleanup_invalid_distribution "$PYTHON_BIN"' not in restart
 
 
 def test_server_installer_does_not_invoke_tray_toolchains():
     installer = (ROOT / "scripts/install_environment.sh").read_text()
-    tail = installer[installer.index('if [[ "$ENVIRONMENT" == "production" ]]'):]
+    tail = installer[installer.index('if [[ "$ENVIRONMENT" == "production" ]]') :]
 
     assert "install_dotnet\n" not in tail
     assert "install_wix\n" not in tail
@@ -277,7 +322,9 @@ def test_server_installer_does_not_invoke_tray_toolchains():
 
 
 def test_retry_rebuilds_only_a_broken_release_runtime():
-    prepare = SCRIPT[SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")]
+    prepare = SCRIPT[
+        SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")
+    ]
     existing = prepare[: prepare.index("return 0")]
 
     assert 'if ! release_runtime_ready "$release"' in existing
@@ -290,8 +337,8 @@ def test_runtime_validation_uses_release_python_module_import():
         SCRIPT.index("release_runtime_ready() {") : SCRIPT.index("\nprepare_release()")
     ]
 
-    assert '"${release}/.venv/bin/python" -c \'import uvicorn\'' in function
-    assert '.venv/bin/uvicorn' not in function
+    assert "\"${release}/.venv/bin/python\" -c 'import uvicorn'" in function
+    assert ".venv/bin/uvicorn" not in function
 
 
 def test_systemd_launches_uvicorn_as_module_without_console_script_shebang():
@@ -326,8 +373,14 @@ def test_upgrade_removes_malformed_duplicate_suffix_instances():
         )
     ]
 
-    assert "systemctl disable --now myportal@blue.service.service myportal@green.service.service" in install
-    assert "systemctl reset-failed myportal@blue.service.service myportal@green.service.service" in install
+    assert (
+        "systemctl disable --now myportal@blue.service.service myportal@green.service.service"
+        in install
+    )
+    assert (
+        "systemctl reset-failed myportal@blue.service.service myportal@green.service.service"
+        in install
+    )
     assert install.index("systemctl disable --now") < install.index(
         "systemctl enable myportal@blue.service myportal@green.service"
     )
@@ -336,7 +389,9 @@ def test_upgrade_removes_malformed_duplicate_suffix_instances():
 def test_systemd_does_not_mask_shared_upload_symlinks_as_read_only():
     unit = (ROOT / "deploy/systemd/myportal@.service").read_text()
 
-    read_only_line = next(line for line in unit.splitlines() if line.startswith("ReadOnlyPaths="))
+    read_only_line = next(
+        line for line in unit.splitlines() if line.startswith("ReadOnlyPaths=")
+    )
     assert "/opt/myportal/releases" not in read_only_line
     assert read_only_line == "ReadOnlyPaths=/opt/myportal/instances"
     assert "ReadWritePaths=/opt/myportal/shared" in unit
@@ -344,13 +399,19 @@ def test_systemd_does_not_mask_shared_upload_symlinks_as_read_only():
 
 
 def test_atomic_link_runs_with_nounset(tmp_path):
-    function = SCRIPT[SCRIPT.index("atomic_link() {") : SCRIPT.index("\ninstance_port()")]
+    function = SCRIPT[
+        SCRIPT.index("atomic_link() {") : SCRIPT.index("\ninstance_port()")
+    ]
     target = tmp_path / "release"
     target.mkdir()
     link = tmp_path / "current"
 
     result = subprocess.run(
-        ["bash", "-c", "set -Eeuo pipefail\n" + function + '\natomic_link "$TARGET" "$LINK"'],
+        [
+            "bash",
+            "-c",
+            "set -Eeuo pipefail\n" + function + '\natomic_link "$TARGET" "$LINK"',
+        ],
         text=True,
         capture_output=True,
         env={**os.environ, "TARGET": str(target), "LINK": str(link)},
@@ -365,28 +426,40 @@ def test_deleted_migration_is_not_treated_as_additive_release(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True
+    )
     subprocess.run(["git", "config", "user.name", "Upgrade Test"], cwd=repo, check=True)
     migrations = repo / "migrations"
     migrations.mkdir()
     migration = migrations / "001_expand.sql"
-    migration.write_text("-- phase: expand\n-- compatible-from: *\n-- compatible-to: *\nSELECT 1;\n")
+    migration.write_text(
+        "-- phase: expand\n-- compatible-from: *\n-- compatible-to: *\nSELECT 1;\n"
+    )
     subprocess.run(["git", "add", "."], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-qm", "old"], cwd=repo, check=True)
-    old_revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    old_revision = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+    ).strip()
     migration.unlink()
     subprocess.run(["git", "add", "-u"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-qm", "delete migration"], cwd=repo, check=True)
-    target_revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    target_revision = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+    ).strip()
     function = SCRIPT[
-        SCRIPT.index("is_additive_migration_only_release() {") : SCRIPT.index("\ncommand -v git")
+        SCRIPT.index("is_additive_migration_only_release() {") : SCRIPT.index(
+            "\ncommand -v git"
+        )
     ]
 
     result = subprocess.run(
         [
             "bash",
             "-c",
-            "set -Eeuo pipefail\n" + function + '\nif is_additive_migration_only_release "$OLD" "$TARGET"; then exit 9; fi',
+            "set -Eeuo pipefail\n"
+            + function
+            + '\nif is_additive_migration_only_release "$OLD" "$TARGET"; then exit 9; fi',
         ],
         cwd=repo,
         text=True,
@@ -417,9 +490,15 @@ def test_migration_environment_preserves_special_characters(tmp_path):
         f'DB_PASSWORD="{password}"\n'
         "DB_NAME=existing_portal\n"
     )
-    function = SCRIPT[SCRIPT.index("run_release_manage() {") : SCRIPT.index("\nrun_migration_phase()")]
+    function = SCRIPT[
+        SCRIPT.index("run_release_manage() {") : SCRIPT.index("\nrun_migration_phase()")
+    ]
     result = subprocess.run(
-        ["bash", "-c", "set -Eeuo pipefail\n" + function + '\nrun_release_manage "$RELEASE" check'],
+        [
+            "bash",
+            "-c",
+            "set -Eeuo pipefail\n" + function + '\nrun_release_manage "$RELEASE" check',
+        ],
         text=True,
         capture_output=True,
         env={
@@ -444,7 +523,11 @@ def test_migration_environment_preserves_special_characters(tmp_path):
 def _run_configuration_validation(tmp_path: Path, contents: str, **environment: str):
     env_file = tmp_path / ".env"
     env_file.write_text(contents)
-    function = SCRIPT[SCRIPT.index("validate_required_configuration() {") : SCRIPT.index("\natomic_link()")]
+    function = SCRIPT[
+        SCRIPT.index("validate_required_configuration() {") : SCRIPT.index(
+            "\natomic_link()"
+        )
+    ]
     child_environment = dict(os.environ)
     child_environment.pop("SESSION_SECRET", None)
     child_environment.pop("TOTP_ENCRYPTION_KEY", None)
@@ -477,15 +560,22 @@ def test_upgrade_rejects_missing_secrets_before_installing_release(tmp_path):
     result = _run_configuration_validation(tmp_path, "SESSION_SECRET=configured\n")
 
     assert result.returncode != 0
-    assert "Missing required application configuration: TOTP_ENCRYPTION_KEY." in result.stderr
+    assert (
+        "Missing required application configuration: TOTP_ENCRYPTION_KEY."
+        in result.stderr
+    )
     assert "before running the upgrade" in result.stderr
-    validation = SCRIPT.index("validate_required_configuration\n", SCRIPT.index("command -v git"))
+    validation = SCRIPT.index(
+        "validate_required_configuration\n", SCRIPT.index("command -v git")
+    )
     preparation = SCRIPT.index('prepare_release "$TARGET_REVISION"')
     assert validation < preparation
 
 
 def test_cutover_checks_expected_version_before_nginx_switch():
-    version_check = SCRIPT.index('wait_for_version "$(instance_port "$inactive")" "$revision"')
+    version_check = SCRIPT.index(
+        'wait_for_version "$(instance_port "$inactive")" "$revision"'
+    )
     smoke = SCRIPT.index('smoke_test "$(instance_port "$inactive")" "$revision"')
     cutover = SCRIPT.index('write_upstream "$inactive" "$active"')
     assert version_check < smoke < cutover
@@ -509,12 +599,12 @@ def test_upgrade_installs_and_starts_blue_green_nginx_after_backend_validation()
         )
     ]
 
-    assert 'deploy/nginx/myportal-bluegreen.conf' in nginx_install
+    assert "deploy/nginx/myportal-bluegreen.conf" in nginx_install
     assert 'available_dir="/etc/nginx/sites-available"' in nginx_install
     assert 'installed_config="${available_dir}/myportal.conf"' in nginx_install
-    assert '/etc/nginx/conf.d/myportal.conf' in nginx_install
+    assert "/etc/nginx/conf.d/myportal.conf" in nginx_install
     assert 'ln -sfn "$installed_config" "${enabled_dir}/myportal.conf"' in nginx_install
-    assert 'systemctl enable --now nginx' in nginx_install
+    assert "systemctl enable --now nginx" in nginx_install
 
     validation = SCRIPT.index('smoke_test "$(instance_port "$inactive")" "$revision"')
     install = SCRIPT.index(
@@ -540,7 +630,9 @@ def test_first_nginx_start_uses_the_validated_candidate_upstream():
 
 
 def test_pre_cutover_failure_does_not_rewrite_working_upstream():
-    rollback = SCRIPT[SCRIPT.index("rollback() {") : SCRIPT.index("\nrun_rolling_restart()")]
+    rollback = SCRIPT[
+        SCRIPT.index("rollback() {") : SCRIPT.index("\nrun_rolling_restart()")
+    ]
 
     assert '[[ "$upstream_switched" == true ]] && write_upstream' in rollback
     switch = SCRIPT.index('write_upstream "$inactive" "$active"')
@@ -550,7 +642,10 @@ def test_pre_cutover_failure_does_not_rewrite_working_upstream():
 
 def test_failure_rolls_back_links_and_upstream():
     assert "rollback()" in SCRIPT
-    assert 'trap \'rollback "$active" "$inactive" "$old_inactive" "$upstream_switched"\' ERR' in SCRIPT
+    assert (
+        'trap \'rollback "$active" "$inactive" "$old_inactive" "$upstream_switched"\' ERR'
+        in SCRIPT
+    )
     assert 'write_upstream "$old_active" "$new_instance"' in SCRIPT
     assert 'atomic_link "$PREVIOUS_RELEASE" "$CURRENT_LINK"' in SCRIPT
 
@@ -573,3 +668,32 @@ def test_remote_validation_rejects_untrusted_and_embedded_credentials():
     assert "validate_origin_remote()" in SCRIPT
     assert "https://github.com/*|git@github.com:*|ssh://git@github.com/*" in SCRIPT
     assert "credential-bearing HTTPS remotes" in SCRIPT
+
+
+# Regression guard: feature-pack publication must wait for an exact scheduler
+# acknowledgement and must flow into the immutable cutover on timeout/failure.
+def test_feature_pack_reload_acknowledgement_falls_back_to_cutover():
+    branch = SCRIPT[
+        SCRIPT.index("  feature-pack-reload)") : SCRIPT.index("  tray-publish)")
+    ]
+    assert "write_upgrade_status reloading" in branch
+    assert 'result.get("revision") == sys.argv[3]' in branch
+    assert 'result.get("status") == "succeeded"' in branch
+    assert 'DEPLOYMENT_ACTION="staged-cutover"' in branch
+    assert branch.index('prepare_release "$TARGET_REVISION"') < branch.index(
+        "feature_pack_reload.flag"
+    )
+    assert '"result_path"' not in branch
+    acknowledgement = branch.index('if [[ "$reload_acknowledged" == true ]]')
+    serving_link = branch.index(
+        'atomic_link "$RELEASE_DIR" "$INSTANCE_ROOT/$active_instance"'
+    )
+    assert acknowledgement < serving_link
+
+
+def test_feature_pack_reload_timeout_is_validated_before_upgrade():
+    validation = SCRIPT.index(
+        'if [[ ! "$FEATURE_PACK_RELOAD_TIMEOUT" =~ ^[1-9][0-9]*$ ]]'
+    )
+    fetch = SCRIPT.index("git fetch --quiet origin main")
+    assert validation < fetch
