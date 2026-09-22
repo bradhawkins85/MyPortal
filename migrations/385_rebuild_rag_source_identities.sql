@@ -1,0 +1,9 @@
+-- DEPLOYMENT: Green/Blue safe. Both application versions tolerate an empty
+-- RAG index, and rag_documents owns its dependent rows through foreign keys.
+--
+-- Source identity rules changed for orders, best-practice checks, mailboxes,
+-- and feature-pack records. Remove rows built with the old rules so the first
+-- post-deployment full maintenance index reconstructs every document and does
+-- not retain stale aliases. The normal RAG indexing task performs that full
+-- rebuild with stale cleanup enabled.
+DELETE FROM rag_documents;

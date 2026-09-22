@@ -28,6 +28,37 @@ def default_agent_rag_mocks(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_feature_pack_results_require_and_canonicalise_stable_ids(monkeypatch):
+    provider = lambda **_kwargs: [  # noqa: E731
+        {"order_number": " FP-100 ", "title": "Valid result"},
+        {"title": "Missing stable identifier"},
+    ]
+    module = SimpleNamespace(AGENT_SEARCH_PROVIDER=provider)
+    registry = SimpleNamespace(
+        _states={"demo": SimpleNamespace(pack=SimpleNamespace(slug="demo"))}
+    )
+    warnings = []
+    monkeypatch.setattr(agent_service, "get_registry", lambda: registry)
+    monkeypatch.setattr(agent_service.importlib, "import_module", lambda _name: module)
+    monkeypatch.setattr(
+        agent_service, "log_warning", lambda message, **meta: warnings.append((message, meta))
+    )
+
+    sources = await agent_service._search_feature_pack_sources(
+        "query",
+        user={"id": 1},
+        active_company_id=None,
+        memberships=[],
+        company_ids=[],
+        is_super_admin=True,
+    )
+
+    assert sources["demo"][0]["id"] == "FP-100"
+    assert len(sources["demo"]) == 1
+    assert warnings[0][1]["reason"] == "stable source identifier is required"
+
+
+@pytest.mark.anyio
 async def test_execute_agent_query_returns_sources(monkeypatch):
     user = {"id": 7, "is_super_admin": False}
     memberships = [
@@ -496,6 +527,7 @@ async def test_execute_agent_query_includes_generic_feature_pack_sources(monkeyp
         provider_calls.append(context)
         return [
             {
+                "id": "backup-1",
                 "title": "Backups policy",
                 "summary": "Nightly backup completed successfully",
                 "url": "/backups/jobs/1",

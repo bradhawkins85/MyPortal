@@ -11,7 +11,7 @@ from typing import Any, Mapping, Sequence
 
 from app.core.database import db
 from app.core.features import get_registry, module_name_for_slug
-from app.core.logging import log_error
+from app.core.logging import log_error, log_warning
 from app.repositories import m365_best_practices as m365_bp_repo
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import reporting as reporting_repo
@@ -1466,15 +1466,55 @@ async def _search_feature_pack_sources(
             continue
         if not result:
             continue
-        items = list(result if isinstance(result, list) else result.get("results", []))
+        if isinstance(result, list):
+            raw_items = result
+        elif isinstance(result, Mapping):
+            raw_items = result.get("results", [])
+        else:
+            log_warning(
+                "Agent feature pack returned malformed results",
+                feature_pack=slug,
+                reason="result must be a list or mapping",
+            )
+            continue
+        if not isinstance(raw_items, (list, tuple)):
+            log_warning(
+                "Agent feature pack returned malformed results",
+                feature_pack=slug,
+                reason="results must be a list",
+            )
+            continue
+        items = list(raw_items)
         normalised: list[dict[str, Any]] = []
-        for item in items[:_FEATURE_PACK_RESULT_LIMIT]:
+        for result_index, item in enumerate(items[:_FEATURE_PACK_RESULT_LIMIT]):
             if not isinstance(item, Mapping):
+                log_warning(
+                    "Agent feature pack result skipped",
+                    feature_pack=slug,
+                    result_index=result_index,
+                    reason="record must be a mapping",
+                )
+                continue
+            identity = rag_index_service.source_identity(f"feature:{slug}", item)
+            if identity is None:
+                log_warning(
+                    "Agent feature pack result skipped",
+                    feature_pack=slug,
+                    result_index=result_index,
+                    reason="stable source identifier is required",
+                )
                 continue
             title = str(
                 item.get("title") or item.get("name") or item.get("label") or ""
             ).strip()
             if not title:
+                log_warning(
+                    "Agent feature pack result skipped",
+                    feature_pack=slug,
+                    result_index=result_index,
+                    source_id=identity[1],
+                    reason="title is required",
+                )
                 continue
             metadata = (
                 item.get("metadata")
@@ -1483,7 +1523,7 @@ async def _search_feature_pack_sources(
             )
             normalised.append(
                 {
-                    "id": item.get("id") or item.get("key") or item.get("slug"),
+                    "id": identity[1],
                     "title": title,
                     "summary": _truncate(
                         item.get("summary")
