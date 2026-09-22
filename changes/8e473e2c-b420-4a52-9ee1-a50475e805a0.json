@@ -1,0 +1,7 @@
+{
+  "guid": "8e473e2c-b420-4a52-9ee1-a50475e805a0",
+  "occurred_at": "2026-09-21T00:00:00Z",
+  "change_type": "fix",
+  "summary": "Made multi-pack hot reload transactional and added scheduler acknowledgement with staged-cutover fallback.",
+  "content_hash": "feature-pack-transactional-reload-acknowledgement"
+}

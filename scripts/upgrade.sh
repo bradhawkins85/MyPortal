@@ -64,6 +64,7 @@ DEPLOYMENT_ACTION="staged-cutover"
 DEPLOYMENT_REASON="planner_not_run"
 STEP_REPORT=""
 TRAY_ARTIFACT_ROOT="${MYPORTAL_TRAY_ARTIFACT_ROOT:-${SHARED_ROOT}/artifacts/tray}"
+FEATURE_PACK_RELOAD_TIMEOUT="${MYPORTAL_FEATURE_PACK_RELOAD_TIMEOUT:-60}"
 
 usage() {
   cat <<'EOF'
@@ -748,8 +749,15 @@ is_additive_migration_only_release() {
   return 0
 }
 
-command -v git >/dev/null && command -v curl >/dev/null && command -v nginx >/dev/null && command -v systemctl >/dev/null
+command -v git >/dev/null && command -v curl >/dev/null && command -v nginx >/dev/null && command -v systemctl >/dev/null && command -v flock >/dev/null
 cd "$PROJECT_ROOT"
+if [[ ! "$FEATURE_PACK_RELOAD_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+  echo "MYPORTAL_FEATURE_PACK_RELOAD_TIMEOUT must be a positive integer." >&2
+  exit 2
+fi
+mkdir -p "$SHARED_ROOT/state"
+exec 9>"$SHARED_ROOT/state/upgrade.lock"
+flock 9
 validate_origin_remote "$(git config --get remote.origin.url)"
 validate_required_configuration
 UPGRADE_STARTED_AT=$(date --iso-8601=seconds)
@@ -800,10 +808,65 @@ case "$DEPLOYMENT_ACTION" in
     exit 0
     ;;
   feature-pack-reload)
-    publish_paths_without_worker_reload "$TARGET_REVISION" feature_pack
-    python3 -c 'import json,sys; print("\n".join(json.loads(sys.argv[1])["feature_packs"]))' "$DEPLOYMENT_PLAN" >"${SHARED_ROOT}/state/feature_pack_reload.flag"
-    write_upgrade_status succeeded "Feature packs published for in-process reload without cycling workers." "$DEPLOYMENT_REASON"
-    exit 0
+    # Candidate code is imported from the same immutable release used by a
+    # normal cutover.  The active link and control checkout remain untouched.
+    prepare_release "$TARGET_REVISION" "$RELEASE_DIR"
+    request_id="${TARGET_REVISION}-$$-$(date +%s)"
+    reload_flag="${SHARED_ROOT}/state/feature_pack_reload.flag"
+    reload_result="${SHARED_ROOT}/state/feature_pack_reload.${request_id}.result"
+    rm -f "$reload_result"
+    python3 - "$DEPLOYMENT_PLAN" "$request_id" "$TARGET_REVISION" "$RELEASE_DIR" "$reload_flag.tmp" <<'PY'
+import json, os, sys
+plan, request_id, revision, release_path, output = sys.argv[1:]
+payload = {
+    "request_id": request_id,
+    "revision": revision,
+    "release_path": release_path,
+    "packs": json.loads(plan)["feature_packs"],
+}
+with open(output, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, sort_keys=True)
+    handle.flush()
+    os.fsync(handle.fileno())
+PY
+    mv -f "$reload_flag.tmp" "$reload_flag"
+    write_upgrade_status reloading "Waiting for feature-pack activation acknowledgement for ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
+    reload_deadline=$((SECONDS + FEATURE_PACK_RELOAD_TIMEOUT))
+    reload_acknowledged=false
+    while ((SECONDS < reload_deadline)); do
+      if [[ -f "$reload_result" ]] && python3 - "$reload_result" "$request_id" "$TARGET_REVISION" "$DEPLOYMENT_PLAN" <<'PY'
+import json, sys
+result = json.load(open(sys.argv[1], encoding="utf-8"))
+expected = sorted(json.loads(sys.argv[4])["feature_packs"])
+ok = result.get("request_id") == sys.argv[2] and result.get("revision") == sys.argv[3]
+ok = ok and result.get("status") == "succeeded"
+ok = ok and sorted(result.get("loaded", {})) == expected
+ok = ok and all(result["loaded"].get(pack) == sys.argv[3] for pack in expected)
+raise SystemExit(0 if ok else 1)
+PY
+      then
+        reload_acknowledged=true
+        break
+      fi
+      sleep 1
+    done
+    rm -f "$reload_result"
+    if [[ "$reload_acknowledged" == true ]]; then
+      # Only now may deployment metadata advance.  Point the serving slot and
+      # canonical release link at the acknowledged immutable candidate so a
+      # later service restart cannot silently roll the packs back.
+      active_instance=$(read_active)
+      atomic_link "$RELEASE_DIR" "$INSTANCE_ROOT/$active_instance"
+      atomic_link "$RELEASE_DIR" "$CURRENT_LINK"
+      write_upgrade_status succeeded "Feature packs loaded and acknowledged at ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
+      exit 0
+    fi
+    # Do not infer success from Git metadata.  A negative result or timeout
+    # always continues into the verified immutable-release cutover below.
+    rm -f "$reload_flag"
+    DEPLOYMENT_ACTION="staged-cutover"
+    DEPLOYMENT_REASON="feature_pack_reload_unacknowledged"
+    record_step feature_pack_reload failed "acknowledgement_timeout_or_activation_failure" "$FEATURE_PACK_RELOAD_TIMEOUT"
     ;;
   tray-publish)
     publish_tray_artifacts "$TARGET_REVISION"

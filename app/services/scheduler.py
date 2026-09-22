@@ -71,6 +71,12 @@ COMMANDS_BY_MODULE = module_capabilities.COMMANDS_BY_MODULE
 _FEATURE_PACK_RELOAD_FLAG_PATH = (
     _PROJECT_ROOT / "var" / "state" / "feature_pack_reload.flag"
 )
+_FEATURE_PACK_RELOAD_RESULT_PATH = (
+    _PROJECT_ROOT / "var" / "state" / "feature_pack_reload.result"
+)
+_FEATURE_PACK_RELOAD_REQUEST_ID_RE = re.compile(r"[A-Za-z0-9_.-]{1,160}\Z")
+_GIT_REVISION_RE = re.compile(r"[0-9a-f]{40,64}\Z")
+_FEATURE_PACK_SLUG_RE = re.compile(r"[a-z][a-z0-9_]*\Z")
 
 # Directory prefix used to detect changes that are isolated to a single
 # feature pack (see ``app/core/features.py``).  When every file in a
@@ -88,6 +94,7 @@ _FEATURE_PACKS_DIR_PREFIX = "app/features/"
 # dynamically simply get an empty match and fall through to the normal
 # full-restart upgrade path.
 _PACK_VERSION_RE = re.compile(r"""version\s*=\s*['"]([^'"]+)['"]""")
+
 
 # Mapping of module slug -> set of scheduled task commands that require that module.
 # Used to filter available commands in the UI and to disable tasks when a module is disabled.
@@ -620,21 +627,26 @@ class SchedulerService:
             # Admission is deliberately inside the execution lock.  A module
             # can be toggled after scheduler refresh but must never race into
             # dispatch.
-            owners = module_capabilities.modules_for_command(str(command or ""))
-            if owners:
-                availability = get_component_availability()
-                owner_modules = [await module_repo.get_module(slug) for slug in owners]
-                if not any(
-                    module and availability.module_enabled(module)
-                    for module in owner_modules
-                ):
+            for module_slug in module_capabilities.modules_for_command(
+                str(command or "")
+            ):
+                module = await module_repo.get_module(module_slug)
+                if not module or not module.get("enabled"):
                     now = datetime.now(timezone.utc)
                     await scheduled_tasks_repo.record_task_run(
-                        int(task_id), status="skipped", started_at=now,
-                        finished_at=now, duration_ms=0,
-                        details=f"{DEPLOYMENT_DISABLED_REASON}; retryable=false",
+                        int(task_id),
+                        status="skipped",
+                        started_at=now,
+                        finished_at=now,
+                        duration_ms=0,
+                        details=f"Module '{module_slug}' is disabled",
                     )
-                    log_info("Scheduled task skipped: owning module unavailable", task_id=task_id, command=command)
+                    log_info(
+                        "Scheduled task skipped: module disabled",
+                        task_id=task_id,
+                        command=command,
+                        module=module_slug,
+                    )
                     return
 
             if not force_restart:
@@ -1428,8 +1440,10 @@ class SchedulerService:
                     if company_id:
                         company_id_int = int(company_id)
                         try:
-                            results = await m365_service.check_enterprise_app_permissions(
-                                company_id_int
+                            results = (
+                                await m365_service.check_enterprise_app_permissions(
+                                    company_id_int
+                                )
                             )
                             all_ok = bool(results) and all(
                                 app.get("all_ok") for app in results
@@ -1721,37 +1735,31 @@ class SchedulerService:
                     version=new_version,
                 )
 
-        # Fast-forward the working tree so the new pack code is on disk
-        # before we ask the registry to re-import it.  ``--ff-only``
-        # refuses to create a merge commit, matching the upgrade
-        # script's expectation that ``main`` advances linearly.
-        rc, _, stderr = await self._run_git("merge", "--ff-only", fetched_head)
-        if rc != 0:
-            log_error(
-                "Feature pack hot-reload aborted: fast-forward merge failed",
-                error=_truncate_output(stderr),
+        release_root = (
+            Path(os.getenv("MYPORTAL_RELEASE_ROOT", "/opt/myportal/releases"))
+            / fetched_head
+        )
+        if not release_root.is_dir():
+            # Preparation belongs to the release coordinator.  Never advance
+            # the control checkout merely to make code importable.
+            log_info(
+                "Feature pack hot-reload deferred to staged cutover",
+                reason="candidate_release_not_prepared",
+                revision=fetched_head,
             )
             return None
-
-        reloaded: list[str] = []
-        for slug in sorted(slugs):
-            try:
-                state = await registry.reload(slug)
-            except Exception as exc:
-                log_error(
-                    "Feature pack hot-reload failed; falling back to full restart",
-                    slug=slug,
-                    error=str(exc),
-                )
-                return None
-            if state.last_error:
-                log_error(
-                    "Feature pack hot-reload reported an error; falling back to full restart",
-                    slug=slug,
-                    error=state.last_error,
-                )
-                return None
-            reloaded.append(slug)
+        reloaded = sorted(slugs)
+        try:
+            await registry.reload_many_from_release(
+                reloaded, release_root, revision=fetched_head
+            )
+        except Exception as exc:
+            log_error(
+                "Feature pack transaction failed; scheduling staged cutover",
+                error=str(exc),
+                revision=fetched_head,
+            )
+            return None
 
         log_info(
             "Feature pack hot-reload completed",
@@ -1785,10 +1793,56 @@ class SchedulerService:
             )
             return
 
+        request_id = "legacy"
+        revision = "unknown"
+        release_path: Path | None = None
+        result_path = _FEATURE_PACK_RELOAD_RESULT_PATH
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict):
+            request_id = str(payload.get("request_id", ""))
+            revision = str(payload.get("revision", ""))
+            configured_release_root = Path(
+                os.getenv("MYPORTAL_RELEASE_ROOT", "/opt/myportal/releases")
+            ).resolve()
+            requested_release = Path(str(payload.get("release_path", ""))).resolve()
+            if (
+                not _FEATURE_PACK_RELOAD_REQUEST_ID_RE.fullmatch(request_id)
+                or not _GIT_REVISION_RE.fullmatch(revision)
+                or requested_release.parent != configured_release_root
+                or requested_release.name != revision
+            ):
+                log_error(
+                    "Rejected invalid feature pack reload request",
+                    path=str(_FEATURE_PACK_RELOAD_FLAG_PATH),
+                )
+                with suppress(OSError):
+                    _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
+                return
+            release_path = requested_release
+            # Never trust a flag-file supplied output path.  Keeping results
+            # beside the coordinator-owned flag prevents arbitrary file writes.
+            result_path = _FEATURE_PACK_RELOAD_FLAG_PATH.parent / (
+                f"feature_pack_reload.{request_id}.result"
+            )
+            raw_entries = payload.get("packs", [])
+        elif payload is None:
+            raw_entries = raw.splitlines()
+        else:
+            log_error(
+                "Rejected malformed feature pack reload request",
+                path=str(_FEATURE_PACK_RELOAD_FLAG_PATH),
+            )
+            with suppress(OSError):
+                _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
+            return
+
         slugs: list[str] = []
         seen: set[str] = set()
-        for raw_line in raw.splitlines():
-            slug = raw_line.strip()
+        for raw_line in raw_entries:
+            slug = str(raw_line).strip()
             if not slug or slug.startswith("#"):
                 continue
             if slug in seen:
@@ -1796,10 +1850,55 @@ class SchedulerService:
             seen.add(slug)
             slugs.append(slug)
 
+        if payload is not None and any(
+            not _FEATURE_PACK_SLUG_RE.fullmatch(slug) for slug in slugs
+        ):
+            log_error(
+                "Rejected invalid feature pack slug in reload request",
+                path=str(_FEATURE_PACK_RELOAD_FLAG_PATH),
+            )
+            with suppress(OSError):
+                _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
+            return
+
         if not slugs:
             with suppress(OSError):
                 _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
             return
+
+        if payload is not None and result_path.is_file():
+            try:
+                existing_result = json.loads(result_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                existing_result = None
+            existing_status = (
+                existing_result.get("status")
+                if isinstance(existing_result, dict)
+                else None
+            )
+            existing_loaded = (
+                existing_result.get("loaded", {})
+                if isinstance(existing_result, dict)
+                else {}
+            )
+            terminal_result = existing_status == "failed" or (
+                existing_status == "succeeded"
+                and isinstance(existing_loaded, dict)
+                and set(existing_loaded) == set(slugs)
+                and all(existing_loaded.get(slug) == revision for slug in slugs)
+            )
+            if (
+                isinstance(existing_result, dict)
+                and existing_result.get("request_id") == request_id
+                and existing_result.get("revision") == revision
+                and terminal_result
+            ):
+                # The prior attempt reached a terminal result but was
+                # interrupted before clearing the request.  Do not activate
+                # hooks, jobs, or routes for the same request twice.
+                with suppress(OSError):
+                    _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
+                return
 
         try:
             from app.core.features import get_registry
@@ -1811,46 +1910,36 @@ class SchedulerService:
             # Registry not initialised yet; try again on the next tick.
             return
 
-        loaded = {state["slug"] for state in registry.list()}
-        from app.services.component_availability import get_component_availability
-
         reloaded: list[str] = []
         failed: list[str] = []
-        for slug in slugs:
-            if not get_component_availability().feature_pack_available(slug):
-                log_info(
-                    "Feature pack reload flag discarded slug",
-                    reason="pack_disabled_by_deployment",
-                    slug=slug,
+        try:
+            if release_path is None:
+                loaded = {state["slug"] for state in registry.list()}
+                for slug in slugs:
+                    if slug not in loaded:
+                        failed.append(slug)
+                        continue
+                    try:
+                        state = await registry.reload(slug)
+                    except Exception:
+                        failed.append(slug)
+                        continue
+                    if state.last_error:
+                        failed.append(slug)
+                    else:
+                        reloaded.append(slug)
+            else:
+                states = await registry.reload_many_from_release(
+                    slugs, release_path, revision=revision
                 )
-                continue
-            if slug not in loaded:
-                log_info(
-                    "Feature pack reload flag skipped slug",
-                    reason="pack_not_loaded",
-                    slug=slug,
-                )
-                failed.append(slug)
-                continue
-            try:
-                state = await registry.reload(slug)
-            except Exception as exc:
-                log_error(
-                    "Feature pack reload flag handler failed",
-                    slug=slug,
-                    error=str(exc),
-                )
-                failed.append(slug)
-                continue
-            if state.last_error:
-                log_error(
-                    "Feature pack reload flag handler reported error",
-                    slug=slug,
-                    error=state.last_error,
-                )
-                failed.append(slug)
-                continue
-            reloaded.append(slug)
+                reloaded = list(states)
+        except Exception as exc:
+            failed = list(slugs)
+            log_error(
+                "Feature pack reload transaction failed",
+                revision=revision,
+                error=str(exc),
+            )
 
         if reloaded:
             log_info(
@@ -1858,6 +1947,21 @@ class SchedulerService:
                 packs=reloaded,
                 failed=failed,
             )
+
+        if payload is not None:
+            result = {
+                "request_id": request_id,
+                "revision": revision,
+                "status": "succeeded" if not failed else "failed",
+                "loaded": {slug: revision for slug in reloaded},
+                "failed": failed,
+            }
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary_result = result_path.with_suffix(result_path.suffix + ".tmp")
+            temporary_result.write_text(
+                json.dumps(result, sort_keys=True), encoding="utf-8"
+            )
+            os.replace(temporary_result, result_path)
 
         if not failed:
             try:
@@ -1868,7 +1972,7 @@ class SchedulerService:
                     path=str(_FEATURE_PACK_RELOAD_FLAG_PATH),
                     error=str(exc),
                 )
-        else:
+        elif payload is None:
             # Leave only the failed slugs in the flag so the next tick
             # retries them.  Successful reloads are dropped.
             try:
@@ -1881,6 +1985,12 @@ class SchedulerService:
                     path=str(_FEATURE_PACK_RELOAD_FLAG_PATH),
                     error=str(exc),
                 )
+        else:
+            # A transactional request is terminal.  Its result tells the
+            # coordinator to perform a full cutover; retrying individual packs
+            # would violate all-or-nothing activation.
+            with suppress(OSError):
+                _FEATURE_PACK_RELOAD_FLAG_PATH.unlink()
 
     @staticmethod
     def _classify_feature_pack_changes(changed_files: list[str]) -> set[str] | None:
@@ -1970,9 +2080,7 @@ class SchedulerService:
 
     @staticmethod
     def _classify_full_upgrade_reason(changed_files: list[str] | None) -> str:
-        plan = build_deployment_plan(
-            [("M", path) for path in (changed_files or [])]
-        )
+        plan = build_deployment_plan([("M", path) for path in (changed_files or [])])
         return plan.reason
 
     def _ensure_update_flag_directory(self) -> None:

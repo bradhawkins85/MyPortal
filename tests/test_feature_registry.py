@@ -18,6 +18,7 @@ import importlib
 import shutil
 import sys
 import textwrap
+import shutil
 from pathlib import Path
 
 import pytest
@@ -49,10 +50,7 @@ def _write_pack(tmp_path: Path, slug: str, version: str, response: str) -> None:
 
     pkg_dir = Path(__file__).resolve().parent.parent / "app" / "features" / slug
     pkg_dir.mkdir(parents=True, exist_ok=True)
-    shutil.rmtree(pkg_dir / "__pycache__", ignore_errors=True)
-    (pkg_dir / "__init__.py").write_text(
-        textwrap.dedent(
-            f"""
+    (pkg_dir / "__init__.py").write_text(textwrap.dedent(f"""
             from fastapi import APIRouter
             from app.core.features import FeaturePack
 
@@ -67,10 +65,7 @@ def _write_pack(tmp_path: Path, slug: str, version: str, response: str) -> None:
                 version="{version}",
                 routers=(router,),
             )
-            """
-        ).lstrip()
-    )
-    importlib.invalidate_caches()
+            """).lstrip())
 
 
 @pytest.fixture
@@ -145,7 +140,11 @@ def test_reload_swaps_router_in_place(tmp_path, app, registry, temp_pack_slug):
         resp = client.get(f"/_t_{temp_pack_slug}/ping")
         assert resp.json() == {"v": "v2"}
         # And only one matching route exists – the old one was removed.
-        matches = [r for r in app.routes if getattr(r, "path", "") == f"/_t_{temp_pack_slug}/ping"]
+        matches = [
+            r
+            for r in app.routes
+            if getattr(r, "path", "") == f"/_t_{temp_pack_slug}/ping"
+        ]
         assert len(matches) == 1
 
 
@@ -196,11 +195,11 @@ def test_unload_removes_routes(tmp_path, app, registry, temp_pack_slug):
 def test_in_flight_counter_increments(tmp_path, app, registry, temp_pack_slug):
     """The counter must rise while an endpoint is executing."""
 
-    pkg_dir = Path(__file__).resolve().parent.parent / "app" / "features" / temp_pack_slug
+    pkg_dir = (
+        Path(__file__).resolve().parent.parent / "app" / "features" / temp_pack_slug
+    )
     pkg_dir.mkdir(parents=True, exist_ok=True)
-    (pkg_dir / "__init__.py").write_text(
-        textwrap.dedent(
-            f"""
+    (pkg_dir / "__init__.py").write_text(textwrap.dedent(f"""
             import asyncio
             from fastapi import APIRouter
             from app.core.features import FeaturePack
@@ -213,9 +212,7 @@ def test_in_flight_counter_increments(tmp_path, app, registry, temp_pack_slug):
                 return {{"ok": "1"}}
 
             PACK = FeaturePack(slug="{temp_pack_slug}", version="1.0.0", routers=(router,))
-            """
-        ).lstrip()
-    )
+            """).lstrip())
 
     async def run() -> None:
         state = await registry.load(temp_pack_slug)
@@ -241,9 +238,7 @@ def test_load_external_plugin_slug(tmp_path, app, registry):
     plugin_root = tmp_path / "plugins"
     package_dir = plugin_root / "demo_external"
     package_dir.mkdir(parents=True, exist_ok=True)
-    (package_dir / "__init__.py").write_text(
-        textwrap.dedent(
-            """
+    (package_dir / "__init__.py").write_text(textwrap.dedent("""
             from fastapi import APIRouter
             from app.core.features import FeaturePack
 
@@ -258,9 +253,7 @@ def test_load_external_plugin_slug(tmp_path, app, registry):
                 version="1.0.0",
                 routers=(router,),
             )
-            """
-        ).lstrip()
-    )
+            """).lstrip())
 
     sys.path.append(str(plugin_root))
     try:
@@ -282,3 +275,92 @@ def test_parse_semver_handles_short_and_suffix_versions():
     assert _parse_semver("1.2") == (1, 2, 0)
     assert _parse_semver("1.2.3-rc1") == (1, 2, 3)
     assert _parse_semver("v2.5.9+build.7") == (2, 5, 9)
+
+
+@pytest.mark.parametrize(
+    "failed_slug",
+    ["_pytest_batch_first", "_pytest_batch_middle", "_pytest_batch_final"],
+)
+def test_batch_reload_rolls_back_when_pack_activation_fails(tmp_path, app, failed_slug):
+    """No routes change when any candidate startup hook fails."""
+
+    registry = FeatureRegistry(app)
+    live_root = Path(__file__).resolve().parent.parent / "app" / "features"
+    slugs = ["_pytest_batch_first", "_pytest_batch_middle", "_pytest_batch_final"]
+    release = tmp_path / "release"
+
+    def write(root: Path, slug: str, version: str, *, fail: bool = False) -> None:
+        target = root / "app" / "features" / slug if root == release else root / slug
+        target.mkdir(parents=True, exist_ok=True)
+        startup = (
+            "raise RuntimeError('injected activation failure')"
+            if fail
+            else "return None"
+        )
+        (target / "__init__.py").write_text(
+            textwrap.dedent(f"""
+            from fastapi import APIRouter
+            from app.core.features import FeaturePack
+            router = APIRouter()
+            @router.get('/batch/{slug}')
+            async def endpoint(): return {{'version': '{version}'}}
+            async def startup():
+                {startup}
+            PACK = FeaturePack(slug='{slug}', version='{version}', routers=(router,), startup=startup)
+        """),
+            encoding="utf-8",
+        )
+
+    try:
+        for slug in slugs:
+            write(live_root, slug, "old")
+            write(release, slug, "new", fail=slug == failed_slug)
+
+        async def run() -> None:
+            for slug in slugs:
+                await registry.load(slug)
+            before = list(app.router.routes)
+            with pytest.raises(RuntimeError, match="injected activation failure"):
+                await registry.reload_many_from_release(
+                    slugs, release, revision="candidate"
+                )
+            assert app.router.routes == before
+            assert [registry.get(slug).pack.version for slug in slugs] == ["old"] * 3
+
+        asyncio.run(run())
+    finally:
+        for slug in slugs:
+            shutil.rmtree(live_root / slug, ignore_errors=True)
+            for name in [
+                n for n in list(sys.modules) if n.startswith(f"app.features.{slug}")
+            ]:
+                sys.modules.pop(name, None)
+
+
+def test_batch_reload_prepare_failure_never_changes_live_routes(tmp_path, app):
+    registry = FeatureRegistry(app)
+    slug = "_pytest_batch_prepare"
+    live_root = Path(__file__).resolve().parent.parent / "app" / "features"
+    release_pack = tmp_path / "release" / "app" / "features" / slug
+    try:
+        _write_pack(tmp_path, slug, "1.0.0", "old")
+        release_pack.mkdir(parents=True)
+        (release_pack / "__init__.py").write_text("invalid python )(", encoding="utf-8")
+
+        async def run() -> None:
+            await registry.load(slug)
+            before = list(app.router.routes)
+            with pytest.raises(SyntaxError):
+                await registry.reload_many_from_release(
+                    [slug], tmp_path / "release", revision="candidate"
+                )
+            assert app.router.routes == before
+            assert registry.get(slug).pack.version == "1.0.0"
+
+        asyncio.run(run())
+    finally:
+        shutil.rmtree(live_root / slug, ignore_errors=True)
+        for name in [
+            n for n in list(sys.modules) if n.startswith(f"app.features.{slug}")
+        ]:
+            sys.modules.pop(name, None)
