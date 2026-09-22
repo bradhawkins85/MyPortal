@@ -17,6 +17,7 @@ from loguru import logger
 
 from app.api.dependencies.auth import require_super_admin
 from app.core.features import get_registry
+from app.services.component_availability import get_component_availability
 
 
 router = APIRouter(prefix="/api/features", tags=["Feature Packs"])
@@ -42,6 +43,11 @@ async def reload_feature(
     """
 
     registry = get_registry()
+    if not get_component_availability().feature_pack_available(slug):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Feature pack '{slug}' is disabled by deployment configuration",
+        )
     try:
         state = await registry.reload(slug)
     except ModuleNotFoundError as exc:

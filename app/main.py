@@ -156,6 +156,7 @@ from app.security.security_headers import SecurityHeadersMiddleware
 from app.security.session import SessionData, session_manager
 from app.api.dependencies.auth import get_current_session
 from app.services.scheduler import scheduler_service, COMMANDS_BY_MODULE
+from app.services.component_availability import AvailabilityConfigurationError
 from app.services import audit as audit_service
 from app.services import background as background_tasks
 from app.services import automations as automations_service
@@ -2872,6 +2873,15 @@ async def on_startup() -> None:
         for slug in (getattr(settings, "feature_packs", "") or "").split(",")
         if slug.strip()
     ]
+    from app.services.component_availability import configure_component_availability
+
+    availability = configure_component_availability(
+        disabled_feature_packs=settings.disabled_feature_packs,
+        disabled_modules=settings.disabled_modules,
+        known_feature_packs=pack_slugs,
+        known_modules=(module["slug"] for module in modules_service.DEFAULT_MODULES),
+    )
+    pack_slugs = [slug for slug in pack_slugs if availability.feature_pack_available(slug)]
     from app.core.module_capabilities import validate_capability_registry
 
     capability_errors = validate_capability_registry(
@@ -10531,6 +10541,13 @@ async def admin_update_module(slug: str, request: Request):
             enabled = bool(raw_enabled)
     try:
         await modules_service.update_module(slug, enabled=enabled)
+    except AvailabilityConfigurationError as exc:
+        return await _render_modules_dashboard(
+            request,
+            current_user,
+            error_message=str(exc),
+            status_code=status.HTTP_409_CONFLICT,
+        )
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error("Failed to update integration module", slug=slug, error=str(exc))
         return await _render_modules_dashboard(
