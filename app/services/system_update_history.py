@@ -55,7 +55,7 @@ def _write(record: dict[str, Any]) -> dict[str, Any]:
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.chmod(temporary, 0o640)
+        os.chmod(temporary, 0o600)
         os.replace(temporary, _path(str(record["id"])))
     finally:
         try:
