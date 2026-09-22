@@ -1097,6 +1097,12 @@ class SchedulerService:
                                 job_id, status="failed", message=str(exc), finished=True
                             )
                             raise
+                elif command == "rag_index_incremental":
+                    from app.services import rag_outbox
+                    details = json.dumps(await rag_outbox.process_pending(), default=str)
+                elif command == "rag_index_reconcile":
+                    from app.services import rag_outbox
+                    details = json.dumps(await rag_outbox.reconcile(), default=str)
                 elif command == "rag_index_stop":
                     stopped = await rag_index_repo.request_all_active_job_stops()
                     details = json.dumps({"stop_requests": stopped}, default=str)

@@ -2282,6 +2282,8 @@ async def merge_tickets(
     
     # Emit events for merged ticket
     if merged_ticket:
+        from app.services import rag_outbox
+        await rag_outbox.enqueue("tickets", target_ticket_id, source_updated_at=merged_ticket.get("updated_at"))
         await emit_ticket_updated_event(
             target_ticket_id,
             actor_type="system",
@@ -2292,6 +2294,8 @@ async def merge_tickets(
     # Do not emit automation events for child tickets once merged; broadcast only
     # so any open UI rows can disappear from lists that exclude merged tickets.
     for ticket_id in merged_ids:
+        from app.services import rag_outbox
+        await rag_outbox.enqueue("tickets", ticket_id, action="delete")
         await broadcast_ticket_event(action="update", ticket_id=ticket_id)
     
     return merged_ticket, merged_ids, moved_count

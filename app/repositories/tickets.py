@@ -429,7 +429,10 @@ async def create_ticket(
         log_info("Ticket created successfully", ticket_id=ticket_id)
         row = await db.fetch_one("SELECT * FROM tickets WHERE id = %s", (ticket_id,))
         if row:
-            return _normalise_ticket(row)
+            created = _normalise_ticket(row)
+            from app.services import rag_outbox
+            await rag_outbox.enqueue("tickets", ticket_id, source_updated_at=created.get("updated_at"))
+            return created
     fallback_row: dict[str, Any] = {
         "id": ticket_id,
         "company_id": company_id,
@@ -459,7 +462,10 @@ async def create_ticket(
         "syncro_updated_at": None,
         "closed_at": None,
     }
-    return _normalise_ticket(fallback_row)
+    created = _normalise_ticket(fallback_row)
+    from app.services import rag_outbox
+    await rag_outbox.enqueue("tickets", ticket_id, source_updated_at=created.get("updated_at"))
+    return created
 
 
 async def list_tickets(
@@ -1361,7 +1367,10 @@ async def update_ticket(ticket_id: int, **fields: Any) -> TicketRecord | None:
     ):
         await _disable_shipment_watch(ticket_id)
     log_info("Ticket updated successfully", ticket_id=ticket_id)
-    return await get_ticket(ticket_id)
+    updated = await get_ticket(ticket_id)
+    from app.services import rag_outbox
+    await rag_outbox.enqueue("tickets", ticket_id, source_updated_at=(updated or {}).get("updated_at"))
+    return updated
 
 
 async def rename_xero_invoice_number(
@@ -1468,6 +1477,8 @@ async def set_tickets_status(
 async def delete_ticket(ticket_id: int) -> None:
     log_info("Deleting ticket", ticket_id=ticket_id)
     await db.execute("DELETE FROM tickets WHERE id = %s", (ticket_id,))
+    from app.services import rag_outbox
+    await rag_outbox.enqueue("tickets", ticket_id, action="delete")
     log_info("Ticket deleted successfully", ticket_id=ticket_id)
 
 
@@ -1505,6 +1516,9 @@ async def delete_tickets(ticket_ids: Iterable[int]) -> int:
         f"DELETE FROM tickets WHERE id IN ({placeholders})",  # nosec B608
         params,
     )
+    from app.services import rag_outbox
+    for ticket_id in normalised_ids:
+        await rag_outbox.enqueue("tickets", ticket_id, action="delete")
     if not existing:
         return 0
     try:
@@ -1608,6 +1622,8 @@ async def create_reply(
                         reply_id=normalised.get("id"),
                         error=str(exc),
                     )
+            from app.services import rag_outbox
+            await rag_outbox.enqueue("tickets", ticket_id)
             return normalised
     fallback_row: dict[str, Any] = {
         "id": reply_id,
@@ -1623,6 +1639,8 @@ async def create_reply(
         "author_email": clean_author_email,
         "author_display_name": clean_author_display_name,
     }
+    from app.services import rag_outbox
+    await rag_outbox.enqueue("tickets", ticket_id)
     return _normalise_reply(fallback_row)
 
 
