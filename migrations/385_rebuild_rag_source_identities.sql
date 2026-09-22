@@ -1,3 +1,7 @@
+-- phase: expand
+-- compatible-from: *
+-- compatible-to: *
+-- maintenance: false
 -- DEPLOYMENT: Green/Blue safe. Both application versions tolerate an empty
 -- RAG index, and rag_documents owns its dependent rows through foreign keys.
 --
