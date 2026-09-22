@@ -719,8 +719,8 @@ run_migration_phase() {
   write_upgrade_status migrating "Applying and validating schema changes before cutover."
   if ! run_release_manage "$release" migrate \
     --serving-release "${serving:-none}" --target-release "$target" "${args[@]}"; then
-    write_upgrade_status failed "Database migration failed; release was not activated. Verify DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and DB_NAME in ${ENV_FILE}."
-    echo "Database migration failed; release was not activated. Verify DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and DB_NAME in ${ENV_FILE}." >&2
+    write_upgrade_status failed "Database migration failed; release was not activated. Review the migration error above; if it is a connection error, verify DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and DB_NAME in ${ENV_FILE}."
+    echo "Database migration failed; release was not activated. Review the migration error above; if it is a connection error, verify DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and DB_NAME in ${ENV_FILE}." >&2
     return 1
   fi
 }

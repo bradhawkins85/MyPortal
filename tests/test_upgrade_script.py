@@ -765,6 +765,7 @@ def test_failed_migration_is_reported_before_release_activation():
     cutover = SCRIPT.index('run_rolling_restart "$TARGET_REVISION"')
     assert migration < cutover
     assert "Database migration failed; release was not activated." in SCRIPT
+    assert "Review the migration error above" in SCRIPT
 
 
 def test_drain_stops_new_work_before_waiting_for_inflight_requests():

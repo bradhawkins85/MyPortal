@@ -1,7 +1,8 @@
 """Regression coverage for stat-strip reporting catalogue entries."""
 
-from pathlib import Path
+import hashlib
 import re
+from pathlib import Path
 
 
 MIGRATION = Path("migrations/381_stat_strip_reporting_queries.sql")
@@ -64,6 +65,14 @@ def test_every_stat_strip_template_has_a_catalogue_mapping() -> None:
         and ("counter_strip" in path.read_text() or 'class="stat-strip' in path.read_text())
     }
     assert actual == set(TEMPLATE_REPORTS)
+
+
+def test_applied_stat_strip_catalogue_migration_remains_immutable() -> None:
+    # Migration 381 has shipped and its checksum is stored by deployed databases.
+    # Corrections must be made in a new migration (such as migration 383).
+    assert hashlib.sha256(MIGRATION.read_bytes()).hexdigest() == (
+        "2a23ffee84344a782b728342a1a752dd15e06950a12e2f958833d586d18a4bd5"
+    )
 
 
 def test_stat_strip_catalogue_has_every_mapping_once() -> None:
