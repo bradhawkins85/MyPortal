@@ -408,6 +408,13 @@ class Settings(BaseSettings):
     rag_relationship_idle_delay_ms: int = Field(
         default=5000, validation_alias="RAG_RELATIONSHIP_IDLE_DELAY_MS", ge=100, le=60000
     )
+    rag_relationship_lease_seconds: int = Field(
+        default=300,
+        validation_alias="RAG_RELATIONSHIP_LEASE_SECONDS",
+        ge=30,
+        le=3600,
+        description="Seconds a relationship queue claim remains valid without a heartbeat.",
+    )
     swagger_ui_url: str = Field(default="/docs", validation_alias="SWAGGER_UI_URL")
     public_base_url: str | None = Field(
         default=None,

@@ -1,6 +1,11 @@
 import pytest
+import aiosqlite
+from contextlib import asynccontextmanager
+from pathlib import Path
+import sqlite3
 
 from app.repositories import rag_relationships as rag_relationships_repo
+from app.core.database import Database
 from app.services.rag_relationships import (
     _relationship_response_payload,
     parse_relationship_response,
@@ -228,7 +233,14 @@ async def test_evaluate_next_batch_requeues_evaluator_failures_without_retry_inc
         return {"slug": slug, "enabled": True}
 
     async def fake_claim_jobs(limit):
-        return [{"id": 9, "source_document_id": 1, "target_document_id": 2}]
+        return [
+            {
+                "id": 9,
+                "source_document_id": 1,
+                "target_document_id": 2,
+                "claim_token": "claim-9",
+            }
+        ]
 
     async def fake_get_document_with_content(document_id):
         return {
@@ -246,10 +258,12 @@ async def test_evaluate_next_batch_requeues_evaluator_failures_without_retry_inc
     async def fake_trigger_module(*args, **kwargs):
         return {"status": "failed", "last_error": "connection refused"}
 
-    async def fake_reset_queue_item(queue_id, note=None):
+    async def fake_reset_queue_item(queue_id, claim_token, note=None):
+        assert claim_token == "claim-9"
         reset_calls.append((queue_id, note or ""))
 
-    async def fake_fail_queue_item(queue_id, error, *, max_retries):
+    async def fake_fail_queue_item(queue_id, claim_token, error, *, max_retries):
+        assert claim_token == "claim-9"
         failed_calls.append((queue_id, error))
 
     monkeypatch.setattr(rag_relationships, "_evaluator_retry_after", 0.0)
@@ -283,3 +297,214 @@ async def test_evaluate_next_batch_requeues_evaluator_failures_without_retry_inc
         (9, "Relationship evaluator unavailable: connection refused")
     ]
     assert failed_calls == []
+
+
+@pytest.fixture
+async def relationship_queue_db(monkeypatch):
+    connection = await aiosqlite.connect(":memory:")
+    connection.row_factory = aiosqlite.Row
+    await connection.executescript("""
+        CREATE TABLE rag_documents (
+            id INTEGER PRIMARY KEY, content_hash TEXT NOT NULL, is_active INTEGER NOT NULL
+        );
+        CREATE TABLE rag_relationship_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_document_id INTEGER NOT NULL,
+            target_document_id INTEGER NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 1000,
+            status TEXT NOT NULL DEFAULT 'PENDING'
+                CHECK(status IN ('PENDING','PROCESSING','COMPLETED','SKIPPED','FAILED')),
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            started_at TEXT, completed_at TEXT, last_error TEXT,
+            claim_token TEXT, lease_expires_at TEXT, heartbeat_at TEXT,
+            source_hash TEXT NOT NULL DEFAULT '', target_hash TEXT NOT NULL DEFAULT '',
+            UNIQUE(source_document_id, target_document_id)
+        );
+        CREATE TABLE rag_relationships (
+            id INTEGER PRIMARY KEY, source_document_id INTEGER NOT NULL,
+            target_document_id INTEGER NOT NULL, match_status TEXT NOT NULL,
+            source_hash TEXT NOT NULL, target_hash TEXT NOT NULL
+        );
+        INSERT INTO rag_documents VALUES (1, 'one-v1', 1), (2, 'two-v1', 1);
+        """)
+    monkeypatch.setattr(rag_relationships_repo.db, "_use_sqlite", True)
+    monkeypatch.setattr(rag_relationships_repo.db, "_sqlite_conn", connection)
+    yield connection
+    await connection.close()
+
+
+@pytest.mark.anyio
+async def test_sqlite_compare_and_set_allows_only_one_claim(relationship_queue_db):
+    assert await rag_relationships_repo.enqueue(2, 1, priority=1000)
+
+    first = await rag_relationships_repo.claim_jobs(1, lease_seconds=60)
+    second = await rag_relationships_repo.claim_jobs(1, lease_seconds=60)
+
+    assert len(first) == 1
+    assert first[0]["source_document_id"] == 1
+    assert first[0]["target_document_id"] == 2
+    assert second == []
+
+
+@pytest.mark.anyio
+async def test_reindex_resets_durable_pair_and_invalidates_old_claim(
+    relationship_queue_db,
+):
+    assert await rag_relationships_repo.enqueue(1, 2, priority=1000)
+    old_job = (await rag_relationships_repo.claim_jobs(1, lease_seconds=60))[0]
+    await relationship_queue_db.execute(
+        "UPDATE rag_documents SET content_hash = 'one-v2' WHERE id = 1"
+    )
+    await relationship_queue_db.commit()
+
+    assert await rag_relationships_repo.enqueue(2, 1, priority=1100)
+    assert not await rag_relationships_repo.complete_queue_item(
+        old_job["id"], "COMPLETED", old_job["claim_token"]
+    )
+    new_job = (await rag_relationships_repo.claim_jobs(1, lease_seconds=60))[0]
+    assert new_job["id"] == old_job["id"]
+    assert new_job["claim_token"] != old_job["claim_token"]
+    assert await rag_relationships_repo.complete_queue_item(
+        new_job["id"], "COMPLETED", new_job["claim_token"]
+    )
+
+
+@pytest.mark.anyio
+async def test_cleanup_reclaims_only_expired_processing_lease(relationship_queue_db):
+    assert await rag_relationships_repo.enqueue(1, 2, priority=1000)
+    job = (await rag_relationships_repo.claim_jobs(1, lease_seconds=60))[0]
+    await relationship_queue_db.execute(
+        "UPDATE rag_relationship_queue SET lease_expires_at = datetime('now', '-1 second') WHERE id = ?",
+        (job["id"],),
+    )
+    await relationship_queue_db.commit()
+
+    result = await rag_relationships_repo.cleanup_stale_matches_and_decisions()
+
+    row = await rag_relationships_repo.db.fetch_one(
+        "SELECT status, claim_token FROM rag_relationship_queue WHERE id = ?",
+        (job["id"],),
+    )
+    assert result["processing_reset"] == 1
+    assert row == {"status": "PENDING", "claim_token": None}
+
+
+@pytest.mark.anyio
+async def test_mysql_claim_uses_transaction_and_skip_locked(monkeypatch):
+    statements: list[str] = []
+
+    class Cursor:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def execute(self, query, params):
+            statements.append(query)
+
+        async def fetchall(self):
+            return [{"id": 7, "source_document_id": 1, "target_document_id": 2}]
+
+    class Connection:
+        began = committed = False
+
+        async def begin(self):
+            self.began = True
+
+        def cursor(self, _cursor_type):
+            return Cursor()
+
+        async def commit(self):
+            self.committed = True
+
+        async def rollback(self):
+            raise AssertionError("claim should not roll back")
+
+    connection = Connection()
+
+    @asynccontextmanager
+    async def acquire():
+        yield connection
+
+    monkeypatch.setattr(rag_relationships_repo.db, "is_sqlite", lambda: False)
+    monkeypatch.setattr(
+        rag_relationships_repo.db,
+        "_require_aiomysql",
+        lambda: type("MySQL", (), {"DictCursor": object()}),
+    )
+    monkeypatch.setattr(rag_relationships_repo.db, "acquire", acquire)
+
+    claimed = await rag_relationships_repo.claim_jobs(1, lease_seconds=60)
+
+    assert connection.began and connection.committed
+    assert "FOR UPDATE SKIP LOCKED" in statements[0]
+    assert "status = 'PENDING'" in statements[1]
+    assert claimed[0]["claim_token"]
+
+
+@pytest.mark.anyio
+async def test_completion_rejects_noncanonical_status_before_database_call(monkeypatch):
+    async def unexpected_execute(*args, **kwargs):
+        raise AssertionError("invalid status must not reach the database")
+
+    monkeypatch.setattr(
+        rag_relationships_repo.db, "execute_rowcount", unexpected_execute
+    )
+    with pytest.raises(ValueError, match="Completion status"):
+        await rag_relationships_repo.complete_queue_item(1, "FAILED", "token")
+
+
+def test_queue_migration_deduplicates_existing_pairs_for_sqlite():
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.executescript("""
+            CREATE TABLE rag_relationship_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_document_id INTEGER NOT NULL,
+                target_document_id INTEGER NOT NULL,
+                priority INTEGER NOT NULL DEFAULT 1000,
+                status TEXT NOT NULL DEFAULT 'PENDING',
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                started_at TEXT, completed_at TEXT, last_error TEXT,
+                UNIQUE(source_document_id, target_document_id, status)
+            );
+            CREATE INDEX idx_rag_relationship_queue_status
+                ON rag_relationship_queue(status, priority, created_at);
+            INSERT INTO rag_relationship_queue
+                (source_document_id, target_document_id, status)
+            VALUES (1, 2, 'completed'), (1, 2, 'PENDING');
+            """)
+        database = Database()
+        migration = Path("migrations/386_relationship_queue_leases.sql").read_text(
+            encoding="utf-8"
+        )
+        adapted = database._adapt_sql_for_sqlite(migration)
+        for statement in database._split_sql_statements(adapted):
+            connection.execute(statement)
+
+        rows = connection.execute(
+            "SELECT id, status FROM rag_relationship_queue"
+        ).fetchall()
+        columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(rag_relationship_queue)"
+            ).fetchall()
+        }
+        assert rows == [(2, "PENDING")]
+        assert {
+            "claim_token",
+            "lease_expires_at",
+            "source_hash",
+            "target_hash",
+        } <= columns
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO rag_relationship_queue "
+                "(source_document_id, target_document_id, status) VALUES (1, 2, 'FAILED')"
+            )
+    finally:
+        connection.close()

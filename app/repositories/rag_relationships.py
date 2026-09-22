@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from typing import Any, Mapping
+from uuid import uuid4
 
 from app.core.database import db
+from app.core.config import get_settings
+
+QUEUE_STATUSES = frozenset({"PENDING", "PROCESSING", "COMPLETED", "SKIPPED", "FAILED"})
 
 
 def _pair(source_id: int, target_id: int) -> tuple[int, int]:
@@ -70,41 +74,124 @@ async def relationship_current(source_id: int, target_id: int) -> bool:
 
 async def enqueue(source_id: int, target_id: int, *, priority: int) -> bool:
     left, right = _pair(source_id, target_id)
-    existing = await db.fetch_one(
-        """
-        SELECT id FROM rag_relationship_queue
-        WHERE source_document_id = ? AND target_document_id = ? AND status IN ('PENDING','PROCESSING')
-        """,
-        (left, right),
-    )
-    if existing:
+    source = await get_document(left)
+    target = await get_document(right)
+    if not source or not target:
         return False
-    await db.execute(
-        """
-        INSERT INTO rag_relationship_queue (source_document_id, target_document_id, priority, status)
-        VALUES (?, ?, ?, 'PENDING')
-        """,
-        (left, right, priority),
-    )
-    return True
-
-
-async def claim_jobs(limit: int) -> list[dict[str, Any]]:
-    jobs = await db.fetch_all(
-        """
-        SELECT * FROM rag_relationship_queue
-        WHERE status = 'PENDING' AND retry_count < 5
-        ORDER BY priority DESC, created_at ASC, id ASC
-        LIMIT ?
-        """,
-        (limit,),
-    )
-    for job in jobs:
-        await db.execute(
-            "UPDATE rag_relationship_queue SET status = 'PROCESSING', started_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (job["id"],),
+    source_hash = str(source.get("content_hash") or "")
+    target_hash = str(target.get("content_hash") or "")
+    if db.is_sqlite():
+        changed = await db.execute_rowcount(
+            """
+            INSERT INTO rag_relationship_queue
+                (source_document_id, target_document_id, priority, status, source_hash, target_hash)
+            VALUES (?, ?, ?, 'PENDING', ?, ?)
+            ON CONFLICT(source_document_id, target_document_id) DO UPDATE SET
+                priority = MAX(rag_relationship_queue.priority, excluded.priority),
+                status = 'PENDING', retry_count = 0, started_at = NULL,
+                completed_at = NULL, last_error = NULL, claim_token = NULL,
+                lease_expires_at = NULL, heartbeat_at = NULL,
+                source_hash = excluded.source_hash, target_hash = excluded.target_hash
+            WHERE rag_relationship_queue.status NOT IN ('PENDING', 'PROCESSING')
+               OR rag_relationship_queue.source_hash <> excluded.source_hash
+               OR rag_relationship_queue.target_hash <> excluded.target_hash
+            """,
+            (left, right, priority, source_hash, target_hash),
         )
-    return jobs
+    else:
+        changed = await db.execute_rowcount(
+            """
+            INSERT INTO rag_relationship_queue
+                (source_document_id, target_document_id, priority, status, source_hash, target_hash)
+            VALUES (?, ?, ?, 'PENDING', ?, ?)
+            ON DUPLICATE KEY UPDATE
+                priority = GREATEST(priority, VALUES(priority)),
+                retry_count = IF(status IN ('PENDING','PROCESSING') AND source_hash <=> VALUES(source_hash) AND target_hash <=> VALUES(target_hash), retry_count, 0),
+                started_at = IF(status IN ('PENDING','PROCESSING') AND source_hash <=> VALUES(source_hash) AND target_hash <=> VALUES(target_hash), started_at, NULL),
+                completed_at = IF(status IN ('PENDING','PROCESSING') AND source_hash <=> VALUES(source_hash) AND target_hash <=> VALUES(target_hash), completed_at, NULL),
+                last_error = IF(status IN ('PENDING','PROCESSING') AND source_hash <=> VALUES(source_hash) AND target_hash <=> VALUES(target_hash), last_error, NULL),
+                claim_token = IF(status IN ('PENDING','PROCESSING') AND source_hash <=> VALUES(source_hash) AND target_hash <=> VALUES(target_hash), claim_token, NULL),
+                lease_expires_at = IF(status IN ('PENDING','PROCESSING') AND source_hash <=> VALUES(source_hash) AND target_hash <=> VALUES(target_hash), lease_expires_at, NULL),
+                heartbeat_at = IF(status IN ('PENDING','PROCESSING') AND source_hash <=> VALUES(source_hash) AND target_hash <=> VALUES(target_hash), heartbeat_at, NULL),
+                status = IF(status IN ('PENDING','PROCESSING') AND source_hash <=> VALUES(source_hash) AND target_hash <=> VALUES(target_hash), status, 'PENDING'),
+                source_hash = VALUES(source_hash), target_hash = VALUES(target_hash)
+            """,
+            (left, right, priority, source_hash, target_hash),
+        )
+    return changed > 0
+
+
+async def claim_jobs(
+    limit: int, *, lease_seconds: int | None = None
+) -> list[dict[str, Any]]:
+    """Atomically claim pending jobs and return only claims won by this caller."""
+
+    if limit <= 0:
+        return []
+    lease_seconds = int(lease_seconds or get_settings().rag_relationship_lease_seconds)
+    claimed: list[dict[str, Any]] = []
+    if db.is_sqlite():
+        candidates = await db.fetch_all(
+            """
+            SELECT * FROM rag_relationship_queue
+            WHERE status = 'PENDING' AND retry_count < 5
+            ORDER BY priority DESC, created_at ASC, id ASC LIMIT ?
+            """,
+            (limit,),
+        )
+        for job in candidates:
+            token = str(uuid4())
+            won = await db.execute_rowcount(
+                """
+                UPDATE rag_relationship_queue
+                SET status = 'PROCESSING', started_at = CURRENT_TIMESTAMP,
+                    heartbeat_at = CURRENT_TIMESTAMP,
+                    lease_expires_at = datetime('now', '+' || ? || ' seconds'),
+                    claim_token = ?, completed_at = NULL
+                WHERE id = ? AND status = 'PENDING' AND retry_count < 5
+                """,
+                (lease_seconds, token, job["id"]),
+            )
+            if won:
+                job.update({"status": "PROCESSING", "claim_token": token})
+                claimed.append(job)
+        return claimed
+
+    mysql = db._require_aiomysql()
+    async with db.acquire() as conn:
+        await conn.begin()
+        try:
+            async with conn.cursor(mysql.DictCursor) as cursor:
+                await cursor.execute(
+                    """
+                    SELECT * FROM rag_relationship_queue
+                    WHERE status = 'PENDING' AND retry_count < 5
+                    ORDER BY priority DESC, created_at ASC, id ASC
+                    LIMIT %s FOR UPDATE SKIP LOCKED
+                    """,
+                    (limit,),
+                )
+                rows = list(await cursor.fetchall())
+                for job in rows:
+                    token = str(uuid4())
+                    await cursor.execute(
+                        """
+                        UPDATE rag_relationship_queue
+                        SET status = 'PROCESSING', started_at = UTC_TIMESTAMP(6),
+                            heartbeat_at = UTC_TIMESTAMP(6),
+                            lease_expires_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL %s SECOND),
+                            claim_token = %s, completed_at = NULL
+                        WHERE id = %s AND status = 'PENDING'
+                        """,
+                        (lease_seconds, token, job["id"]),
+                    )
+                    job.update({"status": "PROCESSING", "claim_token": token})
+                    claimed.append(job)
+            await conn.commit()
+            return claimed
+        except Exception:
+            await conn.rollback()
+            raise
 
 
 async def store_relationship(
@@ -171,32 +258,89 @@ async def store_relationship(
     )
 
 
-async def complete_queue_item(queue_id: int, status: str) -> None:
-    await db.execute(
-        "UPDATE rag_relationship_queue SET status = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (status, queue_id),
-    )
+def _queue_status(status: str) -> str:
+    canonical = status.upper()
+    if canonical not in QUEUE_STATUSES:
+        raise ValueError(f"Invalid relationship queue status: {status}")
+    return canonical
 
 
-async def reset_queue_item(queue_id: int, note: str | None = None) -> None:
-    await db.execute(
-        "UPDATE rag_relationship_queue SET status = 'PENDING', started_at = NULL, last_error = ? WHERE id = ?",
-        ((note or "")[:2000], queue_id),
-    )
+async def heartbeat_queue_item(
+    queue_id: int, claim_token: str, *, lease_seconds: int | None = None
+) -> bool:
+    lease_seconds = int(lease_seconds or get_settings().rag_relationship_lease_seconds)
+    if db.is_sqlite():
+        sql = """
+            UPDATE rag_relationship_queue SET heartbeat_at = CURRENT_TIMESTAMP,
+                lease_expires_at = datetime('now', '+' || ? || ' seconds')
+            WHERE id = ? AND status = 'PROCESSING' AND claim_token = ?
+        """
+    else:
+        sql = """
+            UPDATE rag_relationship_queue SET heartbeat_at = UTC_TIMESTAMP(6),
+                lease_expires_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? SECOND)
+            WHERE id = ? AND status = 'PROCESSING' AND claim_token = ?
+        """
+    return bool(await db.execute_rowcount(sql, (lease_seconds, queue_id, claim_token)))
 
 
-async def fail_queue_item(queue_id: int, error: str, *, max_retries: int) -> None:
-    row = (
-        await db.fetch_one(
-            "SELECT retry_count FROM rag_relationship_queue WHERE id = ?", (queue_id,)
+async def complete_queue_item(queue_id: int, status: str, claim_token: str) -> bool:
+    canonical = _queue_status(status)
+    if canonical not in {"COMPLETED", "SKIPPED"}:
+        raise ValueError("Completion status must be COMPLETED or SKIPPED")
+    return bool(
+        await db.execute_rowcount(
+            """
+            UPDATE rag_relationship_queue
+            SET status = ?, completed_at = CURRENT_TIMESTAMP, claim_token = NULL,
+                lease_expires_at = NULL, heartbeat_at = NULL
+            WHERE id = ? AND status = 'PROCESSING' AND claim_token = ?
+            """,
+            (canonical, queue_id, claim_token),
         )
-        or {}
     )
-    retry_count = int(row.get("retry_count") or 0) + 1
-    status = "FAILED" if retry_count >= max_retries else "PENDING"
-    await db.execute(
-        "UPDATE rag_relationship_queue SET status = ?, retry_count = ?, last_error = ?, completed_at = CASE WHEN ? = 'FAILED' THEN CURRENT_TIMESTAMP ELSE completed_at END WHERE id = ?",
-        (status, retry_count, error[:2000], status, queue_id),
+
+
+async def reset_queue_item(
+    queue_id: int, claim_token: str, note: str | None = None
+) -> bool:
+    return bool(
+        await db.execute_rowcount(
+            """
+            UPDATE rag_relationship_queue SET status = 'PENDING', started_at = NULL,
+                completed_at = NULL, last_error = ?, claim_token = NULL,
+                lease_expires_at = NULL, heartbeat_at = NULL
+            WHERE id = ? AND status = 'PROCESSING' AND claim_token = ?
+            """,
+            ((note or "")[:2000], queue_id, claim_token),
+        )
+    )
+
+
+async def fail_queue_item(
+    queue_id: int, claim_token: str, error: str, *, max_retries: int
+) -> bool:
+    return bool(
+        await db.execute_rowcount(
+            """
+            UPDATE rag_relationship_queue
+            SET retry_count = retry_count + 1,
+                status = CASE WHEN retry_count + 1 >= ? THEN 'FAILED' ELSE 'PENDING' END,
+                last_error = ?,
+                completed_at = CASE WHEN retry_count + 1 >= ? THEN CURRENT_TIMESTAMP ELSE NULL END,
+                started_at = CASE WHEN retry_count + 1 >= ? THEN started_at ELSE NULL END,
+                claim_token = NULL, lease_expires_at = NULL, heartbeat_at = NULL
+            WHERE id = ? AND status = 'PROCESSING' AND claim_token = ?
+            """,
+            (
+                max_retries,
+                error[:2000],
+                max_retries,
+                max_retries,
+                queue_id,
+                claim_token,
+            ),
+        )
     )
 
 
@@ -337,8 +481,7 @@ async def cleanup_stale_matches_and_decisions() -> dict[str, int]:
         DELETE q FROM rag_relationship_queue q
         LEFT JOIN rag_documents s ON s.id = q.source_document_id
         LEFT JOIN rag_documents t ON t.id = q.target_document_id
-        WHERE q.status IN ('completed', 'skipped', 'FAILED')
-           OR s.id IS NULL OR t.id IS NULL OR s.is_active = 0 OR t.is_active = 0
+        WHERE s.id IS NULL OR t.id IS NULL OR s.is_active = 0 OR t.is_active = 0
         """
             if not db.is_sqlite()
             else """
@@ -347,15 +490,22 @@ async def cleanup_stale_matches_and_decisions() -> dict[str, int]:
             SELECT q.id FROM rag_relationship_queue q
             LEFT JOIN rag_documents s ON s.id = q.source_document_id
             LEFT JOIN rag_documents t ON t.id = q.target_document_id
-            WHERE q.status IN ('completed', 'skipped', 'FAILED')
-               OR s.id IS NULL OR t.id IS NULL OR s.is_active = 0 OR t.is_active = 0
+            WHERE s.id IS NULL OR t.id IS NULL OR s.is_active = 0 OR t.is_active = 0
         )
         """
         ),
         (),
     )
     reset_processing = await db.execute_rowcount(
-        "UPDATE rag_relationship_queue SET status = 'PENDING', started_at = NULL WHERE status = 'PROCESSING'",
+        """
+        UPDATE rag_relationship_queue
+        SET status = 'PENDING', started_at = NULL, claim_token = NULL,
+            lease_expires_at = NULL, heartbeat_at = NULL,
+            last_error = 'Processing lease expired; job reclaimed'
+        WHERE status = 'PROCESSING'
+          AND lease_expires_at IS NOT NULL
+          AND lease_expires_at < CURRENT_TIMESTAMP
+        """,
         (),
     )
     return {

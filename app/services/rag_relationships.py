@@ -293,13 +293,29 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
     async def _one(job: Mapping[str, Any]) -> None:
         nonlocal processed
         async with semaphore:
+            claim_token = str(job["claim_token"])
             if _evaluator_in_backoff():
                 await rel_repo.reset_queue_item(
                     int(job["id"]),
+                    claim_token,
                     "Relationship evaluator unavailable: backoff active",
                 )
                 return
             started = time.perf_counter()
+            heartbeat_stop = asyncio.Event()
+
+            async def _heartbeat() -> None:
+                interval = max(5.0, settings.rag_relationship_lease_seconds / 3)
+                while not heartbeat_stop.is_set():
+                    try:
+                        await asyncio.wait_for(heartbeat_stop.wait(), timeout=interval)
+                    except asyncio.TimeoutError:
+                        if not await rel_repo.heartbeat_queue_item(
+                            int(job["id"]), claim_token
+                        ):
+                            return
+
+            heartbeat_task = asyncio.create_task(_heartbeat())
             try:
                 source = await rel_repo.get_document_with_content(
                     int(job["source_document_id"])
@@ -312,7 +328,9 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
                 if await rel_repo.relationship_current(
                     int(source["id"]), int(target["id"])
                 ):
-                    await rel_repo.complete_queue_item(int(job["id"]), "skipped")
+                    await rel_repo.complete_queue_item(
+                        int(job["id"]), "SKIPPED", claim_token
+                    )
                     return
                 response = await modules_service.trigger_module(
                     "ollama",
@@ -332,6 +350,8 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
                 parsed = parse_relationship_response(
                     raw, min_score=settings.rag_relationship_min_score
                 )
+                if not await rel_repo.heartbeat_queue_item(int(job["id"]), claim_token):
+                    return
                 await rel_repo.store_relationship(
                     int(source["id"]),
                     int(target["id"]),
@@ -341,17 +361,26 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
                     target_hash=str(target.get("content_hash") or ""),
                     duration_ms=int((time.perf_counter() - started) * 1000),
                 )
-                await rel_repo.complete_queue_item(int(job["id"]), "completed")
-                processed += 1
+                if await rel_repo.complete_queue_item(
+                    int(job["id"]), "COMPLETED", claim_token
+                ):
+                    processed += 1
             except RelationshipEvaluatorUnavailable as exc:
                 reason = str(exc) or "module did not complete"
                 _set_evaluator_backoff(reason)
                 await rel_repo.reset_queue_item(
-                    int(job["id"]), f"Relationship evaluator unavailable: {reason}"
+                    int(job["id"]),
+                    claim_token,
+                    f"Relationship evaluator unavailable: {reason}",
                 )
             except Exception as exc:
-                await rel_repo.fail_queue_item(int(job["id"]), str(exc), max_retries=5)
+                await rel_repo.fail_queue_item(
+                    int(job["id"]), claim_token, str(exc), max_retries=5
+                )
                 logger.warning("RAG relationship job failed: {}", exc)
+            finally:
+                heartbeat_stop.set()
+                await heartbeat_task
 
     await asyncio.gather(*(_one(job) for job in jobs))
     return processed

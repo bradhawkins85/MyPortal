@@ -562,6 +562,16 @@ class Database:
                 sql = sql[:match.start()] + "VARCHAR(50)" + sql[match.end():]
                 # Add CHECK constraint at the end of the column definition
                 sql = sql.replace(f"{col_name} VARCHAR(50)", f"{col_name} VARCHAR(50){check_constraint}", 1)
+
+        # SQLite cannot ALTER a column to ENUM. Runtime transition validation
+        # enforces the same canonical values for upgraded fallback databases.
+        alter_enum = re.compile(
+            r"ALTER\s+TABLE\s+(\w+)\s+MODIFY\s+(\w+)\s+VARCHAR\(50\)\s+"
+            r"CHECK\s*\(.*?\)\s+NOT\s+NULL\s+DEFAULT\s+'([^']+)'\s*;",
+            re.IGNORECASE | re.DOTALL,
+        )
+
+        sql = alter_enum.sub("", sql)
         
         return sql
 
