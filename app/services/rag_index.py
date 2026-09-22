@@ -140,6 +140,7 @@ class RagDocument:
     company_id: int | None = None
     permission_scope: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
+    sections: list[tuple[str, str]] | None = None
 
 
 # Ordered from the most explicit/common identifier to source-specific fallbacks.
@@ -247,6 +248,148 @@ def chunk_text(text: str) -> list[str]:
     return chunks
 
 
+def _labelled_section(label: str, value: Any) -> tuple[str, str] | None:
+    text = normalise_text(value)
+    return (label, text) if text else None
+
+
+def _ticket_document(
+    source_type: str, source_id: str, item: Mapping[str, Any]
+) -> RagDocument | None:
+    title = str(
+        item.get("subject") or item.get("title") or f"Ticket #{source_id}"
+    ).strip()
+    sections: list[tuple[str, str]] = []
+    for label, value in (
+        ("Subject", title),
+        ("Description", item.get("description")),
+        ("Category", item.get("category") or item.get("category_name")),
+        ("Module", item.get("module") or item.get("module_slug")),
+        ("Status", item.get("status")),
+        ("Priority", item.get("priority")),
+    ):
+        section = _labelled_section(label, value)
+        if section:
+            sections.append(section)
+    tags = [
+        *(item.get("ai_tags") or []),
+        *(item.get("manual_tags") or item.get("tags") or []),
+    ]
+    if tags:
+        sections.append(("Tags", ", ".join(str(tag) for tag in tags)))
+    error_codes = item.get("error_codes") or []
+    if isinstance(error_codes, str):
+        error_codes = [error_codes]
+    if error_codes:
+        sections.append(("Error codes", ", ".join(str(code) for code in error_codes)))
+    for index, reply in enumerate(item.get("replies") or [], start=1):
+        if not isinstance(reply, Mapping):
+            continue
+        kind = "Internal note" if reply.get("is_internal") else "Reply"
+        author = reply.get("author_display_name") or reply.get("author_email")
+        label = f"{kind} {index}" + (f" by {author}" if author else "")
+        section = _labelled_section(label, reply.get("body") or reply.get("content"))
+        if section:
+            sections.append(section)
+    names = []
+    for attachment in item.get("attachments") or []:
+        if isinstance(attachment, Mapping):
+            names.append(
+                attachment.get("original_filename") or attachment.get("filename")
+            )
+        else:
+            names.append(attachment)
+    if names:
+        sections.append(("Attachments", ", ".join(str(name) for name in names if name)))
+    identifiers: list[str] = []
+    for asset in item.get("linked_assets") or item.get("assets") or []:
+        if not isinstance(asset, Mapping):
+            identifiers.append(str(asset))
+            continue
+        for key in (
+            "asset_id",
+            "name",
+            "serial_number",
+            "tactical_asset_id",
+            "tray_device_uid",
+        ):
+            if asset.get(key):
+                identifiers.append(f"{key}={asset[key]}")
+    if identifiers:
+        sections.append(("Linked assets", ", ".join(identifiers)))
+    return _finish_source_document(source_type, source_id, title, item, sections)
+
+
+def _knowledge_base_document(
+    source_type: str, source_id: str, item: Mapping[str, Any]
+) -> RagDocument | None:
+    title = str(item.get("title") or source_id).strip()
+    sections: list[tuple[str, str]] = []
+    for label, value in (
+        ("Title", title),
+        ("Summary", item.get("summary")),
+        ("Article", item.get("content")),
+    ):
+        section = _labelled_section(label, value)
+        if section:
+            sections.append(section)
+    for index, article_section in enumerate(item.get("sections") or [], start=1):
+        if not isinstance(article_section, Mapping):
+            continue
+        heading = article_section.get("heading") or f"Section {index}"
+        section = _labelled_section(str(heading), article_section.get("content"))
+        if section:
+            sections.append(section)
+    tags = [*(item.get("ai_tags") or []), *(item.get("manual_ai_tags") or [])]
+    if tags:
+        sections.append(("Tags", ", ".join(str(tag) for tag in tags)))
+    return _finish_source_document(source_type, source_id, title, item, sections)
+
+
+def _finish_source_document(
+    source_type: str,
+    source_id: str,
+    title: str,
+    item: Mapping[str, Any],
+    sections: list[tuple[str, str]],
+) -> RagDocument | None:
+    text = "\n\n".join(f"[{label}]\n{value}" for label, value in sections)
+    if not text:
+        return None
+    company_id = item.get("company_id")
+    try:
+        company_id = int(company_id) if company_id is not None else None
+    except (TypeError, ValueError):
+        company_id = None
+    permission_scope = _permission_scope_for_source(source_type, item)
+    if permission_scope is None:
+        return None
+    identifiers = {
+        key: item.get(key)
+        for key in ("id", "slug", "ticket_number", "external_reference")
+        if item.get(key) is not None
+    }
+    metadata = {
+        key: value
+        for key, value in item.items()
+        if key
+        not in {"permission_scope", "description", "content", "sections", "replies"}
+    }
+    metadata["identifiers"] = identifiers
+    metadata["section_labels"] = [label for label, _ in sections]
+    return RagDocument(
+        source_type,
+        source_id,
+        title[:500],
+        text,
+        item.get("url"),
+        company_id,
+        permission_scope,
+        metadata,
+        sections,
+    )
+
+
 def document_from_source(
     source_type: str, item: Mapping[str, Any]
 ) -> RagDocument | None:
@@ -254,6 +397,10 @@ def document_from_source(
     if identity is None:
         return None
     normalised_type, source_id = identity
+    if normalised_type in {"tickets", "ticket_comments"}:
+        return _ticket_document(normalised_type, source_id, item)
+    if normalised_type == "knowledge_base":
+        return _knowledge_base_document(normalised_type, source_id, item)
     title = str(
         item.get("title")
         or item.get("subject")
@@ -355,6 +502,8 @@ def _permission_scope_for_source(
     source_type: str, item: Mapping[str, Any]
 ) -> dict[str, Any] | None:
     """Build the complete access policy stored beside each shared document."""
+    if source_type == "ticket_comments" and item.get("internal_only") is True:
+        return _scope("super_admin")
     if source_type == "knowledge_base":
         visibility = str(item.get("article_permission_scope") or "")
         if visibility == "anonymous":
@@ -418,7 +567,11 @@ async def index_document(document: RagDocument) -> int:
     content_changed = (
         not previous or str(previous.get("content_hash") or "") != new_hash
     )
-    chunks = chunk_text(document.text)
+    chunks = []
+    for label, section_text in document.sections or [("Document", document.text)]:
+        chunks.extend(
+            f"[Section: {label}] {chunk}" for chunk in chunk_text(section_text)
+        )
     if not chunks:
         chunks = [normalise_text(document.title)]
     doc_id = await rag_repo.upsert_document(

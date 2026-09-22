@@ -19,6 +19,7 @@ from app.repositories import shop as shop_repo
 from app.repositories import staff as staff_repo
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.repositories import tickets as tickets_repo
+from app.repositories import ticket_attachments as ticket_attachments_repo
 from app.services import company_access
 from app.services import backup_jobs as backup_jobs_service
 from app.services import issues as issues_service
@@ -1666,6 +1667,10 @@ async def execute_agent_query(
                 "title": article.get("title") or slug.replace("-", " ").title(),
                 "summary": _truncate(article.get("summary")),
                 "excerpt": _truncate(article.get("excerpt")),
+                "content": article.get("content") or "",
+                "sections": article.get("sections") or [],
+                "ai_tags": article.get("ai_tags") or [],
+                "manual_ai_tags": article.get("manual_ai_tags") or [],
                 "updated_at": article.get("updated_at_iso"),
                 "url": f"/knowledge-base/articles/{slug}",
                 "article_permission_scope": article.get("article_permission_scope"),
@@ -1677,6 +1682,7 @@ async def execute_agent_query(
 
     user_id_value = user.get("id")
     ticket_sources: list[dict[str, Any]] = []
+    internal_note_sources: list[dict[str, Any]] = []
     try:
         user_id = int(user_id_value)
     except (TypeError, ValueError):
@@ -1752,6 +1758,40 @@ async def execute_agent_query(
                 subject = f"Ticket #{ticket.get('id')}"
             status = ticket.get("status") or "unknown"
             priority = ticket.get("priority") or "normal"
+            try:
+                replies = await tickets_repo.list_replies(
+                    int(ticket.get("id")), include_internal=False
+                )
+                attachments = await ticket_attachments_repo.list_attachments(
+                    int(ticket.get("id")), access_levels=("open", "closed")
+                )
+                linked_assets = await tickets_repo.list_ticket_assets(
+                    int(ticket.get("id"))
+                )
+                if is_super_admin:
+                    all_replies = await tickets_repo.list_replies(
+                        int(ticket.get("id")), include_internal=True
+                    )
+                    for reply in all_replies:
+                        if not reply.get("is_internal"):
+                            continue
+                        internal_note_sources.append(
+                            {
+                                "id": f"{ticket.get('id')}:{reply.get('id')}",
+                                "title": f"Internal note for {subject.strip()}",
+                                "replies": [reply],
+                                "internal_only": True,
+                                "ticket_id": ticket.get("id"),
+                                "company_id": ticket.get("company_id"),
+                            }
+                        )
+            except Exception as exc:  # pragma: no cover - defensive source loading
+                log_error(
+                    "Agent ticket RAG enrichment failed",
+                    ticket_id=ticket.get("id"),
+                    error=str(exc),
+                )
+                replies, attachments, linked_assets = [], [], []
             ticket_sources.append(
                 {
                     "id": ticket.get("id"),
@@ -1759,9 +1799,18 @@ async def execute_agent_query(
                     "status": str(status).strip() or "unknown",
                     "priority": str(priority).strip() or "normal",
                     "updated_at": _utc_iso(ticket.get("updated_at")),
-                    "summary": _truncate(
-                        ticket.get("ai_summary") or ticket.get("description")
-                    ),
+                    "summary": ticket.get("ai_summary"),
+                    "description": ticket.get("description") or "",
+                    "category": ticket.get("category") or ticket.get("category_name"),
+                    "module_slug": ticket.get("module_slug"),
+                    "ai_tags": ticket.get("ai_tags") or [],
+                    "manual_tags": ticket.get("manual_tags")
+                    or ticket.get("tags")
+                    or [],
+                    "error_codes": ticket.get("error_codes") or [],
+                    "replies": replies,
+                    "attachments": attachments,
+                    "linked_assets": linked_assets,
                     "company_id": ticket.get("company_id"),
                     "requester_id": ticket.get("requester_id"),
                 }
@@ -2038,6 +2087,7 @@ async def execute_agent_query(
     assembled_sources = {
         "knowledge_base": knowledge_base_sources,
         "tickets": ticket_sources,
+        "ticket_comments": internal_note_sources,
         "products": product_sources,
         "packages": package_sources,
         "chats": chat_sources,
