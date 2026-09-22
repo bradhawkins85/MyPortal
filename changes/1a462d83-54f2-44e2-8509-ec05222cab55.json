@@ -1,0 +1,7 @@
+{
+  "guid": "1a462d83-54f2-44e2-8509-ec05222cab55",
+  "occurred_at": "2026-09-22T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added requester asset lookup to admin ticket asset linking.",
+  "content_hash": "requester-asset-lookup"
+}

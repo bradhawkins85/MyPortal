@@ -902,6 +902,11 @@
     const initialCompanyId = select.dataset.initialCompanyId || '';
     const ticketNumber = (linkedContainer.dataset.ticketNumber || '').trim();
     const ticketSubject = (linkedContainer.dataset.ticketSubject || '').trim();
+    const lookupButton = document.querySelector('[data-requester-assets-lookup]');
+    const lookupResults = document.querySelector('[data-requester-assets-results]');
+    const lookupStatus = document.querySelector('[data-requester-assets-status]');
+    const lookupOptions = document.querySelector('[data-requester-assets-options]');
+    const lookupLink = document.querySelector('[data-requester-assets-link]');
 
     const tacticalBaseUrl = tacticalBaseUrlRaw.replace(/\/+$/, '');
     const optionLookup = new Map();
@@ -1349,6 +1354,49 @@
       addLinkedAssetById(selectedId);
       select.value = '';
     });
+
+    if (lookupButton && lookupResults && lookupStatus && lookupOptions && lookupLink) {
+      lookupButton.addEventListener('click', async () => {
+        lookupResults.hidden = false;
+        lookupStatus.textContent = 'Looking up requester assets…';
+        lookupOptions.innerHTML = '';
+        lookupLink.hidden = true;
+        lookupButton.disabled = true;
+        try {
+          const response = await fetch(lookupButton.dataset.endpoint || '', { headers: { Accept: 'application/json' } });
+          if (!response.ok) throw new Error(`Request failed with status ${response.status}`);
+          const assets = await response.json();
+          assets.forEach((asset) => {
+            const option = normaliseOption(asset);
+            if (!option || linkedMap.has(option.id)) return;
+            optionLookup.set(option.id, option);
+            const label = document.createElement('label');
+            label.className = 'ticket-assets-lookup__option';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.value = option.id;
+            checkbox.setAttribute('data-requester-asset-choice', '');
+            const text = document.createElement('span');
+            const reasons = Array.isArray(asset.match_reasons) ? asset.match_reasons.join(' · ') : '';
+            text.textContent = reasons ? `${option.label} — ${reasons}` : option.label;
+            label.append(checkbox, text);
+            lookupOptions.appendChild(label);
+          });
+          const count = lookupOptions.querySelectorAll('[data-requester-asset-choice]').length;
+          lookupStatus.textContent = count ? `${count} matching asset${count === 1 ? '' : 's'} found. Select assets to link.` : 'No assets associated with this requester were found.';
+          lookupLink.hidden = count === 0;
+        } catch (error) {
+          console.error('Failed to look up requester assets', error);
+          lookupStatus.textContent = 'Unable to look up requester assets. Please try again.';
+        } finally {
+          lookupButton.disabled = false;
+        }
+      });
+      lookupLink.addEventListener('click', () => {
+        lookupOptions.querySelectorAll('[data-requester-asset-choice]:checked').forEach((choice) => addLinkedAssetById(choice.value));
+        lookupResults.hidden = true;
+      });
+    }
 
     linkedContainer.addEventListener('click', (event) => {
       const target = event.target instanceof Element ? event.target : null;
