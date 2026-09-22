@@ -715,6 +715,28 @@ async def admin_ticket_detail(
     )
 
 
+@router.get("/admin/tickets/{ticket_id:int}/requester-assets", response_class=JSONResponse)
+async def admin_ticket_requester_assets(ticket_id: int, request: Request):
+    """Find assets associated with this ticket's requester."""
+    main_module = _main()
+    _current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    assets = await assets_repo.list_assets_for_ticket_requester(ticket_id)
+    return JSONResponse([
+        {
+            "id": asset.get("id"), "name": asset.get("name"),
+            "serial_number": asset.get("serial_number"), "status": asset.get("status"),
+            "tactical_asset_id": asset.get("tactical_asset_id"),
+            "match_reasons": asset.get("match_reasons", []),
+        }
+        for asset in assets
+    ])
+
+
 async def _ticket_clock_user(request: Request, ticket_id: int) -> tuple[dict[str, Any], int]:
     main_module = _main()
     current_user, redirect = await main_module._require_helpdesk_page(request)
