@@ -1,3 +1,8 @@
+-- phase: expand
+-- compatible-from: *
+-- compatible-to: *
+-- maintenance: false
+
 -- Keep the reporting stat strip aligned with the interactive M365 Best
 -- Practices page. Results contain one current row per company/check, and rows
 -- can have different run_at values when an individual check is evaluated.
