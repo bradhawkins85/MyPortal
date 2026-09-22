@@ -50,6 +50,15 @@ def test_reply_form_keeps_assignment_errors_and_draft_visible() -> None:
     assert "Set a Requester before sending a public reply." in script
 
 
+def test_ai_reprocess_control_is_super_admin_only_and_handles_closed_tickets() -> None:
+    template = Path("app/templates/admin/ticket_detail.html").read_text(encoding="utf-8")
+
+    assert "ticket.ai_summary_status or can_reprocess_ticket_ai" in template
+    assert "{% if can_reprocess_ticket_ai %}" in template
+    assert "{% set reprocess_tags_only = ticket_status == 'closed' %}" in template
+    assert "Reprocess AI tags" in template
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
