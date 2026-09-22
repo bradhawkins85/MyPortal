@@ -39,18 +39,19 @@ async def upsert_document(record: dict[str, Any]) -> int:
             """
             UPDATE rag_documents
             SET company_id = ?, title = ?, url = ?, permission_scope_json = ?,
-                metadata_json = ?, content_hash = ?, is_active = ?, indexed_at = CURRENT_TIMESTAMP
+                metadata_json = ?, content_hash = ?, is_active = ?,
+                source_updated_at = ?, indexed_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """,
-            (*params, existing["id"]),
+            (*params, record.get("source_updated_at"), existing["id"]),
         )
         return int(existing["id"])
     return await db.execute_returning_lastrowid(
         """
         INSERT INTO rag_documents
             (source_type, source_id, company_id, title, url, permission_scope_json,
-             metadata_json, content_hash, embedding_model, is_active)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+             metadata_json, content_hash, embedding_model, is_active, source_updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
         """,
         (
             record["source_type"],
@@ -62,7 +63,16 @@ async def upsert_document(record: dict[str, Any]) -> int:
             record.get("metadata_json"),
             record["content_hash"],
             record["embedding_model"],
+            record.get("source_updated_at"),
         ),
+    )
+
+
+async def deactivate_document(source_type: str, source_id: str) -> int:
+    return await db.execute_rowcount(
+        """UPDATE rag_documents SET is_active = 0, indexed_at = CURRENT_TIMESTAMP
+           WHERE source_type = ? AND source_id = ? AND is_active = 1""",
+        (source_type, source_id),
     )
 
 
@@ -179,6 +189,18 @@ async def health() -> dict[str, Any]:
         SELECT id, source_type, source_id, status, message, started_at, finished_at, created_at
         FROM rag_index_jobs ORDER BY created_at DESC, id DESC LIMIT 10
         """)
+    outbox = await db.fetch_one("""
+        SELECT SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+               SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+               MIN(CASE WHEN status = 'pending' THEN created_at END) AS oldest_pending_at
+        FROM rag_index_outbox
+        """)
+    lag = await db.fetch_all("""
+        SELECT source_type,
+               SUM(CASE WHEN source_updated_at > indexed_at THEN 1 ELSE 0 END) AS stale,
+               MAX(TIMESTAMPDIFF(SECOND, indexed_at, source_updated_at)) AS max_lag_seconds
+        FROM rag_documents WHERE is_active = 1 GROUP BY source_type ORDER BY source_type
+        """)
     return {
         "documents": int((docs or {}).get("count") or 0),
         "inactive_documents": int((inactive_docs or {}).get("count") or 0),
@@ -194,6 +216,8 @@ async def health() -> dict[str, Any]:
         "sources": by_source or [],
         "recent_documents": recent_documents or [],
         "recent_jobs": recent_jobs or [],
+        "outbox": outbox or {"pending": 0, "failed": 0, "oldest_pending_at": None},
+        "source_lag": lag or [],
     }
 
 

@@ -559,7 +559,9 @@ def _permission_scope_for_source(
     return None
 
 
-async def index_document(document: RagDocument) -> int:
+async def index_document(
+    document: RagDocument, *, source_updated_at: Any | None = None
+) -> int:
     previous = await rag_repo.get_document_by_source(
         document.source_type, document.source_id, embedding_model()
     )
@@ -589,6 +591,7 @@ async def index_document(document: RagDocument) -> int:
             ),
             "content_hash": new_hash,
             "embedding_model": embedding_model(),
+            "source_updated_at": source_updated_at,
         }
     )
     if not content_changed:

@@ -1,0 +1,7 @@
+{
+  "guid": "7f917282-67ad-4c0a-979e-ed7f0dd7c91c",
+  "occurred_at": "2026-09-22T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added durable incremental RAG indexing and recurring reconciliation",
+  "content_hash": "rag-durable-incremental-indexing-v1"
+}
