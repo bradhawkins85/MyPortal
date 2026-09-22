@@ -6,6 +6,7 @@ PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 FLAG_DIR="${PROJECT_ROOT}/var/state"
 UPDATE_FLAG_FILE="${FLAG_DIR}/system_update.flag"
 LOCK_FILE="${FLAG_DIR}/system_update.lock"
+REPORT_HELPER="${SCRIPT_DIR}/system_update_report.py"
 
 normalise_upgrade_mode() {
   local raw="${1:-}"
@@ -109,15 +110,28 @@ validate_flag_file
   fi
 
   upgrade_mode=$(resolve_upgrade_mode)
+  update_id=$(read_flag_var "update_id")
+  output_file=$(mktemp "${FLAG_DIR}/system-update-output.XXXXXX")
+  chmod 600 "$output_file"
+  trap 'rm -f "$output_file"' EXIT
+  if [[ -n "$update_id" ]]; then
+    PYTHONPATH="$PROJECT_ROOT" python3 "$REPORT_HELPER" "$update_id" running
+  fi
   echo "Update flag found at $UPDATE_FLAG_FILE. Running upgrade helper in ${upgrade_mode} mode." >&2
-  if bash -lc "$(build_upgrade_command "$upgrade_mode")"; then
+  if bash -lc "$(build_upgrade_command "$upgrade_mode")" > >(tee -a "$output_file") 2> >(tee -a "$output_file" >&2); then
     rm -f "$UPDATE_FLAG_FILE"
+    if [[ -n "$update_id" ]]; then
+      PYTHONPATH="$PROJECT_ROOT" python3 "$REPORT_HELPER" "$update_id" succeeded --output-file "$output_file"
+    fi
     echo "Upgrade helper completed successfully; cleared $UPDATE_FLAG_FILE" >&2
   else
     status=$?
     # A future schedule may retry, but this request is terminal. Removing the
     # flag prevents an interrupted/failed update from looping forever.
     rm -f "$UPDATE_FLAG_FILE"
+    if [[ -n "$update_id" ]]; then
+      PYTHONPATH="$PROJECT_ROOT" python3 "$REPORT_HELPER" "$update_id" failed --output-file "$output_file" --error "Upgrade helper exited with status ${status}."
+    fi
     echo "Error: upgrade helper exited with status ${status}. Cleared the consumed update flag." >&2
     exit "$status"
   fi

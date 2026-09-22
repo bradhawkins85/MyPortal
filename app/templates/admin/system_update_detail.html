@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block header_title %}<span class="header__title-text">System update result</span>{% endblock %}
+{% block header_actions %}<a class="button button--ghost" href="/admin/system-updates">All updates</a>{% endblock %}
+{% block content %}<div class="management management--single"><section class="management__content">
+<header class="management__header"><div><h1 class="management__title">Rolling update <code>{{ update.id[:8] }}</code></h1><p class="management__subtitle">Target <code>{{ update.target_revision }}</code></p></div><span class="tag {{ 'tag--success' if update.status == 'succeeded' else ('tag--danger' if update.status == 'failed' else 'tag--warning') }}">{{ update.status }}</span></header>
+<div class="card card--panel"><dl class="definition-list"><dt>Started</dt><dd><span data-utc="{{ update.started_at }}"></span></dd><dt>Completed</dt><dd>{% if update.completed_at %}<span data-utc="{{ update.completed_at }}"></span>{% else %}In progress{% endif %}</dd><dt>Mode</dt><dd>{{ update.mode }}</dd><dt>Source</dt><dd>{{ update.source }}</dd></dl></div>
+{% if update.error %}<div class="alert alert--danger"><strong>Failure</strong><p>{{ update.error }}</p></div>{% endif %}
+<div class="card card--panel"><h2 class="card__title">Coordinator output</h2><pre style="max-height:55vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere"><code>{{ update.output or 'No output has been reported.' }}</code></pre></div>
+</section></div>{% endblock %}

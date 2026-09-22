@@ -25,9 +25,35 @@ from app.schemas.scheduler import (
     WebhookEventsBulkDeleteResponse,
 )
 from app.services import cron_calendar, scheduled_task_preview, webhook_monitor
+from app.services import system_update_history
 from app.services.scheduler import scheduler_service
 
 router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
+
+
+@router.get("/system-updates", response_model=list[dict[str, Any]])
+async def list_system_updates(
+    limit: int = Query(default=100, ge=1, le=200),
+    _: None = Depends(require_database),
+    __: dict[str, Any] = Depends(require_super_admin),
+) -> list[dict[str, Any]]:
+    """List rolling system update executions (global administrators only)."""
+    return system_update_history.list_updates(limit=limit)
+
+
+@router.get("/system-updates/{update_id}", response_model=dict[str, Any])
+async def get_system_update(
+    update_id: str,
+    response: Response,
+    _: None = Depends(require_database),
+    __: dict[str, Any] = Depends(require_super_admin),
+) -> dict[str, Any]:
+    """Inspect the sanitized output and result of one system update."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return system_update_history.get(update_id)
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=404, detail="System update not found")
 
 
 @router.get("/tasks", response_model=list[ScheduledTaskResponse])
