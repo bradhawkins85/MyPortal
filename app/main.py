@@ -156,7 +156,10 @@ from app.security.security_headers import SecurityHeadersMiddleware
 from app.security.session import SessionData, session_manager
 from app.api.dependencies.auth import get_current_session
 from app.services.scheduler import scheduler_service, COMMANDS_BY_MODULE
-from app.services.component_availability import AvailabilityConfigurationError
+from app.services.component_availability import (
+    AvailabilityConfigurationError,
+    get_component_availability,
+)
 from app.services import audit as audit_service
 from app.services import background as background_tasks
 from app.services import automations as automations_service
@@ -872,6 +875,15 @@ def _release_manifest() -> dict[str, Any]:
 
 # Add cache-busting helper to Jinja2 globals
 templates.env.globals["static_url"] = _static_url
+
+
+def _feature_pack_available(slug: str) -> bool:
+    """Expose deployment feature-pack availability to server-rendered UI."""
+
+    return get_component_availability().feature_pack_available(slug)
+
+
+templates.env.globals["feature_pack_available"] = _feature_pack_available
 
 
 def _deployment_slot() -> str | None:
