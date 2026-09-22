@@ -14,6 +14,8 @@ These exercise the contract documented in ``app/core/features.py``:
 from __future__ import annotations
 
 import asyncio
+import importlib
+import shutil
 import sys
 import textwrap
 from pathlib import Path
@@ -23,6 +25,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
 from app.core.features import FeaturePack, FeatureRegistry, _parse_semver, init_registry
+from app.services.component_availability import configure_component_availability
 
 
 @pytest.fixture
@@ -46,6 +49,7 @@ def _write_pack(tmp_path: Path, slug: str, version: str, response: str) -> None:
 
     pkg_dir = Path(__file__).resolve().parent.parent / "app" / "features" / slug
     pkg_dir.mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(pkg_dir / "__pycache__", ignore_errors=True)
     (pkg_dir / "__init__.py").write_text(
         textwrap.dedent(
             f"""
@@ -66,6 +70,7 @@ def _write_pack(tmp_path: Path, slug: str, version: str, response: str) -> None:
             """
         ).lstrip()
     )
+    importlib.invalidate_caches()
 
 
 @pytest.fixture
@@ -74,9 +79,7 @@ def temp_pack_slug(tmp_path):
     yield slug
     pkg_dir = Path(__file__).resolve().parent.parent / "app" / "features" / slug
     if pkg_dir.exists():
-        for child in pkg_dir.glob("*"):
-            child.unlink()
-        pkg_dir.rmdir()
+        shutil.rmtree(pkg_dir)
     # Drop cached modules so the next test doesn't see this one's code.
     for name in [n for n in list(sys.modules) if n.startswith(f"app.features.{slug}")]:
         sys.modules.pop(name, None)
@@ -97,6 +100,32 @@ def test_load_is_idempotent(tmp_path, app, registry, temp_pack_slug):
         resp = client.get(f"/_t_{temp_pack_slug}/ping")
         assert resp.status_code == 200
         assert resp.json() == {"v": "first"}
+
+
+def test_disabled_pack_is_never_imported_or_mounted(
+    tmp_path, app, registry, temp_pack_slug
+):
+    _write_pack(tmp_path, temp_pack_slug, "1.0.0", "disabled")
+    FeatureRegistry._purge_sys_modules(temp_pack_slug)
+    configure_component_availability(
+        disabled_feature_packs=(temp_pack_slug,),
+        known_feature_packs=(temp_pack_slug,),
+        known_modules=(),
+    )
+
+    async def run() -> None:
+        await registry.load_many((temp_pack_slug,))
+        assert registry.get(temp_pack_slug) is None
+
+    try:
+        asyncio.run(run())
+        assert f"app.features.{temp_pack_slug}" not in sys.modules
+        with TestClient(app) as client:
+            assert client.get(f"/_t_{temp_pack_slug}/ping").status_code == 404
+    finally:
+        configure_component_availability(
+            known_feature_packs=(), known_modules=()
+        )
 
 
 def test_reload_swaps_router_in_place(tmp_path, app, registry, temp_pack_slug):

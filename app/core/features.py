@@ -196,6 +196,11 @@ class FeaturePack:
     description: str = ""
     homepage: str = ""
     min_app_version: str = ""
+    dependencies: tuple[str, ...] = ()
+
+
+class FeaturePackUnavailableError(RuntimeError):
+    """Raised when deployment policy makes a requested pack unavailable."""
 
 
 @dataclass
@@ -404,7 +409,22 @@ class FeatureRegistry:
         async with self._lock_for(slug):
             if slug in self._states:
                 return self._states[slug]
+            self._ensure_available(slug)
             pack = self._import_pack(slug)
+            unavailable = [
+                dependency
+                for dependency in pack.dependencies
+                if not self._is_available(dependency)
+            ]
+            if unavailable:
+                raise FeaturePackUnavailableError(
+                    f"Feature pack '{slug}' depends on unavailable feature pack(s): "
+                    + ", ".join(unavailable)
+                )
+            for dependency in pack.dependencies:
+                if dependency == slug:
+                    raise RuntimeError(f"Feature pack '{slug}' cannot depend on itself")
+                await self.load(dependency)
             state = await self._mount(pack)
             self._states[slug] = state
             logger.bind(feature=slug).info(
@@ -463,6 +483,7 @@ class FeatureRegistry:
         """
 
         async with self._lock_for(slug):
+            self._ensure_available(slug)
             previous = self._states.get(slug)
             started = time.monotonic()
             try:
@@ -519,6 +540,21 @@ class FeatureRegistry:
                 logger.bind(feature=slug).error(
                     "Failed to load feature pack: {error}", error=str(exc)
                 )
+
+    @staticmethod
+    def _is_available(slug: str) -> bool:
+        # Imported lazily to keep the feature contract independent of the
+        # deployment-policy service during settings initialisation.
+        from app.services.component_availability import get_component_availability
+
+        return get_component_availability().feature_pack_available(slug)
+
+    @classmethod
+    def _ensure_available(cls, slug: str) -> None:
+        if not cls._is_available(slug):
+            raise FeaturePackUnavailableError(
+                f"Feature pack '{slug}' is disabled by deployment configuration"
+            )
 
     async def unload_all(self) -> None:
         for slug in list(self._states.keys()):

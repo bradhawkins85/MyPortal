@@ -2875,10 +2875,12 @@ async def on_startup() -> None:
     ]
     from app.services.component_availability import configure_component_availability
 
+    from app.core.features import discover_builtin_feature_pack_slugs
+
     availability = configure_component_availability(
         disabled_feature_packs=settings.disabled_feature_packs,
         disabled_modules=settings.disabled_modules,
-        known_feature_packs=pack_slugs,
+        known_feature_packs=discover_builtin_feature_pack_slugs(),
         known_modules=(module["slug"] for module in modules_service.DEFAULT_MODULES),
     )
     pack_slugs = [slug for slug in pack_slugs if availability.feature_pack_available(slug)]

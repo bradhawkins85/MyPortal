@@ -45,6 +45,16 @@ def test_settings_parse_disabled_lists(monkeypatch):
     settings = Settings()
     assert settings.disabled_feature_packs == "trello"
     assert settings.disabled_modules == "xero,trello"
+    assert "trello" not in settings.feature_packs.split(",")
+
+
+def test_settings_excludes_multiple_disabled_packs(monkeypatch):
+    monkeypatch.setenv("DISABLED_FEATURE_PACKS", "trello,xero")
+    settings = Settings()
+    configured = settings.feature_packs.split(",")
+    assert "trello" not in configured
+    assert "xero" not in configured
+    assert "tickets" in configured
 
 
 def test_unknown_slugs_raise_actionable_configuration_error():
