@@ -22,6 +22,17 @@ one full release. Otherwise declare `maintenance: true` and enable UPG01
 maintenance mode. Only universally compatible expand-only releases skip the
 worker reload.
 
+Released migrations are immutable because their checksums may already be in a
+customer database. The companion `migrations/deployment_metadata.json` records
+metadata that was missing from migrations in the maintained pre-UPG02 upgrade
+window. It is consulted only when a SQL file has no inline metadata; new
+migrations must continue to use the inline header. Migration 380 requires
+UPG01 maintenance because it backfills a GUID and then makes that column
+mandatory, so an older serving release could otherwise insert an invalid row
+between those operations.
+Maintenance-only metadata does not block a fresh empty-database bootstrap,
+because no older worker can be serving that schema.
+
 The `migrations` table is the operational record: checksum, running/completed/
 failed state, phase, timestamps, duration, and a bounded error are durable.
 Applied-file checksum drift and failures stop deployment before cutover. MySQL

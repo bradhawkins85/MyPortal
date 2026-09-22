@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "migrations": {
+    "376_third_party_subscriptions.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "377_change_approval_matrix.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "378_super_admin_role_switcher.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "379_approval_selector_options.sql": {
+      "phase": "data",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "380_approval_configuration_guids.sql": {
+      "phase": "contract",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": true
+    },
+    "381_stat_strip_reporting_queries.sql": {
+      "phase": "data",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "382_rebuild_rag_access_scopes.sql": {
+      "phase": "data",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "382_ticket_reply_fulltext_search.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    }
+  }
+}

@@ -6,6 +6,7 @@ from typing import AsyncIterator, Iterable, Any
 import types
 import re
 import hashlib
+import json
 import time
 
 import aiosqlite
@@ -567,18 +568,38 @@ class Database:
     def _migration_metadata(self, path: Path) -> dict[str, Any]:
         """Read deployment compatibility metadata from leading SQL comments."""
         values: dict[str, str] = {}
+        companion_metadata = False
         for line in path.read_text(encoding="utf-8").splitlines():
             match = re.match(r"\s*--\s*(phase|compatible-from|compatible-to|maintenance)\s*:\s*(.*?)\s*$", line, re.I)
             if match:
                 values[match.group(1).lower()] = match.group(2)
             elif line.strip() and not line.lstrip().startswith("--"):
                 break
+        # Migrations released before deployment metadata was introduced must
+        # remain byte-for-byte stable: changing them would trip checksums on an
+        # upgraded installation.  A companion manifest supplies metadata for
+        # the recent, still-supported upgrade window without rewriting SQL that
+        # may already have run.
+        manifest_path = path.parent / "deployment_metadata.json"
+        if not values and manifest_path.is_file():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest_values = manifest.get("migrations", {}).get(path.name)
+            except (json.JSONDecodeError, OSError) as exc:
+                raise RuntimeError(f"Invalid migration metadata manifest {manifest_path.name}") from exc
+            if manifest_values is not None:
+                if not isinstance(manifest_values, dict):
+                    raise RuntimeError(f"Invalid metadata for migration {path.name}")
+                values = {str(key).lower(): str(value) for key, value in manifest_values.items()}
+                companion_metadata = True
         phase = values.get("phase")
-        legacy = False
+        # Keep the SQLite best-effort compatibility behaviour for immutable
+        # pre-UPG02 SQL even when its deployment policy comes from the manifest.
+        legacy_number = re.match(r"^([0-9]{1,3})_", path.name)
+        legacy = bool(companion_metadata and legacy_number and int(legacy_number.group(1)) <= 382)
         if phase not in {"expand", "data", "backfill", "contract"}:
             # Existing migrations predate UPG02 and are grandfathered so a new
             # installation remains possible. New migrations must be declared.
-            legacy_number = re.match(r"^([0-9]{1,3})_", path.name)
             if legacy_number and int(legacy_number.group(1)) <= 382:
                 phase = "expand"
                 legacy = True
@@ -735,7 +756,13 @@ class Database:
                                 async with conn.cursor() as cursor: await cursor.execute("UPDATE migrations SET checksum=%s WHERE name=%s", (checksum, path.name))
                         continue
                     metadata = self._migration_metadata(path)
-                    self._validate_migration_compatibility(path, metadata, serving_release, target_release, maintenance)
+                    # A brand-new empty schema has no concurrently serving old
+                    # release, so maintenance-only contract steps are safe as
+                    # part of bootstrap. Upgrades must explicitly enter UPG01.
+                    self._validate_migration_compatibility(
+                        path, metadata, serving_release, target_release,
+                        maintenance or not applied,
+                    )
                     started = time.monotonic()
                     if self._use_sqlite:
                         await conn.execute("INSERT OR REPLACE INTO migrations (name,checksum,state,phase,started_at,error_details) VALUES (?,?,?,?,CURRENT_TIMESTAMP,NULL)", (path.name, checksum, "running", metadata["phase"])); await conn.commit()
