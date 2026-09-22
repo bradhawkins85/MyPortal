@@ -45,6 +45,10 @@ from app.services import unifi_talk as unifi_talk_service
 from app.services.realtime import RefreshNotifier, refresh_notifier
 from app.services import tickets as tickets_service
 from app.core.module_capabilities import COMMANDS_BY_MODULE, MODULE_CAPABILITIES
+from app.services.component_availability import (
+    AvailabilityConfigurationError,
+    get_component_availability,
+)
 
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
@@ -2372,11 +2376,15 @@ async def ensure_default_modules() -> None:
 
 async def list_modules() -> list[dict[str, Any]]:
     modules = await module_repo.list_modules()
-    return [
-        _redact_module_settings(_resolve_module_for_runtime(module))
+    availability = get_component_availability()
+    result = [
+        _redact_module_settings(
+            {**_resolve_module_for_runtime(module), "enabled": availability.module_enabled(module)}
+        )
         for module in modules
         if not _is_always_on_ticket_action_module(str(module.get("slug") or ""))
     ]
+    return result
 
 
 async def get_module_settings(slug: str) -> dict[str, Any] | None:
@@ -2714,6 +2722,7 @@ async def get_module(slug: str, *, redact: bool = True) -> dict[str, Any] | None
     if not module:
         return None
     resolved = _resolve_module_for_runtime(module)
+    resolved["enabled"] = get_component_availability().module_enabled(resolved)
     return _redact_module_settings(resolved) if redact else resolved
 
 
@@ -2724,6 +2733,10 @@ async def update_module(
     settings: Mapping[str, Any] | None = None,
     notifier: RefreshNotifier | None = None,
 ) -> dict[str, Any] | None:
+    if enabled is True and not get_component_availability().module_available(slug):
+        raise AvailabilityConfigurationError(
+            f"Module '{slug}' is disabled by deployment configuration and cannot be enabled"
+        )
     capabilities = MODULE_CAPABILITIES.get(slug)
     if capabilities and capabilities.always_on:
         # Internal action modules are catalogue entries, not kill switches.
@@ -2743,7 +2756,11 @@ async def update_module(
             await scheduled_tasks_repo.restore_tasks_disabled_by_module(slug)
         resolved_notifier = notifier or refresh_notifier
         await resolved_notifier.broadcast_refresh(reason=f"modules:updated:{slug}")
-    return _redact_module_settings(updated) if updated else None
+    if not updated:
+        return None
+    resolved = _resolve_module_for_runtime(updated)
+    resolved["enabled"] = get_component_availability().module_enabled(resolved)
+    return _redact_module_settings(resolved)
 
 
 def _normalise_logged_username(value: Any) -> str:

@@ -6,6 +6,7 @@ from app.api.dependencies.auth import require_super_admin
 from app.repositories import integration_modules as module_repo
 from app.schemas.integration_modules import IntegrationModuleResponse, IntegrationModuleUpdate
 from app.services import modules as modules_service
+from app.services.component_availability import AvailabilityConfigurationError
 
 router = APIRouter(prefix="/api/integration-modules", tags=["Integration Modules"])
 
@@ -33,8 +34,12 @@ async def update_module(
     exists = await module_repo.get_module(slug)
     if not exists:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found")
-    updated = await modules_service.update_module(slug, enabled=payload.enabled, settings=payload.settings)
+    try:
+        updated = await modules_service.update_module(
+            slug, enabled=payload.enabled, settings=payload.settings
+        )
+    except AvailabilityConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     if not updated:
         updated = await modules_service.get_module(slug)
     return IntegrationModuleResponse(**updated)
-

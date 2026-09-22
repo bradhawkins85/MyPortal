@@ -18,6 +18,7 @@ from pydantic import (
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.features import discover_builtin_feature_pack_slugs
+from app.services.component_availability import parse_slug_list
 
 # Placeholder values that must be replaced before running in production. These
 # match the defaults distributed in ``.env.example`` and other template files.
@@ -246,6 +247,25 @@ class Settings(BaseSettings):
             "merged with the built-in set and cannot disable bundled packs."
         ),
     )
+    disabled_feature_packs: str = Field(
+        default="", validation_alias="DISABLED_FEATURE_PACKS"
+    )
+    disabled_modules: str = Field(default="", validation_alias="DISABLED_MODULES")
+
+    @field_validator("disabled_feature_packs", "disabled_modules", mode="before")
+    @classmethod
+    def normalise_disabled_components(cls, value: Any) -> str:
+        return ",".join(parse_slug_list(value))
+
+    @field_validator("disabled_feature_packs")
+    @classmethod
+    def validate_disabled_feature_packs(cls, value: str) -> str:
+        unknown = sorted(set(parse_slug_list(value)) - set(_DEFAULT_FEATURE_PACK_SLUGS))
+        if unknown:
+            raise ValueError(
+                "DISABLED_FEATURE_PACKS contains unknown slug(s): " + ", ".join(unknown)
+            )
+        return value
 
     @field_validator("feature_packs", mode="before")
     @classmethod
