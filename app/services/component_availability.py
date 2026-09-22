@@ -14,6 +14,10 @@ from dataclasses import dataclass
 from app.core.module_capabilities import (
     feature_pack_for_module,
     module_for_feature_pack,
+    modules_for_command,
+    modules_for_route,
+    modules_for_service,
+    modules_for_ui_feature,
 )
 
 
@@ -56,6 +60,24 @@ class ComponentAvailability:
         return self.module_available(str(module.get("slug") or "")) and bool(
             module.get("enabled")
         )
+
+    def _owned_capability_available(self, owners: Iterable[str]) -> bool:
+        owners = tuple(owners)
+        # Unowned core capabilities are unaffected. Shared capabilities are
+        # removed only when every owning module is excluded.
+        return not owners or any(self.module_available(owner) for owner in owners)
+
+    def command_available(self, command: str) -> bool:
+        return self._owned_capability_available(modules_for_command(command))
+
+    def route_available(self, route: str) -> bool:
+        return self._owned_capability_available(modules_for_route(route))
+
+    def service_available(self, service: str) -> bool:
+        return self._owned_capability_available(modules_for_service(service))
+
+    def ui_feature_available(self, feature: str) -> bool:
+        return self._owned_capability_available(modules_for_ui_feature(feature))
 
 
 _availability = ComponentAvailability()

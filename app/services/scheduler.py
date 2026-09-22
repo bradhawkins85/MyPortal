@@ -43,6 +43,7 @@ from app.services import value_templates
 from app.services import webhook_monitor
 from app.services import system_update_history
 from app.services.deployment_plan import build_deployment_plan
+from app.services.component_availability import get_component_availability
 from app.services import xero as xero_service
 from app.services import service_status as service_status_service
 from app.services import ticket_shipment_tracking as shipment_watch_service
@@ -148,7 +149,20 @@ class SchedulerService:
             if job.id and job.id.startswith("scheduled-task-"):
                 job.remove()
         tasks = await scheduled_tasks_repo.list_active_tasks()
+        module_rows = {
+            str(row.get("slug") or ""): row for row in await module_repo.list_modules()
+        }
+        availability = get_component_availability()
+        registered = 0
         for task in tasks:
+            owners = module_capabilities.modules_for_command(str(task.get("command") or ""))
+            # Shared commands remain usable while at least one owner is both
+            # deployment-available and operationally enabled.
+            if owners and not any(
+                availability.module_enabled(module_rows.get(owner, {"slug": owner}))
+                for owner in owners
+            ):
+                continue
             trigger = self._build_trigger(task)
             if not trigger:
                 continue
@@ -161,7 +175,8 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
-        log_info("Scheduler tasks loaded", count=len(tasks))
+            registered += 1
+        log_info("Scheduler tasks loaded", count=registered)
         await self._ensure_monitoring_jobs()
 
     def _track_refresh_task(self, task: asyncio.Task[None]) -> None:
@@ -604,16 +619,21 @@ class SchedulerService:
             # Admission is deliberately inside the execution lock.  A module
             # can be toggled after scheduler refresh but must never race into
             # dispatch.
-            for module_slug in module_capabilities.modules_for_command(str(command or "")):
-                module = await module_repo.get_module(module_slug)
-                if not module or not module.get("enabled"):
+            owners = module_capabilities.modules_for_command(str(command or ""))
+            if owners:
+                availability = get_component_availability()
+                owner_modules = [await module_repo.get_module(slug) for slug in owners]
+                if not any(
+                    module and availability.module_enabled(module)
+                    for module in owner_modules
+                ):
                     now = datetime.now(timezone.utc)
                     await scheduled_tasks_repo.record_task_run(
                         int(task_id), status="skipped", started_at=now,
                         finished_at=now, duration_ms=0,
-                        details=f"Module '{module_slug}' is disabled",
+                        details="Owning module is unavailable",
                     )
-                    log_info("Scheduled task skipped: module disabled", task_id=task_id, command=command, module=module_slug)
+                    log_info("Scheduled task skipped: owning module unavailable", task_id=task_id, command=command)
                     return
 
             if not force_restart:

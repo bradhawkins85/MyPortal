@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 
 from app.core.config import Settings
-from app.services import modules as modules_service
+from app.services import module_dispatch, modules as modules_service
 from app.services.component_availability import (
     AvailabilityConfigurationError,
     ComponentAvailability,
@@ -93,6 +94,66 @@ def test_environment_disabled_module_cannot_be_reenabled(monkeypatch):
     assert not called
 
 
+@pytest.mark.anyio
+async def test_default_sync_does_not_create_unavailable_module(monkeypatch):
+    configure_component_availability(
+        disabled_modules="trello",
+        known_feature_packs=("trello",),
+        known_modules=(module["slug"] for module in modules_service.DEFAULT_MODULES),
+    )
+    monkeypatch.setattr(modules_service.db, "is_connected", lambda: True)
+    monkeypatch.setattr(modules_service.module_repo, "list_modules", lambda: asyncio.sleep(0, result=[]))
+    created: list[str] = []
+
+    async def upsert_module(**values):
+        created.append(values["slug"])
+
+    monkeypatch.setattr(modules_service.module_repo, "upsert_module", upsert_module)
+    await modules_service.ensure_default_modules()
+    assert "trello" not in created
+
+
+@pytest.mark.anyio
+async def test_dispatch_rejects_unavailable_module_before_handler(monkeypatch):
+    configure_component_availability(
+        disabled_modules="trello",
+        known_feature_packs=("trello",),
+        known_modules=("trello",),
+    )
+    handler = AsyncMock()
+    monkeypatch.setattr(module_dispatch, "_trigger_module_handler", handler)
+
+    result = await module_dispatch.trigger_module("trello", {"card_id": "secret"})
+
+    assert result == {
+        "status": "skipped",
+        "reason": "Module unavailable",
+        "module": "trello",
+    }
+    handler.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_unavailable_internal_action_is_not_listed_or_dispatched(monkeypatch):
+    configure_component_availability(
+        disabled_modules="reprocess-ai",
+        known_feature_packs=("reprocess_ai",),
+        known_modules=(module["slug"] for module in modules_service.DEFAULT_MODULES),
+    )
+    monkeypatch.setattr(
+        modules_service.module_repo,
+        "list_modules",
+        lambda: asyncio.sleep(0, result=[]),
+    )
+    actions = await modules_service.list_trigger_action_modules()
+    assert "reprocess-ai" not in {item["slug"] for item in actions}
+    assert await modules_service.trigger_module("reprocess-ai", {}) == {
+        "status": "skipped",
+        "reason": "Module unavailable",
+        "module": "reprocess-ai",
+    }
+
+
 @pytest.mark.parametrize(
     ("policy", "pack", "module"),
     [
@@ -107,3 +168,16 @@ def test_environment_disabled_module_cannot_be_reenabled(monkeypatch):
 def test_module_and_associated_pack_share_deployment_availability(policy, pack, module):
     assert policy.feature_pack_available("trello") is pack
     assert policy.module_available("trello") is module
+
+
+def test_shared_capability_remains_available_with_an_available_owner():
+    policy = ComponentAvailability(disabled_modules=frozenset({"xero"}))
+    assert policy.command_available("refresh_company_ids")
+    assert not policy.service_available("xero.api")
+
+
+def test_module_without_feature_pack_deactivates_owned_capabilities():
+    policy = ComponentAvailability(disabled_modules=frozenset({"smtp2go"}))
+    assert not policy.route_available("webhooks.smtp2go")
+    assert not policy.service_available("smtp2go.delivery")
+    assert not policy.ui_feature_available("modules.smtp2go")

@@ -21,6 +21,17 @@ async def trigger_module(
     background: bool = True,
     on_complete: Callable[[Mapping[str, Any]], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
+    # Keep the guard in this thin dispatch boundary as well as in the concrete
+    # module service: tests, plugins, and hot reloads may register another
+    # handler, but deployment exclusions must remain authoritative.
+    from app.services.component_availability import get_component_availability
+
+    if not get_component_availability().module_available(module_slug):
+        return {
+            "status": "skipped",
+            "reason": "Module unavailable",
+            "module": module_slug,
+        }
     handler = _trigger_module_handler
     if handler is None:
         modules_service = import_module("app.services.modules")
