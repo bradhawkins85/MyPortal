@@ -870,6 +870,16 @@ def _release_manifest() -> dict[str, Any]:
 # Add cache-busting helper to Jinja2 globals
 templates.env.globals["static_url"] = _static_url
 
+
+def _deployment_slot() -> str | None:
+    """Return the canonical blue/green slot for this application process."""
+
+    slot = settings.app_instance_id.strip().lower()
+    return slot if slot in {"blue", "green"} else None
+
+
+templates.env.globals["deployment_slot"] = _deployment_slot()
+
 # Ensure document uploads remain web-accessible using the same paths as the
 # previous portal stack.  Product images continue to live in the
 # private ``/uploads`` directory which requires authentication before access.
