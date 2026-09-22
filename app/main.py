@@ -303,6 +303,11 @@ if _version_file.is_file():
         _APP_VERSION = ""
 
 _PWA_SERVICE_WORKER_PATH = templates_config.static_path / "service-worker.js"
+_RELEASE_POLICY_PATH = Path(__file__).resolve().parent.parent / "release.json"
+_RELEASE_HASH_ROOTS = (
+    templates_config.static_path,
+    Path(__file__).resolve().parent / "templates",
+)
 _PWA_ICON_SOURCES = [
     {
         "src": "/static/logo.svg",
@@ -807,10 +812,59 @@ def _static_url(path: str) -> str:
     Appends version query string to force browsers (especially Edge) to fetch
     new versions when files change, preventing stale cached content.
     """
-    if _APP_VERSION:
+    asset_path = path.partition("?")[0]
+    candidate = templates_config.static_path / asset_path.removeprefix("/static/")
+    revision = _content_hash(candidate) if candidate.is_file() else _APP_VERSION
+    if revision:
         separator = "&" if "?" in path else "?"
-        return f"{path}{separator}v={_APP_VERSION}"
+        return f"{path}{separator}v={revision}"
     return path
+
+
+def _content_hash(path: Path) -> str:
+    """Return a short content revision without relying on process version state."""
+
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+    except OSError:
+        return ""
+
+
+def _release_manifest() -> dict[str, Any]:
+    """Build the release contract from current bytes, including hot-deployed files."""
+
+    policy: dict[str, Any] = {}
+    try:
+        loaded = json.loads(_RELEASE_POLICY_PATH.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            policy = loaded
+    except (OSError, ValueError):
+        pass
+    compatibility = str(policy.get("compatibility", "soft")).lower()
+    if compatibility not in {"none", "soft", "optional", "mandatory"}:
+        compatibility = "soft"
+    files: dict[str, str] = {}
+    for root in _RELEASE_HASH_ROOTS:
+        if not root.is_dir():
+            continue
+        prefix = "/static/" if root == templates_config.static_path else "template:"
+        for file_path in sorted(path for path in root.rglob("*") if path.is_file()):
+            relative = file_path.relative_to(root).as_posix()
+            files[prefix + relative] = _content_hash(file_path)
+    identity = {"content": files, "policy": policy}
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:20]
+    precache_paths = [
+        "/static/css/app.css", "/static/js/pwa.js", "/static/js/viewport.js",
+        "/static/logo.svg", "/static/favicon.svg", "/static/upgrade.html",
+    ]
+    return {
+        "release": digest,
+        "application_version": _APP_VERSION,
+        "compatibility": compatibility,
+        "message": str(policy.get("message", "A new portal release is ready.")),
+        "assets": {path: files.get(path, "") for path in precache_paths},
+        "content": files,
+    }
 
 
 # Add cache-busting helper to Jinja2 globals
@@ -906,21 +960,29 @@ async def pwa_manifest() -> JSONResponse:
         "categories": ["productivity", "business"],
     }
     response = JSONResponse(manifest, media_type="application/manifest+json")
-    response.headers["Cache-Control"] = "public, max-age=3600"
+    response.headers["Cache-Control"] = "no-cache, must-revalidate"
     return response
 
 
+@app.get("/release-manifest.json", include_in_schema=False)
+async def release_manifest() -> JSONResponse:
+    """Publish content revisions and the browser compatibility policy."""
+
+    return JSONResponse(
+        _release_manifest(),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
 @app.get("/service-worker.js", include_in_schema=False)
-async def pwa_service_worker() -> FileResponse:
+async def pwa_service_worker() -> Response:
     """Serve the static service worker with strict caching headers."""
 
     if not _PWA_SERVICE_WORKER_PATH.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    response = FileResponse(
-        _PWA_SERVICE_WORKER_PATH,
-        media_type="application/javascript",
-        filename="service-worker.js",
-    )
+    source = _PWA_SERVICE_WORKER_PATH.read_text(encoding="utf-8")
+    source = source.replace("__RELEASE_REVISION__", _release_manifest()["release"])
+    response = PlainTextResponse(source, media_type="application/javascript")
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Service-Worker-Allowed"] = "/"
@@ -928,6 +990,22 @@ async def pwa_service_worker() -> FileResponse:
 
 
 app.mount("/static", StaticFiles(directory=str(templates_config.static_path)), name="static")
+
+
+@app.middleware("http")
+async def release_cache_headers(request: Request, call_next: Any) -> Response:
+    """Keep documents/release metadata fresh and fingerprinted assets immutable."""
+
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/static/"):
+        if request.query_params.get("v"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers.setdefault("Cache-Control", "public, max-age=300, must-revalidate")
+    elif response.headers.get("content-type", "").startswith("text/html"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
 
 
 @app.websocket("/ws/refresh")
