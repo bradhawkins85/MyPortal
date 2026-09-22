@@ -65,6 +65,20 @@
         <h3 class="agent-answer__heading">Answer</h3>
         <div class="agent-answer__meta" hidden data-agent-answer-meta></div>
         <div class="agent-answer__body" data-agent-answer-body></div>
+        <div class="agent-answer__feedback" hidden data-agent-feedback>
+          <span>Was this helpful?</span>
+          <button type="button" class="button button--ghost" data-agent-rating="up" aria-label="Helpful">👍</button>
+          <button type="button" class="button button--ghost" data-agent-rating="down" aria-label="Not helpful">👎</button>
+          <label>Reason
+            <select class="input" data-agent-feedback-reason>
+              <option value="">Optional</option><option value="incorrect">Incorrect</option>
+              <option value="uncited">Citation issue</option><option value="irrelevant">Irrelevant</option>
+              <option value="incomplete">Incomplete</option><option value="unsafe">Unsafe</option><option value="other">Other</option>
+            </select>
+          </label>
+          <label>Comment <input class="input" maxlength="1000" data-agent-feedback-comment></label>
+          <span role="status" data-agent-feedback-status></span>
+        </div>
       </article>
 
       <article class="agent-sources" hidden data-agent-sources>

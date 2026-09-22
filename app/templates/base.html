@@ -659,6 +659,12 @@
                 </a>
               </li>
               <li class="menu__item">
+                <a href="/admin/ai-quality" {% if current_path.startswith('/admin/ai-quality') %}aria-current="page"{% endif %}>
+                  <span class="menu__icon" aria-hidden="true">✓</span>
+                  <span class="menu__label">AI Quality</span>
+                </a>
+              </li>
+              <li class="menu__item">
                 <a href="/admin/chat/ai-tag-synonyms" {% if current_path.startswith('/admin/chat/ai-tag-synonyms') or current_path.startswith('/chat/configuration') %}aria-current="page"{% endif %}>
                   <span class="menu__icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24" focusable="false"><path d="M4 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5l-5 5v-5H6a2 2 0 0 1-2-2V4zm4 4v2h8V8H8zm0 4v2h5v-2H8z"/></svg>

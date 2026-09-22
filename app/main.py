@@ -6247,6 +6247,18 @@ async def admin_rag_page(request: Request):
     )
 
 
+@app.get("/admin/ai-quality", response_class=HTMLResponse)
+async def admin_ai_quality_page(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    from app.repositories import ai_quality as quality_repo
+    return await _render_template(
+        "admin/ai_quality.html", request, current_user,
+        extra={"title": "AI Quality", "quality_groups": await quality_repo.aggregate()},
+    )
+
+
 @app.get("/admin/impersonation", response_class=HTMLResponse)
 async def admin_impersonation_page(
     request: Request,

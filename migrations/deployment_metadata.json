@@ -48,6 +48,12 @@
       "compatible-from": "*",
       "compatible-to": "*",
       "maintenance": false
+    },
+    "387_ai_quality_feedback.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
     }
   }
 }

@@ -395,6 +395,10 @@
     const saveNameInput = panel.querySelector('[data-agent-save-name]');
     const saveSearchButton = panel.querySelector('[data-agent-save-search]');
     const savedLibrary = panel.querySelector('[data-agent-saved-library]');
+    const feedback = panel.querySelector('[data-agent-feedback]');
+    const feedbackReason = panel.querySelector('[data-agent-feedback-reason]');
+    const feedbackComment = panel.querySelector('[data-agent-feedback-comment]');
+    const feedbackStatus = panel.querySelector('[data-agent-feedback-status]');
 
     if (!form || !input) return;
 
@@ -402,6 +406,7 @@
     if (status) status.textContent = defaultStatus;
     let lastQuery = '';
     let lastAnswer = '';
+    let qualityResponseId = null;
 
     function selectedSourceFilters() {
       return filterInputs.filter((inputEl) => inputEl.checked).map((inputEl) => inputEl.value);
@@ -416,6 +421,8 @@
 
     function resetResults() {
       if (answer) answer.hidden = true;
+      qualityResponseId = null;
+      if (feedback) feedback.hidden = true;
       if (answerBody) answerBody.textContent = '';
       if (answerMeta) {
         answerMeta.hidden = true;
@@ -557,6 +564,8 @@
             renderSimpleText(answerBody, payload.answer);
             renderAnswerMeta(answerMeta, payload);
             if (answer) answer.hidden = false;
+            qualityResponseId = payload.quality_response_id || null;
+            if (feedback) feedback.hidden = !qualityResponseId;
           } else if (answer) {
             answer.hidden = true;
           }
@@ -606,6 +615,24 @@
     }
 
     form.addEventListener('submit', handleSubmit);
+    panel.querySelectorAll('[data-agent-rating]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        if (!qualityResponseId) return;
+        if (feedbackStatus) feedbackStatus.textContent = 'Saving…';
+        try {
+          const response = await fetch('/api/agent/feedback', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({response_id: qualityResponseId, rating: button.dataset.agentRating,
+              reason: feedbackReason ? feedbackReason.value || null : null,
+              comment: feedbackComment ? feedbackComment.value.trim() || null : null})
+          });
+          if (!response.ok) throw new Error('feedback failed');
+          if (feedbackStatus) feedbackStatus.textContent = 'Thank you — feedback saved.';
+        } catch (error) {
+          if (feedbackStatus) feedbackStatus.textContent = 'Unable to save feedback.';
+        }
+      });
+    });
     if (createTicketButton) createTicketButton.addEventListener('click', openTicketModal);
     if (saveSearchButton) saveSearchButton.addEventListener('click', saveCurrentSearch);
     fetchSavedSearches();

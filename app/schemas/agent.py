@@ -269,3 +269,11 @@ class AgentQueryResponse(BaseModel):
     evidence: dict[str, list[AgentEvidenceItem]] = Field(default_factory=dict)
     sources: AgentSources
     context: AgentContext
+    quality_response_id: int | None = None
+
+
+class AgentFeedbackRequest(BaseModel):
+    response_id: int = Field(gt=0)
+    rating: str = Field(pattern="^(up|down)$")
+    reason: str | None = Field(default=None, max_length=40)
+    comment: str | None = Field(default=None, max_length=1000)
