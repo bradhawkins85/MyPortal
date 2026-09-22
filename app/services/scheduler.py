@@ -1655,7 +1655,16 @@ class SchedulerService:
         loaded_versions: dict[str, str] = {
             state["slug"]: state["version"] for state in registry.list()
         }
+        from app.services.component_availability import get_component_availability
+
         for slug in slugs:
+            if not get_component_availability().feature_pack_available(slug):
+                log_info(
+                    "Feature pack hot-reload skipped",
+                    reason="pack_disabled_by_deployment",
+                    slug=slug,
+                )
+                return None
             if slug not in loaded_versions:
                 log_info(
                     "Feature pack hot-reload skipped",
@@ -1782,9 +1791,18 @@ class SchedulerService:
             return
 
         loaded = {state["slug"] for state in registry.list()}
+        from app.services.component_availability import get_component_availability
+
         reloaded: list[str] = []
         failed: list[str] = []
         for slug in slugs:
+            if not get_component_availability().feature_pack_available(slug):
+                log_info(
+                    "Feature pack reload flag discarded slug",
+                    reason="pack_disabled_by_deployment",
+                    slug=slug,
+                )
+                continue
             if slug not in loaded:
                 log_info(
                     "Feature pack reload flag skipped slug",

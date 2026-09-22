@@ -137,6 +137,10 @@ class FeaturePackWatcher:
         return False
 
     async def _reload_with_logging(self, slug: str) -> None:
+        from app.services.component_availability import get_component_availability
+
+        if not get_component_availability().feature_pack_available(slug):
+            return
         log_info("Auto-reloading feature pack", feature=slug)
         try:
             await self._registry.reload(slug)

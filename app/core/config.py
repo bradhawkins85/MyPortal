@@ -273,6 +273,18 @@ class Settings(BaseSettings):
         """Merge legacy FEATURE_PACKS values with bundled feature packs."""
         return _normalize_feature_packs(value)
 
+    @model_validator(mode="after")
+    def exclude_disabled_feature_packs(self) -> "Settings":
+        """Keep deployment-disabled packs out of the effective startup manifest."""
+
+        disabled = set(parse_slug_list(self.disabled_feature_packs))
+        self.feature_packs = ",".join(
+            slug
+            for slug in parse_slug_list(self.feature_packs)
+            if slug not in disabled
+        )
+        return self
+
     @field_validator("outbound_audit_bcc", mode="before")
     @classmethod
     def normalise_optional_audit_mailbox(cls, value: Any) -> Any:
