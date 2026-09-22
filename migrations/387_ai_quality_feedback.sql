@@ -6,8 +6,10 @@
 
 CREATE TABLE IF NOT EXISTS ai_quality_responses (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL,
-    company_id BIGINT NULL,
+    -- Match the signed INT keys declared by users.id and companies.id. MySQL
+    -- requires an exact type/sign match for foreign-key columns.
+    user_id INT NOT NULL,
+    company_id INT NULL,
     feature VARCHAR(40) NOT NULL,
     query_hash CHAR(64) NOT NULL,
     query_redacted TEXT NOT NULL,
@@ -26,8 +28,8 @@ CREATE TABLE IF NOT EXISTS ai_quality_responses (
 
 CREATE TABLE IF NOT EXISTS ai_quality_feedback (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    response_id BIGINT NOT NULL,
-    user_id BIGINT NOT NULL,
+    response_id INT NOT NULL,
+    user_id INT NOT NULL,
     rating VARCHAR(4) NOT NULL,
     reason VARCHAR(40) NULL,
     comment VARCHAR(1000) NULL,
