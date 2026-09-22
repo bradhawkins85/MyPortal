@@ -114,6 +114,14 @@ record_step() {
   echo "Upgrade step ${name}: ${outcome} (${reason}, ${duration}s)." >&2
 }
 
+cleanup_old_releases() {
+  # Cleanup is deliberately best-effort: an inability to reclaim disk space
+  # must not turn an otherwise verified deployment into a reported failure.
+  if ! python3 "${PROJECT_ROOT}/scripts/cleanup_releases.py" "$RELEASE_ROOT" "$CURRENT_LINK" --retain 3; then
+    echo "WARNING: post-deployment release cleanup failed; deployment remains successful." >&2
+  fi
+}
+
 generate_deployment_plan() {
   local base="$1" target="$2"
   DEPLOYMENT_PLAN=$(PYTHONPATH="$PROJECT_ROOT" python3 -m app.services.deployment_plan "$base" "$target")
@@ -794,17 +802,20 @@ esac
 case "$DEPLOYMENT_ACTION" in
   no-op)
     write_upgrade_status succeeded "No production changes were required for ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
+    cleanup_old_releases
     exit 0
     ;;
   static-publish)
     publish_paths_without_worker_reload "$TARGET_REVISION" static
     write_upgrade_status succeeded "Versioned static assets ${TARGET_REVISION} published without reloading workers." "$DEPLOYMENT_REASON"
+    cleanup_old_releases
     exit 0
     ;;
   template-reload)
     publish_paths_without_worker_reload "$TARGET_REVISION" static
     publish_paths_without_worker_reload "$TARGET_REVISION" template
     write_upgrade_status succeeded "Templates published and caches invalidated without reloading workers." "$DEPLOYMENT_REASON"
+    cleanup_old_releases
     exit 0
     ;;
   feature-pack-reload)
@@ -859,6 +870,7 @@ PY
       atomic_link "$RELEASE_DIR" "$INSTANCE_ROOT/$active_instance"
       atomic_link "$RELEASE_DIR" "$CURRENT_LINK"
       write_upgrade_status succeeded "Feature packs loaded and acknowledged at ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
+      cleanup_old_releases
       exit 0
     fi
     # Do not infer success from Git metadata.  A negative result or timeout
@@ -871,6 +883,7 @@ PY
   tray-publish)
     publish_tray_artifacts "$TARGET_REVISION"
     write_upgrade_status succeeded "Verified CI tray artifacts ${TARGET_REVISION} published without reloading workers." "$DEPLOYMENT_REASON"
+    cleanup_old_releases
     exit 0
     ;;
   migration-only|staged-cutover) ;;
@@ -892,9 +905,11 @@ if is_additive_migration_only_release "${PREVIOUS_RELEASE##*/}" "$TARGET_REVISIO
   RESTART_MODE="migration-only"
   write_upgrade_status succeeded "Additive migration release ${TARGET_REVISION} applied; application workers were not reloaded." "$DEPLOYMENT_REASON"
   echo "Successfully applied migration-only release ${TARGET_REVISION}."
+  cleanup_old_releases
   exit 0
 fi
 install_blue_green_service_unit "$RELEASE_DIR"
 run_rolling_restart "$TARGET_REVISION" "$RELEASE_DIR"
 write_upgrade_status succeeded "Release ${TARGET_REVISION} is serving; previous release retained."
 echo "Successfully deployed ${TARGET_REVISION} from ${RELEASE_DIR}."
+cleanup_old_releases
