@@ -255,3 +255,31 @@ def test_modules_page_renders_operations_center(super_admin_context, monkeypatch
     assert "Scheduled task dependency graph" in html
     assert "95.0% / 99%" in html
     assert "Access token expires in 2 day(s)" in html
+    assert 'id="modules-actions-menu"' in html
+    assert 'data-operations-modal-open="integration-health-modal"' in html
+    assert 'data-operations-modal-open="credential-expiry-modal"' in html
+    assert 'data-operations-modal-open="integration-setup-modal"' in html
+    assert 'data-operations-modal-open="dependency-graph-modal"' in html
+    assert html.index('id="integration-health-modal"') > html.index('id="modules-table"')
+
+
+def test_modules_page_shows_env_disable_name(super_admin_context, monkeypatch):
+    async def fake_list_modules():
+        return [
+            {
+                "slug": "tacticalrmm",
+                "name": "Tactical RMM",
+                "description": "Device management.",
+                "enabled": True,
+                "settings": {},
+            }
+        ]
+
+    monkeypatch.setattr(modules_service, "list_modules", fake_list_modules)
+
+    with TestClient(app) as client:
+        response = client.get("/admin/modules")
+
+    assert response.status_code == 200
+    assert ">.env module name</th>" in response.text
+    assert '<code>tacticalrmm</code>' in response.text
