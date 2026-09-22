@@ -92,6 +92,12 @@ def test_stat_strip_catalogue_has_every_mapping_once() -> None:
 def test_m365_best_practices_strip_uses_all_visible_current_results() -> None:
     sql = M365_FIX_MIGRATION.read_text()
 
+    assert sql.startswith(
+        "-- phase: expand\n"
+        "-- compatible-from: *\n"
+        "-- compatible-to: *\n"
+        "-- maintenance: false\n"
+    )
     assert "run_at = (SELECT MAX(run_at)" not in sql
     assert "LEFT JOIN m365_best_practice_settings" in sql
     assert "(s.enabled = 1 OR s.check_id IS NULL)" in sql
