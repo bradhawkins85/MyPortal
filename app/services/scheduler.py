@@ -44,6 +44,7 @@ from app.services import webhook_monitor
 from app.services import system_update_history
 from app.services.deployment_plan import build_deployment_plan
 from app.services.component_availability import get_component_availability
+from app.services.component_availability import DEPLOYMENT_DISABLED_REASON
 from app.services import xero as xero_service
 from app.services import service_status as service_status_service
 from app.services import ticket_shipment_tracking as shipment_watch_service
@@ -631,7 +632,7 @@ class SchedulerService:
                     await scheduled_tasks_repo.record_task_run(
                         int(task_id), status="skipped", started_at=now,
                         finished_at=now, duration_ms=0,
-                        details="Owning module is unavailable",
+                        details=f"{DEPLOYMENT_DISABLED_REASON}; retryable=false",
                     )
                     log_info("Scheduled task skipped: owning module unavailable", task_id=task_id, command=command)
                     return

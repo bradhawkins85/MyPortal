@@ -25,6 +25,20 @@ class AvailabilityConfigurationError(ValueError):
     """Raised when a deployment names a component that does not exist."""
 
 
+DEPLOYMENT_DISABLED_REASON = "Component disabled by deployment configuration"
+
+
+def deployment_disabled_result(module_slug: str) -> dict[str, object]:
+    """Return the common terminal result used when an action owner is excluded."""
+
+    return {
+        "status": "skipped",
+        "reason": DEPLOYMENT_DISABLED_REASON,
+        "module": module_slug,
+        "retryable": False,
+    }
+
+
 def parse_slug_list(value: object) -> tuple[str, ...]:
     """Parse a comma-separated slug list, trimming and de-duplicating it."""
 
@@ -121,7 +135,9 @@ def get_component_availability() -> ComponentAvailability:
 __all__ = [
     "AvailabilityConfigurationError",
     "ComponentAvailability",
+    "DEPLOYMENT_DISABLED_REASON",
     "configure_component_availability",
     "get_component_availability",
+    "deployment_disabled_result",
     "parse_slug_list",
 ]

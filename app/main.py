@@ -10511,7 +10511,10 @@ async def admin_feature_packs_page(
     if redirect:
         return redirect
 
-    loaded = feature_registry.list()
+    from app.services.component_availability import get_component_availability
+    availability = get_component_availability()
+    loaded = [item for item in feature_registry.list()
+              if availability.feature_pack_available(str(item.get("slug") or ""))]
     packs = sorted(
         [item for item in loaded if not str(item.get("slug", "")).startswith("plugin.")],
         key=lambda p: p["slug"],
@@ -10533,6 +10536,9 @@ async def admin_update_module(slug: str, request: Request):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
+    from app.services.component_availability import get_component_availability
+    if not get_component_availability().module_available(slug):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     form = await request.form()
     raw_enabled = form.get("enabled")
     enabled = False

@@ -205,6 +205,7 @@ def _parse_automation_form_submission(
     kind: str,
 ) -> tuple[dict[str, Any] | None, dict[str, Any], str | None, int]:
     from app.services import modules as modules_service
+    from app.services.component_availability import get_component_availability
 
     def _get_str_value(key: str) -> str:
         value = form.get(key)
@@ -358,6 +359,13 @@ def _parse_automation_form_submission(
                     f"Select an action module for trigger action {index}.",
                     status.HTTP_400_BAD_REQUEST,
                 )
+            if not get_component_availability().module_available(module_value):
+                return (
+                    None,
+                    form_state,
+                    f"Trigger action {index} uses a module unavailable in this deployment.",
+                    status.HTTP_400_BAD_REQUEST,
+                )
             payload_value = entry.get("payload") or {}
             if not isinstance(payload_value, dict):
                 return (
@@ -396,6 +404,13 @@ def _parse_automation_form_submission(
         form_state["actionPayloadRaw"] = json.dumps(action_payload)
         form_state["actionModule"] = action_module or ""
     elif action_module and isinstance(action_payload, dict):
+        if not get_component_availability().module_available(action_module):
+            return (
+                None,
+                form_state,
+                "The selected action module is unavailable in this deployment.",
+                status.HTTP_400_BAD_REQUEST,
+            )
         try:
             modules_service.validate_action_payload(action_module, action_payload)
         except ValueError as exc:

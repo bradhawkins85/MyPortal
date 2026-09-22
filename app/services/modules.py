@@ -2390,6 +2390,7 @@ async def list_modules() -> list[dict[str, Any]]:
         )
         for module in modules
         if not _is_always_on_ticket_action_module(str(module.get("slug") or ""))
+        and availability.module_available(str(module.get("slug") or ""))
     ]
     return result
 
@@ -2726,6 +2727,8 @@ async def list_trigger_action_modules() -> list[dict[str, Any]]:
 
 
 async def get_module(slug: str, *, redact: bool = True) -> dict[str, Any] | None:
+    if not get_component_availability().module_available(slug):
+        return None
     module = await module_repo.get_module(slug)
     if not module:
         return None
@@ -2888,7 +2891,9 @@ async def trigger_module(
     # or persistent state.  This guarantees no handler code is reached and
     # gives every direct dispatcher the same safe result.
     if not get_component_availability().module_available(slug):
-        return {"status": "skipped", "reason": "Module unavailable", "module": slug}
+        from app.services.component_availability import deployment_disabled_result
+
+        return deployment_disabled_result(slug)
     module = _get_always_on_ticket_action_module(slug)
     if not module:
         module = await module_repo.get_module(slug)
