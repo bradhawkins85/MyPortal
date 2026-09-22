@@ -213,3 +213,58 @@ def test_module_without_feature_pack_deactivates_owned_capabilities():
     assert not policy.route_available("webhooks.smtp2go")
     assert not policy.service_available("smtp2go.delivery")
     assert not policy.ui_feature_available("modules.smtp2go")
+
+
+@pytest.mark.parametrize(
+    ("name", "policy", "expected"),
+    [
+        (
+            "default",
+            ComponentAvailability(),
+            (True, True, True, True, True),
+        ),
+        (
+            "partially-disabled",
+            ComponentAvailability(disabled_modules=frozenset({"trello"})),
+            (False, False, False, False, True),
+        ),
+        (
+            "heavily-reduced",
+            ComponentAvailability(
+                disabled_feature_packs=frozenset({"trello", "xero"}),
+                disabled_modules=frozenset({"tacticalrmm", "smtp2go"}),
+            ),
+            (False, False, False, False, True),
+        ),
+    ],
+)
+def test_reduced_deployment_capability_matrix(name, policy, expected):
+    """Default and reduced deployments consistently filter every surface."""
+
+    del name
+    observed = (
+        policy.feature_pack_available("trello"),
+        policy.route_available("webhooks.trello"),
+        policy.service_available("trello.api"),
+        policy.ui_feature_available("trello"),
+        policy.feature_pack_available("tickets"),
+    )
+    assert observed == expected
+
+
+def test_reenabling_preserves_stored_configuration_and_history():
+    stored_module = {
+        "slug": "trello",
+        "enabled": True,
+        "settings": {"board_id": "existing-board"},
+        "history": ["card-1", "card-2"],
+    }
+    before = {**stored_module, "settings": dict(stored_module["settings"]), "history": list(stored_module["history"])}
+
+    disabled = ComponentAvailability(disabled_modules=frozenset({"trello"}))
+    assert not disabled.module_enabled(stored_module)
+    assert stored_module == before
+
+    restored = ComponentAvailability()
+    assert restored.module_enabled(stored_module)
+    assert stored_module == before

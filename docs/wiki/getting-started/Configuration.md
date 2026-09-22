@@ -22,3 +22,11 @@ The deployment helpers (`scripts/install_production.sh`,
 `scripts/restart.sh`) seed the flag into `.env` if the file was created before
 the option existed. Override the value directly in `.env` or through your
 process manager's secret store.
+
+## Component availability
+
+All bundled components are available by default. Operators who need a reduced
+deployment can exclude components with `DISABLED_FEATURE_PACKS` and
+`DISABLED_MODULES`. See [Component Deactivation](Component%20Deactivation.md)
+for valid slugs, dependency and precedence rules, examples, and the deployment
+verification checklist.

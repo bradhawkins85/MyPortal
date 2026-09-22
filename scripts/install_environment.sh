@@ -780,6 +780,8 @@ build_tray_installers() {
 }
 
 ensure_env_file
+ensure_env_default "DISABLED_FEATURE_PACKS" ""
+ensure_env_default "DISABLED_MODULES" ""
 ensure_env_default "ENABLE_AUTO_REFRESH" "false"
 ensure_env_default "UVICORN_AUTO_UPDATE_ENABLED" "true"
 ensure_env_default "UVICORN_AUTO_UPDATE_ATTEMPTS" "2"
