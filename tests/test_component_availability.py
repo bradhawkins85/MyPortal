@@ -11,6 +11,7 @@ from app.services.component_availability import (
     AvailabilityConfigurationError,
     ComponentAvailability,
     configure_component_availability,
+    deployment_disabled_result,
     parse_slug_list,
 )
 
@@ -127,8 +128,9 @@ async def test_dispatch_rejects_unavailable_module_before_handler(monkeypatch):
 
     assert result == {
         "status": "skipped",
-        "reason": "Module unavailable",
+        "reason": "Component disabled by deployment configuration",
         "module": "trello",
+        "retryable": False,
     }
     handler.assert_not_awaited()
 
@@ -149,8 +151,38 @@ async def test_unavailable_internal_action_is_not_listed_or_dispatched(monkeypat
     assert "reprocess-ai" not in {item["slug"] for item in actions}
     assert await modules_service.trigger_module("reprocess-ai", {}) == {
         "status": "skipped",
-        "reason": "Module unavailable",
+        "reason": "Component disabled by deployment configuration",
         "module": "reprocess-ai",
+        "retryable": False,
+    }
+
+
+@pytest.mark.anyio
+async def test_unavailable_modules_are_absent_from_catalogue_and_lookup(monkeypatch):
+    configure_component_availability(
+        disabled_modules="trello",
+        known_feature_packs=("trello",),
+        known_modules=("trello", "xero"),
+    )
+    rows = [
+        {"slug": "trello", "enabled": True, "settings": {}},
+        {"slug": "xero", "enabled": True, "settings": {}},
+    ]
+    monkeypatch.setattr(modules_service.module_repo, "list_modules", lambda: asyncio.sleep(0, result=rows))
+    monkeypatch.setattr(
+        modules_service.module_repo, "get_module",
+        lambda slug: asyncio.sleep(0, result=next((row for row in rows if row["slug"] == slug), None)),
+    )
+    assert [module["slug"] for module in await modules_service.list_modules()] == ["xero"]
+    assert await modules_service.get_module("trello") is None
+
+
+def test_deployment_skip_result_is_explicit_and_terminal():
+    assert deployment_disabled_result("trello") == {
+        "status": "skipped",
+        "reason": "Component disabled by deployment configuration",
+        "module": "trello",
+        "retryable": False,
     }
 
 

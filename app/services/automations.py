@@ -846,6 +846,7 @@ async def _invoke_automation_actions_for_context(
                 "failed"
                 if action_status in {"failed", "error"}
                 or (action_status == "unknown" and action_error)
+                else "skipped" if action_status == "skipped"
                 else "succeeded"
             )
             await _record_action_history(
@@ -885,6 +886,8 @@ async def _invoke_automation_actions_for_context(
                 .lower()
             )
             result_error = result.get("error") or result.get("last_error") or None
+            if result_status == "skipped":
+                history_status = "skipped"
             if result_status in {"failed", "error"} or result_error:
                 history_status = "failed"
                 history_error = str(result_error or "Module action failed")
@@ -1410,6 +1413,7 @@ async def _execute_automation(
                         "failed"
                         if action_status in {"failed", "error"}
                         or (action_status == "unknown" and action_error)
+                        else "skipped" if action_status == "skipped"
                         else "succeeded"
                     )
                     await _record_action_history(
@@ -1465,6 +1469,10 @@ async def _execute_automation(
                             action_status = "failed"
                             status = "failed"
                             error_message = str(action_error or "Module action failed")
+                        elif raw_status == "skipped":
+                            action_status = "skipped"
+                            status = "skipped"
+                            error_message = str(result_payload.get("reason") or "Action skipped")
                     await _record_action_history(
                         automation,
                         action_name=str(module_slug),

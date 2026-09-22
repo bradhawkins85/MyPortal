@@ -6,7 +6,7 @@ from app.api.dependencies.auth import require_super_admin
 from app.repositories import integration_modules as module_repo
 from app.schemas.integration_modules import IntegrationModuleResponse, IntegrationModuleUpdate
 from app.services import modules as modules_service
-from app.services.component_availability import AvailabilityConfigurationError
+from app.services.component_availability import AvailabilityConfigurationError, get_component_availability
 
 router = APIRouter(prefix="/api/integration-modules", tags=["Integration Modules"])
 
@@ -31,6 +31,8 @@ async def update_module(
     payload: IntegrationModuleUpdate,
     current_user: dict = Depends(require_super_admin),
 ) -> IntegrationModuleResponse:
+    if not get_component_availability().module_available(slug):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found")
     exists = await module_repo.get_module(slug)
     if not exists:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Module not found")

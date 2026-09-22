@@ -1,0 +1,7 @@
+{
+  "guid": "93910fe9-9e21-43c1-8cb5-35b2df2e1c4b",
+  "occurred_at": "2026-09-22T00:00:00Z",
+  "change_type": "fix",
+  "summary": "Hide deployment-disabled components across UI, APIs, and automations",
+  "content_hash": "18b614364d66fd2a5eaff865b2fd3bb468cd242c464fb6b7b443e8244ac9e2a1"
+}

@@ -28,7 +28,9 @@ async def list_features(current_user: dict = Depends(require_super_admin)) -> di
     """Return metadata for every loaded feature pack/plugin."""
 
     registry = get_registry()
-    return {"features": registry.list()}
+    availability = get_component_availability()
+    return {"features": [feature for feature in registry.list()
+                         if availability.feature_pack_available(str(feature.get("slug") or ""))]}
 
 
 @router.post("/{slug}/reload")
