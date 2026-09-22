@@ -1795,7 +1795,7 @@ async def admin_confirm_suggested_asset(ticket_id: int, asset_id: int, request: 
 @router.post("/admin/tickets/{ticket_id:int}/ai/reprocess", response_class=JSONResponse)
 async def admin_reprocess_ticket_ai(ticket_id: int, request: Request):
     main_module = _main()
-    current_user, redirect = await main_module._require_helpdesk_page(request)
+    current_user, redirect = await main_module._require_super_admin_page(request)
     if redirect:
         return redirect
 
@@ -1803,19 +1803,21 @@ async def admin_reprocess_ticket_ai(ticket_id: int, request: Request):
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
-    try:
-        await tickets_service.refresh_ticket_ai_summary(ticket_id)
-    except Exception as exc:  # pragma: no cover - defensive against unexpected failures
-        log_error(
-            "Failed to queue ticket AI summary refresh",
-            ticket_id=ticket_id,
-            user_id=current_user.get("id"),
-            error=str(exc),
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to refresh AI summary.",
-        ) from exc
+    is_closed = str(ticket.get("status") or "").strip().lower() == "closed"
+    if not is_closed:
+        try:
+            await tickets_service.refresh_ticket_ai_summary(ticket_id)
+        except Exception as exc:  # pragma: no cover - defensive against unexpected failures
+            log_error(
+                "Failed to queue ticket AI summary refresh",
+                ticket_id=ticket_id,
+                user_id=current_user.get("id"),
+                error=str(exc),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Unable to refresh AI summary.",
+            ) from exc
 
     try:
         await tickets_service.refresh_ticket_ai_tags(ticket_id)
@@ -1831,12 +1833,12 @@ async def admin_reprocess_ticket_ai(ticket_id: int, request: Request):
             detail="Unable to refresh AI tags.",
         ) from exc
 
-    return JSONResponse(
-        {
-            "status": "queued",
-            "message": "AI summary and tags will be regenerated shortly.",
-        }
+    message = (
+        "AI tags will be regenerated shortly."
+        if is_closed
+        else "AI summary and tags will be regenerated shortly."
     )
+    return JSONResponse({"status": "queued", "message": message})
 
 
 @router.post("/admin/tickets/{ticket_id:int}/delete", response_class=HTMLResponse)

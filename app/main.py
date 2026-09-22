@@ -10381,6 +10381,7 @@ async def _render_ticket_detail(
         "hudu_company_url": hudu_company_url,
         "solidtime_links": solidtime_links,
         "can_delete_ticket": bool(user.get("is_super_admin")),
+        "can_reprocess_ticket_ai": bool(user.get("is_super_admin")),
         "relevant_kb_articles": relevant_articles,
         "relevant_services": relevant_services,
         "service_status_lookup": service_status_lookup,
