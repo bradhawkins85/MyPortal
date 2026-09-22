@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% block header_title %}AI Quality{% endblock %}
+{% block header_actions %}{{ page_header_actions([{"label": "Export CSV", "type": "link", "variant": "primary", "href": "/api/agent/quality/export.csv"}]) }}{% endblock %}
+{% block content %}
+<section class="card card--panel">
+  <p>De-identified feedback grouped by feature, provider and confidence band. Source content and user queries are not included.</p>
+  <div class="table-toolbar"><label>Filter <input class="input" type="search" data-table-search="ai-quality-table"></label></div>
+  <div class="table-responsive">
+    <table id="ai-quality-table" class="data-table" data-table-sortable>
+      <thead><tr><th data-sort="string">Feature</th><th data-sort="string">Source type</th><th data-sort="string">Provider</th><th data-sort="string">Confidence</th><th data-sort="int">Responses</th><th data-sort="int">Helpful</th><th data-sort="int">Unhelpful</th><th data-sort="int">Average latency (ms)</th></tr></thead>
+      <tbody>{% for row in quality_groups %}<tr>
+        <td>{{ row.feature }}</td><td>{{ row.source_type or 'No evidence' }}</td><td>{{ row.provider or 'Not reported' }}</td><td>{{ row.confidence_band or 'Unknown' }}</td>
+        <td>{{ row.response_count }}</td><td>{{ row.helpful or 0 }}</td><td>{{ row.unhelpful or 0 }}</td><td>{{ (row.average_latency_ms or 0)|round|int }}</td>
+      </tr>{% else %}<tr><td colspan="8">No AI quality records yet.</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

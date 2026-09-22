@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
+import csv
+import io
 
 from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.schemas.agent import (
@@ -12,12 +15,14 @@ from app.schemas.agent import (
     AgentQueryResponse,
     AgentSavedSearchCreateRequest,
     AgentSavedSearchItem,
+    AgentFeedbackRequest,
 )
 from app.services import agent as agent_service
 from app.core.database import db
 from app.repositories import rag_index as rag_index_repo
 from app.repositories import rag_relationships as rag_relationship_repo
 from app.repositories import agent_saved_searches as saved_search_repo
+from app.repositories import ai_quality as quality_repo
 
 router = APIRouter(prefix="/api/agent", tags=["Agent"])
 _RAG_INDEX_TASKS: dict[int, asyncio.Task[None]] = {}
@@ -31,6 +36,7 @@ async def query_agent(
 ) -> AgentQueryResponse:
     active_company_id = getattr(request.state, "active_company_id", None)
     memberships = getattr(request.state, "available_companies", None)
+    started = time.monotonic()
     result = await agent_service.execute_agent_query(
         payload.query,
         current_user,
@@ -38,7 +44,46 @@ async def query_agent(
         memberships=memberships,
         source_filters=payload.source_filters,
     )
+    try:
+        result["quality_response_id"] = await quality_repo.record_response(
+            user_id=int(current_user["id"]), company_id=active_company_id,
+            feature="agent", query=payload.query, evidence=result.get("evidence") or {},
+            model=result.get("model"), latency_ms=int((time.monotonic() - started) * 1000),
+            confidence_band=result.get("answer_confidence_label"),
+            outcome="answered" if result.get("answer") else "no_answer",
+        )
+    except Exception:
+        result["quality_response_id"] = None
     return AgentQueryResponse(**result)
+
+
+@router.post("/feedback", status_code=status.HTTP_204_NO_CONTENT)
+async def submit_feedback(payload: AgentFeedbackRequest,
+                          current_user: dict = Depends(get_current_user)) -> None:
+    user_id = int(current_user["id"])
+    if payload.reason and payload.reason not in quality_repo.REASONS:
+        raise HTTPException(status_code=422, detail="Unknown feedback reason")
+    if not await quality_repo.response_owned_by(payload.response_id, user_id):
+        raise HTTPException(status_code=404, detail="AI response not found")
+    await quality_repo.save_feedback(response_id=payload.response_id, user_id=user_id,
+                                     rating=payload.rating, reason=payload.reason,
+                                     comment=(payload.comment or "").strip())
+
+
+@router.get("/quality/summary")
+async def quality_summary(_: dict = Depends(require_super_admin)) -> dict:
+    """Return only de-identified aggregates; source records are never exposed."""
+    return {"groups": await quality_repo.aggregate(), "pipeline_version": quality_repo.PIPELINE_VERSION}
+
+
+@router.get("/quality/export.csv", response_class=Response)
+async def quality_export(_: dict = Depends(require_super_admin)) -> Response:
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=["feature", "source_type", "provider", "confidence_band", "response_count", "helpful", "unhelpful", "average_latency_ms"])
+    writer.writeheader()
+    writer.writerows(await quality_repo.aggregate())
+    return Response(output.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=ai-quality-summary.csv"})
 
 
 @router.post("/query/stream")
