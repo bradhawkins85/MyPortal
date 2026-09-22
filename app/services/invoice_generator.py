@@ -721,3 +721,82 @@ async def generate_subscription_invoice(
         int(result["invoice_id"]), auto_send=auto_send
     )
     return result
+
+
+async def generate_order_invoice(
+    *,
+    order_number: str,
+    company_id: int,
+    order_items: list[dict[str, Any]],
+    user_name: str | None = None,
+    freight_amount: Decimal | None = None,
+) -> dict[str, Any]:
+    """Create a durable MyPortal invoice for a cart order, then sync it to Xero.
+
+    Subscription products are deliberately excluded by the caller because their
+    charges use the subscription invoice workflow.  Keeping the local invoice
+    as the source of truth lets administrators retry a failed Xero sync from the
+    normal invoice screens.
+    """
+    line_items: list[dict[str, Any]] = []
+    for item in order_items:
+        quantity = max(0, int(item.get("quantity") or 0))
+        if quantity == 0:
+            continue
+        unit_amount = item.get("coterm_price") if item.get("coterm_enabled") else None
+        if unit_amount is None:
+            unit_amount = item.get("unit_price")
+        amount = _to_decimal(unit_amount) or Decimal("0")
+        line_items.append(
+            {
+                "Description": str(item.get("product_name") or "Item").strip(),
+                "Quantity": quantity,
+                "UnitAmount": float(amount),
+                "ItemCode": str(item.get("product_sku") or "").strip(),
+            }
+        )
+
+    freight = _to_decimal(freight_amount) or Decimal("0")
+    if freight > 0:
+        line_items.append(
+            {
+                "Description": "Freight",
+                "Quantity": 1,
+                "UnitAmount": float(freight),
+                "ItemCode": "",
+            }
+        )
+    if user_name:
+        line_items.append(
+            {
+                "Description": f"Order {order_number} placed by {user_name}",
+                "Quantity": 0,
+                "UnitAmount": 0,
+                "ItemCode": "",
+            }
+        )
+
+    if not any(Decimal(str(line["Quantity"])) > 0 for line in line_items):
+        return {
+            "status": "skipped",
+            "reason": "Order has no invoiceable product lines",
+            "order_number": order_number,
+            "company_id": company_id,
+        }
+
+    result = await generate_invoice(
+        company_id,
+        include_recurring_items=False,
+        recurring_line_items=line_items,
+        include_ticket_items=False,
+    )
+    result["order_number"] = order_number
+    if result.get("status") != "succeeded":
+        return result
+
+    company = await company_repo.get_company_by_id(company_id) or {}
+    auto_send = bool(company.get("xero_auto_send_product_invoices", 1))
+    result["xero_result"] = await xero_service.sync_invoice(
+        int(result["invoice_id"]), auto_send=auto_send
+    )
+    return result

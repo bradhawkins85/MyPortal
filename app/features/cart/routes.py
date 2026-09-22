@@ -1274,15 +1274,25 @@ async def place_order(request: Request) -> RedirectResponse:
             else _quantize_money(freight_summary["freight_total"])
         )
 
-        await main_module.xero_service.send_order_to_xero(
+        physical_items = [
+            item
+            for item in items
+            if (product_lookup.get(int(item.get("product_id") or 0)) or {}).get(
+                "subscription_category_id"
+            )
+            is None
+        ]
+
+        await main_module.invoice_generator_service.generate_order_invoice(
             order_number=order_number,
             company_id=company_id,
             user_name=user_name,
+            order_items=physical_items,
             freight_amount=freight_amount,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         main_module.log_error(
-            "Failed to send order to Xero",
+            "Failed to generate local invoice for cart order",
             order_number=order_number,
             company_id=company_id,
             error=str(exc),
