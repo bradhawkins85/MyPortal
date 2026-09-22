@@ -81,6 +81,7 @@ class Settings(BaseSettings):
 
     app_name: str = "MyPortal"
     environment: str = "development"
+    app_instance_id: str = Field(default="", validation_alias="APP_INSTANCE_ID")
     secret_key: str = Field(
         validation_alias=AliasChoices("SESSION_SECRET", "SECRET_KEY")
     )
