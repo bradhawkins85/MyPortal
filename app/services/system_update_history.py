@@ -70,6 +70,7 @@ def _write(record: dict[str, Any]) -> dict[str, Any]:
         try:
             os.unlink(temporary)
         except FileNotFoundError:
+            # Temporary file may already have been atomically moved by os.replace().
             pass
     return record
 
