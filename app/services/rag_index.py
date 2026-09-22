@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from app.core.config import get_settings
+from app.core.logging import log_info, log_warning
 from app.repositories import rag_index as rag_repo
 from app.services import rag_relationships
 from app.services.sanitization import sanitize_rich_text
@@ -141,6 +142,42 @@ class RagDocument:
     metadata: dict[str, Any] | None = None
 
 
+# Ordered from the most explicit/common identifier to source-specific fallbacks.
+# Every ingestion and cleanup path must use this list through ``source_identity``.
+_SOURCE_ID_FIELDS = (
+    "id",
+    "slug",
+    "order_number",
+    "key",
+    "check_id",
+    "user_principal_name",
+    "uid",
+)
+
+
+def source_identity(
+    source_type: str, item: Mapping[str, Any]
+) -> tuple[str, str] | None:
+    """Return the canonical, stable identity for a source record.
+
+    Empty values and structured values are not identifiers.  In particular, do
+    not stringify dictionaries or lists: their representation is neither a
+    provider contract nor a stable key suitable for stale-row cleanup.
+    """
+
+    normalised_type = str(source_type).strip()
+    if not normalised_type:
+        return None
+    for field in _SOURCE_ID_FIELDS:
+        value = item.get(field)
+        if value is None or isinstance(value, (bool, Mapping, list, tuple, set)):
+            continue
+        source_id = str(value).strip()
+        if source_id:
+            return normalised_type, source_id
+    return None
+
+
 def normalise_text(value: Any) -> str:
     sanitized = sanitize_rich_text(str(value or ""))
     return re.sub(r"\s+", " ", sanitized.text_content).strip()
@@ -213,16 +250,10 @@ def chunk_text(text: str) -> list[str]:
 def document_from_source(
     source_type: str, item: Mapping[str, Any]
 ) -> RagDocument | None:
-    source_id = (
-        item.get("id")
-        or item.get("slug")
-        or item.get("order_number")
-        or item.get("key")
-        or item.get("check_id")
-        or item.get("user_principal_name")
-    )
-    if source_id is None:
+    identity = source_identity(source_type, item)
+    if identity is None:
         return None
+    normalised_type, source_id = identity
     title = str(
         item.get("title")
         or item.get("subject")
@@ -271,15 +302,15 @@ def document_from_source(
         company_id = int(company_id) if company_id is not None else None
     except (TypeError, ValueError):
         company_id = None
-    permission_scope = _permission_scope_for_source(source_type, item)
+    permission_scope = _permission_scope_for_source(normalised_type, item)
     if permission_scope is None:
         return None
     metadata = {
         key: value for key, value in item.items() if key not in {"permission_scope"}
     }
     return RagDocument(
-        source_type=source_type,
-        source_id=str(source_id),
+        source_type=normalised_type,
+        source_id=source_id,
         title=title[:500],
         text=text,
         url=item.get("url"),
@@ -441,12 +472,11 @@ def source_keys_from_agent_sources(sources: Mapping[str, Any]) -> dict[str, set[
         for normalised_type, item in iterable:
             if not isinstance(item, Mapping):
                 continue
-            source_id = (
-                item.get("id") or item.get("slug") or item.get("key") or item.get("uid")
-            )
-            if source_id is None:
+            identity = source_identity(str(normalised_type), item)
+            if identity is None:
                 continue
-            active.setdefault(str(normalised_type), set()).add(str(source_id))
+            canonical_type, source_id = identity
+            active.setdefault(canonical_type, set()).add(source_id)
     return active
 
 
@@ -457,6 +487,7 @@ async def index_agent_sources(
     cleanup_missing: bool = False,
 ) -> int:
     indexed = 0
+    diagnostics: dict[str, dict[str, int]] = {}
     for source_type, values in sources.items():
         if source_type == "feature_packs" and isinstance(values, Mapping):
             iterable = (
@@ -467,19 +498,30 @@ async def index_agent_sources(
         else:
             iterable = ((source_type, item) for item in (values or []))
         for normalised_type, item in iterable:
+            counts = diagnostics.setdefault(
+                str(normalised_type), {"received": 0, "indexed": 0, "skipped": 0}
+            )
+            counts["received"] += 1
             if job_id is not None and await rag_repo.job_stop_requested(job_id):
                 raise RagIndexCancelled(f"Index job {job_id} was stopped.")
             if not isinstance(item, Mapping):
+                counts["skipped"] += 1
                 continue
             document = document_from_source(normalised_type, item)
             if document is None:
+                counts["skipped"] += 1
                 continue
             await index_document(document)
             indexed += 1
+            counts["indexed"] += 1
+    for source_type, counts in diagnostics.items():
+        logger = log_warning if counts["skipped"] else log_info
+        logger("RAG source indexing diagnostics", source_type=source_type, **counts)
     if cleanup_missing:
         if job_id is not None and await rag_repo.job_stop_requested(job_id):
             raise RagIndexCancelled(f"Index job {job_id} was stopped.")
-        await cleanup_missing_agent_sources(sources)
+        deleted = await cleanup_missing_agent_sources(sources)
+        log_info("RAG stale source cleanup diagnostics", deleted=deleted)
     return indexed
 
 
@@ -508,6 +550,13 @@ async def cleanup_missing_agent_sources(sources: Mapping[str, Any]) -> int:
     assets, or other source records.
     """
 
+    active_sources = source_keys_from_agent_sources(sources)
+    for source_type, source_ids in active_sources.items():
+        log_info(
+            "RAG source cleanup diagnostics",
+            source_type=source_type,
+            active_records=len(source_ids),
+        )
     return await rag_repo.cleanup_missing_documents(
-        source_keys_from_agent_sources(sources), embedding_model=embedding_model()
+        active_sources, embedding_model=embedding_model()
     )
