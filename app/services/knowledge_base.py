@@ -957,14 +957,18 @@ async def list_accessible_search_articles(
             continue
         if not _article_visible(article, context):
             continue
+        authorised = _serialise_article(
+            article, include_content=True, include_permissions=False, context=context
+        )
+        searchable_content = (
+            _combine_sections_html(authorised.get("sections") or [])
+            if article.get("sections")
+            else authorised.get("content") or ""
+        )
         content_parts = [
-            article.get("summary"),
-            article.get("content"),
-            *(
-                section.get("content")
-                for section in article.get("sections", [])
-                if isinstance(section, Mapping)
-            ),
+            authorised.get("summary"),
+            searchable_content,
+            *(section.get("content") for section in authorised.get("sections", [])),
         ]
         excerpt_source = "\n".join(str(part or "") for part in content_parts if part)
         result = {
@@ -973,6 +977,10 @@ async def list_accessible_search_articles(
             "title": str(article.get("title")),
             "summary": article.get("summary"),
             "excerpt": _build_excerpt(excerpt_source, "", article.get("summary")),
+            "content": searchable_content,
+            "sections": authorised.get("sections") or [],
+            "ai_tags": authorised.get("ai_tags") or [],
+            "manual_ai_tags": authorised.get("manual_ai_tags") or [],
             "updated_at_iso": _isoformat(article.get("updated_at_utc")),
         }
         if include_access_metadata:
@@ -1018,6 +1026,14 @@ async def search_articles(
     visible = [dict(item[2]) for item in scored[:limit]]
     results: list[dict[str, Any]] = []
     for article in visible:
+        authorised = _serialise_article(
+            article, include_content=True, include_permissions=False, context=context
+        )
+        searchable_content = (
+            _combine_sections_html(authorised.get("sections") or [])
+            if article.get("sections")
+            else authorised.get("content") or ""
+        )
         content = str(article.get("content") or "")
         summary = article.get("summary")
         result = {
@@ -1026,6 +1042,10 @@ async def search_articles(
             "title": str(article.get("title")),
             "summary": summary,
             "excerpt": _build_excerpt(content, query, summary),
+            "content": searchable_content,
+            "sections": authorised.get("sections") or [],
+            "ai_tags": authorised.get("ai_tags") or [],
+            "manual_ai_tags": authorised.get("manual_ai_tags") or [],
             "updated_at_iso": _isoformat(article.get("updated_at_utc")),
         }
         if include_access_metadata:
