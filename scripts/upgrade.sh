@@ -6,6 +6,24 @@ umask 027
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
+SYSTEM_UPDATE_FLAG_FILE="${PROJECT_ROOT}/var/state/system_update.flag"
+
+# The flag pauses mail import while an update is waiting to be applied.  A
+# failed coordinator run is terminal for that request, so never leave the flag
+# behind and indefinitely block IMAP or Microsoft 365 imports.  The cron
+# wrapper also clears consumed flags, but this trap covers direct invocations
+# and failures that abort before control returns to the wrapper.
+clear_update_flag_on_failure() {
+  local status=$?
+  trap - EXIT
+  if ((status != 0)) && [[ -e "$SYSTEM_UPDATE_FLAG_FILE" || -L "$SYSTEM_UPDATE_FLAG_FILE" ]]; then
+    rm -f -- "$SYSTEM_UPDATE_FLAG_FILE"
+    echo "Upgrade aborted with status ${status}; cleared pending update flag ${SYSTEM_UPDATE_FLAG_FILE}." >&2
+  fi
+  exit "$status"
+}
+
+trap clear_update_flag_on_failure EXIT
 
 resolve_environment_file() {
   local system_env="${1:-/etc/myportal.env}" selected
@@ -34,6 +52,7 @@ INSTANCE_ROOT="${MYPORTAL_INSTANCE_ROOT:-/opt/myportal/instances}"
 CURRENT_LINK="${MYPORTAL_CURRENT_LINK:-/opt/myportal/current}"
 UPSTREAM_FILE="${MYPORTAL_NGINX_UPSTREAM_FILE:-/etc/nginx/conf.d/myportal-active.inc}"
 READY_TIMEOUT="${MYPORTAL_READY_TIMEOUT:-60}"
+READY_REQUEST_TIMEOUT="${MYPORTAL_READY_REQUEST_TIMEOUT:-10}"
 DRAIN_SECONDS="${MYPORTAL_DRAIN_SECONDS:-15}"
 SMOKE_PATH="${MYPORTAL_SMOKE_PATH:-/healthz}"
 SYSTEM_UPDATE_STATUS_FILE="${SHARED_ROOT}/state/system_update.status"
@@ -199,14 +218,91 @@ read_active() {
 }
 
 wait_for_version() {
-  local port="$1" expected="$2" elapsed=0 body
+  local port="$1" expected="$2" elapsed=0 body="" reported="<unavailable>" last_body="no response" failure="no_response"
+  local endpoint="http://127.0.0.1:${port}/readyz"
   while ((elapsed < READY_TIMEOUT)); do
-    body=$(curl -fsS --max-time 2 "http://127.0.0.1:${port}/readyz" 2>/dev/null || true)
-    if [[ "$body" == *'"status":"ok"'* && "$body" == *"\"version\":\"${expected}\""* ]]; then return 0; fi
+    # Startup can make the readiness handler slower than its steady-state
+    # response time (notably while database pools and feature packs settle).
+    # Allow an individual request enough time to finish while retaining the
+    # outer retry window for connection-refused and not-ready responses.
+    body=$(curl -fsS --max-time "$READY_REQUEST_TIMEOUT" "$endpoint" 2>/dev/null || true)
+    if [[ -n "$body" ]]; then
+      last_body="$body"
+      failure="bad_release_metadata"
+    fi
+    reported=$(python3 -c 'import json,sys
+try:
+    payload=json.loads(sys.argv[1])
+except (json.JSONDecodeError, TypeError):
+    print("<invalid-or-empty-response>")
+else:
+    print(payload.get("version", "<missing>") if isinstance(payload, dict) else "<invalid-response>")
+' "$body")
+    if [[ "$reported" != "<invalid-or-empty-response>" && "$reported" != "<invalid-response>" && "$reported" != "<missing>" ]]; then
+      failure="stale_version"
+    fi
+    if python3 -c 'import json,sys
+try:
+    payload=json.loads(sys.argv[1])
+except (json.JSONDecodeError, TypeError):
+    raise SystemExit(1)
+if not isinstance(payload, dict):
+    raise SystemExit(1)
+raise SystemExit(not (payload.get("status") == "ok" and payload.get("version") == sys.argv[2]))
+' "$body" "$expected"; then
+      return 0
+    fi
     sleep 1; ((elapsed+=1))
   done
-  echo "Instance on port ${port} did not report expected version ${expected}" >&2
+  echo "Instance version verification failed: cause=${failure} endpoint=${endpoint} expected=${expected} reported=${reported}" >&2
+  echo "last readiness response: ${last_body}" >&2
+  echo "Verification command: curl -fsS --max-time ${READY_REQUEST_TIMEOUT} ${endpoint}" >&2
   return 1
+}
+
+restart_instance_on_release() {
+  local instance="$1" release="$2" port assigned pid process_release attempts=0
+  port=$(instance_port "$instance")
+  assigned=$(readlink -f "$INSTANCE_ROOT/$instance" 2>/dev/null || true)
+  if [[ "$assigned" != "$release" ]]; then
+    echo "Instance restart failed: cause=wrong_instance_target instance=${instance} expected=${release} assigned=${assigned:-<missing>}" >&2
+    return 1
+  fi
+
+  # A plain restart can overlap with orphaned or asynchronously stopping
+  # workers. Stop first and prove that the slot's port is no longer served;
+  # otherwise an old worker can satisfy readiness with a stale revision.
+  if ! systemctl stop "myportal@${instance}.service"; then
+    echo "Instance restart failed: cause=failed_restart phase=stop instance=${instance}" >&2
+    return 1
+  fi
+  if curl -fsS --max-time 2 "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1; then
+    echo "Instance restart failed: cause=stale_listener instance=${instance} port=${port}; an unmanaged process is still serving the slot" >&2
+    return 1
+  fi
+  if ! systemctl start "myportal@${instance}.service"; then
+    echo "Instance restart failed: cause=failed_restart phase=start instance=${instance}" >&2
+    systemctl status --no-pager "myportal@${instance}.service" >&2 || true
+    return 1
+  fi
+  if ! systemctl is-active --quiet "myportal@${instance}.service"; then
+    echo "Instance restart failed: cause=failed_restart phase=inactive_after_start instance=${instance}" >&2
+    systemctl status --no-pager "myportal@${instance}.service" >&2 || true
+    return 1
+  fi
+
+  while ((attempts < 5)); do
+    pid=$(systemctl show --property MainPID --value "myportal@${instance}.service")
+    process_release=$(readlink -f "/proc/${pid}/cwd" 2>/dev/null || true)
+    [[ -n "$pid" && "$pid" != 0 && "$process_release" == "$release" ]] && break
+    sleep 1
+    ((attempts+=1))
+  done
+  if [[ -z "$pid" || "$pid" == 0 || "$process_release" != "$release" ]]; then
+    echo "Instance restart failed: cause=wrong_instance_target instance=${instance} expected=${release} pid=${pid:-<missing>} process_release=${process_release:-<unavailable>}" >&2
+    return 1
+  fi
+  echo "Started ${instance} from ${process_release} (pid=${pid}, port=${port})." >&2
 }
 
 smoke_test() {
@@ -217,6 +313,17 @@ smoke_test() {
   wait_for_version "$port" "$expected"
 }
 
+make_dependency_layer_service_readable() {
+  local layer="$1"
+  [[ -d "$layer" ]] || return 1
+  # The upgrade runs as root under umask 027, while systemd runs the release as
+  # myportal. The release's .venv is a symlink into this shared layer, so
+  # hardening only the release tree does not make its interpreter executable.
+  chmod a+rx "${SHARED_ROOT}/dependency-layers" "$layer"
+  find "$layer" -type d -exec chmod a+rx,a-w {} +
+  find "$layer" -type f -exec chmod a+rX,a-w {} +
+}
+
 install_dependencies() {
   local release="$1" key layer staging start=$SECONDS
   local lock="${release}/requirements.lock"
@@ -225,6 +332,10 @@ install_dependencies() {
   key=$(printf '%s' "$key" | sha256sum | awk '{print $1}')
   layer="${SHARED_ROOT}/dependency-layers/${key}"
   mkdir -p "${SHARED_ROOT}/dependency-layers"
+  # Repair cached layers created by older upgrades before testing or reusing
+  # them. Root being able to execute Python did not prove the service user
+  # could traverse and execute the symlink target.
+  [[ ! -d "$layer" ]] || make_dependency_layer_service_readable "$layer"
   if [[ -x "${layer}/bin/python" && -f "${layer}/.verified" ]] && \
      (cd "$release" && "${layer}/bin/python" -m pip check >/dev/null && "${layer}/bin/python" -c 'import uvicorn'); then
     ln -s "$layer" "${release}/.venv"
@@ -241,12 +352,14 @@ install_dependencies() {
   (cd "$release" && "$staging/bin/python" -m pip check && "$staging/bin/python" -c 'import uvicorn')
   printf '%s\n' "$key" >"$staging/.verified"
   mv "$staging" "$layer"
+  make_dependency_layer_service_readable "$layer"
   ln -s "$layer" "${release}/.venv"
   record_step dependency_layer miss "lock_or_interpreter_${key}" "$((SECONDS-start))"
 }
 
 validate_tray_artifacts() {
-  local revision="$1" source="${TRAY_ARTIFACT_ROOT}/${revision}" start=$SECONDS artifact
+  local revision="$1" source start=$SECONDS artifact
+  source="${TRAY_ARTIFACT_ROOT}/${revision}"
   [[ -f "${source}/SHA256SUMS" ]] || { echo "Tray checksum manifest missing for ${revision}" >&2; return 1; }
   [[ -f "${source}/REVISION" && "$(tr -d '\r\n' <"${source}/REVISION")" == "$revision" ]] || {
     echo "Tray artifacts are stale or do not identify revision ${revision}" >&2; return 1;
@@ -265,7 +378,8 @@ validate_tray_artifacts() {
 }
 
 publish_tray_artifacts() {
-  local revision="$1" destination="${SHARED_ROOT}/published/tray/${revision}"
+  local revision="$1" destination
+  destination="${SHARED_ROOT}/published/tray/${revision}"
   rm -rf "$destination"
   mkdir -p "$destination"
   cp -a "${TRAY_ARTIFACT_ROOT}/${revision}/." "$destination/"
@@ -434,9 +548,28 @@ EOF
 release_runtime_ready() {
   local release="$1"
   [[ -x "${release}/.venv/bin/python" ]] || return 1
-  # The systemd unit launches uvicorn as a module through this interpreter and
-  # deliberately does not depend on a generated console-script shebang.
-  "${release}/.venv/bin/python" -c 'import uvicorn' >/dev/null 2>&1
+  # Validate as the same unprivileged account used by systemd. A root-only
+  # dependency layer passes an ordinary -x/import check but fails ExecStart
+  # with status 126 (permission denied).
+  runuser --user myportal -- "${release}/.venv/bin/python" -c 'import uvicorn' >/dev/null 2>&1
+}
+
+validate_release_metadata() {
+  local revision="$1" release="$2" recorded
+  recorded=$(tr -d '\r\n' <"$release/version.txt" 2>/dev/null || true)
+  if [[ ! "$revision" =~ ^[0-9a-f]{40}$ || "${release##*/}" != "$revision" || "$recorded" != "$revision" ]]; then
+    echo "Release preparation failed: cause=bad_release_metadata release=${release} expected=${revision} recorded=${recorded:-<missing>}" >&2
+    return 1
+  fi
+}
+
+validate_release_metadata() {
+  local revision="$1" release="$2" recorded
+  recorded=$(tr -d '\r\n' <"$release/version.txt" 2>/dev/null || true)
+  if [[ ! "$revision" =~ ^[0-9a-f]{40}$ || "${release##*/}" != "$revision" || "$recorded" != "$revision" ]]; then
+    echo "Release preparation failed: cause=bad_release_metadata release=${release} expected=${revision} recorded=${recorded:-<missing>}" >&2
+    return 1
+  fi
 }
 
 prepare_release() {
@@ -453,6 +586,12 @@ prepare_release() {
     if [[ -f "$ENV_FILE" && "$(readlink "$release/.env" 2>/dev/null || true)" != "$ENV_FILE" ]]; then
       ln -sfn "$ENV_FILE" "$release/.env"
     fi
+    # A release may already exist after an interrupted attempt, and older
+    # preparations retained the repository's timestamp-style version.txt.
+    # Readiness verification compares against the Git revision, so repair the
+    # generated release metadata before restarting either instance.
+    chmod u+w "$release" "$release/version.txt" 2>/dev/null || true
+    printf '%s\n' "$revision" >"$release/version.txt"
     chmod u+w "$release" "${release}/app" "${release}/app/static"
     link_shared_uploads "$release"
     # Older scripts moved a completed virtualenv from a temporary directory,
@@ -470,6 +609,11 @@ prepare_release() {
     # retrying their service startup.
     make_release_service_readable "$release"
     validate_release_uploads "$release"
+    validate_release_metadata "$revision" "$release"
+    if ! release_runtime_ready "$release"; then
+      echo "Release preparation failed: cause=runtime_not_executable_by_service_user release=${release} interpreter=${release}/.venv/bin/python" >&2
+      return 1
+    fi
     return 0
   fi
   rm -rf "$staging"; mkdir -p "$staging"
@@ -495,6 +639,11 @@ prepare_release() {
   fi
   make_release_service_readable "$release"
   validate_release_uploads "$release"
+  validate_release_metadata "$revision" "$release"
+  if ! release_runtime_ready "$release"; then
+    echo "Release preparation failed: cause=runtime_not_executable_by_service_user release=${release} interpreter=${release}/.venv/bin/python" >&2
+    return 1
+  fi
 }
 
 run_release_manage() {
@@ -547,7 +696,7 @@ run_rolling_restart() {
 
   # Only the non-serving slot changes during preparation and validation.
   atomic_link "$release" "$INSTANCE_ROOT/$inactive"
-  systemctl restart "myportal@${inactive}.service"
+  restart_instance_on_release "$inactive" "$release"
   wait_for_version "$(instance_port "$inactive")" "$revision"
   smoke_test "$(instance_port "$inactive")" "$revision"
 
@@ -571,8 +720,8 @@ run_migration_phase() {
   write_upgrade_status migrating "Applying and validating schema changes before cutover."
   if ! run_release_manage "$release" migrate \
     --serving-release "${serving:-none}" --target-release "$target" "${args[@]}"; then
-    write_upgrade_status failed "Database migration failed; release was not activated. Verify DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and DB_NAME in ${ENV_FILE}."
-    echo "Database migration failed; release was not activated. Verify DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and DB_NAME in ${ENV_FILE}." >&2
+    write_upgrade_status failed "Database migration failed; release was not activated. Review the migration error above; if it is a connection error, verify DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and DB_NAME in ${ENV_FILE}."
+    echo "Database migration failed; release was not activated. Review the migration error above; if it is a connection error, verify DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and DB_NAME in ${ENV_FILE}." >&2
     return 1
   fi
 }

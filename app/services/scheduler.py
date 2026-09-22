@@ -41,7 +41,10 @@ from app.services import tray_installer as tray_installer_service
 from app.services import unbill_time_entries as unbill_time_entries_service
 from app.services import value_templates
 from app.services import webhook_monitor
+from app.services import system_update_history
 from app.services.deployment_plan import build_deployment_plan
+from app.services.component_availability import get_component_availability
+from app.services.component_availability import DEPLOYMENT_DISABLED_REASON
 from app.services import xero as xero_service
 from app.services import service_status as service_status_service
 from app.services import ticket_shipment_tracking as shipment_watch_service
@@ -154,7 +157,20 @@ class SchedulerService:
             if job.id and job.id.startswith("scheduled-task-"):
                 job.remove()
         tasks = await scheduled_tasks_repo.list_active_tasks()
+        module_rows = {
+            str(row.get("slug") or ""): row for row in await module_repo.list_modules()
+        }
+        availability = get_component_availability()
+        registered = 0
         for task in tasks:
+            owners = module_capabilities.modules_for_command(str(task.get("command") or ""))
+            # Shared commands remain usable while at least one owner is both
+            # deployment-available and operationally enabled.
+            if owners and not any(
+                availability.module_enabled(module_rows.get(owner, {"slug": owner}))
+                for owner in owners
+            ):
+                continue
             trigger = self._build_trigger(task)
             if not trigger:
                 continue
@@ -167,7 +183,8 @@ class SchedulerService:
                 coalesce=True,
                 max_instances=1,
             )
-        log_info("Scheduler tasks loaded", count=len(tasks))
+            registered += 1
+        log_info("Scheduler tasks loaded", count=registered)
         await self._ensure_monitoring_jobs()
 
     def _track_refresh_task(self, task: asyncio.Task[None]) -> None:
@@ -1003,7 +1020,10 @@ class SchedulerService:
                 elif command == "update_stock_feed":
                     await products_service.update_stock_feed()
                 elif command == "system_update":
-                    output = await self.run_system_update(force_restart=force_restart)
+                    if force_restart:
+                        output = await self.run_system_update(force_restart=True)
+                    else:
+                        output = await self.run_system_update(scheduled=True)
                     if output:
                         details = output
                     if output == _SYSTEM_UPDATE_NOT_AVAILABLE_MESSAGE:
@@ -1522,16 +1542,22 @@ class SchedulerService:
             raise ValueError(f"Task {task_id} not found")
         await self._run_task(task, force_restart=True)
 
-    async def run_system_update(self, *, force_restart: bool = False) -> str | None:
+    async def run_system_update(
+        self, *, force_restart: bool = False, scheduled: bool = False
+    ) -> str | None:
         """Public helper to execute the system update script.
 
         This wraps the private implementation so that other parts of the
         application can reuse the same update mechanism used by scheduled
         tasks.
         """
-        return await self._run_system_update(force_restart=force_restart)
+        return await self._run_system_update(
+            force_restart=force_restart, scheduled=scheduled
+        )
 
-    async def _run_system_update(self, *, force_restart: bool = False) -> str | None:
+    async def _run_system_update(
+        self, *, force_restart: bool = False, scheduled: bool = False
+    ) -> str | None:
         async with _SYSTEM_UPDATE_LOCK:
             local_head = await self._get_git_ref("HEAD")
             remote_head = await self._get_remote_main_ref()
@@ -1550,8 +1576,12 @@ class SchedulerService:
                 )
                 return _SYSTEM_UPDATE_NOT_AVAILABLE_MESSAGE
 
-            requested_mode = self._resolve_requested_upgrade_mode(
-                force_restart=force_restart
+            # Scheduled updates always use the immutable blue/green rolling
+            # coordinator. Manual callers retain their existing mode semantics.
+            requested_mode = (
+                "rolling"
+                if scheduled
+                else self._resolve_requested_upgrade_mode(force_restart=force_restart)
             )
             changed_files: list[str] | None = None
             if not force_restart:
@@ -1567,7 +1597,7 @@ class SchedulerService:
             # This avoids dropping connections for routine pack-only
             # updates.  Any failure or ambiguity falls through to the
             # full-restart flag-file path below.
-            if not force_restart:
+            if not force_restart and not scheduled:
                 hot_reload_message = await self._try_feature_pack_hot_reload(
                     local_head=local_head,
                     remote_head=remote_head,
@@ -1577,6 +1607,11 @@ class SchedulerService:
 
             self._ensure_update_flag_directory()
             timestamp = datetime.now(timezone.utc).isoformat()
+            history = system_update_history.create_pending(
+                requested_at=timestamp,
+                target_revision=remote_head,
+                source="scheduled" if scheduled else "manual",
+            )
             requested_reason = (
                 "manual_restart_requested"
                 if force_restart
@@ -1587,6 +1622,7 @@ class SchedulerService:
             ).to_dict()
             flag_payload = (
                 f"requested_at={timestamp}\n"
+                f"update_id={history['id']}\n"
                 f"requested_from_ui={str(force_restart).lower()}\n"
                 f"requested_mode={requested_mode}\n"
                 f"requested_reason={requested_reason}\n"
@@ -1654,7 +1690,16 @@ class SchedulerService:
         loaded_versions: dict[str, str] = {
             state["slug"]: state["version"] for state in registry.list()
         }
+        from app.services.component_availability import get_component_availability
+
         for slug in slugs:
+            if not get_component_availability().feature_pack_available(slug):
+                log_info(
+                    "Feature pack hot-reload skipped",
+                    reason="pack_disabled_by_deployment",
+                    slug=slug,
+                )
+                return None
             if slug not in loaded_versions:
                 log_info(
                     "Feature pack hot-reload skipped",

@@ -45,6 +45,10 @@ from app.services import unifi_talk as unifi_talk_service
 from app.services.realtime import RefreshNotifier, refresh_notifier
 from app.services import tickets as tickets_service
 from app.core.module_capabilities import COMMANDS_BY_MODULE, MODULE_CAPABILITIES
+from app.services.component_availability import (
+    AvailabilityConfigurationError,
+    get_component_availability,
+)
 
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 
@@ -2343,11 +2347,18 @@ async def ensure_default_modules() -> None:
         )
         return
     existing_by_slug = {module["slug"]: module for module in existing}
+    availability = get_component_availability()
     for default in DEFAULT_MODULES:
         current = existing_by_slug.get(default["slug"])
         # Use the enabled value from DEFAULT_MODULES if specified, otherwise default to False
         default_enabled = default.get("enabled", False)
         if not current:
+            # Deployment exclusions are catalogue exclusions, not persisted
+            # configuration.  Do not create a row which misleadingly appears
+            # installable; removing the exclusion on a later start creates it
+            # with the normal defaults.
+            if not availability.module_available(default["slug"]):
+                continue
             await module_repo.upsert_module(
                 slug=default["slug"],
                 name=default["name"],
@@ -2372,11 +2383,16 @@ async def ensure_default_modules() -> None:
 
 async def list_modules() -> list[dict[str, Any]]:
     modules = await module_repo.list_modules()
-    return [
-        _redact_module_settings(_resolve_module_for_runtime(module))
+    availability = get_component_availability()
+    result = [
+        _redact_module_settings(
+            {**_resolve_module_for_runtime(module), "enabled": availability.module_enabled(module)}
+        )
         for module in modules
         if not _is_always_on_ticket_action_module(str(module.get("slug") or ""))
+        and availability.module_available(str(module.get("slug") or ""))
     ]
+    return result
 
 
 async def get_module_settings(slug: str) -> dict[str, Any] | None:
@@ -2688,18 +2704,19 @@ async def list_trigger_action_modules() -> list[dict[str, Any]]:
     in the trigger actions menu.
     """
     modules = await module_repo.list_modules()
+    availability = get_component_availability()
     actionable_by_slug: dict[str, dict[str, Any]] = {}
     for module in modules:
         module_slug = _normalise_slug(str(module.get("slug") or ""))
-        if module_slug in _NON_TRIGGERABLE_MODULE_SLUGS or not module.get(
-            "enabled", False
-        ):
+        if module_slug in _NON_TRIGGERABLE_MODULE_SLUGS or not availability.module_enabled(module):
             continue
         redacted = _redact_module_settings(module)
         redacted["payload_schema"] = get_action_payload_schema(module_slug)
         actionable_by_slug[module_slug] = redacted
     for module in _ALWAYS_ON_TICKET_ACTION_MODULES:
         module_slug = module["slug"]
+        if not availability.module_available(module_slug):
+            continue
         internal_module = dict(module)
         internal_module["payload_schema"] = get_action_payload_schema(module_slug)
         actionable_by_slug[module_slug] = internal_module
@@ -2710,10 +2727,13 @@ async def list_trigger_action_modules() -> list[dict[str, Any]]:
 
 
 async def get_module(slug: str, *, redact: bool = True) -> dict[str, Any] | None:
+    if not get_component_availability().module_available(slug):
+        return None
     module = await module_repo.get_module(slug)
     if not module:
         return None
     resolved = _resolve_module_for_runtime(module)
+    resolved["enabled"] = get_component_availability().module_enabled(resolved)
     return _redact_module_settings(resolved) if redact else resolved
 
 
@@ -2724,6 +2744,10 @@ async def update_module(
     settings: Mapping[str, Any] | None = None,
     notifier: RefreshNotifier | None = None,
 ) -> dict[str, Any] | None:
+    if enabled is True and not get_component_availability().module_available(slug):
+        raise AvailabilityConfigurationError(
+            f"Module '{slug}' is disabled by deployment configuration and cannot be enabled"
+        )
     capabilities = MODULE_CAPABILITIES.get(slug)
     if capabilities and capabilities.always_on:
         # Internal action modules are catalogue entries, not kill switches.
@@ -2743,7 +2767,11 @@ async def update_module(
             await scheduled_tasks_repo.restore_tasks_disabled_by_module(slug)
         resolved_notifier = notifier or refresh_notifier
         await resolved_notifier.broadcast_refresh(reason=f"modules:updated:{slug}")
-    return _redact_module_settings(updated) if updated else None
+    if not updated:
+        return None
+    resolved = _resolve_module_for_runtime(updated)
+    resolved["enabled"] = get_component_availability().module_enabled(resolved)
+    return _redact_module_settings(resolved)
 
 
 def _normalise_logged_username(value: Any) -> str:
@@ -2859,6 +2887,13 @@ async def trigger_module(
     background: bool = True,
     on_complete: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
+    # Check the deployment policy before looking up internal/always-on actions
+    # or persistent state.  This guarantees no handler code is reached and
+    # gives every direct dispatcher the same safe result.
+    if not get_component_availability().module_available(slug):
+        from app.services.component_availability import deployment_disabled_result
+
+        return deployment_disabled_result(slug)
     module = _get_always_on_ticket_action_module(slug)
     if not module:
         module = await module_repo.get_module(slug)

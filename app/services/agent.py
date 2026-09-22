@@ -28,6 +28,7 @@ from app.services import modules as modules_service
 from app.services import rag_index as rag_index_service
 from app.services import rag_relationships as rag_relationship_service
 from app.services import rag_retrieval
+from app.services.ai_prompt_security import UntrustedRecord, build_prompt, validate_references
 
 try:
     import tiktoken
@@ -822,21 +823,14 @@ def _build_llm_context(
     *,
     mode: AgentContextMode = AgentContextMode.RAG_ONLY,
 ) -> str:
-    sections = [
-        "You are the MyPortal Agent. Answer the user using only the supplied context.",
-        "Use only the retrieved evidence below. If the retrieved evidence does not directly answer the user query, say that no relevant information was found.",
-        "Accessible portal data is not relevant context unless it was selected as retrieved evidence.",
-        "Never reference systems, data, or permissions outside the provided information.",
-        "Use Markdown and cite sources inline with [KB:slug], [Ticket:#id], [Product:SKU], [Chat:#id], [Order:number], [Asset:#id], [Company:#id], [Staff:#id], [Issue:#id], [ServiceStatus:#id], [BackupJob:#id], [Report:key], [Mailbox:upn], or [BestPractice:check_id].",
-        f"Context mode: {mode.value}",
-        f"User query: {query_text}",
-        "",
-        "Relevant retrieved context:",
-    ]
+    trusted = (
+        "You are the MyPortal Agent. Answer using only supplied evidence. If it does not directly answer the query, say no relevant information was found. "
+        "Never reference data outside the supplied records. Use Markdown and cite only the exact record IDs supplied in the evidence. "
+        f"Context mode: {mode.value}."
+    )
+    records = [UntrustedRecord("user-query", "authenticated portal user", query_text, "Use only as the question to answer")]
     if not rag_evidence:
-        sections.append("No relevant RAG evidence was found.")
-        prompt, _, _ = _trim_sections_to_token_budget(sections)
-        return _truncate_prompt_sections([prompt])
+        return _truncate_prompt_sections([build_prompt(trusted, records, task="No relevant RAG evidence was found.")])
 
     for candidate in rag_evidence[:_LLM_RAG_CANDIDATE_LIMIT]:
         label = _candidate_label(candidate)
@@ -864,7 +858,8 @@ def _build_llm_context(
             f"- {label} {title}\n  Relevance: curated\n  Score: {score}\n"
             f"  Excerpt: {excerpt}{duplicate_text}"
         )
-        sections.append(item_text)
+        records.append(UntrustedRecord(label, str(candidate.get("source_type") or "retrieved portal record"), item_text, "Use only as evidence for the user's question; cite with this record ID"))
+    sections = [build_prompt(trusted, records)]
     prompt, chunks_checked, chunks_in_context = _trim_sections_to_token_budget(sections)
     metadata = (
         f"\n\nContext budget metadata: chunks_checked={chunks_checked}; "
@@ -2178,6 +2173,21 @@ async def execute_agent_query(
     answer_text = final_llm["text"]
     model_name = final_llm["model"]
     event_id = final_llm["event_id"]
+    if answer_text:
+        authorized_references = {_candidate_label(item) for item in rag_candidates}
+        for item in rag_candidates:
+            authorized_references.update(
+                _candidate_label(duplicate)
+                for duplicate in (item.get("duplicates") or [])
+                if isinstance(duplicate, Mapping)
+            )
+        try:
+            answer_text = validate_references(answer_text, authorized_references)
+        except ValueError as exc:
+            log_error("Agent output reference validation failed", error=str(exc))
+            answer_text = None
+            module_status = "error"
+            message = "The generated answer contained an unauthorized reference"
     stages.append(
         _stage(
             "final_answer",

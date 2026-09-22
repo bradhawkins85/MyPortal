@@ -7,6 +7,19 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = (ROOT / "scripts/upgrade.sh").read_text()
 
 
+def test_failed_upgrade_clears_pending_update_flag():
+    cleanup = SCRIPT[
+        SCRIPT.index("clear_update_flag_on_failure() {") : SCRIPT.index(
+            "\nresolve_environment_file()"
+        )
+    ]
+
+    assert 'SYSTEM_UPDATE_FLAG_FILE="${PROJECT_ROOT}/var/state/system_update.flag"' in SCRIPT
+    assert "if ((status != 0))" in cleanup
+    assert 'rm -f -- "$SYSTEM_UPDATE_FLAG_FILE"' in cleanup
+    assert "trap clear_update_flag_on_failure EXIT" in cleanup
+
+
 def _resolve_environment_file(
     tmp_path: Path, system_env: Path, **environment: str
 ) -> str:
@@ -220,6 +233,20 @@ def test_retry_repairs_release_permissions_before_returning():
     assert 'make_release_service_readable "$release"' in retry_branch
 
 
+def test_retry_repairs_the_release_version_marker():
+    prepare = SCRIPT[SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")]
+    existing = prepare[: prepare.index("return 0")]
+
+    assert 'printf \'%s\\n\' "$revision" >"$release/version.txt"' in existing
+
+
+def test_readiness_timeout_reports_the_last_response():
+    wait = SCRIPT[SCRIPT.index("wait_for_version() {") : SCRIPT.index("\nsmoke_test()")]
+
+    assert 'last_body="no response"' in wait
+    assert 'last readiness response: ${last_body}' in wait
+
+
 def test_virtualenv_is_created_only_after_release_reaches_final_path():
     prepare = SCRIPT[
         SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")
@@ -245,6 +272,44 @@ def test_preparation_uses_verified_dependency_cache_and_reports_decision():
     assert "pip check" in install
     assert "record_step dependency_layer hit" in install
     assert "record_step dependency_layer miss" in install
+
+
+def test_dependency_layer_is_traversable_and_executable_by_service_user(tmp_path):
+    function = SCRIPT[
+        SCRIPT.index("make_dependency_layer_service_readable() {") : SCRIPT.index(
+            "\ninstall_dependencies()"
+        )
+    ]
+    shared = tmp_path / "shared"
+    layer = shared / "dependency-layers" / "fixture"
+    python = layer / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\nexit 0\n")
+    shared.chmod(0o755)
+    (shared / "dependency-layers").chmod(0o700)
+    layer.chmod(0o700)
+    python.parent.chmod(0o700)
+    python.chmod(0o700)
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "set -Eeuo pipefail\n"
+            + function
+            + '\nmake_dependency_layer_service_readable "$LAYER"',
+        ],
+        text=True,
+        capture_output=True,
+        env={**os.environ, "SHARED_ROOT": str(shared), "LAYER": str(layer)},
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (shared / "dependency-layers").stat().st_mode & 0o005 == 0o005
+    assert layer.stat().st_mode & 0o005 == 0o005
+    assert python.parent.stat().st_mode & 0o005 == 0o005
+    assert python.stat().st_mode & 0o005 == 0o005
 
 
 def test_dependency_cache_hit_and_invalid_layer_fallback(tmp_path):
@@ -304,6 +369,44 @@ def test_tray_artifacts_are_verified_before_release_preparation():
     assert 'publish_tray_artifacts "$TARGET_REVISION"' in SCRIPT
 
 
+def test_tray_artifact_functions_initialize_revision_before_derived_paths(tmp_path):
+    functions = SCRIPT[
+        SCRIPT.index("record_step() {") : SCRIPT.index("\ninstall_blue_green_service_unit()")
+    ]
+    artifact_root = tmp_path / "artifacts"
+    shared_root = tmp_path / "shared"
+    revision = "fixture-revision"
+    source = artifact_root / revision
+    source.mkdir(parents=True)
+    (source / "REVISION").write_text(revision + "\n")
+    (source / "myportal-tray.msi").write_text("msi fixture\n")
+    (source / "myportal-tray.pkg").write_text("pkg fixture\n")
+    subprocess.run(
+        ["sha256sum", "REVISION", "myportal-tray.msi", "myportal-tray.pkg"],
+        cwd=source,
+        text=True,
+        stdout=(source / "SHA256SUMS").open("w"),
+        check=True,
+    )
+    command = f"""
+set -Eeuo pipefail
+TRAY_ARTIFACT_ROOT={artifact_root!s}
+SHARED_ROOT={shared_root!s}
+STEP_REPORT=''
+{functions}
+validate_tray_artifacts {revision}
+publish_tray_artifacts {revision}
+test "$(readlink "$SHARED_ROOT/published/tray/current")" = "$SHARED_ROOT/published/tray/{revision}"
+"""
+
+    result = subprocess.run(
+        ["bash", "-c", command], text=True, capture_output=True, check=False
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (shared_root / "published" / "tray" / revision / "SHA256SUMS").is_file()
+
+
 def test_restart_does_not_install_or_mutate_dependencies():
     restart = (ROOT / "scripts/restart.sh").read_text()
 
@@ -341,11 +444,27 @@ def test_runtime_validation_uses_release_python_module_import():
     assert ".venv/bin/uvicorn" not in function
 
 
+def test_preparation_rejects_runtime_the_service_user_cannot_execute():
+    prepare = SCRIPT[SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")]
+
+    assert prepare.count('if ! release_runtime_ready "$release"; then') == 3
+    assert prepare.count("cause=runtime_not_executable_by_service_user") == 2
+
+
 def test_systemd_launches_uvicorn_as_module_without_console_script_shebang():
     unit = (ROOT / "deploy/systemd/myportal@.service").read_text()
 
     assert '"$$release/.venv/bin/python" -m uvicorn' in unit
     assert '"$$release/.venv/bin/uvicorn"' not in unit
+
+
+def test_systemd_uses_the_ports_checked_by_blue_green_coordinator():
+    unit = (ROOT / "deploy/systemd/myportal@.service").read_text()
+
+    assert "blue) port=8001" in unit
+    assert "green) port=8002" in unit
+    assert "MYPORTAL_INSTANCE_PORT" not in unit
+    assert '--port "$$port"' in unit
 
 
 def test_systemd_does_not_wait_for_unsupported_uvicorn_notifications():
@@ -582,6 +701,92 @@ def test_cutover_checks_expected_version_before_nginx_switch():
     assert "nginx -t" in SCRIPT
 
 
+def _run_version_check(tmp_path: Path, response: str, expected: str = "target-revision"):
+    function = SCRIPT[SCRIPT.index("wait_for_version() {") : SCRIPT.index("\nsmoke_test()")]
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    curl = fake_bin / "curl"
+    curl.write_text("#!/bin/sh\nprintf '%s' \"$READY_RESPONSE\"\n")
+    curl.chmod(0o755)
+    return subprocess.run(
+        ["bash", "-c", "set -Eeuo pipefail\n" + function + '\nwait_for_version 8001 "$EXPECTED"'],
+        text=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "READY_RESPONSE": response,
+            "EXPECTED": expected,
+            "READY_TIMEOUT": "1",
+            "READY_REQUEST_TIMEOUT": "10",
+        },
+        check=False,
+    )
+
+
+def test_version_check_parses_readiness_json_instead_of_matching_format(tmp_path):
+    result = _run_version_check(
+        tmp_path,
+        '{ "checks": {}, "version": "target-revision", "status": "ok" }',
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_version_check_failure_reports_endpoint_expected_and_reported(tmp_path):
+    result = _run_version_check(
+        tmp_path,
+        '{"status":"ok","version":"repository-timestamp"}',
+    )
+
+    assert result.returncode != 0
+    assert "cause=stale_version" in result.stderr
+    assert "endpoint=http://127.0.0.1:8001/readyz" in result.stderr
+    assert "expected=target-revision" in result.stderr
+    assert "reported=repository-timestamp" in result.stderr
+    assert "curl -fsS --max-time 10 http://127.0.0.1:8001/readyz" in result.stderr
+
+
+def test_version_check_distinguishes_no_response_from_stale_version(tmp_path):
+    result = _run_version_check(tmp_path, "")
+
+    assert result.returncode != 0
+    assert "cause=no_response" in result.stderr
+    assert "reported=<invalid-or-empty-response>" in result.stderr
+
+
+def test_inactive_slot_is_stopped_and_verified_against_assigned_release():
+    restart = SCRIPT[
+        SCRIPT.index("restart_instance_on_release() {") : SCRIPT.index("\nsmoke_test()")
+    ]
+
+    assert 'readlink -f "$INSTANCE_ROOT/$instance"' in restart
+    assert 'cause=wrong_instance_target' in restart
+    stop = restart.index('systemctl stop "myportal@${instance}.service"')
+    stale_listener = restart.index("cause=stale_listener", stop)
+    start = restart.index('systemctl start "myportal@${instance}.service"', stale_listener)
+    process_release = restart.index('readlink -f "/proc/${pid}/cwd"', start)
+    assert stop < stale_listener < start < process_release
+
+    rolling = SCRIPT[SCRIPT.index("run_rolling_restart() {") : SCRIPT.index("\nrun_migration_phase()")]
+    link = rolling.index('atomic_link "$release" "$INSTANCE_ROOT/$inactive"')
+    restart_call = rolling.index('restart_instance_on_release "$inactive" "$release"')
+    readiness = rolling.index('wait_for_version "$(instance_port "$inactive")" "$revision"')
+    assert link < restart_call < readiness
+
+
+def test_version_check_allows_slow_startup_readiness_responses():
+    assert 'READY_REQUEST_TIMEOUT="${MYPORTAL_READY_REQUEST_TIMEOUT:-10}"' in SCRIPT
+    assert 'curl -fsS --max-time "$READY_REQUEST_TIMEOUT" "$endpoint"' in SCRIPT
+
+
+def test_existing_release_version_metadata_is_repaired_before_restart():
+    prepare = SCRIPT[SCRIPT.index("prepare_release() {") : SCRIPT.index("\nrun_release_manage()")]
+    existing = prepare[: prepare.index("return 0")]
+
+    assert 'printf \'%s\\n\' "$revision" >"$release/version.txt"' in existing
+
+
 def test_upgrade_installs_instance_unit_before_restarting_a_slot():
     install_unit = SCRIPT.index('install_blue_green_service_unit "$RELEASE_DIR"')
     rolling_restart = SCRIPT.index('run_rolling_restart "$TARGET_REVISION"')
@@ -655,6 +860,7 @@ def test_failed_migration_is_reported_before_release_activation():
     cutover = SCRIPT.index('run_rolling_restart "$TARGET_REVISION"')
     assert migration < cutover
     assert "Database migration failed; release was not activated." in SCRIPT
+    assert "Review the migration error above" in SCRIPT
 
 
 def test_drain_stops_new_work_before_waiting_for_inflight_requests():

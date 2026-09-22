@@ -401,14 +401,18 @@
 
         try {
           setButtonProcessing(button, true);
-          updateTicketAiStatus(button, 'Requesting AI regeneration. You can continue working while we update the summary.', false);
-          await requestJson(`/admin/tickets/${ticketId}/ai/reprocess`, {
+          updateTicketAiStatus(
+            button,
+            button.dataset.requestMessage || 'Requesting AI regeneration. You can continue working while we update the summary.',
+            false,
+          );
+          const response = await requestJson(`/admin/tickets/${ticketId}/ai/reprocess`, {
             method: 'POST',
             body: JSON.stringify({}),
           });
           updateTicketAiStatus(
             button,
-            'AI summary and tags will be regenerated shortly. Refresh the ticket in a moment to review the updates.',
+            response.message || 'AI processing was queued. Refresh the ticket in a moment to review the updates.',
             false,
           );
         } catch (error) {

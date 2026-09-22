@@ -1,0 +1,7 @@
+{
+  "guid": "f0bcf4c5-cd9e-4fe7-a13d-5358c5d880ee",
+  "occurred_at": "2026-09-22T00:00:00Z",
+  "change_type": "fix",
+  "summary": "Enforce deployment-disabled modules across catalogue synchronization, dispatch, capabilities, and scheduled execution.",
+  "content_hash": ""
+}

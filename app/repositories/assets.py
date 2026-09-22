@@ -6,6 +6,76 @@ from typing import Any
 from app.core.database import db
 
 
+def _normalise_username(value: Any) -> str:
+    username = str(value or "").strip().casefold()
+    if "\\" in username:
+        username = username.rsplit("\\", 1)[-1]
+    if "@" in username:
+        username = username.split("@", 1)[0]
+    return username
+
+
+async def list_assets_for_ticket_requester(ticket_id: int) -> list[dict[str, Any]]:
+    """Return company assets previously linked to, or last used by, a requester."""
+    requester = await db.fetch_one(
+        """
+        SELECT t.company_id, t.requester_id, t.requester_staff_id,
+               COALESCE(s.email, u.email) AS email,
+               COALESCE(s.first_name, u.first_name) AS first_name,
+               COALESCE(s.last_name, u.last_name) AS last_name
+        FROM tickets t
+        LEFT JOIN users u ON u.id = t.requester_id
+        LEFT JOIN staff s ON s.id = t.requester_staff_id
+        WHERE t.id = %s
+        """,
+        (ticket_id,),
+    )
+    if not requester or not requester.get("company_id"):
+        return []
+
+    linked_rows = await db.fetch_all(
+        """
+        SELECT DISTINCT ta.asset_id
+        FROM ticket_assets ta
+        INNER JOIN tickets other_ticket ON other_ticket.id = ta.ticket_id
+        WHERE other_ticket.company_id = %s
+          AND ((%s IS NOT NULL AND other_ticket.requester_id = %s)
+            OR (%s IS NOT NULL AND other_ticket.requester_staff_id = %s))
+        """,
+        (
+            requester["company_id"], requester.get("requester_id"), requester.get("requester_id"),
+            requester.get("requester_staff_id"), requester.get("requester_staff_id"),
+        ),
+    )
+    linked_ids = {int(row["asset_id"]) for row in (linked_rows or [])}
+    candidates = {
+        _normalise_username(value)
+        for value in (
+            str(requester.get("email") or "").split("@", 1)[0],
+            ".".join(filter(None, (requester.get("first_name"), requester.get("last_name")))),
+            requester.get("first_name"),
+        )
+        if _normalise_username(value)
+    }
+
+    matches = []
+    for asset in await list_company_assets(int(requester["company_id"])):
+        asset_id = int(asset["id"])
+        last_user_match = _normalise_username(asset.get("last_user")) in candidates
+        if asset_id in linked_ids or last_user_match:
+            record = dict(asset)
+            record["match_reasons"] = [
+                reason
+                for matched, reason in (
+                    (asset_id in linked_ids, "Previously linked to requester"),
+                    (last_user_match, "Last logged-in user"),
+                )
+                if matched
+            ]
+            matches.append(record)
+    return matches
+
+
 async def list_company_assets(company_id: int) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """

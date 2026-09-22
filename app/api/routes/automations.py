@@ -14,8 +14,29 @@ from app.schemas.automations import (
 )
 from app.services import audit as audit_service
 from app.services import automations as automation_service
+from app.services.component_availability import get_component_availability
 
 router = APIRouter(prefix="/api/automations", tags=["Automations"])
+
+
+def _referenced_action_modules(data: dict) -> set[str]:
+    modules = {str(data["action_module"])} if data.get("action_module") else set()
+    payload = data.get("action_payload")
+    if isinstance(payload, dict) and isinstance(payload.get("actions"), list):
+        modules.update(str(action.get("module")) for action in payload["actions"]
+                       if isinstance(action, dict) and action.get("module"))
+    return modules
+
+
+def _reject_unavailable_action_modules(data: dict) -> None:
+    unavailable = sorted(slug for slug in _referenced_action_modules(data)
+                         if not get_component_availability().module_available(slug))
+    if unavailable:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Automation references module(s) unavailable in this deployment: "
+            + ", ".join(unavailable),
+        )
 
 
 @router.get("/", response_model=list[AutomationResponse])
@@ -42,6 +63,7 @@ async def create_automation(
     current_user: dict = Depends(require_super_admin),
 ) -> AutomationResponse:
     data = payload.model_dump()
+    _reject_unavailable_action_modules(data)
     next_run = None
     if data.get("status") == "active":
         next_run = automation_service.calculate_next_run(data)
@@ -96,6 +118,7 @@ async def update_automation(
     if not existing:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Automation not found")
     data = payload.model_dump(exclude_unset=True)
+    _reject_unavailable_action_modules(data)
     if data:
         await automation_repo.update_automation(automation_id, **data)
     refreshed = await automation_service.refresh_schedule(automation_id)
@@ -211,4 +234,3 @@ async def execute_automation_now(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return AutomationExecutionResult(**result)
-

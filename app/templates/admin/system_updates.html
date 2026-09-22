@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block header_title %}<span class="header__title-text">System update history</span>{% endblock %}
+{% block header_actions %}<a class="button button--ghost" href="/admin/scheduled-tasks">Scheduled tasks</a>{% endblock %}
+{% block content %}
+<div class="management management--single"><section class="management__content">
+  <header class="management__header"><div><h1 class="management__title">System updates</h1><p class="management__subtitle">Rolling blue/green deployments and sanitized coordinator results. Times display in your local timezone.</p></div>
+    <label class="form-field"><span class="form-label">Filter updates</span><input class="form-input" type="search" data-table-filter="system-updates-table" placeholder="Status, revision, source…"></label>
+  </header>
+  <div class="card card--panel"><div class="table-wrapper"><table class="table" id="system-updates-table" data-table data-table-id="system-updates">
+    <thead><tr><th data-sort="date">Started</th><th data-sort="string">Status</th><th data-sort="string">Source</th><th data-sort="string">Mode</th><th data-sort="string">Target revision</th><th data-sort="date">Completed</th><th>Result</th></tr></thead>
+    <tbody>{% for update in updates %}<tr>
+      <td data-label="Started" data-value="{{ update.started_at }}"><span data-utc="{{ update.started_at }}"></span></td>
+      <td data-label="Status"><span class="tag {{ 'tag--success' if update.status == 'succeeded' else ('tag--danger' if update.status == 'failed' else 'tag--warning') }}">{{ update.status }}</span></td>
+      <td data-label="Source">{{ update.source }}</td><td data-label="Mode">{{ update.mode }}</td>
+      <td data-label="Target revision"><code>{{ update.target_revision[:12] }}</code></td>
+      <td data-label="Completed" data-value="{{ update.completed_at or '' }}">{% if update.completed_at %}<span data-utc="{{ update.completed_at }}"></span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+      <td data-label="Result"><a class="button button--ghost" href="/admin/system-updates/{{ update.id }}">Inspect</a></td>
+    </tr>{% else %}<tr><td colspan="7" class="table__empty">No system updates have been recorded yet.</td></tr>{% endfor %}</tbody>
+  </table></div></div>
+</section></div>
+{% endblock %}

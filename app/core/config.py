@@ -18,6 +18,7 @@ from pydantic import (
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.features import discover_builtin_feature_pack_slugs
+from app.services.component_availability import parse_slug_list
 
 # Placeholder values that must be replaced before running in production. These
 # match the defaults distributed in ``.env.example`` and other template files.
@@ -81,6 +82,7 @@ class Settings(BaseSettings):
 
     app_name: str = "MyPortal"
     environment: str = "development"
+    app_instance_id: str = Field(default="", validation_alias="APP_INSTANCE_ID")
     secret_key: str = Field(
         validation_alias=AliasChoices("SESSION_SECRET", "SECRET_KEY")
     )
@@ -245,12 +247,43 @@ class Settings(BaseSettings):
             "merged with the built-in set and cannot disable bundled packs."
         ),
     )
+    disabled_feature_packs: str = Field(
+        default="", validation_alias="DISABLED_FEATURE_PACKS"
+    )
+    disabled_modules: str = Field(default="", validation_alias="DISABLED_MODULES")
+
+    @field_validator("disabled_feature_packs", "disabled_modules", mode="before")
+    @classmethod
+    def normalise_disabled_components(cls, value: Any) -> str:
+        return ",".join(parse_slug_list(value))
+
+    @field_validator("disabled_feature_packs")
+    @classmethod
+    def validate_disabled_feature_packs(cls, value: str) -> str:
+        unknown = sorted(set(parse_slug_list(value)) - set(_DEFAULT_FEATURE_PACK_SLUGS))
+        if unknown:
+            raise ValueError(
+                "DISABLED_FEATURE_PACKS contains unknown slug(s): " + ", ".join(unknown)
+            )
+        return value
 
     @field_validator("feature_packs", mode="before")
     @classmethod
     def ensure_builtin_feature_packs_present(cls, value: Any) -> str:
         """Merge legacy FEATURE_PACKS values with bundled feature packs."""
         return _normalize_feature_packs(value)
+
+    @model_validator(mode="after")
+    def exclude_disabled_feature_packs(self) -> "Settings":
+        """Keep deployment-disabled packs out of the effective startup manifest."""
+
+        disabled = set(parse_slug_list(self.disabled_feature_packs))
+        self.feature_packs = ",".join(
+            slug
+            for slug in parse_slug_list(self.feature_packs)
+            if slug not in disabled
+        )
+        return self
 
     @field_validator("outbound_audit_bcc", mode="before")
     @classmethod

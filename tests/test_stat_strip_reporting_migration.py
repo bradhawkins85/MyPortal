@@ -1,10 +1,12 @@
 """Regression coverage for stat-strip reporting catalogue entries."""
 
-from pathlib import Path
+import hashlib
 import re
+from pathlib import Path
 
 
 MIGRATION = Path("migrations/381_stat_strip_reporting_queries.sql")
+M365_FIX_MIGRATION = Path("migrations/383_fix_m365_best_practices_stat_strip.sql")
 
 # One reporting entry may back identical summary/detail or admin/dashboard strips.
 # Keeping this map beside the migration makes additions to the UI inventory visible
@@ -65,6 +67,14 @@ def test_every_stat_strip_template_has_a_catalogue_mapping() -> None:
     assert actual == set(TEMPLATE_REPORTS)
 
 
+def test_applied_stat_strip_catalogue_migration_remains_immutable() -> None:
+    # Migration 381 has shipped and its checksum is stored by deployed databases.
+    # Corrections must be made in a new migration (such as migration 383).
+    assert hashlib.sha256(MIGRATION.read_bytes()).hexdigest() == (
+        "2a23ffee84344a782b728342a1a752dd15e06950a12e2f958833d586d18a4bd5"
+    )
+
+
 def test_stat_strip_catalogue_has_every_mapping_once() -> None:
     sql = MIGRATION.read_text()
     slugs = _catalogue_slugs(sql)
@@ -77,3 +87,20 @@ def test_stat_strip_catalogue_has_every_mapping_once() -> None:
     assert set(slugs) == expected
     assert sql.count("{{current.company}}") >= 20
     assert "INSERT IGNORE INTO reporting_queries" in sql
+
+
+def test_m365_best_practices_strip_uses_all_visible_current_results() -> None:
+    sql = M365_FIX_MIGRATION.read_text()
+
+    assert sql.startswith(
+        "-- phase: expand\n"
+        "-- compatible-from: *\n"
+        "-- compatible-to: *\n"
+        "-- maintenance: false\n"
+    )
+    assert "run_at = (SELECT MAX(run_at)" not in sql
+    assert "LEFT JOIN m365_best_practice_settings" in sql
+    assert "(s.enabled = 1 OR s.check_id IS NULL)" in sql
+    assert "LEFT JOIN m365_best_practice_company_exclusions" in sql
+    assert "e.check_id IS NULL" in sql
+    assert "WHERE slug = 'stat-strip-m365-best-practices-live'" in sql

@@ -1,0 +1,7 @@
+{
+  "guid": "660d4bfc-ee2a-4922-9a77-1fee2aeda521",
+  "occurred_at": "2026-09-22T00:00Z",
+  "change_type": "Fix",
+  "summary": "Restore the shipped stat-strip migration checksum so upgrades can apply the follow-up M365 reporting fix.",
+  "content_hash": "5c9bfb431b531da1aff0369b762982eeec1926e30e0d7c667fc9016a561db613"
+}

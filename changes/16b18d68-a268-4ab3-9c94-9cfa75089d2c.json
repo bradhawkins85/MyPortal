@@ -1,0 +1,7 @@
+{
+  "guid": "16b18d68-a268-4ab3-9c94-9cfa75089d2c",
+  "occurred_at": "2026-09-21T00:00:00Z",
+  "change_type": "fix",
+  "summary": "Clear the pending system update flag when an upgrade aborts so mail imports can resume.",
+  "content_hash": "clear-pending-update-flag-after-failed-upgrade"
+}

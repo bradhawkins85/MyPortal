@@ -196,6 +196,8 @@ select_python() {
 
 PYTHON_BIN=$(select_python)
 
+ensure_env_default "$PYTHON_BIN" "DISABLED_FEATURE_PACKS" ""
+ensure_env_default "$PYTHON_BIN" "DISABLED_MODULES" ""
 ensure_env_default "$PYTHON_BIN" "ENABLE_AUTO_REFRESH" "false"
 
 if [[ -z "$PYTHON_BIN" ]]; then

@@ -14,6 +14,7 @@ from app.core.logging import log_error
 from app.repositories import knowledge_base as kb_repo
 from app.services import company_access
 from app.services import modules as modules_service
+from app.services.ai_prompt_security import UntrustedRecord, build_prompt
 from app.services.tagging import (
     filter_helpful_texts,
     get_all_excluded_tags,
@@ -177,16 +178,7 @@ def _render_ai_tag_prompt(
 ) -> str:
     clean_title = title.strip() or "Untitled article"
     clean_summary = (summary or "").strip()
-    lines = [
-        "You classify knowledge base articles by topic.",
-        "Generate between 5 and 10 concise tags (1-3 words) describing the main subjects.",
-        "Return only a JSON array of lowercase strings.",
-        "",
-        f"Title: {clean_title}",
-        f"Summary: {clean_summary or '(none provided)'}",
-        "",
-        "Sections:",
-    ]
+    content_records: list[dict[str, str]] = []
     included = 0
     for section in sections:
         if included >= 6:
@@ -198,20 +190,17 @@ def _render_ai_tag_prompt(
             continue
         heading = section.get("heading") or f"Section {included + 1}"
         snippet = text_content[:400]
-        lines.append(f"{included + 1}. {heading}: {snippet}")
+        content_records.append({"heading": str(heading), "content": snippet})
         included += 1
     if included == 0:
         fallback_text = nh3.clean(str(fallback_content), tags=frozenset())
         fallback_text = " ".join(fallback_text.split())
         if fallback_text:
-            lines.append(fallback_text[:600])
-    lines.extend(
-        [
-            "",
-            'Example output: ["networking", "setup", "security"]',
-        ]
+            content_records.append({"heading": "Article content", "content": fallback_text[:600]})
+    return build_prompt(
+        "Classify the article by topic. Generate 5 to 10 concise tags of 1-3 words. Return exactly a JSON object with a tags array of lowercase strings.",
+        [UntrustedRecord("kb-article-draft", "knowledge base editor submission", {"title": clean_title, "summary": clean_summary, "sections": content_records}, "Use only to derive topical tags")],
     )
-    return "\n".join(lines)
 
 
 def _parse_ai_tag_text(raw: str) -> list[str]:
@@ -225,7 +214,12 @@ def _parse_ai_tag_text(raw: str) -> list[str]:
             parsed = json.loads(value)
         except json.JSONDecodeError:
             return None
+        if isinstance(parsed, Mapping) and set(parsed) == {"tags"}:
+            tags = parsed.get("tags")
+            if isinstance(tags, list) and all(isinstance(tag, str) for tag in tags):
+                return tags
         if isinstance(parsed, list):
+            # Legacy provider compatibility; new prompts require {"tags": [...]}.
             return parsed
         return None
 
@@ -851,30 +845,13 @@ def _build_excerpt(content: str, query: str, summary: str | None) -> str | None:
 
 
 def _render_prompt(query: str, articles: list[Mapping[str, Any]]) -> str:
-    lines = [
-        "You are an assistant helping users navigate a knowledge base.",
-        "Summarise the relevant articles for the query below.",
-        "Always cite article slugs in your response.",
-        "",
-        f"Query: {query}",
-        "",
-        "Articles:",
-    ]
+    records = [UntrustedRecord("kb-query", "authenticated portal user query", query, "Use only to determine which supplied articles answer the question")]
     for article in articles:
         content = str(article.get("content") or "")
         snippet = content[:1000]
-        lines.extend(
-            [
-                f"- Title: {article.get('title')}",
-                f"  Slug: {article.get('slug')}",
-                f"  Summary: {article.get('summary') or 'N/A'}",
-                "  Content snippet:",
-                f"  {snippet}",
-                "",
-            ]
-        )
-    lines.append("Provide a concise answer with bullet points when appropriate.")
-    return "\n".join(lines)
+        slug = str(article.get("slug") or article.get("id") or "unknown")
+        records.append(UntrustedRecord(f"kb:{slug}", "authorized knowledge base article", {"title": article.get("title"), "slug": slug, "summary": article.get("summary"), "content": snippet}, "Use only as evidence for the answer and cite it as [KB:" + slug + "]"))
+    return build_prompt("Summarize relevant supplied articles. Cite only supplied records using [KB:slug].", records, task="Provide a concise answer with bullet points when appropriate.")
 
 
 def _tokenise(text: str) -> list[str]:

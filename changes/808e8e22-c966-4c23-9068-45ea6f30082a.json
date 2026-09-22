@@ -1,0 +1,7 @@
+{
+  "guid": "808e8e22-c966-4c23-9068-45ea6f30082a",
+  "occurred_at": "2026-09-22T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Allow super administrators to reprocess ticket AI in every status while limiting closed tickets to AI tag regeneration.",
+  "content_hash": "4d8c025637c086b5fadb971ec87e0c58d54e9f0d3eefa851efb9c0ee433c1364"
+}
