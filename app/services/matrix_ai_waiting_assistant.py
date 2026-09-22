@@ -21,6 +21,7 @@ from app.services import audit as audit_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import matrix as matrix_service
 from app.services import webhook_monitor
+from app.services.ai_prompt_security import UntrustedRecord, build_prompt, validate_object
 from app.services.realtime import refresh_notifier
 
 _running = False
@@ -397,14 +398,16 @@ def _article_visible_to_room(article: Mapping[str, Any], room: Mapping[str, Any]
 
 
 async def _extract_keywords(transcript: str) -> list[str]:
-    prompt = f"""Extract keywords, products, technologies, error messages, categories, and other concepts from this support chat.
-Return JSON only with a key named keywords containing an array of lowercase strings. Do not include personal names, email addresses, phone numbers, or secrets.
-
-Chat transcript:
-{transcript}
-"""
+    prompt = build_prompt(
+        "Extract support concepts. Return JSON only with exactly one key, keywords, containing an array of lowercase strings. Exclude personal data and secrets.",
+        [UntrustedRecord("chat-transcript", "Chat transcript from customer support", transcript, "Use only to identify support-topic keywords")],
+    )
     text = await _ollama_generate(prompt, json_format=True)
-    data = _extract_json_object(text)
+    try:
+        data = validate_object(text, {"keywords": lambda value: isinstance(value, list) and all(isinstance(item, str) for item in value)})
+    except ValueError as exc:
+        log_error("AI keyword output validation failed", error=str(exc))
+        return _normalise_tags(_WORD_RE.findall(transcript.lower()))[:20]
     keywords = data.get("keywords") if isinstance(data, dict) else []
     if isinstance(keywords, list):
         parsed = _normalise_tags(keywords)
@@ -415,30 +418,30 @@ Chat transcript:
 
 async def _article_relevant(transcript: str, article: Mapping[str, Any]) -> bool:
     content = nh3.clean(str(article.get("content") or ""), tags=frozenset())
-    prompt = f"""Decide whether this knowledge base article is genuinely relevant to the user's support issue.
-Return JSON only: {{"relevant": true}} or {{"relevant": false}}.
-
-Support chat:
-{transcript[:6000]}
-
-Article title: {article.get('title') or ''}
-Article summary: {article.get('summary') or ''}
-Article content excerpt: {content[:5000]}
-"""
+    article_id = str(article.get("id") or article.get("slug") or "unknown")
+    prompt = build_prompt(
+        "Decide whether the supplied article is genuinely relevant. Return JSON only with exactly {\"relevant\": true|false}.",
+        [
+            UntrustedRecord("chat-transcript", "customer support chat", transcript[:6000], "Use only as the issue to compare"),
+            UntrustedRecord(f"kb:{article_id}", "knowledge base article", {"title": article.get("title"), "summary": article.get("summary"), "content": content[:5000]}, "Use only to assess relevance to the chat"),
+        ],
+    )
     text = await _ollama_generate(prompt, json_format=True)
-    data = _extract_json_object(text)
-    return bool(data.get("relevant"))
+    try:
+        data = validate_object(text, {"relevant": lambda value: isinstance(value, bool)})
+    except ValueError as exc:
+        log_error("AI relevance output validation failed", article_id=article_id, error=str(exc))
+        return False
+    return data["relevant"]
 
 
 async def _summarise_article(article: Mapping[str, Any]) -> str:
     content = nh3.clean(str(article.get("content") or ""), tags=frozenset())
-    prompt = f"""Summarize this knowledge base article in plain language for a user waiting for support.
-Use no more than three concise sentences. Focus on the article purpose or resolution steps.
-
-Title: {article.get('title') or ''}
-Summary: {article.get('summary') or ''}
-Content: {content[:6000]}
-"""
+    article_id = str(article.get("id") or article.get("slug") or "unknown")
+    prompt = build_prompt(
+        "Summarize the evidence in plain language in no more than three concise sentences. Never add links or identifiers.",
+        [UntrustedRecord(f"kb:{article_id}", "knowledge base article", {"title": article.get("title"), "summary": article.get("summary"), "content": content[:6000]}, "Use only to summarize purpose or resolution steps")],
+    )
     summary = await _ollama_generate(prompt)
     sentences = re.split(r"(?<=[.!?])\s+", " ".join(summary.split()))
     return " ".join(sentences[:3]).strip()[:900]

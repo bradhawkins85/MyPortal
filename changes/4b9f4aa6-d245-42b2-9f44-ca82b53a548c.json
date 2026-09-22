@@ -1,0 +1,7 @@
+{
+  "guid": "4b9f4aa6-d245-42b2-9f44-ca82b53a548c",
+  "occurred_at": "2026-09-22T06:44:27.158912+00:00",
+  "change_type": "security",
+  "summary": "Harden AI prompts against untrusted portal content and validate model outputs",
+  "content_hash": "d8f7b259707d530206b40f57fd549155c35b378288af6cddccbdbe3d458d5394"
+}
