@@ -134,6 +134,7 @@ from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import ticket_expenses as expenses_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
+from app.services import system_update_history
 from app.security.menu_permissions import MENU_PERMISSIONS, catalogue_for_api, menu_has_access, normalize_access_level, normalize_menu_permissions
 from app.repositories import site_settings as site_settings_repo
 from app.security.cache_control import CacheControlMiddleware
@@ -6661,6 +6662,33 @@ async def admin_scheduled_tasks(
         "bulk_company_options": bulk_company_options,
     }
     return await _render_template("admin/scheduled_tasks.html", request, current_user, extra=extra)
+
+
+@app.get("/admin/system-updates", response_class=HTMLResponse)
+async def admin_system_updates(request: Request):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    updates = system_update_history.list_updates()
+    return await _render_template(
+        "admin/system_updates.html", request, current_user,
+        extra={"title": "System update history", "updates": updates},
+    )
+
+
+@app.get("/admin/system-updates/{update_id}", response_class=HTMLResponse)
+async def admin_system_update_detail(request: Request, update_id: str):
+    current_user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    try:
+        update = system_update_history.get(update_id)
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=404, detail="System update not found")
+    return await _render_template(
+        "admin/system_update_detail.html", request, current_user,
+        extra={"title": "System update result", "update": update},
+    )
 
 
 

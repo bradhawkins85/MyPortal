@@ -96,6 +96,53 @@ def test_system_update_run_succeeds_when_update_is_scheduled(monkeypatch):
     )
 
 
+def test_scheduled_system_update_requests_rolling_workflow(monkeypatch):
+    scheduler = SchedulerService()
+    captured = {}
+
+    async def fake_update(self, *, force_restart=False, scheduled=False):
+        captured.update(force_restart=force_restart, scheduled=scheduled)
+        return "queued"
+
+    async def fake_record(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(SchedulerService, "run_system_update", fake_update)
+    monkeypatch.setattr(scheduled_tasks_repo, "record_task_run", fake_record)
+    asyncio.run(scheduler._run_task({"id": 19, "command": "system_update"}))
+    assert captured == {"force_restart": False, "scheduled": True}
+
+
+def test_scheduled_system_update_does_not_use_feature_pack_hot_reload(
+    monkeypatch, tmp_path
+):
+    scheduler = SchedulerService()
+    flag_path = tmp_path / "system_update.flag"
+
+    async def ref(*args):
+        return "local" if len(args) > 1 else "remote"
+
+    async def changed(*args):
+        return ["app/features/example/routes.py"]
+
+    async def legacy_hot_reload(*args, **kwargs):
+        raise AssertionError("legacy hot reload path was invoked")
+
+    monkeypatch.setattr(SchedulerService, "_get_git_ref", ref)
+    monkeypatch.setattr(SchedulerService, "_get_remote_main_ref", ref)
+    monkeypatch.setattr(SchedulerService, "_fetch_remote_main_ref", ref)
+    monkeypatch.setattr(SchedulerService, "_list_changed_files", changed)
+    monkeypatch.setattr(SchedulerService, "_try_feature_pack_hot_reload", legacy_hot_reload)
+    monkeypatch.setattr("app.services.scheduler._SYSTEM_UPDATE_FLAG_PATH", flag_path)
+    monkeypatch.setattr(
+        "app.services.scheduler.system_update_history.create_pending",
+        lambda **kwargs: {"id": "12345678-1234-1234-1234-123456789abc"},
+    )
+    output = asyncio.run(scheduler._run_system_update(scheduled=True))
+    assert "rolling mode" in output
+    assert "requested_mode=rolling" in flag_path.read_text()
+
+
 async def _async_result(value: str) -> str:
     return value
 
