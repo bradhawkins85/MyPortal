@@ -41,9 +41,18 @@ def sanitise_output(value: str | None) -> str:
 
 
 def _path(update_id: str) -> Path:
-    if not re.fullmatch(r"[a-f0-9-]{36}", update_id):
-        raise ValueError("Invalid system update identifier")
-    return _HISTORY_DIR / f"{update_id}.json"
+    try:
+        canonical_id = str(uuid.UUID(update_id))
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise ValueError("Invalid system update identifier") from exc
+
+    history_dir = _HISTORY_DIR.resolve()
+    candidate = (history_dir / f"{canonical_id}.json").resolve()
+    try:
+        candidate.relative_to(history_dir)
+    except ValueError as exc:
+        raise ValueError("Invalid system update identifier") from exc
+    return candidate
 
 
 def _write(record: dict[str, Any]) -> dict[str, Any]:
