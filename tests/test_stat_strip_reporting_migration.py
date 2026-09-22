@@ -5,6 +5,7 @@ import re
 
 
 MIGRATION = Path("migrations/381_stat_strip_reporting_queries.sql")
+M365_FIX_MIGRATION = Path("migrations/383_fix_m365_best_practices_stat_strip.sql")
 
 # One reporting entry may back identical summary/detail or admin/dashboard strips.
 # Keeping this map beside the migration makes additions to the UI inventory visible
@@ -77,3 +78,14 @@ def test_stat_strip_catalogue_has_every_mapping_once() -> None:
     assert set(slugs) == expected
     assert sql.count("{{current.company}}") >= 20
     assert "INSERT IGNORE INTO reporting_queries" in sql
+
+
+def test_m365_best_practices_strip_uses_all_visible_current_results() -> None:
+    sql = M365_FIX_MIGRATION.read_text()
+
+    assert "run_at = (SELECT MAX(run_at)" not in sql
+    assert "LEFT JOIN m365_best_practice_settings" in sql
+    assert "(s.enabled = 1 OR s.check_id IS NULL)" in sql
+    assert "LEFT JOIN m365_best_practice_company_exclusions" in sql
+    assert "e.check_id IS NULL" in sql
+    assert "WHERE slug = 'stat-strip-m365-best-practices-live'" in sql
