@@ -22,7 +22,7 @@ from .routes import router as reporting_router
 
 PACK = FeaturePack(
     slug="reporting",
-    version="1.1.1",
+    version="1.2.0",
     routers=(reporting_router,),
 )
 
