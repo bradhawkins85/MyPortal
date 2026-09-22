@@ -1,3 +1,8 @@
+-- phase: expand
+-- compatible-from: *
+-- compatible-to: *
+-- maintenance: false
+
 -- Add reusable, current-company ticket-list searches to the Reporting catalogue.
 -- Administrators can clone an example and replace the "search text" portion of
 -- each LIKE pattern.  The surrounding % wildcards intentionally implement a
