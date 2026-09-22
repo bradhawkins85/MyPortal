@@ -1,0 +1,7 @@
+{
+  "guid": "63a221a8-e9c6-43b2-9b4f-8cd4e092f3e1",
+  "occurred_at": "2026-09-22T00:00:00Z",
+  "change_type": "Improvement",
+  "summary": "Coordinate content-hashed browser releases without interrupting active work.",
+  "content_hash": "release-manifest-safe-client-update-coordination"
+}
