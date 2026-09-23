@@ -1,0 +1,7 @@
+{
+  "guid": "21eae203-8960-44e1-8539-28ff8e185448",
+  "occurred_at": "2026-09-23T10:22:56.302639+00:00",
+  "change_type": "feature",
+  "summary": "Allow ticket conversation entries to be excluded from resolution generation.",
+  "content_hash": "edfe9fc52faa7ab046d2f6e3b1baf58883ed765f76e2fca5eeb18f415fef7f02"
+}
