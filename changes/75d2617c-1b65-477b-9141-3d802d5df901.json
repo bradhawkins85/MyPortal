@@ -1,0 +1,7 @@
+{
+  "guid": "75d2617c-1b65-477b-9141-3d802d5df901",
+  "occurred_at": "2026-09-23T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Queue all existing RAG sources as low-priority backfill so current AI indexing work runs first.",
+  "content_hash": "9fb7913af21d3bb2f6a5100287cf827879ee0dd47187f1a4f9f643b8d19373b9"
+}
