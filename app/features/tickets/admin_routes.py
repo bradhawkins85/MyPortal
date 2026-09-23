@@ -1054,6 +1054,8 @@ async def admin_update_ticket_status(ticket_id: int, request: Request):
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
     await tickets_repo.set_ticket_status(ticket_id, status_value)
+    if status_value in {"resolved", "closed"}:
+        await tickets_service.refresh_ticket_resolution_steps(ticket_id)
     await tickets_service.refresh_ticket_ai_summary(ticket_id)
     await tickets_service.refresh_ticket_ai_tags(ticket_id)
     await tickets_service.broadcast_ticket_event(action="updated", ticket_id=ticket_id)
@@ -1747,6 +1749,59 @@ async def admin_reprocess_ticket_ai(ticket_id: int, request: Request):
     return JSONResponse({"status": "queued", "message": message})
 
 
+@router.post("/admin/tickets/{ticket_id:int}/resolution-steps", response_class=HTMLResponse)
+async def admin_update_resolution_steps(ticket_id: int, request: Request):
+    """Save technician-edited resolution steps and refresh their RAG document."""
+    main_module = _main()
+    current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    form = await parse_csrf_form(request)
+    sanitized = sanitize_rich_text(str(form.get("resolutionSteps") or ""))
+    await tickets_repo.update_ticket(
+        ticket_id,
+        resolution_steps=sanitized.html if sanitized.has_rich_content else None,
+        resolution_steps_status="succeeded",
+        resolution_steps_source="manually_edited",
+        resolution_steps_updated_at=datetime.now(timezone.utc),
+    )
+    from app.services import rag_outbox
+    await rag_outbox.enqueue("tickets", ticket_id)
+    return flash_redirect(f"/admin/tickets/{ticket_id}", "Resolution steps saved.", "success")
+
+
+@router.post("/admin/tickets/{ticket_id:int}/resolution-steps/reprocess", response_class=JSONResponse)
+async def admin_reprocess_resolution_steps(ticket_id: int, request: Request):
+    main_module = _main()
+    _current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    if str(ticket.get("status") or "").casefold() not in {"resolved", "closed"}:
+        raise HTTPException(status_code=409, detail="Resolution steps are available for resolved or closed tickets.")
+    await tickets_service.refresh_ticket_resolution_steps(ticket_id)
+    return JSONResponse({"status": "queued", "message": "Resolution steps will be regenerated shortly."})
+
+
+@router.post("/admin/tickets/{ticket_id:int}/replies/{reply_id:int}/resolution-step", response_class=HTMLResponse)
+async def admin_toggle_reply_resolution_step(ticket_id: int, reply_id: int, request: Request):
+    main_module = _main()
+    _current_user, redirect = await main_module._require_helpdesk_page(request)
+    if redirect:
+        return redirect
+    form = await parse_csrf_form(request)
+    flagged = str(form.get("flagged") or "").casefold() in {"1", "true", "on", "yes"}
+    if not await tickets_repo.set_reply_resolution_step(reply_id, ticket_id, flagged):
+        raise HTTPException(status_code=404, detail="Ticket reply not found")
+    message = "Reply marked as a resolution step." if flagged else "Reply removed from resolution steps."
+    return flash_redirect(f"/admin/tickets/{ticket_id}#conversation", message, "success")
+
+
 @router.post("/admin/tickets/{ticket_id:int}/delete", response_class=HTMLResponse)
 async def admin_delete_ticket(ticket_id: int, request: Request):
     main_module = _main()
@@ -2064,6 +2119,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
     body_value = form.get("body", "")
     body_raw = str(body_value) if isinstance(body_value, str) else ""
     is_internal = str(form.get("isInternal", "")).lower() in {"1", "true", "on", "yes"}
+    is_resolution_step = str(form.get("isResolutionStep", "")).lower() in {"1", "true", "on", "yes"}
     minutes_input_raw = form.get("minutesSpent", "")
     minutes_input = str(minutes_input_raw).strip() if isinstance(minutes_input_raw, str) else ""
     minutes_spent: int | None = None
@@ -2231,6 +2287,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             minutes_spent=minutes_spent,
             is_billable=is_billable,
             labour_type_id=labour_type_id,
+            is_resolution_step=is_resolution_step,
         )
         mentioned_user_ids = await _valid_mentioned_user_ids(ticket, _parse_mentioned_user_ids(form))
         if mentioned_user_ids:
@@ -2267,6 +2324,8 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
         # Technicians should not be automatically added as ticket watchers when replying.
         if reply_status:
             await tickets_repo.set_ticket_status(ticket_id, reply_status)
+            if reply_status in {"resolved", "closed"}:
+                await tickets_service.refresh_ticket_resolution_steps(ticket_id)
         await tickets_service.refresh_ticket_ai_summary(ticket_id)
         await tickets_service.refresh_ticket_ai_tags(ticket_id)
         await tickets_service.broadcast_ticket_event(action="reply", ticket_id=ticket_id)

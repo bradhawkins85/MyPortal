@@ -1410,6 +1410,13 @@
                   <span>Write an internal note instead</span>
                 </label>
               </div>
+              <div class="form-field form-field--checkbox">
+                <label class="checkbox">
+                  <input type="checkbox" name="isResolutionStep" value="true" />
+                  <span>Mark this reply as a resolution step</span>
+                </label>
+                <p class="form-help">Resolution steps receive extra emphasis when AI creates the final resolution outline.</p>
+              </div>
               <details class="ticket-reply-worklog" open>
                 <summary>Time &amp; billing</summary>
               <div class="form-field">
@@ -1484,6 +1491,53 @@
             </dialog>
             </div>
           </details>
+
+          {% if ticket.status in ['resolved', 'closed'] %}
+          <details class="card card--panel card-collapsible" data-ticket-resolution-panel>
+            <summary class="card__header">
+              <div class="card__title-group">
+                <h2 class="card__title">Resolution Steps</h2>
+                {% if ticket.resolution_steps_status == 'queued' %}
+                  <span class="status status--info">Generating…</span>
+                {% elif ticket.resolution_steps_status == 'error' %}
+                  <span class="status status--danger">Generation failed</span>
+                {% elif ticket.resolution_steps %}
+                  <span class="status status--success">Available</span>
+                {% endif %}
+              </div>
+              <span class="card-collapsible__icon" aria-hidden="true"></span>
+            </summary>
+            <div class="card__body">
+              <form action="/admin/tickets/{{ ticket.id }}/resolution-steps" method="post" class="form">
+                {% include "partials/csrf.html" %}
+                <div class="form-field">
+                  <span class="form-label" id="admin-resolution-steps-label">Final resolution outline</span>
+                  <div class="rich-text-editor" data-rich-text-editor aria-labelledby="admin-resolution-steps-label">
+                    <div class="rich-text-editor__toolbar" role="toolbar" aria-label="Resolution formatting options">
+                      <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="bold" aria-label="Bold"><span aria-hidden="true">B</span></button>
+                      <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="italic" aria-label="Italic"><span aria-hidden="true">I</span></button>
+                      <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="insertUnorderedList" aria-label="Bulleted list"><span aria-hidden="true">•</span></button>
+                      <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="insertOrderedList" aria-label="Numbered list"><span aria-hidden="true">1.</span></button>
+                    </div>
+                    <div class="rich-text-editor__surface" data-rich-text-content contenteditable="true" role="textbox" aria-labelledby="admin-resolution-steps-label" aria-multiline="true" data-placeholder="Add the final steps that resolved this ticket…">{{ ticket.resolution_steps | default('', true) | safe }}</div>
+                    <textarea name="resolutionSteps" class="rich-text-editor__fallback" data-rich-text-value data-rich-text-fallback aria-labelledby="admin-resolution-steps-label">{{ ticket.resolution_steps or '' }}</textarea>
+                  </div>
+                  <p class="form-help">
+                    {% if ticket.resolution_steps_source == 'ai_generated' %}AI generated.{% elif ticket.resolution_steps_source == 'manually_edited' %}Manually edited.{% endif %}
+                    Saving or regenerating refreshes the ticket's RAG index.
+                  </p>
+                </div>
+                {% if ticket.resolution_steps_status == 'error' %}
+                  <p class="form-help form-help--error" role="alert">Resolution generation failed. The ticket remains resolved and any previously saved outline is unchanged.</p>
+                {% endif %}
+                <div class="form-actions">
+                  <button class="button button--primary" type="submit">Save resolution steps</button>
+                  <button class="button button--secondary" type="submit" formaction="/admin/tickets/{{ ticket.id }}/resolution-steps/reprocess" data-resolution-reprocess>Regenerate with AI</button>
+                </div>
+              </form>
+            </div>
+          </details>
+          {% endif %}
 
           <article class="card card--panel">
             <header class="card__header ticket-split-toolbar">
@@ -1620,6 +1674,9 @@
                               {% if reply.is_internal %}
                                 <span class="badge badge--muted">Internal</span>
                               {% endif %}
+                              {% if reply.is_resolution_step %}
+                                <span class="status status--success">Resolution step</span>
+                              {% endif %}
                               {% if reply.is_split_hidden %}
                                 <span class="badge badge--warning">Split to #{{ reply.split_to_ticket_number or reply.split_to_ticket_id }}</span>
                               {% endif %}
@@ -1724,6 +1781,13 @@
                           >
                             Expand message
                           </button>
+                          <form action="/admin/tickets/{{ ticket.id }}/replies/{{ reply.id }}/resolution-step" method="post" class="form-actions">
+                            {% include "partials/csrf.html" %}
+                            <input type="hidden" name="flagged" value="{{ '0' if reply.is_resolution_step else '1' }}" />
+                            <button type="submit" class="button button--ghost button--small">
+                              {{ 'Unmark resolution step' if reply.is_resolution_step else 'Mark as resolution step' }}
+                            </button>
+                          </form>
                         </div>
                       </article>
                     {% endif %}

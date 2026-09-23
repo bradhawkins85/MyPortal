@@ -119,6 +119,14 @@ _TAGS_PROMPT_HEADER = (
     "Respond ONLY with JSON shaped as {\"tags\": [\"tag-one\", \"tag-two\", ...]} using lowercase kebab-case tags."
 )
 
+_RESOLUTION_PROMPT_HEADER = (
+    "You create concise, reusable resolution outlines for completed helpdesk tickets. "
+    "Return only JSON shaped as {\"resolution_steps\": \"<ul><li>...</li></ul>\"}. "
+    "Use a short ordered or unordered list of the actions that actually produced the final resolution. "
+    "Entries explicitly marked as resolution steps are high-value evidence, but consider all ticket context. "
+    "Do not invent actions, credentials, or results."
+)
+
 _DEFAULT_TAG_FILL = [
     "support-request",
     "needs-triage",
@@ -1271,6 +1279,94 @@ async def refresh_ticket_ai_summary(ticket_id: int) -> None:
             ai_summary_updated_at=now,
         )
         await emit_ticket_updated_event(ticket_id, actor_type="system")
+
+
+def _extract_resolution_steps(payload: Any) -> str | None:
+    """Extract and sanitise resolution HTML from an LLM response."""
+    value: Any = payload
+    if isinstance(payload, str):
+        candidate = payload.strip().removeprefix("```json").removesuffix("```").strip()
+        try:
+            value = json.loads(candidate)
+        except (TypeError, ValueError):
+            value = candidate
+    if isinstance(value, Mapping):
+        value = value.get("resolution_steps") or value.get("resolution")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    sanitized = sanitize_rich_text(value)
+    return sanitized.html if sanitized.has_rich_content else None
+
+
+def _render_resolution_prompt(
+    ticket: Mapping[str, Any], replies: list[Mapping[str, Any]]
+) -> str:
+    ticket_id = str(ticket.get("id") or "unknown")
+    records = [UntrustedRecord(
+        f"ticket:{ticket_id}", "resolved helpdesk ticket",
+        {"subject": str(ticket.get("subject") or ""),
+         "description": _prepare_prompt_text(ticket.get("description")),
+         "status": str(ticket.get("status") or "")},
+        "Use as overall issue context",
+    )]
+    # Preserve every explicitly selected entry, then add recent context without duplicates.
+    selected = [reply for reply in replies if reply.get("is_resolution_step")]
+    selected_ids = {reply.get("id") for reply in selected}
+    context = selected + [reply for reply in replies[-16:] if reply.get("id") not in selected_ids]
+    for reply in context:
+        reply_id = str(reply.get("id") or "unknown")
+        records.append(UntrustedRecord(
+            f"ticket-reply:{reply_id}",
+            "FLAGGED RESOLUTION STEP" if reply.get("is_resolution_step") else "conversation entry",
+            {"body": _prepare_prompt_text(reply.get("body")),
+             "internal": bool(reply.get("is_internal"))},
+            "Treat as high-value resolution evidence" if reply.get("is_resolution_step") else "Use when relevant",
+        ))
+    return _limit_ai_prompt(build_prompt(
+        _RESOLUTION_PROMPT_HEADER, records,
+        task="Identify the final successful actions and return exactly the requested JSON.",
+    ))
+
+
+async def refresh_ticket_resolution_steps(ticket_id: int) -> None:
+    """Generate resolution steps without allowing provider failures to affect resolution."""
+    ticket = await tickets_repo.get_ticket(ticket_id)
+    if not ticket or str(ticket.get("status") or "").casefold() not in {"resolved", "closed"}:
+        return
+    replies = await tickets_repo.list_replies(ticket_id, include_internal=True)
+    now = datetime.now(timezone.utc)
+    await tickets_repo.update_ticket(
+        ticket_id, resolution_steps_status="queued", resolution_steps_updated_at=now
+    )
+
+    async def _apply_result(result: Mapping[str, Any]) -> None:
+        status_value = str(result.get("status") or result.get("event_status") or "unknown")
+        steps = _extract_resolution_steps(result.get("response")) if status_value == "succeeded" else None
+        fields: dict[str, Any] = {
+            "resolution_steps_status": "succeeded" if steps else ("error" if status_value == "succeeded" else status_value),
+            "resolution_steps_model": str(result.get("model") or "") or None,
+            "resolution_steps_updated_at": datetime.now(timezone.utc),
+        }
+        if steps:
+            fields.update(resolution_steps=steps, resolution_steps_source="ai_generated")
+        await tickets_repo.update_ticket(ticket_id, **fields)
+        from app.services import rag_outbox
+        await rag_outbox.enqueue("tickets", ticket_id)
+        await emit_ticket_updated_event(ticket_id, actor_type="system")
+
+    try:
+        response = await modules_service.trigger_module(
+            "ollama", {"prompt": _render_resolution_prompt(ticket, replies)}, on_complete=_apply_result
+        )
+        if str(response.get("status") or "") == "skipped":
+            await tickets_repo.update_ticket(
+                ticket_id, resolution_steps_status="skipped", resolution_steps_updated_at=now
+            )
+    except Exception as exc:  # pragma: no cover - provider/network failure
+        log_error("Ticket resolution generation failed", ticket_id=ticket_id, error=str(exc))
+        await tickets_repo.update_ticket(
+            ticket_id, resolution_steps_status="error", resolution_steps_updated_at=now
+        )
 
 
 async def refresh_ticket_ai_tags(ticket_id: int) -> None:

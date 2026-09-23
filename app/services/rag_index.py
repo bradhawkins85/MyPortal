@@ -330,6 +330,7 @@ def _ticket_document(
         ("Module", item.get("module") or item.get("module_slug")),
         ("Status", item.get("status")),
         ("Priority", item.get("priority")),
+        ("Resolution steps", item.get("resolution_steps")),
     ):
         section = _labelled_section(label, value)
         if section:

@@ -1,5 +1,29 @@
 (function () {
 
+  document.querySelectorAll('[data-resolution-reprocess]').forEach((button) => {
+    button.addEventListener('click', async (event) => {
+      event.preventDefault();
+      const original = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Generating…';
+      try {
+        const response = await fetch(button.formAction, {
+          method: 'POST',
+          body: new FormData(button.form),
+          headers: { Accept: 'application/json' },
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.detail || 'Unable to regenerate resolution steps.');
+        button.textContent = 'Queued';
+        window.setTimeout(() => window.location.reload(), 1200);
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = original;
+        window.alert(error.message || 'Unable to regenerate resolution steps.');
+      }
+    });
+  });
+
   function initialiseOutlookContactLookup() {
     const root = document.querySelector('[data-outlook-contact-phones]');
     if (!root) return;
