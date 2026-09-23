@@ -13,6 +13,9 @@
       </summary>
       <ul class="header-title-menu__list" role="menu">
         <li class="header-title-menu__item" role="none">
+          <button type="button" class="header-title-menu__link" role="menuitem" data-deletion-rule-new>New deletion rule</button>
+        </li>
+        <li class="header-title-menu__item" role="none">
           <button
             type="button"
             class="header-title-menu__link header-title-menu__link--danger"
@@ -38,6 +41,49 @@
 {% endblock %}
 
 {% block content %}
+<section class="card card--panel" aria-labelledby="deletion-rules-title">
+  <header class="card__header">
+    <div><h2 id="deletion-rules-title">Deletion rules</h2>
+      <p class="card__subtitle">Rules remove matching monitor entries and their stored attempts. Event rules run after delivery; scheduled rules run on their cron schedule.</p></div>
+  </header>
+  <div class="table-wrapper">
+    <table class="table" id="webhook-deletion-rules-table" data-table data-table-id="webhook-deletion-rules">
+      <thead><tr><th data-sort="string">Name</th><th data-sort="string">Execution</th><th data-sort="string">Conditions</th><th data-sort="string">Status</th><th class="table__actions">Actions</th></tr></thead>
+      <tbody>
+      {% for rule in deletion_rules %}
+        <tr data-rule='{{ rule|tojson }}'>
+          <td>{{ rule.name }}</td><td>{{ rule.execution_type }}{% if rule.cron_expression %} · {{ rule.cron_expression }}{% endif %}</td>
+          <td>{{ rule.conditions|length }} condition{% if rule.conditions|length != 1 %}s{% endif %}</td>
+          <td><span class="status status--{{ 'success' if rule.enabled else 'neutral' }}">{{ 'Enabled' if rule.enabled else 'Disabled' }}</span></td>
+          <td class="table__actions"><button class="button button--ghost" type="button" data-deletion-rule-edit>Edit</button><button class="button button--danger" type="button" data-deletion-rule-delete>Delete</button></td>
+        </tr>
+      {% else %}<tr><td colspan="5" class="table__empty">No deletion rules configured.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <form class="form-grid" data-retention-form>
+    <h3>Final retention rule</h3>
+    <label><input type="checkbox" name="enabled" {% if retention.enabled %}checked{% endif %}> Delete old entries</label>
+    <label>Delete after <input class="form-input" type="number" name="retentionDays" min="1" max="3650" value="{{ retention.retention_days }}" required> days</label>
+    <p class="text-muted">Runs last and uses the entry creation timestamp (UTC), regardless of delivery updates.</p>
+    <button class="button button--primary" type="submit">Save retention</button>
+  </form>
+</section>
+
+<div class="modal" id="webhook-deletion-rule-modal" role="dialog" aria-modal="true" hidden>
+ <div class="modal__content" role="document"><button type="button" class="modal__close" data-modal-close><span class="visually-hidden">Close</span></button>
+  <h2 class="modal__title">Deletion rule</h2>
+  <form data-deletion-rule-form><input type="hidden" name="id">
+   <label class="form-label">Name<input class="form-input" name="name" maxlength="150" required></label>
+   <label class="form-label">Execution<select class="form-input" name="executionType"><option value="event">After a webhook event</option><option value="scheduled">On a schedule</option></select></label>
+   <label class="form-label">Cron schedule<input class="form-input" name="cronExpression" placeholder="0 2 * * *"></label>
+   <label><input type="checkbox" name="enabled" checked> Enabled</label>
+   <fieldset><legend>All conditions must match</legend><div data-rule-conditions></div><button class="button button--ghost" type="button" data-add-condition>Add condition</button></fieldset>
+   <p class="text-muted">Fields may be top-level (for example <code>status</code>) or nested (for example <code>payload.customer.id</code>).</p>
+   <button class="button button--primary" type="submit">Save rule</button>
+  </form>
+ </div>
+</div>
 <section class="card card--panel">
   <header class="card__header">
     <div class="card__controls">

@@ -79,6 +79,15 @@ def _sanitise_text_body(payload: str | None) -> str | None:
     return _truncate(json.dumps(value, default=str))
 
 
+async def _apply_event_deletion_rules(event: dict[str, Any]) -> None:
+    """Evaluate event-triggered policies after a result has been persisted."""
+    from app.services import webhook_deletion_rules
+    try:
+        await webhook_deletion_rules.apply_event_rules(event)
+    except Exception as exc:  # pragma: no cover - monitoring must not break delivery
+        log_error("Webhook deletion rule evaluation failed", event_id=event.get("id"), error=str(exc))
+
+
 def _normalise_ip(value: Any) -> str | None:
     text = str(value or "").strip().strip('"')
     if not text:
@@ -261,7 +270,9 @@ async def record_manual_success(
         response_body=_sanitise_text_body(response_body),
     )
     refreshed = await webhook_repo.get_event(event_id)
-    return refreshed or {"id": event_id, "status": "succeeded"}
+    result = refreshed or {"id": event_id, "status": "succeeded"}
+    await _apply_event_deletion_rules(result)
+    return result
 
 
 async def record_manual_failure(
@@ -297,7 +308,9 @@ async def record_manual_failure(
         response_body=_sanitise_text_body(response_body),
     )
     refreshed = await webhook_repo.get_event(event_id)
-    return refreshed or {"id": event_id, "status": "failed", "last_error": error_message}
+    result = refreshed or {"id": event_id, "status": "failed", "last_error": error_message}
+    await _apply_event_deletion_rules(result)
+    return result
 
 
 async def log_incoming_webhook(
@@ -415,7 +428,9 @@ async def log_incoming_webhook(
         log_error("Incoming webhook failed", event_id=event_id, name=name, error=error_message)
     
     refreshed = await webhook_repo.get_event(event_id)
-    return refreshed or event
+    result = refreshed or event
+    await _apply_event_deletion_rules(result)
+    return result
 
 
 async def process_pending_events(limit: int = 10) -> None:
@@ -424,6 +439,9 @@ async def process_pending_events(limit: int = 10) -> None:
         try:
             await webhook_repo.mark_in_progress(int(event["id"]))
             await _attempt_event(event)
+            refreshed = await webhook_repo.get_event(int(event["id"]))
+            if refreshed:
+                await _apply_event_deletion_rules(refreshed)
         except Exception as exc:  # pragma: no cover - defensive logging
             log_error("Failed to process webhook event", event_id=event.get("id"), error=str(exc))
 
