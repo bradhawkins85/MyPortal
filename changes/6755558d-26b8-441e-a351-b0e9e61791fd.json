@@ -1,0 +1,7 @@
+{
+  "guid": "6755558d-26b8-441e-a351-b0e9e61791fd",
+  "occurred_at": "2026-09-23T10:22:46.366569Z",
+  "change_type": "fix",
+  "summary": "Restore the expand and collapse arrow on admin ticket resolution steps.",
+  "content_hash": "e12a938e844d8d0ded1e955c8d2009e3d18325908cfd8d7bfd5dc254f62bd17a"
+}

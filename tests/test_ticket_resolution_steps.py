@@ -78,6 +78,11 @@ def test_admin_ticket_template_exposes_resolution_controls():
     assert "Resolution step" in template
     assert template.index("AI Summary") < template.index("data-ticket-resolution-panel")
     assert template.index("data-ticket-resolution-panel") < template.index("data-ticket-tasks-card")
+    resolution_panel = template.split("data-ticket-resolution-panel", 1)[1].split(
+        "</summary>", 1
+    )[0]
+    assert "card__header--collapsible" in resolution_panel
+    assert "card__toggle-icon" in resolution_panel
 
 
 def test_resolution_reprocess_uses_global_toast():
