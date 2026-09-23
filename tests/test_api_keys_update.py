@@ -158,7 +158,7 @@ def test_api_update_key_saves_changes(monkeypatch):
     )
     assert audit_calls
     audit_payload = audit_calls[0]
-    assert audit_payload["action"] == "api_keys.update"
+    assert audit_payload["action"] == "api_key.update"
     assert audit_payload["entity_id"] == 5
 
 
