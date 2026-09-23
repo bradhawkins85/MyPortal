@@ -1,0 +1,7 @@
+{
+  "guid": "4d488e21-85db-4455-8c3c-df68a375f329",
+  "occurred_at": "2026-09-23T00:00Z",
+  "change_type": "Feature",
+  "summary": "Add central audit events for licence lifecycle and direct staff assignment changes.",
+  "content_hash": "d85b6f902c13c34601a3575d8e77564fe553c9244babc961600c7f2d275895c4"
+}
