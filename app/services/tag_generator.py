@@ -52,8 +52,7 @@ Tags:"""
         return []
     
     # Check if the module was successful
-    status = response.get("status")
-    if status not in ("completed", "success"):
+    if not modules_service.module_result_succeeded(response):
         return []
     
     # Extract the response text

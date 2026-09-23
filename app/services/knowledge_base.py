@@ -260,10 +260,7 @@ async def _schedule_article_ai_tags(
     prompt = _render_ai_tag_prompt(title, summary, sections, combined_content)
 
     async def _apply_result(result: Mapping[str, Any]) -> None:
-        status = str(result.get("status") or result.get("event_status") or "").lower()
-        if status == "queued":
-            return
-        if status == "skipped":
+        if not modules_service.module_result_succeeded(result):
             return
         payload = result.get("response")
         text: str | None = None
@@ -1068,15 +1065,16 @@ async def search_articles(
         else:
             ollama_status = str(response.get("status") or "unknown")
             ollama_model = response.get("model")
-            payload = response.get("response")
-            if isinstance(payload, Mapping):
-                ollama_summary = payload.get("response") or payload.get("message")
-                if not ollama_model:
-                    model_candidate = payload.get("model")
-                    if isinstance(model_candidate, str):
-                        ollama_model = model_candidate
-            elif isinstance(payload, str):
-                ollama_summary = payload
+            if modules_service.module_result_succeeded(response):
+                payload = response.get("response")
+                if isinstance(payload, Mapping):
+                    ollama_summary = payload.get("response") or payload.get("message")
+                    if not ollama_model:
+                        model_candidate = payload.get("model")
+                        if isinstance(model_candidate, str):
+                            ollama_model = model_candidate
+                elif isinstance(payload, str):
+                    ollama_summary = payload
     return {
         "results": results,
         "ollama_status": ollama_status,
