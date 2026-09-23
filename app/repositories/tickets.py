@@ -287,6 +287,7 @@ def _normalise_reply(row: dict[str, Any]) -> TicketRecord:
     if "is_billable" in record:
         record["is_billable"] = bool(record.get("is_billable"))
     record["is_resolution_step"] = bool(record.get("is_resolution_step"))
+    record["is_not_resolution_step"] = bool(record.get("is_not_resolution_step"))
     if not record.get("kind"):
         record["kind"] = (
             "internal_note" if bool(record.get("is_internal")) else "message"
@@ -1543,6 +1544,7 @@ async def create_reply(
     author_email: str | None = None,
     author_display_name: str | None = None,
     is_resolution_step: bool = False,
+    is_not_resolution_step: bool = False,
 ) -> TicketRecord:
     labour_type_id = await _default_labour_type_for_time_entry(
         minutes_spent, labour_type_id
@@ -1556,7 +1558,7 @@ async def create_reply(
         minutes_spent=minutes_spent,
         is_billable=is_billable,
     )
-    columns = ["ticket_id", "author_id", "body", "is_internal", "is_billable", "is_resolution_step"]
+    columns = ["ticket_id", "author_id", "body", "is_internal", "is_billable", "is_resolution_step", "is_not_resolution_step"]
     params: list[Any] = [
         ticket_id,
         author_id,
@@ -1564,6 +1566,7 @@ async def create_reply(
         1 if is_internal else 0,
         1 if is_billable else 0,
         1 if is_resolution_step else 0,
+        1 if is_not_resolution_step else 0,
     ]
     clean_author_email = str(author_email or "").strip() or None
     clean_author_display_name = str(author_display_name or "").strip() or None
@@ -1638,6 +1641,7 @@ async def create_reply(
         "minutes_spent": minutes_spent,
         "is_billable": 1 if is_billable else 0,
         "is_resolution_step": 1 if is_resolution_step else 0,
+        "is_not_resolution_step": 1 if is_not_resolution_step else 0,
         "external_reference": external_reference,
         "created_at": created_at,
         "labour_type_id": labour_type_id,
@@ -1649,11 +1653,14 @@ async def create_reply(
     return _normalise_reply(fallback_row)
 
 
-async def set_reply_resolution_step(reply_id: int, ticket_id: int, flagged: bool) -> bool:
-    """Flag a reply as resolution evidence, scoped to its parent ticket."""
+async def set_reply_resolution_step(
+    reply_id: int, ticket_id: int, flagged: bool, excluded: bool = False
+) -> bool:
+    """Set a reply's mutually exclusive resolution classification."""
     affected = await db.execute_rowcount(
-        "UPDATE ticket_replies SET is_resolution_step = %s WHERE id = %s AND ticket_id = %s",
-        (1 if flagged else 0, reply_id, ticket_id),
+        "UPDATE ticket_replies SET is_resolution_step = %s, is_not_resolution_step = %s "
+        "WHERE id = %s AND ticket_id = %s",
+        (1 if flagged else 0, 1 if excluded else 0, reply_id, ticket_id),
     )
     if affected:
         from app.services import rag_outbox

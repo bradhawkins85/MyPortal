@@ -1795,10 +1795,18 @@ async def admin_toggle_reply_resolution_step(ticket_id: int, reply_id: int, requ
     if redirect:
         return redirect
     form = await parse_csrf_form(request)
-    flagged = str(form.get("flagged") or "").casefold() in {"1", "true", "on", "yes"}
-    if not await tickets_repo.set_reply_resolution_step(reply_id, ticket_id, flagged):
+    requested_state = str(form.get("state") or "").casefold()
+    if requested_state not in {"resolution", "excluded", "neutral"}:
+        requested_state = "resolution" if str(form.get("flagged") or "").casefold() in {"1", "true", "on", "yes"} else "neutral"
+    flagged = requested_state == "resolution"
+    excluded = requested_state == "excluded"
+    if not await tickets_repo.set_reply_resolution_step(reply_id, ticket_id, flagged, excluded):
         raise HTTPException(status_code=404, detail="Ticket reply not found")
-    message = "Reply marked as a resolution step." if flagged else "Reply removed from resolution steps."
+    message = {
+        "resolution": "Reply marked as a resolution step.",
+        "excluded": "Reply excluded from resolution step generation.",
+        "neutral": "Reply returned to normal resolution step consideration.",
+    }[requested_state]
     return flash_redirect(f"/admin/tickets/{ticket_id}#conversation", message, "success")
 
 
@@ -2120,6 +2128,9 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
     body_raw = str(body_value) if isinstance(body_value, str) else ""
     is_internal = str(form.get("isInternal", "")).lower() in {"1", "true", "on", "yes"}
     is_resolution_step = str(form.get("isResolutionStep", "")).lower() in {"1", "true", "on", "yes"}
+    is_not_resolution_step = str(form.get("isNotResolutionStep", "")).lower() in {"1", "true", "on", "yes"}
+    if is_not_resolution_step:
+        is_resolution_step = False
     minutes_input_raw = form.get("minutesSpent", "")
     minutes_input = str(minutes_input_raw).strip() if isinstance(minutes_input_raw, str) else ""
     minutes_spent: int | None = None
@@ -2288,6 +2299,7 @@ async def admin_create_ticket_reply(ticket_id: int, request: Request):
             is_billable=is_billable,
             labour_type_id=labour_type_id,
             is_resolution_step=is_resolution_step,
+            is_not_resolution_step=is_not_resolution_step,
         )
         mentioned_user_ids = await _valid_mentioned_user_ids(ticket, _parse_mentioned_user_ids(form))
         if mentioned_user_ids:

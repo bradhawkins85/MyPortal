@@ -504,8 +504,12 @@
                   </div>
                   {% if has_helpdesk_access or is_super_admin %}
                   <label class="form-checkbox">
-                    <input type="checkbox" name="isResolutionStep" value="1" />
+                    <input type="checkbox" name="isResolutionStep" value="1" data-resolution-classification="resolution" />
                     <span>Mark this reply as a resolution step</span>
+                  </label>
+                  <label class="form-checkbox">
+                    <input type="checkbox" name="isNotResolutionStep" value="1" data-resolution-classification="excluded" />
+                    <span>Not a resolution step</span>
                   </label>
                   {% endif %}
                   <div class="form-field">
@@ -640,6 +644,8 @@
                             {% endif %}
                             {% if reply.is_resolution_step %}
                               <span class="status status--success">Resolution step</span>
+                            {% elif reply.is_not_resolution_step %}
+                              <span class="status status--neutral">Not a resolution step</span>
                             {% endif %}
                             {% if reply.has_email_tracking %}
                               {% set _reply_recipient_count = reply.recipient_count|default(0) %}
@@ -708,8 +714,9 @@
                         {% if has_helpdesk_access or is_super_admin %}
                         <form action="/admin/tickets/{{ ticket.id }}/replies/{{ reply.id }}/resolution-step" method="post" class="form-actions">
                           {% include "partials/csrf.html" %}
-                          <input type="hidden" name="flagged" value="{{ '0' if reply.is_resolution_step else '1' }}" />
-                          <button type="submit" class="button button--ghost button--small">{{ 'Unmark resolution step' if reply.is_resolution_step else 'Mark as resolution step' }}</button>
+                          <button type="submit" name="state" value="resolution" class="button button--ghost button--small"{% if reply.is_resolution_step %} disabled aria-pressed="true"{% endif %}>Mark as resolution step</button>
+                          <button type="submit" name="state" value="excluded" class="button button--ghost button--small"{% if reply.is_not_resolution_step %} disabled aria-pressed="true"{% endif %}>Not a resolution step</button>
+                          {% if reply.is_resolution_step or reply.is_not_resolution_step %}<button type="submit" name="state" value="neutral" class="button button--ghost button--small">Clear selection</button>{% endif %}
                         </form>
                         {% endif %}
                       </div>

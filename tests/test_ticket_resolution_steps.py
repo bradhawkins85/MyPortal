@@ -10,12 +10,14 @@ def test_resolution_prompt_emphasises_flagged_entries_without_dropping_context()
         [
             {"id": 1, "body": "Reported error 42", "is_resolution_step": False},
             {"id": 2, "body": "Replaced the damaged cable", "is_resolution_step": True},
+            {"id": 3, "body": "Unrelated lunch discussion", "is_not_resolution_step": True},
         ],
     )
 
     assert "FLAGGED RESOLUTION STEP" in prompt
     assert "Replaced the damaged cable" in prompt
     assert "Reported error 42" in prompt
+    assert "Unrelated lunch discussion" not in prompt
 
 
 def test_resolution_response_is_sanitised():
@@ -67,6 +69,8 @@ def test_admin_ticket_template_exposes_resolution_controls():
     template = Path("app/templates/admin/ticket_detail.html").read_text(encoding="utf-8")
 
     assert 'name="isResolutionStep"' in template
+    assert 'name="isNotResolutionStep"' in template
+    assert 'value="excluded"' in template
     assert 'data-ticket-resolution-panel' in template
     assert 'name="resolutionSteps"' in template
     assert 'data-resolution-reprocess' in template

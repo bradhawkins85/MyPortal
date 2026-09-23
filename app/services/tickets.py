@@ -1310,9 +1310,10 @@ def _render_resolution_prompt(
         "Use as overall issue context",
     )]
     # Preserve every explicitly selected entry, then add recent context without duplicates.
-    selected = [reply for reply in replies if reply.get("is_resolution_step")]
+    included_replies = [reply for reply in replies if not reply.get("is_not_resolution_step")]
+    selected = [reply for reply in included_replies if reply.get("is_resolution_step")]
     selected_ids = {reply.get("id") for reply in selected}
-    context = selected + [reply for reply in replies[-16:] if reply.get("id") not in selected_ids]
+    context = selected + [reply for reply in included_replies[-16:] if reply.get("id") not in selected_ids]
     for reply in context:
         reply_id = str(reply.get("id") or "unknown")
         records.append(UntrustedRecord(

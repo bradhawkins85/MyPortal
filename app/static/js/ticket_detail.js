@@ -1,5 +1,15 @@
 (function () {
 
+  document.querySelectorAll('[data-resolution-classification]').forEach((checkbox) => {
+    checkbox.addEventListener('change', () => {
+      if (!checkbox.checked) return;
+      const form = checkbox.closest('form');
+      form?.querySelectorAll('[data-resolution-classification]').forEach((other) => {
+        if (other !== checkbox) other.checked = false;
+      });
+    });
+  });
+
   document.querySelectorAll('[data-resolution-reprocess]').forEach((button) => {
     button.addEventListener('click', async (event) => {
       event.preventDefault();
