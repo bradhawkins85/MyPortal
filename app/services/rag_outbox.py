@@ -74,6 +74,24 @@ async def _load_source(source_type: str, source_id: str) -> dict[str, Any] | Non
     return item
 
 
+async def reindex_source(source_type: str, source_id: str) -> dict[str, int]:
+    """Synchronously refresh one allowlisted source for an administrator action."""
+    if source_type not in SUPPORTED_SOURCES or not str(source_id).isdigit():
+        raise ValueError("Unsupported RAG source")
+    item = await _load_source(source_type, source_id)
+    if item is None:
+        deactivated = await rag_repo.deactivate_document(source_type, source_id)
+        return {"indexed": 0, "deactivated": deactivated}
+    document = rag_index.document_from_source(source_type, item)
+    if document is None:
+        deactivated = await rag_repo.deactivate_document(source_type, source_id)
+        return {"indexed": 0, "deactivated": deactivated}
+    await rag_index.index_document(
+        document, source_updated_at=item.get("updated_at")
+    )
+    return {"indexed": 1, "deactivated": 0}
+
+
 async def process_pending(*, limit: int = 100) -> dict[str, int]:
     """Process persisted work with bounded exponential retry and stale-lease repair."""
     stale_lease = (

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse, Response
@@ -23,6 +24,8 @@ from app.repositories import rag_index as rag_index_repo
 from app.repositories import rag_relationships as rag_relationship_repo
 from app.repositories import agent_saved_searches as saved_search_repo
 from app.repositories import ai_quality as quality_repo
+from app.services import audit as audit_service
+from app.services import rag_outbox, rag_relationships as rag_relationship_service
 
 router = APIRouter(prefix="/api/agent", tags=["Agent"])
 _RAG_INDEX_TASKS: dict[int, asyncio.Task[None]] = {}
@@ -229,6 +232,129 @@ async def rag_health(current_user: dict = Depends(get_current_user)) -> dict:
             status_code=status.HTTP_403_FORBIDDEN, detail="Not permitted"
         )
     return await rag_index_repo.health()
+
+
+def _safe_error_category(value: object) -> str | None:
+    text = str(value or "").casefold()
+    if not text:
+        return None
+    if "timeout" in text or "timed out" in text:
+        return "timeout"
+    if "rate" in text or "429" in text:
+        return "rate_limited"
+    if "unavailable" in text or "connect" in text:
+        return "provider_unavailable"
+    if "parse" in text or "json" in text or "format" in text:
+        return "invalid_model_response"
+    return "evaluation_failed"
+
+
+def _is_stale(document: dict) -> bool:
+    updated = document.get("source_updated_at")
+    indexed = document.get("indexed_at")
+    if not updated or not indexed:
+        return False
+    if isinstance(updated, datetime) and isinstance(indexed, datetime):
+        return updated > indexed
+    return str(updated) > str(indexed)
+
+
+@router.get("/rag/diagnostics/tickets/{ticket_id}")
+async def ticket_rag_diagnostic(
+    ticket_id: int,
+    _: dict = Depends(require_super_admin),
+) -> dict:
+    """Inspect one ticket without returning indexed ticket or candidate content."""
+    document = await rag_index_repo.get_document_diagnostic("tickets", str(ticket_id))
+    if not document:
+        return {
+            "ticket_id": ticket_id, "indexed": False, "current": False,
+            "eligible": False, "ineligibility_reason": "No indexed document exists.",
+            "document": None, "candidates": [], "queue": [], "relationships": [],
+        }
+    document_id = int(document["id"])
+    decisions = await rag_relationship_repo.document_decisions(document_id)
+    settings = agent_service.rag_index_service.get_settings()
+    scope = rag_relationship_repo._json(document.get("permission_scope_json"), {})
+    public_document = {
+        key: document.get(key) for key in (
+            "id", "source_type", "source_id", "company_id", "title", "embedding_model",
+            "is_active", "source_updated_at", "indexed_at",
+        )
+    }
+    public_document["permission_scope"] = scope
+    public_document["chunks"] = document.get("chunks") or []
+    queue = []
+    for row in decisions["queue"]:
+        row = dict(row)
+        row["error_category"] = _safe_error_category(row.pop("last_error", None))
+        row["model"] = settings.rag_relationship_model
+        row["next_action"] = "Retry failed evaluation" if row["status"] == "FAILED" else "Wait for evaluator"
+        queue.append(row)
+    relationships = []
+    for row in decisions["relationships"]:
+        row = dict(row)
+        row["stale"] = (
+            row.get("source_hash") != row.get("current_source_hash")
+            or row.get("target_hash") != row.get("current_target_hash")
+            or row.get("match_status") == "STALE"
+        )
+        for key in ("source_hash", "target_hash", "current_source_hash", "current_target_hash"):
+            row.pop(key, None)
+        relationships.append(row)
+    active = bool(document.get("is_active"))
+    has_active_chunks = any(bool(chunk.get("is_active")) for chunk in document.get("chunks") or [])
+    current = active and not _is_stale(document)
+    return {
+        "ticket_id": ticket_id, "indexed": True, "current": current,
+        "eligible": active and has_active_chunks,
+        "ineligibility_reason": None if active and has_active_chunks else "Document is inactive or has no active chunks.",
+        "document": public_document,
+        "configuration": {
+            "candidate_limit": settings.rag_relationship_candidate_limit,
+            "ticket_candidate_limit": settings.rag_relationship_ticket_candidate_limit,
+            "relationship_min_score": settings.rag_relationship_min_score,
+            "relationship_model": settings.rag_relationship_model,
+        },
+        "candidates": await rag_relationship_repo.candidate_diagnostics(document_id),
+        "queue": queue, "relationships": relationships,
+    }
+
+
+@router.post("/rag/diagnostics/tickets/{ticket_id}/reindex")
+async def reindex_ticket(ticket_id: int, _: dict = Depends(require_super_admin)) -> dict:
+    """Re-index one ticket and return final counts."""
+    job_id = await rag_index_repo.create_job("tickets", str(ticket_id))
+    await rag_index_repo.update_job(job_id, status="running", message="Refreshing ticket index.", started=True)
+    try:
+        counts = await rag_outbox.reindex_source("tickets", str(ticket_id))
+        await rag_index_repo.update_job(job_id, status="completed", message=f"Refresh completed: {counts['indexed']} indexed, {counts['deactivated']} deactivated.", finished=True)
+        await audit_service.log_action(action="rag.ticket.reindex", user_id=int(_["id"]), entity_type="ticket", entity_id=ticket_id, metadata=counts)
+        return {"job_id": job_id, "status": "completed", **counts}
+    except Exception:
+        await rag_index_repo.update_job(job_id, status="failed", message="Ticket indexing failed. Review server logs.", finished=True)
+        raise HTTPException(status_code=503, detail="Ticket indexing failed")
+
+
+@router.post("/rag/diagnostics/tickets/{ticket_id}/relationships/rebuild")
+async def rebuild_ticket_relationships(ticket_id: int, _: dict = Depends(require_super_admin)) -> dict:
+    document = await rag_index_repo.get_document_diagnostic("tickets", str(ticket_id))
+    if not document or not document.get("is_active"):
+        raise HTTPException(status_code=404, detail="Indexed ticket not found")
+    await rag_relationship_repo.mark_relationships_stale(int(document["id"]))
+    queued = await rag_relationship_service.enqueue_relationships_for_document(int(document["id"]))
+    await audit_service.log_action(action="rag.ticket.relationships.rebuild", user_id=int(_["id"]), entity_type="ticket", entity_id=ticket_id, metadata={"queued": queued})
+    return {"status": "completed", "relationships_staled": True, "queued": queued}
+
+
+@router.post("/rag/diagnostics/tickets/{ticket_id}/relationships/retry")
+async def retry_ticket_relationships(ticket_id: int, _: dict = Depends(require_super_admin)) -> dict:
+    document = await rag_index_repo.get_document_diagnostic("tickets", str(ticket_id))
+    if not document:
+        raise HTTPException(status_code=404, detail="Indexed ticket not found")
+    retried = await rag_relationship_repo.retry_failed_for_document(int(document["id"]))
+    await audit_service.log_action(action="rag.ticket.relationships.retry", user_id=int(_["id"]), entity_type="ticket", entity_id=ticket_id, metadata={"retried": retried})
+    return {"status": "completed", "retried": retried}
 
 
 async def _run_rag_index_job(

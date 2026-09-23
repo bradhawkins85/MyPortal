@@ -1,0 +1,7 @@
+{
+  "guid": "9fd94f3f-3321-4f05-a554-b3d8d028cb01",
+  "occurred_at": "2026-09-23T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added permission-safe ticket RAG diagnostics, candidate scoring explanations, relationship job recovery, and document-level rebuild actions.",
+  "content_hash": "rag-ticket-diagnostics"
+}

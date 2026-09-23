@@ -15,6 +15,45 @@
   </div>
 </section>
 
+<div class="card card--panel" data-rag-diagnostics>
+  <div class="card__header">
+    <div>
+      <h2 class="card__title">Ticket diagnostics</h2>
+      <p class="card__description">Inspect the redacted index representation, candidate funnel, and relationship decisions for one ticket.</p>
+    </div>
+  </div>
+  <div class="card__body">
+    <form class="form-row" data-rag-diagnostic-form>
+      <div class="form-group">
+        <label for="rag-ticket-id">Ticket ID</label>
+        <input class="form-control" id="rag-ticket-id" name="ticket_id" type="number" min="1" required inputmode="numeric" placeholder="e.g. 1042">
+      </div>
+      <button class="button" type="submit">Run diagnostic</button>
+    </form>
+    <p class="form-help" data-rag-diagnostic-status aria-live="polite">Enter a ticket ID to inspect its RAG lifecycle.</p>
+    <div data-rag-diagnostic-result hidden>
+      <div class="stat-strip rag-stat-strip" data-rag-diagnostic-summary></div>
+      <div class="button-row" style="margin-block: 1rem;">
+        <button type="button" class="button button--ghost" data-rag-reindex>Re-index document</button>
+        <button type="button" class="button button--ghost" data-rag-rebuild>Rebuild relationships</button>
+        <button type="button" class="button button--ghost" data-rag-retry>Retry failed jobs</button>
+      </div>
+      <section>
+        <h3>Indexed sections (content redacted)</h3>
+        <div class="table-responsive"><table class="table" data-sortable-table><thead><tr><th><button type="button" class="button--link" data-sort="0">Section</button></th><th>Tokens</th><th>Characters</th><th>Model</th><th>Indexed</th><th>Status</th></tr></thead><tbody data-rag-chunks></tbody></table></div>
+      </section>
+      <section style="margin-top: 1.5rem;">
+        <div class="section-heading"><div><h3>Candidate funnel</h3><p class="section-description">Scores are operational metadata; source content remains redacted.</p></div><input class="form-control" type="search" placeholder="Filter candidates" aria-label="Filter candidates" data-table-filter="rag-candidates"></div>
+        <div class="table-responsive"><table class="table" id="rag-candidates" data-sortable-table><thead><tr><th><button type="button" class="button--link" data-sort="0">Candidate</button></th><th>Semantic</th><th>Lexical</th><th>Metadata</th><th>Source weight</th><th><button type="button" class="button--link" data-sort="5">Final</button></th><th>Decision</th></tr></thead><tbody data-rag-candidates></tbody></table></div>
+      </section>
+      <section style="margin-top: 1.5rem;">
+        <div class="section-heading"><div><h3>Queue and decisions</h3></div><select class="form-control" data-table-filter="rag-decisions" aria-label="Filter decision status"><option value="">All statuses</option><option>Pending</option><option>Processing</option><option>Failed</option><option>No_match</option><option>Stale</option><option>Match</option></select></div>
+        <div class="table-responsive"><table class="table" id="rag-decisions" data-sortable-table><thead><tr><th>Candidate</th><th><button type="button" class="button--link" data-sort="1">Status</button></th><th>Score</th><th>Model</th><th>Retries</th><th>Reason / recovery action</th><th>Evaluated</th></tr></thead><tbody data-rag-decisions></tbody></table></div>
+      </section>
+    </div>
+  </div>
+</div>
+
 <div class="card card--panel" data-rag-dashboard>
   <div class="card__header">
     <div>
@@ -72,6 +111,7 @@
 {% block scripts %}
 <script>
 (() => {
+  const diagnostic = document.querySelector('[data-rag-diagnostics]');
   const root = document.querySelector('[data-rag-dashboard]');
   if (!root) return;
   const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
@@ -90,6 +130,40 @@
     return `<article class="stat-strip__stat stat-strip__stat--${esc(variant)} rag-stat-strip__stat"><span class="stat-strip__stat-label">${esc(label)}</span><strong class="stat-strip__stat-value">${esc(value)}</strong><span class="rag-stat-strip__hint">${esc(hint)}</span></article>`;
   }
   function emptyRow(cols, text) { return `<tr><td colspan="${cols}" class="table__empty">${esc(text)}</td></tr>`; }
+  let activeTicketId = null;
+  async function loadDiagnostic(ticketId) {
+    const message = diagnostic.querySelector('[data-rag-diagnostic-status]');
+    message.textContent = `Loading ticket #${ticketId}…`;
+    const res = await fetch(`/api/agent/rag/diagnostics/tickets/${encodeURIComponent(ticketId)}`, {headers: {'Accept': 'application/json'}});
+    if (!res.ok) throw new Error('Unable to load ticket diagnostics');
+    const data = await res.json(); activeTicketId = ticketId;
+    diagnostic.querySelector('[data-rag-diagnostic-result]').hidden = false;
+    const doc = data.document || {};
+    diagnostic.querySelector('[data-rag-diagnostic-summary]').innerHTML = [
+      metric('Indexed', data.indexed ? 'Yes' : 'No', data.ineligibility_reason || 'Document found', data.indexed ? 'success' : 'danger'),
+      metric('Freshness', data.current ? 'Current' : 'Stale / unknown', date(doc.indexed_at), data.current ? 'success' : 'warning'),
+      metric('Eligible', data.eligible ? 'Yes' : 'No', data.ineligibility_reason || 'Ready for matching', data.eligible ? 'success' : 'danger'),
+      metric('Company scope', fmt(doc.company_id), esc(doc.permission_scope?.visibility || 'fail-closed'), 'info'),
+      metric('Embedding', fmt(doc.embedding_model), `${(doc.chunks || []).length} section(s)`, 'neutral'),
+    ].join('');
+    diagnostic.querySelector('[data-rag-chunks]').innerHTML = (doc.chunks || []).map(row => `<tr><td>Section ${esc(row.chunk_index)}</td><td>${number(row.token_count)}</td><td>${number(row.character_count)}</td><td>${esc(row.embedding_model)}</td><td>${date(row.indexed_at)}</td><td><span class="status status--${row.is_active ? 'success' : 'neutral'}">${row.is_active ? 'Active' : 'Inactive'}</span></td></tr>`).join('') || emptyRow(6, 'No indexed sections.');
+    diagnostic.querySelector('[data-rag-candidates]').innerHTML = (data.candidates || []).map(row => `<tr><td>${esc(row.title)}<br><small>${esc(row.source_type)}:${esc(row.source_id)}</small></td><td>${Number(row.semantic_score).toFixed(3)}</td><td>${Number(row.lexical_score).toFixed(3)}</td><td>${Number(row.metadata_score).toFixed(3)}</td><td>${Number(row.source_weight).toFixed(2)}</td><td>${Number(row.final_score).toFixed(3)}</td><td><span class="status status--${row.accepted ? 'success' : 'warning'}">${row.accepted ? 'Accepted' : 'Rejected'}</span><br><small>${esc(row.rejection_reason || row.applied_configuration)}</small></td></tr>`).join('') || emptyRow(7, 'No eligible candidates.');
+    const queueRows = (data.queue || []).map(row => ({...row, display_status: row.status, score: null, reason: row.error_category ? `${row.error_category}; ${row.next_action}` : row.next_action, when: row.completed_at || row.started_at || row.created_at}));
+    const relationRows = (data.relationships || []).map(row => ({...row, display_status: row.stale ? 'STALE' : row.match_status, score: row.relevance_score, model: row.evaluated_model, retry_count: null, reason: row.reason, when: row.evaluated_at}));
+    diagnostic.querySelector('[data-rag-decisions]').innerHTML = [...queueRows, ...relationRows].map(row => `<tr><td>${esc(row.title)}<br><small>${esc(row.source_type)}:${esc(row.source_id)}</small></td><td><span class="status status--neutral">${esc(row.display_status)}</span></td><td>${row.score === null || row.score === undefined ? '—' : Number(row.score).toFixed(3)}</td><td>${esc(row.model)}</td><td>${fmt(row.retry_count)}</td><td>${esc(row.reason)}</td><td>${date(row.when)}</td></tr>`).join('') || emptyRow(7, 'No queued or completed decisions.');
+    message.textContent = `Diagnostic loaded for ticket #${ticketId}. Indexed content is redacted.`;
+  }
+  async function diagnosticAction(action) {
+    if (!activeTicketId) return;
+    const message = diagnostic.querySelector('[data-rag-diagnostic-status]');
+    message.textContent = `${action === 'reindex' ? 'Re-indexing document' : action === 'rebuild' ? 'Rebuilding relationships' : 'Retrying failed jobs'}…`;
+    const path = action === 'reindex' ? 'reindex' : action === 'rebuild' ? 'relationships/rebuild' : 'relationships/retry';
+    const res = await fetch(`/api/agent/rag/diagnostics/tickets/${encodeURIComponent(activeTicketId)}/${path}`, {method: 'POST', headers: {'Accept': 'application/json', 'X-CSRF-Token': csrf}});
+    if (!res.ok) throw new Error(`Unable to ${action}`);
+    const result = await res.json();
+    message.textContent = `Action completed: ${Object.entries(result).filter(([key]) => key !== 'status').map(([key, value]) => `${key.replaceAll('_', ' ')} ${value}`).join(', ')}.`;
+    await loadDiagnostic(activeTicketId);
+  }
   async function loadHealth() {
     status.textContent = 'Loading RAG statistics…';
     const [healthRes, matchingRes] = await Promise.all([
@@ -177,6 +251,12 @@
   document.querySelector('[data-rag-matching-pause]')?.addEventListener('click', () => setMatchingPaused(true).catch(err => status.textContent = err.message));
   document.querySelector('[data-rag-matching-resume]')?.addEventListener('click', () => setMatchingPaused(false).catch(err => status.textContent = err.message));
   document.querySelector('[data-rag-matching-cleanup]')?.addEventListener('click', () => cleanupStaleMatches().catch(err => status.textContent = err.message));
+  diagnostic.querySelector('[data-rag-diagnostic-form]')?.addEventListener('submit', event => { event.preventDefault(); const id = Number(new FormData(event.currentTarget).get('ticket_id')); if (Number.isInteger(id) && id > 0) loadDiagnostic(id).catch(err => diagnostic.querySelector('[data-rag-diagnostic-status]').textContent = err.message); });
+  diagnostic.querySelector('[data-rag-reindex]')?.addEventListener('click', () => diagnosticAction('reindex').catch(err => diagnostic.querySelector('[data-rag-diagnostic-status]').textContent = err.message));
+  diagnostic.querySelector('[data-rag-rebuild]')?.addEventListener('click', () => diagnosticAction('rebuild').catch(err => diagnostic.querySelector('[data-rag-diagnostic-status]').textContent = err.message));
+  diagnostic.querySelector('[data-rag-retry]')?.addEventListener('click', () => diagnosticAction('retry').catch(err => diagnostic.querySelector('[data-rag-diagnostic-status]').textContent = err.message));
+  document.querySelectorAll('[data-table-filter]').forEach(control => control.addEventListener('input', () => { const value = control.value.toLowerCase(); document.querySelectorAll(`#${control.dataset.tableFilter} tbody tr`).forEach(row => row.hidden = !row.textContent.toLowerCase().includes(value)); }));
+  document.querySelectorAll('[data-sortable-table] [data-sort]').forEach(button => button.addEventListener('click', () => { const body = button.closest('table').tBodies[0]; const index = Number(button.dataset.sort); const rows = [...body.rows]; const direction = button.dataset.direction === 'asc' ? -1 : 1; button.dataset.direction = direction === 1 ? 'asc' : 'desc'; rows.sort((a, b) => a.cells[index].textContent.trim().localeCompare(b.cells[index].textContent.trim(), undefined, {numeric: true}) * direction).forEach(row => body.append(row)); }));
   loadHealth().catch(err => status.textContent = err.message);
 })();
 </script>
