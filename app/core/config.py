@@ -498,6 +498,10 @@ class Settings(BaseSettings):
             "request, defaulting to https:// when a proxy is detected."
         ),
     )
+    recaptcha_site_key: str = Field(default="", validation_alias="RECAPTCHA_SITE_KEY")
+    recaptcha_secret_key: str = Field(
+        default="", validation_alias="RECAPTCHA_SECRET_KEY", repr=False
+    )
     opnform_base_url: AnyHttpUrl | None = Field(
         default=None,
         validation_alias=AliasChoices("OPNFORM_BASE_URL", "OPNFORM_URL"),
@@ -732,7 +736,10 @@ class Settings(BaseSettings):
         default=4, validation_alias="MATRIXBOT_AI_CONCURRENCY_LIMIT", ge=1, le=25
     )
     matrixbot_ai_provider_concurrency_limit: int = Field(
-        default=2, validation_alias="MATRIXBOT_AI_PROVIDER_CONCURRENCY_LIMIT", ge=1, le=25
+        default=2,
+        validation_alias="MATRIXBOT_AI_PROVIDER_CONCURRENCY_LIMIT",
+        ge=1,
+        le=25,
     )
     matrixbot_ai_show_match_tags: bool = Field(
         default=True, validation_alias="MATRIXBOT_AI_SHOW_MATCH_TAGS"

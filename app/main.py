@@ -674,6 +674,9 @@ endpoint_limiter = EndpointRateLimiter(redis_client=_rate_limit_redis)
 
 # Login: 5 attempts per 15 minutes per IP
 endpoint_limiter.add_limit("/api/auth/login", "POST", limit=5, window_seconds=900)
+endpoint_limiter.add_limit(
+    "/api/tray/ticket-form/fallback", "POST", limit=10, window_seconds=3600
+)
 endpoint_limiter.add_limit("/auth/passkeys/authenticate/options", "POST", limit=5, window_seconds=300)
 endpoint_limiter.add_limit("/auth/passkeys/authenticate/verify", "POST", limit=10, window_seconds=300)
 endpoint_limiter.add_limit("/auth/passkeys/register/options", "POST", limit=10, window_seconds=300)

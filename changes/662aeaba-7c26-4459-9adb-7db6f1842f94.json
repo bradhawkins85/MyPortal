@@ -1,0 +1,7 @@
+{
+  "guid": "662aeaba-7c26-4459-9adb-7db6f1842f94",
+  "occurred_at": "2026-09-23T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Add a reCAPTCHA-protected unauthenticated fallback for tray ticket submissions.",
+  "content_hash": "66da9d1a5d741438f715712c5a660ce78f9befb1addf7d45f7159c5a81b5e47e"
+}
