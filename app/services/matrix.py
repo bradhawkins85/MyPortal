@@ -169,6 +169,7 @@ async def send_message(
     msgtype: str = "m.text",
     access_token: str | None = None,
     sender_display_name: str | None = None,
+    transaction_id: str | None = None,
 ) -> dict[str, Any]:
     """Send a message to a room. Returns {event_id}.
 
@@ -177,7 +178,9 @@ async def send_message(
     bot as the sender, so prefixing both the plain-text and formatted payloads
     preserves the actual device/user attribution for Element and mobile apps.
     """
-    txn_id = uuid.uuid4().hex
+    # A stable transaction id lets callers safely retry an ambiguous Matrix
+    # request: homeservers return the original event instead of creating one.
+    txn_id = transaction_id or uuid.uuid4().hex
     headers = _bot_headers() if not access_token else {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
