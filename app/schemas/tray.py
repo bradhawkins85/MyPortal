@@ -61,6 +61,8 @@ class TrayMenuNode(BaseModel):
     * ``label`` — non-interactive caption.
     * ``app_version`` — non-interactive caption showing the tray app version.
     * ``link`` — opens ``url`` in the default browser.
+      The ``{{service_status_url}}`` URL variable is resolved by the server to
+      the published status page for the device's company.
     * ``submenu`` — has ``children``.
     * ``display_text`` — opens a popup with ``text`` (sanitised HTML).
     * ``env_var`` — reads an env var named ``name`` and shows / copies it.

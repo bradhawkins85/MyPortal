@@ -1,0 +1,7 @@
+{
+  "guid": "748d830e-dd68-486b-9103-64a2650c1cbc",
+  "occurred_at": "2026-09-23T00:00:00Z",
+  "change_type": "Feature",
+  "summary": "Add a Service Status tray menu option that resolves to each device company's published status page without requiring a tray agent update.",
+  "content_hash": "de6944f8e61a00bff69cca8a6a7326ca3634a5816a6168717d5cd8525466256c"
+}
