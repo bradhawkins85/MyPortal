@@ -17,6 +17,42 @@ async def get_document_by_source(
     )
 
 
+async def get_document_diagnostic(source_type: str, source_id: str) -> dict[str, Any] | None:
+    """Return index metadata and redacted chunk descriptors for one source record."""
+    document = await db.fetch_one(
+        """
+        SELECT * FROM rag_documents
+        WHERE source_type = ? AND source_id = ?
+        ORDER BY is_active DESC, indexed_at DESC, id DESC LIMIT 1
+        """,
+        (source_type, source_id),
+    )
+    if not document:
+        return None
+    chunks = await db.fetch_all(
+        """
+        SELECT id, chunk_index, chunk_hash, embedding_model, token_count,
+               is_active, indexed_at, LENGTH(chunk_text) AS character_count
+        FROM rag_chunks WHERE document_id = ?
+        ORDER BY chunk_index, id
+        """,
+        (document["id"],),
+    )
+    document["chunks"] = chunks or []
+    return document
+
+
+async def get_source_jobs(source_type: str, source_id: str) -> list[dict[str, Any]]:
+    return await db.fetch_all(
+        """
+        SELECT id, status, message, started_at, finished_at, created_at
+        FROM rag_index_jobs WHERE source_type = ? AND source_id = ?
+        ORDER BY created_at DESC, id DESC LIMIT 10
+        """,
+        (source_type, source_id),
+    )
+
+
 async def upsert_document(record: dict[str, Any]) -> int:
     existing = await db.fetch_one(
         """

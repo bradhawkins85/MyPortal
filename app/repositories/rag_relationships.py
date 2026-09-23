@@ -219,6 +219,15 @@ def _candidate_score(
     source_vectors: list[list[float]],
     target: Mapping[str, Any],
 ) -> float:
+    return float(_candidate_score_components(source, source_text, source_vectors, target)["final_score"])
+
+
+def _candidate_score_components(
+    source: Mapping[str, Any],
+    source_text: str,
+    source_vectors: list[list[float]],
+    target: Mapping[str, Any],
+) -> dict[str, float]:
     target_text = " ".join(
         (str(target.get("title") or ""), str(target.get("candidate_text") or ""))
     )
@@ -238,8 +247,102 @@ def _candidate_score(
         (_cosine(a, b) for a in source_vectors for b in target_vectors if b),
         default=0.0,
     )
-    exact = 1.0 if identifiers or metadata else 0.0
-    return (0.50 * max(0.0, semantic)) + (0.30 * lexical) + (0.20 * exact)
+    metadata_score = 1.0 if identifiers or metadata else 0.0
+    source_weight = 1.0
+    final = ((0.50 * max(0.0, semantic)) + (0.30 * lexical) + (0.20 * metadata_score)) * source_weight
+    return {
+        "semantic_score": max(0.0, semantic),
+        "lexical_score": lexical,
+        "metadata_score": metadata_score,
+        "source_weight": source_weight,
+        "final_score": final,
+    }
+
+
+async def candidate_diagnostics(document_id: int, *, limit: int = 50) -> list[dict[str, Any]]:
+    """Return the deterministic candidate funnel without exposing indexed content."""
+    source = await get_document(document_id)
+    if not source:
+        return []
+    targets = await list_compatible_targets(
+        document_id, include_tickets=True, limit=max(1, min(limit, 100)), ticket_limit=20
+    )
+    source_chunks = await db.fetch_all(
+        "SELECT chunk_text, embedding_json FROM rag_chunks WHERE document_id = ? AND is_active = 1",
+        (document_id,),
+    )
+    source_text = " ".join([str(source.get("title") or "")] + [str(row.get("chunk_text") or "") for row in source_chunks])
+    source_vectors = [_json_vector(row.get("embedding_json")) for row in source_chunks]
+    source_vectors = [vector for vector in source_vectors if vector]
+    settings = get_settings()
+    candidate_limit = int(settings.rag_relationship_candidate_limit)
+    ticket_limit = int(settings.rag_relationship_ticket_candidate_limit)
+    ticket_count = 0
+    rows: list[dict[str, Any]] = []
+    for rank, target in enumerate(targets, start=1):
+        components = _candidate_score_components(source, source_text, source_vectors, target)
+        rejected = None
+        if str(target.get("source_type")) == "tickets":
+            ticket_count += 1
+            if not settings.enable_ticket_relationships:
+                rejected = "Ticket-to-ticket matching is disabled (ENABLE_TICKET_RELATIONSHIPS)."
+            elif ticket_count > ticket_limit:
+                rejected = f"Ticket candidate rank exceeds RAG_RELATIONSHIP_TICKET_CANDIDATE_LIMIT={ticket_limit}."
+        if rejected is None and rank > candidate_limit:
+            rejected = f"Candidate rank exceeds RAG_RELATIONSHIP_CANDIDATE_LIMIT={candidate_limit}."
+        rows.append({
+            "document_id": int(target["id"]), "source_type": target.get("source_type"),
+            "source_id": target.get("source_id"), "title": target.get("title"),
+            **components, "accepted": rejected is None,
+            "rejection_reason": rejected,
+            "applied_configuration": (
+                f"RAG_RELATIONSHIP_CANDIDATE_LIMIT={candidate_limit}; "
+                f"RAG_RELATIONSHIP_TICKET_CANDIDATE_LIMIT={ticket_limit}; rank={rank}"
+            ),
+        })
+    return rows
+
+
+async def document_decisions(document_id: int) -> dict[str, list[dict[str, Any]]]:
+    queue = await db.fetch_all(
+        """
+        SELECT q.id, q.status, q.retry_count, q.created_at, q.started_at, q.completed_at,
+               q.last_error, d.id AS candidate_document_id, d.source_type, d.source_id, d.title
+        FROM rag_relationship_queue q
+        JOIN rag_documents d ON d.id = CASE WHEN q.source_document_id = ? THEN q.target_document_id ELSE q.source_document_id END
+        WHERE q.source_document_id = ? OR q.target_document_id = ?
+        ORDER BY q.created_at DESC, q.id DESC
+        """,
+        (document_id, document_id, document_id),
+    )
+    relationships = await db.fetch_all(
+        """
+        SELECT r.id, r.relationship_type, r.match_status, r.relevance_score, r.confidence,
+               r.reason, r.evaluated_model, r.evaluated_at, r.source_hash, r.target_hash,
+               s.content_hash AS current_source_hash, t.content_hash AS current_target_hash,
+               d.id AS candidate_document_id, d.source_type, d.source_id, d.title
+        FROM rag_relationships r
+        JOIN rag_documents s ON s.id = r.source_document_id
+        JOIN rag_documents t ON t.id = r.target_document_id
+        JOIN rag_documents d ON d.id = CASE WHEN r.source_document_id = ? THEN r.target_document_id ELSE r.source_document_id END
+        WHERE r.source_document_id = ? OR r.target_document_id = ?
+        ORDER BY r.evaluated_at DESC, r.id DESC
+        """,
+        (document_id, document_id, document_id),
+    )
+    return {"queue": queue or [], "relationships": relationships or []}
+
+
+async def retry_failed_for_document(document_id: int) -> int:
+    return await db.execute_rowcount(
+        """
+        UPDATE rag_relationship_queue SET status = 'PENDING', retry_count = 0,
+            started_at = NULL, completed_at = NULL, last_error = NULL,
+            claim_token = NULL, lease_expires_at = NULL, heartbeat_at = NULL
+        WHERE (source_document_id = ? OR target_document_id = ?) AND status = 'FAILED'
+        """,
+        (document_id, document_id),
+    )
 
 
 async def mark_relationships_stale(document_id: int) -> None:
