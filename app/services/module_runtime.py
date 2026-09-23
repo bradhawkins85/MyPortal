@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from copy import deepcopy
-from typing import Any
+from typing import Any, Awaitable, Callable, Mapping
 
 from app.repositories import integration_modules as module_repo
 
@@ -245,3 +245,21 @@ async def get_module_settings(slug: str) -> dict[str, Any] | None:
     if not module:
         return None
     return dict(module.get("settings") or {})
+
+
+async def trigger_module(
+    slug: str,
+    payload: Mapping[str, Any] | None = None,
+    *,
+    background: bool = True,
+    on_complete: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+) -> dict[str, Any]:
+    """Dispatch a module without introducing an import cycle at module load time."""
+    from app.services import modules
+
+    return await modules.trigger_module(
+        slug,
+        payload,
+        background=background,
+        on_complete=on_complete,
+    )

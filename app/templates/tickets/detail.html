@@ -340,6 +340,40 @@
             </div>
           </article>
 
+          {% if ticket.status in ['resolved', 'closed'] %}
+          <details class="card card--panel" id="resolution-steps">
+            <summary class="card__header">
+              <span class="card__title">Resolution Steps</span>
+              {% if ticket.resolution_steps_status == 'queued' %}<span class="status status--info">Generating…</span>
+              {% elif ticket.resolution_steps_status == 'error' %}<span class="status status--danger">Generation failed</span>
+              {% elif ticket.resolution_steps %}<span class="status status--success">Available</span>{% endif %}
+            </summary>
+            <div class="card__body">
+              <form action="/admin/tickets/{{ ticket.id }}/resolution-steps" method="post" class="form">
+                {% include "partials/csrf.html" %}
+                <div class="form-field">
+                  <span class="form-label" id="ticket-resolution-steps-label">Final resolution outline</span>
+                  <div class="rich-text-editor" data-rich-text-editor aria-labelledby="ticket-resolution-steps-label">
+                    <div class="rich-text-editor__toolbar" role="toolbar" aria-label="Resolution formatting options">
+                      <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="bold" aria-label="Bold">B</button>
+                      <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="italic" aria-label="Italic">I</button>
+                      <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="insertUnorderedList" aria-label="Bulleted list">•</button>
+                      <button type="button" class="rich-text-editor__button" data-rich-text-button data-command="insertOrderedList" aria-label="Numbered list">1.</button>
+                    </div>
+                    <div class="rich-text-editor__surface" data-rich-text-content contenteditable="true" role="textbox" aria-multiline="true">{{ ticket.resolution_steps | default('', true) | safe }}</div>
+                  </div>
+                  <textarea id="ticket-resolution-steps" name="resolutionSteps" class="rich-text-editor__fallback" data-rich-text-value data-rich-text-fallback aria-labelledby="ticket-resolution-steps-label">{{ ticket.resolution_steps or '' }}</textarea>
+                  <p class="form-help">{{ 'AI generated' if ticket.resolution_steps_source == 'ai_generated' else 'Manually edited' if ticket.resolution_steps_source == 'manually_edited' else 'Add or generate a reusable resolution outline.' }}</p>
+                </div>
+                <div class="form-actions">
+                  <button class="button button--primary" type="submit">Save resolution steps</button>
+                  <button class="button button--secondary" type="submit" formaction="/admin/tickets/{{ ticket.id }}/resolution-steps/reprocess" data-resolution-reprocess>Regenerate with AI</button>
+                </div>
+              </form>
+            </div>
+          </details>
+          {% endif %}
+
           {% call mobile_collapsible('Reply', open=True, id='ticket-reply-mobile') %}
           <article class="card card--panel">
             <header class="card__header">
@@ -468,6 +502,12 @@
                       required
                     >{{ reply_body | e }}</textarea>
                   </div>
+                  {% if has_helpdesk_access or is_super_admin %}
+                  <label class="form-checkbox">
+                    <input type="checkbox" name="isResolutionStep" value="1" />
+                    <span>Mark this reply as a resolution step</span>
+                  </label>
+                  {% endif %}
                   <div class="form-field">
                     <label class="form-label" for="ticket-reply-attachments">Attachments (optional)</label>
                     <input
@@ -598,6 +638,9 @@
                             {% if reply.is_internal %}
                               <span class="badge badge--muted">Internal</span>
                             {% endif %}
+                            {% if reply.is_resolution_step %}
+                              <span class="status status--success">Resolution step</span>
+                            {% endif %}
                             {% if reply.has_email_tracking %}
                               {% set _reply_recipient_count = reply.recipient_count|default(0) %}
                               {% set _is_multi_recipient = _reply_recipient_count and _reply_recipient_count > 1 %}
@@ -661,6 +704,13 @@
                           </button>
                         {% else %}
                           <p class="text-muted">No content provided.</p>
+                        {% endif %}
+                        {% if has_helpdesk_access or is_super_admin %}
+                        <form action="/admin/tickets/{{ ticket.id }}/replies/{{ reply.id }}/resolution-step" method="post" class="form-actions">
+                          {% include "partials/csrf.html" %}
+                          <input type="hidden" name="flagged" value="{{ '0' if reply.is_resolution_step else '1' }}" />
+                          <button type="submit" class="button button--ghost button--small">{{ 'Unmark resolution step' if reply.is_resolution_step else 'Mark as resolution step' }}</button>
+                        </form>
                         {% endif %}
                       </div>
                     </article>
