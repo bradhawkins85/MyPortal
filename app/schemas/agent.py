@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, constr
+from pydantic import BaseModel, Field, constr, field_validator
 
 
 class AgentSourceArticle(BaseModel):
@@ -228,18 +228,32 @@ class AgentEvidenceItem(BaseModel):
 
 class AgentQueryRequest(BaseModel):
     query: constr(strip_whitespace=True, min_length=1, max_length=2000)
-    source_filters: list[
-        constr(strip_whitespace=True, min_length=1, max_length=40)
-    ] = Field(default_factory=list)
+    source_filters: list[constr(strip_whitespace=True, min_length=1, max_length=40)] = (
+        Field(default_factory=list)
+    )
+
+    @field_validator("source_filters")
+    @classmethod
+    def validate_sources(cls, value: list[str]) -> list[str]:
+        from app.services.agent_sources import validate_source_filters
+
+        return validate_source_filters(value)
 
 
 class AgentSavedSearchCreateRequest(BaseModel):
     name: constr(strip_whitespace=True, min_length=1, max_length=120)
     query: constr(strip_whitespace=True, min_length=1, max_length=2000)
-    source_filters: list[
-        constr(strip_whitespace=True, min_length=1, max_length=40)
-    ] = Field(default_factory=list)
+    source_filters: list[constr(strip_whitespace=True, min_length=1, max_length=40)] = (
+        Field(default_factory=list)
+    )
     is_shared: bool = False
+
+    @field_validator("source_filters")
+    @classmethod
+    def validate_sources(cls, value: list[str]) -> list[str]:
+        from app.services.agent_sources import validate_source_filters
+
+        return validate_source_filters(value)
 
 
 class AgentSavedSearchItem(BaseModel):

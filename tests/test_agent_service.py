@@ -41,7 +41,9 @@ async def test_feature_pack_results_require_and_canonicalise_stable_ids(monkeypa
     monkeypatch.setattr(agent_service, "get_registry", lambda: registry)
     monkeypatch.setattr(agent_service.importlib, "import_module", lambda _name: module)
     monkeypatch.setattr(
-        agent_service, "log_warning", lambda message, **meta: warnings.append((message, meta))
+        agent_service,
+        "log_warning",
+        lambda message, **meta: warnings.append((message, meta)),
     )
 
     sources = await agent_service._search_feature_pack_sources(
@@ -191,10 +193,7 @@ def test_extract_explicit_ticket_ids_supported_formats():
 
 
 def test_extract_explicit_ticket_ids_requires_markers():
-    query = (
-        "Reference abc1234def, #      nope, ticketabc123, "
-        "and ticket      nope."
-    )
+    query = "Reference abc1234def, #      nope, ticketabc123, " "and ticket      nope."
 
     result = agent_service._extract_explicit_ticket_ids(query)
 
@@ -202,7 +201,9 @@ def test_extract_explicit_ticket_ids_requires_markers():
 
 
 def test_extract_explicit_ticket_ids_rejects_three_digit_standalone_values():
-    result = agent_service._extract_explicit_ticket_ids("Check 321 before anything else.")
+    result = agent_service._extract_explicit_ticket_ids(
+        "Check 321 before anything else."
+    )
 
     assert result == []
 
@@ -1074,14 +1075,36 @@ async def test_execute_agent_query_passes_all_allowed_source_types_to_rag(monkey
     )
 
     source_filters = retrieve_mock.await_args.kwargs["source_filters"]
-    assert source_filters == [
-        "assets",
-        "chats",
-        "issues",
-        "knowledge_base",
-        "ticket_comments",
-        "tickets",
-    ]
+    assert set(source_filters) == set(agent_service._SUPPORTED_SOURCE_FILTERS) - {
+        "feature_packs"
+    }
+
+
+@pytest.mark.parametrize(
+    ("query", "source_type"),
+    [
+        ("show recent orders", "orders"),
+        ("find staff named Sam", "staff"),
+        ("list shared mailboxes", "mailboxes"),
+        ("show service status", "service_status"),
+        ("which backups failed", "backup_jobs"),
+        ("show monthly reports", "reports"),
+    ],
+)
+def test_source_routing_never_excludes_supported_query_sources(query, source_type):
+    assert source_type in agent_service._infer_allowed_rag_sources(query)
+
+
+@pytest.mark.parametrize(
+    "source_type",
+    ["orders", "staff", "mailboxes", "service_status", "backup_jobs", "reports"],
+)
+def test_explicit_single_source_filter_is_not_restricted_by_inferred_intent(
+    source_type,
+):
+    requested = agent_service._normalise_source_filters([source_type])
+    allowed = requested or agent_service._infer_allowed_rag_sources("unrelated wording")
+    assert allowed == {source_type}
 
 
 def test_apply_source_caps_limits_overrepresented_sources():
@@ -1136,7 +1159,9 @@ async def test_execute_agent_query_applies_source_filters_and_reports_confidence
             },
         ]
     )
-    monkeypatch.setattr(agent_service.rag_retrieval, "retrieve_candidates", retrieve_mock)
+    monkeypatch.setattr(
+        agent_service.rag_retrieval, "retrieve_candidates", retrieve_mock
+    )
 
     async def fake_trigger(slug, payload, *, background):
         return {"status": "succeeded", "response": {"response": "ok"}}
@@ -1150,7 +1175,10 @@ async def test_execute_agent_query_applies_source_filters_and_reports_confidence
         source_filters=["tickets", "chats"],
     )
 
-    assert set(retrieve_mock.await_args.kwargs["source_filters"]) == {"tickets", "chats"}
+    assert set(retrieve_mock.await_args.kwargs["source_filters"]) == {
+        "tickets",
+        "chats",
+    }
     assert result["stages"][0]["data"]["applied_source_filters"] == ["chats", "tickets"]
     assert result["answer_confidence"] is not None
     assert result["answer_confidence_label"] in {"low", "medium", "high"}

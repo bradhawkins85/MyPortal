@@ -11,8 +11,8 @@
     <header class="agent-panel__header">
       <h2 id="ai-search-heading" class="agent-panel__title">How can we assist you</h2>
       <p class="agent-panel__subtitle">
-        Ask a question in plain English. The assistant searches everything including knowledge base articles, chats,
-        tickets, orders, shop content, and assets.
+        Ask a question in plain English. The assistant searches the selected portal sources, including support,
+        commerce, company, Microsoft 365, service, reporting, best-practice, and feature-pack data you can access.
       </p>
     </header>
 
@@ -35,13 +35,9 @@
       </div>
       <fieldset class="agent-panel__filters" aria-label="Source filters">
         <legend class="agent-panel__label">Search sources</legend>
-        <label><input type="checkbox" value="tickets" data-agent-filter checked /> Tickets</label>
-        <label><input type="checkbox" value="knowledge_base" data-agent-filter checked /> Knowledge Base</label>
-        <label><input type="checkbox" value="orders" data-agent-filter checked /> Orders</label>
-        <label><input type="checkbox" value="assets" data-agent-filter checked /> Assets</label>
-        <label><input type="checkbox" value="issues" data-agent-filter checked /> Issues</label>
-        <label><input type="checkbox" value="chats" data-agent-filter checked /> Chats</label>
-        <label><input type="checkbox" value="products" data-agent-filter checked /> Products</label>
+        {% for source_type, source in agent_sources.items() %}
+          <label><input type="checkbox" value="{{ source_type }}" data-agent-filter checked /> {{ source.label }}</label>
+        {% endfor %}
       </fieldset>
       <div class="agent-panel__saved-actions">
         <input
