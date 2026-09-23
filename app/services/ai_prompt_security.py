@@ -104,12 +104,12 @@ def validate_object(
     return parsed
 
 
-_REFERENCE_RE = re.compile(r"\[(KB|Ticket|Product|Chat|Order|Asset|Company|Staff|Issue|ServiceStatus|BackupJob|Report|Mailbox|BestPractice):([^\]]+)\]")
+_REFERENCE_RE = re.compile(r"\[[A-Za-z][A-Za-z0-9 _-]*:[^\]\n]+\]")
 
 
 def validate_references(text: str, authorized_references: set[str]) -> str:
     """Reject citations/identifiers that were not supplied in authorized context."""
-    found = {f"[{kind}:{identifier}]" for kind, identifier in _REFERENCE_RE.findall(text or "")}
+    found = set(_REFERENCE_RE.findall(text or ""))
     unauthorized = found - authorized_references
     if unauthorized:
         raise ValueError(f"AI output referenced unauthorized records: {sorted(unauthorized)}")

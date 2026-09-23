@@ -57,6 +57,14 @@ def test_references_are_restricted_to_authorized_context():
         validate_references("See [KB:secret] and [Ticket:#99].", {"[KB:safe]"})
 
 
+def test_generic_rag_references_are_restricted_to_authorized_context():
+    assert validate_references(
+        "See [RAG:reports:7].", {"[RAG:reports:7]"}
+    ) == "See [RAG:reports:7]."
+    with pytest.raises(ValueError, match="unauthorized"):
+        validate_references("See [RAG:reports:invented].", {"[RAG:reports:7]"})
+
+
 def test_model_request_cannot_authorize_tool_execution():
     assert not authorize_tool_execution(independently_authorized=False, model_requested=True)
     assert authorize_tool_execution(independently_authorized=True, model_requested=False)
