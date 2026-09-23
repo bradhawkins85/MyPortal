@@ -351,25 +351,12 @@ def _safe_related_url(url: str | None) -> str | None:
 
 
 def _source_url(source_type: str, item: dict[str, Any]) -> str | None:
-    supplied_url = _safe_related_url(item.get("url"))
-    if supplied_url:
-        return supplied_url
-    identifier = item.get("id")
-    if source_type == "tickets" and identifier:
-        return f"/admin/tickets/{identifier}"
-    if source_type == "assets" and identifier:
-        return f"/admin/assets/{identifier}"
-    if source_type == "companies" and identifier:
-        return f"/admin/companies/{identifier}"
-    if source_type == "staff" and identifier:
-        return f"/admin/staff/{identifier}"
-    if source_type == "orders" and item.get("order_number"):
-        return f"/admin/orders/{item['order_number']}"
-    if source_type == "chats" and identifier:
-        return f"/chat/{identifier}"
-    if source_type == "issues" and identifier:
-        return f"/admin/issues/{identifier}"
-    return None
+    from app.services.rag_urls import canonical_source_url
+
+    identifier = item.get("id") or item.get("slug") or item.get("order_number")
+    return canonical_source_url(
+        source_type, identifier, metadata=item, supplied_url=item.get("url")
+    )
 
 
 def _source_relevance_score(item: dict[str, Any], search_terms: set[str]) -> int:

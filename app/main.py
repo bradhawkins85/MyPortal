@@ -180,6 +180,8 @@ from app.services import message_templates as message_templates_service
 from app.services import labour_types as labour_types_service
 from app.services import tickets as tickets_service
 from app.services import rag_index as rag_index_service
+from app.services.rag_permissions import can_access_candidate
+from app.services.rag_urls import canonical_source_url
 from app.services import template_variables
 from app.services import webhook_monitor
 from app.services import integration_operations as integration_operations_service
@@ -9714,38 +9716,36 @@ async def _render_tickets_dashboard(
     return response
 
 
-def _ticket_related_safe_url(url: Any) -> str | None:
-    candidate = str(url or "").strip()
-    if not candidate:
-        return None
-    parsed = urlsplit(candidate)
-    if parsed.scheme or parsed.netloc:
-        return None
-    if not candidate.startswith("/") or candidate.startswith("//"):
-        return None
-    return candidate
+_RELATIONSHIP_LABELS = {
+    "DIRECT_MATCH": "Direct match",
+    "DUPLICATE": "Duplicate",
+    "FOLLOW_UP": "Follow-up",
+    "KNOWN_ISSUE": "Known issue",
+    "PARENT_CHILD": "Parent / child",
+    "RELATED": "Related",
+    "SUPPORTING": "Supporting evidence",
+}
 
 
-def _ticket_related_fallback_url(source_type: str, source_id: Any) -> str | None:
-    identifier = str(source_id or "").strip()
-    if not identifier:
-        return None
-    if source_type == "tickets":
-        return f"/admin/tickets/{quote(identifier, safe='')}"
-    if source_type == "assets":
-        return f"/admin/assets/{quote(identifier, safe='')}"
-    if source_type == "companies":
-        return f"/admin/companies/{quote(identifier, safe='')}"
-    if source_type == "staff":
-        return f"/admin/staff/{quote(identifier, safe='')}"
-    if source_type == "chats":
-        return f"/chat/{quote(identifier, safe='')}"
-    if source_type == "issues":
-        return f"/admin/issues/{quote(identifier, safe='')}"
-    return None
+def _relationship_confidence_band(value: Any) -> str:
+    try:
+        score = float(value or 0)
+    except (TypeError, ValueError):
+        score = 0
+    if score >= 0.85:
+        return "High confidence"
+    if score >= 0.65:
+        return "Medium confidence"
+    return "Low confidence"
 
 
-async def _load_ticket_stored_related_items(ticket_id: int, *, limit: int = 12) -> list[dict[str, str]]:
+async def _load_ticket_stored_related_items(
+    ticket_id: int,
+    *,
+    user: Mapping[str, Any],
+    memberships: Sequence[Mapping[str, Any]],
+    limit: int = 12,
+) -> list[dict[str, Any]]:
     try:
         document = await rag_index_repo.get_document_by_source(
             "tickets",
@@ -9762,9 +9762,26 @@ async def _load_ticket_stored_related_items(ticket_id: int, *, limit: int = 12) 
         log_error("Failed to load stored ticket related content", ticket_id=ticket_id, error=str(exc))
         return []
 
-    items: list[dict[str, str]] = []
+    items: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
     for row in evidence_rows:
+        relationship_type = str(row.get("relationship_type") or "RELATED")
+        if not bool(row.get("target_available")):
+            items.append({
+                "available": False,
+                "relationship_label": _RELATIONSHIP_LABELS.get(relationship_type, "Related"),
+                "confidence_band": _relationship_confidence_band(row.get("confidence")),
+                "label": "Related target is unavailable or has been deleted",
+            })
+            continue
+        try:
+            permission_scope = json.loads(str(row.get("permission_scope_json") or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            permission_scope = {}
+        if not can_access_candidate(
+            {"permission_scope": permission_scope}, user=user, memberships=memberships
+        ):
+            continue
         source_type = str(row.get("source_type") or "").strip()
         source_id = row.get("source_id")
         if source_type == "tickets":
@@ -9773,12 +9790,28 @@ async def _load_ticket_stored_related_items(ticket_id: int, *, limit: int = 12) 
                     continue
             except (TypeError, ValueError):
                 source_id = None
-        url = _ticket_related_safe_url(row.get("url")) or _ticket_related_fallback_url(source_type, source_id)
+        try:
+            metadata = json.loads(str(row.get("metadata_json") or "{}"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            metadata = {}
+        url = canonical_source_url(
+            source_type, source_id, metadata=metadata, supplied_url=row.get("url")
+        )
         if not url or url in seen_urls:
             continue
         seen_urls.add(url)
         label = str(row.get("title") or f"{source_type.title()} {source_id}").strip()[:180]
-        items.append({"type": source_type, "label": label, "url": url})
+        reason = str(row.get("reason") or row.get("supporting_excerpt") or "").strip()[:300]
+        items.append({
+            "available": True,
+            "type": source_type,
+            "label": label,
+            "url": url,
+            "relationship_label": _RELATIONSHIP_LABELS.get(relationship_type, "Related"),
+            "confidence_band": _relationship_confidence_band(row.get("confidence")),
+            "score": round(float(row.get("relevance_score") or 0) * 100),
+            "reason": reason,
+        })
     return items
 
 
@@ -10344,7 +10377,11 @@ async def _render_ticket_detail(
 
     asset_options.sort(key=lambda option: option["label"].lower())
 
-    ticket_related_items = await _load_ticket_stored_related_items(ticket_id)
+    ticket_related_items = await _load_ticket_stored_related_items(
+        ticket_id,
+        user=user,
+        memberships=getattr(request.state, "available_companies", None) or [],
+    )
     ticket_expenses = await expenses_repo.list_expenses(ticket_id)
     ticket_canned_responses = await canned_responses_repo.list_responses()
     ticket_expense_total = sum(Decimal(str(expense.get("amount") or 0)) for expense in ticket_expenses)

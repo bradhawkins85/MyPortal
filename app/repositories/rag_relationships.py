@@ -578,13 +578,16 @@ async def list_relationship_evidence(
 ) -> list[dict[str, Any]]:
     return await db.fetch_all(
         """
-        SELECT r.*, d.source_type, d.source_id, d.title, d.url, GROUP_CONCAT(c.chunk_text, '\n') AS content
+        SELECT r.*, d.source_type, d.source_id, d.title, d.url,
+               d.permission_scope_json, d.metadata_json,
+               CASE WHEN d.id IS NOT NULL AND d.is_active = 1 THEN 1 ELSE 0 END AS target_available,
+               GROUP_CONCAT(c.chunk_text, '\n') AS content
         FROM rag_relationships r
-        JOIN rag_documents d ON d.id = CASE WHEN r.source_document_id = ? THEN r.target_document_id ELSE r.source_document_id END
+        LEFT JOIN rag_documents d ON d.id = CASE WHEN r.source_document_id = ? THEN r.target_document_id ELSE r.source_document_id END
         LEFT JOIN rag_chunks c ON c.document_id = d.id AND c.is_active = 1
         WHERE (r.source_document_id = ? OR r.target_document_id = ?)
           AND r.match_status = 'MATCH'
-          AND r.relationship_type IN ('DIRECT_MATCH','RELATED','SUPPORTING')
+          AND r.relationship_type IN ('DIRECT_MATCH','RELATED','SUPPORTING','DUPLICATE','FOLLOW_UP','KNOWN_ISSUE','PARENT_CHILD')
         GROUP BY r.id, d.id
         ORDER BY r.relevance_score DESC, r.confidence DESC
         LIMIT ?

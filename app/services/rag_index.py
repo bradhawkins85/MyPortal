@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.logging import log_info, log_warning
 from app.repositories import rag_index as rag_repo
 from app.services import rag_relationships
+from app.services.rag_urls import canonical_source_url
 from app.services.sanitization import sanitize_rich_text
 
 # Shared token regex and stop-word set used by both embed_text and BM25 retrieval so
@@ -638,13 +639,19 @@ async def index_document(
         )
     if not chunks:
         chunks = [normalise_text(document.title)]
+    canonical_url = canonical_source_url(
+        document.source_type,
+        document.source_id,
+        metadata=document.metadata,
+        supplied_url=document.url,
+    )
     doc_id = await rag_repo.upsert_document(
         {
             "source_type": document.source_type,
             "source_id": document.source_id,
             "company_id": document.company_id,
             "title": document.title,
-            "url": document.url,
+            "url": canonical_url,
             "permission_scope_json": json.dumps(
                 document.permission_scope or {}, ensure_ascii=False
             ),
