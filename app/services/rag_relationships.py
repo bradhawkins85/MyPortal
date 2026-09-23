@@ -115,6 +115,8 @@ async def enqueue_relationships_for_document(document_id: int) -> int:
     targets = await rel_repo.list_compatible_targets(
         document_id,
         include_tickets=bool(settings.enable_ticket_relationships),
+        limit=int(settings.rag_relationship_candidate_limit),
+        ticket_limit=int(settings.rag_relationship_ticket_candidate_limit),
     )
     queued = 0
     for target in targets:
@@ -128,6 +130,21 @@ async def enqueue_relationships_for_document(document_id: int) -> int:
             priority=_relationship_queue_priority(source, target),
         ):
             queued += 1
+    await rel_repo.record_candidate_funnel(
+        document_id,
+        eligible_documents=int(targets[0].get("eligible_documents", len(targets)))
+        if targets
+        else 0,
+        prefiltered_pairs=len(targets),
+        queued_evaluations=queued,
+    )
+    logger.info(
+        "RAG relationship candidate funnel document={} eligible={} prefiltered={} queued={}",
+        document_id,
+        int(targets[0].get("eligible_documents", len(targets))) if targets else 0,
+        len(targets),
+        queued,
+    )
     return queued
 
 
@@ -136,11 +153,7 @@ def _skip_pair(
 ) -> bool:
     if int(source["id"]) == int(target["id"]):
         return True
-    if (
-        source.get("company_id")
-        and target.get("company_id")
-        and int(source["company_id"]) != int(target["company_id"])
-    ):
+    if not rel_repo.company_scope_compatible(source, target):
         return True
     source_type = str(source.get("source_type") or "")
     target_type = str(target.get("source_type") or "")
@@ -184,14 +197,14 @@ def _prompt(source: Mapping[str, Any], target: Mapping[str, Any]) -> str:
     return f"""You evaluate MyPortal RAG document relationships. Return JSON only.
 
 Document A
-{source.get('source_type')} #{source.get('source_id')}
-{source.get('title')}
-{source.get('content') or ''}
+{source.get("source_type")} #{source.get("source_id")}
+{source.get("title")}
+{source.get("content") or ""}
 ----------------------------
 Document B
-{target.get('source_type')} #{target.get('source_id')}
-{target.get('title')}
-{target.get('content') or ''}
+{target.get("source_type")} #{target.get("source_id")}
+{target.get("title")}
+{target.get("content") or ""}
 
 Determine whether these documents are related. Store negative results too.
 Use one relationship value: DIRECT_MATCH, RELATED, SUPPORTING, DUPLICATE, NOT_RELEVANT, FOLLOW_UP, KNOWN_ISSUE, PARENT_CHILD.
@@ -361,6 +374,10 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
                     target_hash=str(target.get("content_hash") or ""),
                     duration_ms=int((time.perf_counter() - started) * 1000),
                 )
+                if parsed["match_status"] == MatchStatus.MATCH.value:
+                    await rel_repo.record_candidate_match(
+                        int(source["id"]), int(target["id"])
+                    )
                 if await rel_repo.complete_queue_item(
                     int(job["id"]), "COMPLETED", claim_token
                 ):
