@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from app.services import rag_index
 from app.services import tickets as tickets_service
 
@@ -41,3 +43,14 @@ def test_ticket_rag_document_contains_resolution_steps():
     assert document is not None
     assert "[Resolution steps]" in document.text
     assert "Renewed the certificate" in document.text
+
+
+def test_admin_ticket_template_exposes_resolution_controls():
+    template = Path("app/templates/admin/ticket_detail.html").read_text(encoding="utf-8")
+
+    assert 'name="isResolutionStep"' in template
+    assert 'data-ticket-resolution-panel' in template
+    assert 'name="resolutionSteps"' in template
+    assert 'data-resolution-reprocess' in template
+    assert 'replies/{{ reply.id }}/resolution-step' in template
+    assert "Resolution step" in template
