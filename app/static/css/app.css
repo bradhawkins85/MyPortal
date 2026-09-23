@@ -7766,6 +7766,21 @@ dialog.dialog::backdrop {
   backdrop-filter: blur(6px);
 }
 
+.resolution-review__subtitle { margin: var(--space-gap-tight) 0 0; color: var(--color-text-muted); }
+.resolution-review__toolbar, .resolution-review__actions { display: flex; align-items: center; gap: var(--space-gap-base); flex-wrap: wrap; }
+.resolution-review__toolbar { justify-content: space-between; margin-bottom: var(--space-gap-base); }
+.resolution-review__toggle { display: inline-flex; align-items: center; gap: var(--space-gap-tight); }
+.resolution-review__notice { min-height: 1.5rem; margin: 0 0 var(--space-gap-base); }
+.resolution-review__notice.is-success { color: var(--color-success); }
+.resolution-review__notice.is-error { color: var(--color-danger); }
+.resolution-review__state { padding: var(--space-gap-roomy); text-align: center; color: var(--color-text-muted); }
+.resolution-review__row--ignored { opacity: 0.65; }
+.resolution-review__table { max-height: min(60vh, 36rem); overflow: auto; }
+
+@media (max-width: 640px) {
+  .resolution-review__toolbar { align-items: stretch; flex-direction: column; }
+}
+
 .dialog__container {
   display: flex;
   flex-direction: column;
