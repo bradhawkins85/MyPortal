@@ -860,7 +860,7 @@
 
           {% if ticket.status in ['resolved', 'closed'] %}
           <details class="card card--panel card-collapsible" data-ticket-resolution-panel>
-            <summary class="card__header">
+            <summary class="card__header card__header--collapsible">
               <div class="card__title-group">
                 <h2 class="card__title">Resolution Steps</h2>
                 {% if ticket.resolution_steps_status == 'queued' %}
@@ -871,7 +871,9 @@
                   <span class="status status--success">Available</span>
                 {% endif %}
               </div>
-              <span class="card-collapsible__icon" aria-hidden="true"></span>
+              <div class="card__collapsible-meta">
+                <span class="card__toggle-icon" aria-hidden="true"></span>
+              </div>
             </summary>
             <div class="card__body">
               <form action="/admin/tickets/{{ ticket.id }}/resolution-steps" method="post" class="form">
