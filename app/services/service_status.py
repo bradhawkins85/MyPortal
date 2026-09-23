@@ -676,10 +676,10 @@ async def run_ai_lookup_for_service(service_id: int) -> dict[str, Any]:
         # trigger_module raises ValueError when the module is not configured at all
         return {"service_id": service_id, "error": "Ollama module not configured", "changed": False}
 
-    module_status = str(module_result.get("status") or "")
+    module_status = modules_service.module_result_status(module_result)
     if module_status == "skipped":
         return {"service_id": service_id, "error": "Ollama module not enabled", "changed": False}
-    if module_status != "succeeded":
+    if not modules_service.module_result_succeeded(module_result):
         last_error = module_result.get("last_error") or module_result.get("error") or module_status
         await service_status_repo.update_service(
             service_id,

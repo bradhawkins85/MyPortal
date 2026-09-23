@@ -503,7 +503,7 @@ async def admin_reporting_ai_query(request: Request):
             module_payload,
             background=False,
         )
-        if response.get("status") in {"error", "failed", "skipped"}:
+        if not modules_service.module_result_succeeded(response):
             reason = response.get("last_error") or response.get("reason")
             if response.get("status") == "skipped" and reason is None:
                 raise _ClientSafeAIQueryError("module_no_query")

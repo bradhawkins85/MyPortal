@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import asyncio
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Mapping
+from typing import Any, Awaitable, Callable, Mapping, TypedDict
 from urllib.parse import urljoin
 
 import httpx
@@ -56,6 +56,32 @@ _SMART_ATTACHMENT_POLL_ATTEMPTS = 5
 _SMART_ATTACHMENT_POLL_DELAY_SECONDS = 0.5
 
 _BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
+
+MODULE_RESULT_SUCCEEDED = "succeeded"
+
+
+class ModuleResult(TypedDict, total=False):
+    """Common result fields returned by :func:`trigger_module`."""
+
+    status: str
+    event_status: str
+    event_id: int
+    response: Any
+    last_error: str
+
+
+def module_result_status(result: Mapping[str, Any] | None) -> str:
+    """Return a module result status in its canonical, comparable form."""
+
+    if not isinstance(result, Mapping):
+        return ""
+    return str(result.get("status") or "").strip().lower()
+
+
+def module_result_succeeded(result: Mapping[str, Any] | None) -> bool:
+    """Whether a synchronous module invocation completed successfully."""
+
+    return module_result_status(result) == MODULE_RESULT_SUCCEEDED
 
 _TACTICALRMM_RATE_LIMIT_LOCK = asyncio.Lock()
 _TACTICALRMM_LAST_REQUEST_AT: float | None = None
@@ -3086,7 +3112,7 @@ def _build_event_result(
     event_id = event.get("id")
     if event_id is not None:
         result["event_id"] = int(event_id)
-    status = str(event.get("status") or "pending")
+    status = str(event.get("status") or "pending").strip().lower()
     result["status"] = status
     result["event_status"] = status
     if event.get("response_status") is not None:
@@ -6108,7 +6134,7 @@ async def _invoke_ai_rename_ticket(
         {"prompt": prompt, "temperature": 0.2, "max_tokens": 512},
         event_future=event_future,
     )
-    if str(ai_result.get("status") or "").lower() != "succeeded":
+    if not module_result_succeeded(ai_result):
         return {**ai_result, "ticket_id": ticket_id}
     new_subject = _extract_ai_ticket_subject(ai_result.get("response"))
     if not new_subject:

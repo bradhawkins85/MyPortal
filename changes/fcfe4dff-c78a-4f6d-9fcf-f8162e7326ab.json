@@ -1,0 +1,7 @@
+{
+  "guid": "fcfe4dff-c78a-4f6d-9fcf-f8162e7326ab",
+  "occurred_at": "2026-09-23T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Standardise synchronous AI module success handling so service-status tags retain successful provider results.",
+  "content_hash": "3d2e118a36df4e7e302391dbfe9f3a7845fad6302c02c07d731b0cfd67175d39"
+}
