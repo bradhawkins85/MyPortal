@@ -70,6 +70,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "https://cal.com",
             "https://app.cal.com",
             "https://static.cloudflareinsights.com",
+            "https://www.google.com",
+            "https://www.gstatic.com",
         ]
 
         # Add extra script sources (e.g., Plausible analytics)
@@ -83,7 +85,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Build connect-src directive
         connect_sources = ["'self'", "https://cal.com", "https://app.cal.com"]
 
-        frame_sources = ["'self'", "https://cal.com", "https://app.cal.com"]
+        frame_sources = [
+            "'self'", "https://cal.com", "https://app.cal.com", "https://www.google.com"
+        ]
 
         # Add portal URL to connect-src to support fetch() API calls from JavaScript
         # This is needed because forms on pages like cart.html use fetch() instead of

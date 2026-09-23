@@ -26,6 +26,8 @@ from decimal import Decimal
 from typing import Any
 from urllib.parse import quote
 
+import httpx
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
@@ -355,10 +357,14 @@ async def get_device_config(
             5, int(device.get("network_scan_interval_minutes") or 360)
         ),
         network_scan_wan_cidrs=[
-            item for item in str(device.get("network_scan_wan_cidrs") or "").splitlines() if item
+            item
+            for item in str(device.get("network_scan_wan_cidrs") or "").splitlines()
+            if item
         ],
         network_scan_local_cidrs=[
-            item for item in str(device.get("network_scan_local_cidrs") or "").splitlines() if item
+            item
+            for item in str(device.get("network_scan_local_cidrs") or "").splitlines()
+            if item
         ],
     )
 
@@ -376,8 +382,12 @@ async def upload_network_scan(
         for item in str(device.get("network_scan_wan_cidrs") or "").splitlines()
         if item
     ]
-    if configured_wan and not any(payload.wan_ip in network for network in configured_wan):
-        raise HTTPException(status_code=403, detail="WAN IP is outside this scanner's allowed ranges")
+    if configured_wan and not any(
+        payload.wan_ip in network for network in configured_wan
+    ):
+        raise HTTPException(
+            status_code=403, detail="WAN IP is outside this scanner's allowed ranges"
+        )
     configured_local = [
         ipaddress.ip_network(item)
         for item in str(device.get("network_scan_local_cidrs") or "").splitlines()
@@ -399,7 +409,8 @@ async def upload_network_scan(
             parsed_subnet.subnet_of(network) for network in configured_local
         ):
             raise HTTPException(
-                status_code=403, detail=f"Subnet is outside this scanner's allowed ranges: {raw_subnet}"
+                status_code=403,
+                detail=f"Subnet is outside this scanner's allowed ranges: {raw_subnet}",
             )
         subnet = str(parsed_subnet)
         if subnet not in subnets:
@@ -409,7 +420,9 @@ async def upload_network_scan(
     if not subnets:
         for host in hosts:
             try:
-                subnet = str(ipaddress.ip_network(f"{host['ip_address']}/24", strict=False))
+                subnet = str(
+                    ipaddress.ip_network(f"{host['ip_address']}/24", strict=False)
+                )
             except ValueError:
                 continue
             if subnet not in subnets:
@@ -985,6 +998,7 @@ def _render_ticket_form(
     success: str | None = None,
     branding_display_name: str | None = None,
     branding_icon_url: str = "/tray/icon.ico",
+    unauthenticated: bool = False,
 ) -> str:
     values = values or {}
     title = "Create Syncro Ticket" if mode == "syncro" else "Submit Ticket"
@@ -1005,6 +1019,13 @@ def _render_ticket_form(
             f'<label class="field"><span>{_html.escape(label + star)}</span>'
             f'<input name="{name}" type="{field_type}" value="{_html.escape(values.get(name, ""))}" '
             f'placeholder="{_html.escape(placeholder)}"{req}></label>'
+        )
+    if unauthenticated:
+        fields.insert(
+            3,
+            '<label class="field"><span>Computer Name *</span>'
+            f'<input name="computer_name" type="text" value="{_html.escape(values.get("computer_name", ""))}" '
+            'placeholder="e.g. RECEPTION-PC" maxlength="255" required></label>',
         )
     fields.append(
         '<label class="field"><span>Description</span>'
@@ -1080,6 +1101,27 @@ def _render_ticket_form(
     )
     disabled = " disabled" if success else ""
     meta_json = _html.escape(json.dumps(question_meta), quote=True)
+    form_action = (
+        "/api/tray/ticket-form/fallback" if unauthenticated else "/api/tray/ticket-form"
+    )
+    device_copy = (
+        "Device authentication was unavailable. You can still send a support request; "
+        "enter the computer name so we can identify it."
+        if unauthenticated
+        else "This secure tray form is authenticated by your enrolled tray device and links the request to this computer."
+    )
+    captcha = ""
+    captcha_script = ""
+    if unauthenticated:
+        captcha = (
+            f'<div id="fallback-recaptcha" class="g-recaptcha" data-size="invisible" '
+            f'data-sitekey="{_html.escape(_settings.recaptcha_site_key, quote=True)}" '
+            'data-callback="submitFallbackTicket"></div>'
+            '<p class="recaptcha-notice">This site is protected by reCAPTCHA and the Google '
+            '<a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a> '
+            'and <a href="https://policies.google.com/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a> apply.</p>'
+        )
+        captcha_script = '<script src="https://www.google.com/recaptcha/api.js" async defer></script>'
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{_html.escape(title)} - {_html.escape(brand_name)}</title>
@@ -1093,16 +1135,17 @@ def _render_ticket_form(
 .main{{padding:28px;overflow:auto}}.card{{max-width:860px;background:white;border:1px solid var(--line);border-radius:16px;padding:24px;box-shadow:0 10px 30px rgba(15,23,42,.06)}}
 .field{{display:grid;gap:8px;margin-bottom:18px}}.field span{{font-weight:600}}input,textarea,select{{width:100%;border:1px solid #cbd5e1;border-radius:10px;padding:11px 12px;font:inherit}}textarea{{resize:vertical}}.check{{display:flex;gap:8px;align-items:center}}.check input{{width:auto}}
 .actions{{display:flex;justify-content:flex-end;gap:12px;margin-top:24px}}button{{border:0;border-radius:10px;padding:12px 18px;font-weight:700;cursor:pointer}}.primary{{background:var(--primary);color:white}}.secondary{{background:#e5e7eb;color:#111827}}
+.recaptcha-notice{{margin:4px 0 0;color:var(--muted);font-size:13px;line-height:1.5}}.recaptcha-notice a{{color:#0b6f77;text-decoration:underline;text-underline-offset:2px}}
 .alert{{border-radius:12px;padding:12px 14px;margin-bottom:18px}}.alert-error{{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}}.alert-success{{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}}
 @media(max-width:760px){{.shell{{display:block}}.nav{{padding:16px}}.main{{padding:16px}}}}
-</style></head><body><div class="shell"><aside class="nav"><div class="brand"><img src="{_html.escape(branding_icon_url, quote=True)}" alt=""><h1>{_html.escape(brand_name)}</h1></div><p>This secure tray form is authenticated by your enrolled tray device and links the request to this computer.</p></aside><header class="header"><h2>{_html.escape(title)}</h2><p>{_html.escape(intro)}</p></header><main class="main"><form class="card" method="post" action="/api/tray/ticket-form"><input type="hidden" name="token" value="{_html.escape(token)}"><input type="hidden" name="csrf" value="{_html.escape(csrf)}"><input type="hidden" id="question-meta" value="{meta_json}">{notice}{done}{"".join(fields)}<div class="actions"><button type="button" class="secondary" onclick="window.close()">Cancel</button><button class="primary" type="submit"{disabled}>Send Request</button></div></form></main></div>
+</style>{captcha_script}</head><body><div class="shell"><aside class="nav"><div class="brand"><img src="{_html.escape(branding_icon_url, quote=True)}" alt=""><h1>{_html.escape(brand_name)}</h1></div><p>{_html.escape(device_copy)}</p></aside><header class="header"><h2>{_html.escape(title)}</h2><p>{_html.escape(intro)}</p></header><main class="main"><form class="card" method="post" action="{form_action}"><input type="hidden" name="token" value="{_html.escape(token)}"><input type="hidden" name="csrf" value="{_html.escape(csrf)}"><input type="hidden" id="question-meta" value="{meta_json}">{notice}{done}{"".join(fields)}{captcha}<div class="actions"><button type="button" class="secondary" onclick="window.close()">Cancel</button><button class="primary" type="submit"{disabled}>Send Request</button></div></form></main></div>
 <script>
 const meta=JSON.parse(document.getElementById('question-meta').value||'[]');
 function valueFor(id){{const el=document.querySelector(`[data-question-input="${{id}}"]`);if(!el)return'';if(el.type==='checkbox')return el.checked?'Yes':'No';return (el.value||'').trim();}}
 function matches(c){{const actual=valueFor(c.parent_question_id).toLowerCase();const expected=(c.expected_value||'').toLowerCase();if(c.operator==='not_equals')return actual!==expected;if(c.operator==='contains')return actual.includes(expected);return actual===expected;}}
 function updateVisibility(){{for(const q of meta){{const row=document.querySelector(`[data-question="${{q.id}}"]`);if(!row)continue;const visible=!q.conditions||q.conditions.length===0||q.conditions.every(matches);row.style.display=visible?'grid':'none';const input=row.querySelector('[data-question-input]');if(input)input.dataset.visible=visible?'1':'0';}}}}
 document.addEventListener('input',updateVisibility);document.addEventListener('change',updateVisibility);updateVisibility();
-const form=document.querySelector('form');['name','email','phone'].forEach(k=>{{const el=form.elements[k];const saved=localStorage.getItem('myportal.tray.ticket.'+k);if(el&&!el.value&&saved)el.value=saved;}});form.addEventListener('submit',()=>{{['name','email','phone'].forEach(k=>{{const el=form.elements[k];if(el)localStorage.setItem('myportal.tray.ticket.'+k,el.value||'');}});}});
+const form=document.querySelector('form');['name','email','phone'].forEach(k=>{{const el=form.elements[k];const saved=localStorage.getItem('myportal.tray.ticket.'+k);if(el&&!el.value&&saved)el.value=saved;}});form.addEventListener('submit',event=>{{['name','email','phone'].forEach(k=>{{const el=form.elements[k];if(el)localStorage.setItem('myportal.tray.ticket.'+k,el.value||'');}});if(document.getElementById('fallback-recaptcha')&&window.grecaptcha){{event.preventDefault();grecaptcha.execute();}}}});function submitFallbackTicket(){{HTMLFormElement.prototype.submit.call(form);}}
 </script></body></html>"""
 
 
@@ -1139,7 +1182,9 @@ async def issue_ticket_token(
 )
 async def tacticalrmm_ticket_url_action(
     request: Request,
-    tray_agent_id: str = Query(alias="TrayAgentID", min_length=1, max_length=255),
+    tray_agent_id: str | None = Query(
+        default=None, alias="TrayAgentID", min_length=1, max_length=255
+    ),
 ) -> RedirectResponse:
     """Launch an asset-linked ticket form from a Tactical RMM URL Action.
 
@@ -1149,13 +1194,18 @@ async def tacticalrmm_ticket_url_action(
     the form URL.
     """
 
-    device_uid = tray_agent_id.strip()
+    device_uid = (tray_agent_id or "").strip()
     device = await tray_repo.get_device_by_uid(device_uid)
     if not device or device.get("status") == "revoked":
-        raise HTTPException(status_code=404, detail="Tray device not found")
+        log_info("Tactical RMM URL Action using unauthenticated ticket fallback")
+        return RedirectResponse(
+            url="/api/tray/ticket-form/fallback",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
     if not device.get("asset_id"):
-        raise HTTPException(
-            status_code=409, detail="Tray device is not linked to an asset"
+        return RedirectResponse(
+            url="/api/tray/ticket-form/fallback",
+            status_code=status.HTTP_303_SEE_OTHER,
         )
 
     token, _csrf = _issue_ticket_form_token(device, "myportal")
@@ -1167,6 +1217,167 @@ async def tacticalrmm_ticket_url_action(
     return RedirectResponse(
         url=_ticket_form_url(token, request),
         status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+async def _verify_recaptcha(response_token: str, request: Request) -> bool:
+    """Verify a fallback-form reCAPTCHA response without exposing the secret."""
+
+    if not _settings.recaptcha_secret_key or not response_token:
+        return False
+    data = {
+        "secret": _settings.recaptcha_secret_key,
+        "response": response_token,
+    }
+    client_ip = get_client_ip(request)
+    if client_ip:
+        data["remoteip"] = client_ip
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            response = await client.post(
+                "https://www.google.com/recaptcha/api/siteverify", data=data
+            )
+            response.raise_for_status()
+            result = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        log_error("tray.fallback.recaptcha_unavailable", error=str(exc))
+        return False
+    return result.get("success") is True
+
+
+async def _render_fallback_ticket_form(
+    *,
+    error: str | None = None,
+    values: dict[str, str] | None = None,
+    success: str | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    questions = await tq_service.get_questions_for_company(None)
+    brand_name = await site_settings_repo.get_tray_icon_tooltip_name()
+    return HTMLResponse(
+        _render_ticket_form(
+            token="",
+            csrf="",
+            mode="myportal",
+            questions=questions,
+            branding_display_name=brand_name,
+            error=error,
+            values=values,
+            success=success,
+            unauthenticated=True,
+        ),
+        status_code=status_code,
+    )
+
+
+@router.get(
+    "/ticket-form/fallback", response_class=HTMLResponse, include_in_schema=False
+)
+async def tray_ticket_form_fallback() -> HTMLResponse:
+    """Display the public fallback when a tray device cannot authenticate."""
+
+    return await _render_fallback_ticket_form()
+
+
+@router.post(
+    "/ticket-form/fallback", response_class=HTMLResponse, include_in_schema=False
+)
+async def tray_ticket_form_fallback_submit(request: Request) -> HTMLResponse:
+    """Validate reCAPTCHA and create an unlinked ticket without requiring sign-in."""
+
+    form = await request.form()
+    values = {
+        k: str(v)
+        for k, v in form.multi_items()
+        if isinstance(k, str) and isinstance(v, str)
+    }
+    required = ("name", "email", "subject", "computer_name")
+    if any(not str(form.get(field) or "").strip() for field in required):
+        return await _render_fallback_ticket_form(
+            error="Complete all required fields, including Computer Name.",
+            values=values,
+            status_code=422,
+        )
+    if not _settings.recaptcha_site_key or not _settings.recaptcha_secret_key:
+        return await _render_fallback_ticket_form(
+            error="Spam verification is not configured. Please contact support.",
+            values=values,
+            status_code=503,
+        )
+    if not await _verify_recaptcha(
+        str(form.get("g-recaptcha-response") or ""), request
+    ):
+        return await _render_fallback_ticket_form(
+            error="Spam verification failed. Please complete reCAPTCHA and try again.",
+            values=values,
+            status_code=400,
+        )
+
+    email = str(form.get("email") or "").strip().lower()
+    name = str(form.get("name") or "").strip()
+    phone = str(form.get("phone") or "").strip()
+    computer_name = str(form.get("computer_name") or "").strip()[:255]
+    existing_user = await users_repo.get_user_by_email(email)
+    requester_id = int(existing_user["id"]) if existing_user else None
+    description_parts = [f"**Computer Name:** {_html.escape(computer_name)}"]
+    if requester_id is None:
+        contact = f"**Name:** {_html.escape(name)}  |  **Email:** {_html.escape(email)}"
+        if phone:
+            contact += f"  |  **Phone:** {_html.escape(phone)}"
+        description_parts.append(contact)
+    description = str(form.get("description") or "").strip()
+    if description:
+        description_parts.extend(["", description])
+    questions = await tq_service.get_questions_for_company(None)
+    submitted_answers = []
+    for question in questions:
+        qid = int(question.get("id") if isinstance(question, dict) else question.id)
+        field_type = str(
+            question.get("field_type")
+            if isinstance(question, dict)
+            else question.field_type
+        )
+        answer = (
+            "No"
+            if field_type == "boolean" and form.get(f"answer_{qid}") is None
+            else str(form.get(f"answer_{qid}") or "")
+        )
+        submitted_answers.append({"question_id": qid, "value": answer})
+    answer_errors = tq_service.validate_answers(questions, submitted_answers)
+    if answer_errors:
+        return await _render_fallback_ticket_form(
+            error="; ".join(answer_errors), values=values, status_code=422
+        )
+    additional = tq_service.build_additional_details(questions, submitted_answers)
+    if additional:
+        description_parts.extend(["", additional])
+    sanitized = sanitize_rich_text("\n".join(description_parts))
+    ticket = await tickets_service.create_ticket(
+        subject=str(form.get("subject") or "").strip()[:500],
+        description=sanitized.html,
+        requester_id=requester_id,
+        company_id=None,
+        assigned_user_id=None,
+        priority="normal",
+        status=await tickets_service.resolve_status_or_default(None),
+        category=None,
+        module_slug=None,
+        external_reference=None,
+        trigger_automations=True,
+        initial_reply_author_id=requester_id,
+        requester_email=email if requester_id is None else None,
+    )
+    ticket_number = ticket.get("ticket_number") or f"#{ticket['id']}"
+    if questions and submitted_answers:
+        snapshots = tq_service.build_answer_snapshots(questions, submitted_answers)
+        if snapshots:
+            await tq_repo.create_answers(int(ticket["id"]), snapshots)
+    log_info(
+        "Unauthenticated tray fallback ticket submitted",
+        ticket_id=ticket.get("id"),
+    )
+    return await _render_fallback_ticket_form(
+        success=f"Your ticket {ticket_number} has been submitted. We will be in touch soon."
     )
 
 
