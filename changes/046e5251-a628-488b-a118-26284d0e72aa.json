@@ -1,0 +1,7 @@
+{
+  "guid": "046e5251-a628-488b-a118-26284d0e72aa",
+  "occurred_at": "2026-09-23T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Route call transcription summaries through the provider-neutral module dispatcher with structured responses and labelled fallbacks.",
+  "content_hash": "09e459b0b9deb6b99c18422f24c3b376019b8786aaf0d8e0bf62203a8ab99524"
+}
