@@ -9,6 +9,8 @@ from typing import Any, Mapping, Sequence
 
 import httpx
 
+from app.services.monitored_http import monitored_client
+
 from app.core.config import get_settings
 from app.core.logging import log_info, log_warning
 from app.repositories import rag_index as rag_repo
@@ -268,7 +270,7 @@ async def embed_text(text: str) -> list[float]:
             "input": text,
             "dimensions": int(settings.rag_embedding_dimensions),
         }
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30.0) as client:
         response = await client.post(url, json=payload, headers=headers)
         response.raise_for_status()
         body = response.json()

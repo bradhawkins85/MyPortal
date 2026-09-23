@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 
+from app.services.monitored_http import monitored_client
+
 from app.core.config import get_settings
 
 _settings = get_settings()
@@ -25,7 +27,7 @@ def _get_client(*, timeout: float = _DEFAULT_TIMEOUT) -> httpx.AsyncClient:
     """Return (or create) the shared async HTTP client."""
     global _client
     if _client is None or _client.is_closed:
-        _client = httpx.AsyncClient(timeout=timeout)
+        _client = monitored_client(httpx.AsyncClient, timeout=timeout)
     return _client
 
 

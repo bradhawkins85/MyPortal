@@ -10,6 +10,8 @@ from urllib.parse import urlencode
 from uuid import UUID
 
 import httpx
+
+from app.services.monitored_http import monitored_client
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from itsdangerous import URLSafeSerializer
@@ -134,7 +136,7 @@ async def _fetch_xero_invoice(invoice_id: str) -> dict[str, Any] | None:
     if not tenant_id:
         raise RuntimeError("Xero tenant ID is not configured")
     access_token = await modules_service.acquire_xero_access_token()
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30.0) as client:
         response = await client.get(
             f"https://api.xero.com/api.xro/2.0/Invoices/{normalized_invoice_id}",
             headers={
@@ -318,7 +320,7 @@ async def list_tenants() -> XeroTenantListResponse:
         access_token = await modules_service.acquire_xero_access_token()
         
         # Fetch tenant connections
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30.0) as client:
             connections_response = await client.get(
                 "https://api.xero.com/connections",
                 headers={
@@ -470,7 +472,7 @@ async def xero_callback(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.post(
                 token_url,
                 data=data,
@@ -508,7 +510,7 @@ async def xero_callback(
     # Fetch tenant connections to get tenant_id
     tenant_id = None
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             connections_response = await client.get(
                 "https://api.xero.com/connections",
                 headers={

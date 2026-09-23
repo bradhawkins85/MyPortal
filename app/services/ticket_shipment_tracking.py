@@ -14,6 +14,8 @@ from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
 import httpx
+
+from app.services.monitored_http import monitored_client
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.database import db
@@ -333,7 +335,7 @@ async def _fetch_with_retries(url: str, *, timeout_seconds: float = 15.0, retrie
     last_error: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
-            async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+            async with monitored_client(httpx.AsyncClient, timeout=timeout_seconds, follow_redirects=True) as client:
                 response = await client.get(url, headers={"User-Agent": "MyPortal/1.0 (ticket-shipment-watch)"})
             response.raise_for_status()
             return response.text

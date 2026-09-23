@@ -8,6 +8,8 @@ from typing import Any, Mapping
 
 import httpx
 
+from app.services.monitored_http import monitored_client
+
 from app.repositories import user_m365_contacts as contacts_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import m365 as m365_service
@@ -61,7 +63,7 @@ async def acquire_access_token(user_id: int) -> str:
         "scope": CONTACTS_SCOPE,
     }
     url = f"https://login.microsoftonline.com/{record['tenant_id']}/oauth2/v2.0/token"
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30) as client:
         response = await client.post(url, data=data)
     if response.status_code != 200:
         raise ValueError("Microsoft 365 sign-in expired; reconnect it from your profile")
@@ -111,7 +113,7 @@ async def lookup_phones(user_id: int, requester_name: str) -> list[dict[str, str
     contacts: list[Mapping[str, Any]] = []
     next_url: str | None = GRAPH_CONTACTS_URL
     visited_urls: set[str] = set()
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30) as client:
         while next_url and next_url not in visited_urls:
             visited_urls.add(next_url)
             response = await client.get(next_url, headers={"Authorization": f"Bearer {token}"})

@@ -25,6 +25,8 @@ from typing import Any
 
 import httpx
 
+from app.services.monitored_http import monitored_client
+
 from app.core.logging import log_error, log_info, log_warning
 
 _GITHUB_API_BASE = "https://api.github.com"
@@ -208,7 +210,7 @@ async def _fetch(
     headers = _build_headers(github_token)
     results = {asset_name: False for asset_name in _ASSET_NAMES}
 
-    async with httpx.AsyncClient(follow_redirects=True) as client:
+    async with monitored_client(httpx.AsyncClient, follow_redirects=True) as client:
         release = await _get_latest_release(client, repo, headers)
         if release is None:
             return results

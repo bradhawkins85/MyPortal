@@ -4,6 +4,8 @@ import ipaddress
 import re
 
 import httpx
+
+from app.services.monitored_http import monitored_client
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 
@@ -108,7 +110,7 @@ async def make_call(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Click to call is not enabled")
     try:
         password = decrypt_secret(str(settings.get("password_encrypted") or ""))
-        async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
+        async with monitored_client(httpx.AsyncClient, verify=False, timeout=10.0) as client:
             response = await client.get(
                 f"https://{settings['phone_ip']}/cgi-bin/api-make_call",
                 params={

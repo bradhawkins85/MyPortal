@@ -13,6 +13,8 @@ from urllib.parse import urljoin
 import nh3
 import httpx
 
+from app.services.monitored_http import monitored_client
+
 from app.core.config import get_settings
 from app.core.logging import log_error
 from app.repositories import chat as chat_repo
@@ -326,7 +328,7 @@ async def _ollama_generate(prompt: str, *, json_format: bool = False) -> str:
         {"provider": provider, "model": model, "json_format": json_format, "prompt": prompt},
     )
     try:
-        async with httpx.AsyncClient(timeout=45) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=45) as client:
             response = await client.post(target_url, json=body, headers=headers)
         response.raise_for_status()
         payload = response.json()

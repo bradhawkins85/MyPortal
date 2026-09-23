@@ -19,6 +19,8 @@ from urllib.parse import parse_qsl, quote, urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
+
+from app.services.monitored_http import monitored_client
 from fastapi import (
     Depends,
     FastAPI,
@@ -5104,7 +5106,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             "grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri,
             "code_verifier": verifier, "scope": user_m365_contacts_service.CONTACTS_SCOPE,
         }
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             token_response = await client.post(
                 "https://login.microsoftonline.com/organizations/oauth2/v2.0/token", data=token_data
             )
@@ -5214,7 +5216,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 "redirect_uri": redirect_uri,
                 "scope": m365_service.DISCOVER_SCOPE,
             }
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             token_response = await client.post(token_endpoint, data=token_data)
         if token_response.status_code != 200:
             log_error(
@@ -5323,7 +5325,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 "redirect_uri": redirect_uri,
                 "scope": m365_service.PROVISION_SCOPE,
             }
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             token_response = await client.post(token_endpoint, data=token_data)
         if token_response.status_code != 200:
             log_error(
@@ -5444,7 +5446,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                     "redirect_uri": redirect_uri,
                     "scope": m365_service.PROVISION_SCOPE,
                 }
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             token_response = await client.post(token_endpoint, data=token_data)
         if token_response.status_code != 200:
             log_error(
@@ -5608,7 +5610,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         "redirect_uri": redirect_uri,
         "scope": m365_service.CONNECT_SCOPE,
     }
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30) as client:
         response = await client.post(token_endpoint, data=data)
     if response.status_code != 200:
         log_error(

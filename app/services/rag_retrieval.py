@@ -10,6 +10,8 @@ from typing import Any, Mapping, Sequence
 
 import httpx
 
+from app.services.monitored_http import monitored_client
+
 from app.core.config import get_settings
 from app.core.logging import log_info
 from app.repositories import rag_index as rag_repo
@@ -276,7 +278,7 @@ async def _rerank(query: str, candidates: list[dict[str, Any]]) -> list[dict[str
     if settings.rag_embedding_api_key:
         settings_headers["Authorization"] = f"Bearer {settings.rag_embedding_api_key}"
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30.0) as client:
             response = await client.post(
                 settings.rag_embedding_base_url.rstrip("/") + "/v1/chat/completions",
                 headers=settings_headers,

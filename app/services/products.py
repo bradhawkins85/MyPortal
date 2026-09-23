@@ -14,6 +14,8 @@ from uuid import uuid4
 
 import aiofiles
 import httpx
+
+from app.services.monitored_http import monitored_client
 from email.utils import parsedate_to_datetime
 from xml.etree.ElementTree import Element  # For type hints only
 from defusedxml.ElementTree import fromstring, ParseError
@@ -182,7 +184,7 @@ async def _download_product_image(image_url: str) -> str | None:
         return None
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=20.0) as client:
             async with client.stream(
                 "GET", candidate, follow_redirects=True
             ) as response:
@@ -514,7 +516,7 @@ async def update_stock_feed() -> int:
         raise ValueError("STOCK_FEED_URL is not configured")
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30.0) as client:
             response = await client.get(str(url), follow_redirects=True)
         response.raise_for_status()
     except httpx.HTTPError as exc:

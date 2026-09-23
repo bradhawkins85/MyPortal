@@ -41,6 +41,8 @@ from typing import Any, Awaitable, Callable, Mapping, Union
 
 import httpx
 
+from app.services.monitored_http import monitored_client
+
 from app.core.logging import log_error, log_info
 from app.core.config import get_settings
 from app.repositories import companies as companies_repo
@@ -1072,7 +1074,7 @@ async def _download_graph_csv_report(access_token: str, url: str) -> list[dict[s
         "Accept": "text/csv",
     }
     try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30, follow_redirects=False) as client:
             response = await client.get(url, headers=headers)
             if response.status_code in (301, 302, 303, 307, 308):
                 download_url = str(response.headers.get("Location") or "").strip()
@@ -1476,7 +1478,7 @@ async def _dns_txt_records(domain: str) -> list[str] | None:
     domain = domain.rstrip(".")
     url = f"https://dns.google/resolve?name={domain}&type=TXT"
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=10) as client:
             resp = await client.get(url, headers={"Accept": "application/dns-json"})
         if resp.status_code != 200:
             return None
