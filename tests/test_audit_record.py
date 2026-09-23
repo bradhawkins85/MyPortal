@@ -3,6 +3,7 @@
 Verifies field-level diffing, secret redaction, request_id propagation, and
 context-var fallbacks for user_id.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -90,7 +91,11 @@ async def test_record_redacts_metadata_secrets(monkeypatch):
             metadata={"client_secret": "abc", "name": "M365"},
         )
     metadata = repo.calls[0]["metadata"]
-    assert metadata == {"client_secret": REDACTED, "name": "M365"}
+    assert metadata == {
+        "client_secret": REDACTED,
+        "name": "M365",
+        "source": "background",
+    }
 
 
 @pytest.mark.asyncio
@@ -100,7 +105,7 @@ async def test_record_never_stores_ticket_reply_body(monkeypatch):
     secret_body = "<p>Top secret customer reply with PII</p>"
     with _patched_repo(monkeypatch) as repo:
         await audit.record(
-            action="ticket.replied",
+            action="ticket.reply",
             user_id=1,
             entity_type="ticket",
             entity_id=99,
@@ -152,6 +157,39 @@ async def test_record_pulls_user_id_from_context_when_not_provided(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_record_attributes_webhook_system_actor(monkeypatch):
+    with _patched_repo(monkeypatch) as repo:
+        await audit.record(
+            action="invoice.payment.update",
+            entity_type="invoice",
+            entity_id=14,
+            before={"paid": False},
+            after={"paid": True},
+            source="webhook",
+            actor="xero",
+            metadata={"company_id": 3},
+        )
+
+    assert repo.calls[0]["metadata"] == {
+        "company_id": 3,
+        "source": "webhook",
+        "actor": "xero",
+    }
+
+
+@pytest.mark.parametrize(
+    "action",
+    ["created", "ticket.created", "Ticket.create", "ticket create", "ticket.create."],
+)
+@pytest.mark.asyncio
+async def test_record_rejects_non_canonical_action_names(monkeypatch, action):
+    with _patched_repo(monkeypatch) as repo:
+        with pytest.raises(ValueError):
+            await audit.record(action=action, after={"id": 1})
+    assert repo.calls == []
+
+
+@pytest.mark.asyncio
 async def test_record_swallows_db_failures(monkeypatch):
     """If the repo raises, the request must not break."""
 
@@ -169,3 +207,27 @@ async def test_record_swallows_db_failures(monkeypatch):
         before={"a": 1},
         after={"a": 2},
     )
+
+
+@pytest.mark.asyncio
+async def test_record_reports_db_failures_to_monitoring(monkeypatch):
+    class _BoomRepo:
+        async def create_audit_log(self, **kwargs):
+            raise RuntimeError("db down")
+
+    errors = []
+    monkeypatch.setattr(audit, "audit_repo", _BoomRepo())
+    monkeypatch.setattr(
+        audit, "log_error", lambda message, **context: errors.append((message, context))
+    )
+
+    await audit.record(
+        action="thing.update",
+        entity_type="thing",
+        entity_id=1,
+        before={"a": 1},
+        after={"a": 2},
+    )
+
+    assert errors[0][0] == "Audit log database write failed"
+    assert errors[0][1]["event"] == "audit.db_write_failed"
