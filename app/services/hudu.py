@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+
+from app.services.monitored_http import monitored_client
 from app.services.module_gate import require_module_enabled
 
 from app.core.logging import log_error
@@ -94,7 +96,7 @@ async def search_companies(name: str) -> list[dict[str, Any]]:
     params = {"name": name}
 
     await require_module_enabled("hudu")
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30.0) as client:
         response = await client.get(url, headers=_make_headers(api_key), params=params)
         _raise_for_status(response)
 
@@ -122,7 +124,7 @@ async def get_company_url(hudu_id: str) -> str | None:
 
     try:
         url = f"{base_url}/api/v1/companies/{hudu_id}"
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30.0) as client:
             response = await client.get(url, headers=_make_headers(api_key))
         if response.status_code == 404:
             return None
@@ -190,7 +192,7 @@ async def create_person(
 
     body = {"person": person_payload}
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30.0) as client:
         response = await client.post(url, headers=_make_headers(api_key), json=body)
         _raise_for_status(response)
 
@@ -239,7 +241,7 @@ async def create_asset_password(
 
     body = {"asset_password": pw_payload}
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30.0) as client:
         response = await client.post(
             endpoint, headers=_make_headers(api_key), json=body
         )
@@ -292,7 +294,7 @@ async def sync_discovered_device(
     settings = await _load_settings()
     base_url, api_key = settings["base_url"], settings["api_key"]
     headers = _make_headers(api_key)
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30.0) as client:
         response = await client.get(
             f"{base_url}/api/v1/asset_layouts",
             headers=headers,

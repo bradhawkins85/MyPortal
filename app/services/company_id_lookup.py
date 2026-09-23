@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 
+from app.services.monitored_http import monitored_client
+
 from app.core.logging import log_error, log_info
 from app.repositories import companies as company_repo
 from app.services import modules as modules_service
@@ -367,7 +369,7 @@ async def _lookup_xero_contact_id(company_name: str) -> str | None:
         page = 1
         max_pages = 10  # Limit search to avoid excessive API calls
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30.0) as client:
             while page <= max_pages:
                 params = {
                     "page": page,

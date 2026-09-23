@@ -1,0 +1,7 @@
+{
+  "guid": "6def1d1d-4e21-464f-8601-13f39840727b",
+  "occurred_at": "2026-09-23T00:00Z",
+  "change_type": "Feature",
+  "summary": "Added comprehensive sanitised Webhook Monitor coverage for outgoing third-party HTTP requests.",
+  "content_hash": "3d4a2d5529ee9665ee365e70f9f5c54fc1ef052a9a54bd28c74fb7601ba88b4e"
+}

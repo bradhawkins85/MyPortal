@@ -21,6 +21,8 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx
+
+from app.services.monitored_http import monitored_client
 from app.services.module_gate import require_module_enabled
 from loguru import logger
 
@@ -883,7 +885,7 @@ async def send_email_via_api(
             )
         response = None
         retry_history: list[dict[str, Any]] = []
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30.0) as client:
             while True:
                 attempt += 1
                 response = await client.post(api_url, json=payload)

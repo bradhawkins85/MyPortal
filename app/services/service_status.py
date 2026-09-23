@@ -14,6 +14,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.services.monitored_http import monitored_client
+
 from app.core.config import get_settings
 from app.core.logging import log_error, log_warning
 from app.repositories import service_status as service_status_repo
@@ -640,7 +642,7 @@ async def run_ai_lookup_for_service(service_id: int) -> dict[str, Any]:
 
     # Fetch the URL content
     try:
-        async with httpx.AsyncClient(
+        async with monitored_client(httpx.AsyncClient,
             timeout=30.0,
             follow_redirects=True,
             headers=_AI_LOOKUP_HTTP_HEADERS,

@@ -9,6 +9,8 @@ from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 from app.core.config import get_settings
 
 import httpx
+
+from app.services.monitored_http import monitored_client
 from loguru import logger
 
 from app.repositories import companies as company_repo
@@ -290,7 +292,7 @@ async def add_comment_to_card(
     full_text = f"{MYPORTAL_COMMENT_PREFIX} {text}"
     url = f"{TRELLO_API_BASE}/cards/{quote(card_id, safe='')}/actions/comments"
     try:
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=_REQUEST_TIMEOUT) as client:
             response = await client.post(
                 url,
                 params={"key": api_key, "token": token},
@@ -333,7 +335,7 @@ async def get_card(
 
     url = f"{TRELLO_API_BASE}/cards/{card_id}"
     try:
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=_REQUEST_TIMEOUT) as client:
             response = await client.get(url, params={"key": api_key, "token": token})
             response.raise_for_status()
             return response.json()
@@ -359,7 +361,7 @@ async def list_webhooks(
     """
     url = f"{TRELLO_API_BASE}/tokens/{token}/webhooks"
     try:
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=_REQUEST_TIMEOUT) as client:
             response = await client.get(url, params={"key": api_key})
             response.raise_for_status()
             return response.json() or []
@@ -379,7 +381,7 @@ async def delete_webhook(
     """
     url = f"{TRELLO_API_BASE}/webhooks/{webhook_id}"
     try:
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=_REQUEST_TIMEOUT) as client:
             response = await client.delete(url, params={"key": api_key, "token": token})
             response.raise_for_status()
             return True
@@ -432,7 +434,7 @@ async def register_webhook(
 
     url = f"{TRELLO_API_BASE}/webhooks"
     try:
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=_REQUEST_TIMEOUT) as client:
             response = await client.post(
                 url,
                 params={"key": api_key, "token": token},
@@ -483,7 +485,7 @@ async def register_webhook(
                             hook.get("id"),
                         )
                     try:
-                        async with httpx.AsyncClient(
+                        async with monitored_client(httpx.AsyncClient,
                             timeout=_REQUEST_TIMEOUT
                         ) as client:
                             retry = await client.post(
@@ -616,7 +618,7 @@ async def validate_credentials_for_company(company: dict[str, Any]) -> dict[str,
 
     url = f"{TRELLO_API_BASE}/members/me"
     try:
-        async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=_REQUEST_TIMEOUT) as client:
             response = await client.get(url, params={"key": api_key, "token": token})
         if response.status_code == 401:
             return {"status": "error", "message": "Invalid Trello API key or token"}

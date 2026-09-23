@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 import ipaddress
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping
 from urllib.parse import urlsplit, urlunsplit
@@ -10,6 +11,7 @@ import httpx
 
 from app.core.logging import log_error, log_info
 from app.repositories import webhook_events as webhook_repo
+from app.services.monitored_http import sanitise_body, sanitise_headers, sanitise_url
 
 _STAFF_WORKFLOW_RESUME_SOURCE = "staff_workflow_http_post"
 
@@ -54,6 +56,27 @@ def _prepare_request_body(payload: Any) -> Any:
     if isinstance(payload, str):
         return _truncate(payload)
     return payload
+
+
+def _sanitise_payload(payload: Any) -> Any:
+    """Apply the shared redaction and size limit to legacy manual events."""
+    if payload is None:
+        return None
+    if isinstance(payload, bytes):
+        return sanitise_body(payload)
+    if isinstance(payload, str):
+        return sanitise_body(payload)
+    try:
+        return sanitise_body(json.dumps(payload, default=str), "application/json")
+    except (TypeError, ValueError):
+        return sanitise_body(str(payload))
+
+
+def _sanitise_text_body(payload: str | None) -> str | None:
+    value = sanitise_body(payload)
+    if value is None or isinstance(value, str):
+        return value
+    return _truncate(json.dumps(value, default=str))
 
 
 def _normalise_ip(value: Any) -> str | None:
@@ -189,11 +212,13 @@ async def create_manual_event(
     :func:`enqueue_event` without triggering outbound HTTP retries.
     """
 
+    safe_headers = sanitise_headers(headers)
+    safe_payload = _sanitise_payload(payload)
     event = await webhook_repo.create_event(
         name=name,
-        target_url=target_url,
-        headers=headers,
-        payload=payload,
+        target_url=sanitise_url(target_url),
+        headers=safe_headers,
+        payload=safe_payload,
         max_attempts=max(1, max_attempts),
         backoff_seconds=max(0, backoff_seconds),
         direction="outgoing",
@@ -223,17 +248,17 @@ async def record_manual_success(
         attempt_number=attempt_number,
         status="succeeded",
         response_status=response_status,
-        response_body=response_body,
+        response_body=_sanitise_text_body(response_body),
         error_message=None,
-        request_headers=_redact_headers(request_headers, sensitive=_SENSITIVE_HEADERS),
-        request_body=_prepare_request_body(request_body),
-        response_headers=_redact_headers(response_headers, sensitive=_SENSITIVE_RESPONSE_HEADERS),
+        request_headers=sanitise_headers(request_headers),
+        request_body=_sanitise_payload(request_body),
+        response_headers=sanitise_headers(response_headers),
     )
     await webhook_repo.mark_event_completed(
         event_id,
         attempt_number=attempt_number,
         response_status=response_status,
-        response_body=response_body,
+        response_body=_sanitise_text_body(response_body),
     )
     refreshed = await webhook_repo.get_event(event_id)
     return refreshed or {"id": event_id, "status": "succeeded"}
@@ -258,18 +283,18 @@ async def record_manual_failure(
         attempt_number=attempt_number,
         status=status,
         response_status=response_status,
-        response_body=response_body,
+        response_body=_sanitise_text_body(response_body),
         error_message=error_message,
-        request_headers=_redact_headers(request_headers, sensitive=_SENSITIVE_HEADERS),
-        request_body=_prepare_request_body(request_body),
-        response_headers=_redact_headers(response_headers, sensitive=_SENSITIVE_RESPONSE_HEADERS),
+        request_headers=sanitise_headers(request_headers),
+        request_body=_sanitise_payload(request_body),
+        response_headers=sanitise_headers(response_headers),
     )
     await webhook_repo.mark_event_failed(
         event_id,
         attempt_number=attempt_number,
         error_message=error_message,
         response_status=response_status,
-        response_body=response_body,
+        response_body=_sanitise_text_body(response_body),
     )
     refreshed = await webhook_repo.get_event(event_id)
     return refreshed or {"id": event_id, "status": "failed", "last_error": error_message}

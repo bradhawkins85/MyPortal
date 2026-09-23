@@ -8,6 +8,8 @@ from urllib.parse import quote, unquote, urlencode, urlsplit
 
 import httpx
 
+from app.services.monitored_http import monitored_client
+
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info
 from app.repositories import m365 as m365_repo
@@ -199,7 +201,7 @@ async def _acquire_delegated_access_token(account: Mapping[str, Any]) -> str:
         "refresh_token": decrypted_refresh,
         "scope": DELEGATED_MAIL_SCOPE,
     }
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30) as client:
         response = await client.post(token_endpoint, data=data)
 
     if response.status_code != 200:
@@ -653,7 +655,7 @@ _WELL_KNOWN_MAIL_FOLDERS = {
 async def _graph_get(access_token: str, url: str) -> dict[str, Any]:
     """Perform a GET request to Microsoft Graph."""
     headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30) as client:
         response = await client.get(url, headers=headers)
     if response.status_code != 200:
         log_error(
@@ -672,7 +674,7 @@ async def _graph_get(access_token: str, url: str) -> dict[str, Any]:
 async def _graph_get_bytes(access_token: str, url: str) -> bytes:
     """Perform a GET request to Microsoft Graph and return raw bytes."""
     headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30) as client:
         response = await client.get(url, headers=headers)
     if response.status_code != 200:
         log_error(
@@ -705,7 +707,7 @@ async def _graph_patch(access_token: str, url: str, payload: dict[str, Any]) -> 
             f"Expected URL to match base: {_GRAPH_BASE}"
         )
     headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30) as client:
         response = await client.patch(url, headers=headers, json=payload)
     if response.status_code not in (200, 204):
         log_error(
@@ -725,7 +727,7 @@ async def _graph_delete(access_token: str, url: str) -> None:
     ):
         raise ValueError(f"Rejected Microsoft Graph DELETE URL: {url}")
     headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30) as client:
         response = await client.delete(url, headers=headers)
     if response.status_code != 204:
         raise M365Error(

@@ -14,6 +14,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
+from app.services.monitored_http import monitored_client
+
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
 from app.repositories import companies as company_repo
@@ -1312,7 +1314,7 @@ async def _execute_policy_step(
                 "webhook_status": event.get("status"),
             }
         timeout_seconds = max(1, int(step.get("timeout_seconds") or 30))
-        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=timeout_seconds) as client:
             response = await client.request(
                 method,
                 url,
@@ -2130,7 +2132,7 @@ async def _execute_policy_step(
             "@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{encoded_manager_id}"
         }
         headers = {"Authorization": f"Bearer {access_token}"}
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             ref_response = await client.put(ref_url, headers=headers, json=ref_payload)
         if ref_response.status_code not in (200, 204):
             raise WorkflowStepError(
@@ -2465,7 +2467,7 @@ async def _graph_patch(
     access_token: str, url: str, payload: dict[str, Any]
 ) -> dict[str, Any]:
     headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30) as client:
         response = await client.patch(url, headers=headers, json=payload)
     if response.status_code not in (200, 204):
         log_error(
@@ -2532,7 +2534,7 @@ async def _graph_post_for_location(
     access_token: str, url: str, payload: dict[str, Any]
 ) -> tuple[dict[str, Any], str | None]:
     headers = {"Authorization": f"Bearer {access_token}"}
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30) as client:
         response = await client.post(url, headers=headers, json=payload)
     if response.status_code not in (200, 201, 202, 204):
         log_error(
@@ -2556,7 +2558,7 @@ async def _wait_for_graph_copy(
     deadline = datetime.now(timezone.utc) + timedelta(seconds=max(1, timeout_seconds))
     headers = {"Authorization": f"Bearer {access_token}"}
     last_payload: dict[str, Any] = {}
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with monitored_client(httpx.AsyncClient, timeout=30) as client:
         while datetime.now(timezone.utc) < deadline:
             response = await client.get(monitor_url, headers=headers)
             if response.status_code >= 400:

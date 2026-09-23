@@ -19,6 +19,8 @@ from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 
+from app.services.monitored_http import monitored_client
+
 from app.core.config import get_settings
 from app.core.logging import log_error, log_info, log_warning
 from app.repositories import apps as apps_repo
@@ -1056,7 +1058,7 @@ async def _exchange_token(
         }
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.post(token_endpoint, data=data)
     except httpx.TimeoutException as exc:
         raise M365Error(
@@ -1300,7 +1302,7 @@ async def _exo_invoke_command(
         "Content-Type": "application/json; charset=utf-8",
     }
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.post(url, headers=headers, json=payload)
     except httpx.DecodingError as exc:
         raise M365Error(
@@ -1469,7 +1471,7 @@ async def _scc_invoke_command(
     if appid and route_organization:
         headers["X-AnchorMailbox"] = f"app:{appid}@{route_organization}"
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.post(url, headers=headers, json=payload)
     except httpx.DecodingError as exc:
         raise M365Error(
@@ -1517,7 +1519,7 @@ async def _graph_get(
     if extra_headers:
         req_headers.update(extra_headers)
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.get(url, headers=req_headers)
     except httpx.TimeoutException as exc:
         raise M365Error(
@@ -1760,7 +1762,7 @@ async def _graph_post(
     _validate_graph_url(url)
     headers = {"Authorization": f"Bearer {access_token}"}
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.post(url, headers=headers, json=payload)
     except httpx.TimeoutException as exc:
         raise M365Error(
@@ -1880,7 +1882,7 @@ async def _graph_patch(
         "Content-Type": "application/json",
     }
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.patch(url, headers=headers, json=payload)
     except httpx.TimeoutException as exc:
         raise M365Error(
@@ -1926,7 +1928,7 @@ async def _graph_delete(access_token: str, url: str) -> None:
     _validate_graph_url(url)
     headers = {"Authorization": f"Bearer {access_token}"}
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.delete(url, headers=headers)
     except httpx.TimeoutException as exc:
         raise M365Error(
@@ -5233,7 +5235,7 @@ async def _fetch_mailbox_usage_report(access_token: str) -> list[dict[str, Any]]
         "Accept": "text/csv",
     }
     try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30, follow_redirects=False) as client:
             response = await client.get(csv_report_url, headers=headers)
             if response.status_code not in (302, 303, 307, 308):
                 log_error(
@@ -5627,7 +5629,7 @@ async def _exo_get_mailbox_permission(
         "Content-Type": "application/json; charset=utf-8",
     }
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.post(url, headers=headers, json=payload)
     except httpx.DecodingError as exc:
         log_warning(
@@ -5800,7 +5802,7 @@ async def _exo_get_archive_mailbox_size(
         "Content-Type": "application/json; charset=utf-8",
     }
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             response = await client.post(url, headers=headers, json=payload)
     except httpx.DecodingError as exc:
         log_warning(
