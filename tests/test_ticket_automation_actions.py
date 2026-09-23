@@ -433,8 +433,10 @@ async def test_invoke_reprocess_ai_summary_and_tags(monkeypatch, mock_webhook_mo
     
     mock_summary = AsyncMock()
     mock_tags = AsyncMock()
+    mock_resolution = AsyncMock()
     monkeypatch.setattr(tickets_service, "refresh_ticket_ai_summary", mock_summary)
     monkeypatch.setattr(tickets_service, "refresh_ticket_ai_tags", mock_tags)
+    monkeypatch.setattr(tickets_service, "refresh_ticket_resolution_steps", mock_resolution)
     
     result = await modules._invoke_reprocess_ai(
         {},
@@ -445,8 +447,10 @@ async def test_invoke_reprocess_ai_summary_and_tags(monkeypatch, mock_webhook_mo
     assert result["status"] == "succeeded"
     assert "summary" in result["processed"]
     assert "tags" in result["processed"]
+    assert "resolution_steps" in result["processed"]
     mock_summary.assert_called_once_with(1)
     mock_tags.assert_called_once_with(1)
+    mock_resolution.assert_called_once_with(1)
 
 
 @pytest.mark.asyncio
@@ -461,7 +465,7 @@ async def test_invoke_reprocess_ai_summary_only(monkeypatch, mock_webhook_monito
     
     result = await modules._invoke_reprocess_ai(
         {},
-        {"ticket_id": 1, "refresh_summary": True, "refresh_tags": False},
+        {"ticket_id": 1, "refresh_summary": True, "refresh_tags": False, "refresh_resolution_steps": False},
         event_future=None,
     )
     
@@ -476,7 +480,7 @@ async def test_invoke_reprocess_ai_no_processing_skips(monkeypatch, mock_webhook
     """Test that reprocess-ai returns skipped when both options are false."""
     result = await modules._invoke_reprocess_ai(
         {},
-        {"ticket_id": 1, "refresh_summary": False, "refresh_tags": False},
+        {"ticket_id": 1, "refresh_summary": False, "refresh_tags": False, "refresh_resolution_steps": False},
         event_future=None,
     )
     

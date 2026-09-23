@@ -1283,9 +1283,9 @@ async def refresh_ticket_ai_summary(ticket_id: int) -> None:
 
 def _extract_resolution_steps(payload: Any) -> str | None:
     """Extract and sanitise resolution HTML from an LLM response."""
-    value: Any = payload
-    if isinstance(payload, str):
-        candidate = payload.strip().removeprefix("```json").removesuffix("```").strip()
+    value: Any = _extract_chat_completion_content(payload)
+    if isinstance(value, str):
+        candidate = value.strip().removeprefix("```json").removesuffix("```").strip()
         try:
             value = json.loads(candidate)
         except (TypeError, ValueError):

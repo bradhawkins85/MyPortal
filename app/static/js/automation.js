@@ -322,11 +322,12 @@
     ],
     'reprocess-ai': [
       {
-        label: 'Refresh AI summary and tags',
+        label: 'Refresh all ticket AI',
         value: toJsonTemplate({
           ticket_id: '{{ ticket.id }}',
           refresh_summary: true,
           refresh_tags: true,
+          refresh_resolution_steps: true,
         }),
       },
       {
@@ -335,6 +336,7 @@
           ticket_id: '{{ ticket.id }}',
           refresh_summary: true,
           refresh_tags: false,
+          refresh_resolution_steps: false,
         }),
       },
       {
@@ -343,6 +345,16 @@
           ticket_id: '{{ ticket.id }}',
           refresh_summary: false,
           refresh_tags: true,
+          refresh_resolution_steps: false,
+        }),
+      },
+      {
+        label: 'Refresh AI resolution steps only',
+        value: toJsonTemplate({
+          ticket_id: '{{ ticket.id }}',
+          refresh_summary: false,
+          refresh_tags: false,
+          refresh_resolution_steps: true,
         }),
       },
     ],
