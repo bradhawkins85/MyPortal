@@ -1,0 +1,7 @@
+{
+  "guid": "d1937e43-bc5a-4710-a322-b1255265943d",
+  "occurred_at": "2026-09-23T00:00:00+00:00",
+  "change_type": "Feature",
+  "summary": "Added an independent refresh_resolution flag to Reprocess AI ticket automation actions.",
+  "content_hash": "57c0f042bc276074e61fcad233b6e9e90149619b65c042b00b3a81eb5b8d39fe"
+}
