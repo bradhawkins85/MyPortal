@@ -22,8 +22,59 @@ from app.services import audit as audit_service
 from app.services import knowledge_base as kb_service
 from app.services import file_storage
 from app.services import tickets as tickets_service
+from app.repositories import resolution_step_reviews as resolution_review_repo
+from app.services import resolution_step_reviews as resolution_review_service
 
 router = APIRouter(prefix="/api/knowledge-base", tags=["Knowledge Base"])
+
+
+class ResolutionReviewUpdate(BaseModel):
+    ignored: bool
+
+
+@router.get("/resolution-steps", summary="List resolution steps awaiting knowledge-base review")
+async def list_resolution_step_reviews(
+    include_ignored: bool = Query(False),
+    current_user: dict = Depends(require_super_admin),
+) -> list[dict]:
+    return await resolution_review_repo.list_entries(include_ignored=include_ignored)
+
+
+@router.patch("/resolution-steps/{ticket_id}", summary="Ignore or restore a resolution-step entry")
+async def update_resolution_step_review(
+    ticket_id: int,
+    payload: ResolutionReviewUpdate,
+    request: Request,
+    current_user: dict = Depends(require_super_admin),
+) -> dict[str, str]:
+    if not await resolution_review_repo.get_entry(ticket_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resolution Step entry not found")
+    await resolution_review_repo.set_ignored(ticket_id, payload.ignored, int(current_user["id"]))
+    action = "ignore" if payload.ignored else "restore"
+    await audit_service.record(
+        action=f"knowledge_base.resolution_step.{action}", request=request,
+        user_id=int(current_user["id"]), entity_type="ticket", entity_id=ticket_id,
+        before=None, after={"ignored": payload.ignored},
+    )
+    return {"status": "updated", "message": "Entry ignored." if payload.ignored else "Entry restored."}
+
+
+@router.post("/resolution-steps/{ticket_id}/generate", status_code=status.HTTP_201_CREATED, summary="Generate a draft article")
+async def generate_resolution_step_article(
+    ticket_id: int,
+    request: Request,
+    current_user: dict = Depends(require_super_admin),
+) -> dict[str, object]:
+    try:
+        article = await resolution_review_service.generate_article(ticket_id, author_id=int(current_user["id"]))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await audit_service.record(
+        action="knowledge_base.resolution_step.generate", request=request,
+        user_id=int(current_user["id"]), entity_type="knowledge_base_article", entity_id=int(article["id"]),
+        before=None, after={"ticket_id": ticket_id, "is_published": False},
+    )
+    return {"status": "created", "message": "Draft knowledge-base article created.", "article_id": article["id"], "slug": article["slug"]}
 
 # Define uploads path at module level
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent

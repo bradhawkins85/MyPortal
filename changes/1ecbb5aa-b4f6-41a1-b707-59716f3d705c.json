@@ -1,0 +1,7 @@
+{
+  "guid": "1ecbb5aa-b4f6-41a1-b707-59716f3d705c",
+  "occurred_at": "2026-09-23T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Add a knowledge-base Resolution Steps review workflow with reversible ignores and LLM-titled draft generation.",
+  "content_hash": "46e4b97b63310e594222afc27eed441bef96ba01609b11b89cae4cb11d160748"
+}

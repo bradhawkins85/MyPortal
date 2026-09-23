@@ -13,8 +13,9 @@
 
 {% block header_actions %}
   {{ page_header_actions([
-    {"label": "New article", "type": "link", "variant": "primary", "href": "/admin/knowledge-base/new"}
-  ]) }}
+    {"label": "New article", "type": "link", "href": "/admin/knowledge-base/new"},
+    {"label": "Resolution Steps", "type": "button", "attrs": {"data-resolution-steps-open": true}}
+  ], menu_id="knowledge-base-actions") }}
 {% endblock %}
 
 {% block content %}
@@ -91,9 +92,21 @@
     </div>
   </section>
 </div>
+<dialog class="dialog dialog--wide resolution-review" data-resolution-steps-dialog aria-labelledby="resolution-review-title">
+  <div class="dialog__container">
+    <header class="dialog__header"><div><h2 class="dialog__title" id="resolution-review-title">Resolution Steps</h2><p class="resolution-review__subtitle">Review completed-ticket resolutions and turn reusable steps into draft articles.</p></div><button class="dialog__close" type="button" data-resolution-steps-close aria-label="Close">&times;</button></header>
+    <div class="dialog__body">
+      <div class="resolution-review__toolbar"><input class="form-input" type="search" placeholder="Filter entries" aria-label="Filter Resolution Step entries" data-resolution-filter /><label class="resolution-review__toggle"><input type="checkbox" data-resolution-show-ignored /> Show ignored entries</label></div>
+      <p class="resolution-review__notice" data-resolution-notice role="status" aria-live="polite"></p>
+      <div class="resolution-review__state" data-resolution-state>Loading Resolution Step entries…</div>
+      <div class="table-wrapper resolution-review__table" data-resolution-table hidden><table class="table table--compact" data-table data-table-id="resolution-step-reviews"><thead><tr><th scope="col" data-sort="string">Ticket subject</th><th scope="col" data-sort="string">AI tags</th><th scope="col" data-sort="string">Company</th><th scope="col">Available actions</th></tr></thead><tbody data-resolution-rows></tbody></table></div>
+    </div>
+  </div>
+</dialog>
 {% endblock %}
 
 {% block scripts %}
   {{ super() }}
   <script src="{{ static_url('/static/js/tables.js') }}" defer></script>
+  <script src="{{ static_url('/static/js/knowledge_base_resolution_steps.js') }}" defer></script>
 {% endblock %}
