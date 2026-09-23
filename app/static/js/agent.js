@@ -300,6 +300,10 @@
         if (Array.isArray(items)) groups.push(createSourceList(formatFeaturePackTitle(slug), slug, items, formatGenericSource));
       });
     }
+    Object.keys(sources).filter((key) => key.startsWith('feature:')).sort().forEach((key) => {
+      const items = sources[key];
+      if (Array.isArray(items)) groups.push(createSourceList(formatFeaturePackTitle(key.slice(8)), key, items, formatGenericSource));
+    });
     if (!groups.length) {
       container.hidden = true;
       return;

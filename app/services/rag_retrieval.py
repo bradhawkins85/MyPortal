@@ -21,6 +21,7 @@ from app.services.rag_index import (
     tokenise,
 )
 from app.services.rag_permissions import can_access_candidate
+from app.services.agent_sources import SOURCE_TYPE_CAPS, SOURCE_WEIGHTS
 
 _EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 _ID_RE = re.compile(r"(?:#\d{3,}|\b\d{4,}\b|\b[A-Z]{2,}\d{2,}\b)", re.IGNORECASE)
@@ -46,25 +47,7 @@ _SOURCE_THRESHOLDS = {
     "best_practices": 0.25,
     "assets": 0.28,
 }
-_SOURCE_WEIGHTS = {
-    "tickets": 1.00,
-    "chats": 0.95,
-    "knowledge_base": 0.90,
-    "assets": 0.80,
-    "products": 0.60,
-    "best_practices": 0.50,
-}
-SOURCE_TYPE_CAPS = {
-    "tickets": 4,
-    "ticket_comments": 6,
-    "knowledge_base": 4,
-    "chats": 4,
-    "products": 4,
-    "assets": 3,
-    "orders": 3,
-    "issues": 3,
-    "best_practices": 2,
-}
+_SOURCE_WEIGHTS = SOURCE_WEIGHTS
 _SOURCE_LIMITS = SOURCE_TYPE_CAPS
 _DUPLICATE_SIMILARITY_THRESHOLD = 0.94
 _PRODUCT_TERMS = {

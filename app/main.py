@@ -135,6 +135,7 @@ from app.repositories import ticket_expenses as expenses_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
 from app.services import system_update_history
+from app.services.agent_sources import SOURCE_REGISTRY as AGENT_SOURCE_REGISTRY
 from app.security.menu_permissions import MENU_PERMISSIONS, catalogue_for_api, menu_has_access, normalize_access_level, normalize_menu_permissions
 from app.repositories import site_settings as site_settings_repo
 from app.security.cache_control import CacheControlMiddleware
@@ -3128,7 +3129,7 @@ async def ai_search_page(request: Request):
         "search.html",
         request,
         user,
-        extra={"title": "Search"},
+        extra={"title": "Search", "agent_sources": AGENT_SOURCE_REGISTRY},
     )
 
 

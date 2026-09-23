@@ -12,7 +12,13 @@ def test_search_page_uses_friendly_copy_without_header_actions():
     assert "{% block title %}Search{% endblock %}" in template
     assert '<span class="header__title-text">Search</span>' in template
     assert "How can we assist you" in template
-    assert "The assistant searches everything including knowledge base articles" in template
+    assert "The assistant searches the selected portal sources" in template
+
+
+def test_agent_filter_ui_offers_all_canonical_source_groups():
+    template = SEARCH_TEMPLATE.read_text(encoding="utf-8")
+    assert "{% for source_type, source in agent_sources.items() %}" in template
+    assert 'value="{{ source_type }}" data-agent-filter' in template
     assert "Possibly Useful Results" in template
     assert "data-agent-filter" in template
     assert "data-agent-stages" in template

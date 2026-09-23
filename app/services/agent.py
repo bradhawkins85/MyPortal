@@ -29,6 +29,11 @@ from app.services import modules as modules_service
 from app.services import rag_index as rag_index_service
 from app.services import rag_relationships as rag_relationship_service
 from app.services import rag_retrieval
+from app.services.agent_sources import (
+    SOURCE_REGISTRY,
+    SOURCE_TYPE_CAPS as _SOURCE_TYPE_CAPS,
+    canonical_source_type,
+)
 from app.services.ai_prompt_security import (
     UntrustedRecord,
     build_prompt,
@@ -62,29 +67,7 @@ _MAX_TICKET_ID_QUERY_LENGTH = 1000
 _TICKET_MARKER_KEYWORD = "ticket"
 _MIN_MARKED_TICKET_ID_DIGITS = 3
 _MIN_STANDALONE_TICKET_ID_DIGITS = 4
-_SUPPORTED_SOURCE_FILTERS = {
-    "knowledge_base",
-    "tickets",
-    "ticket_comments",
-    "products",
-    "packages",
-    "chats",
-    "orders",
-    "assets",
-    "issues",
-    "best_practices",
-}
-_SOURCE_TYPE_CAPS = {
-    "tickets": 4,
-    "ticket_comments": 6,
-    "knowledge_base": 4,
-    "chats": 4,
-    "products": 4,
-    "assets": 3,
-    "orders": 3,
-    "issues": 3,
-    "best_practices": 2,
-}
+_SUPPORTED_SOURCE_FILTERS = frozenset(SOURCE_REGISTRY)
 
 
 class AgentContextMode(str, Enum):
@@ -348,40 +331,25 @@ def _threshold_for_source(source_type: str | None) -> float:
 
 
 def _infer_allowed_rag_sources(query: str) -> set[str]:
+    """Return all plausible sources without making intent routing an exclusion gate."""
     lowered = (query or "").casefold()
-    tokens = set(re.findall(r"[a-z0-9]+", lowered))
-    if _extract_explicit_ticket_ids(query) or {"ticket", "trello", "card"} & tokens:
-        return {"tickets", "ticket_comments", "chats", "knowledge_base"}
-    if {
-        "product",
-        "products",
-        "price",
-        "buy",
-        "purchase",
-        "compatible",
-        "sku",
-    } & tokens:
-        return {"products", "packages", "knowledge_base"}
-    if {"company", "customer", "client", "list", "show", "browse"} & tokens:
-        return {"companies", "knowledge_base"}
-    return {"knowledge_base", "tickets", "ticket_comments", "chats", "assets", "issues"}
+    matched = {
+        source_type
+        for source_type, definition in SOURCE_REGISTRY.items()
+        if any(keyword in lowered for keyword in definition.keywords)
+    }
+    if _extract_explicit_ticket_ids(query):
+        matched.update({"tickets", "ticket_comments"})
+    # Broad retrieval is intentional: ranking and per-source caps prioritise matches,
+    # while this inclusive set ensures an imperfect keyword guess cannot hide evidence.
+    return matched | set(SOURCE_REGISTRY)
 
 
 def _source_allowed(source_type: str | None, allowed_sources: set[str]) -> bool:
-    normalised = str(source_type or "").casefold()
-    aliases = {
-        "ticket": "tickets",
-        "ticket_reply": "ticket_comments",
-        "ticket_replies": "ticket_comments",
-        "chat": "chats",
-        "kb": "knowledge_base",
-        "product": "products",
-        "package": "packages",
-        "company": "companies",
-        "asset": "assets",
-        "issue": "issues",
-    }
-    return aliases.get(normalised, normalised) in allowed_sources
+    normalised = canonical_source_type(str(source_type or ""))
+    return normalised in allowed_sources or (
+        normalised.startswith("feature:") and "feature_packs" in allowed_sources
+    )
 
 
 def _filter_rag_candidates(
@@ -410,7 +378,7 @@ def _normalise_source_filters(source_filters: Sequence[str] | None) -> set[str]:
         return set()
     cleaned: set[str] = set()
     for item in source_filters:
-        value = str(item or "").strip().casefold()
+        value = canonical_source_type(str(item or ""))
         if value in _SUPPORTED_SOURCE_FILTERS:
             cleaned.add(value)
     return cleaned
@@ -419,7 +387,7 @@ def _normalise_source_filters(source_filters: Sequence[str] | None) -> set[str]:
 def _is_source_enabled(enabled_filters: set[str], source_type: str) -> bool:
     if not enabled_filters:
         return True
-    if source_type in enabled_filters:
+    if canonical_source_type(source_type) in enabled_filters:
         return True
     if source_type == "tickets":
         return "ticket_comments" in enabled_filters
@@ -1632,12 +1600,12 @@ async def execute_agent_query(
     company_context = _company_summary(resolved_memberships)
     is_super_admin = bool(user.get("is_super_admin"))
     explicit_ticket_ids = _extract_explicit_ticket_ids(query_text)
-    allowed_rag_sources = _infer_allowed_rag_sources(query_text)
     requested_source_filters = _normalise_source_filters(source_filters)
-    if requested_source_filters:
-        allowed_rag_sources &= requested_source_filters
-        if not allowed_rag_sources:
-            allowed_rag_sources = requested_source_filters
+    allowed_rag_sources = (
+        set(requested_source_filters)
+        if requested_source_filters
+        else _infer_allowed_rag_sources(query_text)
+    )
     source_filters_sorted = sorted(requested_source_filters)
     stages: list[dict[str, Any]] = [
         _stage(
@@ -1851,8 +1819,10 @@ async def execute_agent_query(
     chat_sources: list[dict[str, Any]] = []
     order_sources: list[dict[str, Any]] = []
     asset_sources: list[dict[str, Any]] = []
-    company_sources: list[dict[str, Any]] = _search_company_sources(
-        query_text, resolved_memberships
+    company_sources: list[dict[str, Any]] = (
+        _search_company_sources(query_text, resolved_memberships)
+        if _is_source_enabled(requested_source_filters, "companies")
+        else []
     )
     staff_sources: list[dict[str, Any]] = []
     issue_sources: list[dict[str, Any]] = []
@@ -2025,8 +1995,14 @@ async def execute_agent_query(
             )
 
     try:
-        staff_sources = await _search_staff_sources(
-            query_text, memberships=resolved_memberships, is_super_admin=is_super_admin
+        staff_sources = (
+            await _search_staff_sources(
+                query_text,
+                memberships=resolved_memberships,
+                is_super_admin=is_super_admin,
+            )
+            if _is_source_enabled(requested_source_filters, "staff")
+            else []
         )
     except Exception as exc:  # pragma: no cover - defensive guard
         log_error("Agent staff lookup failed", error=str(exc))
@@ -2044,9 +2020,10 @@ async def execute_agent_query(
             log_error("Agent issue lookup failed", error=str(exc))
             issue_sources = []
 
-    for label, lookup in (
+    for label, source_type, lookup in (
         (
             "service status",
+            "service_status",
             lambda: _search_service_status_sources(
                 query_text,
                 company_ids=accessible_company_ids,
@@ -2055,6 +2032,7 @@ async def execute_agent_query(
         ),
         (
             "backup job",
+            "backup_jobs",
             lambda: _search_backup_job_sources(
                 query_text,
                 company_ids=accessible_company_ids,
@@ -2063,6 +2041,7 @@ async def execute_agent_query(
         ),
         (
             "mailbox",
+            "mailboxes",
             lambda: _search_mailbox_sources(
                 query_text,
                 memberships=resolved_memberships,
@@ -2072,6 +2051,7 @@ async def execute_agent_query(
         ),
         (
             "best practice",
+            "best_practices",
             lambda: _search_best_practice_sources(
                 query_text,
                 memberships=resolved_memberships,
@@ -2081,7 +2061,11 @@ async def execute_agent_query(
         ),
     ):
         try:
-            result = await lookup()
+            result = (
+                await lookup()
+                if _is_source_enabled(requested_source_filters, source_type)
+                else []
+            )
         except Exception as exc:  # pragma: no cover - defensive guard
             log_error(f"Agent {label} lookup failed", error=str(exc))
             result = []
@@ -2101,17 +2085,23 @@ async def execute_agent_query(
             query_text, user=user, is_super_admin=is_super_admin
         )
         report_sources = report_sources[:_SYSTEM_RESULT_LIMIT]
+        if not _is_source_enabled(requested_source_filters, "reports"):
+            report_sources = []
     except Exception as exc:  # pragma: no cover - defensive guard
         log_error("Agent report lookup failed", error=str(exc))
         report_sources = []
 
-    feature_pack_sources = await _search_feature_pack_sources(
-        query_text,
-        user=user,
-        active_company_id=active_company_id,
-        memberships=resolved_memberships,
-        company_ids=accessible_company_ids,
-        is_super_admin=is_super_admin,
+    feature_pack_sources = (
+        await _search_feature_pack_sources(
+            query_text,
+            user=user,
+            active_company_id=active_company_id,
+            memberships=resolved_memberships,
+            company_ids=accessible_company_ids,
+            is_super_admin=is_super_admin,
+        )
+        if _is_source_enabled(requested_source_filters, "feature_packs")
+        else {}
     )
 
     assembled_sources = {
@@ -2160,12 +2150,16 @@ async def execute_agent_query(
         # an otherwise completed index marked as running indefinitely.
         if rag_index_job_id is not None and allow_empty_query:
             return {"sources": assembled_sources}
+        retrieval_sources = set(allowed_rag_sources)
+        if "feature_packs" in retrieval_sources:
+            retrieval_sources.remove("feature_packs")
+            retrieval_sources.update(f"feature:{slug}" for slug in feature_pack_sources)
         raw_rag_candidates = await rag_retrieval.retrieve_candidates(
             query_text,
             user,
             active_company_id=active_company_id,
             memberships=resolved_memberships,
-            source_filters=sorted(allowed_rag_sources),
+            source_filters=sorted(retrieval_sources),
         )
     except rag_index_service.RagIndexCancelled:
         # Cancellation is job control, not a retrieval failure.  Let the job
