@@ -1,0 +1,7 @@
+{
+  "guid": "7b52e140-f25c-4ccf-a497-b710a446f71f",
+  "occurred_at": "2026-09-22T00:00:00Z",
+  "change_type": "improvement",
+  "summary": "Added provider-backed semantic RAG embeddings, compatibility fingerprints, reachable source scoring, bounded reranking, and context token budgeting.",
+  "content_hash": "rag-semantic-embedding-v3"
+}

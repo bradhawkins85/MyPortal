@@ -8,6 +8,8 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+import httpx
+
 from app.core.config import get_settings
 from app.core.logging import log_info
 from app.repositories import rag_index as rag_repo
@@ -37,12 +39,12 @@ _QUERY_EXPANSIONS = {
     "smartcard": ("smart card", "smartcard-inline"),
 }
 _SOURCE_THRESHOLDS = {
-    "knowledge_base": 0.42,
-    "chats": 0.35,
-    "tickets": 0.35,
-    "products": 0.55,
-    "best_practices": 0.60,
-    "assets": 0.40,
+    "knowledge_base": 0.30,
+    "chats": 0.28,
+    "tickets": 0.28,
+    "products": 0.25,
+    "best_practices": 0.25,
+    "assets": 0.28,
 }
 _SOURCE_WEIGHTS = {
     "tickets": 1.00,
@@ -248,6 +250,82 @@ def _threshold(source_type: str, fallback: float) -> float:
     return max(fallback, _SOURCE_THRESHOLDS.get(source_type, fallback))
 
 
+def validate_score_configuration(
+    *,
+    vector_weight: float,
+    bm25_weight: float,
+    metadata_weight: float,
+    minimum_score: float = 0.0,
+) -> None:
+    """Reject sources whose weighted score can never reach their threshold."""
+    component_max = vector_weight + bm25_weight + metadata_weight
+    unreachable = {
+        source: (
+            max(threshold, minimum_score),
+            component_max * _SOURCE_WEIGHTS.get(source, 0.75),
+        )
+        for source, threshold in _SOURCE_THRESHOLDS.items()
+        if component_max * _SOURCE_WEIGHTS.get(source, 0.75)
+        < max(threshold, minimum_score)
+    }
+    if unreachable:
+        details = ", ".join(
+            f"{source} threshold={threshold:.2f} max={maximum:.2f}"
+            for source, (threshold, maximum) in sorted(unreachable.items())
+        )
+        raise ValueError(f"Unreachable RAG source score configuration: {details}")
+
+
+async def _rerank(query: str, candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    settings = get_settings()
+    if not settings.rag_rerank_enabled or not candidates:
+        return candidates
+    bounded = candidates[: int(settings.rag_rerank_top_n)]
+    records = [
+        {"id": index, "title": item.get("title"), "text": item.get("excerpt")}
+        for index, item in enumerate(bounded)
+    ]
+    prompt = (
+        "Rank the records by relevance to the query. Return only a JSON array of "
+        f"record ids, best first. Query: {query}\nRecords: {json.dumps(records)}"
+    )
+    settings_headers = {}
+    if settings.rag_embedding_api_key:
+        settings_headers["Authorization"] = f"Bearer {settings.rag_embedding_api_key}"
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                settings.rag_embedding_base_url.rstrip("/") + "/v1/chat/completions",
+                headers=settings_headers,
+                json={
+                    "model": settings.rag_rerank_model,
+                    "temperature": 0,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+            )
+            response.raise_for_status()
+            order = json.loads(response.json()["choices"][0]["message"]["content"])
+        valid = [
+            int(value)
+            for value in order
+            if isinstance(value, int) and 0 <= value < len(bounded)
+        ]
+        valid = list(dict.fromkeys(valid))
+        ranked = [bounded[index] for index in valid]
+        ranked.extend(item for index, item in enumerate(bounded) if index not in valid)
+        return ranked + candidates[len(bounded) :]
+    except (
+        httpx.HTTPError,
+        KeyError,
+        IndexError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ):
+        log_info("RAG reranker unavailable; retaining hybrid ranking")
+        return candidates
+
+
 def _normalised_hash_text(candidate: Mapping[str, Any]) -> str:
     return " ".join(
         _tokens(
@@ -284,9 +362,11 @@ def _duplicate_keys(candidate: Mapping[str, Any]) -> set[str]:
     )
     if linked_ticket_id:
         keys.add(f"ticket:{linked_ticket_id}")
-    slug = str(
-        metadata.get("slug") or metadata.get("canonical_slug") or ""
-    ).strip().casefold()
+    slug = (
+        str(metadata.get("slug") or metadata.get("canonical_slug") or "")
+        .strip()
+        .casefold()
+    )
     if slug:
         keys.add(f"slug:{slug}")
     return keys
@@ -303,7 +383,7 @@ def _candidate_embedding(candidate: Mapping[str, Any]) -> list[float]:
 
 
 def _group_duplicate_candidates(
-    candidates: Sequence[Mapping[str, Any]]
+    candidates: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     """Return primary evidence with duplicate references grouped under it."""
 
@@ -367,16 +447,26 @@ async def retrieve_candidates(
     settings = get_settings()
     profile = _profile_query(query_text)
     requested_source_types = list(source_filters or SOURCE_TYPE_CAPS.keys())
-    cap_total = sum(SOURCE_TYPE_CAPS.get(source_type, 3) for source_type in requested_source_types)
+    cap_total = sum(
+        SOURCE_TYPE_CAPS.get(source_type, 3) for source_type in requested_source_types
+    )
     configured_limit = int(limit if limit is not None else settings.rag_candidate_limit)
-    resolved_limit = configured_limit if limit is not None else max(configured_limit, cap_total)
+    resolved_limit = (
+        configured_limit if limit is not None else max(configured_limit, cap_total)
+    )
     resolved_min_score = float(
         min_score if min_score is not None else settings.rag_min_score
     )
     resolved_memberships = list(
         memberships or []
     ) or await company_access.list_accessible_companies(user)
-    query_embedding = embed_text(profile.expanded)
+    validate_score_configuration(
+        vector_weight=float(settings.rag_vector_weight),
+        bm25_weight=float(settings.rag_bm25_weight),
+        metadata_weight=float(settings.rag_metadata_weight),
+        minimum_score=resolved_min_score,
+    )
+    query_embedding = await embed_text(profile.expanded)
     rows: list[Mapping[str, Any]] = []
     active_chunk_limit = int(settings.rag_active_chunk_limit)
     for source_type in requested_source_types:
@@ -472,6 +562,7 @@ async def retrieve_candidates(
         if len(diverse) >= max(1, resolved_limit):
             break
     diverse = _group_duplicate_candidates(diverse)
+    diverse = await _rerank(query_text, diverse)
     log_info(
         "RAG hybrid retrieval completed",
         query=query_text,

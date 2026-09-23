@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+import httpx
+
 from app.core.config import get_settings
 from app.core.logging import log_info, log_warning
 from app.repositories import rag_index as rag_repo
@@ -109,8 +111,22 @@ _STOP_WORDS = frozenset(
 )
 
 
+_EMBEDDING_ALGORITHM = "myportal-embedding-v3"
+
+
 def embedding_model() -> str:
-    return get_settings().rag_embedding_model
+    """Return the persisted compatibility fingerprint for the active vectors."""
+    settings = get_settings()
+    components = {
+        "algorithm": _EMBEDDING_ALGORITHM,
+        "provider": settings.rag_embedding_provider.strip().lower(),
+        "model": settings.rag_embedding_model.strip(),
+        "dimensions": int(settings.rag_embedding_dimensions),
+    }
+    digest = hashlib.sha256(
+        json.dumps(components, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:16]
+    return f"{components['provider']}:{components['model']}:{components['dimensions']}:{digest}"
 
 
 def embedding_dimensions() -> int:
@@ -201,8 +217,8 @@ def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def embed_text(text: str) -> list[float]:
-    """Hash-projection embedding with stop-word filtering and bigram augmentation.
+def _lexical_embedding(text: str) -> list[float]:
+    """Hash-projection vector used only by the explicit lexical provider.
 
     Tokens are extracted using the same regex and stop-word list as BM25 retrieval
     so that both signals operate on an identical vocabulary.  Bigrams (adjacent
@@ -225,6 +241,52 @@ def embed_text(text: str) -> list[float]:
     if not magnitude:
         return vector
     return [value / magnitude for value in vector]
+
+
+async def embed_text(text: str) -> list[float]:
+    """Embed text using Ollama/OpenAI-compatible APIs or the local lexical fallback."""
+    settings = get_settings()
+    provider = settings.rag_embedding_provider.strip().lower()
+    if provider == "lexical":
+        return _lexical_embedding(text)
+    base_url = settings.rag_embedding_base_url.rstrip("/")
+    headers: dict[str, str] = {}
+    if settings.rag_embedding_api_key:
+        headers["Authorization"] = f"Bearer {settings.rag_embedding_api_key}"
+    if provider == "ollama":
+        url = f"{base_url}/api/embed"
+        payload: dict[str, Any] = {
+            "model": settings.rag_embedding_model,
+            "input": text,
+            "dimensions": int(settings.rag_embedding_dimensions),
+        }
+    else:
+        url = f"{base_url}/v1/embeddings"
+        payload = {
+            "model": settings.rag_embedding_model,
+            "input": text,
+            "dimensions": int(settings.rag_embedding_dimensions),
+        }
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+        body = response.json()
+    try:
+        vector = (
+            body["embeddings"][0]
+            if provider == "ollama"
+            else body["data"][0]["embedding"]
+        )
+        result = [float(value) for value in vector]
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise ValueError("Embedding provider returned an invalid response") from exc
+    expected = int(settings.rag_embedding_dimensions)
+    if len(result) != expected:
+        raise ValueError(
+            f"Embedding dimension mismatch: configured {expected}, provider returned {len(result)}"
+        )
+    magnitude = math.sqrt(sum(value * value for value in result))
+    return [value / magnitude for value in result] if magnitude else result
 
 
 def cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
@@ -603,7 +665,7 @@ async def index_document(
                 "chunk_index": index,
                 "chunk_text": chunk,
                 "chunk_hash": content_hash(chunk),
-                "embedding_json": json.dumps(embed_text(chunk)),
+                "embedding_json": json.dumps(await embed_text(chunk)),
                 "embedding_model": embedding_model(),
                 "token_count": len(chunk.split()),
             }
