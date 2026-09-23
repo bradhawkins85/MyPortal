@@ -37,7 +37,9 @@ _PLACEHOLDER_SECRETS: frozenset[str] = frozenset(
 # Minimum byte length required for cryptographic secrets used in production.
 _MIN_PRODUCTION_SECRET_LENGTH: int = 32
 _MARKETING_ELEMENT_PLACEHOLDER_SAMPLE: str = "element"
-_DEFAULT_FEATURE_PACK_SLUGS: tuple[str, ...] = tuple(discover_builtin_feature_pack_slugs())
+_DEFAULT_FEATURE_PACK_SLUGS: tuple[str, ...] = tuple(
+    discover_builtin_feature_pack_slugs()
+)
 _DEFAULT_FEATURE_PACKS: str = ",".join(_DEFAULT_FEATURE_PACK_SLUGS)
 
 
@@ -139,12 +141,24 @@ class Settings(BaseSettings):
     )
     smtp_password: str | None = Field(default=None, validation_alias="SMTP_PASS")
     smtp_use_tls: bool = Field(default=True, validation_alias="SMTP_SECURE")
-    dmarc_max_compressed_bytes: int = Field(default=5 * 1024 * 1024, validation_alias="DMARC_MAX_COMPRESSED_BYTES", ge=1024)
-    dmarc_max_expanded_bytes: int = Field(default=25 * 1024 * 1024, validation_alias="DMARC_MAX_EXPANDED_BYTES", ge=1024)
-    dmarc_max_attachments: int = Field(default=10, validation_alias="DMARC_MAX_ATTACHMENTS", ge=1, le=100)
-    dmarc_max_xml_depth: int = Field(default=32, validation_alias="DMARC_MAX_XML_DEPTH", ge=4, le=128)
-    dmarc_max_records: int = Field(default=100000, validation_alias="DMARC_MAX_RECORDS", ge=1)
-    dmarc_retention_days: int = Field(default=365, validation_alias="DMARC_RETENTION_DAYS", ge=1)
+    dmarc_max_compressed_bytes: int = Field(
+        default=5 * 1024 * 1024, validation_alias="DMARC_MAX_COMPRESSED_BYTES", ge=1024
+    )
+    dmarc_max_expanded_bytes: int = Field(
+        default=25 * 1024 * 1024, validation_alias="DMARC_MAX_EXPANDED_BYTES", ge=1024
+    )
+    dmarc_max_attachments: int = Field(
+        default=10, validation_alias="DMARC_MAX_ATTACHMENTS", ge=1, le=100
+    )
+    dmarc_max_xml_depth: int = Field(
+        default=32, validation_alias="DMARC_MAX_XML_DEPTH", ge=4, le=128
+    )
+    dmarc_max_records: int = Field(
+        default=100000, validation_alias="DMARC_MAX_RECORDS", ge=1
+    )
+    dmarc_retention_days: int = Field(
+        default=365, validation_alias="DMARC_RETENTION_DAYS", ge=1
+    )
     stock_feed_url: AnyHttpUrl | None = Field(
         default=None, validation_alias="STOCK_FEED_URL"
     )
@@ -163,7 +177,9 @@ class Settings(BaseSettings):
     portal_url: AnyHttpUrl | None = Field(default=None, validation_alias="PORTAL_URL")
     passkey_rp_id: str = Field(default="", validation_alias="PASSKEY_RP_ID")
     passkey_rp_name: str = Field(default="", validation_alias="PASSKEY_RP_NAME")
-    passkey_allowed_origins: str = Field(default="", validation_alias="PASSKEY_ALLOWED_ORIGINS")
+    passkey_allowed_origins: str = Field(
+        default="", validation_alias="PASSKEY_ALLOWED_ORIGINS"
+    )
     azure_client_id: str | None = Field(
         default=None, validation_alias="AZURE_CLIENT_ID"
     )
@@ -279,9 +295,7 @@ class Settings(BaseSettings):
 
         disabled = set(parse_slug_list(self.disabled_feature_packs))
         self.feature_packs = ",".join(
-            slug
-            for slug in parse_slug_list(self.feature_packs)
-            if slug not in disabled
+            slug for slug in parse_slug_list(self.feature_packs) if slug not in disabled
         )
         return self
 
@@ -320,13 +334,22 @@ class Settings(BaseSettings):
     )
     disable_caching: bool = Field(default=True, validation_alias="DISABLE_CACHING")
     rag_embedding_model: str = Field(
-        default="myportal-hash-embedding-v2",
+        default="myportal-lexical-v3",
         validation_alias="RAG_EMBEDDING_MODEL",
         description=(
             "Embedding model/version identifier stored with RAG chunks. Change this "
             "when switching embedding providers or dimensions so new vectors are "
             "indexed separately from old vectors."
         ),
+    )
+    rag_embedding_provider: str = Field(
+        default="lexical", validation_alias="RAG_EMBEDDING_PROVIDER"
+    )
+    rag_embedding_base_url: str = Field(
+        default="http://127.0.0.1:11434", validation_alias="RAG_EMBEDDING_BASE_URL"
+    )
+    rag_embedding_api_key: str | None = Field(
+        default=None, validation_alias="RAG_EMBEDDING_API_KEY"
     )
     rag_embedding_dimensions: int = Field(
         default=256, validation_alias="RAG_EMBEDDING_DIMENSIONS", ge=16, le=4096
@@ -377,6 +400,10 @@ class Settings(BaseSettings):
         default=0.10, validation_alias="RAG_METADATA_WEIGHT", ge=0.0, le=1.0
     )
     rag_rerank_enabled: bool = Field(default=False, validation_alias="RERANK_ENABLED")
+    rag_rerank_model: str = Field(default="", validation_alias="RAG_RERANK_MODEL")
+    rag_rerank_top_n: int = Field(
+        default=12, validation_alias="RAG_RERANK_TOP_N", ge=1, le=50
+    )
     rag_query_expansion: bool = Field(default=True, validation_alias="QUERY_EXPANSION")
     rag_entity_extraction: bool = Field(
         default=True, validation_alias="ENTITY_EXTRACTION"
@@ -384,6 +411,28 @@ class Settings(BaseSettings):
     rag_max_context_tokens: int = Field(
         default=2500, validation_alias="RAG_MAX_CONTEXT_TOKENS", ge=500, le=20000
     )
+
+    @model_validator(mode="after")
+    def _validate_rag_configuration(self) -> "Settings":
+        provider = self.rag_embedding_provider.strip().lower()
+        if provider not in {"lexical", "ollama", "openai_compatible"}:
+            raise ValueError(
+                "RAG_EMBEDDING_PROVIDER must be lexical, ollama, or openai_compatible"
+            )
+        if (
+            abs(
+                self.rag_vector_weight
+                + self.rag_bm25_weight
+                + self.rag_metadata_weight
+                - 1.0
+            )
+            > 1e-6
+        ):
+            raise ValueError("RAG vector, BM25, and metadata weights must sum to 1.0")
+        if self.rag_rerank_enabled and not self.rag_rerank_model.strip():
+            raise ValueError("RAG_RERANK_MODEL is required when RERANK_ENABLED=true")
+        return self
+
     enable_background_relationships: bool = Field(
         default=True, validation_alias="ENABLE_BACKGROUND_RELATIONSHIPS"
     )
@@ -406,7 +455,10 @@ class Settings(BaseSettings):
         default=0.55, validation_alias="RAG_RELATIONSHIP_MIN_SCORE", ge=0.0, le=1.0
     )
     rag_relationship_idle_delay_ms: int = Field(
-        default=5000, validation_alias="RAG_RELATIONSHIP_IDLE_DELAY_MS", ge=100, le=60000
+        default=5000,
+        validation_alias="RAG_RELATIONSHIP_IDLE_DELAY_MS",
+        ge=100,
+        le=60000,
     )
     rag_relationship_lease_seconds: int = Field(
         default=300,
@@ -893,7 +945,11 @@ class Settings(BaseSettings):
         return value
 
     def passkey_allowed_origin_list(self) -> list[str]:
-        origins = [origin.strip() for origin in self.passkey_allowed_origins.split(",") if origin.strip()]
+        origins = [
+            origin.strip()
+            for origin in self.passkey_allowed_origins.split(",")
+            if origin.strip()
+        ]
         if origins:
             return origins
         if self.portal_url:

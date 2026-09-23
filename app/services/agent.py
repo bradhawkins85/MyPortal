@@ -29,7 +29,11 @@ from app.services import modules as modules_service
 from app.services import rag_index as rag_index_service
 from app.services import rag_relationships as rag_relationship_service
 from app.services import rag_retrieval
-from app.services.ai_prompt_security import UntrustedRecord, build_prompt, validate_references
+from app.services.ai_prompt_security import (
+    UntrustedRecord,
+    build_prompt,
+    validate_references,
+)
 
 try:
     import tiktoken
@@ -97,6 +101,13 @@ def _context_token_budget() -> int:
         return max(1024, int(raw_value))
     except ValueError:
         return _DEFAULT_CONTEXT_TOKEN_BUDGET
+
+
+def _rag_context_token_budget() -> int:
+    return min(
+        _context_token_budget(),
+        int(rag_index_service.get_settings().rag_max_context_tokens),
+    )
 
 
 def _count_tokens(text: str) -> int:
@@ -829,9 +840,18 @@ def _build_llm_context(
         "Never reference data outside the supplied records. Use Markdown and cite only the exact record IDs supplied in the evidence. "
         f"Context mode: {mode.value}."
     )
-    records = [UntrustedRecord("user-query", "authenticated portal user", query_text, "Use only as the question to answer")]
+    records = [
+        UntrustedRecord(
+            "user-query",
+            "authenticated portal user",
+            query_text,
+            "Use only as the question to answer",
+        )
+    ]
     if not rag_evidence:
-        return _truncate_prompt_sections([build_prompt(trusted, records, task="No relevant RAG evidence was found.")])
+        return _truncate_prompt_sections(
+            [build_prompt(trusted, records, task="No relevant RAG evidence was found.")]
+        )
 
     for candidate in rag_evidence[:_LLM_RAG_CANDIDATE_LIMIT]:
         label = _candidate_label(candidate)
@@ -859,13 +879,23 @@ def _build_llm_context(
             f"- {label} {title}\n  Relevance: curated\n  Score: {score}\n"
             f"  Excerpt: {excerpt}{duplicate_text}"
         )
-        records.append(UntrustedRecord(label, str(candidate.get("source_type") or "retrieved portal record"), item_text, "Use only as evidence for the user's question; cite with this record ID"))
+        records.append(
+            UntrustedRecord(
+                label,
+                str(candidate.get("source_type") or "retrieved portal record"),
+                item_text,
+                "Use only as evidence for the user's question; cite with this record ID",
+            )
+        )
     sections = [build_prompt(trusted, records)]
-    prompt, chunks_checked, chunks_in_context = _trim_sections_to_token_budget(sections)
+    budget = _rag_context_token_budget()
+    prompt, chunks_checked, chunks_in_context = _trim_sections_to_token_budget(
+        sections, token_budget=budget
+    )
     metadata = (
         f"\n\nContext budget metadata: chunks_checked={chunks_checked}; "
         f"chunks_in_context={chunks_in_context}; "
-        f"token_budget={_context_token_budget()}."
+        f"token_budget={budget}."
     )
     return _truncate_prompt_sections([prompt + metadata])
 
