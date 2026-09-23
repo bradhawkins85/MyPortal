@@ -10,6 +10,38 @@
   let attemptResponseStatus = null;
   let attemptResponseError = null;
 
+  const conditionOperators = ['equals', 'not_equals', 'contains', 'not_contains', 'starts_with', 'ends_with', 'is_empty', 'is_not_empty', 'greater_than', 'less_than'];
+
+  function addRuleCondition(condition = {}) {
+    const host = document.querySelector('[data-rule-conditions]');
+    if (!host) return;
+    const row = document.createElement('div');
+    row.className = 'card__controls';
+    const field = document.createElement('input'); field.className = 'form-input'; field.name = 'field'; field.required = true; field.placeholder = 'Field'; field.value = condition.field || '';
+    const operator = document.createElement('select'); operator.className = 'form-input'; operator.name = 'operator';
+    conditionOperators.forEach((value) => { const option = document.createElement('option'); option.value = value; option.textContent = value.replaceAll('_', ' '); option.selected = value === condition.operator; operator.appendChild(option); });
+    const value = document.createElement('input'); value.className = 'form-input'; value.name = 'value'; value.placeholder = 'Value'; value.value = condition.value ?? '';
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'button button--ghost'; remove.textContent = 'Remove'; remove.addEventListener('click', () => row.remove());
+    row.append(field, operator, value, remove); host.appendChild(row);
+  }
+
+  function openRuleEditor(rule = {}) {
+    const modal = query('webhook-deletion-rule-modal'); const form = document.querySelector('[data-deletion-rule-form]');
+    form.elements.id.value = rule.id || ''; form.elements.name.value = rule.name || ''; form.elements.executionType.value = rule.execution_type || 'event'; form.elements.cronExpression.value = rule.cron_expression || ''; form.elements.enabled.checked = rule.enabled !== false;
+    document.querySelector('[data-rule-conditions]').innerHTML = ''; (rule.conditions || [{}]).forEach(addRuleCondition); openModal(modal);
+  }
+
+  function bindDeletionRules() {
+    const form = document.querySelector('[data-deletion-rule-form]');
+    document.querySelector('[data-deletion-rule-new]')?.addEventListener('click', () => openRuleEditor());
+    document.querySelector('[data-add-condition]')?.addEventListener('click', () => addRuleCondition());
+    document.querySelectorAll('[data-deletion-rule-edit]').forEach((button) => button.addEventListener('click', () => openRuleEditor(JSON.parse(button.closest('tr').dataset.rule))));
+    document.querySelectorAll('[data-deletion-rule-delete]').forEach((button) => button.addEventListener('click', async () => { const rule = JSON.parse(button.closest('tr').dataset.rule); if (window.confirm(`Delete “${rule.name}”?`)) { await requestJson(`/scheduler/webhook-deletion-rules/${rule.id}`, { method: 'DELETE' }); window.location.reload(); } }));
+    form?.addEventListener('submit', async (event) => { event.preventDefault(); const conditions = [...form.querySelectorAll('[data-rule-conditions] > div')].map((row) => ({ field: row.querySelector('[name=field]').value, operator: row.querySelector('[name=operator]').value, value: row.querySelector('[name=value]').value })); const id = form.elements.id.value; await requestJson(`/scheduler/webhook-deletion-rules${id ? `/${id}` : ''}`, { method: id ? 'PUT' : 'POST', body: JSON.stringify({ name: form.elements.name.value, executionType: form.elements.executionType.value, cronExpression: form.elements.cronExpression.value || null, enabled: form.elements.enabled.checked, conditions }) }); window.location.reload(); });
+    document.querySelector('[data-retention-form]')?.addEventListener('submit', async (event) => { event.preventDefault(); const target = event.currentTarget; await requestJson('/scheduler/webhook-retention', { method: 'PUT', body: JSON.stringify({ enabled: target.elements.enabled.checked, retentionValue: Number(target.elements.retentionValue.value), retentionUnit: target.elements.retentionUnit.value }) }); window.location.reload(); });
+    bindModalDismissal(query('webhook-deletion-rule-modal'));
+  }
+
   function getCookie(name) {
     const pattern = `(?:^|; )${name.replace(/([.$?*|{}()\[\]\\\/\+^])/g, '\\$1')}=([^;]*)`;
     const matches = document.cookie.match(new RegExp(pattern));
@@ -538,5 +570,6 @@
     bindDeleteButtons();
     bindBulkDeleteButtons();
     bindRowMenuPositioning();
+    bindDeletionRules();
   });
 })();

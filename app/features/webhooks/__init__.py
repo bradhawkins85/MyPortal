@@ -14,7 +14,7 @@ from .routes import router as webhooks_router
 
 PACK = FeaturePack(
     slug="webhooks",
-    version="1.0.0",
+    version="1.2.0",
     routers=(webhooks_router,),
 )
 

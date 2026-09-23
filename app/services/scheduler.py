@@ -377,7 +377,9 @@ class SchedulerService:
             if not lock_acquired:
                 log_info("Webhook cleanup already running on another worker, skipping")
                 return
-            await webhook_monitor.purge_completed_events()
+            from app.services import webhook_deletion_rules
+
+            await webhook_deletion_rules.run_scheduled_rules()
 
     async def _run_automation_runner(self) -> None:
         """Run automation processing with distributed lock to prevent duplicate execution."""

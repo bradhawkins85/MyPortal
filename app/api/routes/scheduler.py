@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.core.logging import log_info
 from app.repositories import scheduled_tasks as scheduled_tasks_repo
 from app.repositories import webhook_events as webhook_events_repo
+from app.repositories import webhook_deletion_rules as deletion_rules_repo
 from app.schemas.scheduler import (
     ActivateTaskRequest,
     RunTaskResponse,
@@ -23,12 +24,69 @@ from app.schemas.scheduler import (
     WebhookEventAttemptResponse,
     WebhookEventResponse,
     WebhookEventsBulkDeleteResponse,
+    WebhookDeletionRuleInput,
+    WebhookDeletionRuleResponse,
+    WebhookRetentionInput,
 )
 from app.services import cron_calendar, scheduled_task_preview, webhook_monitor
+from app.services import webhook_deletion_rules as deletion_rules_service
 from app.services import system_update_history
 from app.services.scheduler import scheduler_service
 
 router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
+
+
+def _rule_data(payload: WebhookDeletionRuleInput) -> dict[str, Any]:
+    data = payload.model_dump(by_alias=False)
+    if data["execution_type"] == "scheduled":
+        if not data.get("cron_expression"):
+            raise HTTPException(status_code=422, detail="cronExpression is required for scheduled rules")
+        data["next_run_at"] = deletion_rules_service.next_run(data["cron_expression"])
+    else:
+        data["cron_expression"] = None
+        data["next_run_at"] = None
+    return data
+
+
+@router.get("/webhook-deletion-rules", response_model=list[WebhookDeletionRuleResponse])
+async def list_webhook_deletion_rules(_: None = Depends(require_database), __: dict[str, Any] = Depends(require_super_admin)):
+    return await deletion_rules_repo.list_rules()
+
+
+@router.post("/webhook-deletion-rules", response_model=WebhookDeletionRuleResponse, status_code=201)
+async def create_webhook_deletion_rule(payload: WebhookDeletionRuleInput, _: None = Depends(require_database), __: dict[str, Any] = Depends(require_super_admin)):
+    rule = await deletion_rules_repo.create_rule(_rule_data(payload))
+    log_info("Webhook deletion rule created", rule_id=rule.get("id"))
+    return rule
+
+
+@router.put("/webhook-deletion-rules/{rule_id}", response_model=WebhookDeletionRuleResponse)
+async def update_webhook_deletion_rule(rule_id: int, payload: WebhookDeletionRuleInput, _: None = Depends(require_database), __: dict[str, Any] = Depends(require_super_admin)):
+    if not await deletion_rules_repo.get_rule(rule_id):
+        raise HTTPException(status_code=404, detail="Deletion rule not found")
+    return await deletion_rules_repo.update_rule(rule_id, _rule_data(payload))
+
+
+@router.delete("/webhook-deletion-rules/{rule_id}", status_code=204)
+async def delete_webhook_deletion_rule(rule_id: int, _: None = Depends(require_database), __: dict[str, Any] = Depends(require_super_admin)) -> None:
+    if not await deletion_rules_repo.get_rule(rule_id):
+        raise HTTPException(status_code=404, detail="Deletion rule not found")
+    await deletion_rules_repo.delete_rule(rule_id)
+
+
+@router.get("/webhook-retention")
+async def get_webhook_retention(_: None = Depends(require_database), __: dict[str, Any] = Depends(require_super_admin)):
+    return await deletion_rules_repo.get_retention()
+
+
+@router.put("/webhook-retention")
+async def update_webhook_retention(payload: WebhookRetentionInput, _: None = Depends(require_database), __: dict[str, Any] = Depends(require_super_admin)):
+    value = 0 if payload.retention_unit == "immediately" else payload.retention_value
+    return await deletion_rules_repo.set_retention(
+        enabled=payload.enabled,
+        retention_value=value,
+        retention_unit=payload.retention_unit,
+    )
 
 
 @router.get("/system-updates", response_model=list[dict[str, Any]])

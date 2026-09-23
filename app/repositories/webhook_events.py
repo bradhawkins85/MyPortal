@@ -255,6 +255,21 @@ async def delete_succeeded_before(cutoff: datetime) -> int:
     return count
 
 
+async def delete_before(cutoff: datetime) -> int:
+    """Delete entries whose creation timestamp is older than ``cutoff``.
+
+    ``created_at`` defines retention age so delivery retries cannot extend an
+    entry's lifetime. Attempt/result rows are removed by the foreign key's
+    ``ON DELETE CASCADE``.
+    """
+    threshold = _ensure_naive_utc(cutoff)
+    row = await db.fetch_one("SELECT COUNT(*) AS count FROM webhook_events WHERE created_at < %s", (threshold,))
+    count = int(row["count"]) if row else 0
+    if count:
+        await db.execute("DELETE FROM webhook_events WHERE created_at < %s", (threshold,))
+    return count
+
+
 async def mark_in_progress(event_id: int) -> None:
     now = _utcnow()
     await db.execute(
