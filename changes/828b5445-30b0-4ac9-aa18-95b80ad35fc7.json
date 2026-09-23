@@ -1,0 +1,7 @@
+{
+  "guid": "828b5445-30b0-4ac9-aa18-95b80ad35fc7",
+  "occurred_at": "2026-09-23T00:00:00Z",
+  "change_type": "Security",
+  "summary": "Expand central audit coverage for authentication, sessions, password and MFA lifecycle events, passkeys, roles, and integration-module configuration.",
+  "content_hash": "security-identity-privileged-audit-coverage"
+}

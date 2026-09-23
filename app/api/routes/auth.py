@@ -345,14 +345,23 @@ async def _complete_login_response(
     response = JSONResponse(content=response_model.model_dump(mode="json"))
     session_manager.apply_session_cookies(response, session, request)
     _log_login_success(request, user, auth_method=auth_method)
+    await audit_service.record(
+        action="auth.login.succeed",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="user",
+        entity_id=int(user["id"]),
+        metadata={"authentication_method": auth_method, "outcome": "success"},
+    )
     if passkey_record is not None:
-        await audit_service.log_action(
-            action="auth.passkey.login.succeeded",
+        await audit_service.record(
+            action="auth.passkey.authenticate",
             user_id=int(user["id"]),
             entity_type="user_passkey",
             entity_id=int(passkey_record["id"]),
             metadata={
                 "credential_id_hash": passkeys_service.credential_id_hash(str(passkey_record["credential_id"])),
+                "outcome": "success",
             },
             request=request,
         )
@@ -548,10 +557,35 @@ async def login(
     user = await user_repo.get_user_by_email(payload.email)
     if not user or not verify_password(payload.password, user["password_hash"]):
         _log_login_failure(request, payload.email, "invalid_credentials")
+        # Do not create database audit rows for arbitrary unknown identifiers:
+        # that would provide an attacker with an unbounded audit-log write
+        # primitive.  Identified accounts are useful, attributable signals.
+        if user:
+            await audit_service.record(
+                action="auth.login.fail",
+                request=request,
+                user_id=int(user["id"]),
+                entity_type="user",
+                entity_id=int(user["id"]),
+                metadata={
+                    "authentication_method": "password",
+                    "outcome": "failure",
+                    "reason": "invalid_credentials",
+                    "identifier_hash": _hash_email(payload.email.lower()),
+                },
+            )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     if int(user.get("is_active", 1)) != 1:
         _log_login_failure(request, payload.email, "account_disabled")
+        await audit_service.record(
+            action="auth.login.fail",
+            request=request,
+            user_id=int(user["id"]),
+            entity_type="user",
+            entity_id=int(user["id"]),
+            metadata={"authentication_method": "password", "outcome": "failure", "reason": "account_disabled"},
+        )
         detail = "Please verify your email address before signing in." if not user.get("email_verified_at") else "Account is disabled"
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
 
@@ -559,6 +593,11 @@ async def login(
     if totp_devices:
         if not payload.totp_code:
             _log_login_failure(request, payload.email, "totp_required")
+            await audit_service.record(
+                action="auth.login.fail", request=request, user_id=int(user["id"]),
+                entity_type="user", entity_id=int(user["id"]),
+                metadata={"authentication_method": "password_totp", "outcome": "failure", "reason": "totp_required"},
+            )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="TOTP code required")
         verified = False
         for device in totp_devices:
@@ -568,6 +607,11 @@ async def login(
                 break
         if not verified:
             _log_login_failure(request, payload.email, "invalid_totp")
+            await audit_service.record(
+                action="auth.login.fail", request=request, user_id=int(user["id"]),
+                entity_type="user", entity_id=int(user["id"]),
+                metadata={"authentication_method": "password_totp", "outcome": "failure", "reason": "invalid_totp"},
+            )
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid TOTP code")
 
     await auth_repo.clear_login_attempts(identifier)
@@ -683,6 +727,14 @@ async def logout(
     session: SessionData = Depends(get_current_session),
 ) -> Response:
     await session_manager.revoke_session(session)
+    await audit_service.record(
+        action="auth.session.terminate",
+        request=request,
+        user_id=int(session.user_id),
+        entity_type="session",
+        entity_id=int(session.id),
+        metadata={"reason": "logout", "outcome": "success"},
+    )
     accept_header = request.headers.get("accept", "").lower()
     if "text/html" in accept_header or "application/xhtml+xml" in accept_header:
         logout_response = RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
@@ -773,6 +825,7 @@ async def password_forgot(
 )
 async def password_reset(
     payload: PasswordResetConfirm,
+    request: Request,
     _: None = Depends(require_database),
 ) -> PasswordResetStatus:
     record = await auth_repo.get_password_reset_token(payload.token)
@@ -787,6 +840,14 @@ async def password_reset(
 
     await user_repo.set_user_password(record["user_id"], payload.password)
     await auth_repo.mark_password_reset_token_used(payload.token)
+    await audit_service.record(
+        action="auth.password.reset",
+        request=request,
+        user_id=int(record["user_id"]),
+        entity_type="user",
+        entity_id=int(record["user_id"]),
+        metadata={"outcome": "success"},
+    )
     return PasswordResetStatus(detail="Password reset successful.")
 
 
@@ -797,6 +858,7 @@ async def password_reset(
 )
 async def change_password(
     payload: PasswordChangeRequest,
+    request: Request,
     current_user: dict = Depends(get_current_user),
 ) -> PasswordResetStatus:
     stored_hash = current_user.get("password_hash")
@@ -810,6 +872,14 @@ async def change_password(
         )
 
     await user_repo.set_user_password(current_user["id"], payload.new_password)
+    await audit_service.record(
+        action="auth.password.change",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="user",
+        entity_id=int(current_user["id"]),
+        metadata={"outcome": "success"},
+    )
     return PasswordResetStatus(detail="Password updated successfully.")
 
 
@@ -833,6 +903,7 @@ async def list_totp_devices(
     summary="Begin TOTP enrolment",
 )
 async def setup_totp(
+    request: Request,
     session: SessionData = Depends(get_current_session),
     current_user: dict = Depends(get_current_user),
 ) -> TOTPSetupResponse:
@@ -840,6 +911,14 @@ async def setup_totp(
     totp = pyotp.TOTP(secret)
     provisioning_uri = totp.provisioning_uri(name=current_user["email"], issuer_name=settings.app_name)
     await session_manager.store_pending_totp_secret(session, secret)
+    await audit_service.record(
+        action="auth.mfa.enroll",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="user",
+        entity_id=int(current_user["id"]),
+        metadata={"method": "totp", "stage": "begin"},
+    )
     return TOTPSetupResponse(
         secret=secret,
         otpauth_url=provisioning_uri,
@@ -854,6 +933,7 @@ async def setup_totp(
 )
 async def verify_totp(
     payload: TOTPVerifyRequest,
+    request: Request,
     session: SessionData = Depends(get_current_session),
     current_user: dict = Depends(get_current_user),
 ) -> TOTPAuthenticator:
@@ -863,6 +943,14 @@ async def verify_totp(
 
     totp = pyotp.TOTP(secret)
     if not totp.verify(payload.code, valid_window=1):
+        await audit_service.record(
+            action="auth.mfa.verify",
+            request=request,
+            user_id=int(current_user["id"]),
+            entity_type="user",
+            entity_id=int(current_user["id"]),
+            metadata={"method": "totp", "outcome": "failure"},
+        )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid TOTP code")
 
     name = payload.name or "Authenticator"
@@ -870,6 +958,15 @@ async def verify_totp(
         user_id=current_user["id"], name=name, secret=secret
     )
     await session_manager.clear_pending_totp_secret(session)
+    await audit_service.record_create(
+        action="auth.mfa.verify",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="totp_authenticator",
+        entity_id=int(authenticator["id"]),
+        after={"name": authenticator["name"], "method": "totp"},
+        metadata={"outcome": "success"},
+    )
     return TOTPAuthenticator(id=authenticator["id"], name=authenticator["name"])
 
 
@@ -880,6 +977,7 @@ async def verify_totp(
 )
 async def delete_totp(
     authenticator_id: int,
+    request: Request,
     current_user: dict = Depends(get_current_user),
 ) -> Response:
     if await auth_repo.count_totp_authenticators(current_user["id"]) <= 1:
@@ -887,7 +985,19 @@ async def delete_totp(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="At least one authenticator is required for every account",
         )
+    devices = await auth_repo.get_totp_authenticators(current_user["id"])
+    existing = next((item for item in devices if int(item["id"]) == authenticator_id), None)
+    if existing is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Authenticator not found")
     await auth_repo.delete_totp_authenticator(current_user["id"], authenticator_id)
+    await audit_service.record_delete(
+        action="auth.mfa.remove",
+        request=request,
+        user_id=int(current_user["id"]),
+        entity_type="totp_authenticator",
+        entity_id=authenticator_id,
+        before={"name": existing.get("name"), "method": "totp"},
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -969,10 +1079,10 @@ async def finish_passkey_registration(
     except HTTPException:
         raise
     except Exception as exc:
-        await audit_service.log_action(
-            action="auth.passkey.registration.failed",
+        await audit_service.record(
+            action="auth.passkey.register",
             user_id=int(current_user["id"]),
-            metadata={"reason": "verification_failed"},
+            metadata={"reason": "verification_failed", "outcome": "failure"},
             request=request,
         )
         raise HTTPException(
@@ -999,13 +1109,13 @@ async def finish_passkey_registration(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This passkey is already registered") from exc
         raise
     await audit_service.record_create(
-        action="auth.passkey.registration.succeed",
+        action="auth.passkey.register",
         request=request,
         user_id=int(current_user["id"]),
         entity_type="user_passkey",
         entity_id=int(created["id"]),
         after=_passkey_summary(created),
-        metadata={"credential_id_hash": passkeys_service.credential_id_hash(credential_id)},
+        metadata={"credential_id_hash": passkeys_service.credential_id_hash(credential_id), "outcome": "success"},
     )
     return _build_passkey_item(created)
 
@@ -1134,21 +1244,21 @@ async def finish_passkey_authentication(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail) from None
     passkey = await auth_repo.get_passkey_by_credential_id(credential_id)
     if not passkey:
-        await audit_service.log_action(
-            action="auth.passkey.login.failed",
+        await audit_service.record(
+            action="auth.passkey.authenticate",
             user_id=None,
-            metadata={"reason": "credential_not_found", "credential_id_hash": passkeys_service.credential_id_hash(credential_id)},
+            metadata={"reason": "credential_not_found", "credential_id_hash": passkeys_service.credential_id_hash(credential_id), "outcome": "failure"},
             request=request,
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail)
     user = await user_repo.get_user_by_id(int(passkey["user_id"]))
     if not user or int(user.get("is_active", 1)) != 1:
-        await audit_service.log_action(
-            action="auth.passkey.login.failed",
+        await audit_service.record(
+            action="auth.passkey.authenticate",
             user_id=int(passkey["user_id"]),
             entity_type="user_passkey",
             entity_id=int(passkey["id"]),
-            metadata={"reason": "account_ineligible", "credential_id_hash": passkeys_service.credential_id_hash(credential_id)},
+            metadata={"reason": "account_ineligible", "credential_id_hash": passkeys_service.credential_id_hash(credential_id), "outcome": "failure"},
             request=request,
         )
         raise HTTPException(
@@ -1163,12 +1273,12 @@ async def finish_passkey_authentication(
             sign_count=int(passkey.get("sign_count") or 0),
         )
     except Exception as exc:
-        await audit_service.log_action(
-            action="auth.passkey.login.failed",
+        await audit_service.record(
+            action="auth.passkey.authenticate",
             user_id=int(user["id"]),
             entity_type="user_passkey",
             entity_id=int(passkey["id"]),
-            metadata={"reason": "verification_failed", "credential_id_hash": passkeys_service.credential_id_hash(credential_id)},
+            metadata={"reason": "verification_failed", "credential_id_hash": passkeys_service.credential_id_hash(credential_id), "outcome": "failure"},
             request=request,
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=failure_detail) from exc

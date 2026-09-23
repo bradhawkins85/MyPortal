@@ -1,12 +1,14 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from unittest.mock import AsyncMock
 from fastapi.testclient import TestClient
 
 from app.api.dependencies import auth as auth_dependencies
 from app.core.database import db
 from app.main import app, scheduler_service
 from app.security.session import SessionData, session_manager
+from app.api.routes import auth as auth_routes
 
 
 @pytest.fixture(autouse=True)
@@ -57,6 +59,8 @@ def test_browser_logout_revokes_session_and_redirects_to_login(monkeypatch, acti
 
     monkeypatch.setattr(session_manager, "revoke_session", fake_revoke_session)
     monkeypatch.setattr(session_manager, "clear_session_cookies", fake_clear_session_cookies)
+    audit_record = AsyncMock()
+    monkeypatch.setattr(auth_routes.audit_service, "record", audit_record)
     app.dependency_overrides[auth_dependencies.get_current_session] = lambda: active_session
 
     try:
@@ -74,6 +78,9 @@ def test_browser_logout_revokes_session_and_redirects_to_login(monkeypatch, acti
     assert response.headers["location"] == "/login"
     assert revoked == [active_session.id]
     assert len(cleared) == 1
+    assert audit_record.await_args.kwargs["action"] == "auth.session.terminate"
+    assert audit_record.await_args.kwargs["user_id"] == active_session.user_id
+    assert audit_record.await_args.kwargs["metadata"]["reason"] == "logout"
 
 
 def test_api_logout_keeps_no_content_response(monkeypatch, active_session):
@@ -82,6 +89,7 @@ def test_api_logout_keeps_no_content_response(monkeypatch, active_session):
 
     monkeypatch.setattr(session_manager, "revoke_session", fake_revoke_session)
     monkeypatch.setattr(session_manager, "clear_session_cookies", lambda response: None)
+    monkeypatch.setattr(auth_routes.audit_service, "record", AsyncMock())
     app.dependency_overrides[auth_dependencies.get_current_session] = lambda: active_session
 
     try:
