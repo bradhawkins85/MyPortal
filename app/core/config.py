@@ -728,6 +728,12 @@ class Settings(BaseSettings):
     matrixbot_ai_queue_timeout_minutes: int = Field(
         default=60, validation_alias="MATRIXBOT_AI_QUEUE_TIMEOUT_MINUTES", ge=1
     )
+    matrixbot_ai_concurrency_limit: int = Field(
+        default=4, validation_alias="MATRIXBOT_AI_CONCURRENCY_LIMIT", ge=1, le=25
+    )
+    matrixbot_ai_provider_concurrency_limit: int = Field(
+        default=2, validation_alias="MATRIXBOT_AI_PROVIDER_CONCURRENCY_LIMIT", ge=1, le=25
+    )
     matrixbot_ai_show_match_tags: bool = Field(
         default=True, validation_alias="MATRIXBOT_AI_SHOW_MATCH_TAGS"
     )

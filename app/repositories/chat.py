@@ -749,15 +749,26 @@ async def get_active_ai_queue_item(chat_room_id: int) -> dict[str, Any] | None:
 async def list_due_ai_queue_items(due_before: datetime, limit: int = 25) -> list[dict[str, Any]]:
     rows = await db.fetch_all(
         """SELECT * FROM matrix_ai_analysis_queue
-           WHERE status IN ('queued','processing') AND next_attempt_at <= %s
+           WHERE status = 'queued' AND next_attempt_at <= %s
            ORDER BY next_attempt_at ASC LIMIT %s""",
         (due_before, limit),
     )
     return [dict(r) for r in rows]
 
 
+async def claim_ai_queue_item(queue_id: int, when: datetime, retry_count: int) -> bool:
+    """Claim queued work once, even when multiple worker loops select it."""
+    rowcount = await db.execute_rowcount(
+        """UPDATE matrix_ai_analysis_queue
+           SET status = 'processing', last_attempt_at = %s, retry_count = %s
+           WHERE id = %s AND status = 'queued'""",
+        (when, retry_count, queue_id),
+    )
+    return rowcount == 1
+
+
 async def update_ai_queue_item(queue_id: int, **fields: Any) -> None:
-    allowed = {"last_attempt_at", "retry_count", "status", "cancellation_reason", "next_attempt_at", "result_payload"}
+    allowed = {"last_attempt_at", "retry_count", "status", "cancellation_reason", "next_attempt_at", "result_payload", "recommendation_key", "send_status", "matrix_event_id"}
     invalid = set(fields) - allowed
     if invalid:
         raise ValueError(f"Cannot update matrix_ai_analysis_queue fields: {invalid}")
@@ -766,9 +777,22 @@ async def update_ai_queue_item(queue_id: int, **fields: Any) -> None:
     set_clauses = ", ".join(f"{key} = %s" for key in fields)
     # Queue columns are constrained by the explicit local allowlist and values remain bound.
     await db.execute(  # nosec B608
-        f"UPDATE matrix_ai_analysis_queue SET {set_clauses} WHERE id = %s",  # nosec B608
+        "UPDATE matrix_ai_analysis_queue SET " + set_clauses + " WHERE id = %s",
         tuple(fields.values()) + (queue_id,),
     )
+
+
+async def mark_ai_recommendation_sending(queue_id: int, recommendation_key: str) -> bool:
+    """Persist the outbox key before I/O and allow retries of the same send only."""
+    rowcount = await db.execute_rowcount(
+        """UPDATE matrix_ai_analysis_queue
+           SET recommendation_key = %s, send_status = 'sending'
+           WHERE id = %s
+             AND (send_status IS NULL OR send_status IN ('pending','failed','sending'))
+             AND (recommendation_key IS NULL OR recommendation_key = %s)""",
+        (recommendation_key, queue_id, recommendation_key),
+    )
+    return rowcount == 1
 
 
 async def cancel_active_ai_queue_for_room(chat_room_id: int, reason: str) -> None:

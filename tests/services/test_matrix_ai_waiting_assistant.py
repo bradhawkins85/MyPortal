@@ -323,31 +323,101 @@ def test_ollama_generate_supports_openai_compatible_chat_completions(monkeypatch
     assert requests[0]["headers"]["Authorization"] == "Bearer secret-token"
 
 
-def test_build_article_recommendation_messages_formats_four_plain_text_and_html_messages():
+def test_build_article_recommendation_messages_formats_one_atomic_plain_text_and_html_message():
     article = {"title": "TouchPad <setup>"}
     link = "https://portal.example.test/knowledge-base/articles/touchpad?x=1&y=2"
     summary = " Enable the touchpad.\nUse Fn + F10. "
 
     messages = assistant._build_article_recommendation_messages(article, link, summary)
 
-    assert messages == [
-        (
-            "While you wait, this article may help: TouchPad <setup>",
-            "<p>While you wait, this article may help: TouchPad &lt;setup&gt;</p>",
-        ),
-        (
-            "https://portal.example.test/knowledge-base/articles/touchpad?x=1&y=2",
-            (
-                '<p><a href="https://portal.example.test/knowledge-base/articles/touchpad?x=1&amp;y=2">'
-                'https://portal.example.test/knowledge-base/articles/touchpad?x=1&amp;y=2</a></p>'
-            ),
-        ),
-        ("Enable the touchpad. Use Fn + F10.", "<p>Enable the touchpad. Use Fn + F10.</p>"),
-        (
-            assistant._AI_DISCLAIMER,
-            f"<p>{assistant._AI_DISCLAIMER}</p>",
-        ),
-    ]
+    assert len(messages) == 1
+    body, formatted = messages[0]
+    assert body == (
+        "While you wait, this article may help: TouchPad <setup>\n\n"
+        "https://portal.example.test/knowledge-base/articles/touchpad?x=1&y=2\n\n"
+        "Enable the touchpad. Use Fn + F10.\n\n"
+        f"{assistant._AI_DISCLAIMER}"
+    )
+    assert "TouchPad &lt;setup&gt;" in formatted
+    assert "touchpad?x=1&amp;y=2" in formatted
+    assert formatted.count("<p>") == 4
+
+
+def test_process_queue_once_obeys_global_concurrency_limit(monkeypatch):
+    settings = SimpleNamespace(
+        matrix_enabled=True,
+        matrixbot_ai_waiting_assistant_enabled=True,
+        matrixbot_ai_ollama_enabled=True,
+        matrixbot_ai_ollama_url="http://ollama.test",
+        matrixbot_ai_ollama_model="llama3",
+        matrixbot_ai_max_responses=2,
+        matrixbot_ai_ollama_provider="ollama",
+        matrixbot_ai_concurrency_limit=2,
+        matrixbot_ai_provider_concurrency_limit=3,
+    )
+    active = 0
+    peak = 0
+
+    monkeypatch.setattr(assistant, "get_settings", lambda: settings)
+    assistant._queue_semaphores.clear()
+
+    async def fake_due(*args, **kwargs):
+        return [{"id": value} for value in range(8)]
+
+    async def fake_process(item):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+
+    monkeypatch.setattr(assistant.chat_repo, "list_due_ai_queue_items", fake_due)
+    monkeypatch.setattr(assistant, "_process_queue_item", fake_process)
+
+    asyncio.run(assistant.process_queue_once())
+
+    assert peak == 2
+
+
+def test_rank_articles_uses_one_structured_provider_call(monkeypatch):
+    calls = 0
+
+    async def fake_generate(prompt, *, json_format=False):
+        nonlocal calls
+        calls += 1
+        assert json_format is True
+        return '{"keywords":["vpn"],"rankings":[{"id":"1","relevance":91,"summary":"Reset it."}]}'
+
+    monkeypatch.setattr(assistant, "_ollama_generate", fake_generate)
+    keywords, rankings = asyncio.run(assistant._rank_articles("VPN fails", [
+        {"id": 1, "title": "VPN", "ai_tags": ["vpn"], "content": "Reset the VPN."},
+        {"id": 2, "title": "Email", "ai_tags": ["email"], "content": "Email help."},
+    ]))
+
+    assert calls == 1
+    assert keywords == ["vpn"]
+    assert rankings == [{"id": "1", "relevance": 91.0, "summary": "Reset it."}]
+
+
+def test_process_queue_item_completes_delivered_outbox_without_retrying(monkeypatch):
+    updates = []
+
+    async def fake_update(queue_id, **fields):
+        updates.append((queue_id, fields))
+
+    async def must_not_run(*args, **kwargs):
+        raise AssertionError("completed outbox must not repeat analysis or sending")
+
+    monkeypatch.setattr(assistant.chat_repo, "update_ai_queue_item", fake_update)
+    monkeypatch.setattr(assistant.chat_repo, "get_room", must_not_run)
+    monkeypatch.setattr(assistant, "_ollama_generate", must_not_run)
+    monkeypatch.setattr(assistant, "_send_bot_message", must_not_run)
+
+    asyncio.run(assistant._process_queue_item({"id": 9, "chat_room_id": 42, "send_status": "sent"}))
+
+    assert updates[0][0] == 9
+    assert updates[0][1]["status"] == "completed"
+    assert updates[0][1]["result_payload"]["send_outcome"] == "already_sent"
 
 
 def test_send_bot_message_forwards_formatted_body(monkeypatch):
@@ -387,6 +457,7 @@ def test_send_bot_message_forwards_formatted_body(monkeypatch):
             {"id": 42, "matrix_room_id": "!room:id"},
             "plain",
             formatted_body='<p><a href="https://example.test">https://example.test</a></p>',
+            idempotency_key="stable-recommendation-key",
         )
     )
 
@@ -396,6 +467,7 @@ def test_send_bot_message_forwards_formatted_body(monkeypatch):
             "room_id": "!room:id",
             "body": "plain",
             "formatted_body": '<p><a href="https://example.test">https://example.test</a></p>',
+            "transaction_id": "stable-recommendation-key",
         }
     ]
 
