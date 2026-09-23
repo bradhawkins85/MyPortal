@@ -11672,6 +11672,30 @@ a.stat-strip__stat:focus-visible {
   text-decoration: none;
 }
 
+.ticket-related__item {
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0.5rem;
+}
+
+.ticket-related__item:last-child {
+  border-bottom: 0;
+}
+
+.ticket-related__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.25rem;
+}
+
+.ticket-related__reason,
+.ticket-related__unavailable {
+  color: var(--color-text-muted);
+  display: block;
+  font-size: 0.875rem;
+  margin-top: 0.2rem;
+}
+
 .rag-stat-strip {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }

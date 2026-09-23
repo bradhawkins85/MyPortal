@@ -13,6 +13,30 @@ from app.services.rag_relationships import (
 )
 
 
+@pytest.mark.anyio
+async def test_relationship_evidence_includes_every_positive_type(monkeypatch):
+    captured = {}
+
+    async def fetch_all(sql, params):
+        captured["sql"] = sql
+        return []
+
+    monkeypatch.setattr(rag_relationships_repo.db, "fetch_all", fetch_all)
+    await rag_relationships_repo.list_relationship_evidence(11, limit=12)
+
+    for relationship_type in (
+        "DIRECT_MATCH",
+        "RELATED",
+        "SUPPORTING",
+        "DUPLICATE",
+        "FOLLOW_UP",
+        "KNOWN_ISSUE",
+        "PARENT_CHILD",
+    ):
+        assert relationship_type in captured["sql"]
+    assert "target_available" in captured["sql"]
+
+
 def test_parse_relationship_response_stores_positive_match():
     parsed = parse_relationship_response(
         '{"relationship":"DIRECT_MATCH","confidence":0.94,"score":0.93,"reason":"same fix","supporting_excerpt":"replace CMOS"}',

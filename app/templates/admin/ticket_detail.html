@@ -638,13 +638,22 @@
               >
                 {% for item in ticket_related_items %}
                   <li class="ticket-related__item">
-                    <a
-                      class="ticket-related__link"
-                      href="{{ item.url }}"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="{{ item.label }}"
-                    >{{ item.label }}</a>
+                    <div class="ticket-related__meta">
+                      <span class="status status--info">{{ item.relationship_label }}</span>
+                      <span class="status status--neutral">{{ item.confidence_band }}{% if item.score is defined %} · {{ item.score }}%{% endif %}</span>
+                    </div>
+                    {% if item.available %}
+                      <a
+                        class="ticket-related__link"
+                        href="{{ item.url }}"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="{{ item.label }}"
+                      >{{ item.label }}</a>
+                      {% if item.reason %}<div class="ticket-related__reason">{{ item.reason }}</div>{% endif %}
+                    {% else %}
+                      <span class="ticket-related__unavailable">{{ item.label }}</span>
+                    {% endif %}
                   </li>
                 {% endfor %}
               </ul>

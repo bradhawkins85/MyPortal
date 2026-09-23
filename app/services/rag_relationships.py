@@ -45,8 +45,12 @@ _POSITIVE_TYPES = {
 }
 _MATCH_ORDER = {
     RelationshipType.DIRECT_MATCH.value: 0,
-    RelationshipType.RELATED.value: 1,
-    RelationshipType.SUPPORTING.value: 2,
+    RelationshipType.DUPLICATE.value: 1,
+    RelationshipType.FOLLOW_UP.value: 2,
+    RelationshipType.KNOWN_ISSUE.value: 3,
+    RelationshipType.PARENT_CHILD.value: 4,
+    RelationshipType.RELATED.value: 5,
+    RelationshipType.SUPPORTING.value: 6,
 }
 
 
