@@ -310,6 +310,8 @@ async def log_incoming_webhook(
     response_status: int | None = None,
     response_body: str | None = None,
     error_message: str | None = None,
+    method: str | None = None,
+    integration: str | None = None,
 ) -> dict[str, Any]:
     """Log an incoming webhook request for monitoring and troubleshooting.
     
@@ -325,6 +327,18 @@ async def log_incoming_webhook(
     Returns:
         The created webhook event record
     """
+    # Endpoint-specific legacy logging enriches the central middleware context
+    # instead of creating a second event for the same request.
+    from app.services.incoming_webhooks import current_context
+
+    monitor_context = current_context()
+    if monitor_context is not None:
+        monitor_context.name = name
+        monitor_context.response_status = response_status
+        monitor_context.response_body = response_body
+        monitor_context.error_message = error_message
+        return {"status": "captured", "direction": "incoming"}
+
     # Create the event as 'succeeded' or 'failed' immediately since incoming webhooks
     # are already processed (not queued for delivery)
     status = "succeeded" if error_message is None else "failed"
@@ -334,18 +348,26 @@ async def log_incoming_webhook(
     # even for public HTTPS endpoints. Storing the normalised https:// URL
     # ensures that any manual retry does not hit the proxy's HTTP→HTTPS redirect
     # (301/308) and fail.
-    normalised_source_url = _normalize_source_url(source_url)
+    normalised_source_url = sanitise_url(_normalize_source_url(source_url))
 
     # Redact sensitive headers before storing anywhere
-    safe_headers = _redact_headers(headers, sensitive=_SENSITIVE_HEADERS)
+    safe_headers = sanitise_headers(headers)
+    safe_payload = _sanitise_payload(payload)
+    safe_response_body = _sanitise_text_body(response_body)
     resolved_source_ip = _normalise_ip(source_ip) or _extract_source_ip(safe_headers)
-    metadata = {"source_ip": resolved_source_ip} if resolved_source_ip else None
+    metadata = {
+        key: value for key, value in {
+            "source_ip": resolved_source_ip,
+            "http_method": method,
+            "integration": integration,
+        }.items() if value
+    } or None
 
     event = await webhook_repo.create_event(
         name=name,
         target_url=normalised_source_url,  # For incoming, this is where we received it
         headers=safe_headers,
-        payload=payload,
+        payload=safe_payload,
         max_attempts=1,
         backoff_seconds=0,
         direction="incoming",
@@ -359,15 +381,15 @@ async def log_incoming_webhook(
     event_id = int(event["id"])
     
     # Record the attempt with all details
-    request_body = _prepare_request_body(payload)
+    request_body = _prepare_request_body(safe_payload)
     
     await webhook_repo.record_attempt(
         event_id=event_id,
         attempt_number=1,
         status=status,
         response_status=response_status,
-        response_body=response_body,
-        error_message=error_message,
+        response_body=safe_response_body,
+        error_message=_truncate(error_message),
         request_headers=safe_headers,
         request_body=request_body,
         response_headers=None,  # We don't typically track our own response headers
@@ -379,16 +401,16 @@ async def log_incoming_webhook(
             event_id,
             attempt_number=1,
             response_status=response_status,
-            response_body=response_body,
+            response_body=safe_response_body,
         )
         log_info("Incoming webhook logged", event_id=event_id, name=name, source_url=source_url)
     else:
         await webhook_repo.mark_event_failed(
             event_id,
             attempt_number=1,
-            error_message=error_message,
+            error_message=_truncate(error_message),
             response_status=response_status,
-            response_body=response_body,
+            response_body=safe_response_body,
         )
         log_error("Incoming webhook failed", event_id=event_id, name=name, error=error_message)
     

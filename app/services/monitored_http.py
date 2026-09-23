@@ -29,6 +29,10 @@ _SENSITIVE_NAMES = {
     "api-key", "apikey", "api_key", "x-api-key", "x-auth-token",
     "access_token", "refresh_token", "id_token", "token", "secret",
     "client_secret", "password", "passwd", "signature", "sig", "key",
+    # Common personal data in inbound communication/provider payloads.
+    "email", "email_address", "phone", "phone_number", "mobile",
+    "mobile_phone", "from", "from_number", "sender", "recipient",
+    "address", "name", "message",
 }
 
 
