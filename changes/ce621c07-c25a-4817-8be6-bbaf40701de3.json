@@ -1,0 +1,7 @@
+{
+  "guid": "ce621c07-c25a-4817-8be6-bbaf40701de3",
+  "occurred_at": "2026-09-23T00:00:00Z",
+  "change_type": "Enhancement",
+  "summary": "Move service creation and published status page links into the service status action menu.",
+  "content_hash": "service-status-action-menu-published-pages-modal"
+}
