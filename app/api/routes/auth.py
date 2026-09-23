@@ -999,7 +999,7 @@ async def finish_passkey_registration(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This passkey is already registered") from exc
         raise
     await audit_service.record_create(
-        action="auth.passkey.registration.succeeded",
+        action="auth.passkey.registration.succeed",
         request=request,
         user_id=int(current_user["id"]),
         entity_type="user_passkey",
@@ -1028,7 +1028,7 @@ async def rename_passkey(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Passkey not found")
     await audit_service.record(
-        action="auth.passkey.renamed",
+        action="auth.passkey.rename",
         request=request,
         user_id=int(current_user["id"]),
         entity_type="user_passkey",
@@ -1064,7 +1064,7 @@ async def delete_passkey(
             )
     await auth_repo.delete_passkey(int(current_user["id"]), passkey_id)
     await audit_service.record_delete(
-        action="auth.passkey.removed",
+        action="auth.passkey.remove",
         request=request,
         user_id=int(current_user["id"]),
         entity_type="user_passkey",

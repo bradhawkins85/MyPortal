@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
+import re
+from typing import Any, Literal
 
 from fastapi import Request
 
@@ -8,6 +9,45 @@ from app.core.logging import get_request_context, log_audit_event, log_error
 from app.repositories import audit_logs as audit_repo
 from app.services.audit_diff import diff as compute_diff
 from app.services.audit_diff import redact
+
+AuditSource = Literal["ui", "api_key", "webhook", "scheduled", "background", "system"]
+
+_ACTION_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
+_NON_CANONICAL_VERBS = frozenset(
+    {
+        "created",
+        "updated",
+        "deleted",
+        "archived",
+        "restored",
+        "unarchived",
+        "renamed",
+        "removed",
+        "replied",
+        "requested",
+        "approved",
+        "denied",
+        "succeeded",
+        "failed",
+        "provisioned",
+        "confirmed",
+        "exported",
+        "upserted",
+    }
+)
+
+
+def validate_action_name(action: str) -> None:
+    """Reject non-canonical action names used with the modern recording API."""
+
+    if not _ACTION_PATTERN.fullmatch(action):
+        raise ValueError(
+            "Audit action must be lowercase '<entity>.<verb>' or "
+            "'<domain>.<entity>.<verb>'"
+        )
+    verb = action.rsplit(".", 1)[-1]
+    if verb in _NON_CANONICAL_VERBS:
+        raise ValueError(f"Audit action verb must be imperative, not {verb!r}")
 
 
 def _determine_event_type(action: str) -> str:
@@ -120,6 +160,8 @@ async def record(
     metadata: dict[str, Any] | None = None,
     api_key: str | None = None,
     sensitive_extra_keys: tuple[str, ...] = (),
+    source: AuditSource | None = None,
+    actor: str | None = None,
 ) -> None:
     """Record an audit event with automatic field-level diff and redaction.
 
@@ -136,6 +178,7 @@ async def record(
     to ensure the body is never stored even if it leaks into ``metadata``.
     """
 
+    validate_action_name(action)
     previous_value, new_value = compute_diff(
         before, after, sensitive_extra_keys=sensitive_extra_keys
     )
@@ -143,14 +186,26 @@ async def record(
     # Skip pure no-op updates (after == before) so the audit log isn't spammed
     # with rows that capture no information. Creations and deletions still go
     # through because at least one side will be non-None.
-    if before is not None and after is not None and previous_value is None and new_value is None:
+    if (
+        before is not None
+        and after is not None
+        and previous_value is None
+        and new_value is None
+    ):
         return
 
     safe_metadata: dict[str, Any] | None
-    if metadata is None:
-        safe_metadata = None
-    else:
-        safe_metadata = redact(metadata, sensitive_extra_keys=sensitive_extra_keys)
+    safe_metadata = redact(metadata or {}, sensitive_extra_keys=sensitive_extra_keys)
+
+    # ``source`` is a stable, queryable dimension for distinguishing otherwise
+    # identical user, integration, and unattended operations. Infer the common
+    # cases, while requiring unattended callers to identify themselves.
+    resolved_source: AuditSource = source or (
+        "api_key" if api_key else "ui" if request is not None else "background"
+    )
+    safe_metadata["source"] = resolved_source
+    if actor:
+        safe_metadata["actor"] = actor
 
     resolved_user_id = user_id
     if resolved_user_id is None:
@@ -182,6 +237,8 @@ async def record_create(
     metadata: dict[str, Any] | None = None,
     api_key: str | None = None,
     sensitive_extra_keys: tuple[str, ...] = (),
+    source: AuditSource | None = None,
+    actor: str | None = None,
 ) -> None:
     """Record a creation event. Convenience wrapper around :func:`record`.
 
@@ -201,6 +258,8 @@ async def record_create(
         metadata=metadata,
         api_key=api_key,
         sensitive_extra_keys=sensitive_extra_keys,
+        source=source,
+        actor=actor,
     )
 
 
@@ -215,6 +274,8 @@ async def record_delete(
     metadata: dict[str, Any] | None = None,
     api_key: str | None = None,
     sensitive_extra_keys: tuple[str, ...] = (),
+    source: AuditSource | None = None,
+    actor: str | None = None,
 ) -> None:
     """Record a deletion event. Convenience wrapper around :func:`record`.
 
@@ -232,4 +293,6 @@ async def record_delete(
         metadata=metadata,
         api_key=api_key,
         sensitive_extra_keys=sensitive_extra_keys,
+        source=source,
+        actor=actor,
     )

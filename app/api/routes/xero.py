@@ -176,7 +176,7 @@ async def _apply_xero_invoice_event(event: dict[str, Any], request: Request) -> 
 
     updated = await invoice_repo.patch_invoice(int(local_invoice["id"]), status="paid")
     await audit_service.record(
-        action="invoice.xero_webhook_paid",
+        action="invoice.xero_webhook.mark_paid",
         request=request,
         user_id=None,
         entity_type="invoice",

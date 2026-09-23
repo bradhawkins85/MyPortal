@@ -1138,7 +1138,7 @@ async def delete_ticket(
     await tickets_service.broadcast_ticket_event(action="deleted", ticket_id=ticket_id)
     if effective_user.get("id") is not None:
         await audit_service.record(
-            action="ticket.deleted",
+            action="ticket.delete",
             request=request,
             user_id=int(effective_user["id"]),
             entity_type="ticket",
@@ -1392,7 +1392,7 @@ async def add_reply(
         reply_metadata["api_key_prefix"] = api_key_record.get("key_prefix")
     reply_metadata.update(summarise_reply_body(sanitised_body.html))
     await audit_service.record(
-        action="ticket.replied",
+        action="ticket.reply",
         request=request,
         user_id=int(author_id) if author_id is not None else None,
         entity_type="ticket",
@@ -2311,7 +2311,7 @@ async def blocklist_ticket_attachment(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
         ) from exc
     await audit_service.record(
-        action="ticket.attachment_blocked",
+        action="ticket.attachment.block",
         request=request,
         user_id=int(current_user["id"]),
         entity_type="ticket_attachment_blocklist",

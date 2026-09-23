@@ -569,7 +569,7 @@ async def admin_delete_attachment_blocklist_entry(entry_id: int, request: Reques
         return redirect
     await attachment_blocklist_repo.delete(entry_id)
     await audit_service.record(
-        action="ticket.attachment_blocklist_removed",
+        action="ticket.attachment_blocklist.remove",
         request=request,
         user_id=int(current_user["id"]),
         entity_type="ticket_attachment_blocklist",

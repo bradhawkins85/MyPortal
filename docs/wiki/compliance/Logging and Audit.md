@@ -107,6 +107,12 @@ the response is sent.
 
 ## Audit logs
 
+The normative event classification, required fields, action grammar, high-risk
+coverage matrix, and contributor checklist are maintained in
+[`docs/security/audit-logging-policy.md`](../../security/audit-logging-policy.md).
+This page describes operation of the logging system; where the two differ, the
+security policy is authoritative.
+
 The canonical recording API is **`app.services.audit.record(...)`**. Use it
 instead of `log_action` for any new code:
 
@@ -149,7 +155,7 @@ following are in use today; please reuse them when adding new audit calls:
 | --- | --- |
 | Users | `user.create`, `user.update`, `user.delete` |
 | Companies | `company.create`, `company.update`, `company.delete`, `company.archive`, `company.unarchive` |
-| Tickets | `ticket.create`, `ticket.update`, `ticket.status_change`, `ticket.assign`, `ticket.replied`, `ticket.deleted`, `ticket.watcher.add`, `ticket.watcher.remove` |
+| Tickets | `ticket.create`, `ticket.update`, `ticket.status_change`, `ticket.assign`, `ticket.reply`, `ticket.delete`, `ticket.watcher.add`, `ticket.watcher.remove` |
 | Billing | `invoice.create`, `invoice.update`, `invoice.delete` |
 | Knowledge base | `knowledge_base.article.create`, `knowledge_base.article.update`, `knowledge_base.article.delete` |
 | Automations | `automation.create`, `automation.update`, `automation.enable`, `automation.disable`, `automation.delete` |
@@ -182,7 +188,7 @@ following are in use today; please reuse them when adding new audit calls:
 
 ### Ticket reply body — never stored
 
-`ticket.replied` audit rows record only metadata (`reply_id`, `author_id`,
+`ticket.reply` audit rows record only metadata (`reply_id`, `author_id`,
 `channel` (public/internal), `is_billable`, `minutes_spent`, `length`,
 `word_count`). The body is **never** persisted to `audit_logs`, even if a
 caller accidentally adds it to `metadata`, because we register `"body"` as
