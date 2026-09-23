@@ -14,12 +14,23 @@
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.detail || 'Unable to regenerate resolution steps.');
+        if (window.__portalToast) {
+          window.__portalToast.show(
+            payload.message || 'Resolution steps will be regenerated shortly.',
+            { variant: 'success' },
+          );
+        }
         button.textContent = 'Queued';
         window.setTimeout(() => window.location.reload(), 1200);
       } catch (error) {
         button.disabled = false;
         button.textContent = original;
-        window.alert(error.message || 'Unable to regenerate resolution steps.');
+        const message = error.message || 'Unable to regenerate resolution steps.';
+        if (window.__portalToast) {
+          window.__portalToast.show(message, { variant: 'error' });
+        } else {
+          window.alert(message);
+        }
       }
     });
   });

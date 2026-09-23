@@ -1,0 +1,7 @@
+{
+  "guid": "07d4635b-0e92-4ecb-b1e3-5f24e5957cbf",
+  "occurred_at": "2026-09-23T00:00:00+00:00",
+  "change_type": "Fix",
+  "summary": "Fixed AI resolution-step placement, regeneration parsing and notifications, and automation reprocessing.",
+  "content_hash": "d46cdd07849dac314f1feef1a4aba96cfdc8f14e8d1e632bdceaeb7ec3216f11"
+}

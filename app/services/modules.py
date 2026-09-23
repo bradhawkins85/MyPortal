@@ -1098,7 +1098,7 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
     {
         "slug": "reprocess-ai",
         "name": "Reprocess AI",
-        "description": "Re-trigger AI processing to regenerate ticket summary and tags using the Ollama model.",
+        "description": "Re-trigger AI processing to regenerate ticket summary, tags, and resolution steps using the Ollama model.",
         "icon": "🔄",
         "settings": {},
         "enabled": True,  # Internal action module - no external configuration required
@@ -2538,6 +2538,7 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             },
             {"name": "refresh_summary", "label": "Refresh summary", "type": "boolean"},
             {"name": "refresh_tags", "label": "Refresh tags", "type": "boolean"},
+            {"name": "refresh_resolution_steps", "label": "Refresh resolution steps", "type": "boolean"},
         ],
     },
     "add-ticket-reply": {
@@ -6144,12 +6145,13 @@ async def _invoke_reprocess_ai(
 ) -> dict[str, Any]:
     """Re-trigger AI processing for a ticket.
 
-    This will regenerate the AI summary and tags using the Ollama model.
+    This will regenerate the AI summary, tags, and resolution steps using the Ollama model.
     The ticket_id can be provided directly or via context.ticket.id or context.ticket_id.
 
     Optional parameters:
     - refresh_summary: bool (default: True) - Whether to refresh the AI summary
     - refresh_tags: bool (default: True) - Whether to refresh the AI tags
+    - refresh_resolution_steps: bool (default: True) - Whether to refresh resolution steps
     """
     raw_context = payload.get("context")
     context = raw_context if isinstance(raw_context, Mapping) else {}
@@ -6174,11 +6176,12 @@ async def _invoke_reprocess_ai(
     # Check options
     refresh_summary = _ensure_bool(payload.get("refresh_summary"), True)
     refresh_tags = _ensure_bool(payload.get("refresh_tags"), True)
+    refresh_resolution_steps = _ensure_bool(payload.get("refresh_resolution_steps"), True)
 
-    if not refresh_summary and not refresh_tags:
+    if not refresh_summary and not refresh_tags and not refresh_resolution_steps:
         return {
             "status": "skipped",
-            "reason": "No AI processing requested (both refresh_summary and refresh_tags are false)",
+            "reason": "No AI processing requested (all refresh options are false)",
             "ticket_id": ticket_id_int,
         }
 
@@ -6190,6 +6193,7 @@ async def _invoke_reprocess_ai(
             "ticket_id": ticket_id_int,
             "refresh_summary": refresh_summary,
             "refresh_tags": refresh_tags,
+            "refresh_resolution_steps": refresh_resolution_steps,
         },
         headers={"X-Module": "reprocess-ai"},
         max_attempts=1,
@@ -6210,6 +6214,9 @@ async def _invoke_reprocess_ai(
         if refresh_tags:
             await tickets_service.refresh_ticket_ai_tags(ticket_id_int)
             processed.append("tags")
+        if refresh_resolution_steps:
+            await tickets_service.refresh_ticket_resolution_steps(ticket_id_int)
+            processed.append("resolution_steps")
     except Exception as exc:
         logger.error(
             "AI reprocessing failed",
