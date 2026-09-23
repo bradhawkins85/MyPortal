@@ -3172,6 +3172,8 @@ async def _invoke_ollama(
     *,
     event_future: asyncio.Future[int | None] | None = None,
 ) -> dict[str, Any]:
+    on_delta = payload.get("on_delta")
+    streaming = callable(on_delta)
     provider = (
         str(payload.get("provider") or settings.get("provider") or "ollama")
         .strip()
@@ -3204,7 +3206,7 @@ async def _invoke_ollama(
     request_headers = {"Content-Type": "application/json"}
     if provider == "ollama":
         endpoint = urljoin(f"{base_url}/", "api/generate")
-        body: dict[str, Any] = {"model": model, "prompt": prompt, "stream": False}
+        body: dict[str, Any] = {"model": model, "prompt": prompt, "stream": streaming}
         payload_format = payload.get("format")
         if payload_format is not None:
             body["format"] = payload_format
@@ -3213,7 +3215,7 @@ async def _invoke_ollama(
         messages = payload.get("messages")
         if not isinstance(messages, list) or not messages:
             messages = [{"role": "user", "content": prompt}]
-        body = {"model": model, "messages": messages, "stream": False}
+        body = {"model": model, "messages": messages, "stream": streaming}
         if payload.get("temperature") is not None:
             body["temperature"] = payload.get("temperature")
         if payload.get("max_tokens") is not None:
@@ -3249,8 +3251,40 @@ async def _invoke_ollama(
     }
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-            response = await client.post(endpoint, json=body, headers=request_headers)
-        response.raise_for_status()
+            if not streaming:
+                response = await client.post(endpoint, json=body, headers=request_headers)
+                response.raise_for_status()
+                response_body = response.text
+            else:
+                chunks: list[str] = []
+                async with client.stream(
+                    "POST", endpoint, json=body, headers=request_headers
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        data = line.removeprefix("data:").strip()
+                        if not data or data == "[DONE]":
+                            continue
+                        try:
+                            item = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        if provider == "ollama":
+                            delta = item.get("response") or ""
+                        else:
+                            choices = item.get("choices") or []
+                            delta = (
+                                (choices[0].get("delta") or {}).get("content") or ""
+                                if choices
+                                else ""
+                            )
+                        if delta:
+                            chunks.append(str(delta))
+                            await on_delta(str(delta))
+                complete_text = "".join(chunks)
+                response_body = json.dumps(
+                    {"response": complete_text, "message": complete_text}
+                )
     except httpx.HTTPStatusError as exc:
         response_body = exc.response.text if exc.response is not None else None
         updated_event = await _record_failure(
@@ -3285,7 +3319,6 @@ async def _invoke_ollama(
             extra={"model": model, "endpoint": endpoint, "provider": provider},
         )
 
-    response_body = response.text
     updated_event = await _record_success(
         event_id,
         attempt_number=attempt_number,

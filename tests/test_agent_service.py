@@ -159,11 +159,21 @@ async def test_execute_agent_query_returns_sources(monkeypatch):
     assert "create a support ticket" in result["answer"]
     assert result["model"] is None
     trigger_mock.assert_not_awaited()
+    agent_service.rag_index_service.index_agent_sources.assert_not_awaited()
     assert result["sources"]["knowledge_base"][0]["slug"] == "network-guide"
     assert result["sources"]["tickets"][0]["id"] == 42
     assert result["sources"]["products"][0]["sku"] == "HW-001"
     assert result["sources"]["packages"][0]["sku"] == "PKG-100"
     assert result["context"]["companies"][0]["company_id"] == 1
+
+
+def test_agent_model_call_budget_is_bounded_and_configurable(monkeypatch):
+    monkeypatch.setenv("AI_AGENT_MAX_MODEL_CALLS", "2")
+    assert agent_service._max_agent_model_calls() == 2
+    monkeypatch.setenv("AI_AGENT_MAX_MODEL_CALLS", "99")
+    assert agent_service._max_agent_model_calls() == 2
+    monkeypatch.setenv("AI_AGENT_MAX_MODEL_CALLS", "invalid")
+    assert agent_service._max_agent_model_calls() == 1
 
 
 @pytest.mark.anyio
@@ -975,8 +985,9 @@ async def test_execute_agent_query_returns_stages_and_grouped_evidence(monkeypat
     assert result["evidence"]["tickets"][0]["label"] == "[Ticket:#24425]"
     assert result["evidence"]["chats"][0]["duplicate_count"] == 1
     assert "Also found in 1 similar results: [Chat:#31]" in captured_prompt
-    assert llm_stages
-    assert all(str(stage).startswith("final_answer_turn_") for stage in llm_stages)
+    assert llm_stages == ["final_answer"]
+    assert result["metrics"]["model_calls"] == 1
+    assert result["metrics"]["max_model_calls"] == 1
 
 
 def test_filter_rag_candidates_does_not_duplicate_selected_sources(monkeypatch):

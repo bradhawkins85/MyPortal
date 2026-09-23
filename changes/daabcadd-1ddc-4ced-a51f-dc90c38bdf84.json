@@ -1,0 +1,7 @@
+{
+  "guid": "daabcadd-1ddc-4ced-a51f-dc90c38bdf84",
+  "occurred_at": "2026-09-23T00:00:00+00:00",
+  "change_type": "performance",
+  "summary": "Stream Agent responses incrementally and bound foreground model work.",
+  "content_hash": "c00d4f3edbe5db93ff7f7070e6a5e464107f4cd2377def1c03421a2e2fb86f06"
+}
