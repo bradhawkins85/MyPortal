@@ -413,6 +413,7 @@
     let lastQuery = '';
     let lastAnswer = '';
     let qualityResponseId = null;
+    let activeQueryController = null;
 
     function selectedSourceFilters() {
       return filterInputs.filter((inputEl) => inputEl.checked).map((inputEl) => inputEl.value);
@@ -531,6 +532,7 @@
 
     async function handleSubmit(event) {
       event.preventDefault();
+      if (activeQueryController) return;
       const query = input.value.trim();
       if (!query) {
         if (status) status.textContent = 'Please enter a question for the agent.';
@@ -548,11 +550,14 @@
       lastQuery = query;
       lastAnswer = '';
 
+      const controller = new AbortController();
+      activeQueryController = controller;
       try {
-        const response = await fetch('/api/agent/query', {
+        const response = await fetch('/api/agent/query/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query, source_filters: sourceFilters }),
+          signal: controller.signal,
         });
 
         if (!response.ok) {
@@ -560,7 +565,40 @@
           throw new Error(text || `Request failed with status ${response.status}`);
         }
 
-        const payload = await response.json();
+        if (!response.body) throw new Error('Streaming is not supported by this browser.');
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let payload = null;
+        while (true) {
+          const { value, done } = await reader.read();
+          buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+          const frames = buffer.split('\n\n');
+          buffer = frames.pop() || '';
+          frames.forEach((frame) => {
+            const data = frame.split('\n').filter((line) => line.startsWith('data:')).map((line) => line.slice(5).trim()).join('');
+            if (!data) return;
+            const item = JSON.parse(data);
+            if (item.event === 'started' && status) status.textContent = 'Searching authorised sources…';
+            if (item.event === 'stage' && stages) {
+              stages.hidden = false;
+              const row = document.createElement('li');
+              row.textContent = `${item.name}: ${item.status || 'complete'}`;
+              stages.appendChild(row);
+            }
+            if (item.event === 'answer_delta' && item.text) {
+              lastAnswer += item.text;
+              renderSimpleText(answerBody, lastAnswer);
+              if (answer) answer.hidden = false;
+              if (results) results.hidden = false;
+              if (status) status.textContent = 'Generating answer…';
+            }
+            if (item.event === 'result') payload = item;
+            if (item.event === 'error') throw new Error(item.message || 'Agent request failed');
+          });
+          if (done) break;
+        }
+        if (!payload) throw new Error('The agent stream ended without a result.');
         if (status) status.textContent = formatStatus(payload) || defaultStatus;
         if (stages) renderStages(stages, payload.stages);
 
@@ -613,14 +651,19 @@
           }
         }
       } catch (error) {
+        if (error && error.name === 'AbortError') return;
         if (status) status.textContent = 'Unable to contact the agent. Please try again later.';
         resetResults();
       } finally {
+        activeQueryController = null;
         setBusy(false);
       }
     }
 
     form.addEventListener('submit', handleSubmit);
+    window.addEventListener('pagehide', () => {
+      if (activeQueryController) activeQueryController.abort();
+    });
     panel.querySelectorAll('[data-agent-rating]').forEach((button) => {
       button.addEventListener('click', async () => {
         if (!qualityResponseId) return;

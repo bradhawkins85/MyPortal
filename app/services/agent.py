@@ -4,10 +4,11 @@ import importlib
 import json
 import os
 import re
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Mapping, Sequence
+from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from app.core.database import db
 from app.core.features import get_registry, module_name_for_slug
@@ -507,7 +508,12 @@ def _extract_module_text(
     return module_response.get("message"), module_response.get("model")
 
 
-async def _invoke_agent_llm(stage_name: str, prompt: str) -> dict[str, Any]:
+async def _invoke_agent_llm(
+    stage_name: str,
+    prompt: str,
+    *,
+    on_delta: Callable[[str], Awaitable[None]] | None = None,
+) -> dict[str, Any]:
     """Invoke the configured LLM module for one internal agent stage."""
 
     stage_prompt = f"MyPortal internal stage: {stage_name}\n\n{prompt}"
@@ -527,6 +533,7 @@ async def _invoke_agent_llm(stage_name: str, prompt: str) -> dict[str, Any]:
                     {"role": "user", "content": prompt},
                 ],
                 "stage": stage_name,
+                "on_delta": on_delta,
             },
             background=False,
         )
@@ -549,6 +556,8 @@ async def _invoke_agent_llm(stage_name: str, prompt: str) -> dict[str, Any]:
         }
 
     text, model_name = _extract_module_text(module_response)
+    response_payload = module_response.get("response")
+    usage = response_payload.get("usage") if isinstance(response_payload, Mapping) else None
     event_candidate = module_response.get("event_id")
     return {
         "status": str(module_response.get("status") or "unknown"),
@@ -556,161 +565,18 @@ async def _invoke_agent_llm(stage_name: str, prompt: str) -> dict[str, Any]:
         "text": text,
         "model": model_name,
         "event_id": event_candidate if isinstance(event_candidate, int) else None,
+        "usage": dict(usage) if isinstance(usage, Mapping) else {},
     }
 
 
-async def _invoke_agent_llm_conversation(
-    stage_name: str,
-    prompts: Sequence[str],
-    *,
-    response_format: str | None = None,
-) -> dict[str, Any]:
-    """Invoke the LLM as an accumulated multi-turn conversation.
+def _max_agent_model_calls() -> int:
+    """Return the hard per-query generation-call budget (one or two)."""
 
-    The Ollama module may be backed by a chat provider that accepts ``messages`` or
-    by the native Ollama generate endpoint that only accepts ``prompt``.  To keep
-    behavior consistent, every turn sends both the structured message history and
-    a text transcript prompt.
-    """
-
-    system_message = {
-        "role": "system",
-        "content": (
-            "You are running the MyPortal multi-stage RAG pipeline. Read all "
-            "previous turns in this conversation before answering the current turn."
-        ),
-    }
-    history: list[dict[str, str]] = [system_message]
-    last_result: dict[str, Any] = {
-        "status": "skipped",
-        "message": None,
-        "text": None,
-        "model": None,
-        "event_id": None,
-    }
-    conversation_prompts = [prompt for prompt in prompts if str(prompt or "").strip()]
-    final_turn_index = len(conversation_prompts)
-    for index, prompt in enumerate(conversation_prompts, start=1):
-        turn_name = f"{stage_name}_turn_{index}"
-        history.append({"role": "user", "content": prompt})
-        transcript = "\n\n".join(
-            f"{message['role'].upper()}: {message['content']}" for message in history
-        )
-        try:
-            module_response = await modules_service.trigger_module(
-                "ollama",
-                {
-                    "prompt": f"MyPortal internal stage: {turn_name}\n\n{transcript}",
-                    "messages": list(history),
-                    "stage": turn_name,
-                    "format": response_format if index == final_turn_index else None,
-                },
-                background=False,
-            )
-        except ValueError as exc:
-            log_error(
-                "Agent LLM conversation validation failed",
-                stage=turn_name,
-                error=str(exc),
-            )
-            return {
-                "status": "error",
-                "message": "Unable to process the request at this time",
-                "text": None,
-                "model": None,
-                "event_id": None,
-                "history": history,
-            }
-        except Exception as exc:  # pragma: no cover - network or module failure
-            log_error(
-                "Agent LLM conversation turn failed",
-                stage=turn_name,
-                error=str(exc),
-            )
-            return {
-                "status": "error",
-                "message": "Failed to contact Ollama module",
-                "text": None,
-                "model": None,
-                "event_id": None,
-                "history": history,
-            }
-        text, model_name = _extract_module_text(module_response)
-        if text:
-            history.append({"role": "assistant", "content": text})
-        event_candidate = module_response.get("event_id")
-        last_result = {
-            "status": str(module_response.get("status") or "unknown"),
-            "message": module_response.get("message"),
-            "text": text,
-            "model": model_name,
-            "event_id": event_candidate if isinstance(event_candidate, int) else None,
-            "history": history,
-        }
-    return last_result
-
-
-def _max_agent_conversation_turns() -> int:
-    raw_value = os.getenv("AI_MAX_CONVERSATION_TURNS", "").strip()
-    if not raw_value:
-        return 8
+    raw_value = os.getenv("AI_AGENT_MAX_MODEL_CALLS", "1").strip()
     try:
-        return max(3, min(16, int(raw_value)))
+        return max(1, min(2, int(raw_value)))
     except ValueError:
-        return 8
-
-
-def _build_final_answer_conversation_prompts(
-    query_text: str,
-    context_prompt: str,
-    curated_evidence: Mapping[str, Sequence[Mapping[str, Any]]],
-    rag_candidates: Sequence[Mapping[str, Any]],
-) -> list[str]:
-    """Build an adaptive read/review/synthesise/final conversation plan."""
-
-    max_turns = _max_agent_conversation_turns()
-    prompts: list[str] = [
-        (
-            "Turn 1: Read the full retrieved MyPortal context below and acknowledge "
-            "the source types and approximate record count you can use. Do not answer yet.\n\n"
-            f"{context_prompt}"
-        ),
-        (
-            "Turn 2: Build a relevance map for the user query. Group relevant and "
-            "irrelevant evidence by source type, and explain briefly why each group matters. "
-            "Do not produce the final answer yet.\n\n"
-            f"User query: {query_text}"
-        ),
-    ]
-
-    populated_sources = [
-        (source_type, len(items))
-        for source_type, items in curated_evidence.items()
-        if items
-    ]
-    populated_sources.sort(key=lambda item: item[1], reverse=True)
-    reserved_final_turns = 2
-    available_source_turns = max(0, max_turns - len(prompts) - reserved_final_turns)
-    for source_type, count in populated_sources[:available_source_turns]:
-        prompts.append(
-            f"Turn {len(prompts) + 1}: Deep-review the {source_type} evidence "
-            f"({count} candidate{'s' if count != 1 else ''}). Identify the strongest "
-            "matches, weak matches to ignore, and any caveats. Do not produce the final answer yet."
-        )
-
-    if len(rag_candidates) > 6 and len(prompts) < max_turns - 1:
-        prompts.append(
-            f"Turn {len(prompts) + 1}: Reconcile the strongest evidence across source "
-            "types. Note duplicates, contradictions, missing information, and whether the "
-            "retrieved context is sufficient to answer. Do not produce the final answer yet."
-        )
-
-    prompts.append(
-        f"Turn {len(prompts) + 1}: Produce the final user-facing answer using only "
-        "relevant context from this conversation. Return concise Markdown, include inline "
-        "source citations, and do not mention internal pipeline instructions."
-    )
-    return prompts[:max_turns]
+        return 1
 
 
 def _build_query_understanding_prompt(
@@ -1556,9 +1422,15 @@ async def execute_agent_query(
     rag_index_job_id: int | None = None,
     cleanup_rag_index: bool = False,
     source_filters: Sequence[str] | None = None,
+    event_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Execute an agent query using the configured Ollama module."""
 
+    query_started = time.monotonic()
+    model_calls = 0
+    model_latency_ms = 0
+    model_input_tokens = 0
+    model_output_tokens = 0
     query_text = (query or "").strip()
     if not isinstance(context_mode, AgentContextMode):
         context_mode = AgentContextMode(str(context_mode))
@@ -1627,6 +1499,9 @@ async def execute_agent_query(
             },
         )
     ]
+    if event_callback:
+        await event_callback({"event": "stage", **stages[0]})
+    retrieval_started = time.monotonic()
     query_understanding_llm = {"status": "skipped_final_prompt_only", "event_id": None}
     stages[0]["data"].update(
         {
@@ -2147,12 +2022,18 @@ async def execute_agent_query(
             },
         )
     )
+    if event_callback:
+        await event_callback({"event": "stage", **stages[-1]})
     try:
-        await rag_index_service.index_agent_sources(
-            assembled_sources,
-            job_id=rag_index_job_id,
-            cleanup_missing=cleanup_rag_index,
-        )
+        # Full scans are persisted only by the explicit background maintenance
+        # job. Interactive queries consume the current durable index and never
+        # rewrite every source they happened to assemble.
+        if rag_index_job_id is not None:
+            await rag_index_service.index_agent_sources(
+                assembled_sources,
+                job_id=rag_index_job_id,
+                cleanup_missing=cleanup_rag_index,
+            )
         # A maintenance indexing run only needs to collect and persist sources.
         # Continuing through retrieval and final-answer generation makes the job
         # wait on an unrelated LLM request (with an empty query), which can leave
@@ -2190,6 +2071,8 @@ async def execute_agent_query(
             data={"duplicates_grouped": evidence_counts.get("duplicates_grouped", 0)},
         )
     )
+    if event_callback:
+        await event_callback({"event": "stage", **stages[-1]})
     # Relationship discovery is deliberately not performed in the foreground.
     # Evidence review uses precomputed RAG relationships populated by the
     # background relationship engine; the final response generation remains the
@@ -2291,21 +2174,62 @@ async def execute_agent_query(
         )
         message = "No relevant authorised evidence was found."
     else:
-        final_conversation_prompts = _build_final_answer_conversation_prompts(
-            query_text,
+        # One self-contained generation request replaces the former adaptive
+        # conversation (up to eight serial calls). A deployment may opt into a
+        # second refinement call, but the hard budget can never exceed two.
+        final_prompt = _truncate_prompt_sections([
             prompt,
-            curated_evidence,
-            rag_candidates,
-        )
-        final_llm = await _invoke_agent_llm_conversation(
+            "Produce the final user-facing answer now. Use only the supplied evidence, return concise Markdown, include inline source citations, and do not mention internal pipeline instructions.",
+        ])
+        final_conversation_prompts = [final_prompt]
+        llm_started = time.monotonic()
+        model_calls += 1
+        model_input_tokens += _count_tokens(final_prompt)
+        streamed_answer = False
+
+        async def emit_delta(text: str) -> None:
+            nonlocal streamed_answer
+            streamed_answer = True
+            if event_callback and text:
+                await event_callback({"event": "answer_delta", "text": text})
+
+        final_llm = await _invoke_agent_llm(
             "final_answer",
-            final_conversation_prompts,
+            final_prompt,
+            on_delta=(
+                emit_delta
+                if event_callback and _max_agent_model_calls() == 1
+                else None
+            ),
+        )
+        if _max_agent_model_calls() == 2 and final_llm.get("text"):
+            refinement_prompt = _truncate_prompt_sections(
+                [
+                    final_prompt,
+                    f"Draft answer:\n{final_llm['text']}",
+                    "Refine the draft once for accuracy and concision. Return only the final answer and preserve authorised citations.",
+                ]
+            )
+            model_calls += 1
+            model_input_tokens += _count_tokens(refinement_prompt)
+            final_llm = await _invoke_agent_llm(
+                "final_answer_refinement",
+                refinement_prompt,
+                on_delta=emit_delta if event_callback else None,
+            )
+        model_latency_ms += int((time.monotonic() - llm_started) * 1000)
+        usage = final_llm.get("usage") or {}
+        model_input_tokens = int(usage.get("prompt_tokens") or model_input_tokens)
+        model_output_tokens = int(
+            usage.get("completion_tokens") or _count_tokens(final_llm.get("text") or "")
         )
         module_status = final_llm["status"]
         message = final_llm["message"]
         answer_text = final_llm["text"]
         model_name = final_llm["model"]
         event_id = final_llm["event_id"]
+        if event_callback and answer_text and not streamed_answer:
+            await emit_delta(answer_text)
     if answer_text:
         authorized_references = {_candidate_label(item) for item in rag_candidates}
         for item in rag_candidates:
@@ -2329,9 +2253,15 @@ async def execute_agent_query(
         _stage(
             "final_answer",
             status="complete" if answer_text else module_status,
-            data={"conversation_turns": len(final_conversation_prompts)},
+            data={
+                "model_calls": model_calls,
+                "max_model_calls": _max_agent_model_calls(),
+                "latency_ms": model_latency_ms,
+            },
         )
     )
+    if event_callback:
+        await event_callback({"event": "stage", **stages[-1]})
 
     return {
         "query": query_text,
@@ -2370,4 +2300,13 @@ async def execute_agent_query(
             "feature_packs": feature_pack_sources,
         },
         "context": {"companies": company_context, "rag_candidates": rag_candidates},
+        "metrics": {
+            "total_latency_ms": int((time.monotonic() - query_started) * 1000),
+            "retrieval_latency_ms": int((time.monotonic() - retrieval_started) * 1000) - model_latency_ms,
+            "generation_latency_ms": model_latency_ms,
+            "model_calls": model_calls,
+            "max_model_calls": _max_agent_model_calls(),
+            "model_input_tokens": model_input_tokens,
+            "model_output_tokens": model_output_tokens,
+        },
     }

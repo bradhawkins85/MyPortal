@@ -94,41 +94,73 @@ async def stream_agent_query(
 ) -> StreamingResponse:
     active_company_id = getattr(request.state, "active_company_id", None)
     memberships = getattr(request.state, "available_companies", None)
-    result = await agent_service.execute_agent_query(
-        payload.query,
-        current_user,
-        active_company_id=active_company_id,
-        memberships=memberships,
-        source_filters=payload.source_filters,
-    )
-
     async def events():
-        for stage in result.get("stages") or []:
-            payload = {"event": "stage", **stage}
-            yield f"data: {json.dumps(payload, default=str)}\n\n"
-        evidence = (
-            result.get("evidence") if isinstance(result.get("evidence"), dict) else {}
-        )
-        for source_type, items in evidence.items():
-            if items:
-                yield (
-                    "data: "
-                    + json.dumps(
-                        {
-                            "event": "evidence",
-                            "source_type": source_type,
-                            "count": len(items),
-                        },
-                        default=str,
-                    )
-                    + "\n\n"
-                )
-        if result.get("answer"):
-            payload = {"event": "answer_delta", "text": result["answer"]}
-            yield f"data: {json.dumps(payload, default=str)}\n\n"
-        yield f"data: {json.dumps({'event': 'done'}, default=str)}\n\n"
+        queue: asyncio.Queue[dict | None] = asyncio.Queue()
 
-    return StreamingResponse(events(), media_type="text/event-stream")
+        async def publish(event: dict) -> None:
+            await queue.put(event)
+
+        async def run_query() -> None:
+            try:
+                result = await agent_service.execute_agent_query(
+                    payload.query,
+                    current_user,
+                    active_company_id=active_company_id,
+                    memberships=memberships,
+                    source_filters=payload.source_filters,
+                    event_callback=publish,
+                )
+                try:
+                    result["quality_response_id"] = await quality_repo.record_response(
+                        user_id=int(current_user["id"]),
+                        company_id=active_company_id,
+                        feature="agent",
+                        query=payload.query,
+                        evidence=result.get("evidence") or {},
+                        model=result.get("model"),
+                        latency_ms=int((result.get("metrics") or {}).get("total_latency_ms") or 0),
+                        confidence_band=result.get("answer_confidence_label"),
+                        outcome="answered" if result.get("answer") else "no_answer",
+                    )
+                except Exception:
+                    result["quality_response_id"] = None
+                await queue.put({"event": "result", **result})
+                await queue.put({"event": "done", "metrics": result.get("metrics")})
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                await queue.put(
+                    {"event": "error", "message": "Unable to process the request."}
+                )
+            finally:
+                await queue.put(None)
+
+        task = asyncio.create_task(run_query())
+        try:
+            # Flush headers and visible progress before retrieval or generation ends.
+            yield f"data: {json.dumps({'event': 'started'})}\n\n"
+            while True:
+                if await request.is_disconnected():
+                    task.cancel()
+                    break
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                if item is None:
+                    break
+                yield f"data: {json.dumps(item, default=str)}\n\n"
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/saved-searches", response_model=list[AgentSavedSearchItem])
