@@ -290,6 +290,16 @@ async def link_staff_to_license(staff_id: int, license_id: int) -> None:
     )
 
 
+async def is_staff_linked_to_license(staff_id: int, license_id: int) -> bool:
+    """Return whether the staff member has a direct licence assignment."""
+
+    row = await db.fetch_one(
+        "SELECT 1 AS linked FROM staff_licenses WHERE staff_id = %s AND license_id = %s",
+        (staff_id, license_id),
+    )
+    return row is not None
+
+
 async def unlink_staff_from_license(staff_id: int, license_id: int) -> None:
     await db.execute(
         "DELETE FROM staff_licenses WHERE staff_id = %s AND license_id = %s",
