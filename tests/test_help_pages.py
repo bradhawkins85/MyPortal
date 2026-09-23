@@ -165,3 +165,16 @@ def test_help_article_marks_active_nav_item_and_uses_rich_text_viewer(patched_de
     assert 'class="help__article-body rich-text-viewer"' in response.text
     assert "help__nav-item--active" in response.text
     assert "MyPortal Wiki" in response.text
+
+
+def test_worker_scaling_article_is_available_from_help(patched_dependencies):
+    with TestClient(app) as client:
+        index_response = client.get("/help")
+        article_response = client.get("/help/administration/application-worker-scaling")
+
+    assert index_response.status_code == 200
+    assert "/help/administration/application-worker-scaling" in index_response.text
+    assert "Application Worker Scaling" in index_response.text
+    assert article_response.status_code == 200
+    assert "Recommended limits" in article_response.text
+    assert "Conservative ceiling without dedicated load testing" in article_response.text
