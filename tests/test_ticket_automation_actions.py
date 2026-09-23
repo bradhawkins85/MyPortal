@@ -440,7 +440,7 @@ async def test_invoke_reprocess_ai_summary_and_tags(monkeypatch, mock_webhook_mo
     
     result = await modules._invoke_reprocess_ai(
         {},
-        {"ticket_id": 1, "refresh_summary": True, "refresh_tags": True},
+        {"ticket_id": 1, "refresh_summary": True, "refresh_tags": True, "refresh_resolution": True},
         event_future=None,
     )
     
@@ -451,6 +451,39 @@ async def test_invoke_reprocess_ai_summary_and_tags(monkeypatch, mock_webhook_mo
     mock_summary.assert_called_once_with(1)
     mock_tags.assert_called_once_with(1)
     mock_resolution.assert_called_once_with(1)
+
+
+@pytest.mark.asyncio
+async def test_invoke_reprocess_ai_tags_do_not_implicitly_refresh_resolution(
+    monkeypatch, mock_webhook_monitor, mock_record_success
+):
+    """Resolution steps are rebuilt only when their dedicated flag is set."""
+    from app.services import tickets as tickets_service
+
+    mock_tags = AsyncMock()
+    mock_resolution = AsyncMock()
+    monkeypatch.setattr(tickets_service, "refresh_ticket_ai_tags", mock_tags)
+    monkeypatch.setattr(tickets_service, "refresh_ticket_resolution_steps", mock_resolution)
+
+    result = await modules._invoke_reprocess_ai(
+        {},
+        {"ticket_id": 1, "refresh_summary": False, "refresh_tags": True},
+        event_future=None,
+    )
+
+    assert result["processed"] == ["tags"]
+    mock_tags.assert_awaited_once_with(1)
+    mock_resolution.assert_not_awaited()
+    assert mock_webhook_monitor.await_args.kwargs["payload"]["refresh_resolution"] is False
+
+
+def test_reprocess_ai_schema_exposes_resolution_flag():
+    schema = modules.get_action_payload_schema("reprocess-ai")
+
+    assert schema is not None
+    field_names = {field["name"] for field in schema["fields"]}
+    assert "refresh_resolution" in field_names
+    assert "refresh_resolution_steps" not in field_names
 
 
 @pytest.mark.asyncio
@@ -465,7 +498,7 @@ async def test_invoke_reprocess_ai_summary_only(monkeypatch, mock_webhook_monito
     
     result = await modules._invoke_reprocess_ai(
         {},
-        {"ticket_id": 1, "refresh_summary": True, "refresh_tags": False, "refresh_resolution_steps": False},
+        {"ticket_id": 1, "refresh_summary": True, "refresh_tags": False, "refresh_resolution": False},
         event_future=None,
     )
     
@@ -480,7 +513,7 @@ async def test_invoke_reprocess_ai_no_processing_skips(monkeypatch, mock_webhook
     """Test that reprocess-ai returns skipped when both options are false."""
     result = await modules._invoke_reprocess_ai(
         {},
-        {"ticket_id": 1, "refresh_summary": False, "refresh_tags": False, "refresh_resolution_steps": False},
+        {"ticket_id": 1, "refresh_summary": False, "refresh_tags": False, "refresh_resolution": False},
         event_future=None,
     )
     

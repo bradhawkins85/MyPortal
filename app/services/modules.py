@@ -2564,7 +2564,7 @@ _ACTION_PAYLOAD_SCHEMAS: dict[str, dict[str, Any]] = {
             },
             {"name": "refresh_summary", "label": "Refresh summary", "type": "boolean"},
             {"name": "refresh_tags", "label": "Refresh tags", "type": "boolean"},
-            {"name": "refresh_resolution_steps", "label": "Refresh resolution steps", "type": "boolean"},
+            {"name": "refresh_resolution", "label": "Refresh resolution steps", "type": "boolean"},
         ],
     },
     "add-ticket-reply": {
@@ -6177,7 +6177,7 @@ async def _invoke_reprocess_ai(
     Optional parameters:
     - refresh_summary: bool (default: True) - Whether to refresh the AI summary
     - refresh_tags: bool (default: True) - Whether to refresh the AI tags
-    - refresh_resolution_steps: bool (default: True) - Whether to refresh resolution steps
+    - refresh_resolution: bool (default: False) - Whether to rebuild resolution steps
     """
     raw_context = payload.get("context")
     context = raw_context if isinstance(raw_context, Mapping) else {}
@@ -6202,9 +6202,15 @@ async def _invoke_reprocess_ai(
     # Check options
     refresh_summary = _ensure_bool(payload.get("refresh_summary"), True)
     refresh_tags = _ensure_bool(payload.get("refresh_tags"), True)
-    refresh_resolution_steps = _ensure_bool(payload.get("refresh_resolution_steps"), True)
+    # Resolution generation is independently opt-in.  Keep accepting the
+    # earlier internal name so saved automations created during the short-lived
+    # rollout of that field continue to work.
+    raw_refresh_resolution = payload.get("refresh_resolution")
+    if raw_refresh_resolution is None:
+        raw_refresh_resolution = payload.get("refresh_resolution_steps")
+    refresh_resolution = _ensure_bool(raw_refresh_resolution, False)
 
-    if not refresh_summary and not refresh_tags and not refresh_resolution_steps:
+    if not refresh_summary and not refresh_tags and not refresh_resolution:
         return {
             "status": "skipped",
             "reason": "No AI processing requested (all refresh options are false)",
@@ -6219,7 +6225,7 @@ async def _invoke_reprocess_ai(
             "ticket_id": ticket_id_int,
             "refresh_summary": refresh_summary,
             "refresh_tags": refresh_tags,
-            "refresh_resolution_steps": refresh_resolution_steps,
+            "refresh_resolution": refresh_resolution,
         },
         headers={"X-Module": "reprocess-ai"},
         max_attempts=1,
@@ -6240,7 +6246,7 @@ async def _invoke_reprocess_ai(
         if refresh_tags:
             await tickets_service.refresh_ticket_ai_tags(ticket_id_int)
             processed.append("tags")
-        if refresh_resolution_steps:
+        if refresh_resolution:
             await tickets_service.refresh_ticket_resolution_steps(ticket_id_int)
             processed.append("resolution_steps")
     except Exception as exc:

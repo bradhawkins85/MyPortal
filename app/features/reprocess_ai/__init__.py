@@ -14,7 +14,7 @@ from app.core.features import FeaturePack
 
 PACK = FeaturePack(
     slug="reprocess_ai",
-    version="1.0.1",
+    version="1.1.0",
 )
 
 
