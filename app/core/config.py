@@ -437,7 +437,26 @@ class Settings(BaseSettings):
         default=True, validation_alias="ENABLE_BACKGROUND_RELATIONSHIPS"
     )
     enable_ticket_relationships: bool = Field(
-        default=False, validation_alias="ENABLE_TICKET_RELATIONSHIPS"
+        default=False,
+        validation_alias="ENABLE_TICKET_RELATIONSHIPS",
+        description=(
+            "Admin-controlled opt-in for ticket-to-ticket relationship evaluation. "
+            "Ticket-to-KB and ticket-to-asset candidates are unaffected."
+        ),
+    )
+    rag_relationship_candidate_limit: int = Field(
+        default=24,
+        validation_alias="RAG_RELATIONSHIP_CANDIDATE_LIMIT",
+        ge=1,
+        le=100,
+        description="Hard maximum candidate evaluations queued per changed document.",
+    )
+    rag_relationship_ticket_candidate_limit: int = Field(
+        default=5,
+        validation_alias="RAG_RELATIONSHIP_TICKET_CANDIDATE_LIMIT",
+        ge=1,
+        le=20,
+        description="Additional per-source safety cap for ticket targets.",
     )
     rag_relationship_model: str = Field(
         default="gemma4:e2b", validation_alias="RAG_RELATIONSHIP_MODEL"

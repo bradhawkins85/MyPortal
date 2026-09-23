@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import math
+import re
+from collections import defaultdict
 from typing import Any, Mapping
 from uuid import uuid4
 
@@ -34,17 +38,208 @@ async def get_document_with_content(document_id: int) -> dict[str, Any] | None:
 
 
 async def list_compatible_targets(
-    document_id: int, *, include_tickets: bool
+    document_id: int,
+    *,
+    include_tickets: bool,
+    limit: int = 24,
+    ticket_limit: int = 5,
 ) -> list[dict[str, Any]]:
-    if include_tickets:
-        return await db.fetch_all(
-            "SELECT * FROM rag_documents WHERE id <> ? AND is_active = 1",
-            (document_id,),
+    """Return a deterministic, scoped top-K relationship candidate set.
+
+    The database performs cheap security and source-type prefiltering first. A
+    hybrid identifier/tag, lexical and persisted-vector score then ranks the
+    remaining documents without making an LLM call.
+    """
+    source = await get_document(document_id)
+    if not source or limit <= 0:
+        return []
+    compatible = _COMPATIBLE_SOURCES.get(str(source.get("source_type") or ""))
+    if compatible is None:
+        compatible = frozenset({str(source.get("source_type") or "")})
+    if not include_tickets and str(source.get("source_type") or "") == "tickets":
+        compatible = compatible - {"tickets"}
+    if not compatible:
+        return []
+
+    placeholders = ",".join("?" for _ in compatible)
+    params: list[Any] = [
+        document_id,
+        source.get("embedding_model"),
+        *sorted(compatible),
+    ]
+    company_id = source.get("company_id")
+    if company_id is None:
+        scope_sql = "d.company_id IS NULL"
+    else:
+        # Null-company documents are only admitted below when their stored
+        # permission scope explicitly marks them as globally visible.
+        scope_sql = "(d.company_id = ? OR d.company_id IS NULL)"
+        params.append(company_id)
+    chunk_rows = await db.fetch_all(
+        "SELECT d.*, c.chunk_text AS candidate_text, c.embedding_json AS candidate_embedding "
+        "FROM rag_documents d LEFT JOIN rag_chunks c ON c.document_id = d.id AND c.is_active = 1 "
+        "WHERE d.id <> ? AND d.is_active = 1 AND d.embedding_model = ? "
+        "AND d.source_type IN (" + placeholders + ") AND " + scope_sql,
+        tuple(params),
+    )
+    documents: dict[int, dict[str, Any]] = {}
+    for chunk in chunk_rows:
+        document = documents.setdefault(
+            int(chunk["id"]), {**chunk, "candidate_text": "", "candidate_vectors": []}
         )
-    return await db.fetch_all(
-        "SELECT * FROM rag_documents WHERE id <> ? AND is_active = 1 AND source_type <> 'tickets'",
+        document["candidate_text"] += " " + str(chunk.get("candidate_text") or "")
+        vector = _json_vector(chunk.get("candidate_embedding"))
+        if vector:
+            document["candidate_vectors"].append(vector)
+    source_chunks = await db.fetch_all(
+        "SELECT chunk_text, embedding_json FROM rag_chunks WHERE document_id = ? AND is_active = 1",
         (document_id,),
     )
+    source_text = " ".join(
+        [str(source.get("title") or "")]
+        + [str(chunk.get("chunk_text") or "") for chunk in source_chunks]
+    )
+    source_vectors = [
+        _json_vector(chunk.get("embedding_json")) for chunk in source_chunks
+    ]
+    source_vectors = [vector for vector in source_vectors if vector]
+
+    eligible: list[dict[str, Any]] = []
+    for row in documents.values():
+        if (
+            row.get("company_id") is None
+            and company_id is not None
+            and not _is_authorised_global(row)
+        ):
+            continue
+        row["candidate_score"] = _candidate_score(
+            source, source_text, source_vectors, row
+        )
+        eligible.append(row)
+    eligible.sort(key=lambda row: (-float(row["candidate_score"]), int(row["id"])))
+    eligible_count = len(eligible)
+    per_source: defaultdict[str, int] = defaultdict(int)
+    selected: list[dict[str, Any]] = []
+    for row in eligible:
+        source_type = str(row.get("source_type") or "")
+        cap = (
+            ticket_limit
+            if source_type == "tickets"
+            else _SOURCE_CANDIDATE_LIMITS.get(source_type, 8)
+        )
+        if per_source[source_type] >= cap:
+            continue
+        per_source[source_type] += 1
+        selected.append(row)
+        if len(selected) >= limit:
+            break
+    for row in selected:
+        row["eligible_documents"] = eligible_count
+    return selected
+
+
+_COMPATIBLE_SOURCES: dict[str, frozenset[str]] = {
+    "tickets": frozenset({"knowledge_base", "assets", "tickets"}),
+    "ticket_comments": frozenset({"tickets", "knowledge_base"}),
+    "knowledge_base": frozenset({"tickets", "knowledge_base", "assets"}),
+    "assets": frozenset({"tickets", "knowledge_base", "assets"}),
+    "issues": frozenset({"tickets", "knowledge_base", "issues"}),
+    "best_practices": frozenset({"knowledge_base", "best_practices"}),
+}
+_SOURCE_CANDIDATE_LIMITS = {"knowledge_base": 10, "assets": 8, "tickets": 5}
+_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_.:@#-]+", re.IGNORECASE)
+_IDENTIFIER_RE = re.compile(
+    r"(?:#[0-9]{3,}|\b[a-z]{2,}[-_]?[0-9]{2,}\b|\b[0-9a-f]{8,}\b)", re.IGNORECASE
+)
+
+
+def _json(value: Any, fallback: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(str(value or ""))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _json_vector(value: Any) -> list[float]:
+    parsed = _json(value, [])
+    try:
+        return [float(item) for item in parsed] if isinstance(parsed, list) else []
+    except (TypeError, ValueError):
+        return []
+
+
+def _is_authorised_global(document: Mapping[str, Any]) -> bool:
+    scope = _json(document.get("permission_scope_json"), {})
+    return str(scope.get("visibility") or "") in {"anonymous", "authenticated"}
+
+
+def company_scope_compatible(
+    source: Mapping[str, Any], target: Mapping[str, Any]
+) -> bool:
+    """Apply the same fail-closed company boundary used during prefiltering."""
+    source_company = source.get("company_id")
+    target_company = target.get("company_id")
+    if source_company is None:
+        return target_company is None
+    if target_company is None:
+        return _is_authorised_global(target)
+    return int(source_company) == int(target_company)
+
+
+def _flatten_metadata(value: Any) -> set[str]:
+    metadata = _json(value, {})
+    if not isinstance(metadata, Mapping):
+        return set()
+    result: set[str] = set()
+    for key, item in metadata.items():
+        if (
+            "id" in str(key).casefold()
+            or "tag" in str(key).casefold()
+            or "serial" in str(key).casefold()
+        ):
+            values = item if isinstance(item, (list, tuple, set)) else [item]
+            result.update(str(v).casefold() for v in values if v not in (None, ""))
+    return result
+
+
+def _cosine(left: list[float], right: list[float]) -> float:
+    if not left or len(left) != len(right):
+        return 0.0
+    denominator = math.sqrt(sum(v * v for v in left)) * math.sqrt(
+        sum(v * v for v in right)
+    )
+    return sum(a * b for a, b in zip(left, right)) / denominator if denominator else 0.0
+
+
+def _candidate_score(
+    source: Mapping[str, Any],
+    source_text: str,
+    source_vectors: list[list[float]],
+    target: Mapping[str, Any],
+) -> float:
+    target_text = " ".join(
+        (str(target.get("title") or ""), str(target.get("candidate_text") or ""))
+    )
+    source_tokens = set(_TOKEN_RE.findall(source_text.casefold()))
+    target_tokens = set(_TOKEN_RE.findall(target_text.casefold()))
+    lexical = len(source_tokens & target_tokens) / max(
+        1, len(source_tokens | target_tokens)
+    )
+    identifiers = set(_IDENTIFIER_RE.findall(source_text)) & set(
+        _IDENTIFIER_RE.findall(target_text)
+    )
+    metadata = _flatten_metadata(source.get("metadata_json")) & _flatten_metadata(
+        target.get("metadata_json")
+    )
+    target_vectors = target.get("candidate_vectors") or []
+    semantic = max(
+        (_cosine(a, b) for a in source_vectors for b in target_vectors if b),
+        default=0.0,
+    )
+    exact = 1.0 if identifiers or metadata else 0.0
+    return (0.50 * max(0.0, semantic)) + (0.30 * lexical) + (0.20 * exact)
 
 
 async def mark_relationships_stale(document_id: int) -> None:
@@ -52,6 +247,40 @@ async def mark_relationships_stale(document_id: int) -> None:
         "UPDATE rag_relationships SET match_status = 'STALE' WHERE source_document_id = ? OR target_document_id = ?",
         (document_id, document_id),
     )
+
+
+async def record_candidate_funnel(
+    document_id: int,
+    *,
+    eligible_documents: int,
+    prefiltered_pairs: int,
+    queued_evaluations: int,
+) -> None:
+    await db.execute(
+        """
+        INSERT INTO rag_relationship_candidate_runs
+            (document_id, eligible_documents, prefiltered_pairs, queued_evaluations)
+        VALUES (?, ?, ?, ?)
+        """,
+        (document_id, eligible_documents, prefiltered_pairs, queued_evaluations),
+    )
+
+
+async def record_candidate_match(source_id: int, target_id: int) -> None:
+    """Attribute a positive result to the newest funnel run for either endpoint."""
+    row = await db.fetch_one(
+        """
+        SELECT id FROM rag_relationship_candidate_runs
+        WHERE document_id IN (?, ?)
+        ORDER BY created_at DESC, id DESC LIMIT 1
+        """,
+        (source_id, target_id),
+    )
+    if row:
+        await db.execute(
+            "UPDATE rag_relationship_candidate_runs SET positive_matches = positive_matches + 1 WHERE id = ?",
+            (row["id"],),
+        )
 
 
 async def relationship_current(source_id: int, target_id: int) -> bool:
@@ -401,6 +630,15 @@ async def metrics() -> dict[str, Any]:
     failed_lookups = await db.fetch_one(
         "SELECT COUNT(*) AS count FROM rag_relationship_queue WHERE status = 'FAILED'"
     )
+    funnel = await db.fetch_one(
+        """
+        SELECT COALESCE(SUM(eligible_documents), 0) AS eligible_documents,
+               COALESCE(SUM(prefiltered_pairs), 0) AS prefiltered_pairs,
+               COALESCE(SUM(queued_evaluations), 0) AS queued_evaluations,
+               COALESCE(SUM(positive_matches), 0) AS positive_matches
+        FROM rag_relationship_candidate_runs
+        """
+    )
     return {
         "queue": queue,
         "relationships": rels,
@@ -411,6 +649,15 @@ async def metrics() -> dict[str, Any]:
         "pending_matches": int((pending_matches or {}).get("count") or 0),
         "failed_lookups": int((failed_lookups or {}).get("count") or 0),
         "stale_matches": int((stale_matches or {}).get("count") or 0),
+        "candidate_funnel": {
+            key: int((funnel or {}).get(key) or 0)
+            for key in (
+                "eligible_documents",
+                "prefiltered_pairs",
+                "queued_evaluations",
+                "positive_matches",
+            )
+        },
         "matching_paused": await matching_paused(),
     }
 

@@ -7,6 +7,7 @@ import sqlite3
 from app.repositories import rag_relationships as rag_relationships_repo
 from app.core.database import Database
 from app.services.rag_relationships import (
+    _skip_pair,
     _relationship_response_payload,
     parse_relationship_response,
 )
@@ -130,6 +131,84 @@ def test_relationship_queue_priority_prefers_ticket_pairs():
     assert _relationship_queue_priority(ticket, article) > _relationship_queue_priority(
         asset, article
     )
+
+
+def test_company_scope_rejects_cross_company_and_unapproved_global_documents():
+    ticket = {"id": 1, "source_type": "tickets", "company_id": 10}
+    other_company = {"id": 2, "source_type": "assets", "company_id": 11}
+    unsafe_global = {
+        "id": 3,
+        "source_type": "knowledge_base",
+        "company_id": None,
+        "permission_scope_json": '{"visibility":"super_admin"}',
+    }
+    safe_global = {
+        "id": 4,
+        "source_type": "knowledge_base",
+        "company_id": None,
+        "permission_scope_json": '{"visibility":"authenticated"}',
+    }
+
+    assert _skip_pair(ticket, other_company, False)
+    assert _skip_pair(ticket, unsafe_global, False)
+    assert not _skip_pair(ticket, safe_global, False)
+
+
+@pytest.mark.anyio
+async def test_ticket_enqueue_is_bounded_and_preserves_mixed_candidates(monkeypatch):
+    from app.services import rag_relationships
+
+    source = {"id": 1, "source_type": "tickets", "company_id": 10}
+    targets = [
+        {
+            "id": 2,
+            "source_type": "knowledge_base",
+            "company_id": 10,
+            "eligible_documents": 5000,
+        },
+        {
+            "id": 3,
+            "source_type": "assets",
+            "company_id": 10,
+            "eligible_documents": 5000,
+        },
+    ]
+    captured: dict = {}
+
+    async def list_targets(document_id, **kwargs):
+        captured.update(kwargs)
+        return targets
+
+    async def false(*args, **kwargs):
+        return False
+
+    async def true(*args, **kwargs):
+        return True
+
+    async def record(document_id, **kwargs):
+        captured["funnel"] = kwargs
+
+    monkeypatch.setattr(rag_relationships.rel_repo, "matching_paused", false)
+    monkeypatch.setattr(rag_relationships.rel_repo, "get_document", lambda *_: None)
+
+    async def get_document(*_):
+        return source
+
+    monkeypatch.setattr(rag_relationships.rel_repo, "get_document", get_document)
+    monkeypatch.setattr(
+        rag_relationships.rel_repo, "list_compatible_targets", list_targets
+    )
+    monkeypatch.setattr(rag_relationships.rel_repo, "relationship_current", false)
+    monkeypatch.setattr(rag_relationships.rel_repo, "enqueue", true)
+    monkeypatch.setattr(rag_relationships.rel_repo, "record_candidate_funnel", record)
+
+    assert await rag_relationships.enqueue_relationships_for_document(1) == 2
+    assert captured["limit"] <= 100
+    assert captured["funnel"] == {
+        "eligible_documents": 5000,
+        "prefiltered_pairs": 2,
+        "queued_evaluations": 2,
+    }
 
 
 @pytest.mark.anyio
