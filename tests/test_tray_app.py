@@ -681,6 +681,7 @@ def test_resolve_config_expands_service_status_link_for_device_company(
         return "MyPortal"
 
     monkeypatch.setattr(svc.companies_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(svc._settings, "portal_url", "https://portal.example.test/")
     monkeypatch.setattr(
         svc.site_settings_repo, "get_tray_icon_tooltip_name", fake_get_tooltip_name
     )
@@ -715,7 +716,7 @@ def test_resolve_config_expands_service_status_link_for_device_company(
         {
             "type": "link",
             "label": "Service Status",
-            "url": f"/service-status/public/42/{token}",
+            "url": f"https://portal.example.test/service-status/public/42/{token}",
         }
     ]
 
@@ -757,6 +758,51 @@ def test_resolve_config_omits_service_status_link_without_company(
     )
 
     cfg = run(svc.resolve_config_for_device({"company_id": None, "asset_id": 9876}))
+
+    assert cfg["menu"] == []
+
+
+def test_resolve_config_omits_service_status_link_without_portal_url(
+    tray_db, run, monkeypatch
+):
+    import json
+    from app.repositories import tray as repo
+    from app.services import tray as svc
+
+    async def fake_get_company(company_id):
+        return {"id": company_id, "name": "Example Co", "archived": 0}
+
+    async def fake_get_tooltip_name():
+        return "MyPortal"
+
+    monkeypatch.setattr(svc.companies_repo, "get_company_by_id", fake_get_company)
+    monkeypatch.setattr(svc._settings, "portal_url", None)
+    monkeypatch.setattr(
+        svc.site_settings_repo, "get_tray_icon_tooltip_name", fake_get_tooltip_name
+    )
+    run(
+        repo.create_menu_config(
+            name="status-link-without-portal-url",
+            scope="company",
+            scope_ref_id=64,
+            payload_json=json.dumps(
+                [
+                    {
+                        "type": "link",
+                        "label": "Service Status",
+                        "url": svc.SERVICE_STATUS_URL_VARIABLE,
+                    }
+                ]
+            ),
+            display_text=None,
+            env_allowlist=None,
+            branding_icon_url=None,
+            enabled=True,
+            created_by_user_id=None,
+        )
+    )
+
+    cfg = run(svc.resolve_config_for_device({"company_id": 64, "asset_id": None}))
 
     assert cfg["menu"] == []
 

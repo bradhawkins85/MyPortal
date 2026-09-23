@@ -490,12 +490,15 @@ async def _expand_menu_url_variables(
     if company_id is not None:
         company = await companies_repo.get_company_by_id(int(company_id))
     status_url = None
-    if company and int(company.get("archived") or 0) != 1:
+    portal_base_url = str(_settings.portal_url or "").strip().rstrip("/")
+    if company and int(company.get("archived") or 0) != 1 and portal_base_url:
         token = service_status_service.build_public_status_token(
             int(company_id),
             seed=service_status_service.public_status_token_seed(company),
         )
-        status_url = f"/service-status/public/{int(company_id)}/{token}"
+        status_url = (
+            f"{portal_base_url}/service-status/public/{int(company_id)}/{token}"
+        )
 
     def expand(node_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
         expanded: list[dict[str, Any]] = []

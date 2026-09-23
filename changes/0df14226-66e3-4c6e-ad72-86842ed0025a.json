@@ -1,0 +1,7 @@
+{
+  "guid": "0df14226-66e3-4c6e-ad72-86842ed0025a",
+  "occurred_at": "2026-09-23T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Fix Service Status tray links to use an absolute portal URL so existing tray agents can open them in the client's default browser.",
+  "content_hash": "b82ae48ee4fbd550817ba37c8b3e880a605c107d66405ab726cdf25d5dc643b1"
+}
