@@ -1,0 +1,7 @@
+{
+  "guid": "3f06cc73-ecc1-4145-b9eb-613560fff2d7",
+  "occurred_at": "2026-09-23T10:56:40.111484+00:00",
+  "change_type": "feature",
+  "summary": "Centralise incoming third-party callback monitoring with redaction, truncation, failure capture, and Tray exclusions.",
+  "content_hash": ""
+}

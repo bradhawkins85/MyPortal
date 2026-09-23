@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 
 from app.services.monitored_http import monitored_client
+from app.services.incoming_webhooks import IncomingWebhookMonitorMiddleware
 from fastapi import (
     Depends,
     FastAPI,
@@ -791,6 +792,10 @@ app.add_middleware(
     MaintenanceMiddleware,
     page_path=str(Path(__file__).parent / "static" / "upgrade.html"),
 )
+
+# Registered outermost so authentication, body parsing, dependency validation,
+# handler failures, and maintenance/rate-limit rejections are all observable.
+app.add_middleware(IncomingWebhookMonitorMiddleware)
 
 templates = Jinja2Templates(directory=str(templates_config.template_path))
 
