@@ -23,6 +23,7 @@ CREATE INDEX IF NOT EXISTS idx_webhook_deletion_rules_due
 CREATE TABLE IF NOT EXISTS webhook_retention_settings (
   id INT PRIMARY KEY,
   enabled TINYINT(1) NOT NULL DEFAULT 0,
-  retention_days INT NOT NULL DEFAULT 30,
+  retention_value INT NOT NULL DEFAULT 30,
+  retention_unit VARCHAR(20) NOT NULL DEFAULT 'days',
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );

@@ -69,18 +69,23 @@ async def mark_run(rule_id: int, *, next_run_at: datetime | None) -> None:
 
 async def get_retention() -> dict[str, Any]:
     row = await db.fetch_one("SELECT * FROM webhook_retention_settings WHERE id = %s", (1,))
-    return dict(row) if row else {"id": 1, "enabled": False, "retention_days": 30}
+    return dict(row) if row else {
+        "id": 1,
+        "enabled": False,
+        "retention_value": 30,
+        "retention_unit": "days",
+    }
 
 
-async def set_retention(*, enabled: bool, retention_days: int) -> dict[str, Any]:
+async def set_retention(*, enabled: bool, retention_value: int, retention_unit: str) -> dict[str, Any]:
     if await db.fetch_one("SELECT id FROM webhook_retention_settings WHERE id = %s", (1,)):
         await db.execute(
-            "UPDATE webhook_retention_settings SET enabled=%s, retention_days=%s WHERE id=%s",
-            (int(enabled), retention_days, 1),
+            "UPDATE webhook_retention_settings SET enabled=%s, retention_value=%s, retention_unit=%s WHERE id=%s",
+            (int(enabled), retention_value, retention_unit, 1),
         )
     else:
         await db.execute(
-            "INSERT INTO webhook_retention_settings (id, enabled, retention_days) VALUES (%s, %s, %s)",
-            (1, int(enabled), retention_days),
+            "INSERT INTO webhook_retention_settings (id, enabled, retention_value, retention_unit) VALUES (%s, %s, %s, %s)",
+            (1, int(enabled), retention_value, retention_unit),
         )
     return await get_retention()

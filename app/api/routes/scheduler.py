@@ -81,7 +81,12 @@ async def get_webhook_retention(_: None = Depends(require_database), __: dict[st
 
 @router.put("/webhook-retention")
 async def update_webhook_retention(payload: WebhookRetentionInput, _: None = Depends(require_database), __: dict[str, Any] = Depends(require_super_admin)):
-    return await deletion_rules_repo.set_retention(enabled=payload.enabled, retention_days=payload.retention_days)
+    value = 0 if payload.retention_unit == "immediately" else payload.retention_value
+    return await deletion_rules_repo.set_retention(
+        enabled=payload.enabled,
+        retention_value=value,
+        retention_unit=payload.retention_unit,
+    )
 
 
 @router.get("/system-updates", response_model=list[dict[str, Any]])

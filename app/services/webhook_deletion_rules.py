@@ -75,5 +75,13 @@ async def run_scheduled_rules(now: datetime | None = None) -> int:
         await rules_repo.mark_run(int(rule["id"]), next_run_at=next_run(rule["cron_expression"], now))
     retention = await rules_repo.get_retention()
     if bool(retention.get("enabled")):
-        deleted += await events_repo.delete_before(now - timedelta(days=int(retention["retention_days"])))
+        value = int(retention["retention_value"])
+        unit = str(retention["retention_unit"])
+        duration = {
+            "immediately": timedelta(0),
+            "minutes": timedelta(minutes=value),
+            "hours": timedelta(hours=value),
+            "days": timedelta(days=value),
+        }[unit]
+        deleted += await events_repo.delete_before(now - duration)
     return deleted

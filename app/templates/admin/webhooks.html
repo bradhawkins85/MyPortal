@@ -64,8 +64,16 @@
   <form class="form-grid" data-retention-form>
     <h3>Final retention rule</h3>
     <label><input type="checkbox" name="enabled" {% if retention.enabled %}checked{% endif %}> Delete old entries</label>
-    <label>Delete after <input class="form-input" type="number" name="retentionDays" min="1" max="3650" value="{{ retention.retention_days }}" required> days</label>
-    <p class="text-muted">Runs last and uses the entry creation timestamp (UTC), regardless of delivery updates.</p>
+    <label>Delete after <input class="form-input" type="number" name="retentionValue" min="0" max="5256000" value="{{ retention.retention_value }}" required></label>
+    <label class="form-label">Time unit
+      <select class="form-input" name="retentionUnit">
+        <option value="immediately" {% if retention.retention_unit == 'immediately' %}selected{% endif %}>Immediately</option>
+        <option value="minutes" {% if retention.retention_unit == 'minutes' %}selected{% endif %}>Minutes</option>
+        <option value="hours" {% if retention.retention_unit == 'hours' %}selected{% endif %}>Hours</option>
+        <option value="days" {% if retention.retention_unit == 'days' %}selected{% endif %}>Days</option>
+      </select>
+    </label>
+    <p class="text-muted">Runs last and uses the entry creation timestamp (UTC), regardless of delivery updates. “Immediately” removes every remaining entry on the next cleanup run.</p>
     <button class="button button--primary" type="submit">Save retention</button>
   </form>
 </section>

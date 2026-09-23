@@ -205,5 +205,6 @@ class WebhookDeletionRuleResponse(WebhookDeletionRuleInput):
 
 class WebhookRetentionInput(BaseModel):
     enabled: bool
-    retention_days: int = Field(ge=1, le=3650, validation_alias="retentionDays")
+    retention_value: int = Field(ge=0, le=5256000, validation_alias="retentionValue")
+    retention_unit: Literal["immediately", "minutes", "hours", "days"] = Field(validation_alias="retentionUnit")
     model_config = {"populate_by_name": True}

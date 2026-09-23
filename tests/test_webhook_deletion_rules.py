@@ -35,7 +35,7 @@ def test_scheduled_rules_run_before_final_retention(monkeypatch):
     async def events(limit=5000): return [{"id": 7, "status": "failed"}, {"id": 8, "status": "succeeded"}]
     async def delete(event_id): calls.append(("rule", event_id))
     async def mark(rule_id, *, next_run_at): calls.append(("mark", rule_id))
-    async def retention(): return {"enabled": True, "retention_days": 30}
+    async def retention(): return {"enabled": True, "retention_value": 30, "retention_unit": "days"}
     async def old(cutoff): calls.append(("retention", cutoff)); return 2
     monkeypatch.setattr(service.rules_repo, "list_rules", rules)
     monkeypatch.setattr(service.rules_repo, "mark_run", mark)
@@ -46,3 +46,28 @@ def test_scheduled_rules_run_before_final_retention(monkeypatch):
     assert asyncio.run(service.run_scheduled_rules(now)) == 3
     assert calls[0] == ("rule", 7)
     assert calls[-1][0] == "retention"
+
+
+def test_retention_supports_minutes_hours_and_immediate(monkeypatch):
+    now = datetime(2026, 1, 10, 12, 0, tzinfo=timezone.utc)
+
+    async def rules(*, enabled_only=False): return []
+    async def events(limit=5000): return []
+    monkeypatch.setattr(service.rules_repo, "list_rules", rules)
+    monkeypatch.setattr(service.events_repo, "list_events", events)
+
+    for value, unit, expected in (
+        (15, "minutes", now - timedelta(minutes=15)),
+        (6, "hours", now - timedelta(hours=6)),
+        (0, "immediately", now),
+    ):
+        cutoffs = []
+        async def retention(value=value, unit=unit):
+            return {"enabled": True, "retention_value": value, "retention_unit": unit}
+        async def delete_before(cutoff):
+            cutoffs.append(cutoff)
+            return 0
+        monkeypatch.setattr(service.rules_repo, "get_retention", retention)
+        monkeypatch.setattr(service.events_repo, "delete_before", delete_before)
+        asyncio.run(service.run_scheduled_rules(now))
+        assert cutoffs == [expected]
