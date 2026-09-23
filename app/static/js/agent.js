@@ -358,12 +358,14 @@
 
   function renderAnswerMeta(container, payload) {
     if (!container) return;
-    const confidence = payload.answer_confidence;
     const label = payload.answer_confidence_label;
+    const explanation = payload.answer_confidence_explanation;
     const missing = Array.isArray(payload.missing_sources) ? payload.missing_sources : [];
     const parts = [];
-    if (confidence != null && !Number.isNaN(Number(confidence))) {
-      parts.push(`Confidence: ${Math.round(Number(confidence) * 100)}%${label ? ` (${label})` : ''}`);
+    if (label && label !== 'not_calibrated') {
+      parts.push(`Confidence: ${label}`);
+    } else if (explanation) {
+      parts.push(explanation);
     }
     if (missing.length) {
       parts.push(`No strong matches in: ${missing.join(', ')}`);

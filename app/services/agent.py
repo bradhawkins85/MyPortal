@@ -345,6 +345,20 @@ def _infer_allowed_rag_sources(query: str) -> set[str]:
     return matched | set(SOURCE_REGISTRY)
 
 
+def _infer_intent_sources(query: str) -> set[str]:
+    """Return only source types explicitly indicated by the user's wording."""
+
+    lowered = (query or "").casefold()
+    matched = {
+        source_type
+        for source_type, definition in SOURCE_REGISTRY.items()
+        if any(keyword in lowered for keyword in definition.keywords)
+    }
+    if _extract_explicit_ticket_ids(query):
+        matched.update({"tickets", "ticket_comments"})
+    return matched
+
+
 def _source_allowed(source_type: str | None, allowed_sources: set[str]) -> bool:
     normalised = canonical_source_type(str(source_type or ""))
     return normalised in allowed_sources or (
@@ -414,32 +428,22 @@ def _calculate_answer_confidence(
     rag_candidates: Sequence[Mapping[str, Any]],
     *,
     preferred_sources: Sequence[str],
-) -> tuple[float, str, list[str]]:
-    if not rag_candidates:
-        return 0.0, "low", list(preferred_sources)
-    scores: list[float] = []
+) -> tuple[None, str, list[str]]:
+    """Return confidence metadata without presenting uncalibrated scores.
+
+    Retrieval scores rank evidence; they are not probabilities that an answer is
+    correct.  A numeric value must remain hidden until thresholds have been
+    measured and documented against a representative answer-quality evaluation
+    set.
+    """
+
     found_sources = set()
     for candidate in rag_candidates:
         source_type = str(candidate.get("source_type") or "").casefold()
         if source_type:
             found_sources.add(source_type)
-        try:
-            scores.append(float(candidate.get("score") or 0))
-        except (TypeError, ValueError):
-            continue
-    average_score = sum(scores) / len(scores) if scores else 0.0
-    source_coverage = len(found_sources & set(preferred_sources)) / max(
-        1, len(set(preferred_sources))
-    )
-    confidence = max(0.0, min(1.0, (average_score * 0.65) + (source_coverage * 0.35)))
-    if confidence >= 0.75:
-        label = "high"
-    elif confidence >= 0.45:
-        label = "medium"
-    else:
-        label = "low"
     missing = [source for source in preferred_sources if source not in found_sources]
-    return round(confidence, 3), label, missing
+    return None, "not_calibrated", missing
 
 
 def _stage(
@@ -1606,6 +1610,11 @@ async def execute_agent_query(
         if requested_source_filters
         else _infer_allowed_rag_sources(query_text)
     )
+    intent_sources = (
+        set(requested_source_filters)
+        if requested_source_filters
+        else _infer_intent_sources(query_text)
+    )
     source_filters_sorted = sorted(requested_source_filters)
     stages: list[dict[str, Any]] = [
         _stage(
@@ -1613,7 +1622,7 @@ async def execute_agent_query(
             data={
                 "intent": "mixed",
                 "ticket_ids": explicit_ticket_ids,
-                "preferred_sources": sorted(allowed_rag_sources),
+                "preferred_sources": sorted(intent_sources),
                 "applied_source_filters": source_filters_sorted,
             },
         )
@@ -2253,7 +2262,7 @@ async def execute_agent_query(
     has_relevant_sources = bool(rag_candidates)
     confidence_value, confidence_label, missing_sources = _calculate_answer_confidence(
         rag_candidates,
-        preferred_sources=sorted(allowed_rag_sources),
+        preferred_sources=sorted(intent_sources),
     )
 
     if context_mode is AgentContextMode.RAG_ONLY:
@@ -2272,21 +2281,31 @@ async def execute_agent_query(
     event_id: int | None = None
     message: str | None = None
 
-    final_conversation_prompts = _build_final_answer_conversation_prompts(
-        query_text,
-        prompt,
-        curated_evidence,
-        rag_candidates,
-    )
-    final_llm = await _invoke_agent_llm_conversation(
-        "final_answer",
-        final_conversation_prompts,
-    )
-    module_status = final_llm["status"]
-    message = final_llm["message"]
-    answer_text = final_llm["text"]
-    model_name = final_llm["model"]
-    event_id = final_llm["event_id"]
+    final_conversation_prompts: list[str] = []
+    if not has_relevant_sources:
+        module_status = "succeeded"
+        answer_text = (
+            "I couldn't find authorised evidence relevant enough to answer that "
+            "question. I won't guess or make unsupported claims. Try narrowing your "
+            "question or source filters, or create a support ticket so the team can help."
+        )
+        message = "No relevant authorised evidence was found."
+    else:
+        final_conversation_prompts = _build_final_answer_conversation_prompts(
+            query_text,
+            prompt,
+            curated_evidence,
+            rag_candidates,
+        )
+        final_llm = await _invoke_agent_llm_conversation(
+            "final_answer",
+            final_conversation_prompts,
+        )
+        module_status = final_llm["status"]
+        message = final_llm["message"]
+        answer_text = final_llm["text"]
+        model_name = final_llm["model"]
+        event_id = final_llm["event_id"]
     if answer_text:
         authorized_references = {_candidate_label(item) for item in rag_candidates}
         for item in rag_candidates:
@@ -2299,9 +2318,13 @@ async def execute_agent_query(
             answer_text = validate_references(answer_text, authorized_references)
         except ValueError as exc:
             log_error("Agent output reference validation failed", error=str(exc))
-            answer_text = None
-            module_status = "error"
-            message = "The generated answer contained an unauthorized reference"
+            answer_text = (
+                "I couldn't provide a safely grounded answer because the generated "
+                "response cited evidence that was not supplied. Please try again or "
+                "create a support ticket so the team can help."
+            )
+            module_status = "succeeded"
+            message = "The generated answer contained an unauthorized reference."
     stages.append(
         _stage(
             "final_answer",
@@ -2321,6 +2344,10 @@ async def execute_agent_query(
         "has_relevant_sources": has_relevant_sources,
         "answer_confidence": confidence_value,
         "answer_confidence_label": confidence_label,
+        "answer_confidence_explanation": (
+            "A numeric confidence is hidden because answer-quality calibration "
+            "has not yet been validated on a representative evaluation set."
+        ),
         "missing_sources": missing_sources,
         "stages": stages,
         "evidence": curated_evidence,

@@ -144,21 +144,8 @@ async def test_execute_agent_query_returns_sources(monkeypatch):
         AsyncMock(return_value=package_rows),
     )
 
-    async def fake_trigger(slug, payload, *, background):
-        assert slug == "ollama"
-        assert background is False
-        prompt = payload.get("prompt")
-        assert prompt
-        assert "No relevant RAG evidence was found." in prompt
-        assert "Knowledge base articles:" not in prompt
-        return {
-            "status": "succeeded",
-            "model": "llama3",
-            "response": {"response": "Answer text"},
-            "event_id": 918,
-        }
-
-    monkeypatch.setattr(agent_service.modules_service, "trigger_module", fake_trigger)
+    trigger_mock = AsyncMock()
+    monkeypatch.setattr(agent_service.modules_service, "trigger_module", trigger_mock)
 
     result = await agent_service.execute_agent_query(
         "network setup",
@@ -168,8 +155,10 @@ async def test_execute_agent_query_returns_sources(monkeypatch):
     )
 
     assert result["status"] == "succeeded"
-    assert result["answer"] == "Answer text"
-    assert result["model"] == "llama3"
+    assert "couldn't find authorised evidence" in result["answer"]
+    assert "create a support ticket" in result["answer"]
+    assert result["model"] is None
+    trigger_mock.assert_not_awaited()
     assert result["sources"]["knowledge_base"][0]["slug"] == "network-guide"
     assert result["sources"]["tickets"][0]["id"] == 42
     assert result["sources"]["products"][0]["sku"] == "HW-001"
@@ -718,14 +707,8 @@ async def test_execute_agent_query_minimises_llm_prompt_context(monkeypatch):
         AsyncMock(return_value=[]),
     )
 
-    captured_prompt = ""
-
-    async def fake_trigger(slug, payload, *, background):
-        nonlocal captured_prompt
-        captured_prompt = payload.get("prompt", "")
-        return {"status": "succeeded", "response": {"response": "Minimised"}}
-
-    monkeypatch.setattr(agent_service.modules_service, "trigger_module", fake_trigger)
+    trigger_mock = AsyncMock()
+    monkeypatch.setattr(agent_service.modules_service, "trigger_module", trigger_mock)
 
     result = await agent_service.execute_agent_query(
         "network", user, active_company_id=1, memberships=memberships
@@ -734,12 +717,8 @@ async def test_execute_agent_query_minimises_llm_prompt_context(monkeypatch):
     assert len(result["sources"]["knowledge_base"]) == 6
     assert len(result["sources"]["tickets"]) == 6
     assert len(result["sources"]["products"]) == 6
-    assert "No relevant RAG evidence was found." in captured_prompt
-    assert "Knowledge base articles:" not in captured_prompt
-    assert "Tickets created by or watched by the user:" not in captured_prompt
-    assert "Products and hardware recommendations" not in captured_prompt
-    assert "Companies available to the user:" not in captured_prompt
-    assert "Extra Co" not in captured_prompt
+    assert "couldn't find authorised evidence" in result["answer"]
+    trigger_mock.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -1180,5 +1159,33 @@ async def test_execute_agent_query_applies_source_filters_and_reports_confidence
         "chats",
     }
     assert result["stages"][0]["data"]["applied_source_filters"] == ["chats", "tickets"]
-    assert result["answer_confidence"] is not None
-    assert result["answer_confidence_label"] in {"low", "medium", "high"}
+    assert result["answer_confidence"] is None
+    assert result["answer_confidence_label"] == "not_calibrated"
+    assert "representative evaluation set" in result["answer_confidence_explanation"]
+
+
+def test_confidence_missing_sources_only_uses_user_intent():
+    _, label, missing = agent_service._calculate_answer_confidence(
+        [{"source_type": "tickets", "score": 0.9}],
+        preferred_sources=["tickets"],
+    )
+    assert label == "not_calibrated"
+    assert missing == []
+
+
+def test_weak_evidence_is_rejected_before_generation():
+    assert agent_service._filter_rag_candidates(
+        [{"source_type": "tickets", "source_id": 1, "score": 0.01}],
+        allowed_sources={"tickets"},
+    ) == []
+
+
+def test_conflicting_authorised_evidence_is_preserved_for_grounded_answers():
+    candidates = [
+        {"source_type": "tickets", "source_id": 1, "score": 0.9, "excerpt": "Enabled"},
+        {"source_type": "tickets", "source_id": 2, "score": 0.88, "excerpt": "Disabled"},
+    ]
+    filtered = agent_service._filter_rag_candidates(
+        candidates, allowed_sources={"tickets"}
+    )
+    assert [item["source_id"] for item in filtered] == [1, 2]
