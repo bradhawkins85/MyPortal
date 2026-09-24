@@ -96,7 +96,7 @@
           <div><h3 id="setup-title">Guided tenant setup</h3><p>Create and authorise a dedicated enterprise app without manually configuring the Azure portal.</p></div>
         </header>
         <div class="m365-steps">
-          <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">1</span><span class="m365-step__title">Identify tenant</span></div><p>A Global Admin signs in so the tenant can be discovered securely.</p><a href="/m365/discover" class="button">Sign in as Global Admin</a></div>
+          <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">1</span><span class="m365-step__title">Identify tenant</span></div><p>A Global Admin signs in so the tenant can be discovered securely.</p><a href="/m365/discover" class="button">Sign in as Global Admin</a>{% if request.query_params.get('m365_discovered_tenant') %}<form method="get" action="/m365/provision" class="form-field__group"><input class="form-input" name="tenant_id" value="{{ request.query_params.get('m365_discovered_tenant') }}" readonly><button class="button" type="submit">Confirm tenant and provision</button></form>{% endif %}</div>
           <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">2</span><span class="m365-step__title">Grant portal access</span></div><p>Approve the required Microsoft Graph permissions and offline access.</p>{% if has_credentials %}<a href="/m365/connect" class="button">Authorise portal access</a>{% else %}<button type="button" class="button button--secondary" disabled title="Complete step 1 first">Complete step 1 first</button>{% endif %}</div>
         </div>
       </section>

@@ -18,6 +18,7 @@ from typing import Any
 from urllib.parse import quote, unquote, urlsplit
 
 import httpx
+import jwt
 
 from app.services.monitored_http import monitored_client
 
@@ -168,6 +169,7 @@ def get_required_app_role_ids() -> list[str]:
 
 # OAuth scopes requested during the admin-consent provisioning flow
 PROVISION_SCOPE = (
+    "openid profile "
     "https://graph.microsoft.com/Application.ReadWrite.All "
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
     "https://graph.microsoft.com/DelegatedPermissionGrant.ReadWrite.All "
@@ -185,6 +187,7 @@ PROVISION_SCOPE = (
 # delegated permissions even if they are not statically configured on the enterprise
 # app registration (Microsoft Entra ID dynamic consent).
 CONNECT_SCOPE = (
+    "openid profile "
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
     "https://graph.microsoft.com/DelegatedPermissionGrant.ReadWrite.All "
     "https://graph.microsoft.com/Directory.Read.All "
@@ -1164,6 +1167,40 @@ async def _add_password_credential(
                 _self_renewal_reprovision_message(admin_flow=admin_flow)
             ) from exc
         raise
+
+
+async def validate_microsoft_id_token(id_token: str, *, client_id: str) -> dict[str, Any]:
+    """Cryptographically validate a Microsoft v2 ID token and return claims.
+
+    Access tokens are intentionally not inspected: Graph access tokens are an
+    opaque credential from this application's perspective.
+    """
+    if not id_token or not client_id:
+        raise M365Error("Microsoft did not return a verifiable identity token")
+    try:
+        header = jwt.get_unverified_header(id_token)
+        kid = str(header.get("kid") or "")
+        async with monitored_client(httpx.AsyncClient, timeout=15) as client:
+            response = await client.get(
+                "https://login.microsoftonline.com/common/discovery/v2.0/keys"
+            )
+        response.raise_for_status()
+        jwk = next(key for key in response.json().get("keys", []) if key.get("kid") == kid)
+        public_key = jwt.algorithms.RSAAlgorithm.from_jwk(jwk)
+        claims = jwt.decode(
+            id_token,
+            public_key,
+            algorithms=["RS256"],
+            audience=client_id,
+            options={"require": ["exp", "iat", "aud", "iss", "tid"]},
+        )
+    except (jwt.PyJWTError, httpx.HTTPError, KeyError, StopIteration, TypeError, ValueError) as exc:
+        raise M365Error("Microsoft returned an invalid identity token") from exc
+    tenant_id = str(claims.get("tid") or "").strip()
+    issuer = str(claims.get("iss") or "").rstrip("/")
+    if issuer != f"https://login.microsoftonline.com/{tenant_id}/v2.0":
+        raise M365Error("Microsoft identity issuer did not match its tenant")
+    return claims
 
 
 def generate_pkce_pair() -> tuple[str, str]:

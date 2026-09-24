@@ -173,6 +173,7 @@ from app.services.cron_expression import validate as validate_cron_expression
 from app.services import company_access
 from app.services import dashboard as dashboard_service
 from app.services import user_m365_contacts as user_m365_contacts_service
+from app.services import m365_oauth_transactions
 from app.services import rag_relationships as rag_relationship_service
 from app.services import m365 as m365_service
 from app.services import cis_benchmark as cis_benchmark_service
@@ -208,6 +209,38 @@ configure_logging()
 settings = get_settings()
 templates_config = get_templates_config()
 oauth_state_serializer = URLSafeSerializer(settings.secret_key, salt="m365-oauth")
+
+
+async def _new_m365_oauth_state(request: Request, **context: Any) -> str:
+    """Create opaque state bound to the current authenticated session."""
+    session = await session_manager.load_session(request)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    transaction_id = await m365_oauth_transactions.create(
+        user_id=session.user_id, session_id=session.id, **context
+    )
+    return oauth_state_serializer.dumps({"transaction_id": transaction_id})
+
+
+async def _consume_m365_oauth_state(request: Request, state: str | None) -> dict[str, Any] | None:
+    """Validate, consume, and bind opaque OAuth state to this live session."""
+    if not state:
+        return None
+    try:
+        envelope = oauth_state_serializer.loads(state)
+    except BadSignature:
+        return None
+    # Context-bearing legacy state is intentionally rejected (see service docs).
+    transaction_id = envelope.get("transaction_id") if isinstance(envelope, dict) else None
+    if not isinstance(transaction_id, str):
+        return None
+    transaction = await m365_oauth_transactions.consume(transaction_id)
+    session = await session_manager.load_session(request)
+    if not transaction or session is None:
+        return None
+    if int(transaction.get("user_id") or 0) != session.user_id or int(transaction.get("session_id") or 0) != session.id:
+        return None
+    return transaction
 PWA_THEME_COLOR = "#0f172a"
 PWA_BACKGROUND_COLOR = "#0f172a"
 SHOP_LOW_STOCK_THRESHOLD = 5
@@ -4585,16 +4618,16 @@ async def repair_m365_permissions(request: Request):
         # permissions and then return to the diagnostics page.
         credentials = await m365_service.get_credentials(company_id)
         if credentials:
-            state = oauth_state_serializer.dumps({
-                "company_id": company_id,
-                "user_id": user.get("id"),
-                "flow": "connect",
-                "return_to": "diagnostics",
-            })
+            redirect_uri = _build_m365_redirect_uri(request)
+            state = await _new_m365_oauth_state(
+                request, company_id=company_id, flow="connect",
+                return_to="diagnostics", tenant_id=credentials["tenant_id"],
+                client_id=credentials["client_id"], redirect_uri=redirect_uri,
+            )
             params = {
                 "client_id": credentials["client_id"],
                 "response_type": "code",
-                "redirect_uri": _build_m365_redirect_uri(request),
+                "redirect_uri": redirect_uri,
                 "response_mode": "query",
                 "scope": m365_service.CONNECT_SCOPE,
                 "state": state,
@@ -4775,7 +4808,10 @@ async def m365_connect(request: Request):
     redirect_uri = _build_m365_redirect_uri(request)
     state_payload = {
         "company_id": company_id,
-        "user_id": user.get("id"),
+        "flow": "connect",
+        "tenant_id": credentials["tenant_id"],
+        "client_id": credentials["client_id"],
+        "redirect_uri": redirect_uri,
     }
     if request.query_params.get("setup") == "compliance_role":
         state_payload["setup"] = "compliance_role"
@@ -4783,7 +4819,7 @@ async def m365_connect(request: Request):
         state_payload["return_to"] = (
             requested_return if requested_return in {"m365", "diagnostics"} else "m365"
         )
-    state = oauth_state_serializer.dumps(state_payload)
+    state = await _new_m365_oauth_state(request, **state_payload)
     params = {
         "client_id": credentials["client_id"],
         "response_type": "code",
@@ -4817,18 +4853,17 @@ async def m365_provision(request: Request, tenant_id: str = Query(...)):
         return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
     redirect_uri = _build_m365_redirect_uri(request)
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
-    verifier_id = await _store_m365_provision_code_verifier(code_verifier)
-    state = oauth_state_serializer.dumps(
-        {
-            "company_id": company_id,
-            "user_id": user.get("id"),
-            "tenant_id": tenant_id,
-            "flow": "provision",
-            "verifier_id": verifier_id,
-        }
-    )
     oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(
         company_id, redirect_uri=redirect_uri
+    )
+    state = await _new_m365_oauth_state(
+        request,
+        company_id=company_id,
+        tenant_id=tenant_id,
+        flow="provision",
+        code_verifier=code_verifier,
+        client_id=oauth_client_id,
+        redirect_uri=redirect_uri,
     )
     params = {
         "client_id": oauth_client_id,
@@ -4922,12 +4957,13 @@ async def m365_discover(request: Request):
 
     state_payload: dict = {
         "company_id": company_id,
-        "user_id": user.get("id"),
         "flow": "discover",
         "code_verifier": code_verifier,
+        "client_id": oauth_client_id,
+        "redirect_uri": redirect_uri,
     }
 
-    state = oauth_state_serializer.dumps(state_payload)
+    state = await _new_m365_oauth_state(request, **state_payload)
     params: dict = {
         "client_id": oauth_client_id,
         "response_type": "code",
@@ -4972,15 +5008,17 @@ async def admin_csp_provision(request: Request):
     # Prefer existing admin credentials, then an explicitly configured
     # bootstrap client, and finally fall back to PKCE with the well-known
     # Azure CLI public client so no manual credential setup is required.
-    existing_client_id, _ = await _get_m365_admin_credentials()
+    existing_client_id, existing_client_secret = await _get_m365_admin_credentials()
     bootstrap_client_id = str(settings.m365_bootstrap_client_id or "").strip()
 
     code_verifier: str | None = None
-    pkce_handle: str | None = None
+    oauth_client_secret: str | None = None
     if existing_client_id:
         oauth_client_id = existing_client_id
+        oauth_client_secret = existing_client_secret
     elif bootstrap_client_id:
         oauth_client_id = bootstrap_client_id
+        oauth_client_secret = str(settings.m365_bootstrap_client_secret or "").strip() or None
     else:
         # No credentials configured – use PKCE with a public client.
         # Persist the code_verifier server-side and send only an opaque
@@ -4988,20 +5026,16 @@ async def admin_csp_provision(request: Request):
         # Use M365_PKCE_CLIENT_ID if configured; otherwise fall back to the
         # Azure CLI public client (which may be blocked in some tenants).
         code_verifier, code_challenge = m365_service.generate_pkce_pair()
-        pkce_handle = await _store_pkce_verifier(code_verifier)
         oauth_client_id = m365_service.get_pkce_client_id()
 
     state_payload: dict = {
-        "company_id": company_id,
-        "user_id": current_user.get("id"),
-        "flow": "discover",
-        "return_to": "company_edit",
+        "flow": "csp_admin_provision",
         "code_verifier": code_verifier,
+        "client_id": oauth_client_id,
+        "client_secret": oauth_client_secret,
+        "redirect_uri": redirect_uri,
     }
-    if pkce_handle:
-        state_payload["pkce_handle"] = pkce_handle
-
-    state = oauth_state_serializer.dumps(state_payload)
+    state = await _new_m365_oauth_state(request, **state_payload)
     params: dict = {
         "client_id": oauth_client_id,
         "response_type": "code",
@@ -5044,80 +5078,54 @@ async def _best_effort_sync_m365_email_domains(company_id: int) -> None:
 
 @app.get("/m365/callback", name="m365_callback")
 async def m365_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
+    # Consume first, including denied-consent responses: a callback transaction
+    # is single-use regardless of whether Microsoft returned a code.
+    state_data = await _consume_m365_oauth_state(request, state)
+    if not state_data:
+        return flash_redirect("/m365", "The Microsoft sign-in session expired or was already used.", "error")
+    flow = str(state_data.get("flow") or "connect")
+    company_id = int(state_data.get("company_id") or 0)
+    error_redirect = "/admin/profile" if flow == "user_m365_contacts" else (
+        "/admin/modules/m365-mail" if flow == "m365_mail_auth" else "/m365"
+    )
+
+    # Re-authorize the portal principal and resource at callback time.  Access
+    # may have been revoked, the active company changed, or an account moved
+    # while the Microsoft consent screen was open.
+    current_user, auth_redirect = await _require_authenticated_user(request)
+    if auth_redirect or not current_user:
+        return flash_redirect(error_redirect, "The Microsoft sign-in session is no longer valid.", "error")
+    if flow in {"discover", "provision", "csp_admin_provision", "m365_mail_auth"} and not current_user.get("is_super_admin"):
+        return flash_redirect(error_redirect, "Microsoft 365 administration access was revoked.", "error")
+    if company_id and not current_user.get("is_super_admin"):
+        accessible = await company_access.list_accessible_companies(current_user)
+        if company_id not in {int(item["id"]) for item in accessible}:
+            return flash_redirect(error_redirect, "Access to this company was revoked.", "error")
+
     if error:
         message = request.query_params.get("error_description", error)
-        # Try to determine the flow from state so we can redirect to the
-        # correct page and clear any stale PKCE client IDs. If state is
-        # unparseable we fall back to /m365.
-        error_redirect = "/m365"
-        state_data: dict[str, Any] = {}
-        if state:
-            try:
-                state_data = oauth_state_serializer.loads(state)
-                if state_data.get("flow") == "m365_mail_auth":
-                    error_redirect = "/admin/modules/m365-mail"
-                elif state_data.get("flow") == "user_m365_contacts":
-                    error_redirect = "/admin/profile"
-            except Exception:
-                state_data = {}
-        # AADSTS700016 means the PKCE app registration no longer exists in the
-        # tenant (it was deleted). Clear the stale pkce_client_id (including
-        # any company-specific value) so that the next sign-in attempt falls
-        # back to the Azure CLI public client, and guide the admin to re-
-        # provision so a fresh PKCE app is created.
         if "AADSTS700016" in message:
-            company_id_raw = state_data.get("company_id")
-            if company_id_raw is not None:
-                try:
-                    await m365_service.clear_company_pkce_client_id(int(company_id_raw))
-                except (TypeError, ValueError):
-                    log_warning(
-                        "Skipping per-company PKCE clear; invalid company_id in state",
-                        company_id_raw=company_id_raw,
-                    )
-                except Exception as exc:
-                    log_warning(
-                        "Failed to clear per-company PKCE client ID after AADSTS700016",
-                        company_id_raw=company_id_raw,
-                        error=str(exc),
-                    )
-            try:
-                await m365_service.clear_pkce_client_id()
-            except Exception as exc:
-                log_warning(
-                    "Failed to clear global PKCE client ID after AADSTS700016",
-                    error=str(exc),
-                )
+            # Never mutate shared/global configuration from an error callback.
+            # The verified transaction identifies the affected client so the
+            # administrator can repair precisely that connection.
             message = (
-                "The PKCE app registration was not found in Azure AD (AADSTS700016). "
-                "The cached app ID has been cleared. Please sign in again; if the problem "
-                "persists, re-provision the M365 integration via Admin → M365."
+                "Microsoft could not find the OAuth application (AADSTS700016). "
+                "No settings were changed. Repair the affected company connection and try again."
             )
-        encoded = urlencode({"error": message})
-        return RedirectResponse(url=f"{error_redirect}?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
-    if not code or not state:
-        return flash_redirect("/m365", "invalid response", "error")
-    try:
-        state_data = oauth_state_serializer.loads(state)
-    except BadSignature:
-        return flash_redirect("/m365", "invalid state", "error")
-    company_id_raw = state_data.get("company_id")
-    try:
-        company_id = int(company_id_raw)
-    except (TypeError, ValueError):
-        company_id = 0
-    flow = state_data.get("flow", "connect")
+        return flash_redirect(error_redirect, message, "error")
+    if not code:
+        return flash_redirect(error_redirect, "Microsoft returned an invalid response.", "error")
 
     if flow == "user_m365_contacts":
         current_user, auth_redirect = await _require_authenticated_user(request)
         if auth_redirect or not current_user or int(current_user["id"]) != int(state_data.get("user_id") or 0):
             return flash_redirect("/admin/profile", "The Microsoft sign-in session is not valid.", "error")
-        verifier = await _pop_m365_provision_code_verifier(state_data.get("pkce_handle"))
+        verifier = str(state_data.get("code_verifier") or "")
         if not verifier:
             return flash_redirect("/admin/profile", "The Microsoft sign-in verifier is missing.", "error")
-        redirect_uri = _build_m365_redirect_uri(request)
+        redirect_uri = str(state_data.get("redirect_uri") or "")
         token_data = {
-            "client_id": await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri),
+            "client_id": str(state_data.get("client_id") or ""),
             "grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri,
             "code_verifier": verifier, "scope": user_m365_contacts_service.CONTACTS_SCOPE,
         }
@@ -5137,12 +5145,13 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # source for the signed-in tenant.  Keep the access-token fallback for
         # older responses which did not include an ID token.
         try:
-            tenant_id = user_m365_contacts_service.tenant_id_from_token_response(payload)
-        except ValueError:
+            identity = await m365_service.validate_microsoft_id_token(
+                str(payload.get("id_token") or ""), client_id=str(state_data.get("client_id") or "")
+            )
+            tenant_id = str(identity["tid"])
+        except m365_service.M365Error:
             return flash_redirect(
-                "/admin/profile",
-                "Microsoft did not return a usable account identity.",
-                "error",
+                "/admin/profile", "Microsoft did not return a verified account identity.", "error"
             )
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(payload.get("expires_in") or 3600))
         await user_m365_contacts_service.store_tokens(
@@ -5170,7 +5179,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # ── Tenant-discovery flow ──────────────────────────────────────────
         # Exchange the auth code to get a token, then extract the tid claim.
         return_to_company_edit = state_data.get("return_to") == "company_edit"
-        redirect_uri = _build_m365_redirect_uri(request)
+        redirect_uri = str(state_data.get("redirect_uri") or "")
 
         def _discover_error(msg: str) -> RedirectResponse:
             if return_to_company_edit:
@@ -5180,57 +5189,18 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER
             )
 
-        _discover_cid, _discover_csec = await _get_m365_admin_credentials(company_id)
-
-        # Determine the token exchange method.  When the flow was initiated
-        # using PKCE (state contains a verifier handle), the exchange is done
-        # with the configured PKCE public client – no client secret required.
-        # Otherwise fall back to the traditional secret-based exchange using
-        # existing admin credentials or the M365_BOOTSTRAP_* env vars.
-        code_verifier: str | None = None
-        pkce_handle = state_data.get("pkce_handle")
-        if isinstance(pkce_handle, str) and pkce_handle:
-            code_verifier = await _pop_pkce_verifier(pkce_handle)
-            if not code_verifier:
-                return _csp_provision_error(
-                    "Provisioning session expired. Please restart the CSP provisioning flow."
-                )
-        elif state_verifier := state_data.get("code_verifier"):
-            # code_verifier stored directly in the signed state by the discover flow.
-            code_verifier = str(state_verifier)
-        token_endpoint = (
-            "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
-        )
-        if code_verifier:
-            token_data: dict = {
-                "client_id": await m365_service.get_effective_pkce_client_id_for_company(
-                    company_id, redirect_uri=redirect_uri
-                ),
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "code_verifier": code_verifier,
-                "scope": m365_service.DISCOVER_SCOPE,
-            }
-        else:
-            # code_verifier is always included by the discover endpoints now.
-            # This branch handles legacy state tokens that pre-date the PKCE-
-            # always change.  Using admin credentials here risks AADSTS700025
-            # if the configured client_id belongs to a public PKCE app, so we
-            # only fall back when the credentials are actually present and
-            # surface a clear error on failure.
-            if not _discover_cid or not _discover_csec:
-                return _discover_error(
-                    "Sign-in session is incomplete. Please click 'Sign in as Global Admin' again."
-                )
-            token_data = {
-                "client_id": _discover_cid,
-                "client_secret": _discover_csec,
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "scope": m365_service.DISCOVER_SCOPE,
-            }
+        code_verifier = str(state_data.get("code_verifier") or "")
+        if not code_verifier:
+            return _discover_error("The sign-in verifier is missing or expired.")
+        token_endpoint = "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
+        token_data = {
+            "client_id": str(state_data.get("client_id") or ""),
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": str(state_data.get("redirect_uri") or ""),
+            "code_verifier": code_verifier,
+            "scope": m365_service.DISCOVER_SCOPE,
+        }
         async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             token_response = await client.post(token_endpoint, data=token_data)
         if token_response.status_code != 200:
@@ -5253,13 +5223,12 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             return _discover_error("Sign-in failed during tenant discovery.")
 
         token_payload = token_response.json()
-        # Prefer id_token (contains tid reliably); fall back to access_token
-        id_token = token_payload.get("id_token") or token_payload.get("access_token", "")
-        if not id_token:
-            return _discover_error("No token received during tenant discovery.")
-
+        id_token = str(token_payload.get("id_token") or "")
         try:
-            discovered_tenant_id = m365_service.extract_tenant_id_from_token(id_token)
+            identity = await m365_service.validate_microsoft_id_token(
+                id_token, client_id=str(state_data.get("client_id") or "")
+            )
+            discovered_tenant_id = str(identity["tid"])
         except m365_service.M365Error as exc:
             log_error(
                 "Failed to extract tenant ID from token",
@@ -5277,12 +5246,12 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # Redirect to the provision flow using the discovered tenant ID
         if return_to_company_edit:
             return RedirectResponse(
-                url=f"/admin/companies/{company_id}/m365-provision"
-                f"?{urlencode({'tenant_id': discovered_tenant_id})}",
+                url=f"/admin/companies/{company_id}/edit?"
+                f"{urlencode({'m365_discovered_tenant': discovered_tenant_id})}",
                 status_code=status.HTTP_303_SEE_OTHER,
             )
         return RedirectResponse(
-            url=f"/m365/provision?{urlencode({'tenant_id': discovered_tenant_id})}",
+            url=f"/m365?{urlencode({'m365_discovered_tenant': discovered_tenant_id})}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
@@ -5292,7 +5261,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # so their token has Application.ReadWrite.All + AppRoleAssignment.ReadWrite.All
         # in their own partner tenant.  We use it to create a dedicated app
         # registration that will serve as the M365 admin OAuth client.
-        redirect_uri = _build_m365_redirect_uri(request)
+        redirect_uri = str(state_data.get("redirect_uri") or "")
 
         def _csp_provision_error(msg: str) -> RedirectResponse:
             encoded = urlencode({"error": msg})
@@ -5311,7 +5280,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         )
         if code_verifier:
             token_data: dict = {
-                "client_id": m365_service.get_pkce_client_id(),
+                "client_id": str(state_data.get("client_id") or ""),
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri,
@@ -5319,11 +5288,8 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 "scope": m365_service.PROVISION_SCOPE,
             }
         else:
-            bootstrap_client_id = str(settings.m365_bootstrap_client_id or "").strip()
-            existing_client_id, existing_client_secret = await _get_m365_admin_credentials()
-            oauth_client_id = existing_client_id or bootstrap_client_id
-            bootstrap_client_secret = str(settings.m365_bootstrap_client_secret or "").strip()
-            oauth_client_secret = existing_client_secret or bootstrap_client_secret
+            oauth_client_id = str(state_data.get("client_id") or "")
+            oauth_client_secret = str(state_data.get("client_secret") or "")
 
             if not oauth_client_id or not oauth_client_secret:
                 return _csp_provision_error(
@@ -5355,17 +5321,13 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         if not access_token:
             return _csp_provision_error("No access token received during CSP admin provisioning.")
 
-        # Extract the partner tenant ID from the token
         try:
-            partner_tenant_id = m365_service.extract_tenant_id_from_token(access_token)
+            identity = await m365_service.validate_microsoft_id_token(
+                str(token_payload.get("id_token") or ""), client_id=str(state_data.get("client_id") or "")
+            )
+            partner_tenant_id = str(identity["tid"])
         except m365_service.M365Error:
-            try:
-                id_token = token_payload.get("id_token", "")
-                partner_tenant_id = m365_service.extract_tenant_id_from_token(id_token)
-            except m365_service.M365Error:
-                return _csp_provision_error(
-                    "Unable to determine partner tenant ID from token."
-                )
+            return _csp_provision_error("Unable to verify the Microsoft account identity.")
 
         try:
             provision_result = await m365_service.provision_csp_admin_app_registration(
@@ -5404,7 +5366,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # ── Auto-provision flow ────────────────────────────────────────────
         tenant_id = str(state_data.get("tenant_id", "")).strip()
         return_to_company_edit = state_data.get("return_to") == "company_edit"
-        redirect_uri = _build_m365_redirect_uri(request)
+        redirect_uri = str(state_data.get("redirect_uri") or "")
 
         def _provision_error(msg: str) -> RedirectResponse:
             if return_to_company_edit:
@@ -5420,16 +5382,13 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # Always use PKCE for the provision flow so the customer's Global Admin
         # can grant consent without requiring the CSP admin app to have a service
         # principal in the customer tenant (avoids AADSTS700016).
-        verifier_id = state_data.get("verifier_id")
-        code_verifier = await _pop_m365_provision_code_verifier(verifier_id)
+        code_verifier = str(state_data.get("code_verifier") or "")
         token_endpoint = (
             f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
         )
         if code_verifier:
             token_data = {
-                "client_id": await m365_service.get_effective_pkce_client_id_for_company(
-                    company_id, redirect_uri=redirect_uri
-                ),
+                "client_id": str(state_data.get("client_id") or ""),
                 "grant_type": "authorization_code",
                 "code": code,
                 "redirect_uri": redirect_uri,
@@ -5437,30 +5396,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
                 "scope": m365_service.PROVISION_SCOPE,
             }
         else:
-            # Backward-compatibility: fall back to admin credentials when no
-            # verifier_id/code_verifier is present (e.g. old state tokens in flight).
-            code_verifier = state_data.get("code_verifier")
-            if code_verifier:
-                token_data = {
-                    "client_id": m365_service.get_pkce_client_id(),
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": redirect_uri,
-                    "code_verifier": code_verifier,
-                    "scope": m365_service.PROVISION_SCOPE,
-                }
-            else:
-                _provision_cid, _provision_csec = await _get_m365_admin_credentials()
-                if not _provision_cid or not _provision_csec:
-                    return _provision_error("Admin M365 credentials are not configured.")
-                token_data = {
-                    "client_id": _provision_cid,
-                    "client_secret": _provision_csec,
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": redirect_uri,
-                    "scope": m365_service.PROVISION_SCOPE,
-                }
+            return _provision_error("The provisioning verifier is missing or expired.")
         async with monitored_client(httpx.AsyncClient, timeout=30) as client:
             token_response = await client.post(token_endpoint, data=token_data)
         if token_response.status_code != 200:
@@ -5481,11 +5417,14 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         # than the tenant_id carried in OAuth state, which can otherwise leave
         # credentials stored against the wrong tenant and cause Graph failures.
         try:
-            token_tenant_id = m365_service.extract_tenant_id_from_token(access_token)
+            identity = await m365_service.validate_microsoft_id_token(
+                str(token_payload.get("id_token") or ""), client_id=str(state_data.get("client_id") or "")
+            )
+            token_tenant_id = str(identity["tid"])
         except m365_service.M365Error:
-            token_tenant_id = ""
+            return _provision_error("Microsoft did not return a verified account identity.")
 
-        effective_tenant_id = token_tenant_id.strip() or tenant_id
+        effective_tenant_id = token_tenant_id.strip()
         if token_tenant_id and token_tenant_id != tenant_id:
             log_error(
                 "M365 provision callback tenant mismatch; refusing candidate",
@@ -5551,10 +5490,10 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     credentials = await m365_service.get_credentials(company_id)
     if not credentials:
         return flash_redirect("/m365", "missing credentials", "error")
-    token_endpoint = f"https://login.microsoftonline.com/{credentials['tenant_id']}/oauth2/v2.0/token"
-    redirect_uri = _build_m365_redirect_uri(request)
+    token_endpoint = f"https://login.microsoftonline.com/{state_data['tenant_id']}/oauth2/v2.0/token"
+    redirect_uri = str(state_data.get("redirect_uri") or "")
     data = {
-        "client_id": credentials["client_id"],
+        "client_id": str(state_data.get("client_id") or ""),
         "client_secret": credentials.get("client_secret") or "",
         "grant_type": "authorization_code",
         "code": code,
@@ -5573,6 +5512,14 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
     payload = response.json()
     refresh_token = payload.get("refresh_token")
     access_token = payload.get("access_token")
+    try:
+        identity = await m365_service.validate_microsoft_id_token(
+            str(payload.get("id_token") or ""), client_id=str(state_data.get("client_id") or "")
+        )
+    except m365_service.M365Error:
+        return flash_redirect("/m365", "Microsoft did not return a verified account identity.", "error")
+    if str(identity.get("tid") or "") != str(state_data.get("tenant_id") or ""):
+        return flash_redirect("/m365", "The signed-in Microsoft tenant did not match this connection.", "error")
     await m365_repo.update_tokens(
         company_id=company_id,
         refresh_token=encrypt_secret(refresh_token) if refresh_token else None,
@@ -6117,11 +6064,11 @@ async def profile_m365_contacts_connect(request: Request):
         return redirect
     redirect_uri = _build_m365_redirect_uri(request)
     verifier, challenge = m365_service.generate_pkce_pair()
-    verifier_id = await _store_m365_provision_code_verifier(verifier)
-    state = oauth_state_serializer.dumps({
-        "flow": "user_m365_contacts", "user_id": int(user["id"]), "pkce_handle": verifier_id,
-    })
     client_id = await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri)
+    state = await _new_m365_oauth_state(
+        request, flow="user_m365_contacts", code_verifier=verifier,
+        client_id=client_id, redirect_uri=redirect_uri,
+    )
     params = {
         "client_id": client_id, "response_type": "code", "redirect_uri": redirect_uri,
         "response_mode": "query", "scope": user_m365_contacts_service.CONTACTS_SCOPE,

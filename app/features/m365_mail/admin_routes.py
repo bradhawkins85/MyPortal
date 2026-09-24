@@ -482,25 +482,24 @@ async def admin_m365_mail_authorize(account_id: int, request: Request):
     company_id = account.get("company_id")
     redirect_uri = main_module._build_m365_redirect_uri(request)
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
-    state = main_module.oauth_state_serializer.dumps(
-        {
-            "user_id": current_user.get("id"),
-            "flow": "m365_mail_auth",
-            "account_id": account_id,
-            "company_id": company_id,
-            "code_verifier": code_verifier,
-        }
+    oauth_client_id = (
+        await m365_service.get_effective_pkce_client_id_for_company(
+            company_id, redirect_uri=redirect_uri
+        )
+        if company_id
+        else await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri)
+    )
+    state = await main_module._new_m365_oauth_state(
+        request,
+        flow="m365_mail_auth",
+        account_id=account_id,
+        company_id=company_id,
+        code_verifier=code_verifier,
+        client_id=oauth_client_id,
+        redirect_uri=redirect_uri,
     )
     params = {
-        "client_id": (
-            await m365_service.get_effective_pkce_client_id_for_company(
-                company_id, redirect_uri=redirect_uri
-            )
-            if company_id
-            else await m365_service.get_effective_pkce_client_id(
-                redirect_uri=redirect_uri
-            )
-        ),
+        "client_id": oauth_client_id,
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "response_mode": "query",

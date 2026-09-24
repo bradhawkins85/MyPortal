@@ -26,6 +26,7 @@ dependencies = [
     "httpx",
     "loguru",
     "cryptography>=46.0.7",
+    "PyJWT[crypto]>=2.10.1",
     "webauthn==3.0.0",
     "email-validator",
     "python-multipart",

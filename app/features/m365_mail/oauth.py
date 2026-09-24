@@ -31,6 +31,10 @@ class M365OAuthService(Protocol):
 
     def extract_tenant_id_from_token(self, token: str) -> str: ...
 
+    async def validate_microsoft_id_token(
+        self, id_token: str, *, client_id: str
+    ) -> dict[str, Any]: ...
+
 
 class M365MailOAuthService(Protocol):
     DELEGATED_MAIL_SCOPE: str
@@ -85,7 +89,7 @@ async def handle_m365_mail_auth_callback(
     except (TypeError, ValueError):
         account_id = 0
     code_verifier: str | None = state_data.get("code_verifier")
-    redirect_uri = build_m365_redirect_uri(request)
+    redirect_uri = str(state_data.get("redirect_uri") or "")
 
     def _mail_auth_error(msg: str) -> RedirectResponse:
         return flash_redirect("/admin/modules/m365-mail", msg, "error")
@@ -94,14 +98,13 @@ async def handle_m365_mail_auth_callback(
         return _mail_auth_error("Invalid account in OAuth state.")
     if not code_verifier:
         return _mail_auth_error("Missing PKCE code verifier.")
+    account = await m365_mail_service.get_account(account_id)
+    if not account or int(account.get("company_id") or 0) != int(company_id or 0):
+        return _mail_auth_error("The mailbox account owner changed while signing in.")
 
     token_endpoint = "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
     token_data = {
-        "client_id": await m365_service.get_effective_pkce_client_id_for_company(
-            company_id, redirect_uri=redirect_uri
-        )
-        if company_id
-        else await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri),
+        "client_id": str(state_data.get("client_id") or ""),
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": redirect_uri,
@@ -134,13 +137,13 @@ async def handle_m365_mail_auth_callback(
         )
 
     try:
-        tenant_id = m365_service.extract_tenant_id_from_token(access_token)
+        identity = await m365_service.validate_microsoft_id_token(
+            str(token_payload.get("id_token") or ""),
+            client_id=str(state_data.get("client_id") or ""),
+        )
+        tenant_id = str(identity["tid"])
     except Exception:
-        id_token = token_payload.get("id_token", "")
-        try:
-            tenant_id = m365_service.extract_tenant_id_from_token(id_token)
-        except Exception:
-            return _mail_auth_error("Unable to determine tenant ID from the sign-in response.")
+        return _mail_auth_error("Unable to verify the Microsoft account identity.")
 
     await m365_mail_service.store_delegated_tokens(
         account_id,
@@ -150,7 +153,6 @@ async def handle_m365_mail_auth_callback(
         expires_at=expires_at,
     )
 
-    account = await m365_mail_service.get_account(account_id)
     label = account.get("name") if account else f"#{account_id}"
     message = f"Successfully signed in for mailbox {label}."
     return flash_redirect("/admin/modules/m365-mail", message, "success")

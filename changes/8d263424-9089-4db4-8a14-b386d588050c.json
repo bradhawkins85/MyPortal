@@ -1,0 +1,7 @@
+{
+  "guid": "8d263424-9089-4db4-8a14-b386d588050c",
+  "occurred_at": "2026-09-24T00:00:00Z",
+  "change_type": "security",
+  "summary": "Bound Microsoft 365 OAuth callbacks to expiring, single-use portal transactions and verified Microsoft identities.",
+  "content_hash": "m365-oauth-single-use-transactions"
+}
