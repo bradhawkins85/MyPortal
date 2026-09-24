@@ -60,10 +60,12 @@
         <div><dt>1. Search</dt><dd>Non-destructive</dd></div>
         <div><dt>2. Review</dt><dd>Count + details</dd></div>
         <div><dt>3. Confirm</dt><dd>Type PURGE</dd></div>
-        <div><dt>Purge mode</dt><dd>Hard delete</dd></div>
+        <div><dt>Search scope</dt><dd>All Exchange locations</dd></div>
+        <div><dt>Purge type</dt><dd>HardDelete</dd></div>
+        <div><dt>Service limit</dt><dd>Up to 10 items/mailbox/action</dd></div>
       </dl>
-      <p class="form-help">Searches run against all Exchange locations in the selected company tenant. Every action is retained in history and the audit log.</p>
-      <p class="form-help">Tenant permissions and Purview role configuration are managed from <a href="/m365/diagnostics">Office 365 Diagnostics</a>.</p>
+      <p class="form-help">Searches run against all Exchange locations in the selected company tenant. Holds and retention can preserve recoverable copies; this workflow does not bypass them.</p>
+      <p class="form-help"><strong>Execution unavailable:</strong> Microsoft does not support app-only eDiscovery PowerShell. Use the licensed, delegated administrator workflow shown in <a href="/m365/diagnostics">Office 365 Diagnostics</a>. The legacy app-only code is retained only for controlled migration and is not reported as ready.</p>
     </div>
   </aside>
 </div>
@@ -101,7 +103,12 @@
               <strong>Search name</strong><br>{{ item.search_name }}<br><br>
               {% if item.error_message %}<span class="status status--danger">Error</span> {{ item.error_message }}<br><br>{% endif %}
               {% if item.search_details %}<strong>Search details</strong><br>{{ item.search_details|tojson(indent=2) }}<br><br>{% endif %}
-              {% if item.purge_details %}<strong>Purge details</strong><br>{{ item.purge_details|tojson(indent=2) }}<br><br>{% endif %}
+              {% if item.purge_details %}<strong>Purge outcome</strong><br>
+                Submitted: {{ item.purge_details.submitted_items|default(item.matched_items) }}<br>
+                Removed: {{ item.purge_details.removed_items|default(item.removed_items) }}<br>
+                Remaining: {% if item.purge_details.remaining_items_unknown|default(true) %}Unknown{% else %}{{ item.purge_details.remaining_items }}{% endif %}<br>
+                <span class="text-muted">Completed means the remote action ended; it does not guarantee every match was removed.</span><br><br>
+                <strong>Remote details</strong><br>{{ item.purge_details|tojson(indent=2) }}<br><br>{% endif %}
               {% if item.search_status == 'failed' %}
               <form method="post" action="/m365/spam-purge/{{ item.id }}/retry" class="purge-actions">
                 {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}">{% endif %}

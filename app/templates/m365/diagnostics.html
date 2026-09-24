@@ -77,7 +77,7 @@
     <header class="panel__header">
       <div>
         <h2 class="panel__title" id="purview-preflight-title">Purview eDiscovery preflight</h2>
-        <p class="panel__subtitle">Validates API consent, the enterprise application's Entra administrator role, and Purview configuration before searches or purges run.</p>
+        <p class="panel__subtitle">Separately reports provider support, Entra consent, Exchange/EOP grants, Purview provisioning, search access, and purge access.</p>
       </div>
       <span class="status status--{{ 'success' if purview_preflight.ready else 'warning' }}">{{ 'Ready' if purview_preflight.ready else 'Admin action required' }}</span>
     </header>
@@ -106,14 +106,15 @@ Correlation/request ID: {{ purview_preflight.correlation_id }}
 {% endfor %}</code></pre>
       </details>
       {% endif %}
-      <p class="text-muted">Validation uses ExchangeOnlineManagement 3.10.1 or later guidance. A 401 usually means the EOP permission or consent is missing; a connection without eDiscovery commands usually means registration or role-group membership is missing.</p>
+      <p class="text-muted">These checks diagnose the retained legacy route only. Passing app-role or RBAC checks does not make app-only eDiscovery supported or ready.</p>
       {% if purview_preflight.client_id and purview_preflight.tenant_domain %}
-      <h3>Certificate connection validation</h3>
-      <pre style="white-space:pre-wrap; overflow:auto;"><code>Connect-IPPSSession `
-  -CertificateThumbprint "&lt;certificate-thumbprint&gt;" `
-  -AppId "{{ purview_preflight.client_id }}" `
-  -Organization "{{ purview_preflight.tenant_domain }}" `
-  -EnableSearchOnlySession</code></pre>
+      <h3>Supported administrator workflow</h3>
+      <ol>
+        <li>Confirm the operator has the tenant license and separate Purview roles needed to search and purge.</li>
+        <li>Open an interactive Exchange Online PowerShell session and run <code>Connect-IPPSSession -EnableSearchOnlySession</code>.</li>
+        <li>Complete and review the search before creating the separate purge action.</li>
+        <li>Record the remote names and reconcile their status before retrying after a timeout.</li>
+      </ol>
       {% endif %}
     </div>
   </section>

@@ -56,12 +56,13 @@ async def test_preflight_distinguishes_eop_permission_and_reports_all_checks():
     ):
         result = await m365.run_purview_preflight(7)
 
-    assert result["ready"] is True
+    assert result["ready"] is False
     assert [item["key"] for item in result["checks"]] == [
-        "eop_permission", "admin_consent", "administrator_role", "organization",
-        "service_principal", "ediscovery_manager",
+        "provider_support", "eop_permission", "admin_consent", "administrator_role",
+        "organization", "service_principal", "ediscovery_manager",
+        "tenant_license", "search_rbac", "purge_rbac",
     ]
-    assert {item["status"] for item in result["checks"]} == {"Passed"}
+    assert result["provider_supported"] is False
 
 
 @pytest.mark.anyio("asyncio")
@@ -152,8 +153,8 @@ async def test_preflight_uses_live_purview_probe_when_graph_assignment_is_stale(
     ):
         result = await m365.run_purview_preflight(7)
 
-    assert result["ready"] is True
-    assert {item["status"] for item in result["checks"]} == {"Passed"}
+    assert result["ready"] is False
+    assert {item["status"] for item in result["checks"]} == {"Passed", "Unsupported", "Not Verified"}
 
 
 @pytest.mark.anyio("asyncio")
@@ -254,7 +255,7 @@ async def test_preflight_avoids_broken_role_group_member_cmdlet():
     ):
         result = await m365.run_purview_preflight(7)
 
-    assert result["ready"] is True
+    assert result["ready"] is False
     assert commands == ["Get-RoleGroup", "Get-ServicePrincipal"]
     assert "Get-RoleGroupMember" not in commands
 
@@ -354,13 +355,11 @@ async def test_preflight_repair_registers_principal_and_adds_role_member():
     ):
         result = await m365.run_purview_preflight(7, repair=True)
 
-    assert result["repaired"] == ["service_principal", "ediscovery_manager"]
-    assert ("New-ServicePrincipal", {
-        "AppId": client_id, "ObjectId": object_id, "DisplayName": "MyPortal Purview eDiscovery",
-    }) in commands
-    assert ("Add-RoleGroupMember", {
-        "Identity": "eDiscoveryManager", "Member": object_id,
-    }) in commands
+    assert result["repaired"] == []
+    assert not any(
+        command in {"New-ServicePrincipal", "Add-RoleGroupMember"}
+        for command, _parameters in commands
+    )
 
 
 @pytest.mark.anyio("asyncio")
