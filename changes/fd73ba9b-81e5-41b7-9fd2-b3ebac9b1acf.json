@@ -1,0 +1,7 @@
+{
+  "guid": "fd73ba9b-81e5-41b7-9fd2-b3ebac9b1acf",
+  "occurred_at": "2026-09-24T00:00:00Z",
+  "change_type": "Security",
+  "summary": "Make Microsoft 365 spam purge readiness provider-aware and reconcile remote purge retries",
+  "content_hash": "721d218153ab8e2b403131cf9d06dbb3dc516c8998d002f9a284ae0a4f80a961"
+}

@@ -423,3 +423,37 @@ def test_jwt_appid_returns_none_when_claim_absent():
 def test_jwt_appid_returns_none_for_invalid_token():
     assert _jwt_appid("notavalidjwt") is None
     assert _jwt_appid("") is None
+
+@pytest.mark.anyio("asyncio")
+async def test_purge_retry_reconciles_remote_success_without_second_action(monkeypatch):
+    request = {"id": 8, "company_id": 2, "search_name": "reviewed-search",
+               "action_name": "reviewed-search_Purge", "matched_items": 12}
+    updates = []
+    monkeypatch.setattr(service.purge_repo, "get_request", AsyncMock(return_value=request))
+    monkeypatch.setattr(service.purge_repo, "update_request",
+                        AsyncMock(side_effect=lambda _id, values: updates.append(values)))
+    monkeypatch.setattr(service.m365_service, "_acquire_scc_access_token",
+                        AsyncMock(return_value=("token", "tenant")))
+    monkeypatch.setattr(service, "_scc_organization",
+                        AsyncMock(return_value="tenant.onmicrosoft.com"))
+
+    async def invoke(_token, _tenant, command, _parameters=None, **_kwargs):
+        assert command != "New-ComplianceSearchAction"
+        return {"value": [{"Status": "Completed", "Results": "Item count: 10"}]}
+
+    monkeypatch.setattr(service.m365_service, "_scc_invoke_command", invoke)
+    monkeypatch.setattr(service, "_run_managed_folder_assistant", AsyncMock())
+    await service._run_purge(8)
+
+    outcome = next(value for value in updates if value.get("purge_status") == "completed")
+    assert outcome["removed_items"] == 10
+    assert outcome["purge_details"]["submitted_items"] == 12
+    assert outcome["purge_details"]["remaining_items"] == 2
+
+
+def test_spam_purge_discloses_limits_retention_and_unknown_counts():
+    source = open("app/templates/m365/spam_purge.html", encoding="utf-8").read()
+    assert "Up to 10 items/mailbox/action" in source
+    assert "Holds and retention" in source
+    assert "Remaining:" in source and "Unknown" in source
+    assert "does not guarantee every match was removed" in source

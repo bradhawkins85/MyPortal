@@ -4220,7 +4220,7 @@ async def run_purview_preflight(
     *,
     repair: bool = False,
 ) -> dict[str, Any]:
-    """Validate every app-only Purview prerequisite without changing broad roles.
+    """Describe the legacy app-only Purview route without declaring it supported.
 
     Graph is authoritative for the EOP resource assignment.  The similarly named
     Office 365 Exchange Online assignment is deliberately never accepted here.
@@ -4228,8 +4228,11 @@ async def run_purview_preflight(
     through Graph. Purview-native registration and role membership are checked
     through the SCC session because those objects are not represented by Entra
     directory roles.
-    When *repair* is true, missing Purview registration and eDiscoveryManager
-    membership are created after the compliance organization is reachable.
+    Microsoft explicitly excludes Purview compliance/eDiscovery cmdlets from
+    app-only authentication support.  The probes below are retained as migration
+    diagnostics only: a successful probe cannot make this execution route ready.
+    ``repair`` is accepted for API compatibility, but role-group membership is
+    never broadened automatically.
     """
     checked_at = datetime.now(timezone.utc)
     correlation_id = str(uuid.uuid4())
@@ -4410,30 +4413,6 @@ async def run_purview_preflight(
                 if principal_identities & member_identities:
                     membership_ok = True
                     break
-            if repair and not registration_ok and object_id:
-                await _scc_invoke_command(
-                    scc_token,
-                    tenant_id,
-                    "New-ServicePrincipal",
-                    {
-                        "AppId": client_id,
-                        "ObjectId": object_id,
-                        "DisplayName": "MyPortal Purview eDiscovery",
-                    },
-                    organization=tenant_domain,
-                )
-                registration_ok = True
-                repaired.append("service_principal")
-            if repair and registration_ok and not membership_ok and object_id:
-                await _scc_invoke_command(
-                    scc_token,
-                    tenant_id,
-                    "Add-RoleGroupMember",
-                    {"Identity": "eDiscoveryManager", "Member": object_id},
-                    organization=tenant_domain,
-                )
-                membership_ok = True
-                repaired.append("ediscovery_manager")
         except M365Error as exc:
             scc_error = str(exc)
             correlation_id = getattr(exc, "correlation_id", None) or correlation_id
@@ -4489,8 +4468,43 @@ async def run_purview_preflight(
                        "The enterprise application object ID is not a verified role-group member.",
                        None if membership_ok else membership_command + '\n\nGet-RoleGroupMember -Identity "eDiscoveryManager"'),
     ])
+    checks.insert(0, _purview_check(
+        "provider_support", "Microsoft-supported execution route", "Unsupported",
+        "The configured route uses app-only Security & Compliance PowerShell. "
+        "Microsoft does not support app-only authentication for Purview compliance "
+        "and eDiscovery cmdlets; successful permission or role probes do not change that.",
+        "Use an appropriately licensed administrator in an interactive delegated "
+        "Exchange Online PowerShell session, run Connect-IPPSSession with "
+        "-EnableSearchOnlySession, and perform the reviewed search and purge in "
+        "Microsoft Purview. Keep the query and remote action name with this request.",
+    ))
+    checks.extend([
+        _purview_check(
+            "tenant_license", "Tenant eDiscovery/search-and-purge licensing",
+            "Not Verified",
+            "Application permissions do not prove that every searched custodian and "
+            "operator has the Microsoft licensing required for the selected Purview workflow.",
+            "Verify the current Microsoft Purview licensing requirements for the tenant "
+            "and the users in scope before running the interactive workflow.",
+        ),
+        _purview_check(
+            "search_rbac", "Purview search authorization", "Not Verified",
+            "Legacy eDiscoveryManager membership does not independently prove the "
+            "interactive operator can create and run this search.",
+            "In Purview, assign the interactive operator the least-privilege search role "
+            "and verify the intended Exchange locations are in scope.",
+        ),
+        _purview_check(
+            "purge_rbac", "Purview Search And Purge authorization", "Not Verified",
+            "Search authorization does not grant the separate Search And Purge role.",
+            "After review, have an administrator separately assign the Search And Purge "
+            "role to the interactive operator; do not add it to the application.",
+        ),
+    ])
     return {
-        "ready": all(check["status"] == "Passed" for check in checks),
+        "ready": False,
+        "execution_route": "legacy_app_only_scc_invokecommand",
+        "provider_supported": False,
         "tenant_domain": tenant_domain,
         "tenant_id": tenant_id,
         "client_id": client_id,

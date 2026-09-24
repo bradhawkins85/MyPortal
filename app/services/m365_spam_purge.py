@@ -179,7 +179,9 @@ async def _require_purview_preflight(company_id: int) -> None:
     )
     raise m365_service.M365Error(
         "Purview preflight did not pass: " + failed
-        + ". Open Office 365 Diagnostics for exact remediation commands and recheck configuration.",
+        + ". The retained app-only route is an unsupported legacy migration path; "
+        "do not repeatedly repair consent. Open Office 365 Diagnostics for the "
+        "supported interactive administrator workflow.",
         http_status=503,
     )
 
@@ -296,17 +298,43 @@ async def _run_purge(request_id: int) -> None:
         company_id = int(request["company_id"])
         token, tenant_id = await m365_service._acquire_scc_access_token(company_id)
         organization = await _scc_organization(company_id)
-        await m365_service._scc_invoke_command(token, tenant_id, "New-ComplianceSearchAction", {
-            "SearchName": request["search_name"], "Purge": True,
-            "PurgeType": "HardDelete", "Confirm": False,
-        }, organization=organization)
+        # Reconcile first. A previous request can have succeeded remotely and then
+        # timed out locally; issuing New-ComplianceSearchAction again would create
+        # a second destructive operation.
+        result: dict[str, Any] | None = None
+        try:
+            existing = await m365_service._scc_invoke_command(
+                token, tenant_id, "Get-ComplianceSearchAction",
+                {"Identity": request["action_name"]}, organization=organization,
+            )
+            existing_row = _first_row(existing)
+            if existing_row and existing_row.get("Status"):
+                result = existing_row
+        except m365_service.M365Error as exc:
+            if exc.http_status != 404:
+                raise
+        if result is None:
+            await m365_service._scc_invoke_command(token, tenant_id, "New-ComplianceSearchAction", {
+                "SearchName": request["search_name"], "Purge": True,
+                "PurgeType": "HardDelete", "Confirm": False,
+            }, organization=organization)
         await purge_repo.update_request(request_id, {"purge_status": "running"})
-        result = await _poll_command(
-            token, tenant_id, "Get-ComplianceSearchAction", request["action_name"],
-            organization=organization,
-        )
+        if result is None or str(result.get("Status") or "").lower() not in TERMINAL_STATUSES:
+            result = await _poll_command(
+                token, tenant_id, "Get-ComplianceSearchAction", request["action_name"],
+                organization=organization,
+            )
         status = str(result.get("Status") or "failed").lower()
         removed = _removed_item_count(result)
+        matched = int(request.get("matched_items") or 0)
+        result = dict(result)
+        result.update({
+            "submitted_items": matched,
+            "removed_items": removed,
+            "remaining_items": max(matched - removed, 0) if removed else None,
+            "remaining_items_unknown": removed == 0,
+            "purge_type": "HardDelete",
+        })
         updates = {
             "purge_status": status, "removed_items": removed, "purge_details": result,
             "purge_completed_at": _utcnow(),
