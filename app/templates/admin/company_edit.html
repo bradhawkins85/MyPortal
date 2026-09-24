@@ -1005,9 +1005,16 @@
           <hr class="divider" style="margin: 1.5rem 0;" />
           <div>
             <p class="form-help">Auto-provision creates a dedicated enterprise app registration in the tenant and configures the required permissions automatically.</p>
+            {% if request.query_params.get('m365_discovered_tenant') %}
+            <form method="get" action="/admin/companies/{{ company.id }}/m365-provision" class="form-field__group" style="margin-top: 0.5rem;">
+              <input type="text" name="tenant_id" class="form-input" value="{{ request.query_params.get('m365_discovered_tenant') }}" readonly />
+              <button type="submit" class="button">Confirm tenant and provision</button>
+            </form>
+            <p class="form-help">Confirm that this tenant belongs to {{ company.name }} before provisioning.</p>
+            {% endif %}
             <div style="margin-top: 0.5rem;">
               <a href="/admin/companies/{{ company.id }}/m365-discover" class="button button--ghost">Sign in as Global Admin</a>
-              <span class="form-help" style="display: block; margin-top: 0.25rem;">Discovers the Tenant ID automatically, then provisions the app in one step.</span>
+              <span class="form-help" style="display: block; margin-top: 0.25rem;">Discovers the Tenant ID securely, then asks you to confirm it before provisioning.</span>
             </div>
             <details style="margin-top: 1rem;">
               <summary class="form-help" style="cursor: pointer;">Already know the Tenant ID? Enter it manually</summary>

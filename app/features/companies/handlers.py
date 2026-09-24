@@ -2423,19 +2423,13 @@ async def admin_company_m365_provision(
         )
     redirect_uri = _main()._build_m365_redirect_uri(request)
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
-    verifier_id = await _main()._store_m365_provision_code_verifier(code_verifier)
-    state = _main().oauth_state_serializer.dumps(
-        {
-            "company_id": company_id,
-            "user_id": current_user.get("id"),
-            "tenant_id": tenant_id,
-            "flow": "provision",
-            "return_to": "company_edit",
-            "verifier_id": verifier_id,
-        }
-    )
     oauth_client_id = await m365_service.get_effective_pkce_client_id_for_company(
         company_id, redirect_uri=redirect_uri
+    )
+    state = await _main()._new_m365_oauth_state(
+        request, company_id=company_id, tenant_id=tenant_id, flow="provision",
+        return_to="company_edit", code_verifier=code_verifier,
+        client_id=oauth_client_id, redirect_uri=redirect_uri,
     )
     params = {
         "client_id": oauth_client_id,
@@ -2471,13 +2465,14 @@ async def admin_company_m365_discover(company_id: int, request: Request):
 
     state_payload: dict = {
         "company_id": company_id,
-        "user_id": current_user.get("id"),
         "flow": "discover",
         "return_to": "company_edit",
         "code_verifier": code_verifier,
+        "client_id": oauth_client_id,
+        "redirect_uri": redirect_uri,
     }
 
-    state = _main().oauth_state_serializer.dumps(state_payload)
+    state = await _main()._new_m365_oauth_state(request, **state_payload)
     params: dict = {
         "client_id": oauth_client_id,
         "response_type": "code",
