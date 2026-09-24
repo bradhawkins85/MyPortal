@@ -107,7 +107,7 @@ async def test_provision_app_registration_success():
             return _make_app_data("provisioned-client-id")
         if "/servicePrincipals" in url and "appRoleAssignments" not in url:
             return _make_sp_data("provisioned-sp-id")
-        if "appRoleAssignments" in url:
+        if ("appRoleAssignments" in url or "appRoleAssignedTo" in url):
             return _make_role_assignment()
         if "owners/$ref" in url:
             return {}  # 204 No Content → empty dict
@@ -141,9 +141,17 @@ async def test_provision_app_registration_success():
         "Should POST to /applications to create app registration"
     assert any("/servicePrincipals" in u and "appRoleAssignments" not in u for u in call_order), \
         "Should POST to /servicePrincipals to create service principal"
-    assert sum(1 for u in call_order if "appRoleAssignments" in u) == len(
+    assert sum(1 for u in call_order if ("appRoleAssignments" in u or "appRoleAssignedTo" in u)) == len(
         m365_service._PROVISION_APP_ROLES
     ) + 1, "Should grant one role assignment per required role plus Exchange.ManageAsApp"
+    assert any(
+        u.endswith("/servicePrincipals/graph-sp-id/appRoleAssignedTo")
+        for u in call_order
+    ), "Graph roles should be assigned through the stable resource service principal"
+    assert not any(
+        u.endswith("/servicePrincipals/provisioned-sp-id/appRoleAssignments")
+        for u in call_order
+    ), "Provisioning should not route role creation through the newly-created principal"
     assert any("addPassword" in u for u in call_order), \
         "Should POST to addPassword to create client secret"
 
@@ -184,7 +192,7 @@ async def test_provision_app_registration_default_display_name():
             return _make_app_data()
         if "/servicePrincipals" in url and "appRoleAssignments" not in url:
             return _make_sp_data()
-        if "appRoleAssignments" in url:
+        if ("appRoleAssignments" in url or "appRoleAssignedTo" in url):
             return _make_role_assignment()
         if "owners/$ref" in url:
             return {}
@@ -229,7 +237,7 @@ async def test_provision_app_registration_keeps_sharepoint_permission_when_looku
             return _make_app_data()
         if "/servicePrincipals" in url and "appRoleAssignments" not in url:
             return _make_sp_data()
-        if "appRoleAssignments" in url:
+        if ("appRoleAssignments" in url or "appRoleAssignedTo" in url):
             return _make_role_assignment()
         if "owners/$ref" in url:
             return {}
@@ -271,7 +279,7 @@ async def test_provision_app_registration_keeps_sharepoint_permission_when_looku
     granted_graph_roles = {
         p["payload"]["appRoleId"]
         for p in captured_payloads
-        if "appRoleAssignments" in p["url"]
+        if ("appRoleAssignments" in p["url"] or "appRoleAssignedTo" in p["url"])
         and p["payload"].get("resourceId") == "graph-sp-id"
     }
 
@@ -290,7 +298,7 @@ async def test_provision_app_registration_registers_redirect_uri():
             return _make_app_data()
         if "/servicePrincipals" in url and "appRoleAssignments" not in url:
             return _make_sp_data()
-        if "appRoleAssignments" in url:
+        if ("appRoleAssignments" in url or "appRoleAssignedTo" in url):
             return _make_role_assignment()
         if "owners/$ref" in url:
             return {}
@@ -337,7 +345,7 @@ async def test_provision_app_registration_no_redirect_uri_when_not_provided():
             return _make_app_data()
         if "/servicePrincipals" in url and "appRoleAssignments" not in url:
             return _make_sp_data()
-        if "appRoleAssignments" in url:
+        if ("appRoleAssignments" in url or "appRoleAssignedTo" in url):
             return _make_role_assignment()
         if "owners/$ref" in url:
             return {}

@@ -1,0 +1,7 @@
+{
+  "guid": "35993171-2ace-4b60-8e9f-87c7d0e87f49",
+  "occurred_at": "2026-09-24T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Grant Microsoft 365 application roles through each established resource service principal to avoid tenant confirmation failures while a new enterprise app is still propagating.",
+  "content_hash": "m365-resource-side-app-role-assignment"
+}

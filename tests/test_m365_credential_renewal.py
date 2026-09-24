@@ -38,7 +38,7 @@ def _make_provision_mocks(
             return {"id": app_obj_id, "appId": client_id}
         if "/servicePrincipals" in url and "appRoleAssignments" not in url:
             return {"id": sp_id}
-        if "appRoleAssignments" in url:
+        if ("appRoleAssignments" in url or "appRoleAssignedTo" in url):
             return {"id": "assignment-id"}
         if "owners/$ref" in url:
             return {}  # 204 No Content → empty dict
@@ -88,7 +88,7 @@ async def test_provision_uses_configurable_lifetime():
             return {"id": APP_OBJECT_ID, "appId": "cid"}
         if "/servicePrincipals" in url and "appRoleAssignments" not in url:
             return {"id": SERVICE_PRINCIPAL_ID}
-        if "appRoleAssignments" in url:
+        if ("appRoleAssignments" in url or "appRoleAssignedTo" in url):
             return {"id": "x"}
         if "owners/$ref" in url:
             return {}
@@ -138,7 +138,7 @@ async def test_provision_adds_sp_as_owner():
             return {"id": APP_OBJECT_ID, "appId": "cid"}
         if "/servicePrincipals" in url and "appRoleAssignments" not in url:
             return {"id": SERVICE_PRINCIPAL_ID}
-        if "appRoleAssignments" in url:
+        if ("appRoleAssignments" in url or "appRoleAssignedTo" in url):
             return {"id": "x"}
         if "addPassword" in url:
             return {"secretText": "s", "keyId": "k"}
@@ -181,7 +181,7 @@ async def test_diagnostics_reports_missing_app_self_owner():
     async def mock_get(token: str, url: str) -> dict:
         if "owners?$select=id" in url:
             return {"value": []}
-        if "appRoleAssignments" in url:
+        if ("appRoleAssignments" in url or "appRoleAssignedTo" in url):
             return {"value": []}
         if "?$filter=appId eq" in url:
             return {"value": [{"id": SERVICE_PRINCIPAL_ID, "appRoles": []}]}

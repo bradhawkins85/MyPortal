@@ -260,6 +260,22 @@ def _is_graph_role_grantable(role_id: str, graph_sp_role_ids: set[str]) -> bool:
     return role_id in graph_sp_role_ids or role_id in _FORCE_GRANT_GRAPH_APP_ROLES
 
 
+def _app_role_assignment_url(resource_sp_id: str) -> str:
+    """Return the resource-side endpoint used to grant an application role.
+
+    Graph supports creating the same grant from the assignee's
+    ``appRoleAssignments`` collection or the resource's ``appRoleAssignedTo``
+    collection.  New MyPortal service principals are not always immediately
+    routable through their assignee-side collection.  The resource principal
+    (Microsoft Graph, Exchange, and so on) is already established, so posting
+    to its collection avoids that propagation race.
+    """
+    return (
+        "https://graph.microsoft.com/v1.0/servicePrincipals/"
+        f"{_graph_path_segment(resource_sp_id)}/appRoleAssignedTo"
+    )
+
+
 # Catalog of enterprise apps and their expected application permissions.
 # Used by the diagnostics page to display Pass/Fail per permission per app.
 ENTERPRISE_APP_CATALOG: list[dict[str, Any]] = [
@@ -2642,7 +2658,7 @@ async def _grant_provisioned_roles(
             try:
                 await _post_app_role_assignment_with_retry(
                     access_token,
-                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
+                    _app_role_assignment_url(graph_sp_id),
                     {
                         "principalId": sp_object_id,
                         "resourceId": graph_sp_id,
@@ -2691,7 +2707,7 @@ async def _grant_provisioned_roles(
                 try:
                     await _post_app_role_assignment_with_retry(
                         access_token,
-                        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
+                        _app_role_assignment_url(resource_sp_id),
                         {
                             "principalId": sp_object_id,
                             "resourceId": resource_sp_id,
