@@ -1,6 +1,5 @@
-from datetime import datetime, timedelta, timezone
-
 import pytest
+from unittest.mock import AsyncMock
 
 from app.services import m365_oauth_transactions as transactions
 
@@ -8,6 +7,16 @@ from app.services import m365_oauth_transactions as transactions
 @pytest.mark.anyio("asyncio")
 async def test_transaction_is_single_use(monkeypatch):
     monkeypatch.setattr(transactions, "get_redis_client", lambda: None)
+    stored = {}
+
+    async def store(transaction_id, payload, expires_at):
+        stored[transaction_id] = payload
+
+    async def consume(transaction_id):
+        return stored.pop(transaction_id, None)
+
+    monkeypatch.setattr(transactions.transaction_repo, "create", store)
+    monkeypatch.setattr(transactions.transaction_repo, "consume", consume)
     transaction_id = await transactions.create(
         user_id=7,
         session_id=11,
@@ -30,19 +39,41 @@ async def test_transaction_is_single_use(monkeypatch):
 @pytest.mark.anyio("asyncio")
 async def test_expired_transaction_is_rejected(monkeypatch):
     monkeypatch.setattr(transactions, "get_redis_client", lambda: None)
+    monkeypatch.setattr(transactions.transaction_repo, "create", AsyncMock())
+    monkeypatch.setattr(transactions.transaction_repo, "consume", AsyncMock(return_value=None))
     transaction_id = await transactions.create(user_id=1, session_id=2, flow="discover")
-    payload, _ = transactions._store[transaction_id]
-    transactions._store[transaction_id] = (
-        payload,
-        datetime.now(timezone.utc) - timedelta(seconds=1),
-    )
 
     assert await transactions.consume(transaction_id) is None
 
 
 @pytest.mark.anyio("asyncio")
+async def test_database_fallback_encrypts_callback_context(monkeypatch):
+    monkeypatch.setattr(transactions, "get_redis_client", lambda: None)
+    create = AsyncMock()
+    monkeypatch.setattr(transactions.transaction_repo, "create", create)
+
+    await transactions.create(
+        user_id=1, session_id=2, flow="provision", code_verifier="private-verifier"
+    )
+
+    encrypted_payload = create.await_args.args[1]
+    assert "private-verifier" not in encrypted_payload
+    assert encrypted_payload.startswith("v1:")
+
+
+@pytest.mark.anyio("asyncio")
 async def test_simultaneous_company_transactions_remain_isolated(monkeypatch):
     monkeypatch.setattr(transactions, "get_redis_client", lambda: None)
+    stored = {}
+
+    async def store(transaction_id, payload, expires_at):
+        stored[transaction_id] = payload
+
+    async def consume(transaction_id):
+        return stored.pop(transaction_id, None)
+
+    monkeypatch.setattr(transactions.transaction_repo, "create", store)
+    monkeypatch.setattr(transactions.transaction_repo, "consume", consume)
     first_id = await transactions.create(user_id=1, session_id=9, company_id=100, code_verifier="one")
     second_id = await transactions.create(user_id=1, session_id=9, company_id=200, code_verifier="two")
 

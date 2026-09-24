@@ -2,9 +2,9 @@
 
 The browser receives only a random transaction identifier.  In particular,
 PKCE verifiers and authorization context are never put in signed state (a
-signature provides integrity, not confidentiality).  Deployments with more
-than one worker must configure Redis; the in-process store is a development
-fallback only.
+signature provides integrity, not confidentiality). Redis is preferred; the
+database provides shared durable storage when Redis is not configured so a
+callback can safely land on any web worker.
 
 Legacy state containing callback context is deliberately not accepted.  It
 cannot be made single-use and has no trustworthy issue time, so failing it
@@ -14,18 +14,19 @@ does not affect already-stored Microsoft credentials.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from cryptography.exceptions import InvalidTag
+
+from app.repositories import m365_oauth_transactions as transaction_repo
+from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services.redis import get_redis_client
 
 TTL_SECONDS = 600
 _PREFIX = "m365:oauth:transaction:"
-_store: dict[str, tuple[dict[str, Any], datetime]] = {}
-_lock = asyncio.Lock()
 
 
 async def create(**context: Any) -> str:
@@ -37,8 +38,9 @@ async def create(**context: Any) -> str:
         await redis.setex(_PREFIX + transaction_id, TTL_SECONDS, json.dumps(payload))
         return transaction_id
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=TTL_SECONDS)
-    async with _lock:
-        _store[transaction_id] = (payload, expires_at)
+    await transaction_repo.create(
+        transaction_id, encrypt_secret(json.dumps(payload)), expires_at
+    )
     return transaction_id
 
 
@@ -57,12 +59,10 @@ async def consume(transaction_id: str) -> dict[str, Any] | None:
             return json.loads(raw)
         except (TypeError, ValueError):
             return None
-    now = datetime.now(timezone.utc)
-    async with _lock:
-        entry = _store.pop(transaction_id, None)
-        for key, (_, expiry) in list(_store.items()):
-            if expiry <= now:
-                _store.pop(key, None)
-    if not entry or entry[1] <= now:
+    encrypted_payload = await transaction_repo.consume(transaction_id)
+    if not encrypted_payload:
         return None
-    return entry[0]
+    try:
+        return json.loads(decrypt_secret(encrypted_payload))
+    except (InvalidTag, TypeError, ValueError):
+        return None
