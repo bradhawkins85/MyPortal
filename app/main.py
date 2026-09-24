@@ -5247,6 +5247,7 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
 
     if flow == "m365_mail_auth":
         from app.features.m365_mail.oauth import handle_m365_mail_auth_callback as _pack_handler
+        from app.services import m365_mail as m365_mail_service
 
         return await _pack_handler(
             request,
