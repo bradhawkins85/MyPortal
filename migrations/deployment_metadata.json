@@ -61,6 +61,12 @@
       "compatible-to": "*",
       "maintenance": false
     },
+    "397_m365_durable_jobs.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
     "394_webhook_deletion_rules.sql": {
       "phase": "expand",
       "compatible-from": "*",
