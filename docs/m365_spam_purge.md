@@ -137,8 +137,11 @@ Administrator or Compliance Administrator assignment does not replace this
 Purview RBAC setup and does not prove that the tenant's Purview organization has
 finished provisioning.
 
-The preflight verifies organization availability with `Get-OrganizationConfig`
-and checks `eDiscoveryManager` membership before querying the service principal.
+The preflight verifies organization availability with the Purview-native
+`Get-ComplianceSearch` cmdlet and checks `eDiscoveryManager` membership before
+querying the service principal. Exchange Online's `Get-OrganizationConfig` is not
+used as a Purview probe because that endpoint can return an internal
+`System.ArgumentNullException` despite valid authentication and routing.
 An unfiltered `Get-ServicePrincipal` request through Purview's REST endpoint can
 return an internal `System.ArgumentNullException`, even when the application is
 already registered. Membership is sufficient proof of registration; when a
