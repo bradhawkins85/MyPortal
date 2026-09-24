@@ -4396,60 +4396,63 @@ async def run_purview_preflight(
     if tenant_domain:
         try:
             scc_token, _ = await _acquire_scc_access_token(company_id)
-            # Probe with a cmdlet implemented by the Security & Compliance
-            # session. Get-OrganizationConfig belongs to Exchange Online and the
-            # Purview REST endpoint can fail it with ArgumentNullException even
-            # when authentication and organization routing are healthy.
-            await _scc_invoke_command(
-                scc_token, tenant_id, "Get-ComplianceSearch", organization=tenant_domain
+            # Probe the role group itself. Purview's REST front end can throw
+            # ArgumentNullException for Get-RoleGroupMember even when Identity
+            # is supplied, which used to prevent every search from starting.
+            role_groups = await _scc_invoke_command(
+                scc_token, tenant_id, "Get-RoleGroup",
+                {"Identity": "eDiscoveryManager"}, organization=tenant_domain,
             )
             # A successful app-only Purview command proves the EOP application
             # permission, tenant consent, and organization routing directly.
             # Do not gate this probe on Graph metadata: manually granted roles
             # can be usable before (or without permission for) Graph enumeration.
             permission_configured = consent_granted = org_ok = True
-            members = await _scc_invoke_command(
-                scc_token, tenant_id, "Get-RoleGroupMember",
-                {"Identity": "eDiscoveryManager"}, organization=tenant_domain,
+            principals = await _scc_invoke_command(
+                scc_token, tenant_id, "Get-ServicePrincipal",
+                {"Identity": object_id}, organization=tenant_domain,
             )
-            member_rows = members.get("value") or members.get("Value") or []
-            if isinstance(member_rows, dict):
-                member_rows = [member_rows]
-            membership_ok = any(
-                object_id.lower() in {
-                    str(row.get("ExternalDirectoryObjectId") or "").lower(),
-                    str(row.get("Identity") or "").lower(),
-                    str(row.get("Name") or "").lower(),
-                }
-                for row in member_rows if isinstance(row, dict)
-            )
-            # A role-group member must already be a Purview recipient, making
-            # membership stronger proof of registration than a second lookup.
-            # Avoid the unfiltered lookup because the REST endpoint can throw
-            # ArgumentNullException for Get-ServicePrincipal with no Identity.
-            registration_ok = membership_ok
-            if not registration_ok:
-                try:
-                    principals = await _scc_invoke_command(
-                        scc_token, tenant_id, "Get-ServicePrincipal",
-                        {"Identity": object_id}, organization=tenant_domain,
-                    )
-                except M365Error:
-                    # Some Purview tenants return an internal
-                    # ArgumentNullException instead of an empty result when the
-                    # recipient is absent. Organization and consent were
-                    # already proved above; keep this as a registration failure
-                    # so repair can create the recipient.
-                    principals = {}
-                principal_rows = principals.get("value") or principals.get("Value") or []
-                if isinstance(principal_rows, dict):
-                    principal_rows = [principal_rows]
-                registration_ok = any(
-                    str(row.get("ObjectId") or row.get("Identity") or "").lower()
-                    == object_id.lower()
-                    or str(row.get("AppId") or "").lower() == client_id.lower()
-                    for row in principal_rows if isinstance(row, dict)
+            principal_rows = principals.get("value") or principals.get("Value") or []
+            if isinstance(principal_rows, dict):
+                principal_rows = [principal_rows]
+            principal_identities = {object_id.lower(), client_id.lower()}
+            for row in principal_rows if isinstance(principal_rows, list) else []:
+                if not isinstance(row, dict):
+                    continue
+                principal_identities.update(
+                    str(row.get(key) or "").lower()
+                    for key in ("ObjectId", "ExternalDirectoryObjectId", "AppId", "Identity", "Name")
+                    if row.get(key)
                 )
+            registration_ok = any(
+                str(row.get("ObjectId") or row.get("ExternalDirectoryObjectId") or row.get("Identity") or "").lower()
+                == object_id.lower()
+                or str(row.get("AppId") or "").lower() == client_id.lower()
+                for row in principal_rows if isinstance(row, dict)
+            )
+            # Get-RoleGroup exposes the group's Members property without using
+            # the broken Get-RoleGroupMember REST binding seen in affected
+            # tenants. Match all identities returned for the registered app.
+            role_rows = role_groups.get("value") or role_groups.get("Value") or []
+            if isinstance(role_rows, dict):
+                role_rows = [role_rows]
+            for row in role_rows if isinstance(role_rows, list) else []:
+                if not isinstance(row, dict):
+                    continue
+                members = row.get("Members") or row.get("members") or []
+                if not isinstance(members, list):
+                    members = [members]
+                member_identities = {
+                    str(value).lower()
+                    for member in members
+                    for value in (
+                        member.values() if isinstance(member, dict) else (member,)
+                    )
+                    if value
+                }
+                if principal_identities & member_identities:
+                    membership_ok = True
+                    break
             if repair and not registration_ok and object_id:
                 await _scc_invoke_command(
                     scc_token,
