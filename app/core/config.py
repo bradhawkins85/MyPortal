@@ -231,6 +231,9 @@ class Settings(BaseSettings):
     m365_client_secret_renewal_days: int = Field(
         default=30, validation_alias="M365_CLIENT_SECRET_RENEWAL_DAYS", ge=1
     )
+    m365_client_secret_overlap_days: int = Field(
+        default=7, validation_alias="M365_CLIENT_SECRET_OVERLAP_DAYS", ge=1
+    )
     integration_credential_warning_days: int = Field(
         default=30, validation_alias="INTEGRATION_CREDENTIAL_WARNING_DAYS", ge=1
     )

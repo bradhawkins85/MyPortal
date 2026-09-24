@@ -2772,299 +2772,234 @@ async def _grant_provisioned_roles(
         )
 
 
-async def renew_client_secret(company_id: int) -> None:
-    """Renew the Azure AD client secret for a provisioned M365 integration app.
+def _credential_overlap_days() -> int:
+    """Return a concrete overlap duration even for partial test/config objects."""
+    value = getattr(get_settings(), "m365_client_secret_overlap_days", 7)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 7
 
-    Authenticates using the provisioned app's own credentials via the
-    ``client_credentials`` grant, then calls ``addPassword`` on the app
-    registration to create a new secret.  The old secret is revoked after the
-    new one has been safely persisted.
 
-    Requires the provisioned app to:
-    - Have ``Application.ReadWrite.OwnedBy`` application permission granted.
-    - Be registered as an owner of its own app registration.
+async def _validate_replacement_secret(
+    *, tenant_id: str, client_id: str, client_secret: str
+) -> None:
+    """Validate a candidate credential, allowing for Entra propagation delay."""
+    last_error: M365Error | None = None
+    for attempt in range(3):
+        try:
+            await _exchange_token(
+                tenant_id=tenant_id,
+                client_id=client_id,
+                client_secret=client_secret,
+                refresh_token=None,
+            )
+            return
+        except M365Error as exc:
+            last_error = exc
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+    raise M365Error(
+        "Replacement M365 credential failed validation; the previous credential remains active"
+    ) from last_error
 
-    Both of these are configured automatically by :func:`provision_app_registration`
-    for apps provisioned after this feature was introduced.
 
-    Raises :class:`M365Error` if the credentials are missing or the app object ID
-    has not been stored (apps provisioned before this feature require re-provisioning).
+async def _remove_candidate_secret(
+    access_token: str, app_object_id: str, key_id: str | None, *, company_id: int | None
+) -> None:
+    """Best-effort cleanup of a candidate which was never activated."""
+    if not key_id:
+        return
+    try:
+        await _graph_post(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/removePassword",
+            {"keyId": key_id},
+        )
+    except M365Error as exc:
+        log_error(
+            "Failed to remove inactive M365 replacement credential",
+            company_id=company_id,
+            key_id=key_id,
+            error=str(exc),
+        )
+
+
+async def _create_and_validate_secret(
+    *, access_token: str, tenant_id: str, client_id: str, app_object_id: str,
+    expires_at: datetime, company_id: int | None, admin_flow: bool,
+) -> tuple[str, str | None]:
+    """Shared create -> validate portion of every secret rotation."""
+    expiry = expires_at.date().isoformat() + "T00:00:00Z"
+    secret_data = await _add_password_credential(
+        access_token, app_object_id, expiry, admin_flow=admin_flow
+    )
+    new_secret = str(secret_data["secretText"])
+    new_key_id = secret_data.get("keyId")
+    try:
+        await _validate_replacement_secret(
+            tenant_id=tenant_id, client_id=client_id, client_secret=new_secret
+        )
+    except M365Error:
+        await _remove_candidate_secret(
+            access_token, app_object_id, new_key_id, company_id=company_id
+        )
+        raise
+    return new_secret, new_key_id
+
+
+async def renew_client_secret(company_id: int) -> dict[str, Any]:
+    """Validate and atomically activate a replacement company credential.
+
+    The previous key is deliberately retained for the configured overlap window.
+    Retirement is a separate recovery-safe operation, so a failed validation or
+    persistence never makes the working credential unavailable.
     """
-    settings = get_settings()
     creds = await get_credentials(company_id)
     if not creds:
         raise M365Error("No M365 credentials found for company")
-
-    app_object_id = creds.get("app_object_id")
-    if not app_object_id:
-        raise M365ReprovisionRequiredError(
-            "App object ID not stored – re-provisioning is required to enable "
-            "automatic client secret renewal for this company"
-        )
-
-    # Get an access token using the provisioned app's own client credentials.
-    # refresh_token=None forces the client_credentials grant which returns a
-    # token with all granted application permissions including
-    # Application.ReadWrite.OwnedBy.
+    tenant_id = str(creds.get("tenant_id") or "").strip()
+    client_id = str(creds.get("client_id") or "").strip()
+    old_secret = str(creds.get("client_secret") or "")
     access_token, _, _ = await _exchange_token(
-        tenant_id=creds["tenant_id"],
-        client_id=creds["client_id"],
-        client_secret=creds.get("client_secret") or "",
+        tenant_id=tenant_id, client_id=client_id, client_secret=old_secret,
         refresh_token=None,
     )
+    app_object_id = str(creds.get("app_object_id") or "").strip()
+    if not app_object_id:
+        try:
+            app_object_id = await _lookup_application_object_id(access_token, client_id) or ""
+        except M365Error as exc:
+            raise M365ReprovisionRequiredError(
+                "Application ID is missing and could not be safely discovered; "
+                "verify the client ID, app ownership, and Application.ReadWrite.OwnedBy "
+                "consent. Re-provisioning is not performed automatically."
+            ) from exc
+        if not app_object_id:
+            raise M365ReprovisionRequiredError(
+                "Application ID could not be discovered. Verify app ownership and "
+                "Application.ReadWrite.OwnedBy consent, then retry adoption."
+            )
+        await m365_repo.update_application_metadata(
+            company_id=company_id, app_object_id=app_object_id,
+            key_id=creds.get("client_secret_key_id"),
+            expires_at=_parse_client_secret_expires(creds.get("client_secret_expires_at")),
+        )
 
-    # Calculate new expiry
-    secret_lifetime_days = settings.m365_client_secret_lifetime_days
-    new_expiry_date = date.today() + timedelta(days=secret_lifetime_days)
-    new_expiry_str = new_expiry_date.isoformat() + "T00:00:00Z"
+    lock_name = f"m365_credential_rotation_{tenant_id}_{client_id}"
+    async with m365_repo.db.acquire_lock(lock_name, timeout=10) as acquired:
+        if not acquired:
+            raise M365Error("Credential renewal is already running for this application")
+        # Re-read inside the distributed lock so concurrent manual/scheduled runs
+        # cannot activate or retire one another's key.
+        current = await get_credentials(company_id)
+        if not current:
+            raise M365Error("M365 credentials were removed during renewal")
+        lifetime = get_settings().m365_client_secret_lifetime_days
+        expires_at = datetime.combine(date.today() + timedelta(days=lifetime), datetime.min.time())
+        new_secret, new_key_id = await _create_and_validate_secret(
+            access_token=access_token, tenant_id=tenant_id, client_id=client_id,
+            app_object_id=app_object_id, expires_at=expires_at,
+            company_id=company_id, admin_flow=False,
+        )
+        try:
+            await m365_repo.update_client_secret(
+                company_id=company_id, client_secret=_encrypt(new_secret),
+                key_id=new_key_id, expires_at=expires_at,
+            )
+        except Exception:
+            await _remove_candidate_secret(
+                access_token, app_object_id, new_key_id, company_id=company_id
+            )
+            raise
 
-    # Create new client secret via Graph API
-    secret_data = await _add_password_credential(
-        access_token,
-        app_object_id,
-        new_expiry_str,
-        admin_flow=False,
-    )
-    new_secret: str = secret_data["secretText"]
-    new_key_id: str | None = secret_data.get("keyId")
-    new_expires_at = datetime(
-        new_expiry_date.year, new_expiry_date.month, new_expiry_date.day
-    )
-
-    # Save old key ID before updating so we can revoke it afterwards
-    old_key_id: str | None = creds.get("client_secret_key_id")
-
-    # Persist new secret – do this BEFORE revoking old key so we never lose access
-    await m365_repo.update_client_secret(
-        company_id=company_id,
-        client_secret=_encrypt(new_secret),
-        key_id=new_key_id,
-        expires_at=new_expires_at,
+    overlap_until = datetime.now(timezone.utc) + timedelta(
+        days=_credential_overlap_days()
     )
     log_info(
-        "Renewed M365 client secret",
-        company_id=company_id,
-        new_key_id=new_key_id,
-        expires_at=new_expiry_str,
+        "Activated validated M365 client secret; previous key retained for overlap",
+        company_id=company_id, new_key_id=new_key_id,
+        previous_key_id=current.get("client_secret_key_id"),
+        overlap_until=overlap_until.isoformat(),
     )
-
-    # Revoke the old secret now that the new one is safely stored
-    if old_key_id:
-        try:
-            await _graph_post(
-                access_token,
-                f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/removePassword",
-                {"keyId": old_key_id},
-            )
-            log_info(
-                "Revoked old M365 client secret",
-                company_id=company_id,
-                old_key_id=old_key_id,
-            )
-        except M365Error as exc:
-            # Non-fatal: old secret will expire naturally; log for admin visibility
-            log_error(
-                "Failed to revoke old M365 client secret",
-                company_id=company_id,
-                old_key_id=old_key_id,
-                error=str(exc),
-            )
+    return {"key_id": new_key_id, "expires_at": expires_at,
+            "previous_key_id": current.get("client_secret_key_id"),
+            "overlap_until": overlap_until}
 
 
 async def renew_admin_client_secret(company_id: int | None = None) -> dict[str, Any]:
-    """Renew stored M365 admin credentials used for PKCE/bootstrap flows."""
-    if company_id is None:
-        creds = await get_admin_m365_credentials()
-    else:
-        creds = await get_company_admin_credentials(company_id)
+    """Validate then activate a bootstrap credential using the shared lifecycle."""
+    creds = (await get_admin_m365_credentials() if company_id is None
+             else await get_company_admin_credentials(company_id))
     if not creds:
         raise M365Error("No M365 admin credentials found")
-
     tenant_id = str(creds.get("tenant_id") or "").strip()
     client_id = str(creds.get("client_id") or "").strip()
     client_secret = str(creds.get("client_secret") or "").strip()
     if not tenant_id or not client_id or not client_secret:
         raise M365Error("Incomplete M365 admin credentials")
-
     access_token, _, _ = await _exchange_token(
-        tenant_id=tenant_id,
-        client_id=client_id,
-        client_secret=client_secret,
+        tenant_id=tenant_id, client_id=client_id, client_secret=client_secret,
         refresh_token=None,
     )
-
     app_object_id = str(creds.get("app_object_id") or "").strip()
     if not app_object_id:
-        app_object_id = await _lookup_application_object_id(access_token, client_id)
+        app_object_id = await _lookup_application_object_id(access_token, client_id) or ""
         if not app_object_id:
             raise M365ReprovisionRequiredError(
-                "Admin app object ID not stored – re-provisioning is required to enable "
-                "automatic admin client secret renewal"
+                "Application ID could not be discovered. Verify app ownership and "
+                "Application.ReadWrite.OwnedBy consent, then retry adoption."
             )
         await _persist_backfilled_admin_app_object_id(
-            company_id=company_id,
-            client_id=client_id,
-            client_secret=client_secret,
-            tenant_id=tenant_id,
-            app_object_id=app_object_id,
+            company_id=company_id, client_id=client_id, client_secret=client_secret,
+            tenant_id=tenant_id, app_object_id=app_object_id,
             client_secret_key_id=creds.get("client_secret_key_id"),
-            client_secret_expires_at=_parse_client_secret_expires(
-                creds.get("client_secret_expires_at")
-            ),
+            client_secret_expires_at=_parse_client_secret_expires(creds.get("client_secret_expires_at")),
             pkce_client_id=creds.get("pkce_client_id"),
         )
 
-    secret_lifetime_days = get_settings().m365_client_secret_lifetime_days
-    new_expiry_date = date.today() + timedelta(days=secret_lifetime_days)
-    new_expiry_str = new_expiry_date.isoformat() + "T00:00:00Z"
-
-    secret_data = await _add_password_credential(
-        access_token,
-        app_object_id,
-        new_expiry_str,
-        admin_flow=True,
-    )
-    new_secret: str = secret_data["secretText"]
-    new_key_id: str | None = secret_data.get("keyId")
-    new_expires_at = datetime(
-        new_expiry_date.year, new_expiry_date.month, new_expiry_date.day
-    )
-    old_key_id: str | None = creds.get("client_secret_key_id")
-    old_expires_at = _parse_client_secret_expires(creds.get("client_secret_expires_at"))
-
-    if company_id is None:
-        await update_admin_m365_credentials(
-            client_id=client_id,
-            client_secret=new_secret,
-            tenant_id=tenant_id,
-            app_object_id=app_object_id,
-            client_secret_key_id=new_key_id,
-            client_secret_expires_at=new_expires_at,
-            pkce_client_id=creds.get("pkce_client_id"),
+    lock_name = f"m365_credential_rotation_{tenant_id}_{client_id}"
+    async with m365_repo.db.acquire_lock(lock_name, timeout=10) as acquired:
+        if not acquired:
+            raise M365Error("Credential renewal is already running for this application")
+        lifetime = get_settings().m365_client_secret_lifetime_days
+        expires_at = datetime.combine(date.today() + timedelta(days=lifetime), datetime.min.time())
+        new_secret, new_key_id = await _create_and_validate_secret(
+            access_token=access_token, tenant_id=tenant_id, client_id=client_id,
+            app_object_id=app_object_id, expires_at=expires_at,
+            company_id=company_id, admin_flow=True,
         )
-    else:
-        await upsert_company_admin_credentials(
-            company_id=company_id,
-            client_id=client_id,
-            client_secret=new_secret,
-            tenant_id=tenant_id,
-            app_object_id=app_object_id,
-            client_secret_key_id=new_key_id,
-            client_secret_expires_at=new_expires_at,
-            pkce_client_id=creds.get("pkce_client_id"),
-        )
-
-    try:
-        await _exchange_token(
-            tenant_id=tenant_id,
-            client_id=client_id,
-            client_secret=new_secret,
-            refresh_token=None,
-        )
-    except M365Error as exc:
-        log_error(
-            "New M365 admin client secret validation failed; restoring previous credential",
-            company_id=company_id,
-            new_key_id=new_key_id,
-            error=str(exc),
-        )
-        if new_key_id:
-            try:
-                await _graph_post(
-                    access_token,
-                    f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/removePassword",
-                    {"keyId": new_key_id},
-                )
-            except M365Error as cleanup_exc:
-                log_error(
-                    "Failed to remove unvalidated M365 admin client secret",
-                    company_id=company_id,
-                    new_key_id=new_key_id,
-                    error=str(cleanup_exc),
-                )
-        if company_id is None:
-            await update_admin_m365_credentials(
-                client_id=client_id,
-                client_secret=client_secret,
-                tenant_id=tenant_id,
-                app_object_id=app_object_id,
-                client_secret_key_id=old_key_id,
-                client_secret_expires_at=old_expires_at,
-                pkce_client_id=creds.get("pkce_client_id"),
-            )
-        else:
-            await upsert_company_admin_credentials(
-                company_id=company_id,
-                client_id=client_id,
-                client_secret=client_secret,
-                tenant_id=tenant_id,
-                app_object_id=app_object_id,
-                client_secret_key_id=old_key_id,
-                client_secret_expires_at=old_expires_at,
-                pkce_client_id=creds.get("pkce_client_id"),
-            )
-        raise M365Error(
-            "Replacement M365 admin credential failed validation; previous credential restored"
-        ) from exc
-
-    log_info(
-        "Renewed M365 admin client secret",
-        company_id=company_id,
-        new_key_id=new_key_id,
-        expires_at=new_expiry_str,
-    )
-
-    had_previous_key = bool(old_key_id)
-    revoked_previous = False
-    if old_key_id:
         try:
-            await _graph_post(
-                access_token,
-                f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/removePassword",
-                {"keyId": old_key_id},
+            if company_id is None:
+                await update_admin_m365_credentials(
+                    client_id=client_id, client_secret=new_secret, tenant_id=tenant_id,
+                    app_object_id=app_object_id, client_secret_key_id=new_key_id,
+                    client_secret_expires_at=expires_at,
+                    pkce_client_id=creds.get("pkce_client_id"),
+                )
+            else:
+                await upsert_company_admin_credentials(
+                    company_id=company_id, client_id=client_id,
+                    client_secret=new_secret, tenant_id=tenant_id,
+                    app_object_id=app_object_id, client_secret_key_id=new_key_id,
+                    client_secret_expires_at=expires_at,
+                    pkce_client_id=creds.get("pkce_client_id"),
+                )
+        except Exception:
+            await _remove_candidate_secret(
+                access_token, app_object_id, new_key_id, company_id=company_id
             )
-            revoked_previous = True
-            log_info(
-                "Revoked old M365 admin client secret",
-                company_id=company_id,
-                old_key_id=old_key_id,
-            )
-        except M365Error as exc:
-            revoked_previous = False
-            log_error(
-                "Failed to revoke old M365 admin client secret",
-                company_id=company_id,
-                old_key_id=old_key_id,
-                error=str(exc),
-            )
-    if revoked_previous and new_key_id and new_key_id != old_key_id:
-        if company_id is None:
-            await update_admin_m365_credentials(
-                client_id=client_id,
-                client_secret=new_secret,
-                tenant_id=tenant_id,
-                app_object_id=app_object_id,
-                client_secret_key_id=new_key_id,
-                client_secret_expires_at=new_expires_at,
-                pkce_client_id=creds.get("pkce_client_id"),
-            )
-        else:
-            await upsert_company_admin_credentials(
-                company_id=company_id,
-                client_id=client_id,
-                client_secret=new_secret,
-                tenant_id=tenant_id,
-                app_object_id=app_object_id,
-                client_secret_key_id=new_key_id,
-                client_secret_expires_at=new_expires_at,
-                pkce_client_id=creds.get("pkce_client_id"),
-            )
-    return {
-        "expires_at": new_expires_at,
-        "had_previous_key": had_previous_key,
-        "key_id": new_key_id,
-        "revoked_previous": revoked_previous,
-    }
+            raise
+
+    overlap_until = datetime.now(timezone.utc) + timedelta(
+        days=_credential_overlap_days()
+    )
+    log_info(
+        "Activated validated M365 admin secret; previous key retained for overlap",
+        company_id=company_id, new_key_id=new_key_id,
+        previous_key_id=creds.get("client_secret_key_id"),
+        overlap_until=overlap_until.isoformat(),
+    )
+    return {"expires_at": expires_at, "had_previous_key": bool(creds.get("client_secret_key_id")),
+            "key_id": new_key_id, "revoked_previous": False,
+            "overlap_until": overlap_until}
 
 
 async def renew_expiring_client_secrets() -> dict[str, Any]:
@@ -3088,17 +3023,17 @@ async def renew_expiring_client_secrets() -> dict[str, Any]:
 
     for cred in expiring:
         company_id = int(cred["company_id"])
-        if not cred.get("app_object_id"):
-            log_error(
-                "Skipping M365 secret renewal – app_object_id not stored; "
-                "re-provisioning required",
-                company_id=company_id,
-            )
-            skipped += 1
-            continue
         try:
             await renew_client_secret(company_id)
             renewed += 1
+        except M365ReprovisionRequiredError as exc:
+            log_error(
+                "M365 credential adoption requires ownership or consent repair",
+                company_id=company_id,
+                action="Verify self-ownership and Application.ReadWrite.OwnedBy consent, then retry",
+                error=str(exc),
+            )
+            skipped += 1
         except M365Error as exc:
             log_error(
                 "Failed to renew M365 client secret",

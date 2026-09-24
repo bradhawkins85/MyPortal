@@ -1,0 +1,7 @@
+{
+  "guid": "c29b2b4c-ec44-4fad-b763-ce9645512e8d",
+  "occurred_at": "2026-09-24T00:00:00Z",
+  "change_type": "security",
+  "summary": "Stage and validate Microsoft 365 replacement credentials before activation, retaining previous keys for a configurable overlap and adopting discoverable legacy application IDs.",
+  "content_hash": "f0d362686706c8a113048cf07bfe498e621b16b3299f3b26068f2be8d6e27244"
+}
