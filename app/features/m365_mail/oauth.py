@@ -47,6 +47,11 @@ class M365MailOAuthService(Protocol):
         refresh_token: str,
         access_token: str,
         expires_at: datetime | None,
+        client_id: str,
+        authority: str,
+        account_id_claim: str | None,
+        scopes: str,
+        connection_version: int | None,
     ) -> None: ...
 
     async def get_account(self, account_id: int) -> dict[str, Any] | None: ...
@@ -151,6 +156,11 @@ async def handle_m365_mail_auth_callback(
         refresh_token=refresh_token,
         access_token=access_token,
         expires_at=expires_at,
+        client_id=str(state_data.get("client_id") or ""),
+        authority=f"https://login.microsoftonline.com/{tenant_id}",
+        account_id_claim=str(identity.get("oid") or identity.get("sub") or "") or None,
+        scopes=str(token_payload.get("scope") or m365_mail_service.DELEGATED_MAIL_SCOPE),
+        connection_version=int(state_data["connection_version"]) if state_data.get("connection_version") else None,
     )
 
     label = account.get("name") if account else f"#{account_id}"

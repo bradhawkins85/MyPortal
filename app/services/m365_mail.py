@@ -146,6 +146,11 @@ async def store_delegated_tokens(
     refresh_token: str,
     access_token: str,
     expires_at: datetime | None,
+    client_id: str,
+    authority: str,
+    account_id_claim: str | None,
+    scopes: str,
+    connection_version: int | None,
 ) -> dict[str, Any] | None:
     """Store encrypted delegated OAuth tokens on a mail account."""
     return await mail_repo.update_account_tokens(
@@ -154,6 +159,9 @@ async def store_delegated_tokens(
         refresh_token=encrypt_secret(refresh_token),
         access_token=encrypt_secret(access_token),
         token_expires_at=expires_at,
+        oauth_client_id=client_id, oauth_authority=authority,
+        oauth_account_id=account_id_claim, oauth_scopes=scopes,
+        oauth_connection_version=connection_version,
     )
 
 
@@ -195,11 +203,15 @@ async def _acquire_delegated_access_token(account: Mapping[str, Any]) -> str:
     # Use the PKCE public client to exchange the refresh token — no
     # client_secret required (public client flow).
     token_endpoint = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    originating_client = _normalise_string(account.get("oauth_client_id"))
+    # Legacy rows deliberately keep their existing working behaviour until an
+    # administrator reconnects; newly authorised rows never consult globals.
+    client_id = originating_client or await m365_service.get_effective_pkce_client_id()
     data = {
-        "client_id": await m365_service.get_effective_pkce_client_id(),
+        "client_id": client_id,
         "grant_type": "refresh_token",
         "refresh_token": decrypted_refresh,
-        "scope": DELEGATED_MAIL_SCOPE,
+        "scope": _normalise_string(account.get("oauth_scopes")) or DELEGATED_MAIL_SCOPE,
     }
     async with monitored_client(httpx.AsyncClient, timeout=30) as client:
         response = await client.post(token_endpoint, data=data)
@@ -219,6 +231,8 @@ async def _acquire_delegated_access_token(account: Mapping[str, Any]) -> str:
 
     payload = response.json()
     new_access = str(payload.get("access_token", ""))
+    if not new_access:
+        raise M365Error("Microsoft did not return a delegated access token")
     new_refresh = payload.get("refresh_token")
     expires_in = payload.get("expires_in")
     new_expires: datetime | None = None
@@ -234,6 +248,7 @@ async def _acquire_delegated_access_token(account: Mapping[str, Any]) -> str:
         refresh_token=stored_refresh,
         access_token=encrypt_secret(new_access),
         token_expires_at=new_expires,
+        expected_revision=int(account.get("token_revision") or 0),
     )
 
     return new_access

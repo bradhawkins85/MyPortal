@@ -1,0 +1,7 @@
+{
+  "guid": "871fc730-eabd-4d9e-b86f-090fe893932b",
+  "occurred_at": "2026-09-24T10:10:00Z",
+  "change_type": "security",
+  "summary": "Bind Microsoft 365 tokens to their originating OAuth identity and tenant-scoped cache.",
+  "content_hash": "ece3601d91b4465b4fcc472fa61d2a6e55bbc1ebd784302b11e24e2d7397f380"
+}

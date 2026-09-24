@@ -87,17 +87,23 @@ async def update_tokens(
     refresh_token: str | None,
     access_token: str | None,
     token_expires_at: datetime | None,
+    cache_tenant_id: str | None = None,
+    cache_client_id: str | None = None,
+    cache_grant_type: str | None = None,
 ) -> dict[str, Any]:
     await db.execute(
         """
         UPDATE company_m365_credentials
-        SET refresh_token = %s, access_token = %s, token_expires_at = %s
+        SET refresh_token = %s, access_token = %s, token_expires_at = %s,
+            token_cache_tenant_id = %s, token_cache_client_id = %s,
+            token_cache_grant_type = %s
         WHERE company_id = %s
         """,
         (
             refresh_token,
             access_token,
             token_expires_at,
+            cache_tenant_id, cache_client_id, cache_grant_type,
             company_id,
         ),
     )
@@ -105,6 +111,19 @@ async def update_tokens(
     if not credentials:
         raise RuntimeError("Credentials not found after token update")
     return credentials
+
+
+async def update_app_token(*, company_id: int, access_token: str | None,
+                           token_expires_at: datetime | None,
+                           cache_tenant_id: str, cache_client_id: str) -> None:
+    """Persist app-only state without modifying delegated authorization."""
+    await db.execute(
+        """UPDATE company_m365_credentials
+           SET app_access_token = %s, app_token_expires_at = %s,
+               app_token_cache_tenant_id = %s, app_token_cache_client_id = %s
+           WHERE company_id = %s""",
+        (access_token, token_expires_at, cache_tenant_id, cache_client_id, company_id),
+    )
 
 
 async def update_client_secret(

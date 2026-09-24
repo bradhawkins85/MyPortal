@@ -964,10 +964,12 @@ class M365Error(RuntimeError):
         *,
         http_status: int | None = None,
         graph_error_code: str | None = None,
+        failure_kind: str | None = None,
     ) -> None:
         super().__init__(message)
         self.http_status: int | None = http_status
         self.graph_error_code: str | None = graph_error_code
+        self.failure_kind: str | None = failure_kind
 
 
 def _safe_m365_error_fields(exc: M365Error) -> dict[str, Any]:
@@ -1468,13 +1470,27 @@ async def _exchange_token(
             response = await client.post(token_endpoint, data=data)
     except httpx.TimeoutException as exc:
         raise M365Error(
-            f"Microsoft 365 token request timed out ({type(exc).__name__})"
+            f"Microsoft 365 token request timed out ({type(exc).__name__})",
+            failure_kind="network",
         ) from exc
     except httpx.NetworkError as exc:
         raise M365Error(
-            f"Microsoft 365 token request network error ({type(exc).__name__})"
+            f"Microsoft 365 token request network error ({type(exc).__name__})",
+            failure_kind="network",
         ) from exc
     if response.status_code != 200:
+        try:
+            error_code = str(response.json().get("error") or "")
+        except (TypeError, ValueError):
+            error_code = ""
+        if error_code in {"invalid_grant", "interaction_required", "consent_required"}:
+            failure_kind = "reauthentication_required"
+        elif response.status_code == 429:
+            failure_kind = "throttled"
+        elif response.status_code >= 500:
+            failure_kind = "transient"
+        else:
+            failure_kind = "permanent"
         grant_type = "refresh_token" if refresh_token else "client_credentials"
         log_error(
             "Failed to acquire Microsoft 365 token",
@@ -1487,6 +1503,8 @@ async def _exchange_token(
         raise M365Error(
             "Unable to acquire Microsoft 365 access token",
             http_status=response.status_code,
+            graph_error_code=error_code or None,
+            failure_kind=failure_kind,
         )
 
     payload = response.json()
@@ -1511,6 +1529,13 @@ async def acquire_access_token(
     tenant_id = str(creds.get("tenant_id") or "").strip()
     client_id = str(creds.get("client_id") or "").strip()
 
+    # Resolve the customer boundary before consulting any token cache.  A CSP
+    # remap therefore invalidates warm tokens instead of leaking the previous
+    # customer's authorization into the new tenant.
+    csp_tenant_id = await companies_repo.get_company_csp_tenant_id(company_id)
+    effective_tenant_id = str(csp_tenant_id or tenant_id).strip()
+    csp_mapping_applied = bool(csp_tenant_id)
+
     # Reuse a stored token that is still valid (with a 5-minute safety margin).
     # This avoids an unnecessary round-trip to Microsoft's token endpoint on
     # every call (e.g. after an app restart) and prevents transient failures
@@ -1519,9 +1544,24 @@ async def acquire_access_token(
     # For flows that explicitly require application permissions (for example
     # mailbox reporting APIs), callers can set ``force_client_credentials=True``
     # to bypass the cached delegated token and force an app-only token refresh.
-    stored_token = creds.get("access_token")
-    stored_expires_at = creds.get("token_expires_at")
-    if not force_client_credentials and stored_token and stored_expires_at:
+    use_app_cache = force_client_credentials or not creds.get("refresh_token")
+    token_prefix = "app_" if use_app_cache else ""
+    stored_token = creds.get(token_prefix + "access_token")
+    stored_expires_at = creds.get(token_prefix + "token_expires_at")
+    cache_tenant = creds.get(token_prefix + "token_cache_tenant_id")
+    cache_client = creds.get(token_prefix + "token_cache_client_id")
+    cache_grant = creds.get("token_cache_grant_type")
+    identity_matches = (
+        str(cache_tenant or "").casefold() == effective_tenant_id.casefold()
+        and str(cache_client or "").casefold() == client_id.casefold()
+        and (use_app_cache or cache_grant == "refresh_token")
+    )
+    if not csp_mapping_applied and not cache_tenant and not cache_client:
+        # Legacy records have reliable tenant/client evidence in the credential
+        # row itself. Preserve their working cache until the first refresh
+        # backfills the explicit cache identity.
+        identity_matches = not use_app_cache
+    if stored_token and stored_expires_at and identity_matches:
         # token_expires_at is stored as a naive UTC datetime; compare likewise.
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         margin = timedelta(minutes=5)
@@ -1538,13 +1578,6 @@ async def acquire_access_token(
             )
             return stored_token
 
-    # Legacy CSP deployments may still store the customer tenant mapping on the
-    # company record while credentials point at a shared partner tenant app.
-    # Use the mapped customer tenant when present to avoid cross-tenant sync.
-    csp_tenant_id = await companies_repo.get_company_csp_tenant_id(company_id)
-    effective_tenant_id = csp_tenant_id or tenant_id
-    csp_mapping_applied = bool(csp_tenant_id)
-
     log_info(
         "M365 acquiring access token",
         company_id=company_id,
@@ -1556,35 +1589,12 @@ async def acquire_access_token(
 
     stored_refresh = None if force_client_credentials else creds.get("refresh_token")
     grant_type = "refresh_token" if stored_refresh else "client_credentials"
-    try:
-        access_token, refresh, expires_at = await _exchange_token(
-            tenant_id=effective_tenant_id,
-            client_id=client_id,
-            client_secret=creds.get("client_secret") or "",
-            refresh_token=stored_refresh,
-        )
-    except M365Error:
-        if not stored_refresh:
-            raise
-        # The stored refresh token is stale or revoked.  Fall back to the
-        # client_credentials grant so that background sync jobs can continue
-        # using application permissions without user interaction.
-        log_error(
-            "M365 refresh token is invalid; falling back to client_credentials grant",
-            company_id=company_id,
-            tenant_id=effective_tenant_id,
-            client_id=client_id,
-        )
-        access_token, refresh, expires_at = await _exchange_token(
-            tenant_id=effective_tenant_id,
-            client_id=client_id,
-            client_secret=creds.get("client_secret") or "",
-            refresh_token=None,
-        )
-        grant_type = "client_credentials"
-        # Clear the stale refresh token so future calls use client_credentials
-        # immediately rather than attempting the refresh_token grant again.
-        refresh = None
+    access_token, refresh, expires_at = await _exchange_token(
+        tenant_id=effective_tenant_id,
+        client_id=client_id,
+        client_secret=creds.get("client_secret") or "",
+        refresh_token=stored_refresh,
+    )
 
     log_info(
         "M365 access token acquired successfully",
@@ -1603,17 +1613,21 @@ async def acquire_access_token(
     # value so that future delegated operations (e.g. auto-granting missing
     # permissions on a 403) can still use it.  Only overwrite when a real
     # refresh token was returned or when a stale one was explicitly cleared.
-    if force_client_credentials and refresh is None:
-        refresh_to_store = _encrypt(creds.get("refresh_token"))
-    else:
-        refresh_to_store = _encrypt(refresh)
+    refresh_to_store = _encrypt(refresh or creds.get("refresh_token"))
 
-    await m365_repo.update_tokens(
-        company_id=company_id,
-        refresh_token=refresh_to_store,
-        access_token=_encrypt(access_token),
-        token_expires_at=expires_value,
-    )
+    if grant_type == "client_credentials":
+        await m365_repo.update_app_token(
+            company_id=company_id, access_token=_encrypt(access_token),
+            token_expires_at=expires_value, cache_tenant_id=effective_tenant_id,
+            cache_client_id=client_id,
+        )
+    else:
+        await m365_repo.update_tokens(
+            company_id=company_id, refresh_token=refresh_to_store,
+            access_token=_encrypt(access_token), token_expires_at=expires_value,
+            cache_tenant_id=effective_tenant_id, cache_client_id=client_id,
+            cache_grant_type=grant_type,
+        )
     return access_token
 
 

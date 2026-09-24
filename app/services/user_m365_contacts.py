@@ -41,11 +41,18 @@ async def status_for_user(user_id: int) -> dict[str, Any]:
 
 
 async def store_tokens(user_id: int, *, tenant_id: str, account_email: str | None,
-                       refresh_token: str, access_token: str, expires_at: datetime | None) -> None:
+                       refresh_token: str, access_token: str, expires_at: datetime | None,
+                       client_id: str | None = None, account_id: str | None = None,
+                       scopes: str | None = None, connection_version: int | None = None,
+                       expected_revision: int | None = None) -> None:
     await contacts_repo.upsert_integration(
         user_id, tenant_id=tenant_id, account_email=account_email,
         refresh_token=encrypt_secret(refresh_token), access_token=encrypt_secret(access_token),
         token_expires_at=expires_at,
+        oauth_client_id=client_id,
+        oauth_authority=f"https://login.microsoftonline.com/{tenant_id}",
+        oauth_account_id=account_id, oauth_scopes=scopes,
+        oauth_connection_version=connection_version, expected_revision=expected_revision,
     )
 
 
@@ -57,10 +64,10 @@ async def acquire_access_token(user_id: int) -> str:
     if record.get("access_token") and expires and expires > datetime.now(timezone.utc) + timedelta(minutes=5):
         return decrypt_secret(record["access_token"])
     data = {
-        "client_id": await m365_service.get_effective_pkce_client_id(),
+        "client_id": record.get("oauth_client_id") or await m365_service.get_effective_pkce_client_id(),
         "grant_type": "refresh_token",
         "refresh_token": decrypt_secret(record["refresh_token"]),
-        "scope": CONTACTS_SCOPE,
+        "scope": record.get("oauth_scopes") or CONTACTS_SCOPE,
     }
     url = f"https://login.microsoftonline.com/{record['tenant_id']}/oauth2/v2.0/token"
     async with monitored_client(httpx.AsyncClient, timeout=30) as client:
@@ -75,7 +82,8 @@ async def acquire_access_token(user_id: int) -> str:
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(expires_in or 3600))
     refresh_token = str(payload.get("refresh_token") or decrypt_secret(record["refresh_token"]))
     await store_tokens(user_id, tenant_id=record["tenant_id"], account_email=record.get("account_email"),
-                       refresh_token=refresh_token, access_token=access_token, expires_at=expires_at)
+                       refresh_token=refresh_token, access_token=access_token, expires_at=expires_at,
+                       expected_revision=int(record.get("token_revision") or 0))
     return access_token
 
 

@@ -5155,8 +5155,13 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             )
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=float(payload.get("expires_in") or 3600))
         await user_m365_contacts_service.store_tokens(
-            int(current_user["id"]), tenant_id=tenant_id, account_email=str(current_user.get("email") or "") or None,
+            int(current_user["id"]), tenant_id=tenant_id,
+            account_email=str(identity.get("preferred_username") or identity.get("email") or "") or None,
             refresh_token=str(refresh_token), access_token=str(access_token), expires_at=expires_at,
+            client_id=str(state_data.get("client_id") or ""),
+            account_id=str(identity.get("oid") or identity.get("sub") or "") or None,
+            scopes=str(payload.get("scope") or user_m365_contacts_service.CONTACTS_SCOPE),
+            connection_version=int(state_data["connection_version"]) if state_data.get("connection_version") else None,
         )
         return flash_redirect("/admin/profile", "Outlook contacts connected.", "success")
 
