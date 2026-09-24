@@ -1,6 +1,9 @@
 document.addEventListener('DOMContentLoaded', function () {
+  var root = document.querySelector('[data-mailbox-page-config]');
+  if (!root || root.dataset.mailboxInitialized === 'true') return;
+  root.dataset.mailboxInitialized = 'true';
   function parseConfig() {
-    var element = document.querySelector('[data-mailbox-page-config]');
+    var element = root;
     if (!element) return null;
     try {
       return JSON.parse(element.getAttribute('data-mailbox-page-config') || '{}');
@@ -15,6 +18,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
   var csrfToken = config.csrfToken || '';
   var activeStaff = Array.isArray(config.activeStaff) ? config.activeStaff : [];
+  var mailboxCount = Number(config.mailboxCount || 0);
+  var companyName = config.companyName || 'the selected company';
 
   document.querySelectorAll('[data-table-id="m365-user-mailboxes"] [data-header-menu], [data-table-id="m365-shared-mailboxes"] [data-header-menu]').forEach(function (menu) {
     var wrapper = menu.closest('.table-wrapper') || menu.closest('.panel__body');
@@ -112,7 +117,7 @@ document.addEventListener('DOMContentLoaded', function () {
   var runAllBtn = document.querySelector('[data-start-managed-folder-assistant-all]');
   if (runAllBtn) {
     runAllBtn.addEventListener('click', function () {
-      if (!window.confirm('Start Managed Folder Assistant for all mailboxes?')) {
+      if (!window.confirm('Start Managed Folder Assistant for ' + mailboxCount + ' mailbox' + (mailboxCount === 1 ? '' : 'es') + ' in ' + companyName + '? This can increase Exchange processing load.')) {
         return;
       }
       handleActionButton(
@@ -125,7 +130,7 @@ document.addEventListener('DOMContentLoaded', function () {
         },
         function (data, originalText) {
           runAllBtn.disabled = false;
-          runAllBtn.textContent = '\u2713 Started (' + (data.started || 0) + ')';
+          runAllBtn.textContent = (data.failed ? '⚠ Partial: ' + (data.started || 0) + ' started, ' + data.failed + ' failed' : '\u2713 Started (' + (data.started || 0) + ')');
           window.setTimeout(function () {
             runAllBtn.textContent = originalText;
           }, 3000);
@@ -158,6 +163,13 @@ document.addEventListener('DOMContentLoaded', function () {
       if (event.key === 'Escape') {
         event.preventDefault();
         closeModal();
+      } else if (event.key === 'Tab') {
+        var focusable = modal.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [href]');
+        if (!focusable.length) return;
+        var first = focusable[0];
+        var last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
       }
     }
 

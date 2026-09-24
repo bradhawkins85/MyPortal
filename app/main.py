@@ -4140,9 +4140,8 @@ async def save_m365_best_practices_settings(request: Request):
 async def _load_m365_mailbox_context(request: Request, *, mailbox_permission: str):
     """Load context for M365 mailbox pages.
 
-    A user may access the page if they are a super admin, have
-    ``can_manage_licenses``, or have the specific ``mailbox_permission`` flag
-    (e.g. ``can_view_m365_user_mailboxes`` or ``can_view_m365_shared_mailboxes``).
+    A user may access the page if they are a super admin or have the specific
+    mailbox capability. License administration never implies mailbox access.
     """
     user, redirect = await _require_authenticated_user(request)
     if redirect:
@@ -4162,7 +4161,6 @@ async def _load_m365_mailbox_context(request: Request, *, mailbox_permission: st
     mailbox_menu_key = "menu.m365.user_mailboxes" if mailbox_permission == "can_view_m365_user_mailboxes" else "menu.m365.shared_mailboxes"
     can_access = bool(
         is_super_admin
-        or (membership and membership.get("can_manage_licenses"))
         or (membership and membership.get(mailbox_permission))
         or _membership_menu_can(user, membership, mailbox_menu_key)
     )
@@ -4176,6 +4174,44 @@ async def _load_m365_mailbox_context(request: Request, *, mailbox_permission: st
         )
     company = await company_repo.get_company_by_id(company_id)
     return user, membership, company, company_id, None
+
+
+def _m365_mailbox_capabilities(user: dict[str, Any], membership: dict[str, Any] | None) -> dict[str, bool]:
+    """Return the single capability decision used by mailbox UI and routes.
+
+    License permissions deliberately do not participate: viewing or administering
+    subscriptions is not authority to inspect or change Exchange mailboxes.
+    """
+    super_admin = bool(user.get("is_super_admin"))
+    user_read = super_admin or bool(
+        (membership and membership.get("can_view_m365_user_mailboxes"))
+        or _membership_menu_can(user, membership, "menu.m365.user_mailboxes")
+    )
+    shared_read = super_admin or bool(
+        (membership and membership.get("can_view_m365_shared_mailboxes"))
+        or _membership_menu_can(user, membership, "menu.m365.shared_mailboxes")
+    )
+    return {
+        "user_read": user_read,
+        "shared_read": shared_read,
+        "user_write": super_admin or _membership_menu_can(user, membership, "menu.m365.user_mailboxes", write=True),
+        "shared_write": super_admin or _membership_menu_can(user, membership, "menu.m365.shared_mailboxes", write=True),
+        "sync": super_admin,
+        "destructive": super_admin,
+    }
+
+
+async def _load_m365_mailbox_api_context(request: Request):
+    """Authenticate an API request without introducing a license-menu gate."""
+    return await _load_license_context(request, require_manage=False)
+
+
+def _require_mailbox_capability(capabilities: dict[str, bool], capability: str) -> None:
+    if not capabilities.get(capability, False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Mailbox {capability.replace('_', ' ')} permission required",
+        )
 
 
 @app.get("/m365/mailboxes/users", response_class=HTMLResponse)
@@ -4196,6 +4232,8 @@ async def m365_user_mailboxes_page(request: Request):
         "synced_at": synced_at,
         "has_credentials": bool(credentials),
         "active_staff": active_staff,
+        "mailbox_kind": "user",
+        "mailbox_capabilities": _m365_mailbox_capabilities(user, membership),
     }
     return await _render_template("m365/user_mailboxes.html", request, user, extra=extra)
 
@@ -4218,6 +4256,8 @@ async def m365_shared_mailboxes_page(request: Request):
         "synced_at": synced_at,
         "has_credentials": bool(credentials),
         "active_staff": active_staff,
+        "mailbox_kind": "shared",
+        "mailbox_capabilities": _m365_mailbox_capabilities(user, membership),
     }
     return await _render_template("m365/shared_mailboxes.html", request, user, extra=extra)
 
@@ -4229,11 +4269,10 @@ async def sync_m365_mailboxes(request: Request):
     Returns 202 Accepted immediately so the browser never waits for the long-running
     sync and never hits a gateway timeout.
     """
-    user, membership, _, company_id, redirect = await _load_license_context(request)
+    user, membership, _, company_id, redirect = await _load_m365_mailbox_api_context(request)
     if redirect:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
-    if not user.get("is_super_admin"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    _require_mailbox_capability(_m365_mailbox_capabilities(user, membership), "sync")
     job = await m365_jobs_service.enqueue(company_id, "mailbox_sync", "mailboxes")
     log_info("M365 mailbox sync queued", company_id=company_id, user_id=user.get("id"), job_id=job["id"])
     return JSONResponse({"job_id": job["id"], "status": job["status"]}, status_code=202)
@@ -4242,9 +4281,12 @@ async def sync_m365_mailboxes(request: Request):
 @app.get("/m365/jobs/{job_id}", response_class=JSONResponse, tags=["Microsoft 365"])
 async def get_m365_job_status(job_id: str, request: Request):
     """Return safe progress for a durable operation in the active tenant only."""
-    user, _, _, company_id, redirect = await _load_license_context(request)
+    user, membership, _, company_id, redirect = await _load_m365_mailbox_api_context(request)
     if redirect:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
+    capabilities = _m365_mailbox_capabilities(user, membership)
+    if not (capabilities["user_read"] or capabilities["shared_read"]):
+        _require_mailbox_capability(capabilities, "user_read")
     job = await m365_jobs_service.get(job_id, company_id)
     if not job:
         raise HTTPException(status_code=404, detail="Operation not found")
@@ -4263,15 +4305,10 @@ async def enable_m365_user_archive(request: Request):
     UPN. The UPN must belong to a known user mailbox in this company; otherwise
     a 404 is returned. Requires mailbox write privileges.
     """
-    user, membership, company, company_id, redirect = await _load_license_context(request)
+    user, membership, company, company_id, redirect = await _load_m365_mailbox_api_context(request)
     if redirect:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
-    if not (
-        user.get("is_super_admin")
-        or _membership_menu_can(user, membership, "menu.m365.user_mailboxes", write=True)
-        or _membership_menu_can(user, membership, "menu.m365.shared_mailboxes", write=True)
-    ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mailbox read/write permission required")
+    _require_mailbox_capability(_m365_mailbox_capabilities(user, membership), "user_write")
 
     try:
         body = await request.json()
@@ -4303,14 +4340,10 @@ async def enable_m365_user_archive(request: Request):
 @app.get("/m365/mailboxes/rules", response_class=JSONResponse, tags=["Microsoft 365"])
 async def get_m365_mailbox_rules(request: Request, upn: str):
     """Return inbox rules for a known mailbox. Super admins only."""
-    user, membership, company, company_id, redirect = await _load_license_context(request)
+    user, membership, company, company_id, redirect = await _load_m365_mailbox_api_context(request)
     if redirect:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
-    if not user.get("is_super_admin"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Super admin privileges required",
-        )
+    _require_mailbox_capability(_m365_mailbox_capabilities(user, membership), "destructive")
 
     user_mbs = await m365_service.get_user_mailboxes(company_id)
     shared_mbs = await m365_service.get_shared_mailboxes(company_id)
@@ -4337,11 +4370,10 @@ async def get_m365_mailbox_rules(request: Request, upn: str):
 @app.post("/m365/mailboxes/start-managed-folder-assistant", response_class=JSONResponse, tags=["Microsoft 365"])
 async def start_m365_managed_folder_assistant(request: Request):
     """Start Managed Folder Assistant for a specific mailbox."""
-    user, membership, company, company_id, redirect = await _load_license_context(request)
+    user, membership, company, company_id, redirect = await _load_m365_mailbox_api_context(request)
     if redirect:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
-    if not user.get("is_super_admin"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    _require_mailbox_capability(_m365_mailbox_capabilities(user, membership), "destructive")
 
     try:
         body = await request.json()
@@ -4372,11 +4404,10 @@ async def start_m365_managed_folder_assistant(request: Request):
 @app.post("/m365/mailboxes/start-managed-folder-assistant/all", response_class=JSONResponse, tags=["Microsoft 365"])
 async def start_m365_managed_folder_assistant_all(request: Request):
     """Start Managed Folder Assistant for all mailboxes in the tenant."""
-    user, membership, company, company_id, redirect = await _load_license_context(request)
+    user, membership, company, company_id, redirect = await _load_m365_mailbox_api_context(request)
     if redirect:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
-    if not user.get("is_super_admin"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
+    _require_mailbox_capability(_m365_mailbox_capabilities(user, membership), "destructive")
 
     try:
         result = await m365_service.start_managed_folder_assistant_all_mailboxes(company_id)
@@ -4407,7 +4438,7 @@ async def get_m365_mailbox_permissions(request: Request, upn: str):
     via M365 group membership) and ``accessible_by`` (members of the M365 group
     backing this mailbox).
     """
-    user, membership, company, company_id, redirect = await _load_license_context(request)
+    user, membership, company, company_id, redirect = await _load_m365_mailbox_api_context(request)
     if redirect:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
 
@@ -4415,6 +4446,9 @@ async def get_m365_mailbox_permissions(request: Request, upn: str):
     # arbitrary Graph API queries with user-supplied input.
     user_mbs = await m365_service.get_user_mailboxes(company_id)
     shared_mbs = await m365_service.get_shared_mailboxes(company_id)
+    capabilities = _m365_mailbox_capabilities(user, membership)
+    target_is_user = any(str(mb.get("user_principal_name") or "").lower() == upn.lower() for mb in user_mbs)
+    _require_mailbox_capability(capabilities, "user_read" if target_is_user else "shared_read")
     known_upns = {mb["user_principal_name"] for mb in user_mbs + shared_mbs}
     if upn not in known_upns:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mailbox not found")
@@ -4433,17 +4467,9 @@ async def get_m365_mailbox_permissions(request: Request, upn: str):
 @app.post("/m365/mailboxes/permissions/request", response_class=JSONResponse, tags=["Microsoft 365"])
 async def request_m365_mailbox_permission_changes(request: Request):
     """Create a ticket requesting mailbox permission additions/removals."""
-    user, membership, company, company_id, redirect = await _load_license_context(request)
+    user, membership, company, company_id, redirect = await _load_m365_mailbox_api_context(request)
     if redirect:
         return JSONResponse({"error": "Authentication required"}, status_code=401)
-    if not (
-        user.get("is_super_admin")
-        or _membership_menu_can(user, membership, "menu.m365.user_mailboxes", write=True)
-        or _membership_menu_can(user, membership, "menu.m365.shared_mailboxes", write=True)
-        or _membership_menu_can(user, membership, "menu.m365.user_mailboxes")
-        or _membership_menu_can(user, membership, "menu.m365.shared_mailboxes")
-    ):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Mailbox permission access required")
 
     try:
         body = await request.json()
@@ -4460,6 +4486,9 @@ async def request_m365_mailbox_permission_changes(request: Request):
 
     user_mbs = await m365_service.get_user_mailboxes(company_id)
     shared_mbs = await m365_service.get_shared_mailboxes(company_id)
+    capabilities = _m365_mailbox_capabilities(user, membership)
+    target_is_user = any(str(mb.get("user_principal_name") or "").strip().lower() == mailbox_upn.lower() for mb in user_mbs)
+    _require_mailbox_capability(capabilities, "user_write" if target_is_user else "shared_write")
     known_upns = {str(mb.get("user_principal_name") or "").strip().lower() for mb in user_mbs + shared_mbs}
     if mailbox_upn.lower() not in known_upns:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mailbox not found")
