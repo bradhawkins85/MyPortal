@@ -16,6 +16,7 @@ the start of the run and the app-only token is force-refreshed if any new
 roles were granted.
 
 Also covers:
+- Secure Score uses the supported ``SecurityEvents.Read.All`` permission.
 - ``ReportSettings.ReadWrite.All`` is in ``_PROVISION_APP_ROLES`` so the
   ``/admin/reportSettings`` check & PATCH remediation succeed.
 - ``_check_audit_log_enabled`` now probes ``/auditLogs/directoryAudits``
@@ -55,14 +56,13 @@ def disable_ticket_on_fail_by_default(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_provision_app_roles_includes_security_secure_score_read_all() -> None:
-    """The provisioning role list must include SecuritySecureScore.Read.All so
-    that ``/security/secureScores`` is accessible without a 403 error.
-    """
-    # Microsoft-published, well-known application permission ID for
-    # SecuritySecureScore.Read.All – required by GET /security/secureScores.
-    security_secure_score_read_all = "e0b77adb-e790-44a3-b0a0-257d06303687"
-    assert security_secure_score_read_all in m365_service._PROVISION_APP_ROLES
+def test_provision_app_roles_use_supported_secure_score_permission() -> None:
+    """Secure Score uses the documented SecurityEvents.Read.All app role."""
+    security_events_read_all = "bf394140-e372-4bf9-a898-299cfc7564e5"
+    retired_security_secure_score = "e0b77adb-e790-44a3-b0a0-257d06303687"
+
+    assert security_events_read_all in m365_service._PROVISION_APP_ROLES
+    assert retired_security_secure_score not in m365_service._PROVISION_APP_ROLES
 
 
 def test_provision_app_roles_includes_report_settings_readwrite_all() -> None:
@@ -322,7 +322,7 @@ async def test_run_best_practices_self_heal_swallows_errors() -> None:
 @pytest.mark.anyio("asyncio")
 async def test_check_monitor_secure_score_unknown_on_403() -> None:
     """A 403 from the secureScores endpoint maps to STATUS_UNKNOWN with a
-    message pointing to the missing SecuritySecureScore.Read.All permission.
+    message pointing to the missing SecurityEvents.Read.All permission.
     """
     with patch(
         "app.services.cis_benchmark._graph_get",
@@ -334,4 +334,4 @@ async def test_check_monitor_secure_score_unknown_on_403() -> None:
         result = await cis_service._check_monitor_secure_score("fake-token")
 
     assert result["status"] == STATUS_UNKNOWN
-    assert "SecuritySecureScore.Read.All" in result["details"]
+    assert "SecurityEvents.Read.All" in result["details"]

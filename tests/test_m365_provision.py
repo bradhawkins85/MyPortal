@@ -143,7 +143,7 @@ async def test_provision_app_registration_success():
         "Should POST to /servicePrincipals to create service principal"
     assert sum(1 for u in call_order if "appRoleAssignments" in u) == len(
         m365_service._PROVISION_APP_ROLES
-    ) + 2, "Should grant one role assignment per required role plus Exchange.ManageAsApp and Teams.ManageAsApp"
+    ) + 1, "Should grant one role assignment per required role plus Exchange.ManageAsApp"
     assert any("addPassword" in u for u in call_order), \
         "Should POST to addPassword to create client secret"
 
@@ -611,6 +611,16 @@ async def test_provision_app_roles_constant():
     assert "df021288-bdef-4463-88db-98f22de89214" in m365_service._PROVISION_APP_ROLES
     # Directory.Read.All
     assert "7ab1d382-f21e-4acd-a863-ba3e13f7da61" in m365_service._PROVISION_APP_ROLES
+
+
+def test_permission_contract_omits_unsupported_permissions():
+    """Provisioning must not request permissions that Microsoft APIs do not expose."""
+    permission_names = {
+        permission.name for permission in m365_service.PERMISSION_CONTRACT
+    }
+
+    assert "SecuritySecureScore.Read.All" not in permission_names
+    assert "LicenseManager.AccessAsUser" not in permission_names
 
 
 # ---------------------------------------------------------------------------
