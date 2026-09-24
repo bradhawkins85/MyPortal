@@ -101,6 +101,7 @@ PURVIEW_ADMIN_CONSENT_STEPS = (
 # endpoint require the Teams.ManageAsApp application role from this service principal
 # in addition to Exchange.ManageAsApp.
 _TEAMS_APP_ID = "48ac35b8-9aa8-4d74-927d-1f4a14a0b239"
+_TEAMS_SCOPE = "https://api.interfaces.records.teams.microsoft.com/.default"
 # Teams.ManageAsApp application role ID.
 # Note: Microsoft assigns the same GUID to both Exchange.ManageAsApp and
 # Teams.ManageAsApp – they share the same role ID (dc50a0fb-...) but target
@@ -273,13 +274,6 @@ ENTERPRISE_APP_CATALOG: list[dict[str, Any]] = [
         "app_id": _SCC_APP_ID,
         "permissions": [
             {"id": _SCC_MANAGE_AS_APP_ROLE, "name": "Exchange.ManageAsApp"},
-        ],
-    },
-    {
-        "name": "Skype and Teams Tenant Admin API",
-        "app_id": _TEAMS_APP_ID,
-        "permissions": [
-            {"id": _TEAMS_MANAGE_AS_APP_ROLE, "name": "Teams.ManageAsApp"},
         ],
     },
 ]
@@ -1691,6 +1685,29 @@ async def _acquire_exo_access_token(company_id: int) -> tuple[str, str]:
     return access_token, tenant_id
 
 
+async def _acquire_teams_access_tokens(company_id: int) -> tuple[str, str, str]:
+    """Acquire the two documented tokens used by ``Connect-MicrosoftTeams``.
+
+    The returned order is Graph, Teams resource, tenant.  Tokens are neither
+    persisted nor shared across company boundaries.
+    """
+    creds = await get_credentials(company_id)
+    if not creds:
+        raise M365Error("Microsoft 365 credentials have not been configured")
+    tenant_id = str(creds.get("tenant_id") or "").strip()
+    client_id = str(creds.get("client_id") or "").strip()
+    secret = str(creds.get("client_secret") or "")
+    graph_token, _, _ = await _exchange_token(
+        tenant_id=tenant_id, client_id=client_id, client_secret=secret,
+        refresh_token=None, scope=_GRAPH_SCOPE,
+    )
+    teams_token, _, _ = await _exchange_token(
+        tenant_id=tenant_id, client_id=client_id, client_secret=secret,
+        refresh_token=None, scope=_TEAMS_SCOPE,
+    )
+    return graph_token, teams_token, tenant_id
+
+
 async def _exo_invoke_command(
     exo_token: str,
     tenant_id: str,
@@ -2671,73 +2688,14 @@ async def _grant_provisioned_roles(
             except M365Error as exc:
                 log_error(f"Failed to look up {resource_name} service principal", error=str(exc))
 
-        # 2b. Grant Skype and Teams Tenant Admin API Teams.ManageAsApp role (best-effort).
-        # Required for Teams PowerShell cmdlets (Get-CsTeamsMeetingPolicy etc.) via
-        # the Exchange Online InvokeCommand endpoint.
-        try:
-            teams_sp_response = await _graph_get(
-                access_token,
-                f"https://graph.microsoft.com/v1.0/servicePrincipals"
-                f"?$filter=appId eq '{_TEAMS_APP_ID}'&$select=id,appRoles",
-            )
-            teams_sp_list = teams_sp_response.get("value", [])
-            if teams_sp_list:
-                teams_sp_obj = teams_sp_list[0]
-                teams_sp_id: str = teams_sp_obj["id"]
-                teams_app_roles = teams_sp_obj.get("appRoles", [])
-                if not any(
-                    r.get("id") == _TEAMS_MANAGE_AS_APP_ROLE for r in teams_app_roles
-                ):
-                    log_info(
-                        "Teams SP does not expose ManageAsApp role in this tenant; "
-                        "skipping Teams.ManageAsApp role grant",
-                        sp_object_id=sp_object_id,
-                    )
-                else:
-                    try:
-                        await _post_app_role_assignment_with_retry(
-                            access_token,
-                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
-                            {
-                                "principalId": sp_object_id,
-                                "resourceId": teams_sp_id,
-                                "appRoleId": _TEAMS_MANAGE_AS_APP_ROLE,
-                            },
-                        )
-                        log_info(
-                            "Granted Teams.ManageAsApp role",
-                            sp_object_id=sp_object_id,
-                        )
-                    except M365Error as exc:
-                        if exc.http_status == 409:
-                            log_info(
-                                "Teams.ManageAsApp role already assigned, skipping",
-                                sp_object_id=sp_object_id,
-                            )
-                        else:
-                            log_error(
-                                "Failed to grant Teams.ManageAsApp role; "
-                                "Teams PowerShell cmdlets will not be available",
-                                error=str(exc),
-                            )
-            else:
-                log_info(
-                    "Skype and Teams Tenant Admin API service principal not found in tenant; "
-                    "skipping Teams.ManageAsApp role grant",
-                )
-        except M365Error as exc:
-            log_error(
-                "Failed to look up Skype and Teams Tenant Admin API service principal; "
-                "Teams PowerShell cmdlets will not be available",
-                error=str(exc),
-            )
+        # Teams application authentication has no permission grant on the
+        # Skype/Teams API. Existing legacy grants are intentionally left untouched.
 
         # 3. Assign Exchange Administrator directory role (best-effort).
         await _ensure_exchange_admin_role(access_token, sp_object_id)
 
         # 3b. Assign Teams Service Administrator directory role (best-effort).
-        # Required in addition to Teams.ManageAsApp for Teams PowerShell cmdlets to
-        # succeed when called via the Exchange Online InvokeCommand REST endpoint.
+        # Required for MicrosoftTeams application authentication.
         await _ensure_teams_service_admin_role(access_token, sp_object_id)
 
         # 4. Add the service principal as an owner of the app registration so it
@@ -5270,41 +5228,8 @@ async def try_grant_missing_permissions(
                         **_safe_m365_error_fields(exc),
                     )
 
-        # Best-effort: grant Teams.ManageAsApp if not already assigned.
-        # Exchange.ManageAsApp and Teams.ManageAsApp share the same role GUID but
-        # target different service principals, so both must be granted separately.
-        if teams_needed:
-            try:
-                if teams_sp_id:
-                    try:
-                        await _graph_post(
-                            access_token,
-                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
-                            {
-                                "principalId": sp_object_id,
-                                "resourceId": teams_sp_id,
-                                "appRoleId": _TEAMS_MANAGE_AS_APP_ROLE,
-                            },
-                        )
-                        granted.append(_TEAMS_MANAGE_AS_APP_ROLE)
-                        log_info(
-                            "Granted Teams.ManageAsApp via connect flow",
-                            company_id=company_id,
-                        )
-                    except M365Error as exc:
-                        if exc.http_status != 409:
-                            log_error(
-                                "try_grant_missing_permissions: "
-                                "failed to grant Teams.ManageAsApp",
-                                company_id=company_id,
-                                **_safe_m365_error_fields(exc),
-                            )
-            except M365Error as exc:
-                log_error(
-                    "try_grant_missing_permissions: unexpected Teams grant failure",
-                    company_id=company_id,
-                    **_safe_m365_error_fields(exc),
-                )
+        # Do not add or revoke legacy Teams.ManageAsApp assignments. Supported
+        # Teams authentication uses resource tokens and Teams RBAC.
 
         # Best-effort: assign the Exchange Administrator directory role so that
         # Exchange Online PowerShell cmdlets (Get-MailboxPermission) succeed.
