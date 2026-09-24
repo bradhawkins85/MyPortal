@@ -1,0 +1,7 @@
+{
+  "guid": "01540f2c-e5be-43bd-a24b-5de3dcdecc7b",
+  "occurred_at": "2026-09-24T04:51:42.899968+00:00",
+  "change_type": "feature",
+  "summary": "Add tenant-wide Microsoft 365 permission and directory role diagnostics",
+  "content_hash": "c5f832e41d8121ba6f220070bbbb550f047a3fbfe3211b69cc2f3b64010dce19"
+}
