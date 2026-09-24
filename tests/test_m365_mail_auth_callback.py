@@ -1,14 +1,18 @@
 """Regression tests for the M365 mail OAuth callback."""
+import asyncio
 import base64
 import json
 from urllib.parse import quote
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.core.database import db
+from app.features.m365_mail import oauth as m365_mail_oauth
 from app.main import app, scheduler_service
+from app.services import m365_mail as m365_mail_service
 
 
 @pytest.fixture(autouse=True)
@@ -144,3 +148,41 @@ def test_m365_mail_callback_handles_null_company_id(monkeypatch):
     assert stored["tenant_id"] == "tenant-123"
     assert calls, "Token exchange should be attempted"
     assert calls[0]["data"]["code_verifier"] == "code-verify"
+
+
+def test_m365_mail_callback_loads_service_in_cold_worker(monkeypatch):
+    """The callback must not rely on external access to a lazy module export."""
+    state_data = {
+        "flow": "m365_mail_auth",
+        "account_id": 7,
+        "company_id": 4,
+        "code_verifier": "verifier",
+    }
+
+    async def fake_consume_state(request, state):
+        return state_data
+
+    async def fake_authenticated_user(request):
+        return {"id": 1, "is_super_admin": True}, None
+
+    received_service = None
+
+    async def fake_handler(request, **kwargs):
+        nonlocal received_service
+        received_service = kwargs["m365_mail_service"]
+        return main_module.RedirectResponse("/success", status_code=303)
+
+    monkeypatch.setattr(main_module, "_consume_m365_oauth_state", fake_consume_state)
+    monkeypatch.setattr(main_module, "_require_authenticated_user", fake_authenticated_user)
+    monkeypatch.setattr(m365_mail_oauth, "handle_m365_mail_auth_callback", fake_handler)
+    monkeypatch.delitem(main_module.__dict__, "m365_mail_service", raising=False)
+
+    request = Request(
+        {"type": "http", "method": "GET", "path": "/m365/callback", "headers": []}
+    )
+    response = asyncio.run(
+        main_module.m365_callback(request, code="auth-code", state="opaque-state")
+    )
+
+    assert response.status_code == 303
+    assert received_service is m365_mail_service
