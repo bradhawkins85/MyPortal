@@ -20,6 +20,55 @@ def test_connection_migration_is_additive_and_rolling_safe():
     assert "company_m365_credentials" not in sql
 
 
+def test_first_connection_does_not_inventory_admin_credentials_placeholder(
+    monkeypatch,
+):
+    placeholder = {
+        "company_id": 1,
+        "tenant_id": "",
+        "client_id": "",
+        "client_secret": "",
+        "admin_client_id": "admin-client",
+    }
+    candidate = {"id": 12, "company_id": 1, "state": "pending"}
+    ensure_legacy = AsyncMock()
+    stage_candidate = AsyncMock(return_value=candidate)
+    monkeypatch.setattr(
+        m365.m365_repo, "get_credentials", AsyncMock(return_value=placeholder)
+    )
+    monkeypatch.setattr(m365.connection_repo, "ensure_legacy", ensure_legacy)
+    monkeypatch.setattr(m365.connection_repo, "stage_candidate", stage_candidate)
+    monkeypatch.setattr(m365, "_encrypt", lambda value: f"encrypted:{value}")
+
+    result = asyncio.run(
+        m365.stage_connection_candidate(
+            1,
+            "tenant",
+            {
+                "client_id": "client",
+                "client_secret": "secret",
+                "app_object_id": "app",
+                "service_principal_object_id": "service-principal",
+                "client_secret_key_id": "key",
+                "client_secret_expires_at": None,
+            },
+        )
+    )
+
+    assert result == candidate
+    ensure_legacy.assert_not_awaited()
+    stage_candidate.assert_awaited_once_with(
+        company_id=1,
+        tenant_id="tenant",
+        client_id="client",
+        client_secret="encrypted:secret",
+        app_object_id="app",
+        service_principal_object_id="service-principal",
+        client_secret_key_id="key",
+        client_secret_expires_at=None,
+    )
+
+
 def test_provisioning_never_searches_or_deletes_by_display_name(monkeypatch):
     get_roles = AsyncMock(return_value=("00000000-0000-0000-0000-000000000001", {}))
     build_access = AsyncMock(return_value=([], [], []))

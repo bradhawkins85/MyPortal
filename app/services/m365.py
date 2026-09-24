@@ -1357,7 +1357,13 @@ async def stage_connection_candidate(
 ) -> dict[str, Any]:
     """Persist a replacement without changing what production jobs consume."""
     current = await m365_repo.get_credentials(company_id)
-    if current:
+    # Admin-only configuration creates a compatibility row with blank customer
+    # credentials.  Such a placeholder is not a legacy connection and must not
+    # be inventoried before the company's first managed connection is staged.
+    if current and all(
+        str(current.get(key) or "").strip()
+        for key in ("tenant_id", "client_id", "client_secret")
+    ):
         await connection_repo.ensure_legacy(company_id, current)
     return await connection_repo.stage_candidate(
         company_id=company_id,
