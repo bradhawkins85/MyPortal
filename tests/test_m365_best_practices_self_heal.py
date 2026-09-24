@@ -74,8 +74,10 @@ def test_provision_app_roles_includes_report_settings_readwrite_all() -> None:
     # ReportSettings.ReadWrite.All (the read-write variant covers both the
     # GET probe in ``_check_concealed_names`` and the PATCH used by the
     # remediation flow).
-    report_settings_readwrite = "ee353f83-55ef-4b78-82da-555bfa2b4b95"
+    report_settings_readwrite = "2a60023f-3219-47ad-baa4-40e17cd02a1d"
+    report_settings_read_only = "ee353f83-55ef-4b78-82da-555bfa2b4b95"
     assert report_settings_readwrite in m365_service._PROVISION_APP_ROLES
+    assert report_settings_read_only not in m365_service._PROVISION_APP_ROLES
 
 
 @pytest.mark.anyio("asyncio")

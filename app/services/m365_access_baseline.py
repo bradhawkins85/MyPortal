@@ -128,7 +128,10 @@ GRAPH_APPLICATION_PERMISSION_IDS = {
     "Reports.Read.All": "230c1aed-a721-4c5d-9cb4-a90514e508ef",
     "MailboxSettings.Read": "40f97065-369a-49f4-947c-6a255697ae91",
     "MailboxSettings.ReadWrite": "6931bccd-447a-43d1-b442-00a195474933",
-    "ReportSettings.ReadWrite.All": "ee353f83-55ef-4b78-82da-555bfa2b4b95",
+    # Do not confuse this with ReportSettings.Read.All
+    # (ee353f83-55ef-4b78-82da-555bfa2b4b95).  The read-only role cannot
+    # authorize the report-settings remediation PATCH.
+    "ReportSettings.ReadWrite.All": "2a60023f-3219-47ad-baa4-40e17cd02a1d",
     "Mail.ReadWrite": "e2a3a72e-5f79-4c64-b1b1-878b674786c9",
     "GroupMember.ReadWrite.All": "dbaae8cf-10b5-4b86-a4a1-f871c94c6695",
     "IdentityRiskyUser.Read.All": "dc5007c0-2d7d-4c42-879c-2dab87571379",
