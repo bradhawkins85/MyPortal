@@ -6,24 +6,20 @@
 {% block title %}User Mailboxes – Office 365{% endblock %}
 
 {% block header_actions %}
-  {% if has_credentials %}
-    {{ page_header_actions([
-      {"label": "Sync mailboxes", "type": "button",
-       "attrs": {"id": "sync-mailboxes-btn", "data-sync-mailboxes": ""}},
-      {"label": "Start Managed Folder Assistant (all)", "type": "button",
-       "attrs": {"data-start-managed-folder-assistant-all": ""}}
-    ]) }}
+  {% set actions = [] %}
+  {% if has_credentials and mailbox_capabilities.sync %}
+    {% set _ = actions.append({"label": "Sync mailboxes", "type": "button", "attrs": {"id": "sync-mailboxes-btn", "data-sync-mailboxes": ""}}) %}
   {% endif %}
+  {% if has_credentials and mailbox_capabilities.destructive %}
+    {% set _ = actions.append({"label": "Start Managed Folder Assistant (all)", "type": "button", "attrs": {"data-start-managed-folder-assistant-all": "", "data-mailbox-count": mailboxes | length}}) %}
+  {% endif %}
+  {% if actions %}{{ page_header_actions(actions) }}{% endif %}
 {% endblock %}
 
 {% block content %}
-  <div data-mailbox-page-config='{{ {"csrfToken": csrf_token or "", "activeStaff": active_staff | default([])} | tojson | e }}'>
+  <div data-mailbox-page-config='{{ {"csrfToken": csrf_token or "", "activeStaff": active_staff | default([]), "companyName": company.name or "Selected company", "mailboxCount": mailboxes | length} | tojson | e }}'>
   <section class="panel">
-    {% if synced_at %}
-    <header class="panel__header">
-      <p class="panel__subtitle">Last synced {{ synced_at.strftime('%d %b %Y %H:%M') }} UTC.</p>
-    </header>
-    {% endif %}
+    {% include "m365/_mailbox_freshness.html" %}
     <div class="panel__body" {% if mailboxes %}style="padding:0"{% endif %}>
       {% if not has_credentials %}
       <p class="text-muted">Microsoft 365 credentials have not been configured for this company. Configure them on the <a href="/m365">Office 365</a> page before syncing mailboxes.</p>
@@ -46,7 +42,7 @@
           <tr>
             <td>{{ mb.display_name or mb.user_principal_name }}</td>
             <td><small class="text-muted">{{ mb.user_principal_name }}</small></td>
-            <td data-value="{{ mb.storage_used_bytes }}" style="text-align:right;white-space:nowrap">{{ mb.storage_used_bytes | filesizeformat }}</td>
+            <td data-value="{{ mb.storage_used_bytes if mb.storage_used_bytes is not none else '' }}" style="text-align:right;white-space:nowrap">{% if mb.storage_used_bytes is not none %}{{ mb.storage_used_bytes | filesizeformat }}{% else %}<span class="status status--warning" title="Mailbox size was not available during the latest sync">Unknown</span>{% endif %}</td>
             <td data-value="{{ mb.archive_storage_used_bytes if mb.archive_storage_used_bytes is not none else '' }}" style="text-align:right;white-space:nowrap">
               {% if mb.archive_storage_used_bytes is not none %}
                 {{ mb.archive_storage_used_bytes | filesizeformat }}
@@ -87,7 +83,7 @@
                       aria-controls="mailbox-perm-modal"
                     >Mailbox Permissions</button>
                   </li>
-                  {% if is_super_admin %}
+                  {% if mailbox_capabilities.destructive %}
                   <li class="header-title-menu__item" role="none">
                     <button
                       type="button"
@@ -101,6 +97,7 @@
                     >View Rules</button>
                   </li>
                   {% endif %}
+                  {% if mailbox_capabilities.destructive %}
                   <li class="header-title-menu__item" role="none">
                     <button
                       type="button"
@@ -111,7 +108,8 @@
                       data-display-name="{{ mb.display_name or mb.user_principal_name }}"
                     >Start Managed Folder Assistant</button>
                   </li>
-                  {% if not mb.has_archive %}
+                  {% endif %}
+                  {% if not mb.has_archive and mailbox_capabilities.user_write %}
                   <li class="header-title-menu__item" role="none">
                     <button
                       type="button"
@@ -160,6 +158,7 @@
           <p class="panel__subtitle" style="margin-top:0">Users assigned full access to this mailbox.</p>
           <ul id="perm-accessible-by" style="margin:0 0 1.25rem;padding-left:1.25rem"></ul>
 
+          {% if mailbox_capabilities[mailbox_kind ~ "_write"] %}
           <form id="mailbox-permission-request-form" class="form" style="border-top:1px solid var(--color-border, #ddd);padding-top:1rem">
             <input type="hidden" id="perm-request-upn" name="mailbox_upn" value="">
             <input type="hidden" id="perm-request-display-name" name="mailbox_display_name" value="">
@@ -182,12 +181,13 @@
               <button type="submit" class="button button--primary" id="perm-request-save">Save</button>
             </div>
           </form>
+          {% else %}<p class="panel__subtitle">Read-only access: permission changes require mailbox write access.</p>{% endif %}
         </div>
       </div>
     </div>
   </div>
 
-  {% if is_super_admin %}
+  {% if mailbox_capabilities.destructive %}
   <div
     class="modal"
     id="mailbox-rules-modal"

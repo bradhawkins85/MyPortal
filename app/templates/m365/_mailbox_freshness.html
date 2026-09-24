@@ -1,0 +1,6 @@
+<div class="panel__header">
+  <p class="panel__subtitle">
+    <strong>{{ company.name or "Selected company" }}</strong> · {{ mailboxes | length }} mailbox{% if mailboxes | length != 1 %}es{% endif %} ·
+    {% if synced_at %}Source refreshed {{ synced_at.strftime('%d %b %Y %H:%M') }} UTC{% else %}<span class="status status--warning">Source freshness unknown</span>{% endif %}
+  </p>
+</div>
