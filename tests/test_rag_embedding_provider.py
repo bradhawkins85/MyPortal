@@ -38,6 +38,62 @@ async def test_openai_compatible_embedding_supports_semantic_paraphrase(monkeypa
     assert rag_index.cosine_similarity(left, right) > 0.99
 
 
+@pytest.mark.anyio
+async def test_openai_compatible_embedding_uses_llama_cpp_supported_payload(monkeypatch):
+    settings = SimpleNamespace(
+        rag_embedding_provider="openai_compatible",
+        rag_embedding_model="nomic-embed-text",
+        rag_embedding_dimensions=2,
+        rag_embedding_base_url="http://llama.test",
+        rag_embedding_api_key=None,
+    )
+    response = SimpleNamespace(
+        raise_for_status=lambda: None,
+        json=lambda: {"data": [{"embedding": [3.0, 4.0, 12.0]}]},
+    )
+    payloads = []
+
+    async def post(_self, _url, *, json, headers):
+        payloads.append(json)
+        return response
+
+    monkeypatch.setattr(rag_index, "get_settings", lambda: settings)
+    monkeypatch.setattr(rag_index.httpx.AsyncClient, "post", post)
+
+    vector = await rag_index.embed_text("Section: Subject")
+
+    assert payloads == [
+        {
+            "model": "nomic-embed-text",
+            "input": "Section: Subject",
+            "encoding_format": "float",
+        }
+    ]
+    assert vector == pytest.approx([0.6, 0.8])
+
+
+@pytest.mark.anyio
+async def test_openai_compatible_embedding_rejects_too_short_vector(monkeypatch):
+    settings = SimpleNamespace(
+        rag_embedding_provider="openai_compatible",
+        rag_embedding_model="nomic-embed-text",
+        rag_embedding_dimensions=3,
+        rag_embedding_base_url="http://llama.test",
+        rag_embedding_api_key=None,
+    )
+    response = SimpleNamespace(
+        raise_for_status=lambda: None,
+        json=lambda: {"data": [{"embedding": [1.0, 2.0]}]},
+    )
+    monkeypatch.setattr(rag_index, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        rag_index.httpx.AsyncClient, "post", AsyncMock(return_value=response)
+    )
+
+    with pytest.raises(ValueError, match="configured 3, provider returned 2"):
+        await rag_index.embed_text("test")
+
+
 def test_embedding_fingerprint_changes_for_every_compatibility_component(monkeypatch):
     base = dict(
         rag_embedding_provider="ollama",

@@ -268,7 +268,7 @@ async def embed_text(text: str) -> list[float]:
         payload = {
             "model": settings.rag_embedding_model,
             "input": text,
-            "dimensions": int(settings.rag_embedding_dimensions),
+            "encoding_format": "float",
         }
     async with monitored_client(httpx.AsyncClient, timeout=30.0) as client:
         response = await client.post(url, json=payload, headers=headers)
@@ -284,10 +284,16 @@ async def embed_text(text: str) -> list[float]:
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise ValueError("Embedding provider returned an invalid response") from exc
     expected = int(settings.rag_embedding_dimensions)
-    if len(result) != expected:
+    if len(result) < expected:
         raise ValueError(
             f"Embedding dimension mismatch: configured {expected}, provider returned {len(result)}"
         )
+    # ``dimensions`` is not part of the baseline OpenAI-compatible contract and
+    # llama.cpp rejects it with HTTP 501.  Request the model's native vector and
+    # reduce it locally; Matryoshka models retain their intended semantics after
+    # truncation and the normalization below.
+    if len(result) > expected:
+        result = result[:expected]
     magnitude = math.sqrt(sum(value * value for value in result))
     return [value / magnitude for value in result] if magnitude else result
 
