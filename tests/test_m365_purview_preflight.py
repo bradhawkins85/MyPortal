@@ -39,7 +39,9 @@ async def test_preflight_distinguishes_eop_permission_and_reports_all_checks():
     async def invoke(_token, _tenant, command, _parameters=None, **_kwargs):
         if command == "Get-ServicePrincipal":
             return {"value": [{"ObjectId": object_id, "AppId": client_id}]}
-        return {"value": [{"ExternalDirectoryObjectId": object_id}]}
+        if command == "Get-RoleGroup":
+            return {"value": [{"Members": [object_id]}]}
+        raise AssertionError(command)
 
     with (
         patch.object(m365, "get_credentials", AsyncMock(return_value={
@@ -133,8 +135,8 @@ async def test_preflight_uses_live_purview_probe_when_graph_assignment_is_stale(
     async def invoke(_token, _tenant, command, _parameters=None, **_kwargs):
         if command == "Get-ServicePrincipal":
             return {"value": [{"ObjectId": object_id, "AppId": client_id}]}
-        if command == "Get-RoleGroupMember":
-            return {"value": [{"ExternalDirectoryObjectId": object_id}]}
+        if command == "Get-RoleGroup":
+            return {"value": [{"Members": [object_id]}]}
         raise AssertionError(command)
 
     with (
@@ -184,8 +186,8 @@ async def test_preflight_accepts_eop_assignment_when_manifest_cannot_be_read():
     async def invoke(_token, _tenant, command, _parameters=None, **_kwargs):
         if command == "Get-ServicePrincipal":
             return {"value": [{"ObjectId": object_id}]}
-        if command == "Get-RoleGroupMember":
-            return {"value": [{"ExternalDirectoryObjectId": object_id}]}
+        if command == "Get-RoleGroup":
+            return {"value": [{"Members": [object_id]}]}
         return {"value": [{"Name": "contoso"}]}
 
     with (
@@ -207,7 +209,7 @@ async def test_preflight_accepts_eop_assignment_when_manifest_cannot_be_read():
 
 
 @pytest.mark.anyio("asyncio")
-async def test_preflight_uses_membership_instead_of_unfiltered_service_principal_lookup():
+async def test_preflight_avoids_broken_role_group_member_cmdlet():
     client_id = "22222222-2222-2222-2222-222222222222"
     object_id = "33333333-3333-3333-3333-333333333333"
 
@@ -231,9 +233,12 @@ async def test_preflight_uses_membership_instead_of_unfiltered_service_principal
 
     async def invoke(_token, _tenant, command, parameters=None, **_kwargs):
         commands.append(command)
-        if command == "Get-RoleGroupMember":
+        if command == "Get-RoleGroup":
             assert parameters == {"Identity": "eDiscoveryManager"}
-            return {"value": [{"ExternalDirectoryObjectId": object_id}]}
+            return {"value": [{"Members": [{"ExternalDirectoryObjectId": object_id}]}]}
+        if command == "Get-ServicePrincipal":
+            assert parameters == {"Identity": object_id}
+            return {"value": [{"ObjectId": object_id, "AppId": client_id}]}
         raise AssertionError(command)
 
     with (
@@ -250,7 +255,8 @@ async def test_preflight_uses_membership_instead_of_unfiltered_service_principal
         result = await m365.run_purview_preflight(7)
 
     assert result["ready"] is True
-    assert commands == ["Get-RoleGroupMember"]
+    assert commands == ["Get-RoleGroup", "Get-ServicePrincipal"]
+    assert "Get-RoleGroupMember" not in commands
 
 
 @pytest.mark.anyio("asyncio")
@@ -275,8 +281,8 @@ async def test_preflight_scopes_service_principal_internal_error_to_registration
         raise AssertionError(url)
 
     async def invoke(_token, _tenant, command, parameters=None, **_kwargs):
-        if command == "Get-RoleGroupMember":
-            return {"value": []}
+        if command == "Get-RoleGroup":
+            return {"value": [{"Members": []}]}
         if command == "Get-ServicePrincipal":
             assert parameters == {"Identity": object_id}
             raise m365.M365Error(
