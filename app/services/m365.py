@@ -4088,22 +4088,19 @@ async def run_purview_preflight(
     if tenant_domain:
         try:
             scc_token, _ = await _acquire_scc_access_token(company_id)
-            # Probe with a cmdlet implemented by the Security & Compliance
-            # session. Get-OrganizationConfig belongs to Exchange Online and the
-            # Purview REST endpoint can fail it with ArgumentNullException even
-            # when authentication and organization routing are healthy.
-            await _scc_invoke_command(
-                scc_token, tenant_id, "Get-ComplianceSearch", organization=tenant_domain
+            # Use the parameterised role-group lookup as the live organization
+            # probe.  Empty Get-ComplianceSearch requests are rejected by some
+            # Purview REST front ends with ArgumentNullException even for a
+            # correctly configured tenant.
+            members = await _scc_invoke_command(
+                scc_token, tenant_id, "Get-RoleGroupMember",
+                {"Identity": "eDiscoveryManager"}, organization=tenant_domain,
             )
             # A successful app-only Purview command proves the EOP application
             # permission, tenant consent, and organization routing directly.
             # Do not gate this probe on Graph metadata: manually granted roles
             # can be usable before (or without permission for) Graph enumeration.
             permission_configured = consent_granted = org_ok = True
-            members = await _scc_invoke_command(
-                scc_token, tenant_id, "Get-RoleGroupMember",
-                {"Identity": "eDiscoveryManager"}, organization=tenant_domain,
-            )
             member_rows = members.get("value") or members.get("Value") or []
             if isinstance(member_rows, dict):
                 member_rows = [member_rows]
