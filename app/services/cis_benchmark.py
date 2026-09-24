@@ -911,7 +911,7 @@ async def _check_monitor_secure_score(token: str) -> dict[str, Any]:
             return _unknown(
                 check_id,
                 check_name,
-                "Unable to retrieve Secure Score – the app may lack SecuritySecureScore.Read.All permission.",
+                "Unable to retrieve Secure Score – the app may lack SecurityEvents.Read.All permission.",
             )
         return _unknown(check_id, check_name, f"Unable to retrieve Secure Score: {exc}")
 

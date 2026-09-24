@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CONTRACT_VERSION = "2026-09-24.3"
+CONTRACT_VERSION = "2026-09-24.4"
 
 
 @dataclass(frozen=True)
@@ -37,9 +37,6 @@ RESOURCE_APP_IDS = {
     "Office 365 Management APIs": "c5393580-f805-4401-95e8-94b7a6ef2fc2",
     "Skype and Teams Tenant Admin API": "48ac35b8-9aa8-4d74-927d-1f4a14a0b239",
     "WindowsDefenderATP": "fc780465-2017-40d4-a0c5-307022471b92",
-    # Tenant-owned resource. Its configured app ID must be verified at runtime;
-    # display name alone is never treated as identity.
-    "M365 License Manager": None,
     "Microsoft Exchange Online Protection": "00000007-0000-0ff1-ce00-000000000000",
 }
 
@@ -73,7 +70,6 @@ OrgSettings-Forms.ReadWrite.All DeviceManagementRBAC.ReadWrite.All PrivilegedAcc
 
 _DELEGATED = {
     "Office 365 Management APIs": "ActivityFeed.Read",
-    "M365 License Manager": "LicenseManager.AccessAsUser",
     "Office 365 Exchange Online": "Exchange.Manage Calendars.ReadWrite.All MailboxSettings.ReadWrite",
     "Microsoft Graph": """SharePointTenantSettings.ReadWrite.All UnifiedGroupMember.Read.AsGuest
 RoleManagement.ReadWrite.Directory Organization.ReadWrite.All SecurityActions.ReadWrite.All offline_access
@@ -101,6 +97,11 @@ IdentityRiskEvent.ReadWrite.All IdentityRiskyServicePrincipal.ReadWrite.All Iden
     "WindowsDefenderATP": "Vulnerability.Read",
 }
 
+# Do not add ``SecuritySecureScore.Read.All`` or
+# ``LicenseManager.AccessAsUser`` here. Microsoft Graph documents
+# ``SecurityEvents.Read.All`` for the Secure Score endpoints, while the latter
+# is not exposed by a Microsoft 365 resource service principal. Requesting
+# either unavailable permission makes the Entra provisioning manifest invalid.
 
 # Stable Graph IDs already used by provisioning before this contract existed.
 # Keeping this snapshot here prevents provisioning and diagnostics drifting apart.
@@ -137,7 +138,6 @@ GRAPH_APPLICATION_PERMISSION_IDS = {
     "IdentityRiskyUser.Read.All": "dc5007c0-2d7d-4c42-879c-2dab87571379",
     "Application.Read.All": "9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30",
     "SecurityEvents.Read.All": "bf394140-e372-4bf9-a898-299cfc7564e5",
-    "SecuritySecureScore.Read.All": "e0b77adb-e790-44a3-b0a0-257d06303687",
     "SharePointTenantSettings.ReadWrite.All": "19b94e34-907c-4f43-bde9-38b1909ed408",
     "Sites.Read.All": "332a536c-c7ef-4017-ab91-336970924f0d",
     "Sites.ReadWrite.All": "9492366f-7969-46a4-8d15-ed1a20078fff",
@@ -155,7 +155,6 @@ _PROVISION_ONLY = {
     "Mail.ReadWrite": ("mail_import", "GET/PATCH /users/{id}/messages", "write", "optional"),
     "IdentityRiskyUser.Read.All": ("security_monitoring", "GET /identityProtection/riskyUsers", "read", "optional"),
     "Application.Read.All": ("application_monitoring", "GET /applications", "read", "required"),
-    "SecuritySecureScore.Read.All": ("security_monitoring", "GET /security/secureScores", "read", "optional"),
     "Sites.ReadWrite.All": ("offboarding_export", "PUT /sites/{id}/drive/items", "write", "optional"),
 }
 
@@ -176,7 +175,6 @@ def _metadata(resource: str, permission_type: str, name: str) -> tuple[str, str,
         "Office 365 Management APIs": "GET /api/v1.0/{tenant}/activity/feed/subscriptions/content",
         "Skype and Teams Tenant Admin API": "Teams PowerShell tenant administration cmdlet",
         "WindowsDefenderATP": "GET /api/vulnerabilities",
-        "M365 License Manager": "License Manager configured API operation",
     }[resource]
     access = "write" if any(token in name for token in ("Write", "Manage", "Create", "Send", "Command", "Edit", "Delete", "FullControl")) else "read"
     disposition = "legacy"
