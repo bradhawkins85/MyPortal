@@ -97,7 +97,20 @@
         </header>
         <p class="alert alert--{{ connection_health.variant }}" role="status">{{ connection_health.message }}</p>
         <div class="m365-steps">
-          <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">1</span><span class="m365-step__title">Confirm tenant</span></div><p>One Global Administrator sign-in discovers and binds the expected tenant.</p><a href="/m365/discover" class="button">Sign in with Microsoft</a>{% if request.query_params.get('m365_discovered_tenant') %}<form method="get" action="/m365/provision" class="form-field__group"><label for="confirmed-tenant-id" class="form-label">Discovered tenant</label><input id="confirmed-tenant-id" class="form-input" name="tenant_id" value="{{ request.query_params.get('m365_discovered_tenant') }}" readonly><button class="button" type="submit">Confirm tenant</button></form>{% endif %}</div>
+          <div class="m365-step">
+            <div class="m365-step__top"><span class="m365-step__number">1</span><span class="m365-step__title">Confirm tenant</span></div>
+            <p>One Global Administrator sign-in discovers and binds the expected tenant.</p>
+            <a href="/m365/discover" class="button">Sign in with Microsoft</a>
+            {% if request.query_params.get('m365_discovered_tenant') %}
+            <div class="form-field__group">
+              <label for="confirmed-tenant-id" class="form-label">Discovered tenant</label>
+              <input id="confirmed-tenant-id" class="form-input" value="{{ request.query_params.get('m365_discovered_tenant') }}" readonly>
+              {# Use a navigation link because /m365/provision redirects to Microsoft;
+                 CSP form-action also checks a form submission's redirect chain. #}
+              <a class="button" href="/m365/provision?tenant_id={{ request.query_params.get('m365_discovered_tenant') | urlencode }}">Confirm tenant</a>
+            </div>
+            {% endif %}
+          </div>
           <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">2</span><span class="m365-step__title">Review access</span></div><p>Review the combined permission delta and enabled workload justification before consent.</p><a href="/m365/diagnostics" class="button button--ghost">Review permissions</a></div>
           <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">3</span><span class="m365-step__title">Grant consent</span></div><p>Grant all reviewable Microsoft consent together. Separate directory or Purview RBAC is shown and can be resumed.</p>{% if has_credentials %}<a href="/m365/connect" class="button">Grant Microsoft consent</a>{% else %}<button type="button" class="button button--secondary" disabled>Confirm tenant first</button>{% endif %}</div>
           <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">4</span><span class="m365-step__title">Verify and renew</span></div><p>Verify tenant identity, enabled workloads and automatic credential renewal before cutover.</p><a href="{{ connection_health.next_action_url }}" class="button button--ghost">{{ connection_health.next_action_label }}</a></div>

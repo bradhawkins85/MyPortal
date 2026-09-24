@@ -33,3 +33,14 @@ def test_m365_sensitive_actions_retain_csrf_and_safe_secret_fields() -> None:
     assert source.count('autocomplete="new-password"') == 2
     assert 'rel="noopener noreferrer"' in source
     assert "Delete stored Microsoft 365 credentials?" in source
+
+
+def test_confirm_tenant_uses_navigation_for_oauth_redirect() -> None:
+    source = TEMPLATE_PATH.read_text(encoding="utf-8")
+
+    expected_link = (
+        'href="/m365/provision?tenant_id={{ '
+        "request.query_params.get('m365_discovered_tenant') | urlencode }}\""
+    )
+    assert expected_link in source
+    assert 'action="/m365/provision"' not in source
