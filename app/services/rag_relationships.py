@@ -216,6 +216,15 @@ Return JSON only:
 {{"relationship":"DIRECT_MATCH","confidence":0.94,"score":0.93,"reason":"...","supporting_excerpt":"..."}}"""
 
 
+def _evaluation_payload(prompt: str, model_override: str) -> dict[str, Any]:
+    """Build a request without masking the module's configured default model."""
+
+    payload: dict[str, Any] = {"prompt": prompt, "format": "json"}
+    if model := model_override.strip():
+        payload["model"] = model
+    return payload
+
+
 def _extract_json_object(text: str) -> str:
     stripped = text.strip()
     if not stripped:
@@ -303,6 +312,13 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
     if not evaluator_module or not evaluator_module.get("enabled"):
         _set_evaluator_backoff("Ollama module disabled or not configured")
         return 0
+    evaluator_settings = evaluator_module.get("settings")
+    configured_model = (
+        str(evaluator_settings.get("model") or "").strip()
+        if isinstance(evaluator_settings, Mapping)
+        else ""
+    )
+    evaluation_model = settings.rag_relationship_model.strip() or configured_model
     jobs = await rel_repo.claim_jobs(limit or settings.rag_relationship_batch_size)
     processed = 0
     semaphore = asyncio.Semaphore(max(1, int(settings.rag_relationship_max_concurrent)))
@@ -349,14 +365,11 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
                         int(job["id"]), "SKIPPED", claim_token
                     )
                     return
+                evaluation_payload = _evaluation_payload(
+                    _prompt(source, target), settings.rag_relationship_model
+                )
                 response = await modules_service.trigger_module(
-                    "ollama",
-                    {
-                        "prompt": _prompt(source, target),
-                        "format": "json",
-                        "model": settings.rag_relationship_model,
-                    },
-                    background=False,
+                    "ollama", evaluation_payload, background=False
                 )
                 unavailable_reason = _relationship_evaluator_unavailable_reason(
                     response
@@ -373,7 +386,7 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
                     int(source["id"]),
                     int(target["id"]),
                     parsed,
-                    evaluated_model=settings.rag_relationship_model,
+                    evaluated_model=evaluation_model,
                     source_hash=str(source.get("content_hash") or ""),
                     target_hash=str(target.get("content_hash") or ""),
                     duration_ms=int((time.perf_counter() - started) * 1000),

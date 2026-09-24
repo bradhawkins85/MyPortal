@@ -462,7 +462,7 @@ class Settings(BaseSettings):
         description="Additional per-source safety cap for ticket targets.",
     )
     rag_relationship_model: str = Field(
-        default="gemma4:e2b", validation_alias="RAG_RELATIONSHIP_MODEL"
+        default="", validation_alias="RAG_RELATIONSHIP_MODEL"
     )
     rag_relationship_workers: int = Field(
         default=2, validation_alias="RAG_RELATIONSHIP_WORKERS", ge=0, le=16
