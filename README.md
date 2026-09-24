@@ -72,6 +72,8 @@ MyPortal combines customer operations, service delivery workflows, and integrati
    ```bash
    cp .env.example .env
    ```
+   Redis is optional for local development and recommended for multi-worker or
+   production deployments. See [Redis installation and configuration](docs/wiki/getting-started/Redis.md).
 4. Run the app:
    ```bash
    python -m uvicorn app.main:app --reload

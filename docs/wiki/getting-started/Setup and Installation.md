@@ -63,7 +63,7 @@ Edit `.env` and update these critical settings:
 - **SMS_ENDPOINT** and **SMS_AUTH** (optional) - For SMS notifications
 
 Optional settings include:
-- Redis connection details
+- Redis connection details (see [Redis Installation and Configuration](Redis))
 - SMTP server configuration
 - Azure Graph credentials for Office 365 sync
 
