@@ -1,0 +1,7 @@
+{
+  "guid": "069ce6a0-c8d1-48e2-b30f-34ccc33fab55",
+  "occurred_at": "2026-09-24T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Keep Microsoft 365 sign-in state in shared durable storage when Redis is unavailable so tenant setup callbacks can complete on any web worker.",
+  "content_hash": "m365-oauth-durable-database-fallback"
+}
