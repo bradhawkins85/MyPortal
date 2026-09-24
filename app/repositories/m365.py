@@ -126,6 +126,20 @@ async def update_app_token(*, company_id: int, access_token: str | None,
     )
 
 
+async def update_application_metadata(
+    *, company_id: int, app_object_id: str, key_id: str | None,
+    expires_at: datetime | None,
+) -> None:
+    """Backfill safely discovered application and secret metadata in place."""
+    await db.execute(
+        """UPDATE company_m365_credentials
+           SET app_object_id = %s, client_secret_key_id = %s,
+               client_secret_expires_at = %s
+           WHERE company_id = %s""",
+        (app_object_id, key_id, expires_at, company_id),
+    )
+
+
 async def update_client_secret(
     *,
     company_id: int,
@@ -151,8 +165,8 @@ async def list_credentials_expiring_before(cutoff: datetime) -> list[dict[str, A
     rows = await db.fetch_all(
         """
         SELECT * FROM company_m365_credentials
-        WHERE client_secret_expires_at IS NOT NULL
-          AND client_secret_expires_at <= %s
+        WHERE client_secret_expires_at IS NULL
+           OR client_secret_expires_at <= %s
         """,
         (cutoff,),
     )

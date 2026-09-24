@@ -282,13 +282,11 @@ async def test_renew_admin_client_secret_backfills_missing_app_object_id():
         result = await m365_service.renew_admin_client_secret()
 
     assert result["key_id"] == NEW_KEY_ID
-    assert len(persisted) == 3
+    assert len(persisted) == 2
     assert persisted[0]["app_object_id"] == APP_OBJECT_ID
     assert persisted[0]["client_secret"] == "old-secret"
     assert persisted[1]["app_object_id"] == APP_OBJECT_ID
     assert persisted[1]["client_secret"] == "new-secret"
-    assert persisted[2]["app_object_id"] == APP_OBJECT_ID
-    assert persisted[2]["client_secret"] == "new-secret"
     add_call = next(c for c in posted_calls if "addPassword" in c["url"])
     assert APP_OBJECT_ID in add_call["url"]
     assert exchange_mock.await_count == 2
@@ -321,6 +319,8 @@ async def test_renew_admin_client_secret_validation_failure_restores_previous_se
         side_effect=[
             ("old-token", None, None),
             m365_service.M365Error("new secret rejected"),
+            m365_service.M365Error("new secret rejected"),
+            m365_service.M365Error("new secret rejected"),
         ]
     )
     mock_settings = MagicMock()
@@ -341,18 +341,14 @@ async def test_renew_admin_client_secret_validation_failure_restores_previous_se
     ):
         with pytest.raises(
             m365_service.M365Error,
-            match="previous credential restored",
+            match="previous credential remains active",
         ):
             await m365_service.renew_admin_client_secret()
 
-    assert len(persisted) == 2
-    assert persisted[0]["client_secret"] == "new-secret"
-    assert persisted[0]["client_secret_key_id"] == NEW_KEY_ID
-    assert persisted[1]["client_secret"] == "old-secret"
-    assert persisted[1]["client_secret_key_id"] == OLD_KEY_ID
+    assert persisted == []
     remove_call = next(c for c in posted_calls if "removePassword" in c["url"])
     assert remove_call["payload"]["keyId"] == NEW_KEY_ID
-    assert exchange_mock.await_count == 2
+    assert exchange_mock.await_count == 4
 
 
 @pytest.mark.anyio
@@ -421,7 +417,7 @@ async def test_exchange_token_preserves_http_status_on_failure():
 
 @pytest.mark.anyio("asyncio")
 async def test_renew_client_secret_success():
-    """renew_client_secret creates a new secret and revokes the old one."""
+    """renew_client_secret validates a new secret and retains the old one for overlap."""
     company_id = 42
     stored_creds = {
         "company_id": company_id,
@@ -467,9 +463,8 @@ async def test_renew_client_secret_success():
     assert call_kwargs["company_id"] == company_id
     assert call_kwargs["key_id"] == NEW_KEY_ID
 
-    # Old key was revoked
-    remove_pw = next(c for c in posted_calls if "removePassword" in c["url"])
-    assert remove_pw["payload"]["keyId"] == OLD_KEY_ID
+    # The old key remains usable during the documented overlap period.
+    assert not any("removePassword" in c["url"] for c in posted_calls)
 
 
 @pytest.mark.anyio("asyncio")
@@ -492,14 +487,18 @@ async def test_renew_client_secret_no_app_object_id_raises():
         "client_secret_key_id": None,
         "client_secret_expires_at": None,
     }
-    with patch.object(m365_service, "get_credentials", AsyncMock(return_value=creds)):
-        with pytest.raises(m365_service.M365Error, match="re-provisioning"):
+    with (
+        patch.object(m365_service, "get_credentials", AsyncMock(return_value=creds)),
+        patch.object(m365_service, "_exchange_token", AsyncMock(return_value=("token", None, None))),
+        patch.object(m365_service, "_lookup_application_object_id", AsyncMock(return_value=None)),
+    ):
+        with pytest.raises(m365_service.M365Error, match="Verify app ownership"):
             await m365_service.renew_client_secret(1)
 
 
 @pytest.mark.anyio("asyncio")
-async def test_renew_client_secret_revoke_failure_is_nonfatal():
-    """A failure to revoke the old key is logged but does not raise an exception."""
+async def test_renew_client_secret_retains_old_key_during_overlap():
+    """The previous key is not revoked during the configured overlap."""
     company_id = 7
     stored_creds = {
         "company_id": company_id,
@@ -530,11 +529,9 @@ async def test_renew_client_secret_revoke_failure_is_nonfatal():
         patch.object(m365_service.m365_repo, "update_client_secret", AsyncMock()),
         patch("app.services.m365.get_settings", return_value=mock_settings),
     ):
-        # Should NOT raise even though removePassword failed
         await m365_service.renew_client_secret(company_id)
 
-    # Verify removePassword was attempted
-    assert any("removePassword" in u for u in posted_calls)
+    assert not any("removePassword" in u for u in posted_calls)
 
 
 @pytest.mark.anyio("asyncio")
@@ -579,8 +576,8 @@ async def test_renew_client_secret_no_old_key_id_skips_revoke():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.anyio("asyncio")
-async def test_renew_expiring_skips_without_app_object_id():
-    """renew_expiring_client_secrets skips entries without app_object_id."""
+async def test_renew_expiring_attempts_adoption_without_app_object_id():
+    """The scheduler attempts guided adoption instead of silently skipping."""
     expiring_creds = [
         {
             "company_id": 1,
@@ -596,6 +593,10 @@ async def test_renew_expiring_skips_without_app_object_id():
             m365_service.m365_repo,
             "list_credentials_expiring_before",
             AsyncMock(return_value=expiring_creds),
+        ),
+        patch.object(
+            m365_service, "renew_client_secret",
+            AsyncMock(side_effect=m365_service.M365ReprovisionRequiredError("ownership required")),
         ),
         patch.object(
             m365_service, "get_admin_m365_credentials", AsyncMock(return_value=None)
