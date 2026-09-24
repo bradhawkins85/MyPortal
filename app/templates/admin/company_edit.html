@@ -869,73 +869,16 @@
             </label>
             <p class="form-help">When enabled, admins can select a staff member to forward emails to when submitting an offboarding request. Disable if your company uses a fixed forwarding address configured in the workflow step.</p>
           </div>
-          {% if m365_credential %}
+          {% if m365_connection_health %}
+          <div class="alert alert--{{ m365_connection_health.variant }}" role="status">
+            <strong>{{ m365_connection_health.label }}</strong><br />{{ m365_connection_health.message }}
+          </div>
           <dl class="definition-list">
-            <div class="definition-list__item">
-              <dt>Tenant ID</dt>
-              <dd>{{ m365_credential.tenant_id }}</dd>
-            </div>
-            <div class="definition-list__item">
-              <dt>Client ID</dt>
-              <dd>{{ m365_credential.client_id }}</dd>
-            </div>
-            <div class="definition-list__item">
-              <dt>Token expires</dt>
-              <dd>{{ m365_credential.token_expires_at or 'Not authorised yet' }}</dd>
-            </div>
+            <div class="definition-list__item"><dt>Last verified</dt><dd>{% if m365_connection_health.last_verified_at %}<time data-utc="{{ m365_connection_health.last_verified_at }}">{{ m365_connection_health.last_verified_at }}</time>{% else %}Never{% endif %}</dd></div>
+            <div class="definition-list__item"><dt>Next renewal / expiry</dt><dd>{% if m365_connection_health.renewal_at %}<time data-utc="{{ m365_connection_health.renewal_at }}">{{ m365_connection_health.renewal_at }}</time>{% else %}Not scheduled{% endif %}</dd></div>
           </dl>
-          {% else %}
-          <p class="text-muted">No Microsoft 365 credentials linked to this company.</p>
-          {% endif %}
-          <form action="/admin/companies/{{ company.id }}/m365-credentials" method="post" class="form" autocomplete="off">
-            {% include "partials/csrf.html" %}
-            <div class="form-field">
-              <label class="form-label" for="m365-tenant-id">Tenant ID</label>
-              <input
-                id="m365-tenant-id"
-                name="tenantId"
-                class="form-input"
-                value="{{ m365_credential.tenant_id if m365_credential else '' }}"
-                maxlength="255"
-                required
-              />
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="m365-client-id">Client ID</label>
-              <input
-                id="m365-client-id"
-                name="clientId"
-                class="form-input"
-                value="{{ m365_credential.client_id if m365_credential else '' }}"
-                maxlength="255"
-                required
-              />
-            </div>
-            <div class="form-field">
-              <label class="form-label" for="m365-client-secret">Client secret</label>
-              <input
-                id="m365-client-secret"
-                name="clientSecret"
-                type="password"
-                class="form-input"
-                placeholder="{% if m365_credential %}Enter new secret to rotate{% else %}Required{% endif %}"
-                {% if not m365_credential %}required{% endif %}
-              />
-              <p class="form-help">Secrets are encrypted at rest. Leave blank to keep the existing secret.</p>
-            </div>
-            <div class="form-actions">
-              <button type="submit" class="button">Save credentials</button>
-            </div>
-          </form>
-          {% if m365_credential %}
-          <form action="/admin/companies/{{ company.id }}/m365-credentials/delete" method="post" class="form" style="margin-top: 1rem;">
-            {% include "partials/csrf.html" %}
-            <button
-              type="submit"
-              class="button button--ghost"
-              onclick="return confirm('Remove Microsoft 365 credentials for this company?');"
-            >Remove credentials</button>
-          </form>
+          <a class="button" href="/admin/companies/{{ company.id }}/m365">{{ m365_connection_health.next_action_label }}</a>
+          <p class="form-help">Setup, permission review, repair and manual credentials are managed on the canonical company connection page.</p>
           {% endif %}
           <hr class="divider" style="margin: 1.5rem 0;" />
           <div class="form-field">

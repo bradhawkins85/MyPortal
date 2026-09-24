@@ -1,277 +1,76 @@
 {% extends "base.html" %}
 {% from "macros/header.html" import page_header_actions %}
-
-{% block header_title %}Office 365 Diagnostics{% endblock %}
-
-{% block title %}Office 365 Diagnostics{% endblock %}
-
+{% block header_title %}Microsoft 365 connection diagnostics{% endblock %}
+{% block title %}Microsoft 365 connection diagnostics{% endblock %}
 {% block header_actions %}
-  {% if has_credentials %}
-    {{ page_header_actions([
-      {
-        "label": "Check Permissions",
-        "type": "form",
-        "action": "/m365/diagnostics/check",
-        "method": "post",
-        "variant": "primary"
-      },
-      {
-        "label": "Repair Configuration",
-        "type": "form",
-        "action": "/m365/diagnostics/repair",
-        "method": "post",
-        "variant": "secondary"
-      }
-    ]) }}
-  {% endif %}
+  {{ page_header_actions([
+    {"label": "Connection", "type": "link", "href": "/m365", "variant": "secondary"},
+    {"label": "Verify now", "type": "form", "action": "/m365/diagnostics/check", "method": "post", "variant": "primary"},
+    {"label": "Repair", "type": "form", "action": "/m365/diagnostics/repair", "method": "post", "variant": "secondary"}
+  ] if has_credentials else [{"label": "Start setup", "type": "link", "href": "/m365", "variant": "primary"}]) }}
 {% endblock %}
-
 {% block content %}
-  {% if required_access %}
-  <section class="panel" aria-labelledby="required-access-title">
-    <header class="panel__header">
-      <div>
-        <h2 class="panel__title" id="required-access-title">Required tenant-wide access</h2>
-        <p class="panel__subtitle">Checks application permissions and delegated permissions separately, including both app-manifest configuration and effective tenant-wide consent.</p>
-      </div>
-      <span class="status status--{{ 'success' if required_access.all_ok else 'danger' }}">{{ 'All access verified' if required_access.all_ok else 'Action required' }}</span>
+<div class="page-stack">
+  <section class="card card--panel" aria-labelledby="connection-health-title">
+    <header class="card__header">
+      <div><h2 class="card__title" id="connection-health-title">Connection health</h2><p class="card__subtitle">Credentials are not treated as connected until tenant, workloads, access and renewal have been verified.</p></div>
+      <span class="status status--{{ connection_health.variant }}" role="status">{{ connection_health.label }}</span>
     </header>
-    <div class="panel__body">
-      {% if required_access.error %}<p class="alert alert--danger">{{ required_access.error }}</p>{% endif %}
-      <h3>Directory roles</h3>
-      {% for role in required_access.directory_roles %}
-      <article class="card card--panel" style="margin-bottom: var(--space-3);">
-        <div style="display:flex; justify-content:space-between; gap:var(--space-3);">
-          <strong>{{ role.name }}</strong>
-          <span class="status status--{{ 'success' if role.status == 'pass' else 'danger' }}">{{ 'Assigned' if role.status == 'pass' else 'Missing' }}</span>
-        </div>
-        {% if role.remediation %}<p class="text-muted">{{ role.remediation }}</p>{% endif %}
-      </article>
-      {% endfor %}
-      {% for resource in required_access.resources %}
-      <details style="margin-top:var(--space-3);" {% if not resource.all_ok %}open{% endif %}>
-        <summary><strong>{{ resource.name }}</strong> — {{ 'verified' if resource.all_ok else 'action required' }}</summary>
-        <div style="overflow-x:auto;">
-          <table class="table">
-            <thead><tr><th>Permission</th><th>Type</th><th>Configured</th><th>Consent</th><th>Result</th></tr></thead>
-            <tbody>
-            {% for permission in resource.permissions %}
-              <tr>
-                <td><strong>{{ permission.name }}</strong>{% if permission.remediation %}<br><small class="text-muted">{{ permission.remediation }}</small>{% endif %}</td>
-                <td>{{ permission.type }}</td>
-                <td>{{ 'Yes' if permission.configured else 'No' }}</td>
-                <td>{{ 'Granted' if permission.consented else 'Missing' }}</td>
-                <td><span class="status status--{{ 'success' if permission.status == 'pass' else ('neutral' if permission.status == 'unavailable' else 'danger') }}">{{ permission.status|replace('_', ' ')|title }}</span></td>
-              </tr>
-            {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </details>
-      {% endfor %}
+    <div class="card__body">
+      <p>{{ connection_health.message }}</p>
+      <dl class="definition-list">
+        <div class="definition-list__item"><dt>Last verified</dt><dd>{% if connection_health.last_verified_at %}<time data-utc="{{ connection_health.last_verified_at }}">{{ connection_health.last_verified_at }}</time>{% else %}Never{% endif %}</dd></div>
+        <div class="definition-list__item"><dt>Next credential renewal / expiry</dt><dd>{% if connection_health.renewal_at %}<time data-utc="{{ connection_health.renewal_at }}">{{ connection_health.renewal_at }}</time>{% else %}Not scheduled{% endif %}</dd></div>
+      </dl>
+      <a class="button" href="{{ connection_health.next_action_url }}">{{ connection_health.next_action_label }}</a>
     </div>
-  </section>
-  {% endif %}
-  {% if purview_preflight %}
-  <section class="panel" aria-labelledby="purview-preflight-title">
-    <header class="panel__header">
-      <div>
-        <h2 class="panel__title" id="purview-preflight-title">Purview eDiscovery preflight</h2>
-        <p class="panel__subtitle">Separately reports provider support, Entra consent, Exchange/EOP grants, Purview provisioning, search access, and purge access.</p>
-      </div>
-      <span class="status status--{{ 'success' if purview_preflight.ready else 'warning' }}">{{ 'Ready' if purview_preflight.ready else 'Admin action required' }}</span>
-    </header>
-    <div class="panel__body">
-      {% if purview_preflight.error %}<p class="alert alert--danger">{{ purview_preflight.error }}</p>{% endif %}
-      {% for check in purview_preflight.checks %}
-      <article class="card card--panel" style="margin-bottom: var(--space-3);">
-        <div style="display:flex; justify-content:space-between; gap:var(--space-3); align-items:flex-start;">
-          <div><strong>{{ check.label }}</strong><p class="text-muted">{{ check.detail }}</p></div>
-          <span class="status status--{{ 'success' if check.status == 'Passed' else ('danger' if check.status == 'Failed' else 'warning') }}">{{ check.status }}</span>
-        </div>
-        {% if check.remediation %}<pre style="white-space:pre-wrap; overflow:auto;"><code>{{ check.remediation }}</code></pre>{% endif %}
-      </article>
-      {% endfor %}
-      {% if purview_preflight.client_id %}
-      <h3>Identifiers</h3>
-      <p><strong>Application/client ID</strong> (App registrations): <code>{{ purview_preflight.client_id }}</code></p>
-      <p><strong>Enterprise application object ID</strong> (Enterprise applications): <code>{{ purview_preflight.enterprise_application_object_id or 'Not found' }}</code></p>
-      <details>
-        <summary>Support-ready diagnostic bundle</summary>
-        <pre style="white-space:pre-wrap; overflow:auto;"><code>Tenant domain: {{ purview_preflight.tenant_domain }}
-Tenant ID: {{ purview_preflight.tenant_id }}
-Timestamp (UTC): {{ purview_preflight.timestamp }}
-Correlation/request ID: {{ purview_preflight.correlation_id }}
-{% for check in purview_preflight.checks %}{{ check.label }}: {{ check.status }}
-{% endfor %}</code></pre>
-      </details>
-      {% endif %}
-      <p class="text-muted">These checks diagnose the retained legacy route only. Passing app-role or RBAC checks does not make app-only eDiscovery supported or ready.</p>
-      {% if purview_preflight.client_id and purview_preflight.tenant_domain %}
-      <h3>Supported administrator workflow</h3>
-      <ol>
-        <li>Confirm the operator has the tenant license and separate Purview roles needed to search and purge.</li>
-        <li>Open an interactive Exchange Online PowerShell session and run <code>Connect-IPPSSession -EnableSearchOnlySession</code>.</li>
-        <li>Complete and review the search before creating the separate purge action.</li>
-        <li>Record the remote names and reconcile their status before retrying after a timeout.</li>
-      </ol>
-      {% endif %}
-    </div>
-  </section>
-  {% endif %}
-  <section class="panel">
-    <header class="panel__header">
-      <div>
-        <h2 class="panel__title">Enterprise App Permissions</h2>
-        <p class="panel__subtitle">
-          Lists the expected permissions for each Microsoft 365 enterprise app used by this portal.
-          Click <strong>Check Permissions</strong> to verify each permission is granted and see Pass/Fail results.
-        </p>
-      </div>
-    </header>
-    {% if not has_credentials %}
-    <div class="panel__body">
-      <p class="text-muted">
-        Microsoft 365 credentials have not been configured for this company.
-        Configure them on the <a href="/m365">Office 365</a> page before running diagnostics.
-      </p>
-    </div>
-    {% else %}
-    <div class="panel__body">
-      <h3>Purview role check</h3>
-      <p class="text-muted">
-        Configure the tenant-wide <strong>Compliance Administrator</strong> role for this company's enterprise application. This delegated setup requires an administrator with an active supported role and does not grant API consent or provision Purview.
-      </p>
-      <a class="button button--secondary" href="/m365/connect?setup=compliance_role&amp;return_to=diagnostics">Configure Compliance Administrator</a>
-    </div>
-    {% endif %}
   </section>
 
-  {# ------------------------------------------------------------------ #}
-  {# Render one panel per enterprise app                                 #}
-  {# ------------------------------------------------------------------ #}
-  {% set results_by_app = {} %}
-  {% if results %}
-    {% for app in results %}
-      {% set _ = results_by_app.update({app.app_id: app}) %}
-    {% endfor %}
-  {% endif %}
-
-  {% for app in catalog %}
-    {% set app_result = results_by_app.get(app.app_id) %}
-  <section class="panel">
-    <header class="panel__header">
-      <div>
-        <h3 class="panel__title">{{ app.name }}</h3>
-        <p class="panel__subtitle" style="font-family: var(--font-mono, monospace); font-size: 0.8rem; color: var(--color-muted);">App ID: {{ app.app_id }}</p>
-      </div>
-      {% if app_result %}
-      <div class="panel__header-meta">
-        {% if app_result.all_ok %}
-          <span class="status status--success">All permissions granted</span>
-        {% else %}
-          <span class="status status--danger">Missing permissions</span>
-        {% endif %}
-        {% if app_result.checked_at %}
-          <small class="text-muted" style="margin-left: 0.5rem;">
-            Last checked: <span data-utc="{{ app_result.checked_at.isoformat() if app_result.checked_at else '' }}">{{ app_result.checked_at }}</span>
-          </small>
-        {% endif %}
-      </div>
-      {% endif %}
-    </header>
-    <div class="panel__body" style="padding: 0;">
-      <table class="table">
-        <thead>
-          <tr>
-            <th style="width: 3rem;"></th>
-            <th>Permission</th>
-            <th>Role ID</th>
-            <th style="width: 8rem;">Status</th>
-            <th style="width: 6rem;"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for perm in app.permissions %}
-            {% set perm_result = namespace(status="unknown") %}
-            {% if app_result %}
-              {% for p in app_result.permissions %}
-                {% if p.id == perm.id %}
-                  {% set perm_result.status = p.status %}
-                {% endif %}
-              {% endfor %}
-            {% endif %}
-          <tr>
-            <td style="text-align: center;">
-              {% if perm_result.status == "pass" %}
-                <span title="Pass" style="color: var(--color-success, #16a34a); font-size: 1.25rem;">✓</span>
-              {% elif perm_result.status == "not_supported" %}
-                <span title="Not supported in this tenant" style="color: var(--color-muted, #6b7280); font-size: 1.25rem;">–</span>
-              {% elif perm_result.status == "fail" %}
-                <span title="Fail" style="color: var(--color-error, #dc2626); font-size: 1.25rem;">✗</span>
-              {% else %}
-                <span title="Not yet checked" style="color: var(--color-muted, #6b7280); font-size: 1.25rem;">–</span>
-              {% endif %}
-            </td>
-            <td><strong>{{ perm.name }}</strong></td>
-            <td>
-              <code style="font-size: 0.8rem; color: var(--color-muted);">{{ perm.id }}</code>
-            </td>
-            <td>
-              {% if perm_result.status == "pass" %}
-                <span class="status status--success">Pass</span>
-              {% elif perm_result.status == "not_supported" %}
-                <span class="status status--neutral" title="This permission is not available in this Microsoft 365 tenant.">Not supported</span>
-              {% elif perm_result.status == "fail" %}
-                <span class="status status--danger">Fail</span>
-              {% else %}
-                <span class="status status--neutral">Unknown</span>
-              {% endif %}
-            </td>
-            <td style="width: 6rem; text-align: right;">
-              {% if perm_result.status == "fail" %}
-                <form method="post" action="/m365/diagnostics/repair" style="display:inline;">
-                  {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
-                  <button type="submit" class="btn btn--sm btn--warning" title="Attempt to grant this missing permission" aria-label="Repair missing permission: {{ perm.name }}">Repair</button>
-                </form>
-              {% endif %}
-            </td>
-          </tr>
-          {% if perm_result.status == "fail" and perm.name == "Teams.ManageAsApp" %}
-          <tr>
-            <td colspan="5" style="background: var(--color-warning-bg, #fffbeb); border-top: none; padding: 0.5rem 1rem 0.75rem 3rem;">
-              <strong style="color: var(--color-warning, #92400e);">Remediation steps:</strong>
-              <ol style="margin: 0.35rem 0 0 1.25rem; padding: 0; color: var(--color-warning, #92400e);">
-                <li>Click <strong>Repair</strong> above, or re-run <strong>Authorize portal access</strong> on the <a href="/m365">Office 365 Configuration</a> page to attempt an automatic grant.</li>
-                <li>If the automatic grant fails, sign in to <a href="https://entra.microsoft.com" target="_blank" rel="noopener noreferrer">Microsoft Entra ID</a> as a Global Administrator and navigate to <strong>Enterprise applications &rsaquo; [your app] &rsaquo; Permissions &rsaquo; Grant admin consent</strong>.</li>
-                <li>Additionally, assign the <strong>Teams Service Administrator</strong> directory role to the service principal under <strong>Roles and administrators &rsaquo; Teams Service Administrator</strong>.</li>
-              </ol>
-            </td>
-          </tr>
-          {% endif %}
-          {% endfor %}
-        </tbody>
-      </table>
+  <section class="card card--panel" aria-labelledby="capability-title">
+    <header class="card__header"><div><h2 class="card__title" id="capability-title">Capability readiness</h2><p class="card__subtitle">The same checks determine the status shown throughout company and module settings.</p></div></header>
+    <div class="card__body" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:var(--space-3);">
+      {% for workload in connection_health.workloads %}<div><strong>{{ workload.name }}</strong><br><span class="status status--{{ 'success' if workload.ready else 'warning' }}">{{ 'Ready' if workload.ready else 'Action required' }}</span></div>{% endfor %}
+      {% if purview_preflight %}<div><strong>Purview administrator workflow</strong><br><span class="status status--{{ 'success' if purview_preflight.ready else 'warning' }}">{{ 'Ready' if purview_preflight.ready else 'Separate Microsoft RBAC required' }}</span></div>{% endif %}
     </div>
   </section>
-  {% endfor %}
 
-  <section class="panel">
-    <header class="panel__header">
-      <h3 class="panel__title">How permissions are verified</h3>
-    </header>
-    <div class="panel__body">
-      <ol class="list list--ordered">
-        <li>The portal acquires an application token using the stored company credentials.</li>
-        <li>It locates the enterprise app's service principal in the Microsoft Entra ID tenant.</li>
-        <li>It retrieves all app role assignments for that service principal and compares them against the expected permissions for each enterprise app.</li>
-        <li>Each permission is reported as <strong>Pass</strong> (granted) or <strong>Fail</strong> (missing).</li>
-      </ol>
-      <p class="text-muted">
-        Missing permissions can be granted by re-running the auto-provision flow on the
-        <a href="/m365">Office 365 Configuration</a> page, or by manually assigning the roles
-        in <a href="https://entra.microsoft.com" target="_blank" rel="noopener noreferrer">Microsoft Entra ID</a>.
-      </p>
+  <section class="card card--panel" aria-labelledby="permission-title">
+    <header class="card__header"><div><h2 class="card__title" id="permission-title">Permission diagnostics</h2><p class="card__subtitle">Each resource, permission and grant type appears once with its requested, consented and operational state.</p></div></header>
+    <div class="card__body">
+      <div class="table-toolbar"><label class="form-field" for="permission-filter"><span class="form-label">Filter permissions</span><input class="form-input" id="permission-filter" type="search" placeholder="Resource, permission or type" data-permission-filter></label></div>
+      {% if required_access and required_access.error %}<p class="alert alert--danger" role="alert">{{ required_access.error }}</p>{% endif %}
+      <div class="table-scroll" style="overflow-x:auto;">
+        <table class="table" id="m365-permission-table">
+          <thead><tr><th scope="col"><button type="button" class="button button--ghost" data-sort="resource">Resource</button></th><th scope="col"><button type="button" class="button button--ghost" data-sort="permission">Permission</button></th><th scope="col">Type</th><th scope="col">Requested</th><th scope="col">Consented</th><th scope="col">Operational</th></tr></thead>
+          <tbody>
+          {% if required_access %}{% for resource in required_access.resources %}{% for permission in resource.permissions %}
+            <tr data-permission-row data-resource="{{ resource.name|lower }}" data-permission="{{ permission.name|lower }}">
+              <td>{{ resource.name }}</td><td><strong>{{ permission.name }}</strong>{% if permission.remediation %}<br><small class="text-muted">{{ permission.remediation }}</small>{% endif %}</td><td>{{ permission.type }}</td>
+              <td><span class="status status--{{ 'success' if permission.configured else 'danger' }}">{{ 'Yes' if permission.configured else 'Missing' }}</span></td>
+              <td><span class="status status--{{ 'success' if permission.consented else 'danger' }}">{{ 'Granted' if permission.consented else 'Missing' }}</span></td>
+              <td><span class="status status--{{ 'success' if permission.status == 'pass' else ('neutral' if permission.status == 'unavailable' else 'danger') }}">{{ permission.status|replace('_', ' ')|title }}</span></td>
+            </tr>
+          {% endfor %}{% endfor %}{% endif %}
+          </tbody>
+        </table>
+      </div>
+      {% if not required_access %}<p class="text-muted">Connect the tenant, then verify to populate this canonical permission inventory.</p>{% endif %}
     </div>
   </section>
+
+  {% if required_access and required_access.directory_roles %}<section class="card card--panel" aria-labelledby="rbac-title"><header class="card__header"><div><h2 class="card__title" id="rbac-title">Separate Microsoft RBAC steps</h2><p class="card__subtitle">These assignments cannot be combined with API consent. Complete them in Microsoft, then return and verify.</p></div></header><div class="card__body">{% for role in required_access.directory_roles %}<p><strong>{{ role.name }}</strong> <span class="status status--{{ 'success' if role.status == 'pass' else 'warning' }}">{{ 'Assigned' if role.status == 'pass' else 'Required' }}</span>{% if role.remediation %}<br><small>{{ role.remediation }}</small>{% endif %}</p>{% endfor %}<a class="button button--secondary" href="/m365/connect?setup=compliance_role&amp;return_to=diagnostics">Resume Microsoft RBAC setup</a></div></section>{% endif %}
+
+  <details class="card card--panel"><summary class="card__header"><span class="card__title">Advanced credential and support details</span></summary><div class="card__body"><p>Tenant ID: <code>{{ connection_health.tenant_id or 'Not confirmed' }}</code></p>{% if purview_preflight and purview_preflight.correlation_id %}<p>Latest Microsoft correlation ID: <code>{{ purview_preflight.correlation_id }}</code></p>{% endif %}<p class="text-muted">Secrets and tokens are never displayed.</p></div></details>
+</div>
+<script>
+(() => {
+  const input = document.querySelector('[data-permission-filter]');
+  const rows = [...document.querySelectorAll('[data-permission-row]')];
+  input?.addEventListener('input', () => { const value = input.value.trim().toLowerCase(); rows.forEach(row => { row.hidden = !row.textContent.toLowerCase().includes(value); }); });
+  document.querySelectorAll('[data-sort]').forEach(button => button.addEventListener('click', () => {
+    const key = button.dataset.sort; const body = document.querySelector('#m365-permission-table tbody');
+    rows.sort((a, b) => a.dataset[key].localeCompare(b.dataset[key])); rows.forEach(row => body.appendChild(row));
+  }));
+})();
+</script>
 {% endblock %}

@@ -84,7 +84,7 @@
       <span class="m365-hero__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 5.5 10.5 3v8H3V5.5Zm9-2.9L21 1v10h-9V2.6ZM3 12.5h7.5v8L3 18.5v-6Zm9 0h9v10l-9-1.6v-8.4Z"/></svg></span>
       <div><h2 id="m365-title">Microsoft 365 connection</h2><p>Manage tenant access, credentials, and connection health for {{ company.name if company and company.name else 'this company' }}.</p></div>
     </div>
-    <span class="m365-status{% if has_credentials %} m365-status--connected{% endif %}"><span class="m365-status__dot"></span>{{ 'Connected' if has_credentials else 'Not connected' }}</span>
+    <span class="status status--{{ connection_health.variant }}" role="status">{{ connection_health.label }}</span>
   </section>
 
   <div class="m365-grid">
@@ -95,9 +95,12 @@
           <span class="m365-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 0 1 5 5v1h1a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3v-8a3 3 0 0 1 3-3h1V7a5 5 0 0 1 5-5Zm0 2a3 3 0 0 0-3 3v1h6V7a3 3 0 0 0-3-3Zm0 8a2 2 0 0 0-1 3.73V18h2v-2.27A2 2 0 0 0 12 12Z"/></svg></span>
           <div><h3 id="setup-title">Guided tenant setup</h3><p>Create and authorise a dedicated enterprise app without manually configuring the Azure portal.</p></div>
         </header>
+        <p class="alert alert--{{ connection_health.variant }}" role="status">{{ connection_health.message }}</p>
         <div class="m365-steps">
-          <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">1</span><span class="m365-step__title">Identify tenant</span></div><p>A Global Admin signs in so the tenant can be discovered securely.</p><a href="/m365/discover" class="button">Sign in as Global Admin</a>{% if request.query_params.get('m365_discovered_tenant') %}<form method="get" action="/m365/provision" class="form-field__group"><input class="form-input" name="tenant_id" value="{{ request.query_params.get('m365_discovered_tenant') }}" readonly><button class="button" type="submit">Confirm tenant and provision</button></form>{% endif %}</div>
-          <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">2</span><span class="m365-step__title">Grant portal access</span></div><p>Approve the required Microsoft Graph permissions and offline access.</p>{% if has_credentials %}<a href="/m365/connect" class="button">Authorise portal access</a>{% else %}<button type="button" class="button button--secondary" disabled title="Complete step 1 first">Complete step 1 first</button>{% endif %}</div>
+          <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">1</span><span class="m365-step__title">Confirm tenant</span></div><p>One Global Administrator sign-in discovers and binds the expected tenant.</p><a href="/m365/discover" class="button">Sign in with Microsoft</a>{% if request.query_params.get('m365_discovered_tenant') %}<form method="get" action="/m365/provision" class="form-field__group"><label for="confirmed-tenant-id" class="form-label">Discovered tenant</label><input id="confirmed-tenant-id" class="form-input" name="tenant_id" value="{{ request.query_params.get('m365_discovered_tenant') }}" readonly><button class="button" type="submit">Confirm tenant</button></form>{% endif %}</div>
+          <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">2</span><span class="m365-step__title">Review access</span></div><p>Review the combined permission delta and enabled workload justification before consent.</p><a href="/m365/diagnostics" class="button button--ghost">Review permissions</a></div>
+          <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">3</span><span class="m365-step__title">Grant consent</span></div><p>Grant all reviewable Microsoft consent together. Separate directory or Purview RBAC is shown and can be resumed.</p>{% if has_credentials %}<a href="/m365/connect" class="button">Grant Microsoft consent</a>{% else %}<button type="button" class="button button--secondary" disabled>Confirm tenant first</button>{% endif %}</div>
+          <div class="m365-step"><div class="m365-step__top"><span class="m365-step__number">4</span><span class="m365-step__title">Verify and renew</span></div><p>Verify tenant identity, enabled workloads and automatic credential renewal before cutover.</p><a href="{{ connection_health.next_action_url }}" class="button button--ghost">{{ connection_health.next_action_label }}</a></div>
         </div>
       </section>
       {% endif %}
@@ -138,10 +141,12 @@
       <section class="m365-card">
         <header class="m365-card__header"><span class="m365-section-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm-1 5v6h6v-2h-4V7h-2Z"/></svg></span><div><h3>Connection overview</h3><p>Current tenant authentication state.</p></div></header>
         <dl class="m365-facts">
-          <div class="m365-fact"><dt>Status</dt><dd>{{ 'Ready to synchronise' if has_credentials else 'Setup required' }}</dd></div>
-          <div class="m365-fact"><dt>Token expiry</dt><dd>{% if credential and credential.token_expires_at %}<time data-utc="{{ credential.token_expires_at }}">{{ credential.token_expires_at }}</time>{% else %}Not available{% endif %}</dd></div>
+          <div class="m365-fact"><dt>Status</dt><dd><span class="status status--{{ connection_health.variant }}">{{ connection_health.label }}</span></dd></div>
+          <div class="m365-fact"><dt>Last verified</dt><dd>{% if connection_health.last_verified_at %}<time data-utc="{{ connection_health.last_verified_at }}">{{ connection_health.last_verified_at }}</time>{% else %}Never{% endif %}</dd></div>
+          <div class="m365-fact"><dt>Next renewal</dt><dd>{% if connection_health.renewal_at %}<time data-utc="{{ connection_health.renewal_at }}">{{ connection_health.renewal_at }}</time>{% else %}Not scheduled{% endif %}</dd></div>
           {% if is_super_admin %}<div class="m365-fact"><dt>Provisioning</dt><dd>{{ 'Company override' if has_admin_credentials else ('Global configuration' if admin_credentials_configured else 'Not configured') }}</dd></div>{% endif %}
         </dl>
+        <ul class="m365-checklist" style="margin-top:var(--space-3);">{% for workload in connection_health.workloads %}<li>{{ workload.name }} — {{ 'Ready' if workload.ready else 'Action required' }}</li>{% endfor %}</ul>
       </section>
 
       {% if has_credentials and is_super_admin %}
