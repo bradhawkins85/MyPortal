@@ -4522,11 +4522,16 @@ async def m365_diagnostics_page(request: Request):
     credentials = await m365_service.get_credentials(company_id)
     last_results = await m365_service.get_last_enterprise_app_permissions(company_id)
     purview_preflight = None
+    required_access = None
     if credentials:
         try:
             purview_preflight = await m365_service.run_purview_preflight(company_id)
         except m365_service.M365Error as exc:
             purview_preflight = {"ready": False, "error": str(exc), "checks": []}
+        try:
+            required_access = await m365_service.diagnose_required_m365_access(company_id)
+        except m365_service.M365Error as exc:
+            required_access = {"all_ok": False, "error": str(exc), "resources": [], "directory_roles": []}
 
     extra = {
         "title": "Office 365 Diagnostics",
@@ -4535,6 +4540,7 @@ async def m365_diagnostics_page(request: Request):
         "catalog": m365_service.ENTERPRISE_APP_CATALOG,
         "results": last_results,
         "purview_preflight": purview_preflight,
+        "required_access": required_access,
         "is_super_admin": True,
     }
     return await _render_template("m365/diagnostics.html", request, user, extra=extra)
@@ -4550,6 +4556,7 @@ async def run_m365_diagnostics_check(request: Request):
         return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
     try:
         await m365_service.check_enterprise_app_permissions(company_id)
+        await m365_service.diagnose_required_m365_access(company_id)
     except m365_service.M365Error as exc:
         return flash_redirect("/m365/diagnostics", str(exc), "error")
     return flash_redirect("/m365/diagnostics", "Permission check completed", "success")
