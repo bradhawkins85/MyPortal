@@ -83,6 +83,7 @@ from app.services.cis_benchmark import (
 from app.services.m365 import (
     M365Error,
     _acquire_exo_access_token,
+    _acquire_teams_access_tokens,
     _acquire_scc_access_token,
     _coerce_exo_bool,
     _exo_invoke_command,
@@ -101,6 +102,11 @@ from app.services.m365 import (
     get_effective_admin_credentials,
     renew_admin_client_secret,
     try_grant_missing_permissions,
+)
+from app.services.m365_providers import (
+    ProviderCommandError,
+    invoke_teams_command,
+    provider_enabled,
 )
 
 
@@ -1914,11 +1920,9 @@ async def _check_zap_teams_on(
 # Teams Service Administrator RBAC role on the service principal).
 
 _TEAMS_PERMISSION_HINT = (
-    " The service principal requires the Teams.ManageAsApp app role "
-    "and the Teams Service Administrator directory role. Re-run the "
-    "'Authorize portal access' flow to grant the required permissions, "
-    "or assign them manually in Microsoft Entra ID > Roles and "
-    "administrators > Teams Service Administrator."
+    " Grant Microsoft Graph Organization.Read.All and assign the service "
+    "principal the Teams Service Administrator role; do not add permissions "
+    "to the Skype and Teams Tenant Admin API."
 )
 
 # Checks that call Teams PowerShell cmdlets via the Exchange Online InvokeCommand
@@ -1950,6 +1954,20 @@ def _teams_ps_error_detail(exc: M365Error, cmdlet: str) -> str:
     return f"Unable to query {cmdlet}: {exc}"
 
 
+async def _teams_invoke_command(
+    tokens: tuple[str, str], tenant_id: str, cmdlet: str,
+    parameters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    try:
+        return await invoke_teams_command(
+            tenant_id=tenant_id, graph_token=tokens[0], teams_token=tokens[1],
+            command=cmdlet, parameters=parameters,
+        )
+    except ProviderCommandError as exc:
+        status = 403 if exc.kind == "rbac_denied" else 400
+        raise M365Error(f"Teams provider {exc.kind}: {exc}", http_status=status) from exc
+
+
 async def _check_anon_dialin_cannot_start_meeting(
     exo_token: str, tenant_id: str
 ) -> dict[str, Any]:
@@ -1957,7 +1975,7 @@ async def _check_anon_dialin_cannot_start_meeting(
     check_id = "bp_anon_dialin_cannot_start_meeting"
     check_name = "Anonymous users and dial-in callers can't start a meeting"
     try:
-        data = await _exo_invoke_command(
+        data = await _teams_invoke_command(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
@@ -1992,7 +2010,7 @@ async def _check_only_org_bypass_lobby(
     check_id = "bp_only_org_can_bypass_lobby"
     check_name = "Only people in my org can bypass the lobby"
     try:
-        data = await _exo_invoke_command(
+        data = await _teams_invoke_command(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
@@ -2019,7 +2037,7 @@ async def _check_invited_users_auto_admitted(
     check_id = "bp_invited_users_auto_admitted"
     check_name = "Only invited users should be automatically admitted to Teams meetings"
     try:
-        data = await _exo_invoke_command(
+        data = await _teams_invoke_command(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
@@ -2045,7 +2063,7 @@ async def _check_external_participants_no_control(
     check_id = "bp_external_participants_no_control"
     check_name = "External participants can't give or request control"
     try:
-        data = await _exo_invoke_command(
+        data = await _teams_invoke_command(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
@@ -2071,7 +2089,7 @@ async def _check_external_users_cannot_initiate(
     check_id = "bp_external_users_cannot_initiate"
     check_name = "External Teams users cannot initiate conversations"
     try:
-        data = await _exo_invoke_command(
+        data = await _teams_invoke_command(
             exo_token, tenant_id, "Get-CsTenantFederationConfiguration"
         )
     except M365Error as exc:
@@ -2108,7 +2126,7 @@ async def _check_teams_external_files_approved_storage(
     check_id = "bp_teams_external_files_approved_storage"
     check_name = "External file sharing in Teams is enabled for only approved cloud storage services"
     try:
-        data = await _exo_invoke_command(
+        data = await _teams_invoke_command(
             exo_token, tenant_id, "Get-CsTeamsClientConfiguration", {"Identity": "Global"}
         )
     except M365Error as exc:
@@ -2144,7 +2162,7 @@ async def _check_restrict_anon_users_join_meeting(
     check_id = "bp_restrict_anon_users_join_meeting"
     check_name = "Restrict anonymous users from joining meetings"
     try:
-        data = await _exo_invoke_command(
+        data = await _teams_invoke_command(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
@@ -2170,7 +2188,7 @@ async def _check_restrict_anon_users_start_meeting(
     check_id = "bp_restrict_anon_users_start_meeting"
     check_name = "Restrict anonymous users from starting Teams meetings"
     try:
-        data = await _exo_invoke_command(
+        data = await _teams_invoke_command(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
@@ -5898,11 +5916,10 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "-AllowPSTNUsersToBypassLobby $false"
         ),
         "source": _check_anon_dialin_cannot_start_meeting,
-        "source_type": "exo",
+        "source_type": "teams",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
-        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_only_org_can_bypass_lobby",
@@ -5913,11 +5930,10 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "remediation": "Set-CsTeamsMeetingPolicy -Identity Global -AutoAdmittedUsers EveryoneInCompany",
         "source": _check_only_org_bypass_lobby,
-        "source_type": "exo",
+        "source_type": "teams",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
-        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_invited_users_auto_admitted",
@@ -5929,11 +5945,10 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "remediation": "Set-CsTeamsMeetingPolicy -Identity Global -AutoAdmittedUsers InvitedUsers",
         "source": _check_invited_users_auto_admitted,
-        "source_type": "exo",
+        "source_type": "teams",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
-        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_dialin_cannot_bypass_lobby",
@@ -5986,11 +6001,10 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         ),
         "remediation": "Set-CsTeamsMeetingPolicy -Identity Global -AllowExternalParticipantGiveRequestControl $false",
         "source": _check_external_participants_no_control,
-        "source_type": "exo",
+        "source_type": "teams",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
-        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_external_users_cannot_initiate",
@@ -6004,11 +6018,10 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "(or restrict via -AllowedDomains to a managed list)"
         ),
         "source": _check_external_users_cannot_initiate,
-        "source_type": "exo",
+        "source_type": "teams",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
-        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_teams_external_files_approved_storage",
@@ -6023,11 +6036,10 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "-AllowShareFile $false -AllowEgnyte $false"
         ),
         "source": _check_teams_external_files_approved_storage,
-        "source_type": "exo",
+        "source_type": "teams",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
-        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_restrict_anon_users_join_meeting",
@@ -6042,11 +6054,10 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "-AllowAnonymousUsersToJoinMeeting $false"
         ),
         "source": _check_restrict_anon_users_join_meeting,
-        "source_type": "exo",
+        "source_type": "teams",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
-        "requires_teams_manage_as_app": True,
     },
     {
         "id": "bp_restrict_anon_users_start_meeting",
@@ -6062,11 +6073,10 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
             "-AllowAnonymousUsersToStartMeeting $false"
         ),
         "source": _check_restrict_anon_users_start_meeting,
-        "source_type": "exo",
+        "source_type": "teams",
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
-        "requires_teams_manage_as_app": True,
         "is_cis_benchmark": True,
     },
     # ------------------------------------------------------------------
@@ -7282,6 +7292,8 @@ async def run_best_practices(
     # EXO token/tenant – acquired lazily on first EXO check
     exo_token: str | None = None
     exo_tenant_id: str | None = None
+    teams_tokens: tuple[str, str] | None = None
+    teams_tenant_id: str | None = None
 
     # SCC token/tenant – acquired lazily on first SCC (Security & Compliance) check
     scc_token: str | None = None
@@ -7310,11 +7322,6 @@ async def run_best_practices(
                 f"license(s) which the tenant does not have: "
                 f"{_format_missing_licenses(missing)}."
             )
-        elif bp.get("requires_teams_manage_as_app"):
-            # Teams PowerShell cmdlet checks require Teams.ManageAsApp which
-            # cannot be programmatically assigned to an app registration.
-            status = STATUS_NOT_APPLICABLE
-            details = _TEAMS_PS_NOT_APPLICABLE_DETAILS
         elif cis_group and cis_group in _CIS_GROUP_RUNNERS:
             # CIS batch check – run the group runner once and cache results
             if cis_group not in cis_group_cache:
@@ -7368,6 +7375,18 @@ async def run_best_practices(
                             lambda r=runner: r(exo_token, exo_tenant_id),  # type: ignore[call-arg,misc]
                             company_id=company_id,
                             check_id=check_id,
+                        )
+                elif source_type == "teams":
+                    if not provider_enabled(company_id, "teams"):
+                        raw = _result(check_id, check_name, STATUS_NOT_APPLICABLE,
+                            "Teams provider is not enabled for this company; the legacy Exchange route is not used.")
+                    else:
+                        if teams_tokens is None:
+                            graph_teams, resource_teams, teams_tenant_id = await _acquire_teams_access_tokens(company_id)
+                            teams_tokens = (graph_teams, resource_teams)
+                        raw = await _call_check_with_retry(
+                            lambda r=runner: r(teams_tokens, teams_tenant_id),
+                            company_id=company_id, check_id=check_id,
                         )
                 elif source_type == "scc":
                     if scc_token is None:
@@ -7558,9 +7577,6 @@ async def run_single_check(
             f"license(s) which the tenant does not have: "
             f"{_format_missing_licenses(missing)}."
         )
-    elif bp.get("requires_teams_manage_as_app"):
-        status = STATUS_NOT_APPLICABLE
-        details = _TEAMS_PS_NOT_APPLICABLE_DETAILS
     elif cis_group and cis_group in _CIS_GROUP_RUNNERS:
         batch_runner = _CIS_GROUP_RUNNERS.get(cis_group)
         if batch_runner:
@@ -7613,6 +7629,18 @@ async def run_single_check(
                         lambda r=runner: r(exo_token, exo_tenant_id),  # type: ignore[call-arg,misc]
                         company_id=company_id,
                         check_id=check_id,
+                    )
+            elif source_type == "teams":
+                if not provider_enabled(company_id, "teams"):
+                    raw = _result(
+                        check_id, check_name, STATUS_NOT_APPLICABLE,
+                        "Teams provider is not enabled for this company; the legacy Exchange route is not used.",
+                    )
+                else:
+                    graph_teams, resource_teams, teams_tid = await _acquire_teams_access_tokens(company_id)
+                    raw = await _call_check_with_retry(
+                        lambda r=runner: r((graph_teams, resource_teams), teams_tid),
+                        company_id=company_id, check_id=check_id,
                     )
             elif source_type == "scc":
                 scc_tok, scc_tid = await _acquire_scc_access_token(company_id)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CONTRACT_VERSION = "2026-09-24.1"
+CONTRACT_VERSION = "2026-09-24.2"
 
 
 @dataclass(frozen=True)
@@ -195,9 +195,9 @@ _named_baseline.extend((
     RequiredPermission("Microsoft Exchange Online Protection", "Application", "Exchange.ManageAsApp",
                        "dc50a0fb-09a3-484d-be87-e023b12c6440", "purview", "Get-ProtectionAlert/New-ProtectionAlert",
                        "write", "Purview licensing", "Tenant administrator plus Compliance Administrator RBAC", ("application",), "required"),
-    RequiredPermission("Skype and Teams Tenant Admin API", "Application", "Teams.ManageAsApp",
-                       "dc50a0fb-09a3-484d-be87-e023b12c6440", "teams_administration", "Get-CsTeamsMeetingPolicy and related cmdlets",
-                       "read", "Microsoft Teams", "Tenant administrator plus Teams Service Administrator RBAC", ("application",), "required"),
+    # Teams PowerShell application authentication intentionally has no app role
+    # on the legacy Skype/Teams API.  The supported flow uses Graph
+    # Organization.Read.All plus Teams RBAC and two resource tokens.
 ))
 
 REQUIRED_PERMISSIONS = tuple(_named_baseline)
