@@ -29,6 +29,7 @@ from app.repositories import licenses as license_repo
 from app.repositories import license_sku_friendly_names as sku_friendly_repo
 from app.repositories import integration_modules as modules_repo
 from app.repositories import m365 as m365_repo
+from app.repositories import m365_connections as connection_repo
 from app.repositories import staff as staff_repo
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
@@ -1348,6 +1349,100 @@ async def delete_credentials(company_id: int) -> None:
     await m365_repo.delete_credentials(company_id)
 
 
+async def stage_connection_candidate(
+    company_id: int, tenant_id: str, provisioned: dict[str, Any]
+) -> dict[str, Any]:
+    """Persist a replacement without changing what production jobs consume."""
+    current = await m365_repo.get_credentials(company_id)
+    if current:
+        await connection_repo.ensure_legacy(company_id, current)
+    return await connection_repo.stage_candidate(
+        company_id=company_id,
+        tenant_id=tenant_id,
+        client_id=provisioned["client_id"],
+        client_secret=_encrypt(provisioned["client_secret"]),
+        app_object_id=provisioned.get("app_object_id"),
+        service_principal_object_id=provisioned.get("service_principal_object_id"),
+        client_secret_key_id=provisioned.get("client_secret_key_id"),
+        client_secret_expires_at=provisioned.get("client_secret_expires_at"),
+    )
+
+
+async def get_pending_connection(
+    company_id: int, tenant_id: str | None = None
+) -> dict[str, Any] | None:
+    pending = await connection_repo.get_pending(company_id)
+    if tenant_id and pending and str(pending.get("tenant_id", "")).lower() != tenant_id.lower():
+        return None
+    return pending
+
+
+async def verify_connection_candidate(
+    company_id: int, connection_id: int
+) -> dict[str, Any]:
+    """Verify tenant, workload access, and future secret-renewal access."""
+    candidate = await connection_repo.get(connection_id)
+    if not candidate or int(candidate["company_id"]) != company_id:
+        raise M365Error("Microsoft 365 connection candidate not found", http_status=404)
+    tenant_ok = workload_ok = renewal_ok = False
+    error: str | None = None
+    try:
+        secret = _decrypt(candidate.get("client_secret"))
+        token, _, _ = await _exchange_token(
+            tenant_id=str(candidate["tenant_id"]),
+            client_id=str(candidate["client_id"]),
+            client_secret=secret,
+            refresh_token=None,
+        )
+        organization = await _graph_get(
+            token, "https://graph.microsoft.com/v1.0/organization?$select=id"
+        )
+        actual_tenant = str((organization.get("value") or [{}])[0].get("id") or "")
+        tenant_ok = actual_tenant.lower() == str(candidate["tenant_id"]).lower()
+        if not tenant_ok:
+            raise M365Error("Candidate authenticated to a different Microsoft 365 tenant")
+        await _graph_get(token, "https://graph.microsoft.com/v1.0/users?$top=1&$select=id")
+        workload_ok = True
+        app_object_id = str(candidate.get("app_object_id") or "")
+        if not app_object_id:
+            raise M365Error("Candidate has no stable application object identity")
+        await _graph_get(
+            token,
+            f"https://graph.microsoft.com/v1.0/applications/"
+            f"{_graph_object_id(app_object_id)}?$select=id",
+        )
+        renewal_ok = True
+    except M365Error as exc:
+        error = str(exc)
+    await connection_repo.record_verification(
+        connection_id, tenant=tenant_ok, workload=workload_ok,
+        renewal=renewal_ok, error=error,
+    )
+    result = await connection_repo.get(connection_id)
+    if not result:
+        raise M365Error("Microsoft 365 connection candidate disappeared")
+    return result
+
+
+async def activate_connection_candidate(company_id: int, connection_id: int) -> dict[str, Any]:
+    return await connection_repo.activate(company_id, connection_id)
+
+
+async def rollback_connection(company_id: int) -> dict[str, Any]:
+    return await connection_repo.rollback(company_id)
+
+
+async def connection_dependency_inventory(connection_id: int) -> list[dict[str, Any]]:
+    return await connection_repo.dependency_inventory(connection_id)
+
+
+async def retire_connection(company_id: int, connection_id: int) -> None:
+    connection = await connection_repo.get(connection_id)
+    if not connection or int(connection["company_id"]) != company_id:
+        raise M365Error("Microsoft 365 connection not found", http_status=404)
+    await connection_repo.retire(connection_id)
+
+
 async def _exchange_token(
     *,
     tenant_id: str,
@@ -2269,66 +2364,14 @@ async def _graph_delete(access_token: str, url: str) -> None:
         )
 
 
-async def _delete_existing_apps_by_display_name(
-    access_token: str,
-    display_name: str,
-) -> None:
-    """Delete all app registrations whose ``displayName`` matches *display_name*.
-
-    Searching by display name covers the case where a previous provision run
-    left behind an orphaned app registration (e.g. if the stored
-    ``app_object_id`` is stale or was never recorded).  Deletion of the app
-    registration also removes the corresponding service principal in the same
-    tenant.
-
-    Errors are logged but never re-raised so that the caller (the provision
-    flow) can continue to create a fresh registration even when cleanup fails.
-    """
-    safe_name = display_name.replace("'", "''")
-    try:
-        existing = await _graph_get(
-            access_token,
-            f"https://graph.microsoft.com/v1.0/applications"
-            f"?$filter=displayName eq '{safe_name}'&$select=id,appId,displayName",
-        )
-    except M365Error as exc:
-        log_error(
-            "Failed to search for existing app registrations; skipping cleanup",
-            display_name=display_name,
-            error=str(exc),
-        )
-        return
-
-    for app in existing.get("value", []):
-        obj_id = app.get("id", "")
-        app_id = app.get("appId", "")
-        if not obj_id:
-            continue
-        try:
-            await _graph_delete(
-                access_token,
-                f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(obj_id)}",
-            )
-            log_info(
-                "Deleted existing app registration before re-provisioning",
-                app_object_id=obj_id,
-                app_id=app_id,
-                display_name=display_name,
-            )
-        except M365Error as exc:
-            log_error(
-                "Failed to delete existing app registration; continuing with provisioning",
-                app_object_id=obj_id,
-                app_id=app_id,
-                error=str(exc),
-            )
-
-
 async def provision_app_registration(
     *,
     access_token: str,
     display_name: str = "MyPortal Integration",
     redirect_uri: str | None = None,
+    app_object_id: str | None = None,
+    client_id: str | None = None,
+    service_principal_object_id: str | None = None,
 ) -> dict[str, Any]:
     """Create a per-tenant app registration with required permissions.
 
@@ -2359,9 +2402,9 @@ async def provision_app_registration(
     settings = get_settings()
     secret_lifetime_days = settings.m365_client_secret_lifetime_days
 
-    # 0. Remove any existing app registrations with the same display name so
-    #    that re-provisioning always starts from a clean slate.
-    await _delete_existing_apps_by_display_name(access_token, display_name)
+    # Display names are not identities: two companies may deliberately use the
+    # same name. Repair only an explicitly stored object, otherwise create a
+    # side-by-side candidate and leave every existing registration untouched.
 
     # 1. Validate permissions against the tenant's actual resource SP app roles.
     #    Some permissions (e.g. SharePointTenantSettings.Read.All) are only
@@ -2395,7 +2438,7 @@ async def provision_app_registration(
         await _build_required_resource_access(access_token)
     )
 
-    # 2. Create the app registration with only the validated permissions.
+    # 2. Repair the known app in place or create a side-by-side registration.
     app_payload: dict[str, Any] = {
         "displayName": display_name,
         "signInAudience": "AzureADMyOrg",
@@ -2403,23 +2446,34 @@ async def provision_app_registration(
     }
     if redirect_uri:
         app_payload["web"] = {"redirectUris": [redirect_uri]}
-    app_data = await _graph_post(
-        access_token,
-        "https://graph.microsoft.com/v1.0/applications",
-        app_payload,
-    )
-    app_object_id: str = app_data["id"]
-    client_id: str = app_data["appId"]
-    log_info("Provisioned M365 app registration", client_id=client_id)
+    if app_object_id and client_id:
+        await _graph_patch(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}",
+            app_payload,
+        )
+        log_info("Repaired M365 app registration in place", client_id=client_id)
+    else:
+        app_data = await _graph_post(
+            access_token,
+            "https://graph.microsoft.com/v1.0/applications",
+            app_payload,
+        )
+        app_object_id = app_data["id"]
+        client_id = app_data["appId"]
+        log_info("Provisioned M365 app registration candidate", client_id=client_id)
 
     # 3. Create a service principal (Enterprise App) for the registration
-    sp_data = await _graph_post(
-        access_token,
-        "https://graph.microsoft.com/v1.0/servicePrincipals",
-        {"appId": client_id},
-    )
-    sp_object_id: str = sp_data["id"]
-    log_info("Created M365 service principal", sp_object_id=sp_object_id)
+    if service_principal_object_id:
+        sp_object_id = service_principal_object_id
+    else:
+        sp_data = await _graph_post(
+            access_token,
+            "https://graph.microsoft.com/v1.0/servicePrincipals",
+            {"appId": client_id},
+        )
+        sp_object_id = sp_data["id"]
+        log_info("Created M365 service principal", sp_object_id=sp_object_id)
 
     # 4. Create a client secret with a configurable lifetime (default: 730 days / 2 years).
     # This is done *before* the role-assignment step so that the HTTP callback
@@ -2431,7 +2485,7 @@ async def provision_app_registration(
     secret_expiry_str = secret_expiry_date.isoformat() + "T00:00:00Z"
     secret_data = await _graph_post(
         access_token,
-        f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/addPassword",
+        f"https://graph.microsoft.com/v1.0/applications/{quote(str(app_object_id), safe='')}/addPassword",
         {
             "passwordCredential": {
                 "displayName": _M365_SECRET_DISPLAY_NAME,
@@ -2473,6 +2527,7 @@ async def provision_app_registration(
         "client_id": client_id,
         "client_secret": client_secret,
         "app_object_id": app_object_id,
+        "service_principal_object_id": sp_object_id,
         "client_secret_key_id": client_secret_key_id,
         "client_secret_expires_at": client_secret_expires_at,
     }
@@ -3145,8 +3200,6 @@ async def provision_pkce_public_client_app(
         endpoint of this MyPortal instance).
     :returns: The Application (client) ID of the newly created registration.
     """
-    await _delete_existing_apps_by_display_name(access_token, display_name)
-
     app_payload: dict[str, Any] = {
         "displayName": display_name,
         # AzureADMultipleOrgs enables sign-in for users from any Azure AD tenant
