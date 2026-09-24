@@ -381,3 +381,73 @@ async def test_sync_delegated_403_retries_unread_filter_with_client_credentials(
     assert [token for token, _url in seen_urls] == ["delegated-token", "client-creds-token"]
     assert all("$filter=isRead%20eq%20false" in url for _token, url in seen_urls)
     assert all("$orderby=receivedDateTime%20asc" not in url for _token, url in seen_urls)
+
+
+async def test_sync_delegated_401_forces_token_refresh_and_retries(monkeypatch):
+    """A revoked cached delegated token is refreshed once after Graph returns 401."""
+    from app.services.m365 import M365Error
+
+    account = _fake_account(
+        company_id=5,
+        refresh_token="enc:refresh",
+        access_token="enc:cached",
+        token_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        tenant_id="tenant-123",
+    )
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", lambda _: _coro(account))
+
+    refresh_flags: list[bool] = []
+
+    async def fake_acquire_delegated(acct, *, force_refresh=False):
+        refresh_flags.append(force_refresh)
+        return "refreshed-token" if force_refresh else "cached-token"
+
+    seen_tokens: list[str] = []
+
+    async def fake_graph_get(token, url):
+        seen_tokens.append(token)
+        if token == "cached-token":
+            raise M365Error("Unauthorized", http_status=401)
+        return {"value": [], "@odata.nextLink": None}
+
+    monkeypatch.setattr(m365_mail, "_acquire_delegated_access_token", fake_acquire_delegated)
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+
+    result = await m365_mail.sync_account(1)
+
+    assert result["status"] == "succeeded"
+    assert refresh_flags == [False, True]
+    assert seen_tokens == ["cached-token", "refreshed-token"]
+
+
+async def test_sync_app_401_bypasses_token_cache_and_retries(monkeypatch):
+    """A rejected app token is reacquired without consulting the token cache."""
+    from app.services.m365 import M365Error
+
+    account = _fake_account(company_id=5)
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(m365_mail.mail_repo, "get_account", lambda _: _coro(account))
+
+    acquire_calls: list[dict[str, Any]] = []
+
+    async def fake_acquire_token(company_id, **kwargs):
+        assert company_id == 5
+        acquire_calls.append(kwargs)
+        return "fresh-app-token" if kwargs.get("force_refresh") else "cached-app-token"
+
+    async def fake_graph_get(token, url):
+        if token == "cached-app-token":
+            raise M365Error("Unauthorized", http_status=401)
+        return {"value": [], "@odata.nextLink": None}
+
+    monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+
+    result = await m365_mail.sync_account(1)
+
+    assert result["status"] == "succeeded"
+    assert acquire_calls == [
+        {"force_client_credentials": True},
+        {"force_client_credentials": True, "force_refresh": True},
+    ]

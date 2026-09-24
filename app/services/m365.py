@@ -1543,7 +1543,10 @@ async def _exchange_token(
 
 
 async def acquire_access_token(
-    company_id: int, *, force_client_credentials: bool = False
+    company_id: int,
+    *,
+    force_client_credentials: bool = False,
+    force_refresh: bool = False,
 ) -> str:
     creds = await get_credentials(company_id)
     if not creds:
@@ -1584,7 +1587,7 @@ async def acquire_access_token(
         # row itself. Preserve their working cache until the first refresh
         # backfills the explicit cache identity.
         identity_matches = not use_app_cache
-    if stored_token and stored_expires_at and identity_matches:
+    if not force_refresh and stored_token and stored_expires_at and identity_matches:
         # token_expires_at is stored as a naive UTC datetime; compare likewise.
         now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
         margin = timedelta(minutes=5)
