@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CONTRACT_VERSION = "2026-09-24.2"
+CONTRACT_VERSION = "2026-09-24.3"
 
 
 @dataclass(frozen=True)
@@ -107,6 +107,13 @@ IdentityRiskEvent.ReadWrite.All IdentityRiskyServicePrincipal.ReadWrite.All Iden
 GRAPH_APPLICATION_PERMISSION_IDS = {
     "User.Read.All": "df021288-bdef-4463-88db-98f22de89214",
     "User.ReadWrite.All": "741f803b-c850-494e-b5df-cde7c675a1ca",
+    # Staff lifecycle permissions are additive.  User.ReadWrite.All remains in
+    # the legacy baseline for compatibility, but it is not presented as the
+    # least-privileged permission for these property-specific operations.
+    "User-PasswordProfile.ReadWrite.All": "4c37e1b6-35a1-43bf-926a-6f30f2cdf585",
+    "User.EnableDisableAccount.All": "3011c876-62b7-4ada-afa2-506cbbecc68c",
+    "User.RevokeSessions.All": "77f952ba-9a5f-4521-8c9d-6c9648f7eaf7",
+    "LicenseAssignment.ReadWrite.All": "5facf0c1-8979-4e95-abcf-ff3d079771c0",
     "RoleManagement.ReadWrite.Directory": "9e3f62cf-ca93-4989-b6ce-bf83c28f9fe8",
     "Directory.Read.All": "7ab1d382-f21e-4acd-a863-ba3e13f7da61",
     "Application.ReadWrite.OwnedBy": "18a4783c-866b-4cc7-a460-3d5e5662c884",
@@ -149,6 +156,13 @@ _PROVISION_ONLY = {
     "Sites.ReadWrite.All": ("offboarding_export", "PUT /sites/{id}/drive/items", "write", "optional"),
 }
 
+_STAFF_LIFECYCLE = {
+    "User-PasswordProfile.ReadWrite.All": ("password_reset", "PATCH /users/{id} passwordProfile", "write", "required"),
+    "User.EnableDisableAccount.All": ("account_status", "PATCH /users/{id} accountEnabled (with User.Read.All)", "write", "required"),
+    "User.RevokeSessions.All": ("session_revocation", "POST /users/{id}/revokeSignInSessions", "write", "required"),
+    "LicenseAssignment.ReadWrite.All": ("license_assignment", "POST /users/{id}/assignLicense (with User.Read.All)", "write", "required"),
+}
+
 
 def _metadata(resource: str, permission_type: str, name: str) -> tuple[str, str, str, str, tuple[str, ...]]:
     feature = "legacy_baseline"
@@ -173,6 +187,8 @@ def _entry(resource: str, permission_type: str, name: str) -> RequiredPermission
     feature, operation, access, disposition, modes = _metadata(resource, permission_type, name)
     if resource == "Microsoft Graph" and permission_type == "Application" and name in _PROVISION_ONLY:
         feature, operation, access, disposition = _PROVISION_ONLY[name]
+    if resource == "Microsoft Graph" and permission_type == "Application" and name in _STAFF_LIFECYCLE:
+        feature, operation, access, disposition = _STAFF_LIFECYCLE[name]
     permission_id = GRAPH_APPLICATION_PERMISSION_IDS.get(name) if resource == "Microsoft Graph" and permission_type == "Application" else None
     return RequiredPermission(resource, permission_type, name, permission_id, feature, operation, access,
                               "Workload licence required when the endpoint is licensed",

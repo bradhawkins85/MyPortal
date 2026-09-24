@@ -1679,11 +1679,7 @@ async def _execute_policy_step(
         )
         revoked_sessions = False
         if bool(step.get("revoke_sign_in_sessions", True)):
-            await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
-                access_token,
-                f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/revokeSignInSessions",
-                {},
-            )
+            await m365_service.revoke_sign_in_sessions(access_token, user_id)
             revoked_sessions = True
         return {
             "m365_user_id": user_id,
@@ -2018,21 +2014,35 @@ async def _execute_policy_step(
         # Resolve subscribed SKU IDs from the tenant by matching part numbers.
         skus_response = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
             access_token,
-            "https://graph.microsoft.com/v1.0/subscribedSkus?$select=skuId,skuPartNumber",
+            "https://graph.microsoft.com/v1.0/subscribedSkus?$select=skuId,skuPartNumber,consumedUnits,prepaidUnits",
         )
         sku_map = {
-            str(entry.get("skuPartNumber") or "").upper(): str(entry.get("skuId") or "")
+            str(entry.get("skuPartNumber") or "").upper(): entry
             for entry in (skus_response.get("value") or [])
             if entry.get("skuId")
         }
+        user_payload = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+            access_token,
+            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}?$select=usageLocation",
+        )
+        if not str(user_payload.get("usageLocation") or "").strip():
+            raise WorkflowStepError(
+                "assign_licenses: set the user's usageLocation before assigning a license"
+            )
         add_licenses = []
         for part_number in sku_part_numbers:
-            sku_id = sku_map.get(part_number.upper())
-            if not sku_id:
+            sku = sku_map.get(part_number.upper())
+            if not sku:
                 raise WorkflowStepError(
                     f"assign_licenses: SKU part number not found in tenant: {part_number}"
                 )
-            add_licenses.append({"skuId": sku_id})
+            enabled = int((sku.get("prepaidUnits") or {}).get("enabled") or 0)
+            consumed = int(sku.get("consumedUnits") or 0)
+            if enabled <= consumed:
+                raise WorkflowStepError(
+                    f"assign_licenses: no available licenses for SKU: {part_number}"
+                )
+            add_licenses.append({"skuId": str(sku["skuId"])})
         remove_first = bool(step.get("remove_existing_licenses", False))
         remove_licenses: list[str] = []
         if remove_first:
@@ -2076,6 +2086,21 @@ async def _execute_policy_step(
         access_token = await m365_service.acquire_access_token(
             company_id, force_client_credentials=True
         )
+        # Validate every target before the first write, avoiding a partially
+        # applied group set when a later group is immutable or role-assignable.
+        for group_id in group_ids:
+            group = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+                access_token,
+                f"https://graph.microsoft.com/v1.0/groups/{quote(group_id, safe='')}?$select=id,groupTypes,isAssignableToRole",
+            )
+            if "DynamicMembership" in (group.get("groupTypes") or []):
+                raise WorkflowStepError(
+                    f"add_to_groups: {group_id} uses dynamic membership and cannot be changed manually"
+                )
+            if bool(group.get("isAssignableToRole")):
+                raise WorkflowStepError(
+                    f"add_to_groups: {group_id} is role-assignable; use a separately reviewed privileged workflow"
+                )
         added_group_ids: list[str] = []
         for group_id in group_ids:
             await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
@@ -2928,10 +2953,8 @@ async def _run_offboarding_step(
     mailbox_rules_disabled_count = 0
 
     if disable_sign_in:
-        await _graph_patch(
-            access_token,
-            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}",
-            {"accountEnabled": False},
+        await m365_service.set_user_account_enabled(
+            access_token, user_id, enabled=False
         )
         steps_executed.append("disable_sign_in")
 
