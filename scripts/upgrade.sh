@@ -64,6 +64,7 @@ DEPLOYMENT_ACTION="staged-cutover"
 DEPLOYMENT_REASON="planner_not_run"
 STEP_REPORT=""
 TRAY_ARTIFACT_ROOT="${MYPORTAL_TRAY_ARTIFACT_ROOT:-${SHARED_ROOT}/artifacts/tray}"
+TRAY_ARTIFACTS_AVAILABLE=false
 FEATURE_PACK_RELOAD_TIMEOUT="${MYPORTAL_FEATURE_PACK_RELOAD_TIMEOUT:-60}"
 
 usage() {
@@ -383,6 +384,25 @@ validate_tray_artifacts() {
   }
   (cd "$source" && sha256sum --check --strict SHA256SUMS)
   record_step tray_artifacts verified "tray_inputs_changed_${revision}" "$((SECONDS-start))"
+}
+
+prepare_tray_artifacts() {
+  local revision="$1" source
+  source="${TRAY_ARTIFACT_ROOT}/${revision}"
+
+  # The supported release workflows publish installers directly to GitHub
+  # Releases. A deployment host therefore normally has no revision-specific CI
+  # bundle to validate. Preserve validation for installations that explicitly
+  # stage such a bundle, but do not make an absent optional bundle block the
+  # application upgrade.
+  if [[ ! -e "$source" ]]; then
+    TRAY_ARTIFACTS_AVAILABLE=false
+    record_step tray_artifacts skipped "github_release_delivery_${revision}" 0
+    return 0
+  fi
+
+  validate_tray_artifacts "$revision"
+  TRAY_ARTIFACTS_AVAILABLE=true
 }
 
 publish_tray_artifacts() {
@@ -783,10 +803,11 @@ generate_deployment_plan "$PLAN_BASE" "$TARGET_REVISION"
 # live-release changes begin.
 write_upgrade_status preparing "Deployment plan ${DEPLOYMENT_ACTION} for ${TARGET_REVISION}." "$DEPLOYMENT_REASON"
 
-# Artifact validation is preparation, not cutover. A missing or stale CI
-# artifact therefore fails before any release, instance, or active link moves.
+# Artifact validation is preparation, not cutover. A staged bundle must be
+# complete and valid before any release, instance, or active link moves. The
+# normal GitHub Release delivery path does not stage a server-side bundle.
 if python3 -c 'import json,sys; raise SystemExit(not json.loads(sys.argv[1])["validate_tray_artifacts"])' "$DEPLOYMENT_PLAN"; then
-  if ! validate_tray_artifacts "$TARGET_REVISION"; then
+  if ! prepare_tray_artifacts "$TARGET_REVISION"; then
     record_step tray_artifacts failed "missing_stale_or_invalid_${TARGET_REVISION}" 0
     write_upgrade_status failed "Required tray artifacts failed validation; the active release was not touched." "$DEPLOYMENT_REASON"
     exit 1
@@ -881,8 +902,13 @@ PY
     record_step feature_pack_reload failed "acknowledgement_timeout_or_activation_failure" "$FEATURE_PACK_RELOAD_TIMEOUT"
     ;;
   tray-publish)
-    publish_tray_artifacts "$TARGET_REVISION"
-    write_upgrade_status succeeded "Verified CI tray artifacts ${TARGET_REVISION} published without reloading workers." "$DEPLOYMENT_REASON"
+    if [[ "$TRAY_ARTIFACTS_AVAILABLE" == true ]]; then
+      publish_tray_artifacts "$TARGET_REVISION"
+      tray_message="Verified CI tray artifacts ${TARGET_REVISION} published without reloading workers."
+    else
+      tray_message="Tray source ${TARGET_REVISION} is delivered through GitHub Releases; no server-side CI bundle was staged."
+    fi
+    write_upgrade_status succeeded "$tray_message" "$DEPLOYMENT_REASON"
     cleanup_old_releases
     exit 0
     ;;

@@ -358,8 +358,8 @@ printf '%s' "$STEP_REPORT"
     assert outcomes == ["miss", "hit", "miss"]
 
 
-def test_tray_artifacts_are_verified_before_release_preparation():
-    validation = SCRIPT.index('validate_tray_artifacts "$TARGET_REVISION"')
+def test_staged_tray_artifacts_are_verified_before_release_preparation():
+    validation = SCRIPT.index('prepare_tray_artifacts "$TARGET_REVISION"')
     preparation = SCRIPT.index('prepare_release "$TARGET_REVISION"')
 
     assert validation < preparation
@@ -367,6 +367,58 @@ def test_tray_artifacts_are_verified_before_release_preparation():
     assert "Tray artifacts are stale or do not identify revision" in SCRIPT
     assert "Required tray artifact missing" in SCRIPT
     assert 'publish_tray_artifacts "$TARGET_REVISION"' in SCRIPT
+
+
+def test_missing_optional_tray_bundle_uses_github_release_delivery(tmp_path):
+    functions = SCRIPT[
+        SCRIPT.index("record_step() {") : SCRIPT.index(
+            "\ninstall_blue_green_service_unit()"
+        )
+    ]
+    command = f"""
+set -Eeuo pipefail
+TRAY_ARTIFACT_ROOT={tmp_path / 'artifacts'!s}
+TRAY_ARTIFACTS_AVAILABLE=false
+STEP_REPORT=''
+{functions}
+prepare_tray_artifacts fixture-revision
+test "$TRAY_ARTIFACTS_AVAILABLE" = false
+printf '%s' "$STEP_REPORT"
+"""
+
+    result = subprocess.run(
+        ["bash", "-c", command], text=True, capture_output=True, check=False
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == (
+        "tray_artifacts:skipped:github_release_delivery_fixture-revision:0s"
+    )
+
+
+def test_incomplete_staged_tray_bundle_still_fails_closed(tmp_path):
+    functions = SCRIPT[
+        SCRIPT.index("record_step() {") : SCRIPT.index(
+            "\ninstall_blue_green_service_unit()"
+        )
+    ]
+    source = tmp_path / "artifacts" / "fixture-revision"
+    source.mkdir(parents=True)
+    command = f"""
+set -Eeuo pipefail
+TRAY_ARTIFACT_ROOT={tmp_path / 'artifacts'!s}
+TRAY_ARTIFACTS_AVAILABLE=false
+STEP_REPORT=''
+{functions}
+prepare_tray_artifacts fixture-revision
+"""
+
+    result = subprocess.run(
+        ["bash", "-c", command], text=True, capture_output=True, check=False
+    )
+
+    assert result.returncode != 0
+    assert "Tray checksum manifest missing for fixture-revision" in result.stderr
 
 
 def test_tray_artifact_functions_initialize_revision_before_derived_paths(tmp_path):
