@@ -92,3 +92,32 @@ async def test_grant_required_admin_consent_surfaces_failed_scope_update():
             await m365._grant_required_admin_consent(
                 "token", principal_id, [], [(resource_id, ["Required.Scope"])]
             )
+
+
+@pytest.mark.anyio
+async def test_grant_updates_opaque_oauth_id_and_follows_all_pages():
+    principal_id = "11111111-1111-1111-1111-111111111111"
+    resource_id = "22222222-2222-2222-2222-222222222222"
+    opaque_id = "l5eW7x0ga0-WDOntXzHateQDNpSH5-lPk9HjD3Sarjk"
+    graph_get = AsyncMock(side_effect=[
+        {"value": [], "@odata.nextLink": "https://graph.microsoft.com/v1.0/servicePrincipals/next"},
+        {"value": [{"resourceId": resource_id, "appRoleId": "existing-role"}]},
+        {"value": [], "@odata.nextLink": "https://graph.microsoft.com/v1.0/oauth2PermissionGrants/next"},
+        {"value": [{"id": opaque_id, "resourceId": resource_id, "scope": "Existing.Scope"}]},
+    ])
+    graph_patch = AsyncMock(return_value={})
+    with (
+        patch.object(m365, "_graph_get", graph_get),
+        patch.object(m365, "_graph_patch", graph_patch),
+    ):
+        changed = await m365._grant_required_admin_consent(
+            "token", principal_id, [], [(resource_id, ["New.Scope"])],
+        )
+
+    assert changed is True
+    assert graph_get.await_count == 4
+    graph_patch.assert_awaited_once_with(
+        "token",
+        f"https://graph.microsoft.com/v1.0/oauth2PermissionGrants/{opaque_id}",
+        {"scope": "Existing.Scope New.Scope"},
+    )
