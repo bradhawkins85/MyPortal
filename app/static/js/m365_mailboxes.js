@@ -72,6 +72,23 @@ document.addEventListener('DOMContentLoaded', function () {
 
   var syncBtn = document.querySelector('[data-sync-mailboxes]');
   if (syncBtn) {
+    function pollSync(jobId, originalText) {
+      window.setTimeout(function () {
+        fetch('/m365/jobs/' + encodeURIComponent(jobId))
+          .then(function (resp) { return resp.json().then(function (data) { return { ok: resp.ok, data: data }; }); })
+          .then(function (response) {
+            if (!response.ok) throw new Error('status unavailable');
+            var state = response.data.status;
+            syncBtn.textContent = state === 'queued' ? 'Queued…' : state === 'running' ? 'Syncing…' : state === 'partial' ? '⚠ Partially synced' : state === 'succeeded' ? '✓ Synced' : '✗ Sync failed';
+            if (state === 'queued' || state === 'running') return pollSync(jobId, originalText);
+            window.setTimeout(function () { window.location.reload(); }, 1000);
+          })
+          .catch(function () {
+            syncBtn.textContent = originalText;
+            syncBtn.disabled = false;
+          });
+      }, 1500);
+    }
     syncBtn.addEventListener('click', function () {
       var originalText = syncBtn.textContent;
       syncBtn.disabled = true;
@@ -79,13 +96,11 @@ document.addEventListener('DOMContentLoaded', function () {
         method: 'POST',
         headers: jsonHeaders()
       })
-        .then(function (resp) { return resp.json(); })
-        .then(function () {
-          syncBtn.textContent = '\u2713 Sync started';
-          window.setTimeout(function () {
-            syncBtn.textContent = originalText;
-            syncBtn.disabled = false;
-          }, 3000);
+        .then(function (resp) { return resp.json().then(function (data) { return { ok: resp.ok, data: data }; }); })
+        .then(function (response) {
+          if (!response.ok || !response.data.job_id) throw new Error('queue failed');
+          syncBtn.textContent = 'Queued…';
+          pollSync(response.data.job_id, originalText);
         })
         .catch(function () {
           syncBtn.textContent = originalText;

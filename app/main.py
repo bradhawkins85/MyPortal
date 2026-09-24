@@ -189,6 +189,7 @@ from app.services.rag_urls import canonical_source_url
 from app.services import template_variables
 from app.services import webhook_monitor
 from app.services import integration_operations as integration_operations_service
+from app.services import m365_jobs as m365_jobs_service
 from app.services import issues as issues_service
 from app.services import invoice_generator as invoice_generator_service
 from app.services import service_status as service_status_service
@@ -2832,8 +2833,7 @@ async def on_startup() -> None:
         for company_id, company_tasks in by_company.items():
             commands_for_company = {t["command"] for t in company_tasks}
             has_legacy = bool(legacy_commands & commands_for_company)
-            has_new = bool(new_commands & commands_for_company)
-            if not has_legacy or has_new:
+            if not has_legacy:
                 continue
             # Find an existing company name from the legacy task name if possible
             legacy_task = next(
@@ -2953,6 +2953,12 @@ async def on_startup() -> None:
         raise RuntimeError("Invalid module capability registry: " + "; ".join(capability_errors))
 
     await scheduler_service.start()
+    async def _mailbox_sync_job(job: dict[str, Any]) -> dict[str, Any]:
+        count = await m365_service.sync_mailboxes(int(job["company_id"]))
+        return {"mailboxes_synced": count}
+
+    m365_jobs_service.register("mailbox_sync", _mailbox_sync_job)
+    m365_jobs_service.start_worker()
     modules_service.start_xero_token_keepalive()
 
     if pack_slugs:
@@ -2982,6 +2988,7 @@ async def on_startup() -> None:
 async def on_shutdown() -> None:
     global _app_ready
     _app_ready = False
+    await m365_jobs_service.stop_worker()
     if settings.matrix_enabled:
         from app.services import matrix_sync, matrix_ai_waiting_assistant
         matrix_sync.stop_sync_loop()
@@ -4199,15 +4206,24 @@ async def sync_m365_mailboxes(request: Request):
         return JSONResponse({"error": "Authentication required"}, status_code=401)
     if not user.get("is_super_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Super admin privileges required")
-    task = await scheduled_tasks_repo.get_first_task_for_company_by_commands(
-        company_id, ["sync_m365_mailboxes", "sync_m365_data", "sync_o365"]
-    )
-    if task is not None:
-        asyncio.create_task(scheduler_service.run_now(task["id"]))
-    else:
-        asyncio.create_task(m365_service.sync_mailboxes(company_id))
-    log_info("M365 mailbox sync queued", company_id=company_id, user_id=user.get("id"))
-    return JSONResponse({"queued": True}, status_code=202)
+    job = await m365_jobs_service.enqueue(company_id, "mailbox_sync", "mailboxes")
+    log_info("M365 mailbox sync queued", company_id=company_id, user_id=user.get("id"), job_id=job["id"])
+    return JSONResponse({"job_id": job["id"], "status": job["status"]}, status_code=202)
+
+
+@app.get("/m365/jobs/{job_id}", response_class=JSONResponse, tags=["Microsoft 365"])
+async def get_m365_job_status(job_id: str, request: Request):
+    """Return safe progress for a durable operation in the active tenant only."""
+    user, _, _, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return JSONResponse({"error": "Authentication required"}, status_code=401)
+    job = await m365_jobs_service.get(job_id, company_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Operation not found")
+    return {
+        key: job.get(key)
+        for key in ("id", "job_type", "resource_key", "status", "result", "safe_error", "created_at", "started_at", "heartbeat_at", "completed_at", "updated_at")
+    }
 
 
 @app.post("/m365/mailboxes/enable-archive", response_class=JSONResponse, tags=["Microsoft 365"])
