@@ -368,6 +368,100 @@ async def test_provision_app_registration_no_redirect_uri_when_not_provided():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_provision_app_registration_replaces_deleted_pending_application():
+    """A stale pending application identity must not make confirmation permanently fail."""
+    posted_urls: list[str] = []
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        posted_urls.append(url)
+        if url.endswith("/applications"):
+            return _make_app_data("replacement-client-id")
+        if url.endswith("/servicePrincipals"):
+            return _make_sp_data("replacement-sp-id")
+        if "addPassword" in url:
+            return _make_secret_data("replacement-secret")
+        return {}
+
+    async def mock_graph_get(token: str, url: str, **kwargs: Any) -> dict:
+        if m365_service._TEAMS_APP_ID in url:
+            return {"value": []}
+        return _make_graph_sp_response()
+
+    with (
+        patch.object(
+            m365_service,
+            "_get_sp_app_role_ids",
+            AsyncMock(return_value=("graph-sp-id", set(m365_service._PROVISION_APP_ROLES))),
+        ),
+        patch.object(
+            m365_service,
+            "_build_required_resource_access",
+            AsyncMock(return_value=([], [], [])),
+        ),
+        patch.object(
+            m365_service,
+            "_graph_patch",
+            AsyncMock(
+                side_effect=m365_service.M365Error(
+                    "Microsoft Graph PATCH failed (404): Resource does not exist",
+                    http_status=404,
+                )
+            ),
+        ),
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+    ):
+        result = await m365_service.provision_app_registration(
+            access_token="token",
+            app_object_id="93bcf873-a8bd-4061-b4d7-160b98ed8712",
+            client_id="deleted-client-id",
+            service_principal_object_id="deleted-sp-object-id",
+        )
+        await drain_provision_background_tasks()
+
+    assert result["app_object_id"] == "app-object-id"
+    assert result["client_id"] == "replacement-client-id"
+    assert result["service_principal_object_id"] == "replacement-sp-id"
+    assert any(url.endswith("/applications") for url in posted_urls)
+    assert any(url.endswith("/servicePrincipals") for url in posted_urls)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_provision_app_registration_does_not_replace_on_non_404_patch_error():
+    """Only a missing stored registration is safe to replace automatically."""
+    with (
+        patch.object(
+            m365_service,
+            "_get_sp_app_role_ids",
+            AsyncMock(return_value=("graph-sp-id", set(m365_service._PROVISION_APP_ROLES))),
+        ),
+        patch.object(
+            m365_service,
+            "_build_required_resource_access",
+            AsyncMock(return_value=([], [], [])),
+        ),
+        patch.object(
+            m365_service,
+            "_graph_patch",
+            AsyncMock(
+                side_effect=m365_service.M365Error(
+                    "Microsoft Graph PATCH failed (403)", http_status=403
+                )
+            ),
+        ),
+        patch.object(m365_service, "_graph_post", AsyncMock()) as graph_post,
+    ):
+        with pytest.raises(m365_service.M365Error, match="403"):
+            await m365_service.provision_app_registration(
+                access_token="token",
+                app_object_id="93bcf873-a8bd-4061-b4d7-160b98ed8712",
+                client_id="existing-client-id",
+            )
+
+    graph_post.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
 async def test_provision_scope_constant():
     """PROVISION_SCOPE contains the required Graph-qualified delegated permissions."""
     assert "https://graph.microsoft.com/Application.ReadWrite.All" in m365_service.PROVISION_SCOPE

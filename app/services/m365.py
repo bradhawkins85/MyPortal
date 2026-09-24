@@ -2491,13 +2491,32 @@ async def provision_app_registration(
     if redirect_uri:
         app_payload["web"] = {"redirectUris": [redirect_uri]}
     if app_object_id and client_id:
-        await _graph_patch(
-            access_token,
-            f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}",
-            app_payload,
-        )
-        log_info("Repaired M365 app registration in place", client_id=client_id)
-    else:
+        try:
+            await _graph_patch(
+                access_token,
+                f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}",
+                app_payload,
+            )
+            log_info("Repaired M365 app registration in place", client_id=client_id)
+        except M365Error as exc:
+            if exc.http_status != 404:
+                raise
+            # A pending connection can outlive an app registration that an
+            # administrator deleted directly in Entra.  Treat that stored
+            # object identity as stale and create a replacement instead of
+            # making every subsequent Confirm tenant attempt PATCH an object
+            # that no longer exists.  The old service-principal identity is
+            # tied to that deleted registration and must not be reused either.
+            log_warning(
+                "Stored M365 app registration no longer exists; creating a replacement",
+                app_object_id=app_object_id,
+                client_id=client_id,
+            )
+            app_object_id = None
+            client_id = None
+            service_principal_object_id = None
+
+    if not app_object_id or not client_id:
         app_data = await _graph_post(
             access_token,
             "https://graph.microsoft.com/v1.0/applications",
