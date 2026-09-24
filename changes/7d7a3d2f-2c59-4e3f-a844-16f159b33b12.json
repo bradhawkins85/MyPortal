@@ -1,0 +1,7 @@
+{
+  "guid": "7d7a3d2f-2c59-4e3f-a844-16f159b33b12",
+  "occurred_at": "2026-09-24T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Stop requesting the unsupported Exchange.ManageAsApp role from Exchange Online Protection during Microsoft 365 tenant setup and repair.",
+  "content_hash": "m365-remove-invalid-eop-app-role"
+}

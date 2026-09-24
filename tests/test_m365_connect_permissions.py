@@ -356,9 +356,9 @@ async def test_provision_app_registration_skips_409_role_assignments():
 
     assert result["client_id"] == "new-client-id"
     assert result["client_secret"] == "test-secret"
-    # All roles should have been attempted (Graph roles + Exchange.ManageAsApp + Teams.ManageAsApp)
+    # All supported roles should be attempted (Graph roles + Exchange.ManageAsApp).
     role_assignment_calls = [c for c in post_calls if "appRoleAssignments" in c["url"]]
-    assert len(role_assignment_calls) == len(_PROVISION_APP_ROLES) + 2, (
+    assert len(role_assignment_calls) == len(_PROVISION_APP_ROLES) + 1, (
         "All role assignments must be attempted even when the first returns 409"
     )
 
