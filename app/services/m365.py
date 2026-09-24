@@ -209,6 +209,7 @@ def get_required_app_role_ids() -> list[str]:
 PROVISION_SCOPE = (
     "https://graph.microsoft.com/Application.ReadWrite.All "
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
+    "https://graph.microsoft.com/DelegatedPermissionGrant.ReadWrite.All "
     "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory offline_access"
 )
 
@@ -224,6 +225,7 @@ PROVISION_SCOPE = (
 # app registration (Microsoft Entra ID dynamic consent).
 CONNECT_SCOPE = (
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
+    "https://graph.microsoft.com/DelegatedPermissionGrant.ReadWrite.All "
     "https://graph.microsoft.com/Directory.Read.All "
     "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory offline_access"
 )
@@ -600,6 +602,102 @@ async def _build_required_resource_access(
         if delegated_names:
             delegated_grants.append((str(resource["id"]), delegated_names))
     return manifest, application_grants, delegated_grants
+
+
+async def _grant_required_admin_consent(
+    access_token: str,
+    sp_object_id: str,
+    application_grants: list[tuple[str, str]],
+    delegated_grants: list[tuple[str, list[str]]],
+) -> bool:
+    """Grant every resolved application role and tenant-wide delegated scope.
+
+    Microsoft Graph permits only one ``AllPrincipals`` OAuth grant for a given
+    client/resource pair.  Existing grants therefore have to be updated with
+    the union of old and required scopes; treating the resulting create-time
+    conflict as success leaves newly requested scopes without admin consent.
+    """
+    changed = False
+    assignments = await _graph_get(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
+    )
+    assigned = {
+        (str(item.get("resourceId")), str(item.get("appRoleId")))
+        for item in assignments.get("value", [])
+    }
+    for resource_id, role_id in set(application_grants):
+        if (resource_id, role_id) in assigned:
+            continue
+        await _post_app_role_assignment_with_retry(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
+            {"principalId": sp_object_id, "resourceId": resource_id, "appRoleId": role_id},
+        )
+        changed = True
+
+    existing_response = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/oauth2PermissionGrants"
+        f"?$filter=clientId eq '{quote(sp_object_id, safe='')}' and consentType eq 'AllPrincipals'"
+        "&$select=id,resourceId,scope",
+    )
+    existing_by_resource = {
+        str(item.get("resourceId")): item
+        for item in existing_response.get("value", [])
+        if item.get("resourceId") and item.get("id")
+    }
+    for resource_id, required_scopes in delegated_grants:
+        existing = existing_by_resource.get(resource_id)
+        current_scopes = set(str((existing or {}).get("scope") or "").split())
+        merged_scopes = current_scopes | set(required_scopes)
+        if existing and merged_scopes == current_scopes:
+            continue
+        payload = {"scope": " ".join(sorted(merged_scopes))}
+        if existing:
+            await _graph_patch(
+                access_token,
+                "https://graph.microsoft.com/v1.0/oauth2PermissionGrants/"
+                f"{_graph_object_id(existing['id'])}",
+                payload,
+            )
+        else:
+            await _graph_post(
+                access_token,
+                "https://graph.microsoft.com/v1.0/oauth2PermissionGrants",
+                {
+                    "clientId": sp_object_id,
+                    "consentType": "AllPrincipals",
+                    "resourceId": resource_id,
+                    **payload,
+                },
+            )
+        changed = True
+    return changed
+
+
+async def grant_required_m365_admin_consent(
+    company_id: int, access_token: str
+) -> bool:
+    """Resolve and grant the full baseline to an existing MyPortal app."""
+    creds = await get_credentials(company_id)
+    if not creds or not creds.get("client_id"):
+        raise M365Error("No M365 credentials are configured for this company")
+    client_id = str(creds["client_id"])
+    principals = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/servicePrincipals"
+        f"?$filter=appId eq '{quote(client_id, safe='')}'&$select=id",
+    )
+    if not principals.get("value"):
+        raise M365Error("MyPortal service principal not found in tenant")
+    _, application_grants, delegated_grants = await _build_required_resource_access(access_token)
+    return await _grant_required_admin_consent(
+        access_token,
+        str(principals["value"][0]["id"]),
+        application_grants,
+        delegated_grants,
+    )
 
 
 def get_pkce_client_id() -> str:
@@ -2412,37 +2510,12 @@ async def _grant_provisioned_roles(
     # of attempting grants for roles that may not exist in the tenant).
     roles_to_grant = valid_graph_roles if valid_graph_roles is not None else _PROVISION_APP_ROLES
     try:
-        # Grant the complete, resource-aware application baseline.  The set
-        # removes legacy duplicates retained below for backwards compatibility.
-        for resource_id, role_id in set(baseline_application_grants or []):
-            try:
-                await _post_app_role_assignment_with_retry(
-                    access_token,
-                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
-                    {"principalId": sp_object_id, "resourceId": resource_id, "appRoleId": role_id},
-                )
-            except M365Error as exc:
-                if exc.http_status != 409:
-                    log_error("Failed to grant required application permission", role_id=role_id, error=str(exc))
-
-        # Delegated tenant-wide consent is represented by oauth2PermissionGrant,
-        # not appRoleAssignment.  Keep it separate so diagnostics cannot mistake
-        # a configured scope for effective consent.
-        for resource_id, scopes in baseline_delegated_grants or []:
-            try:
-                await _graph_post(
-                    access_token,
-                    "https://graph.microsoft.com/v1.0/oauth2PermissionGrants",
-                    {
-                        "clientId": sp_object_id,
-                        "consentType": "AllPrincipals",
-                        "resourceId": resource_id,
-                        "scope": " ".join(scopes),
-                    },
-                )
-            except M365Error as exc:
-                if exc.http_status != 409:
-                    log_error("Failed to grant required delegated permissions", resource_id=resource_id, error=str(exc))
+        await _grant_required_admin_consent(
+            access_token,
+            sp_object_id,
+            baseline_application_grants or [],
+            baseline_delegated_grants or [],
+        )
 
         for role_name in REQUIRED_DIRECTORY_ROLES:
             await _ensure_directory_role_by_name(access_token, sp_object_id, role_name)
@@ -4762,6 +4835,7 @@ async def repair_enterprise_app_permissions(
     granted = await try_grant_missing_permissions(
         company_id=company_id,
         access_token=access_token,
+        raise_on_consent_error=True,
     )
     role_result = await ensure_compliance_administrator_role(
         company_id=company_id,
@@ -4924,6 +4998,8 @@ async def _ensure_teams_service_admin_role(
 async def try_grant_missing_permissions(
     company_id: int,
     access_token: str,
+    *,
+    raise_on_consent_error: bool = False,
 ) -> bool:
     """Best-effort: grant any missing ``_PROVISION_APP_ROLES`` to the company's
     enterprise app service principal using the provided *access_token*.
@@ -4963,6 +5039,16 @@ async def try_grant_missing_permissions(
             )
             return False
         sp_object_id: str = sp_list[0]["id"]
+
+        _, baseline_application_grants, baseline_delegated_grants = (
+            await _build_required_resource_access(access_token)
+        )
+        baseline_consent_granted = await _grant_required_admin_consent(
+            access_token,
+            sp_object_id,
+            baseline_application_grants,
+            baseline_delegated_grants,
+        )
 
         # Retrieve current appRoleAssignments.
         # Track (appRoleId, resourceId) pairs to distinguish Exchange.ManageAsApp
@@ -5058,7 +5144,7 @@ async def try_grant_missing_permissions(
             and teams_sp_id not in manage_as_app_resource_ids
         )
 
-        granted: list[str] = []
+        granted: list[str] = ["required-admin-consent"] if baseline_consent_granted else []
 
         # Grant each missing Graph role assignment
         if missing:
@@ -5263,6 +5349,8 @@ async def try_grant_missing_permissions(
             company_id=company_id,
             exception_type=type(exc).__name__,
         )
+        if raise_on_consent_error and isinstance(exc, M365Error):
+            raise
         return False
 
 
