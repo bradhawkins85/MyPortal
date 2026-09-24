@@ -316,11 +316,11 @@ async def test_sync_account_error_no_credentials(monkeypatch):
     result = await m365_mail.sync_account(1)
 
     assert result["status"] == "error"
-    assert "credentials" in result["error"].lower()
+    assert "not linked to a company" in result["error"].lower()
 
 
-async def test_sync_account_uses_provisioned_company_when_none(monkeypatch):
-    """sync_account uses a provisioned company for auth when account has no company_id."""
+async def test_sync_account_never_borrows_another_company_token(monkeypatch):
+    """An unlinked mailbox must not authenticate as an arbitrary company."""
     monkeypatch.setattr(m365_mail.system_state, "is_restart_pending", lambda: False)
 
     async def fake_get_module(slug: str, *, redact: bool = True):
@@ -363,8 +363,9 @@ async def test_sync_account_uses_provisioned_company_when_none(monkeypatch):
 
     result = await m365_mail.sync_account(1)
 
-    assert result["status"] == "succeeded"
-    assert acquired_company_ids == [10]  # Should pick min(provisioned)
+    assert result["status"] == "error"
+    assert "not linked to a company" in result["error"].lower()
+    assert acquired_company_ids == []
 
 
 async def test_sync_account_error_no_upn(monkeypatch):
@@ -900,6 +901,8 @@ async def test_sync_account_no_company_resolves_from_email(monkeypatch):
             "id": 1,
             "active": True,
             "company_id": None,
+            "refresh_token": "encrypted-mailbox-refresh-token",
+            "tenant_id": "mailbox-tenant",
             "user_principal_name": "user@example.com",
             "folder": "Inbox",
             "process_unread_only": True,
@@ -913,6 +916,9 @@ async def test_sync_account_no_company_resolves_from_email(monkeypatch):
         return {7}
 
     async def fake_acquire_token(company_id, **kwargs):
+        return "fake-access-token"
+
+    async def fake_acquire_delegated(account, **kwargs):
         return "fake-access-token"
 
     graph_messages = {
@@ -982,6 +988,7 @@ async def test_sync_account_no_company_resolves_from_email(monkeypatch):
     monkeypatch.setattr(m365_mail.mail_repo, "get_account", fake_get_account)
     monkeypatch.setattr(m365_mail.m365_repo, "list_provisioned_company_ids", fake_list_provisioned)
     monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
+    monkeypatch.setattr(m365_mail, "_acquire_delegated_access_token", fake_acquire_delegated)
     monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
     monkeypatch.setattr(m365_mail.mail_repo, "get_message", fake_get_message)
     monkeypatch.setattr(m365_mail.mail_repo, "upsert_message", fake_upsert_message)

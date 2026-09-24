@@ -1,0 +1,7 @@
+{
+  "guid": "58ac5356-6363-4072-9d75-92d997d3d561",
+  "occurred_at": "2026-09-24T00:00:00Z",
+  "change_type": "Security",
+  "summary": "Isolate Microsoft 365 mailbox authentication tokens by company and mailbox",
+  "content_hash": "072af874f64f49481699881aa023fe00d902c00999ca557cb10c624b6209cd5e"
+}

@@ -540,11 +540,10 @@ async def _acquire_access_token_for_mail_account(account: Mapping[str, Any]) -> 
         return await _acquire_delegated_access_token(account)
     auth_company_id = _int_or_none(account.get("company_id"))
     if auth_company_id is None:
-        provisioned = await m365_repo.list_provisioned_company_ids()
-        if provisioned:
-            auth_company_id = min(provisioned)
-    if auth_company_id is None:
-        raise ValueError("No Microsoft 365 credentials configured.")
+        raise ValueError(
+            "This mailbox is not linked to a company and has no mailbox-specific "
+            "Microsoft 365 sign-in."
+        )
     return await m365_service.acquire_access_token(
         int(auth_company_id), force_client_credentials=True
     )
@@ -1184,19 +1183,24 @@ async def sync_account(
     else:
         # Fall back to company credentials (per-tenant enterprise app)
         if auth_company_id is None:
-            provisioned = await m365_repo.list_provisioned_company_ids()
-            if provisioned:
-                auth_company_id = min(provisioned)
-            else:
-                result = {
-                    "status": "error",
-                    "error": "No Microsoft 365 credentials configured. Please sign in to authorize access to the mailbox.",
-                    "errors": [{"error": "No Microsoft 365 credentials configured."}],
-                }
-                await _record_sync_history_safe(
-                    account_id=account_id, started_at=started_at, result=result
-                )
-                return result
+            result = {
+                "status": "error",
+                "error": (
+                    "This mailbox is not linked to a company. Link it to the correct "
+                    "company or sign in specifically for this mailbox."
+                ),
+                "errors": [
+                    {
+                        "error": (
+                            "No mailbox-specific Microsoft 365 credentials configured."
+                        )
+                    }
+                ],
+            }
+            await _record_sync_history_safe(
+                account_id=account_id, started_at=started_at, result=result
+            )
+            return result
 
         try:
             access_token = await m365_service.acquire_access_token(
@@ -1335,10 +1339,6 @@ async def sync_account(
                         account_id=account_id,
                         upn=upn,
                     )
-                    if auth_company_id is None:
-                        provisioned = await m365_repo.list_provisioned_company_ids()
-                        if provisioned:
-                            auth_company_id = min(provisioned)
                     if auth_company_id is not None:
                         try:
                             access_token = await m365_service.acquire_access_token(
