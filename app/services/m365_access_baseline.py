@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CONTRACT_VERSION = "2026-09-24.4"
+CONTRACT_VERSION = "2026-09-24.5"
 
 
 @dataclass(frozen=True)
@@ -37,7 +37,6 @@ RESOURCE_APP_IDS = {
     "Office 365 Management APIs": "c5393580-f805-4401-95e8-94b7a6ef2fc2",
     "Skype and Teams Tenant Admin API": "48ac35b8-9aa8-4d74-927d-1f4a14a0b239",
     "WindowsDefenderATP": "fc780465-2017-40d4-a0c5-307022471b92",
-    "Microsoft Exchange Online Protection": "00000007-0000-0ff1-ce00-000000000000",
 }
 
 REQUIRED_DIRECTORY_ROLES = (
@@ -207,15 +206,11 @@ for name in GRAPH_APPLICATION_PERMISSION_IDS:
     if not any((p.resource, p.permission_type, p.name) == key for p in _named_baseline):
         _named_baseline.append(_entry(*key))
 
-# Non-Graph app roles used by workload cmdlets are contract entries too.
-_named_baseline.extend((
-    RequiredPermission("Microsoft Exchange Online Protection", "Application", "Exchange.ManageAsApp",
-                       "dc50a0fb-09a3-484d-be87-e023b12c6440", "purview", "Get-ProtectionAlert/New-ProtectionAlert",
-                       "write", "Purview licensing", "Tenant administrator plus Compliance Administrator RBAC", ("application",), "required"),
-    # Teams PowerShell application authentication intentionally has no app role
-    # on the legacy Skype/Teams API.  The supported flow uses Graph
-    # Organization.Read.All plus Teams RBAC and two resource tokens.
-))
+# Purview compliance/eDiscovery cmdlets do not support this app-only execution
+# route.  In particular, Microsoft Exchange Online Protection does not expose
+# an Exchange.ManageAsApp role that can be assigned through Microsoft Graph.
+# Keep the legacy Purview probes as diagnostics, but do not put an invalid EOP
+# permission into a new application's consent manifest.
 
 REQUIRED_PERMISSIONS = tuple(_named_baseline)
 PERMISSION_CONTRACT = REQUIRED_PERMISSIONS

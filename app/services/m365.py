@@ -283,13 +283,6 @@ ENTERPRISE_APP_CATALOG: list[dict[str, Any]] = [
             {"id": _EXO_MANAGE_AS_APP_ROLE, "name": "Exchange.ManageAsApp"},
         ],
     },
-    {
-        "name": "Microsoft Exchange Online Protection",
-        "app_id": _SCC_APP_ID,
-        "permissions": [
-            {"id": _SCC_MANAGE_AS_APP_ROLE, "name": "Exchange.ManageAsApp"},
-        ],
-    },
 ]
 
 
@@ -2675,11 +2668,11 @@ async def _grant_provisioned_roles(
             sp_object_id=sp_object_id,
         )
 
-        # 2. Grant ManageAsApp on both PowerShell resources. Purview uses the
-        # EOP resource, not the similarly named Office 365 Exchange Online API.
+        # 2. Grant Exchange.ManageAsApp on Exchange Online. Do not attempt the
+        # identically numbered role against Exchange Online Protection: EOP
+        # does not expose that app role and Graph rejects it with InvalidUpdate.
         for resource_app_id, resource_name in (
             (_EXO_APP_ID, "Office 365 Exchange Online"),
-            (_SCC_APP_ID, "Microsoft Exchange Online Protection"),
         ):
             try:
                 resource_response = await _graph_get(
@@ -2687,11 +2680,7 @@ async def _grant_provisioned_roles(
                     f"https://graph.microsoft.com/v1.0/servicePrincipals"
                     f"?$filter=appId eq '{resource_app_id}'&$select=id,appId",
                 )
-                resource_list = [
-                    item for item in resource_response.get("value", [])
-                    if resource_app_id != _SCC_APP_ID
-                    or str(item.get("appId") or "").lower() == resource_app_id
-                ]
+                resource_list = resource_response.get("value", [])
                 if not resource_list:
                     log_info(
                         f"{resource_name} service principal not found in tenant; "
@@ -5153,7 +5142,6 @@ async def try_grant_missing_permissions(
         # We also retrieve the Graph SP's appRoles to filter out any required
         # permissions that don't exist in this tenant.
         exo_sp_id: str | None = None
-        scc_sp_id: str | None = None
         teams_sp_id: str | None = None
         try:
             exo_sp_resp = await _graph_get(
@@ -5167,25 +5155,6 @@ async def try_grant_missing_permissions(
         except M365Error as exc:
             log_warning(
                 "M365 permission repair could not discover Exchange service principal",
-                company_id=company_id,
-                **_safe_m365_error_fields(exc),
-            )
-
-        try:
-            scc_sp_resp = await _graph_get(
-                access_token,
-                "https://graph.microsoft.com/v1.0/servicePrincipals"
-                f"?$filter=appId eq '{_SCC_APP_ID}'&$select=id,appId",
-            )
-            scc_sp_list = [
-                item for item in scc_sp_resp.get("value", [])
-                if str(item.get("appId") or "").lower() == _SCC_APP_ID
-            ]
-            if scc_sp_list:
-                scc_sp_id = scc_sp_list[0]["id"]
-        except M365Error as exc:
-            log_warning(
-                "M365 permission repair could not discover Purview service principal",
                 company_id=company_id,
                 **_safe_m365_error_fields(exc),
             )
@@ -5213,7 +5182,6 @@ async def try_grant_missing_permissions(
             )
 
         exo_needed = exo_sp_id is not None and exo_sp_id not in manage_as_app_resource_ids
-        scc_needed = scc_sp_id is not None and scc_sp_id not in manage_as_app_resource_ids
         teams_needed = (
             teams_sp_id is not None
             and teams_sp_has_role
@@ -5312,29 +5280,6 @@ async def try_grant_missing_permissions(
                     company_id=company_id,
                     **_safe_m365_error_fields(exc),
                 )
-
-        # Purview has its own Exchange.ManageAsApp resource assignment. This
-        # is the key repair performed by reconnect for existing installations.
-        if scc_needed and scc_sp_id:
-            try:
-                await _graph_post(
-                    access_token,
-                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
-                    {
-                        "principalId": sp_object_id,
-                        "resourceId": scc_sp_id,
-                        "appRoleId": _SCC_MANAGE_AS_APP_ROLE,
-                    },
-                )
-                granted.append(_SCC_MANAGE_AS_APP_ROLE)
-                log_info("Granted Purview Exchange.ManageAsApp via connect flow", company_id=company_id)
-            except M365Error as exc:
-                if exc.http_status != 409:
-                    log_error(
-                        "try_grant_missing_permissions: failed to grant Purview Exchange.ManageAsApp",
-                        company_id=company_id,
-                        **_safe_m365_error_fields(exc),
-                    )
 
         # Do not add or revoke legacy Teams.ManageAsApp assignments. Supported
         # Teams authentication uses resource tokens and Teams RBAC.

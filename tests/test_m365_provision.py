@@ -621,6 +621,15 @@ def test_permission_contract_omits_unsupported_permissions():
 
     assert "SecuritySecureScore.Read.All" not in permission_names
     assert "LicenseManager.AccessAsUser" not in permission_names
+    assert not any(
+        permission.resource == "Microsoft Exchange Online Protection"
+        and permission.name == "Exchange.ManageAsApp"
+        for permission in m365_service.PERMISSION_CONTRACT
+    )
+    assert all(
+        app["app_id"] != m365_service._SCC_APP_ID
+        for app in m365_service.ENTERPRISE_APP_CATALOG
+    )
 
 
 # ---------------------------------------------------------------------------
