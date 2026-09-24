@@ -271,9 +271,8 @@ async def test_sync_delegated_403_falls_back_to_client_credentials(monkeypatch):
     assert call_count["acquire"] == 1
 
 
-async def test_sync_delegated_403_falls_back_via_provisioned_company(monkeypatch):
-    """A 403 with delegated auth (no company_id) should discover a provisioned
-    company and fall back to client_credentials."""
+async def test_sync_delegated_403_never_borrows_provisioned_company(monkeypatch):
+    """A global mailbox must not borrow another company's app token after a 403."""
     from app.services.m365 import M365Error
 
     account = _fake_account(
@@ -309,8 +308,9 @@ async def test_sync_delegated_403_falls_back_via_provisioned_company(monkeypatch
     monkeypatch.setattr(m365_mail.m365_service, "acquire_access_token", fake_acquire_token)
 
     result = await m365_mail.sync_account(1)
-    assert result["status"] == "succeeded"
-    assert call_count["graph_get"] == 2
+    assert result["status"] == "completed_with_errors"
+    assert call_count["graph_get"] == 1
+    assert call_count["acquire"] == 0
 
 
 async def test_sync_delegated_403_fallback_then_client_creds_also_403(monkeypatch):
