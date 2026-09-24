@@ -4,11 +4,26 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/bradhawkins85/myportal-tray/internal/api"
 	"github.com/bradhawkins85/myportal-tray/internal/ipc"
 )
+
+func TestServiceDoesNotModifyDefenderPreferences(t *testing.T) {
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, forbidden := range []string{"ApplyExclusions", "Add-MpPreference", "Set-MpPreference", "TamperProtection"} {
+		if strings.Contains(string(source), forbidden) {
+			t.Errorf("tray service must not attempt to modify Defender preferences: found %q", forbidden)
+		}
+	}
+}
 
 func TestDeliverUserSessionMessageQueuesAndLaunchesUIWhenNoIPCClient(t *testing.T) {
 	d := &daemon{}
