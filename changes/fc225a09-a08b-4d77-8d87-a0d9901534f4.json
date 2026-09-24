@@ -1,0 +1,7 @@
+{
+  "guid": "fc225a09-a08b-4d77-8d87-a0d9901534f4",
+  "occurred_at": "2026-09-24T10:59:30.159779+00:00",
+  "change_type": "feature",
+  "summary": "Consolidate Microsoft 365 company connection health and diagnostics",
+  "content_hash": "13f632613db49d334d89df6118c6992ba297a5810d80d4b92264c99214af2ffe"
+}

@@ -176,6 +176,8 @@ from app.services import user_m365_contacts as user_m365_contacts_service
 from app.services import m365_oauth_transactions
 from app.services import rag_relationships as rag_relationship_service
 from app.services import m365 as m365_service
+from app.services.m365_connection_health import build_connection_health
+from app.repositories import m365_connections as m365_connection_repo
 from app.services import cis_benchmark as cis_benchmark_service
 from app.services import m365_best_practices as m365_best_practices_service
 from app.services import modules as modules_service
@@ -3458,6 +3460,15 @@ async def m365_page(request: Request):
     if not _membership_menu_can(user, membership, "menu.m365.configuration"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Office 365 configuration access required")
     credentials = await m365_service.get_credentials(company_id)
+    active_connection = await m365_connection_repo.get_active(company_id)
+    pending_connection = await m365_connection_repo.get_pending(company_id)
+    permission_results = await m365_service.get_last_enterprise_app_permissions(company_id)
+    connection_health = build_connection_health(
+        credentials,
+        active=active_connection,
+        pending=pending_connection,
+        permission_results=permission_results,
+    )
     credential_view = None
     if credentials:
         expires = credentials.get("token_expires_at")
@@ -3498,10 +3509,27 @@ async def m365_page(request: Request):
         "admin_credential": admin_credential_view,
         "is_super_admin": bool(user.get("is_super_admin")),
         "has_credentials": bool(credentials),
+        "connection_health": connection_health,
         "has_admin_credentials": bool(admin_credential_view),
         "admin_credentials_configured": bool(all(await _get_m365_admin_credentials(company_id))),
     }
     return await _render_template("m365/index.html", request, user, extra=extra)
+
+
+@app.get("/admin/companies/{company_id}/m365", response_class=RedirectResponse)
+async def company_m365_connection_page(company_id: int, request: Request):
+    """Canonical per-company entry point while preserving the established page."""
+    user, redirect = await _require_super_admin_page(request)
+    if redirect:
+        return redirect
+    company = await company_repo.get_company_by_id(company_id)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    session = await session_manager.load_session(request)
+    if not session:
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    await session_manager.set_active_company(session, company_id)
+    return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.get("/m365/benchmarks", response_class=RedirectResponse)
@@ -4570,6 +4598,12 @@ async def m365_diagnostics_page(request: Request):
 
     credentials = await m365_service.get_credentials(company_id)
     last_results = await m365_service.get_last_enterprise_app_permissions(company_id)
+    active_connection = await m365_connection_repo.get_active(company_id)
+    pending_connection = await m365_connection_repo.get_pending(company_id)
+    connection_health = build_connection_health(
+        credentials, active=active_connection, pending=pending_connection,
+        permission_results=last_results,
+    )
     purview_preflight = None
     required_access = None
     if credentials:
@@ -4590,6 +4624,7 @@ async def m365_diagnostics_page(request: Request):
         "results": last_results,
         "purview_preflight": purview_preflight,
         "required_access": required_access,
+        "connection_health": connection_health,
         "is_super_admin": True,
     }
     return await _render_template("m365/diagnostics.html", request, user, extra=extra)

@@ -829,8 +829,12 @@ async def _render_company_edit_page(
 
     # Fetch Microsoft 365 credentials for the company
     m365_credential_view: dict[str, Any] | None = None
+    m365_connection_health: dict[str, Any] | None = None
     if is_super_admin:
         try:
+            from app.repositories import m365_connections as m365_connection_repo
+            from app.services.m365_connection_health import build_connection_health
+
             m365_creds = await m365_service.get_credentials(company_id)
             if m365_creds:
                 expires = m365_creds.get("token_expires_at")
@@ -845,6 +849,12 @@ async def _render_company_edit_page(
                     "client_id": m365_creds.get("client_id"),
                     "token_expires_at": expires_display,
                 }
+            m365_connection_health = build_connection_health(
+                m365_creds,
+                active=await m365_connection_repo.get_active(company_id),
+                pending=await m365_connection_repo.get_pending(company_id),
+                permission_results=await m365_service.get_last_enterprise_app_permissions(company_id),
+            )
         except RuntimeError as exc:  # pragma: no cover - defensive guard for tests
             if "Database pool not initialised" in str(exc):
                 pass
@@ -911,6 +921,7 @@ async def _render_company_edit_page(
         "show_inactive_tasks": show_inactive_tasks,
         "m365_credential": m365_credential_view,
         "m365_has_credentials": m365_credential_view is not None,
+        "m365_connection_health": m365_connection_health,
         "m365_admin_credentials_configured": bool(
             all(await _main()._get_m365_admin_credentials(company_id))
         ),
