@@ -170,7 +170,9 @@ async def clear_delegated_tokens(account_id: int) -> dict[str, Any] | None:
     return await mail_repo.clear_account_tokens(account_id)
 
 
-async def _acquire_delegated_access_token(account: Mapping[str, Any]) -> str:
+async def _acquire_delegated_access_token(
+    account: Mapping[str, Any], *, force_refresh: bool = False
+) -> str:
     """Acquire a Graph API access token using the account's own delegated tokens.
 
     If the cached access token is still valid it is returned immediately.
@@ -185,7 +187,7 @@ async def _acquire_delegated_access_token(account: Mapping[str, Any]) -> str:
     # Try the cached access token (5-minute safety margin)
     cached_token = account.get("access_token")
     expires_at = account.get("token_expires_at")
-    if cached_token and expires_at:
+    if not force_refresh and cached_token and expires_at:
         margin = datetime.now(timezone.utc) + timedelta(minutes=5)
         if expires_at > margin:
             return decrypt_secret(cached_token)
@@ -1270,11 +1272,55 @@ async def sync_account(
 
         # Paginate through all messages
         delegated_fallback_attempted = False
+        unauthorized_retry_attempted = False
         unread_filter_fallback_attempted = False
         while full_url:
             try:
                 data = await _graph_get(access_token, full_url)
             except M365Error as exc:
+                if exc.http_status == 401 and not unauthorized_retry_attempted:
+                    # A token can be revoked by Microsoft before its advertised
+                    # expiry (password/session changes are common examples). Do
+                    # not keep returning the cached token: refresh it once and
+                    # retry the exact page that failed.
+                    unauthorized_retry_attempted = True
+                    try:
+                        if using_delegated:
+                            access_token = await _acquire_delegated_access_token(
+                                account, force_refresh=True
+                            )
+                        elif auth_company_id is not None:
+                            access_token = await m365_service.acquire_access_token(
+                                int(auth_company_id),
+                                force_client_credentials=True,
+                                force_refresh=True,
+                            )
+                        else:
+                            raise M365Error(
+                                "No Microsoft 365 credentials are available to refresh"
+                            )
+                        log_info(
+                            "Refreshed M365 access token after Graph returned 401",
+                            account_id=account_id,
+                            upn=upn,
+                        )
+                        continue
+                    except Exception as refresh_exc:
+                        log_error(
+                            "Failed to refresh M365 access token after Graph returned 401",
+                            account_id=account_id,
+                            upn=upn,
+                            error=str(refresh_exc),
+                        )
+                        errors.append(
+                            {
+                                "error": (
+                                    "Microsoft 365 authentication expired and could not "
+                                    "be refreshed. Please sign in again."
+                                )
+                            }
+                        )
+                        break
                 if (
                     exc.http_status == 403
                     and using_delegated
