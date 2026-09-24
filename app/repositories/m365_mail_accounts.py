@@ -185,6 +185,8 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
         "refresh_token",
         "access_token",
         "token_expires_at",
+        "oauth_client_id", "oauth_authority", "oauth_account_id", "oauth_scopes",
+        "oauth_connection_version",
     }
     unknown = set(fields) - allowed
     if unknown:
@@ -231,11 +233,23 @@ async def update_account_tokens(
     refresh_token: str | None,
     access_token: str | None,
     token_expires_at: datetime | None,
+    oauth_client_id: str | None = None,
+    oauth_authority: str | None = None,
+    oauth_account_id: str | None = None,
+    oauth_scopes: str | None = None,
+    oauth_connection_version: int | None = None,
+    expected_revision: int | None = None,
 ) -> dict[str, Any] | None:
     """Update only the OAuth token columns for a mail account."""
     expires_value = None
     if isinstance(token_expires_at, datetime):
         expires_value = token_expires_at.replace(tzinfo=None)
+    revision_clause = "" if expected_revision is None else " AND token_revision = %s"
+    params: list[Any] = [tenant_id, refresh_token, access_token, expires_value,
+                         oauth_client_id, oauth_authority, oauth_account_id,
+                         oauth_scopes, oauth_connection_version, account_id]
+    if expected_revision is not None:
+        params.append(expected_revision)
     await db.execute(
         """
         UPDATE m365_mail_accounts
@@ -243,10 +257,16 @@ async def update_account_tokens(
             refresh_token = %s,
             access_token = %s,
             token_expires_at = %s,
+            oauth_client_id = COALESCE(%s, oauth_client_id),
+            oauth_authority = COALESCE(%s, oauth_authority),
+            oauth_account_id = COALESCE(%s, oauth_account_id),
+            oauth_scopes = COALESCE(%s, oauth_scopes),
+            oauth_connection_version = COALESCE(%s, oauth_connection_version),
+            token_revision = token_revision + 1,
             updated_at = UTC_TIMESTAMP(6)
         WHERE id = %s
-        """,
-        (tenant_id, refresh_token, access_token, expires_value, account_id),
+        """ + revision_clause,
+        tuple(params),
     )
     return await get_account(account_id)
 
