@@ -1,0 +1,7 @@
+{
+  "guid": "78cbfb93-1e04-429d-83ee-9ec659f06ae3",
+  "occurred_at": "2026-09-24T07:26:42.201880+00:00",
+  "change_type": "security",
+  "summary": "Stage and verify Microsoft 365 replacement connections before explicit cutover",
+  "content_hash": "b8f060a61208efa474f58d95d6ee816723f149be81a814147c03535add5e5b7e"
+}

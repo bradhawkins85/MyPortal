@@ -5487,11 +5487,15 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
 
         effective_tenant_id = token_tenant_id.strip() or tenant_id
         if token_tenant_id and token_tenant_id != tenant_id:
-            log_info(
-                "M365 provision callback tenant mismatch; using token tenant",
+            log_error(
+                "M365 provision callback tenant mismatch; refusing candidate",
                 company_id=company_id,
                 requested_tenant_id=tenant_id,
                 token_tenant_id=token_tenant_id,
+            )
+            return _provision_error(
+                "The signed-in account belongs to a different tenant. "
+                "The existing connection was not changed."
             )
 
         # Load company name for a descriptive app display name
@@ -5500,10 +5504,18 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
         display_name = f"MyPortal – {company_name}" if company_name else "MyPortal Integration"
 
         try:
+            pending_connection = await m365_service.get_pending_connection(
+                company_id, effective_tenant_id
+            )
             provision_result = await m365_service.provision_app_registration(
                 access_token=access_token,
                 display_name=display_name,
                 redirect_uri=redirect_uri,
+                app_object_id=(pending_connection or {}).get("app_object_id"),
+                client_id=(pending_connection or {}).get("client_id"),
+                service_principal_object_id=(pending_connection or {}).get(
+                    "service_principal_object_id"
+                ),
             )
         except m365_service.M365Error as exc:
             log_error(
@@ -5514,100 +5526,24 @@ async def m365_callback(request: Request, code: str | None = None, state: str | 
             )
             return _provision_error(f"Provisioning failed: {exc}")
 
-        await m365_service.upsert_credentials(
-            company_id=company_id,
-            tenant_id=effective_tenant_id,
-            client_id=provision_result["client_id"],
-            client_secret=provision_result["client_secret"],
-            app_object_id=provision_result.get("app_object_id"),
-            client_secret_key_id=provision_result.get("client_secret_key_id"),
-            client_secret_expires_at=provision_result.get("client_secret_expires_at"),
+        candidate = await m365_service.stage_connection_candidate(
+            company_id, effective_tenant_id, provision_result
         )
         log_info(
-            "M365 enterprise app provisioned and credentials stored",
+            "M365 enterprise app candidate staged; active connection unchanged",
             company_id=company_id,
             tenant_id=effective_tenant_id,
             client_id=provision_result["client_id"],
+            connection_id=candidate["id"],
         )
 
-        # Best-effort: provision a dedicated PKCE public client for this company
-        try:
-            await m365_service.auto_provision_company_pkce_client_id(
-                company_id,
-                redirect_uri=redirect_uri,
-                company_admin_creds={
-                    "tenant_id": effective_tenant_id,
-                    "client_id": provision_result["client_id"],
-                    "client_secret": provision_result["client_secret"],
-                    "app_object_id": provision_result.get("app_object_id"),
-                    "client_secret_key_id": provision_result.get("client_secret_key_id"),
-                    "client_secret_expires_at": provision_result.get(
-                        "client_secret_expires_at"
-                    ),
-                },
-            )
-        except Exception as exc:  # pragma: no cover - best-effort helper
-            log_warning(
-                "Per-company PKCE auto-provision failed after M365 app provisioning",
-                company_id=company_id,
-                error=str(exc),
-            )
-
-        # Auto-create default sync tasks for the company if not already present.
-        existing_commands = await scheduled_tasks_repo.get_commands_for_company(company_id)
-        has_m365_sync_task = bool(
-            {"sync_m365_data", "sync_o365", "sync_m365_licenses", "sync_m365_contacts", "sync_m365_mailboxes"}
-            & existing_commands
-        )
-        sync_staff_task_name = (
-            f"{company_name} - Sync staff directory"
-            if company_name
-            else "Sync staff directory"
-        )
-        # Create the three split M365 sync tasks if no M365 sync tasks exist yet
-        if not has_m365_sync_task:
-            for command, label_suffix in (
-                ("sync_m365_licenses", "Sync Microsoft 365 licenses"),
-                ("sync_m365_contacts", "Sync Microsoft 365 contacts"),
-                ("sync_m365_mailboxes", "Sync Microsoft 365 mailboxes"),
-            ):
-                label = f"{company_name} - {label_suffix}" if company_name else label_suffix
-                await scheduled_tasks_repo.create_task(
-                    name=label,
-                    command=command,
-                    cron=_random_daily_cron(),
-                    company_id=company_id,
-                    active=True,
-                )
-                log_info(
-                    "Auto-created scheduled task after M365 provisioning",
-                    command=command,
-                    company_id=company_id,
-                )
-        if "sync_staff" not in existing_commands:
-            await scheduled_tasks_repo.create_task(
-                name=sync_staff_task_name,
-                command="sync_staff",
-                cron=_random_daily_cron(),
-                company_id=company_id,
-                active=True,
-            )
-            log_info(
-                "Auto-created scheduled task after M365 provisioning",
-                command="sync_staff",
-                company_id=company_id,
-            )
-        await scheduler_service.refresh()
-
-        asyncio.create_task(
-            _best_effort_sync_m365_email_domains(company_id),
-            name=f"sync_m365_email_domains_{company_id}",
-        )
-
+        # Provisioning is intentionally complete at staging. PKCE configuration,
+        # scheduled jobs and the compatibility credential row remain attached to
+        # the active connection until a separate verified cutover.
         if return_to_company_edit:
             return _company_edit_redirect(
                 company_id=company_id,
-                success="Microsoft 365 enterprise app provisioned successfully.",
+                success="Microsoft 365 replacement staged. Verify it before activation.",
             )
         return RedirectResponse(url="/m365", status_code=status.HTTP_303_SEE_OTHER)
 
