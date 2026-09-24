@@ -33,6 +33,11 @@ from app.repositories import staff as staff_repo
 from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import modules as modules_service
+from app.services.m365_access_baseline import (
+    REQUIRED_DIRECTORY_ROLES,
+    RESOURCE_APP_IDS,
+    permissions_by_resource,
+)
 
 
 _GRAPH_SCOPE = "https://graph.microsoft.com/.default"
@@ -349,6 +354,169 @@ ENTERPRISE_APP_CATALOG: list[dict[str, Any]] = [
 ]
 
 
+async def diagnose_required_m365_access(company_id: int) -> dict[str, Any]:
+    """Verify manifest configuration, tenant consent, and directory roles.
+
+    Configuration and effective grants are intentionally checked separately:
+    ``requiredResourceAccess`` is only a request in an app manifest and does not
+    prove that an administrator granted tenant-wide consent.
+    """
+    creds = await get_credentials(company_id)
+    if not creds:
+        raise M365Error("No M365 credentials found for company")
+    access_token, _, _ = await _exchange_token(
+        tenant_id=creds["tenant_id"],
+        client_id=creds["client_id"],
+        client_secret=creds.get("client_secret") or "",
+        refresh_token=None,
+    )
+    client_id = str(creds["client_id"])
+    applications = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/applications"
+        f"?$filter=appId eq '{quote(client_id, safe='')}'&$select=id,requiredResourceAccess",
+    )
+    if not applications.get("value"):
+        raise M365Error("MyPortal app registration not found in tenant")
+    app = applications["value"][0]
+    configured = {
+        (str(entry.get("resourceAppId")), str(item.get("type")), str(item.get("id")))
+        for entry in app.get("requiredResourceAccess", [])
+        for item in entry.get("resourceAccess", [])
+    }
+    principals = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/servicePrincipals"
+        f"?$filter=appId eq '{quote(client_id, safe='')}'&$select=id",
+    )
+    if not principals.get("value"):
+        raise M365Error("MyPortal service principal not found in tenant")
+    principal_id = str(principals["value"][0]["id"])
+    assignments = await _graph_get(
+        access_token,
+        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(principal_id)}/appRoleAssignments",
+    )
+    assigned = {
+        (str(item.get("resourceId")), str(item.get("appRoleId")))
+        for item in assignments.get("value", [])
+    }
+    grants = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/oauth2PermissionGrants"
+        f"?$filter=clientId eq '{quote(principal_id, safe='')}'&$select=resourceId,scope,consentType",
+    )
+    delegated_grants = {
+        (str(grant.get("resourceId")), scope)
+        for grant in grants.get("value", [])
+        if grant.get("consentType") == "AllPrincipals"
+        for scope in str(grant.get("scope") or "").split()
+    }
+
+    results: list[dict[str, Any]] = []
+    for resource_name, requirements in permissions_by_resource().items():
+        app_id = RESOURCE_APP_IDS[resource_name]
+        filter_part = (
+            f"appId eq '{app_id}'" if app_id else f"displayName eq '{resource_name}'"
+        )
+        resources = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/servicePrincipals"
+            f"?$filter={filter_part}&$select=id,appId,appRoles,oauth2PermissionScopes",
+        )
+        resource = (resources.get("value") or [None])[0]
+        role_ids = {
+            str(role.get("value")): str(role.get("id"))
+            for role in (resource or {}).get("appRoles", [])
+            if role.get("value") and role.get("id")
+        }
+        scope_ids = {
+            str(scope.get("value")): str(scope.get("id"))
+            for scope in (resource or {}).get("oauth2PermissionScopes", [])
+            if scope.get("value") and scope.get("id")
+        }
+        resource_id = str((resource or {}).get("id") or "")
+        actual_app_id = str((resource or {}).get("appId") or app_id or "")
+        permission_results = []
+        for requirement in requirements:
+            definitions = role_ids if requirement.permission_type == "Application" else scope_ids
+            permission_id = definitions.get(requirement.name)
+            manifest_type = "Role" if requirement.permission_type == "Application" else "Scope"
+            is_configured = bool(permission_id and (actual_app_id, manifest_type, permission_id) in configured)
+            is_consented = bool(
+                permission_id
+                and (
+                    (resource_id, permission_id) in assigned
+                    if requirement.permission_type == "Application"
+                    else (resource_id, requirement.name) in delegated_grants
+                )
+            )
+            if not permission_id:
+                remediation = (
+                    f"The {resource_name} service principal does not expose {requirement.name} as a "
+                    f"{requirement.permission_type.lower()} permission. Confirm the resource is provisioned "
+                    "and the permission is available in this tenant; contact the API owner if it is not."
+                )
+            elif not is_configured:
+                remediation = (
+                    f"Add {resource_name} > {requirement.permission_type} > {requirement.name} "
+                    "to the MyPortal app registration, then grant tenant-wide admin consent."
+                )
+            elif not is_consented:
+                remediation = (
+                    f"Grant tenant-wide admin consent for {resource_name} > "
+                    f"{requirement.name}; a configured permission alone is not an effective grant."
+                )
+            else:
+                remediation = None
+            permission_results.append({
+                "name": requirement.name,
+                "type": requirement.permission_type,
+                "id": permission_id,
+                "configured": is_configured,
+                "consented": is_consented,
+                "status": "pass" if is_configured and is_consented else ("unavailable" if not permission_id else "fail"),
+                "remediation": remediation,
+            })
+        results.append({
+            "name": resource_name,
+            "app_id": actual_app_id,
+            "permissions": permission_results,
+            "all_ok": all(item["status"] == "pass" for item in permission_results),
+        })
+
+    role_assignments = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments"
+        f"?$filter=principalId eq '{quote(principal_id, safe='')}'&$select=roleDefinitionId",
+    )
+    assigned_role_ids = {str(row.get("roleDefinitionId")) for row in role_assignments.get("value", [])}
+    role_definitions = await _graph_get(
+        access_token,
+        "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions?$select=id,displayName",
+    )
+    definitions_by_name = {
+        str(row.get("displayName")): str(row.get("id")) for row in role_definitions.get("value", [])
+    }
+    role_results = []
+    for role_name in REQUIRED_DIRECTORY_ROLES:
+        role_id = definitions_by_name.get(role_name)
+        granted = bool(role_id and role_id in assigned_role_ids)
+        role_results.append({
+            "name": role_name,
+            "status": "pass" if granted else "fail",
+            "remediation": None if granted else (
+                f"In Microsoft Entra admin center, open Roles and administrators > {role_name}, "
+                "add an assignment for the MyPortal enterprise application at directory scope (/), then re-run diagnostics."
+            ),
+        })
+    return {
+        "resources": results,
+        "directory_roles": role_results,
+        "all_ok": all(resource["all_ok"] for resource in results)
+        and all(role["status"] == "pass" for role in role_results),
+    }
+
+
 def is_azure_cli_pkce_fallback(client_id: str | None) -> bool:
     """Return ``True`` when ``client_id`` matches the Azure CLI fallback app ID."""
     return str(client_id or "").strip() == AZURE_CLI_CLIENT_ID
@@ -380,6 +548,58 @@ async def _get_sp_app_role_ids(access_token: str, app_id: str) -> tuple[str | No
         return sp["id"], role_ids
     except M365Error:
         return None, set()
+
+
+async def _build_required_resource_access(
+    access_token: str,
+) -> tuple[list[dict[str, Any]], list[tuple[str, str]], list[tuple[str, list[str]]]]:
+    """Resolve the named baseline against this tenant's resource principals.
+
+    Permission identifiers are owned by each Microsoft API and can change or be
+    absent in sovereign/unlicensed tenants, so they are discovered rather than
+    copied from an unrelated tenant.  Missing definitions remain visible as
+    actionable ``unavailable`` diagnostics instead of silently changing type.
+    """
+    manifest: list[dict[str, Any]] = []
+    application_grants: list[tuple[str, str]] = []
+    delegated_grants: list[tuple[str, list[str]]] = []
+    for resource_name, requirements in permissions_by_resource().items():
+        app_id = RESOURCE_APP_IDS[resource_name]
+        filter_part = f"appId eq '{app_id}'" if app_id else f"displayName eq '{resource_name}'"
+        response = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/servicePrincipals"
+            f"?$filter={filter_part}&$select=id,appId,appRoles,oauth2PermissionScopes",
+        )
+        if not response.get("value"):
+            log_warning("Required Microsoft 365 resource is unavailable", resource=resource_name)
+            continue
+        resource = response["value"][0]
+        roles = {str(item.get("value")): str(item.get("id")) for item in resource.get("appRoles", [])}
+        scopes = {str(item.get("value")): str(item.get("id")) for item in resource.get("oauth2PermissionScopes", [])}
+        resource_access = []
+        delegated_names = []
+        for requirement in requirements:
+            permission_id = (roles if requirement.permission_type == "Application" else scopes).get(requirement.name)
+            if not permission_id:
+                log_warning(
+                    "Required Microsoft 365 permission is unavailable",
+                    resource=resource_name,
+                    permission=requirement.name,
+                    permission_type=requirement.permission_type,
+                )
+                continue
+            access_type = "Role" if requirement.permission_type == "Application" else "Scope"
+            resource_access.append({"id": permission_id, "type": access_type})
+            if access_type == "Role":
+                application_grants.append((str(resource["id"]), permission_id))
+            else:
+                delegated_names.append(requirement.name)
+        if resource_access:
+            manifest.append({"resourceAppId": str(resource["appId"]), "resourceAccess": resource_access})
+        if delegated_names:
+            delegated_grants.append((str(resource["id"]), delegated_names))
+    return manifest, application_grants, delegated_grants
 
 
 def get_pkce_client_id() -> str:
@@ -2056,8 +2276,6 @@ async def provision_app_registration(
             "Unable to locate Microsoft Graph service principal in the tenant"
         )
 
-    _teams_sp_id, teams_sp_role_ids = await _get_sp_app_role_ids(access_token, _TEAMS_APP_ID)
-
     # Filter Graph roles to those present in this tenant's Graph SP, plus
     # explicitly force-granted roles whose availability lookup can be stale or
     # incomplete even though Graph accepts the assignment.
@@ -2075,31 +2293,9 @@ async def provision_app_registration(
             skipped_roles=skipped_graph_roles,
         )
 
-    teams_role_available = _TEAMS_MANAGE_AS_APP_ROLE in teams_sp_role_ids
-
-    required_resource_access: list[dict[str, Any]] = [
-        {
-            "resourceAppId": _GRAPH_APP_ID,
-            "resourceAccess": [
-                {"id": role_id, "type": "Role"} for role_id in valid_graph_roles
-            ],
-        },
-        {
-            "resourceAppId": _EXO_APP_ID,
-            "resourceAccess": [
-                {"id": _EXO_MANAGE_AS_APP_ROLE, "type": "Role"},
-            ],
-        },
-    ]
-    if teams_role_available and _teams_sp_id:
-        required_resource_access.append(
-            {
-                "resourceAppId": _TEAMS_APP_ID,
-                "resourceAccess": [
-                    {"id": _TEAMS_MANAGE_AS_APP_ROLE, "type": "Role"},
-                ],
-            }
-        )
+    required_resource_access, baseline_application_grants, baseline_delegated_grants = (
+        await _build_required_resource_access(access_token)
+    )
 
     # 2. Create the app registration with only the validated permissions.
     app_payload: dict[str, Any] = {
@@ -2169,6 +2365,8 @@ async def provision_app_registration(
             graph_sp_id,
             app_object_id,
             valid_graph_roles=valid_graph_roles,
+            baseline_application_grants=baseline_application_grants,
+            baseline_delegated_grants=baseline_delegated_grants,
         ),
         name=f"provision_roles_{client_id}",
     )
@@ -2189,6 +2387,8 @@ async def _grant_provisioned_roles(
     app_object_id: str,
     *,
     valid_graph_roles: list[str] | None = None,
+    baseline_application_grants: list[tuple[str, str]] | None = None,
+    baseline_delegated_grants: list[tuple[str, list[str]]] | None = None,
 ) -> None:
     """Background task: grant all required role assignments for a newly-provisioned app.
 
@@ -2212,6 +2412,41 @@ async def _grant_provisioned_roles(
     # of attempting grants for roles that may not exist in the tenant).
     roles_to_grant = valid_graph_roles if valid_graph_roles is not None else _PROVISION_APP_ROLES
     try:
+        # Grant the complete, resource-aware application baseline.  The set
+        # removes legacy duplicates retained below for backwards compatibility.
+        for resource_id, role_id in set(baseline_application_grants or []):
+            try:
+                await _post_app_role_assignment_with_retry(
+                    access_token,
+                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
+                    {"principalId": sp_object_id, "resourceId": resource_id, "appRoleId": role_id},
+                )
+            except M365Error as exc:
+                if exc.http_status != 409:
+                    log_error("Failed to grant required application permission", role_id=role_id, error=str(exc))
+
+        # Delegated tenant-wide consent is represented by oauth2PermissionGrant,
+        # not appRoleAssignment.  Keep it separate so diagnostics cannot mistake
+        # a configured scope for effective consent.
+        for resource_id, scopes in baseline_delegated_grants or []:
+            try:
+                await _graph_post(
+                    access_token,
+                    "https://graph.microsoft.com/v1.0/oauth2PermissionGrants",
+                    {
+                        "clientId": sp_object_id,
+                        "consentType": "AllPrincipals",
+                        "resourceId": resource_id,
+                        "scope": " ".join(scopes),
+                    },
+                )
+            except M365Error as exc:
+                if exc.http_status != 409:
+                    log_error("Failed to grant required delegated permissions", resource_id=resource_id, error=str(exc))
+
+        for role_name in REQUIRED_DIRECTORY_ROLES:
+            await _ensure_directory_role_by_name(access_token, sp_object_id, role_name)
+
         # 1. Grant each required Microsoft Graph application permission.
         # 409 Conflict means the assignment already exists – treat as success.
         # Any other error is logged and skipped so remaining roles still process.
@@ -4537,6 +4772,46 @@ async def repair_enterprise_app_permissions(
     }
 
 
+async def _ensure_directory_role_by_name(
+    access_token: str, sp_object_id: str, role_name: str
+) -> bool:
+    """Assign a verified built-in directory role at tenant scope."""
+    try:
+        definitions = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions"
+            f"?$filter=displayName eq '{quote(role_name, safe='')}'&$select=id,displayName,isBuiltIn",
+        )
+        matching = [
+            row for row in definitions.get("value", [])
+            if row.get("displayName") == role_name and row.get("isBuiltIn") is not False
+        ]
+        if len(matching) != 1:
+            log_error("Could not uniquely resolve required built-in directory role", role_name=role_name)
+            return False
+        role_id = str(matching[0]["id"])
+        existing = await _graph_get(
+            access_token,
+            "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments"
+            f"?$filter=principalId eq '{quote(sp_object_id, safe='')}' and roleDefinitionId eq '{quote(role_id, safe='')}'",
+        )
+        if existing.get("value"):
+            return False
+        await _graph_post(
+            access_token,
+            "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments",
+            {"principalId": sp_object_id, "roleDefinitionId": role_id, "directoryScopeId": "/"},
+        )
+        return True
+    except M365Error as exc:
+        log_error(
+            "Failed to assign required directory role; assign it in Microsoft Entra Roles and administrators",
+            role_name=role_name,
+            error=str(exc),
+        )
+        return False
+
+
 async def _ensure_exchange_admin_role(
     access_token: str,
     sp_object_id: str,
@@ -4940,6 +5215,10 @@ async def try_grant_missing_permissions(
         # This is required in addition to Teams.ManageAsApp.
         if await _ensure_teams_service_admin_role(access_token, sp_object_id):
             granted.append("teams-admin-role")
+
+        for role_name in REQUIRED_DIRECTORY_ROLES:
+            if await _ensure_directory_role_by_name(access_token, sp_object_id, role_name):
+                granted.append(f"directory-role:{role_name}")
 
         # Repair the second half of the self-renewal contract as well as the
         # Application.ReadWrite.OwnedBy assignment.  Existing installations

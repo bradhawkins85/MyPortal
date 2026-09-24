@@ -27,6 +27,51 @@
 {% endblock %}
 
 {% block content %}
+  {% if required_access %}
+  <section class="panel" aria-labelledby="required-access-title">
+    <header class="panel__header">
+      <div>
+        <h2 class="panel__title" id="required-access-title">Required tenant-wide access</h2>
+        <p class="panel__subtitle">Checks application permissions and delegated permissions separately, including both app-manifest configuration and effective tenant-wide consent.</p>
+      </div>
+      <span class="status status--{{ 'success' if required_access.all_ok else 'danger' }}">{{ 'All access verified' if required_access.all_ok else 'Action required' }}</span>
+    </header>
+    <div class="panel__body">
+      {% if required_access.error %}<p class="alert alert--danger">{{ required_access.error }}</p>{% endif %}
+      <h3>Directory roles</h3>
+      {% for role in required_access.directory_roles %}
+      <article class="card card--panel" style="margin-bottom: var(--space-3);">
+        <div style="display:flex; justify-content:space-between; gap:var(--space-3);">
+          <strong>{{ role.name }}</strong>
+          <span class="status status--{{ 'success' if role.status == 'pass' else 'danger' }}">{{ 'Assigned' if role.status == 'pass' else 'Missing' }}</span>
+        </div>
+        {% if role.remediation %}<p class="text-muted">{{ role.remediation }}</p>{% endif %}
+      </article>
+      {% endfor %}
+      {% for resource in required_access.resources %}
+      <details style="margin-top:var(--space-3);" {% if not resource.all_ok %}open{% endif %}>
+        <summary><strong>{{ resource.name }}</strong> — {{ 'verified' if resource.all_ok else 'action required' }}</summary>
+        <div style="overflow-x:auto;">
+          <table class="table">
+            <thead><tr><th>Permission</th><th>Type</th><th>Configured</th><th>Consent</th><th>Result</th></tr></thead>
+            <tbody>
+            {% for permission in resource.permissions %}
+              <tr>
+                <td><strong>{{ permission.name }}</strong>{% if permission.remediation %}<br><small class="text-muted">{{ permission.remediation }}</small>{% endif %}</td>
+                <td>{{ permission.type }}</td>
+                <td>{{ 'Yes' if permission.configured else 'No' }}</td>
+                <td>{{ 'Granted' if permission.consented else 'Missing' }}</td>
+                <td><span class="status status--{{ 'success' if permission.status == 'pass' else ('neutral' if permission.status == 'unavailable' else 'danger') }}">{{ permission.status|replace('_', ' ')|title }}</span></td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
   {% if purview_preflight %}
   <section class="panel" aria-labelledby="purview-preflight-title">
     <header class="panel__header">
