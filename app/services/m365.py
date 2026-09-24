@@ -35,6 +35,7 @@ from app.repositories import staff_custom_fields as staff_custom_fields_repo
 from app.security.encryption import decrypt_secret, encrypt_secret
 from app.services import modules as modules_service
 from app.services.m365_access_baseline import (
+    PERMISSION_CONTRACT,
     REQUIRED_DIRECTORY_ROLES,
     RESOURCE_APP_IDS,
     permissions_by_resource,
@@ -145,55 +146,14 @@ _APP_SELF_OWNER_CHECK_ID = "myportal-app-self-owner"
 # audit logs.  These are included in the initial provisioning grant so that
 # newly provisioned apps immediately support CIS benchmarking without requiring
 # re-provisioning.
-_PROVISION_APP_ROLES: list[str] = [
-    "df021288-bdef-4463-88db-98f22de89214",  # User.Read.All
-    "741f803b-c850-494e-b5df-cde7c675a1ca",  # User.ReadWrite.All (staff onboarding: create/update users, assign licenses)
-    "9e3f62cf-ca93-4989-b6ce-bf83c28f9fe8",  # RoleManagement.ReadWrite.Directory (Global Administrator remediation)
-    "7ab1d382-f21e-4acd-a863-ba3e13f7da61",  # Directory.Read.All
-    "18a4783c-866b-4cc7-a460-3d5e5662c884",  # Application.ReadWrite.OwnedBy (for self-renewal)
-    # Additional permissions for CIS benchmark checks:
-    "246dd0d5-5bd0-4def-940b-0421030a5b68",  # Policy.Read.All
-    "29c18626-4985-4dcd-85c0-193eef327366",  # Policy.ReadWrite.AuthenticationMethod (Authenticator MFA-fatigue remediation)
-    "fb221be6-99f2-473f-bd32-01c6a0e9ca3b",  # Policy.ReadWrite.Authorization (required to PATCH /policies/authorizationPolicy for guest access remediation)
-    "498476ce-e0fe-48b0-b801-37ba7e2685c6",  # Organization.Read.All
-    _DOMAIN_READ_ALL_ROLE,  # Domain.Read.All (Purview organization routing)
-    "dc377aa6-52d8-4e23-b271-2a7ae04cedf3",  # DeviceManagementConfiguration.Read.All
-    "2f51be20-0bb4-4fed-bf7b-db946066c75e",  # DeviceManagementManagedDevices.Read.All
-    "b0afded3-3588-46d8-8b3d-9842eff778da",  # AuditLog.Read.All
-    # Additional permissions for mailbox reporting:
-    "230c1aed-a721-4c5d-9cb4-a90514e508ef",  # Reports.Read.All
-    "40f97065-369a-49f4-947c-6a255697ae91",  # MailboxSettings.Read
-    "6931bccd-447a-43d1-b442-00a195474933",  # MailboxSettings.ReadWrite
-    # Required by the "Display concealed names in reports" best-practice check
-    # (GET /admin/reportSettings) and its PATCH-based remediation. Distinct
-    # from Reports.Read.All – /admin/reportSettings rejects tokens that lack
-    # ReportSettings.* with S2SUnauthorized / "Invalid permission".
-    "ee353f83-55ef-4b78-82da-555bfa2b4b95",  # ReportSettings.ReadWrite.All
-    # Permission for Office 365 Mailbox Import (m365-mail module):
-    "e2a3a72e-5f79-4c64-b1b1-878b674786c9",  # Mail.ReadWrite
-    # Permissions for staff onboarding/offboarding group management:
-    "dbaae8cf-10b5-4b86-a4a1-f871c94c6695",  # GroupMember.ReadWrite.All (add/remove group members)
-    # Additional permissions for M365 monitoring best-practice checks:
-    "dc5007c0-2d7d-4c42-879c-2dab87571379",  # IdentityRiskyUser.Read.All
-    "9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30",  # Application.Read.All
-    "bf394140-e372-4bf9-a898-299cfc7564e5",  # SecurityEvents.Read.All
-    "e0b77adb-e790-44a3-b0a0-257d06303687",  # SecuritySecureScore.Read.All (required by /security/secureScores)
-    # SharePoint Online tenant settings (required for SPO best-practice checks)
-    _SHAREPOINT_TENANT_SETTINGS_ROLE,  # SharePointTenantSettings.ReadWrite.All
-    # SharePoint sites and default document libraries (OneDrive export destination picker):
-    _SITES_READ_ALL_ROLE,  # Sites.Read.All
-    # SharePoint document library writes (OneDrive export folder creation/copy):
-    _SITES_READWRITE_ALL_ROLE,  # Sites.ReadWrite.All
-    _GROUP_READWRITE_ALL_ROLE,  # Group.ReadWrite.All (create Offboarded Staff export site)
-    # MFA registration details report and per-user MFA state checks:
-    # - GET /v1.0/reports/authenticationMethods/userRegistrationDetails
-    # - GET /beta/users/{id}/authentication/requirements
-    "38d9df27-64da-44fd-b7c5-a6fbac20248f",  # UserAuthenticationMethod.Read.All
-    # Microsoft Forms tenant settings (required for the
-    # bp_internal_phishing_forms check and its PATCH remediation):
-    # - GET/PATCH /beta/admin/forms/settings
-    "2cb92fee-97a3-4034-8702-24a6f5d0d1e9",  # OrgSettings-Forms.ReadWrite.All
-]
+_GRAPH_ROLE_NAMES: dict[str, str] = {
+    permission.permission_id: permission.name
+    for permission in PERMISSION_CONTRACT
+    if permission.resource == "Microsoft Graph"
+    and permission.permission_type == "Application"
+    and permission.permission_id
+}
+_PROVISION_APP_ROLES: list[str] = list(_GRAPH_ROLE_NAMES)
 
 def get_required_app_role_ids() -> list[str]:
     """Return the list of Microsoft Graph application permission role IDs
@@ -259,41 +219,6 @@ _NON_PREMIUM_ERROR_CODE = "Authentication_RequestFromNonPremiumTenantOrB2CTenant
 # propagated after provisioning).  Callers should detect this and retry without the
 # permission-gated field rather than propagating a hard failure.
 _MISSING_PERMISSION_ERROR_CODE = "Authentication_MSGraphPermissionMissing"
-
-# Human-readable names for each Graph API application permission role ID.
-# Mirrors the inline comments on _PROVISION_APP_ROLES for structured output.
-_GRAPH_ROLE_NAMES: dict[str, str] = {
-    "df021288-bdef-4463-88db-98f22de89214": "User.Read.All",
-    "741f803b-c850-494e-b5df-cde7c675a1ca": "User.ReadWrite.All",
-    "9e3f62cf-ca93-4989-b6ce-bf83c28f9fe8": "RoleManagement.ReadWrite.Directory",
-    "7ab1d382-f21e-4acd-a863-ba3e13f7da61": "Directory.Read.All",
-    "18a4783c-866b-4cc7-a460-3d5e5662c884": "Application.ReadWrite.OwnedBy",
-    "246dd0d5-5bd0-4def-940b-0421030a5b68": "Policy.Read.All",
-    "29c18626-4985-4dcd-85c0-193eef327366": "Policy.ReadWrite.AuthenticationMethod",
-    "fb221be6-99f2-473f-bd32-01c6a0e9ca3b": "Policy.ReadWrite.Authorization",
-    "498476ce-e0fe-48b0-b801-37ba7e2685c6": "Organization.Read.All",
-    _DOMAIN_READ_ALL_ROLE: "Domain.Read.All",
-    "dc377aa6-52d8-4e23-b271-2a7ae04cedf3": "DeviceManagementConfiguration.Read.All",
-    "2f51be20-0bb4-4fed-bf7b-db946066c75e": "DeviceManagementManagedDevices.Read.All",
-    "b0afded3-3588-46d8-8b3d-9842eff778da": "AuditLog.Read.All",
-    "230c1aed-a721-4c5d-9cb4-a90514e508ef": "Reports.Read.All",
-    "40f97065-369a-49f4-947c-6a255697ae91": "MailboxSettings.Read",
-    "6931bccd-447a-43d1-b442-00a195474933": "MailboxSettings.ReadWrite",
-    "ee353f83-55ef-4b78-82da-555bfa2b4b95": "ReportSettings.ReadWrite.All",
-    "e2a3a72e-5f79-4c64-b1b1-878b674786c9": "Mail.ReadWrite",
-    "dbaae8cf-10b5-4b86-a4a1-f871c94c6695": "GroupMember.ReadWrite.All",
-    "dc5007c0-2d7d-4c42-879c-2dab87571379": "IdentityRiskyUser.Read.All",
-    "9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30": "Application.Read.All",
-    "bf394140-e372-4bf9-a898-299cfc7564e5": "SecurityEvents.Read.All",
-    "e0b77adb-e790-44a3-b0a0-257d06303687": "SecuritySecureScore.Read.All",
-    "19b94e34-907c-4f43-bde9-38b1909ed408": "SharePointTenantSettings.ReadWrite.All",
-    "332a536c-c7ef-4017-ab91-336970924f0d": "Sites.Read.All",
-    "9492366f-7969-46a4-8d15-ed1a20078fff": "Sites.ReadWrite.All",
-    "62a82d76-70ea-41e2-9197-370581804d09": "Group.ReadWrite.All",
-    "38d9df27-64da-44fd-b7c5-a6fbac20248f": "UserAuthenticationMethod.Read.All",
-    "2cb92fee-97a3-4034-8702-24a6f5d0d1e9": "OrgSettings-Forms.ReadWrite.All",
-}
-
 
 # Microsoft Graph application permissions that must be requested/granted even
 # when a tenant's servicePrincipal appRoles projection does not include them.
@@ -426,7 +351,7 @@ async def diagnose_required_m365_access(company_id: int) -> dict[str, Any]:
             "https://graph.microsoft.com/v1.0/servicePrincipals"
             f"?$filter={filter_part}&$select=id,appId,appRoles,oauth2PermissionScopes",
         )
-        resource = (resources.get("value") or [None])[0]
+        resource = _select_contract_resource(resource_name, app_id, resources.get("value", []))
         role_ids = {
             str(role.get("value")): str(role.get("id"))
             for role in (resource or {}).get("appRoles", [])
@@ -553,6 +478,24 @@ async def _get_sp_app_role_ids(access_token: str, app_id: str) -> tuple[str | No
         return None, set()
 
 
+def _select_contract_resource(
+    resource_name: str, app_id: str | None, items: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Resolve a resource without treating a tenant-owned display name as identity."""
+    if app_id:
+        matches = [item for item in items if str(item.get("appId") or "").lower() == app_id.lower()]
+        if not matches and len(items) == 1 and not items[0].get("appId"):
+            # The query itself is appId-filtered; tolerate projections/tests that omit appId.
+            matches = items
+    else:
+        matches = [
+            item for item in items
+            if str(item.get("displayName") or "") == resource_name
+            and _GRAPH_OBJECT_ID_PATTERN.fullmatch(str(item.get("appId") or ""))
+        ]
+    return matches[0] if len(matches) == 1 else None
+
+
 async def _build_required_resource_access(
     access_token: str,
 ) -> tuple[list[dict[str, Any]], list[tuple[str, str]], list[tuple[str, list[str]]]]:
@@ -574,16 +517,29 @@ async def _build_required_resource_access(
             "https://graph.microsoft.com/v1.0/servicePrincipals"
             f"?$filter={filter_part}&$select=id,appId,appRoles,oauth2PermissionScopes",
         )
-        if not response.get("value"):
-            log_warning("Required Microsoft 365 resource is unavailable", resource=resource_name)
+        resource = _select_contract_resource(resource_name, app_id, response.get("value", []))
+        if not resource:
+            log_warning("Required Microsoft 365 resource is unavailable or ambiguous", resource=resource_name)
             continue
-        resource = response["value"][0]
         roles = {str(item.get("value")): str(item.get("id")) for item in resource.get("appRoles", [])}
         scopes = {str(item.get("value")): str(item.get("id")) for item in resource.get("oauth2PermissionScopes", [])}
         resource_access = []
         delegated_names = []
         for requirement in requirements:
-            permission_id = (roles if requirement.permission_type == "Application" else scopes).get(requirement.name)
+            definitions = roles if requirement.permission_type == "Application" else scopes
+            permission_id = definitions.get(requirement.name)
+            if (
+                not permission_id
+                and requirement.permission_id
+                and (
+                    requirement.permission_id in definitions.values()
+                    or (
+                        resource_name == "Microsoft Graph"
+                        and requirement.permission_id in _FORCE_GRANT_GRAPH_APP_ROLES
+                    )
+                )
+            ):
+                permission_id = requirement.permission_id
             if not permission_id:
                 log_warning(
                     "Required Microsoft 365 permission is unavailable",
@@ -599,7 +555,7 @@ async def _build_required_resource_access(
             else:
                 delegated_names.append(requirement.name)
         if resource_access:
-            manifest.append({"resourceAppId": str(resource["appId"]), "resourceAccess": resource_access})
+            manifest.append({"resourceAppId": str(resource.get("appId") or app_id), "resourceAccess": resource_access})
         if delegated_names:
             delegated_grants.append((str(resource["id"]), delegated_names))
     return manifest, application_grants, delegated_grants
@@ -619,25 +575,25 @@ async def _grant_required_admin_consent(
     conflict as success leaves newly requested scopes without admin consent.
     """
     changed = False
-    assignments = await _graph_get(
+    assignments = await _graph_get_all(
         access_token,
-        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
+        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
     )
     assigned = {
         (str(item.get("resourceId")), str(item.get("appRoleId")))
-        for item in assignments.get("value", [])
+        for item in assignments
     }
     for resource_id, role_id in set(application_grants):
         if (resource_id, role_id) in assigned:
             continue
         await _post_app_role_assignment_with_retry(
             access_token,
-            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
+            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
             {"principalId": sp_object_id, "resourceId": resource_id, "appRoleId": role_id},
         )
         changed = True
 
-    existing_response = await _graph_get(
+    existing_grants = await _graph_get_all(
         access_token,
         "https://graph.microsoft.com/v1.0/oauth2PermissionGrants"
         f"?$filter=clientId eq '{quote(sp_object_id, safe='')}' and consentType eq 'AllPrincipals'"
@@ -645,7 +601,7 @@ async def _grant_required_admin_consent(
     )
     existing_by_resource = {
         str(item.get("resourceId")): item
-        for item in existing_response.get("value", [])
+        for item in existing_grants
         if item.get("resourceId") and item.get("id")
     }
     for resource_id, required_scopes in delegated_grants:
@@ -659,7 +615,7 @@ async def _grant_required_admin_consent(
             await _graph_patch(
                 access_token,
                 "https://graph.microsoft.com/v1.0/oauth2PermissionGrants/"
-                f"{_graph_object_id(existing['id'])}",
+                f"{_graph_path_segment(existing['id'])}",
                 payload,
             )
         else:
@@ -2568,7 +2524,11 @@ async def _grant_provisioned_roles(
         await _grant_required_admin_consent(
             access_token,
             sp_object_id,
-            baseline_application_grants or [],
+            [
+                grant for grant in (baseline_application_grants or [])
+                if grant[1] not in roles_to_grant
+                and grant[1] not in {_EXO_MANAGE_AS_APP_ROLE, _TEAMS_MANAGE_AS_APP_ROLE}
+            ],
             baseline_delegated_grants or [],
         )
 
@@ -2582,7 +2542,7 @@ async def _grant_provisioned_roles(
             try:
                 await _post_app_role_assignment_with_retry(
                     access_token,
-                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
+                    f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
                     {
                         "principalId": sp_object_id,
                         "resourceId": graph_sp_id,
@@ -2635,7 +2595,7 @@ async def _grant_provisioned_roles(
                 try:
                     await _post_app_role_assignment_with_retry(
                         access_token,
-                        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
+                        f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
                         {
                             "principalId": sp_object_id,
                             "resourceId": resource_sp_id,
@@ -2686,7 +2646,7 @@ async def _grant_provisioned_roles(
                     try:
                         await _post_app_role_assignment_with_retry(
                             access_token,
-                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
+                            f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_path_segment(sp_object_id)}/appRoleAssignments",
                             {
                                 "principalId": sp_object_id,
                                 "resourceId": teams_sp_id,
@@ -2734,10 +2694,10 @@ async def _grant_provisioned_roles(
         try:
             await _graph_post(
                 access_token,
-                f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}/owners/$ref",
+                f"https://graph.microsoft.com/v1.0/applications/{_graph_path_segment(app_object_id)}/owners/$ref",
                 {
                     "@odata.id": (
-                        f"https://graph.microsoft.com/v1.0/directoryObjects/{_graph_object_id(sp_object_id)}"
+                        f"https://graph.microsoft.com/v1.0/directoryObjects/{_graph_path_segment(sp_object_id)}"
                     )
                 },
             )
@@ -4670,11 +4630,10 @@ async def check_enterprise_app_permissions(
 
     # Fetch all app role assignments for this service principal.
     # Each assignment has appRoleId and resourceId (the resource SP object ID).
-    assignments_response = await _graph_get(
+    assignment_list = await _graph_get_all(
         access_token,
         f"https://graph.microsoft.com/v1.0/servicePrincipals/{_graph_object_id(sp_object_id)}/appRoleAssignments",
     )
-    assignment_list = assignments_response.get("value", [])
 
     # Build a set of (appRoleId, resourceAppId) tuples for precise matching.
     # Exchange.ManageAsApp and Teams.ManageAsApp share the same appRoleId GUID
@@ -4774,9 +4733,9 @@ async def check_enterprise_app_permissions(
             else:
                 perm_status = "fail"
 
-            # Only 'fail' counts against all_ok; 'not_supported' permissions
-            # cannot be granted in this tenant and are not actionable failures.
-            app_all_ok = app_all_ok and perm_status in ("pass", "not_supported")
+            # Unavailable permissions remain distinct from denied consent, but
+            # cannot make a partial repair appear complete.
+            app_all_ok = app_all_ok and perm_status == "pass"
 
             perm_results.append({"id": role_id, "name": role_name, "status": perm_status})
 
@@ -4828,10 +4787,9 @@ async def get_last_enterprise_app_permissions(
                 "checked_at": row.get("checked_at"),
             }
         perm_status = row["status"]
-        # 'not_supported' means the permission GUID doesn't exist in this
-        # tenant's resource SP and can never be granted; it does NOT indicate
-        # a configuration problem that the admin needs to fix.
-        if perm_status not in ("pass", "not_supported"):
+        # Preserve unsupported/unavailable as a distinct status while ensuring
+        # a partial setup is never represented as complete.
+        if perm_status != "pass":
             by_app[app_id]["all_ok"] = False
         by_app[app_id]["permissions"].append(
             {"id": row["role_id"], "name": row["role_name"], "status": perm_status}
@@ -4896,8 +4854,21 @@ async def repair_enterprise_app_permissions(
     )
     results = await check_enterprise_app_permissions(company_id)
     purview = await run_purview_preflight(company_id, repair=True)
+    unavailable = [
+        {"app_id": app["app_id"], "permission": permission["name"]}
+        for app in results
+        for permission in app["permissions"]
+        if permission["status"] == "not_supported"
+    ]
+    complete = (
+        all(app["all_ok"] for app in results)
+        and bool(purview.get("ready"))
+        and not unavailable
+    )
     return {
         "granted": granted,
+        "complete": complete,
+        "unavailable": unavailable,
         "compliance_role": role_result,
         "results": results,
         "purview": purview,
