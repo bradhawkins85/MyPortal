@@ -17,14 +17,118 @@ mailbox, matching the prior console workflow.
 
 ## Permissions
 
-The tenant enterprise app must be able to use Security & Compliance PowerShell.
-That requires `Exchange.ManageAsApp` on the **Microsoft Exchange Online
-Protection** resource (`00000007-0000-0ff1-ce00-000000000000`); the assignment
-with the same name on **Office 365 Exchange Online** is separate and is used by
-the Managed Folder Assistant follow-up. MyPortal provisioning, reconnect repair,
-and permission diagnostics now handle both resource assignments independently.
-Only authenticated super administrators and users with the
-`helpdesk.technician` permission can access the UI or API.
+The tenant enterprise app needs **two separate application permission grants**,
+even though both permissions are named `Exchange.ManageAsApp`. Granting one does
+not grant the other.
+
+| Resource | Resource application ID | Purpose |
+| --- | --- | --- |
+| Microsoft Exchange Online Protection | `00000007-0000-0ff1-ce00-000000000000` | Security & Compliance PowerShell |
+| Office 365 Exchange Online | `00000002-0000-0ff1-ce00-000000000000` | Exchange Online PowerShell and the Managed Folder Assistant follow-up |
+
+Microsoft documents the separate requirements for `Connect-IPPSSession` and
+`Connect-ExchangeOnline` in its [app-only authentication guidance](https://learn.microsoft.com/en-us/powershell/exchange/app-only-auth-powershell-v2).
+MyPortal provisioning, reconnect repair, and permission diagnostics handle both
+resource assignments independently. Only authenticated super administrators and
+users with the `helpdesk.technician` permission can access the UI or API.
+
+### Identify the tenant and application
+
+Open the [Microsoft Entra admin center](https://entra.microsoft.com/), switch to
+the tenant that MyPortal manages, and open **Enterprise applications → your
+MyPortal application → Overview**. Record both identifiers:
+
+- **Application ID** identifies the MyPortal app and should be used to
+  distinguish similarly named apps.
+- **Object ID** identifies the app's enterprise application (service principal)
+  in this tenant.
+
+### Check the existing grants
+
+Within the enterprise application, open **Permissions** and inspect the
+admin-consented application permissions. Confirm that `Exchange.ManageAsApp`
+appears under **each** resource in the table above. A single entry is not enough
+for the complete spam-purge workflow.
+
+For an authoritative programmatic check, retrieve the service principal's app
+role assignments:
+
+```http
+GET https://graph.microsoft.com/v1.0/servicePrincipals/{myportal-enterprise-app-object-id}/appRoleAssignments
+```
+
+These are the actual grants rather than only permissions requested on an app
+registration. Recently changed assignments can take time to appear. See
+[Microsoft Graph: list app role assignments granted to a service principal](https://learn.microsoft.com/en-us/graph/api/serviceprincipal-list-approleassignments?view=graph-rest-1.0).
+
+### Add missing permissions in the portal
+
+If you own the app registration, go to **App registrations → your application →
+API permissions**, then:
+
+1. Select **Add a permission → APIs my organization uses**.
+2. Search for **Microsoft Exchange Online Protection**.
+3. Select **Application permissions → Exchange → Exchange.ManageAsApp**.
+4. Select **Add permissions**.
+5. Repeat these steps for **Office 365 Exchange Online** if its permission is
+   missing.
+6. Select **Grant admin consent for your tenant** while signed in with an
+   authorised administrator account.
+7. Verify that both entries show **Granted**.
+
+For a vendor-owned, multitenant MyPortal app, the app registration may exist
+only in the vendor's tenant. In that case, use MyPortal's provisioning or
+reconnect consent flow, or use the tenant-side assignment method below.
+
+### Provision or repair each resource assignment
+
+Provisioning and reconnect repair must handle each resource application ID in
+the table separately:
+
+1. Find the resource's service principal in the customer tenant:
+
+   ```http
+   GET https://graph.microsoft.com/v1.0/servicePrincipals?$filter=appId eq '{resource-application-id}'&$select=id,displayName,appRoles
+   ```
+
+2. In its `appRoles`, locate the enabled role whose `value` is
+   `Exchange.ManageAsApp` and whose `allowedMemberTypes` includes `Application`.
+3. Check MyPortal's existing grants for both that resource's tenant-specific
+   object ID and that role's ID.
+4. If the assignment is absent, create it:
+
+   ```http
+   POST https://graph.microsoft.com/v1.0/servicePrincipals/{resource-service-principal-object-id}/appRoleAssignedTo
+   Content-Type: application/json
+
+   {
+     "principalId": "{myportal-enterprise-app-object-id}",
+     "resourceId": "{resource-service-principal-object-id}",
+     "appRoleId": "{role-id-found-on-that-resource}"
+   }
+   ```
+
+`resourceId` must be the resource's **service-principal object ID in the customer
+tenant**, not the fixed resource application ID from the table.
+
+Creating the assignment requires Microsoft Graph permissions such as
+`AppRoleAssignment.ReadWrite.All` and `Application.Read.All`, plus an appropriate
+administrator role when using delegated access. These permissions belong to the
+identity performing the provisioning. See [Microsoft Graph: grant an app role
+assignment](https://learn.microsoft.com/en-us/graph/api/serviceprincipal-post-approleassignments?view=graph-rest-1.0).
+
+### Verify roles and both connections
+
+API permission grants are only one part of access. The app also needs the
+administrative and RBAC roles required by the commands it executes. After a
+repair, obtain fresh app sessions and test both `Connect-IPPSSession` and
+`Connect-ExchangeOnline`, followed by an appropriate read-only command in each
+session. See Microsoft's [authentication and role guidance](https://learn.microsoft.com/en-us/powershell/exchange/app-only-auth-powershell-v2).
+
+MyPortal diagnostics report two independent permission results. If Office 365
+Exchange Online is granted but Microsoft Exchange Online Protection is missing,
+the Managed Folder Assistant connection may work while Security & Compliance
+access fails.
 
 Microsoft's best-effort app-only eDiscovery setup also requires the enterprise
 application service principal to be registered with `New-ServicePrincipal` and
