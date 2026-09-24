@@ -1,0 +1,7 @@
+{
+  "guid": "c4dd9d35-45a6-4fb9-a432-90bd5302d2ed",
+  "occurred_at": "2026-09-24T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Route RAG relationship evaluations through the configured AI module model unless an explicit relationship model override is set.",
+  "content_hash": "0acb4449fdc308b519942889e715b71feb19dd1cb1784702662ee7b8b0ec9b4e"
+}

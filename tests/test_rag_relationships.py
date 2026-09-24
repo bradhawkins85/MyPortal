@@ -142,6 +142,18 @@ def test_relationship_prompt_keeps_non_ticket_order():
     assert "Document A\nassets #42" in document_a
 
 
+def test_relationship_evaluator_uses_configured_module_model_by_default():
+    from app.services.rag_relationships import _evaluation_payload
+
+    assert _evaluation_payload("compare", "") == {
+        "prompt": "compare",
+        "format": "json",
+    }
+    assert _evaluation_payload("compare", "  specialist-model  ")["model"] == (
+        "specialist-model"
+    )
+
+
 def test_relationship_queue_priority_prefers_ticket_pairs():
     from app.services.rag_relationships import _relationship_queue_priority
 
