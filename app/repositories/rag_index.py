@@ -17,6 +17,19 @@ async def get_document_by_source(
     )
 
 
+async def has_active_chunks(document_id: int) -> bool:
+    """Return whether a document has at least one usable indexed chunk."""
+    row = await db.fetch_one(
+        """
+        SELECT 1 AS present FROM rag_chunks
+        WHERE document_id = ? AND is_active = 1
+        LIMIT 1
+        """,
+        (document_id,),
+    )
+    return row is not None
+
+
 async def get_document_diagnostic(source_type: str, source_id: str) -> dict[str, Any] | None:
     """Return index metadata and redacted chunk descriptors for one source record."""
     document = await db.fetch_one(

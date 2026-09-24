@@ -635,6 +635,9 @@ async def index_document(
     content_changed = (
         not previous or str(previous.get("content_hash") or "") != new_hash
     )
+    chunks_missing = bool(previous) and not await rag_repo.has_active_chunks(
+        int(previous["id"])
+    )
     chunks = []
     for label, section_text in document.sections or [("Document", document.text)]:
         chunks.extend(
@@ -666,7 +669,7 @@ async def index_document(
             "source_updated_at": source_updated_at,
         }
     )
-    if not content_changed:
+    if not content_changed and not chunks_missing:
         return doc_id
     await rag_repo.replace_chunks(
         doc_id,
@@ -682,7 +685,11 @@ async def index_document(
             for index, chunk in enumerate(chunks)
         ],
     )
-    await rag_relationships.on_document_indexed(doc_id, content_changed=content_changed)
+    # A historical document with no active chunks was never retrievable. Treat
+    # repairing it like a content change so relationship matching also sees it.
+    await rag_relationships.on_document_indexed(
+        doc_id, content_changed=content_changed or chunks_missing
+    )
     return doc_id
 
 
