@@ -37,8 +37,6 @@ async def test_preflight_distinguishes_eop_permission_and_reports_all_checks():
         raise AssertionError(url)
 
     async def invoke(_token, _tenant, command, _parameters=None, **_kwargs):
-        if command == "Get-ComplianceSearch":
-            return {"value": [{"Name": "contoso"}]}
         if command == "Get-ServicePrincipal":
             return {"value": [{"ObjectId": object_id, "AppId": client_id}]}
         return {"value": [{"ExternalDirectoryObjectId": object_id}]}
@@ -133,8 +131,6 @@ async def test_preflight_uses_live_purview_probe_when_graph_assignment_is_stale(
         raise AssertionError(url)
 
     async def invoke(_token, _tenant, command, _parameters=None, **_kwargs):
-        if command == "Get-ComplianceSearch":
-            return {"value": [{"Name": "contoso"}]}
         if command == "Get-ServicePrincipal":
             return {"value": [{"ObjectId": object_id, "AppId": client_id}]}
         if command == "Get-RoleGroupMember":
@@ -186,8 +182,6 @@ async def test_preflight_accepts_eop_assignment_when_manifest_cannot_be_read():
         raise AssertionError(url)
 
     async def invoke(_token, _tenant, command, _parameters=None, **_kwargs):
-        if command == "Get-ComplianceSearch":
-            return {"value": [{"Name": "contoso"}]}
         if command == "Get-ServicePrincipal":
             return {"value": [{"ObjectId": object_id}]}
         if command == "Get-RoleGroupMember":
@@ -235,11 +229,10 @@ async def test_preflight_uses_membership_instead_of_unfiltered_service_principal
 
     commands: list[str] = []
 
-    async def invoke(_token, _tenant, command, _parameters=None, **_kwargs):
+    async def invoke(_token, _tenant, command, parameters=None, **_kwargs):
         commands.append(command)
-        if command == "Get-ComplianceSearch":
-            return {"value": [{"Name": "contoso"}]}
         if command == "Get-RoleGroupMember":
+            assert parameters == {"Identity": "eDiscoveryManager"}
             return {"value": [{"ExternalDirectoryObjectId": object_id}]}
         raise AssertionError(command)
 
@@ -257,7 +250,7 @@ async def test_preflight_uses_membership_instead_of_unfiltered_service_principal
         result = await m365.run_purview_preflight(7)
 
     assert result["ready"] is True
-    assert commands == ["Get-ComplianceSearch", "Get-RoleGroupMember"]
+    assert commands == ["Get-RoleGroupMember"]
 
 
 @pytest.mark.anyio("asyncio")
@@ -282,8 +275,6 @@ async def test_preflight_scopes_service_principal_internal_error_to_registration
         raise AssertionError(url)
 
     async def invoke(_token, _tenant, command, parameters=None, **_kwargs):
-        if command == "Get-ComplianceSearch":
-            return {"value": [{"Name": "contoso"}]}
         if command == "Get-RoleGroupMember":
             return {"value": []}
         if command == "Get-ServicePrincipal":
