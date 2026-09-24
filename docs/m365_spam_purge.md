@@ -33,6 +33,15 @@ Administrator or Compliance Administrator assignment does not replace this
 Purview RBAC setup and does not prove that the tenant's Purview organization has
 finished provisioning.
 
+The preflight verifies organization availability with `Get-OrganizationConfig`
+and checks `eDiscoveryManager` membership before querying the service principal.
+An unfiltered `Get-ServicePrincipal` request through Purview's REST endpoint can
+return an internal `System.ArgumentNullException`, even when the application is
+already registered. Membership is sufficient proof of registration; when a
+separate lookup is necessary, MyPortal supplies the enterprise application
+object ID as `Identity`. This prevents that Microsoft endpoint error from being
+misreported as failures of every Purview prerequisite.
+
 The preflight also verifies that the enterprise application itself has either
 the **Exchange Administrator** or **Compliance Administrator** Entra directory
 role. The diagnostics repair action assigns Compliance Administrator using the

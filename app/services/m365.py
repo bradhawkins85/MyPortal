@@ -4088,36 +4088,14 @@ async def run_purview_preflight(
     if tenant_domain:
         try:
             scc_token, _ = await _acquire_scc_access_token(company_id)
-            principals = await _scc_invoke_command(
-                scc_token, tenant_id, "Get-ServicePrincipal", organization=tenant_domain
+            await _scc_invoke_command(
+                scc_token, tenant_id, "Get-OrganizationConfig", organization=tenant_domain
             )
             # A successful app-only Purview command proves the EOP application
             # permission, tenant consent, and organization routing directly.
             # Do not gate this probe on Graph metadata: manually granted roles
             # can be usable before (or without permission for) Graph enumeration.
             permission_configured = consent_granted = org_ok = True
-            principal_rows = principals.get("value") or principals.get("Value") or []
-            if isinstance(principal_rows, dict):
-                principal_rows = [principal_rows]
-            registration_ok = any(
-                str(row.get("ObjectId") or row.get("Identity") or "").lower() == object_id.lower()
-                or str(row.get("AppId") or "").lower() == client_id.lower()
-                for row in principal_rows if isinstance(row, dict)
-            )
-            if repair and not registration_ok and object_id:
-                await _scc_invoke_command(
-                    scc_token,
-                    tenant_id,
-                    "New-ServicePrincipal",
-                    {
-                        "AppId": client_id,
-                        "ObjectId": object_id,
-                        "DisplayName": "MyPortal Purview eDiscovery",
-                    },
-                    organization=tenant_domain,
-                )
-                registration_ok = True
-                repaired.append("service_principal")
             members = await _scc_invoke_command(
                 scc_token, tenant_id, "Get-RoleGroupMember",
                 {"Identity": "eDiscoveryManager"}, organization=tenant_domain,
@@ -4133,6 +4111,47 @@ async def run_purview_preflight(
                 }
                 for row in member_rows if isinstance(row, dict)
             )
+            # A role-group member must already be a Purview recipient, making
+            # membership stronger proof of registration than a second lookup.
+            # Avoid the unfiltered lookup because the REST endpoint can throw
+            # ArgumentNullException for Get-ServicePrincipal with no Identity.
+            registration_ok = membership_ok
+            if not registration_ok:
+                try:
+                    principals = await _scc_invoke_command(
+                        scc_token, tenant_id, "Get-ServicePrincipal",
+                        {"Identity": object_id}, organization=tenant_domain,
+                    )
+                except M365Error:
+                    # Some Purview tenants return an internal
+                    # ArgumentNullException instead of an empty result when the
+                    # recipient is absent. Organization and consent were
+                    # already proved above; keep this as a registration failure
+                    # so repair can create the recipient.
+                    principals = {}
+                principal_rows = principals.get("value") or principals.get("Value") or []
+                if isinstance(principal_rows, dict):
+                    principal_rows = [principal_rows]
+                registration_ok = any(
+                    str(row.get("ObjectId") or row.get("Identity") or "").lower()
+                    == object_id.lower()
+                    or str(row.get("AppId") or "").lower() == client_id.lower()
+                    for row in principal_rows if isinstance(row, dict)
+                )
+            if repair and not registration_ok and object_id:
+                await _scc_invoke_command(
+                    scc_token,
+                    tenant_id,
+                    "New-ServicePrincipal",
+                    {
+                        "AppId": client_id,
+                        "ObjectId": object_id,
+                        "DisplayName": "MyPortal Purview eDiscovery",
+                    },
+                    organization=tenant_domain,
+                )
+                registration_ok = True
+                repaired.append("service_principal")
             if repair and registration_ok and not membership_ok and object_id:
                 await _scc_invoke_command(
                     scc_token,

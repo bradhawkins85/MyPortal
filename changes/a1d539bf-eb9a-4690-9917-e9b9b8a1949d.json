@@ -1,0 +1,7 @@
+{
+  "guid": "a1d539bf-eb9a-4690-9917-e9b9b8a1949d",
+  "occurred_at": "2026-09-24T00:06:14.708905+00:00",
+  "change_type": "fix",
+  "summary": "Prevent Purview preflight from using an unfiltered Get-ServicePrincipal call that can return ArgumentNullException.",
+  "content_hash": "f2474f49a7d523bcd29c756d528c6e3b0cd1c3fe5ab77050cd13a03e0f164536"
+}

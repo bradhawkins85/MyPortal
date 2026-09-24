@@ -133,6 +133,8 @@ async def test_preflight_uses_live_purview_probe_when_graph_assignment_is_stale(
         raise AssertionError(url)
 
     async def invoke(_token, _tenant, command, _parameters=None, **_kwargs):
+        if command == "Get-OrganizationConfig":
+            return {"value": [{"Name": "contoso"}]}
         if command == "Get-ServicePrincipal":
             return {"value": [{"ObjectId": object_id, "AppId": client_id}]}
         if command == "Get-RoleGroupMember":
@@ -184,6 +186,8 @@ async def test_preflight_accepts_eop_assignment_when_manifest_cannot_be_read():
         raise AssertionError(url)
 
     async def invoke(_token, _tenant, command, _parameters=None, **_kwargs):
+        if command == "Get-OrganizationConfig":
+            return {"value": [{"Name": "contoso"}]}
         if command == "Get-ServicePrincipal":
             return {"value": [{"ObjectId": object_id}]}
         if command == "Get-RoleGroupMember":
@@ -206,6 +210,110 @@ async def test_preflight_accepts_eop_assignment_when_manifest_cannot_be_read():
     by_key = {item["key"]: item for item in result["checks"]}
     assert by_key["eop_permission"]["status"] == "Passed"
     assert by_key["admin_consent"]["status"] == "Passed"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_preflight_uses_membership_instead_of_unfiltered_service_principal_lookup():
+    client_id = "22222222-2222-2222-2222-222222222222"
+    object_id = "33333333-3333-3333-3333-333333333333"
+
+    async def graph_get(_token: str, url: str):
+        if "/domains?" in url:
+            return {"value": [{"id": "contoso.onmicrosoft.com", "isInitial": True}]}
+        if "/applications/" in url:
+            return {"requiredResourceAccess": []}
+        if "/appRoleAssignments" in url:
+            return {"value": []}
+        if "/transitiveMemberOf/" in url:
+            return {"value": [{
+                "displayName": "Compliance Administrator",
+                "roleTemplateId": m365._COMPLIANCE_ADMIN_ROLE_TEMPLATE_ID,
+            }]}
+        if "/servicePrincipals?" in url:
+            return {"value": [{"id": object_id, "appId": client_id}]}
+        raise AssertionError(url)
+
+    commands: list[str] = []
+
+    async def invoke(_token, _tenant, command, _parameters=None, **_kwargs):
+        commands.append(command)
+        if command == "Get-OrganizationConfig":
+            return {"value": [{"Name": "contoso"}]}
+        if command == "Get-RoleGroupMember":
+            return {"value": [{"ExternalDirectoryObjectId": object_id}]}
+        raise AssertionError(command)
+
+    with (
+        patch.object(m365, "get_credentials", AsyncMock(return_value={
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "client_id": client_id,
+            "app_object_id": "55555555-5555-5555-5555-555555555555",
+        })),
+        patch.object(m365, "acquire_access_token", AsyncMock(return_value="graph-token")),
+        patch.object(m365, "_graph_get", side_effect=graph_get),
+        patch.object(m365, "_acquire_scc_access_token", AsyncMock(return_value=("scc-token", "tenant"))),
+        patch.object(m365, "_scc_invoke_command", side_effect=invoke),
+    ):
+        result = await m365.run_purview_preflight(7)
+
+    assert result["ready"] is True
+    assert commands == ["Get-OrganizationConfig", "Get-RoleGroupMember"]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_preflight_scopes_service_principal_internal_error_to_registration():
+    client_id = "22222222-2222-2222-2222-222222222222"
+    object_id = "33333333-3333-3333-3333-333333333333"
+
+    async def graph_get(_token: str, url: str):
+        if "/domains?" in url:
+            return {"value": [{"id": "contoso.onmicrosoft.com", "isInitial": True}]}
+        if "/applications/" in url:
+            return {"requiredResourceAccess": []}
+        if "/appRoleAssignments" in url:
+            return {"value": []}
+        if "/transitiveMemberOf/" in url:
+            return {"value": [{
+                "displayName": "Compliance Administrator",
+                "roleTemplateId": m365._COMPLIANCE_ADMIN_ROLE_TEMPLATE_ID,
+            }]}
+        if "/servicePrincipals?" in url:
+            return {"value": [{"id": object_id, "appId": client_id}]}
+        raise AssertionError(url)
+
+    async def invoke(_token, _tenant, command, parameters=None, **_kwargs):
+        if command == "Get-OrganizationConfig":
+            return {"value": [{"Name": "contoso"}]}
+        if command == "Get-RoleGroupMember":
+            return {"value": []}
+        if command == "Get-ServicePrincipal":
+            assert parameters == {"Identity": object_id}
+            raise m365.M365Error(
+                "Security & Compliance Get-ServicePrincipal failed (500): "
+                "System.ArgumentNullException",
+                http_status=500,
+            )
+        raise AssertionError(command)
+
+    with (
+        patch.object(m365, "get_credentials", AsyncMock(return_value={
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
+            "client_id": client_id,
+            "app_object_id": "55555555-5555-5555-5555-555555555555",
+        })),
+        patch.object(m365, "acquire_access_token", AsyncMock(return_value="graph-token")),
+        patch.object(m365, "_graph_get", side_effect=graph_get),
+        patch.object(m365, "_acquire_scc_access_token", AsyncMock(return_value=("scc-token", "tenant"))),
+        patch.object(m365, "_scc_invoke_command", side_effect=invoke),
+    ):
+        result = await m365.run_purview_preflight(7)
+
+    checks = {check["key"]: check for check in result["checks"]}
+    assert checks["eop_permission"]["status"] == "Passed"
+    assert checks["admin_consent"]["status"] == "Passed"
+    assert checks["organization"]["status"] == "Passed"
+    assert checks["service_principal"]["status"] == "Requires Admin Action"
+    assert checks["ediscovery_manager"]["status"] == "Requires Admin Action"
 
 
 @pytest.mark.anyio("asyncio")
