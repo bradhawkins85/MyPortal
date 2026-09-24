@@ -6317,6 +6317,14 @@ async def _fetch_exo_archive_mailbox_sizes(
     return sizes_by_mailbox
 
 
+class _PermissionSnapshot(dict[str, list[dict[str, str]]]):
+    """Permission rows plus whether every requested mailbox was read."""
+
+    def __init__(self, *args: Any, complete: bool, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.complete = complete
+
+
 async def _fetch_exo_mailbox_permissions(
     company_id: int,
     mailbox_emails: set[str],
@@ -6334,14 +6342,15 @@ async def _fetch_exo_mailbox_permissions(
     queries fail, those mailboxes are silently skipped.
     """
     if not mailbox_emails:
-        return {}
+        return _PermissionSnapshot(complete=True)
 
     try:
         exo_token, effective_tenant_id = await _acquire_exo_access_token(company_id)
     except M365Error:
-        return {}
+        return _PermissionSnapshot(complete=False)
 
     members_by_mailbox: dict[str, list[dict[str, str]]] = {}
+    complete = True
     for mailbox_email in mailbox_emails:
         normalised = str(mailbox_email or "").strip().lower()
         if not normalised:
@@ -6358,13 +6367,44 @@ async def _fetch_exo_mailbox_permissions(
                     "Exchange.ManageAsApp permission and an Exchange RBAC role.",
                     mailbox_email=normalised,
                 )
+                complete = False
                 break
             raise
         parsed = _parse_exo_mailbox_permission_records(normalised, records)
         if parsed:
             members_by_mailbox[normalised] = parsed
 
-    return members_by_mailbox
+    return _PermissionSnapshot(members_by_mailbox, complete=complete)
+
+
+async def _fetch_exo_recipient_types(company_id: int) -> dict[str, str]:
+    """Return the authoritative Exchange recipient type for every mailbox.
+
+    Usage reports are intentionally not used for classification: they are
+    delayed telemetry and do not distinguish shared, room, and equipment
+    mailboxes reliably.
+    """
+    exo_token, tenant_id = await _acquire_exo_access_token(company_id)
+    data = await _exo_invoke_command(
+        exo_token,
+        tenant_id,
+        "Get-Mailbox",
+        {"ResultSize": "Unlimited"},
+    )
+    rows = data.get("value") or []
+    if isinstance(rows, dict):
+        rows = [rows]
+    result: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        address = _coerce_exo_string(
+            row.get("UserPrincipalName") or row.get("PrimarySmtpAddress")
+        ).lower()
+        recipient_type = _coerce_exo_string(row.get("RecipientTypeDetails"))
+        if address and recipient_type:
+            result[address] = recipient_type
+    return result
 
 
 async def sync_mailboxes(company_id: int) -> int:
@@ -6481,10 +6521,11 @@ async def sync_mailboxes(company_id: int) -> int:
                 identifiers.append(value)
         return identifiers
 
-    # Get all users (enabled + disabled); mailboxes only exist for enabled accounts.
+    # Account state is not a mailbox type.  Disabled ordinary users remain user
+    # mailboxes, while Exchange recipient details identify shared/resource types.
     users = await get_all_users(company_id)
     users_with_identifiers = [
-        (u, _user_identifiers(u)) for u in users if u.get("accountEnabled", True)
+        (u, _user_identifiers(u)) for u in users
     ]
     users_with_identifiers = [
         (user, identifiers)
@@ -6515,6 +6556,18 @@ async def sync_mailboxes(company_id: int) -> int:
     # repeating N failing API calls (they would all fail identically).
     rules_permission_denied = False
 
+    recipient_types: dict[str, str] = {}
+    recipient_inventory_complete = False
+    try:
+        recipient_types = await _fetch_exo_recipient_types(company_id)
+        recipient_inventory_complete = True
+    except Exception as exc:
+        log_info(
+            "Preserving mailbox classification; Exchange recipient inventory unavailable",
+            company_id=company_id,
+            error=str(exc),
+        )
+
     # --- User mailboxes ---
     for user, identifiers in users_with_identifiers:
         preferred_upn = identifiers[0]
@@ -6529,7 +6582,9 @@ async def sync_mailboxes(company_id: int) -> int:
         report_upn = str(report_entry.get("userPrincipalName") or "").strip().lower()
         if report_upn:
             matched_report_upns.add(report_upn)
-        storage_bytes = int(report_entry.get("storageUsedInBytes") or 0)
+        storage_bytes = (
+            int(report_entry.get("storageUsedInBytes") or 0) if report_entry else None
+        )
         archive_raw = report_entry.get("archiveMailboxStorageUsedInBytes")
         archive_bytes = int(archive_raw) if archive_raw else 0
         # Use the dedicated "Has Archive" flag from the report when present;
@@ -6540,7 +6595,7 @@ async def sync_mailboxes(company_id: int) -> int:
             user.get("displayName") or report_entry.get("displayName") or preferred_upn
         )
 
-        fw_count = 0
+        fw_count: int | None = None
         if not rules_permission_denied:
             try:
                 fw_count = await _count_forwarding_rules(access_token, user["id"])
@@ -6579,10 +6634,16 @@ async def sync_mailboxes(company_id: int) -> int:
             {
                 "user_principal_name": preferred_upn,
                 "display_name": display_name,
-                "mailbox_type": "UserMailbox",
+                "mailbox_type": recipient_types.get(preferred_upn, "UserMailbox"),
                 "storage_used_bytes": storage_bytes,
-                "archive_storage_used_bytes": archive_bytes if has_archive else None,
-                "has_archive": has_archive,
+                "archive_storage_used_bytes": (
+                    archive_bytes if archive_raw is not None else None
+                ),
+                "has_archive": (
+                    has_archive
+                    if "hasArchive" in report_entry or archive_raw is not None
+                    else None
+                ),
                 "forwarding_rule_count": fw_count,
             }
         )
@@ -6602,11 +6663,15 @@ async def sync_mailboxes(company_id: int) -> int:
             {
                 "user_principal_name": upn_lower,
                 "display_name": display_name,
-                "mailbox_type": "SharedMailbox",
+                "mailbox_type": recipient_types.get(upn_lower, "SharedMailbox"),
                 "storage_used_bytes": storage_bytes,
-                "archive_storage_used_bytes": archive_bytes if has_archive else None,
-                "has_archive": has_archive,
-                "forwarding_rule_count": 0,
+                "archive_storage_used_bytes": (
+                    archive_bytes if archive_raw is not None else None
+                ),
+                "has_archive": (
+                    has_archive if "hasArchive" in entry or archive_raw is not None else None
+                ),
+                "forwarding_rule_count": None,
             }
         )
 
@@ -6622,7 +6687,7 @@ async def sync_mailboxes(company_id: int) -> int:
     # now and copy matching group-member entries to the mailbox UPN.
     if group_member_cache:
         for row in rows_to_upsert:
-            if row["mailbox_type"] != "SharedMailbox":
+            if row["mailbox_type"] not in {"SharedMailbox", "RoomMailbox", "EquipmentMailbox"}:
                 continue
             mb_upn = row["user_principal_name"]
             if mb_upn in group_member_cache:
@@ -6672,10 +6737,14 @@ async def sync_mailboxes(company_id: int) -> int:
         if str(row["user_principal_name"] or "").strip()
     }
     direct_members_by_mailbox: dict[str, list[dict[str, str]]] = {}
+    permission_inventory_complete = False
     if mailbox_emails:
         try:
             direct_members_by_mailbox = await _fetch_exo_mailbox_permissions(
                 company_id, mailbox_emails
+            )
+            permission_inventory_complete = bool(
+                getattr(direct_members_by_mailbox, "complete", False)
             )
         except Exception as exc:
             log_info(
@@ -6730,12 +6799,45 @@ async def sync_mailboxes(company_id: int) -> int:
 
     # Remove stale entries (mailboxes that no longer exist in the tenant).
     current_upns = [r["user_principal_name"] for r in rows_to_upsert]
-    await m365_repo.delete_stale_mailboxes(company_id, current_upns)
+    # Absence is authoritative only when Exchange supplied a complete mailbox
+    # inventory.  Empty/delayed Graph reports must never purge real mailboxes.
+    if recipient_inventory_complete:
+        await m365_repo.delete_stale_mailboxes(company_id, current_upns)
 
     # Purge mailbox-member rows that were not touched in this sync run.
     # Rows written above have synced_at == member_sync_start; older rows belong
     # to previous syncs and should be removed.
-    await m365_repo.delete_stale_mailbox_members(company_id, member_sync_start)
+    if permission_inventory_complete:
+        await m365_repo.delete_stale_mailbox_members(company_id, member_sync_start)
+
+    # Completeness is persisted independently for each authority.  A failed
+    # attempt updates freshness/staleness without destroying last_success_at.
+    category_states = {
+        "usage_report": True,
+        "recipient_inventory": recipient_inventory_complete,
+        "direct_permissions": permission_inventory_complete,
+        "archive_metrics": bool(mailbox_emails) and mailbox_emails.issubset(
+            archive_sizes_by_mailbox
+        ),
+        "forwarding_rules": not rules_permission_denied,
+    }
+    for category, complete in category_states.items():
+        try:
+            await m365_repo.set_mailbox_sync_state(
+                company_id,
+                category,
+                complete=complete,
+                attempted_at=member_sync_start,
+            )
+        except Exception as exc:
+            # State metadata is additive during rollout and must not make an
+            # otherwise safe mailbox sync destructive or unavailable.
+            log_warning(
+                "Unable to record mailbox source completeness",
+                company_id=company_id,
+                category=category,
+                error=str(exc),
+            )
 
     synced_staff_custom_fields = await sync_staff_custom_fields_from_m365_mailboxes(
         company_id

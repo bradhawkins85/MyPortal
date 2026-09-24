@@ -194,10 +194,10 @@ async def upsert_mailbox(
     user_principal_name: str,
     display_name: str,
     mailbox_type: str,
-    storage_used_bytes: int,
+    storage_used_bytes: int | None,
     archive_storage_used_bytes: int | None,
-    has_archive: bool,
-    forwarding_rule_count: int,
+    has_archive: bool | None,
+    forwarding_rule_count: int | None,
 ) -> None:
     """Insert or update a mailbox record for the given company."""
     await db.execute(
@@ -210,10 +210,10 @@ async def upsert_mailbox(
         ON DUPLICATE KEY UPDATE
             display_name = VALUES(display_name),
             mailbox_type = VALUES(mailbox_type),
-            storage_used_bytes = VALUES(storage_used_bytes),
-            archive_storage_used_bytes = VALUES(archive_storage_used_bytes),
-            has_archive = VALUES(has_archive),
-            forwarding_rule_count = VALUES(forwarding_rule_count),
+            storage_used_bytes = COALESCE(VALUES(storage_used_bytes), storage_used_bytes),
+            archive_storage_used_bytes = COALESCE(VALUES(archive_storage_used_bytes), archive_storage_used_bytes),
+            has_archive = COALESCE(VALUES(has_archive), has_archive),
+            forwarding_rule_count = COALESCE(VALUES(forwarding_rule_count), forwarding_rule_count),
             synced_at = VALUES(synced_at)
         """,
         (
@@ -223,7 +223,7 @@ async def upsert_mailbox(
             mailbox_type,
             storage_used_bytes,
             archive_storage_used_bytes,
-            int(has_archive),
+            int(has_archive) if has_archive is not None else None,
             forwarding_rule_count,
             datetime.utcnow(),
         ),
@@ -289,6 +289,30 @@ async def get_mailbox_synced_at(company_id: int) -> datetime | None:
         value = row["synced_at"]
         return value if isinstance(value, datetime) else None
     return None
+
+
+async def set_mailbox_sync_state(
+    company_id: int, category: str, *, complete: bool, attempted_at: datetime
+) -> None:
+    """Record source completeness without replacing the last successful read."""
+    await db.execute(
+        """
+        INSERT INTO m365_mailbox_sync_state (
+            company_id, category, is_complete, last_attempt_at, last_success_at
+        ) VALUES (%s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            is_complete = VALUES(is_complete),
+            last_attempt_at = VALUES(last_attempt_at),
+            last_success_at = COALESCE(VALUES(last_success_at), last_success_at)
+        """,
+        (
+            company_id,
+            category,
+            int(complete),
+            attempted_at,
+            attempted_at if complete else None,
+        ),
+    )
 
 
 async def upsert_mailbox_member(
