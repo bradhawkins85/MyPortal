@@ -240,6 +240,10 @@ run the RMM exclusion script as LocalSystem or an administrator. The script is
 idempotent and defaults to `%ProgramFiles%\MyPortalTray` and
 `%ProgramData%\MyPortal\tray`:
 
+The Tray agent does not change Defender preferences or Tamper Protection. This
+separate, administrator-initiated script is the only supported way to configure
+the optional exclusions.
+
 ```powershell
 .\integrations\tacticalrmm\set-tray-defender-exclusions.ps1
 ```
