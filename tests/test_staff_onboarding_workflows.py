@@ -1053,7 +1053,9 @@ async def test_assign_licenses_step_resolves_sku_and_posts(monkeypatch):
 
     async def fake_graph_get(access_token, url):
         if "subscribedSkus" in url:
-            return {"value": [{"skuId": "sku-id-001", "skuPartNumber": "ENTERPRISEPACK"}]}
+            return {"value": [{"skuId": "sku-id-001", "skuPartNumber": "ENTERPRISEPACK", "consumedUnits": 2, "prepaidUnits": {"enabled": 3}}]}
+        if "usageLocation" in url:
+            return {"usageLocation": "AU"}
         return {}
 
     async def fake_graph_post(access_token, url, payload):
@@ -1090,7 +1092,9 @@ async def test_assign_licenses_raises_for_unknown_sku(monkeypatch):
         return "tok"
 
     async def fake_graph_get(access_token, url):
-        return {"value": [{"skuId": "other-id", "skuPartNumber": "SOMEOTHERSKU"}]}
+        if "subscribedSkus" in url:
+            return {"value": [{"skuId": "other-id", "skuPartNumber": "SOMEOTHERSKU"}]}
+        return {"usageLocation": "AU"}
 
     monkeypatch.setattr(workflows.m365_service, "acquire_access_token", fake_acquire_token)
     monkeypatch.setattr(workflows.m365_service, "_graph_get", fake_graph_get)
@@ -1117,8 +1121,12 @@ async def test_add_to_groups_step_posts_member_ref_for_each_group(monkeypatch):
         posted_urls.append(url)
         return {}
 
+    async def fake_graph_get(access_token, url):
+        return {"id": url.split("/groups/", 1)[1].split("?", 1)[0], "groupTypes": [], "isAssignableToRole": False}
+
     monkeypatch.setattr(workflows.m365_service, "acquire_access_token", fake_acquire_token)
     monkeypatch.setattr(workflows.m365_service, "_graph_post", fake_graph_post)
+    monkeypatch.setattr(workflows.m365_service, "_graph_get", fake_graph_get)
 
     result = await workflows._execute_policy_step(
         step={"type": "add_to_groups", "group_ids_csv": "grp-001,grp-002"},

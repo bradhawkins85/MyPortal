@@ -51,6 +51,20 @@ _GRAPH_OBJECT_ID_PATTERN = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 )
 
+# Microsoft Graph's least-privileged application permission mapping for staff
+# lifecycle commands.  Keep this close to the implementations so UI actions,
+# workflows and actionable errors cannot drift from the consent inventory.
+STAFF_LIFECYCLE_PERMISSION_REQUIREMENTS: dict[str, tuple[str, ...]] = {
+    "reset_password": ("User-PasswordProfile.ReadWrite.All",),
+    "set_account_enabled": ("User.EnableDisableAccount.All", "User.Read.All"),
+    "revoke_sessions": ("User.RevokeSessions.All",),
+    "create_user": ("User.ReadWrite.All",),
+    "update_user": ("User.ReadWrite.All",),
+    "set_manager": ("User.ReadWrite.All",),
+    "assign_license": ("LicenseAssignment.ReadWrite.All", "User.Read.All"),
+    "change_group_membership": ("GroupMember.ReadWrite.All",),
+}
+
 # Exchange Online (Office 365 Exchange Online) service principal app ID and scope.
 # Used to acquire app-only tokens for Exchange Online PowerShell REST API calls
 # (e.g. Get-MailboxPermission) which are not available via Microsoft Graph.
@@ -4072,9 +4086,11 @@ async def reset_user_password(company_id: int, staff_email: str) -> str:
         if exc.http_status == 403 and exc.graph_error_code == "Authorization_RequestDenied":
             raise M365Error(
                 "The Microsoft 365 app does not have permission to reset this password. "
-                "Ensure the app has the User.ReadWrite.All application permission with "
-                "admin consent, and that the target account does not hold a privileged "
-                "admin role (which requires additional Azure AD role assignments).",
+                "Grant admin consent for the User-PasswordProfile.ReadWrite.All application "
+                "permission. Password resets are supported for ordinary cloud-only users; "
+                "federated or synchronized identities must be reset at their identity source. "
+                "For a privileged target, use an appropriately authorized Entra administrator "
+                "rather than assigning MyPortal a broader directory role.",
                 http_status=403,
                 graph_error_code=exc.graph_error_code,
             ) from exc
@@ -4104,12 +4120,65 @@ async def set_user_sign_in_enabled(
     user = await _lookup_user_by_email(access_token, staff_email.strip().lower())
     user_id = str(user["id"]).strip()
 
+    await set_user_account_enabled(access_token, user_id, enabled=enabled)
+
+
+async def set_user_account_enabled(
+    access_token: str, user_id: str, *, enabled: bool
+) -> None:
+    """Shared accountEnabled command for standalone and workflow actions."""
     encoded_user_id = quote(user_id, safe="")
-    await _graph_patch(
-        access_token,
-        f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}",
-        {"accountEnabled": enabled},
-    )
+    try:
+        await _graph_patch(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}",
+            {"accountEnabled": enabled},
+        )
+    except M365Error as exc:
+        if exc.http_status == 403:
+            raise M365Error(
+                "The Microsoft 365 app cannot change accountEnabled. Grant admin consent "
+                "for User.EnableDisableAccount.All and User.Read.All. Privileged targets "
+                "can require an appropriate Entra role; do not broaden the app role automatically.",
+                http_status=403,
+                graph_error_code=exc.graph_error_code,
+            ) from exc
+        raise
+
+
+async def revoke_user_sign_in_sessions(company_id: int, staff_email: str) -> None:
+    """Invalidate a user's refresh tokens independently of account disabling.
+
+    Graph documents a propagation delay for this operation, so success is never
+    described as immediate termination of every active application session.
+    """
+    creds = await get_credentials(company_id)
+    if not creds:
+        raise M365Error("No M365 credentials found for company")
+    access_token = await acquire_access_token(company_id, force_client_credentials=True)
+    user = await _lookup_user_by_email(access_token, staff_email.strip().lower())
+    await revoke_sign_in_sessions(access_token, str(user["id"]).strip())
+
+
+async def revoke_sign_in_sessions(access_token: str, user_id: str) -> None:
+    """Shared revokeSignInSessions command for standalone and workflows."""
+    encoded_user_id = quote(user_id, safe="")
+    try:
+        await _graph_post(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/revokeSignInSessions",
+            {},
+        )
+    except M365Error as exc:
+        if exc.http_status == 403:
+            raise M365Error(
+                "The Microsoft 365 app cannot revoke sign-in sessions. Grant admin "
+                "consent for User.RevokeSessions.All. Disabling sign-in is a separate "
+                "operation and does not prove all existing sessions have ended.",
+                http_status=403,
+                graph_error_code=exc.graph_error_code,
+            ) from exc
+        raise
 
 
 async def verify_tenant_permissions(
