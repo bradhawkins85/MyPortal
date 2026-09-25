@@ -1,0 +1,7 @@
+{
+  "guid": "8abfe80f-cf54-422e-95fd-bd01ea57ba23",
+  "occurred_at": "2026-09-25T00:00:00Z",
+  "change_type": "Security",
+  "summary": "Reduce Microsoft 365 provisioning to the application permissions and bootstrap scopes MyPortal uses.",
+  "content_hash": "1a4962d3b557f1e6c172366e541da12400d1c84fcaaa1143a87842cdc1b63ee7"
+}

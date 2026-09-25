@@ -1,31 +1,28 @@
 from app.services.m365_access_baseline import (
+    GRAPH_APPLICATION_PERMISSION_IDS,
     REQUIRED_DIRECTORY_ROLES,
     REQUIRED_PERMISSIONS,
 )
+from app.services.m365 import CONNECT_SCOPE, PROVISION_SCOPE
 
 
-def test_required_access_baseline_preserves_resource_type_and_name():
+def test_required_access_baseline_contains_only_permissions_used_by_myportal():
     entries = {(item.permission_type, item.resource, item.name) for item in REQUIRED_PERMISSIONS}
-    # The 151-entry named snapshot is preserved and the formerly separate
-    # provisioning/workload requirements are now additive contract entries.
-    assert len(entries) == len(REQUIRED_PERMISSIONS) == 166
-    assert ("Application", "Microsoft Graph", "AccessReview.Read.All") in entries
-    assert ("Application", "Office 365 Exchange Online", "MailboxSettings.ReadWrite") in entries
-    assert ("Delegated", "Office 365 Exchange Online", "MailboxSettings.ReadWrite") in entries
-    assert ("Application", "Office 365 SharePoint Online", "Sites.FullControl.All") in entries
-    assert ("Delegated", "Office 365 SharePoint Online", "AllSites.FullControl") in entries
-    assert ("Delegated", "WindowsDefenderATP", "Vulnerability.Read") in entries
-    assert ("Application", "Microsoft Graph", "Application.ReadWrite.OwnedBy") in entries
-    assert ("Application", "Microsoft Exchange Online Protection", "Exchange.ManageAsApp") not in entries
-    assert ("Application", "Microsoft Graph", "User-PasswordProfile.ReadWrite.All") in entries
-    assert ("Application", "Microsoft Graph", "User.EnableDisableAccount.All") in entries
-    assert ("Application", "Microsoft Graph", "User.RevokeSessions.All") in entries
-    assert ("Application", "Microsoft Graph", "LicenseAssignment.ReadWrite.All") in entries
+    expected = {
+        ("Application", "Microsoft Graph", name)
+        for name in GRAPH_APPLICATION_PERMISSION_IDS
+    }
+
+    assert entries == expected
+    assert len(entries) == len(REQUIRED_PERMISSIONS)
+    assert not any(item.permission_type == "Delegated" for item in REQUIRED_PERMISSIONS)
     assert all(item.feature and item.operation and item.disposition for item in REQUIRED_PERMISSIONS)
 
 
-def test_required_directory_roles_are_exact():
-    assert REQUIRED_DIRECTORY_ROLES == (
-        "Cloud Application Administrator",
-        "Reports Reader",
-    )
+def test_permission_contract_does_not_assign_directory_roles():
+    assert REQUIRED_DIRECTORY_ROLES == ()
+
+
+def test_bootstrap_scopes_do_not_request_delegated_permission_management():
+    assert "DelegatedPermissionGrant.ReadWrite.All" not in PROVISION_SCOPE
+    assert "DelegatedPermissionGrant.ReadWrite.All" not in CONNECT_SCOPE

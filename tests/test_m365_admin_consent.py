@@ -70,10 +70,10 @@ async def test_grant_required_admin_consent_is_idempotent_when_everything_is_gra
     graph_patch.assert_not_awaited()
 
 
-def test_admin_flows_request_permission_grant_write_scope():
+def test_admin_flows_do_not_request_unused_permission_grant_write_scope():
     scope = "https://graph.microsoft.com/DelegatedPermissionGrant.ReadWrite.All"
-    assert scope in m365.PROVISION_SCOPE
-    assert scope in m365.CONNECT_SCOPE
+    assert scope not in m365.PROVISION_SCOPE
+    assert scope not in m365.CONNECT_SCOPE
 
 
 @pytest.mark.anyio
