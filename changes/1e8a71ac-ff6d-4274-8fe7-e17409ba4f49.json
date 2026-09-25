@@ -1,0 +1,7 @@
+{
+  "guid": "1e8a71ac-ff6d-4274-8fe7-e17409ba4f49",
+  "occurred_at": "2026-09-25T00:00:00Z",
+  "change_type": "fix",
+  "summary": "Add the correct Microsoft Graph User-PasswordProfile.ReadWrite.All application permission to MyPortal app registrations.",
+  "content_hash": "m365-password-profile-application-permission-v1"
+}

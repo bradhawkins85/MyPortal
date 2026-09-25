@@ -922,6 +922,10 @@ async def test_provision_app_roles_constant():
     assert "df021288-bdef-4463-88db-98f22de89214" in m365_service._PROVISION_APP_ROLES
     # Directory.Read.All
     assert "7ab1d382-f21e-4acd-a863-ba3e13f7da61" in m365_service._PROVISION_APP_ROLES
+    # User-PasswordProfile.ReadWrite.All
+    assert "cc117bb9-00cf-4eb8-b580-ea2a878fe8f7" in m365_service._PROVISION_APP_ROLES
+    # EduAssignments.Read.All must not be substituted for the password role.
+    assert "4c37e1b6-35a1-43bf-926a-6f30f2cdf585" not in m365_service._PROVISION_APP_ROLES
 
 
 def test_permission_contract_omits_unsupported_permissions():
