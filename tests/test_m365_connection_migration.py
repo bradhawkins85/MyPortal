@@ -69,6 +69,60 @@ def test_first_connection_does_not_inventory_admin_credentials_placeholder(
     )
 
 
+def test_legacy_inventory_uses_next_version_and_restores_matching_row(monkeypatch):
+    active = {"id": 7, "company_id": 1, "state": "active", "version": 2}
+    monkeypatch.setattr(
+        m365_connections, "get_active", AsyncMock(side_effect=[None, active])
+    )
+    execute = AsyncMock()
+    inventory = AsyncMock()
+    monkeypatch.setattr(m365_connections.db, "execute", execute)
+    monkeypatch.setattr(m365_connections, "inventory_dependencies", inventory)
+
+    result = asyncio.run(
+        m365_connections.ensure_legacy(
+            1,
+            {
+                "tenant_id": "tenant",
+                "client_id": "client",
+                "client_secret": "encrypted-secret",
+            },
+        )
+    )
+
+    assert result == active
+    sql, params = execute.await_args.args
+    assert "COALESCE(MAX(version), 0) + 1" in sql
+    assert "state = 'active'" in sql
+    assert params[-1] == 1
+    inventory.assert_awaited_once_with(7, 1, "tenant")
+
+
+def test_existing_credentials_are_reencrypted_for_legacy_inventory(monkeypatch):
+    current = {
+        "tenant_id": "tenant",
+        "client_id": "client",
+        "client_secret": "decrypted-secret",
+    }
+    ensure_legacy = AsyncMock()
+    monkeypatch.setattr(m365.m365_repo, "get_credentials", AsyncMock(return_value=current))
+    monkeypatch.setattr(m365.connection_repo, "ensure_legacy", ensure_legacy)
+    monkeypatch.setattr(
+        m365.connection_repo, "stage_candidate", AsyncMock(return_value={"id": 12})
+    )
+    monkeypatch.setattr(m365, "_encrypt", lambda value: f"encrypted:{value}")
+
+    asyncio.run(
+        m365.stage_connection_candidate(
+            1, "tenant", {"client_id": "new", "client_secret": "new-secret"}
+        )
+    )
+
+    inventoried = ensure_legacy.await_args.args[1]
+    assert inventoried["client_secret"] == "encrypted:decrypted-secret"
+    assert current["client_secret"] == "decrypted-secret"
+
+
 def test_provisioning_never_searches_or_deletes_by_display_name(monkeypatch):
     get_roles = AsyncMock(return_value=("00000000-0000-0000-0000-000000000001", {}))
     build_access = AsyncMock(return_value=([], [], []))
