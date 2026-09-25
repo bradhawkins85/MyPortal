@@ -2827,10 +2827,45 @@ async def _grant_provisioned_roles(
         for role_name in REQUIRED_DIRECTORY_ROLES:
             await _ensure_directory_role_by_name(access_token, sp_object_id, role_name)
 
+        # Confirmation may resume a partially (or fully) provisioned app.  Read
+        # the assignee's current grants once and avoid submitting duplicate
+        # creates: Graph reports duplicate appRoleAssignedTo POSTs as a 400
+        # InvalidUpdate in some tenants rather than the documented conflict.
+        existing_role_assignments: set[tuple[str, str]] = set()
+        try:
+            assignment_response = await _graph_get(
+                access_token,
+                "https://graph.microsoft.com/v1.0/servicePrincipals/"
+                f"{_graph_path_segment(sp_object_id)}/appRoleAssignments"
+                "?$select=resourceId,appRoleId",
+            )
+            existing_role_assignments = {
+                (str(item["resourceId"]), str(item["appRoleId"]))
+                for item in assignment_response.get("value", [])
+                if isinstance(item, dict)
+                and item.get("resourceId")
+                and item.get("appRoleId")
+            }
+        except M365Error as exc:
+            # Preserve the existing best-effort behaviour if Graph cannot list
+            # assignments; individual creates still have their normal guards.
+            log_info(
+                "Could not preflight existing app role assignments",
+                sp_object_id=sp_object_id,
+                error=str(exc),
+            )
+
         # 1. Grant each required Microsoft Graph application permission.
         # 409 Conflict means the assignment already exists – treat as success.
         # Any other error is logged and skipped so remaining roles still process.
         for role_id in roles_to_grant:
+            if (graph_sp_id, role_id) in existing_role_assignments:
+                log_info(
+                    "App role assignment already exists, skipping",
+                    role_id=role_id,
+                    sp_object_id=sp_object_id,
+                )
+                continue
             try:
                 await _post_app_role_assignment_with_retry(
                     access_token,
@@ -2880,6 +2915,12 @@ async def _grant_provisioned_roles(
                     )
                     continue
                 resource_sp_id: str = resource_list[0]["id"]
+                if (resource_sp_id, _EXO_MANAGE_AS_APP_ROLE) in existing_role_assignments:
+                    log_info(
+                        f"{resource_name} Exchange.ManageAsApp role already assigned, skipping",
+                        sp_object_id=sp_object_id,
+                    )
+                    continue
                 try:
                     await _post_app_role_assignment_with_retry(
                         access_token,
@@ -2921,6 +2962,33 @@ async def _grant_provisioned_roles(
         # 4. Add the service principal as an owner of the app registration so it
         #    can call addPassword on itself (Application.ReadWrite.OwnedBy).
         try:
+            owner_ids: set[str] = set()
+            try:
+                owners_response = await _graph_get(
+                    access_token,
+                    f"https://graph.microsoft.com/v1.0/applications/"
+                    f"{_graph_path_segment(app_object_id)}/owners?$select=id",
+                )
+                owner_ids = {
+                    str(owner["id"])
+                    for owner in owners_response.get("value", [])
+                    if isinstance(owner, dict) and owner.get("id")
+                }
+            except M365Error as exc:
+                # A failed read must not prevent a first-time owner assignment.
+                # Fall through to the idempotent POST and its duplicate guards.
+                log_info(
+                    "Could not preflight existing M365 app owners",
+                    app_object_id=app_object_id,
+                    error=str(exc),
+                )
+            if sp_object_id in owner_ids:
+                log_info(
+                    "Service principal is already an owner of M365 app registration",
+                    app_object_id=app_object_id,
+                    sp_object_id=sp_object_id,
+                )
+                return
             await _graph_post(
                 access_token,
                 f"https://graph.microsoft.com/v1.0/applications/{_graph_path_segment(app_object_id)}/owners/$ref",

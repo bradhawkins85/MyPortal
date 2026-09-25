@@ -276,6 +276,78 @@ async def test_provision_app_registration_success():
 
 
 @pytest.mark.anyio("asyncio")
+async def test_grant_provisioned_roles_skips_existing_assignments_and_owner():
+    """Reconfirming an existing tenant must not submit duplicate Graph writes."""
+    graph_role = m365_service._PROVISION_APP_ROLES[0]
+    graph_post = AsyncMock()
+
+    async def mock_graph_get(token: str, url: str, **kwargs: Any) -> dict:
+        if url.endswith("/appRoleAssignments?$select=resourceId,appRoleId"):
+            return {
+                "value": [
+                    {"resourceId": "graph-sp-id", "appRoleId": graph_role},
+                    {
+                        "resourceId": "exchange-sp-id",
+                        "appRoleId": m365_service._EXO_MANAGE_AS_APP_ROLE,
+                    },
+                ]
+            }
+        if "/owners?$select=id" in url:
+            return {"value": [{"id": "sp-object-id"}]}
+        if m365_service._EXO_APP_ID in url:
+            return {"value": [{"id": "exchange-sp-id"}]}
+        return {"value": []}
+
+    with (
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+        patch.object(m365_service, "_graph_post", graph_post),
+        patch.object(m365_service, "_ensure_directory_role_by_name", AsyncMock()),
+        patch.object(m365_service, "_ensure_exchange_admin_role", AsyncMock()),
+        patch.object(m365_service, "_ensure_teams_service_admin_role", AsyncMock()),
+    ):
+        await m365_service._grant_provisioned_roles(
+            "token",
+            "sp-object-id",
+            "graph-sp-id",
+            "app-object-id",
+            valid_graph_roles=[graph_role],
+        )
+
+    graph_post.assert_not_awaited()
+
+
+@pytest.mark.anyio("asyncio")
+async def test_grant_provisioned_roles_assigns_owner_when_owner_preflight_fails():
+    """A transient owner-list failure must not block first-time provisioning."""
+    graph_post = AsyncMock(return_value={})
+
+    async def mock_graph_get(token: str, url: str, **kwargs: Any) -> dict:
+        if "/owners?$select=id" in url:
+            raise m365_service.M365Error("owner lookup unavailable", http_status=503)
+        if m365_service._EXO_APP_ID in url:
+            return {"value": []}
+        return {"value": []}
+
+    with (
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+        patch.object(m365_service, "_graph_post", graph_post),
+        patch.object(m365_service, "_ensure_directory_role_by_name", AsyncMock()),
+        patch.object(m365_service, "_ensure_exchange_admin_role", AsyncMock()),
+        patch.object(m365_service, "_ensure_teams_service_admin_role", AsyncMock()),
+    ):
+        await m365_service._grant_provisioned_roles(
+            "token",
+            "sp-object-id",
+            "graph-sp-id",
+            "app-object-id",
+            valid_graph_roles=[],
+        )
+
+    graph_post.assert_awaited_once()
+    assert graph_post.await_args.args[1].endswith("/applications/app-object-id/owners/$ref")
+
+
+@pytest.mark.anyio("asyncio")
 async def test_provision_app_registration_missing_graph_sp():
     """provision_app_registration raises M365Error if Graph SP not found."""
     async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
@@ -877,7 +949,8 @@ def test_permission_contract_omits_unsupported_permissions():
 
 def _make_jwt(payload: dict) -> str:
     """Build a minimal JWT with the given payload (no real signature)."""
-    import base64, json
+    import base64
+    import json
     header = base64.urlsafe_b64encode(
         json.dumps({"alg": "RS256", "typ": "JWT"}).encode()
     ).rstrip(b"=").decode()
