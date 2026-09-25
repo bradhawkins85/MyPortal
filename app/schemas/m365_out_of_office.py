@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
@@ -12,6 +13,7 @@ class OutOfOfficeCreate(BaseModel):
     internal_message: str = Field(min_length=1, max_length=10000)
     external_message: str | None = Field(default=None, max_length=10000)
     same_message: bool = True
+    external_audience: Literal["none", "contactsOnly", "all"] = "none"
 
     @field_validator("start_time", "end_time")
     @classmethod
@@ -42,3 +44,12 @@ class OutOfOfficeResult(BaseModel):
     mailbox: EmailStr
     success: bool
     error: str | None = None
+
+
+class OutOfOfficeDisable(BaseModel):
+    mailboxes: list[EmailStr] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def remove_duplicates(self):
+        self.mailboxes = list(dict.fromkeys(self.mailboxes))
+        return self

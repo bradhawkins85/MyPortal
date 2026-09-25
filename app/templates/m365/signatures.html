@@ -15,16 +15,16 @@
   <section class="card card--panel">
     <header class="card__header card__header--stacked">
       <div>
-        <h2 class="card__title">Centralised Microsoft 365 signatures</h2>
+        <h2 class="card__title">MyPortal signature templates</h2>
         <p class="card__subtitle">
           Manage tenant-scoped HTML and plain-text signature templates, preview them against staff data,
-          and publish or disable managed signatures without touching existing personal signatures.
+          and publish or disable them for consumers inside MyPortal. Publishing changes a database lifecycle state; it does not deploy a signature to Outlook or other Microsoft 365 clients.
         </p>
       </div>
     </header>
     <div class="card__body card__body--stacked">
       <div class="alert alert--info" role="status">
-        Scheduling uses <strong>{{ schedule_timezone }}</strong>. Active published templates are ordered by priority, then the configured default, then the earliest activation start date, then the lowest template ID.
+        <strong>Lifecycle:</strong> Draft templates are editable but inactive. Published means available for MyPortal use. A published template becomes scheduled or active according to its dates in <strong>{{ schedule_timezone }}</strong>. <strong>Client deployment: not configured</strong> — this workspace does not synchronize Outlook signatures.
       </div>
       {% if current_primary %}
         <div class="card card--panel">
@@ -40,7 +40,7 @@
               <tr>
                 <th scope="col">Name</th>
                 <th scope="col">Slug</th>
-                <th scope="col">Status</th>
+                <th scope="col">MyPortal publication</th>
                 <th scope="col">Priority</th>
                 <th scope="col">Schedule</th>
                 <th scope="col">Updated</th>
@@ -56,7 +56,7 @@
                     {% if item.is_default %}<span class="badge badge--info">Default</span>{% endif %}
                   </td>
                   <td><code>{{ item.slug }}</code></td>
-                  <td>{{ item.status|replace('_', ' ')|title }}</td>
+                  <td>{{ item.status|replace('_', ' ')|title }}{% if item.status == 'published' %}<br><small class="text-muted">{{ 'Active for MyPortal' if current_primary and current_primary.id == item.id else 'Scheduled/available for MyPortal' }} · Outlook deployment: not configured</small>{% endif %}</td>
                   <td>{{ item.priority or 0 }}</td>
                   <td>
                     {% if item.schedule_start_on or item.schedule_end_on %}
@@ -91,8 +91,8 @@
       <div>
         <h2 class="card__title">Current platform boundary</h2>
         <p class="card__subtitle">
-          This release adds the central management workspace. Tenant deployment, default-policy enforcement,
-          and Outlook-client reconciliation still depend on verified Microsoft platform behaviour.
+          This workspace stores and selects templates for MyPortal. It has no supported delivery integration,
+          so actual Outlook deployment status is <strong>not configured</strong> rather than pending or successful.
         </p>
       </div>
     </header>

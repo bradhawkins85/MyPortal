@@ -15,11 +15,22 @@
   .oof-mailbox:last-child { border-bottom:0; }
   .oof-mailbox span { min-width:0; overflow-wrap:anywhere; }
   .oof-tools { display:flex; align-items:center; gap:var(--space-2); margin-bottom:var(--space-2); }
+  .oof-results { margin-bottom:var(--space-4); }
+  .oof-actions { display:flex; gap:var(--space-2); flex-wrap:wrap; }
   @media (max-width:800px) { .oof-grid,.oof-fields { grid-template-columns:1fr; } .oof-wide { grid-column:auto; } }
 </style>
 {% endblock %}
 
 {% block content %}
+{% if state_error %}<div class="alert alert--error" role="alert">Current Microsoft 365 state could not be loaded: {{ state_error }}</div>{% endif %}
+{% if outcomes %}
+<section class="card card--panel oof-results" aria-labelledby="outcome-heading">
+  <header class="card__header"><h2 class="card__title" id="outcome-heading">Verified mailbox results</h2></header>
+  <div class="card__body"><ul class="list">
+    {% for result in outcomes %}<li><strong>{{ result.mailbox }}</strong> — {% if result.success %}{{ 'disabled' if completed_action == 'disable' else 'schedule saved' }}{% else %}<span class="text-danger">failed: {{ result.error }}</span>{% endif %}</li>{% endfor %}
+  </ul>{% if outcomes|selectattr('success', 'equalto', false)|list %}<p class="form-help">Submitted values remain below so failed mailboxes can be retried without re-entering the schedule.</p>{% endif %}</div>
+</section>
+{% endif %}
 <form method="post" action="/m365/out-of-office" id="oof-form" class="oof-grid">
   <section class="card card--panel">
     <header class="card__header"><div><h2 class="card__title">User mailboxes</h2><p class="card__subtitle">Choose one or more synced user mailboxes.</p></div></header>
@@ -31,7 +42,7 @@
       <div class="oof-mailboxes" id="mailbox-list">
         {% for mailbox in mailboxes %}
         <label class="oof-mailbox" data-mailbox-row>
-          <input type="checkbox" name="mailboxes" value="{{ mailbox.user_principal_name }}" {% if not can_write %}disabled{% endif %}>
+          <input type="checkbox" name="mailboxes" value="{{ mailbox.user_principal_name }}" {% if mailbox.user_principal_name in (submitted.mailboxes or []) %}checked{% endif %} {% if not can_write %}disabled{% endif %}>
           <span><strong>{{ mailbox.display_name }}</strong><br><small class="text-muted">{{ mailbox.user_principal_name }}</small></span>
         </label>
         {% else %}<p class="table__empty">No synced user mailboxes are available.</p>{% endfor %}
@@ -40,20 +51,34 @@
   </section>
 
   <section class="card card--panel">
-    <header class="card__header"><div><h2 class="card__title">Automatic reply</h2><p class="card__subtitle">Times are entered in your local timezone and sent to Microsoft 365 as UTC.</p></div></header>
+    <header class="card__header"><div><h2 class="card__title">Schedule or update automatic replies</h2><p class="card__subtitle">Times are entered in your browser timezone and normalized to UTC for Microsoft 365. The effective UTC range is shown before submission.</p></div></header>
     <div class="card__body oof-fields">
-      <div class="form-field"><label for="start-local">Starts</label><input class="input" id="start-local" type="datetime-local" required {% if not can_write %}disabled{% endif %}><input type="hidden" name="start_time" id="start-time"></div>
-      <div class="form-field"><label for="end-local">Ends</label><input class="input" id="end-local" type="datetime-local" required {% if not can_write %}disabled{% endif %}><input type="hidden" name="end_time" id="end-time"></div>
-      <div class="form-field oof-wide"><label for="internal-message">Internal sender message</label><textarea class="input" id="internal-message" name="internal_message" rows="6" maxlength="10000" required {% if not can_write %}disabled{% endif %}></textarea></div>
-      <div class="form-field oof-wide"><label><input type="checkbox" name="same_message" id="same-message" checked {% if not can_write %}disabled{% endif %}> Use the same message for external senders</label></div>
-      <div class="form-field oof-wide" id="external-field" hidden><label for="external-message">External sender message</label><textarea class="input" id="external-message" name="external_message" rows="6" maxlength="10000" {% if not can_write %}disabled{% endif %}></textarea></div>
+      <div class="form-field"><label for="start-local">Starts</label><input class="input" id="start-local" type="datetime-local" required data-initial-utc="{{ submitted.start_time or '' }}" {% if not can_write %}disabled{% endif %}><input type="hidden" name="start_time" id="start-time" value="{{ submitted.start_time or '' }}"></div>
+      <div class="form-field"><label for="end-local">Ends</label><input class="input" id="end-local" type="datetime-local" required data-initial-utc="{{ submitted.end_time or '' }}" {% if not can_write %}disabled{% endif %}><input type="hidden" name="end_time" id="end-time" value="{{ submitted.end_time or '' }}"></div>
+      <p class="form-help oof-wide" id="effective-range" role="status">Enter both times to preview the effective UTC range.</p>
+      <div class="form-field oof-wide"><label for="internal-message">Internal sender message</label><textarea class="input" id="internal-message" name="internal_message" rows="6" maxlength="10000" required {% if not can_write %}disabled{% endif %}>{{ submitted.internal_message or '' }}</textarea></div>
+      <fieldset class="form-field oof-wide"><legend>External audience</legend>
+        <label><input type="radio" name="external_audience" value="none" {% if not submitted.external_audience or submitted.external_audience == 'none' %}checked{% endif %}> No external senders</label><br>
+        <label><input type="radio" name="external_audience" value="contactsOnly" {% if submitted.external_audience == 'contactsOnly' %}checked{% endif %}> External senders in the mailbox's contacts only</label><br>
+        <label><input type="radio" name="external_audience" value="all" {% if submitted.external_audience == 'all' %}checked{% endif %}> All external senders</label>
+        <p class="form-help">This choice is written only when scheduling. Disabling preserves the mailbox's saved audience and messages.</p>
+      </fieldset>
+      <div class="form-field oof-wide"><label><input type="checkbox" name="same_message" id="same-message" {% if submitted.same_message is not defined or submitted.same_message %}checked{% endif %} {% if not can_write %}disabled{% endif %}> Use the internal message for enabled external replies</label></div>
+      <div class="form-field oof-wide" id="external-field" hidden><label for="external-message">External sender message</label><textarea class="input" id="external-message" name="external_message" rows="6" maxlength="10000" {% if not can_write %}disabled{% endif %}>{{ submitted.external_message or '' }}</textarea></div>
       <div class="form-field oof-wide">
-        {% if can_write %}<button class="button button--primary" type="submit" {% if not mailboxes %}disabled{% endif %}>Set Out of Office</button>
+        {% if can_write %}<div class="oof-actions"><button class="button button--primary" name="intent" value="schedule" type="submit" {% if not mailboxes %}disabled{% endif %}>Save schedule</button><button class="button button--danger" name="intent" value="disable" type="submit" formnovalidate {% if not mailboxes %}disabled{% endif %}>Disable selected</button></div>
         {% else %}<p class="form-help">Your role has read-only access. Write permission is required to apply automatic replies.</p>{% endif %}
       </div>
     </div>
   </section>
 </form>
+<section class="card card--panel" aria-labelledby="current-heading">
+ <header class="card__header"><div><h2 class="card__title" id="current-heading">Current Microsoft 365 state</h2><p class="card__subtitle">Read directly from each authorized mailbox. Use Edit to copy an existing schedule into the form; nothing is changed until Save schedule is selected.</p></div></header>
+ <div class="card__body table-wrapper"><table class="table"><thead><tr><th>Mailbox</th><th>Status</th><th>Effective range</th><th>External audience</th><th>Read result</th><th></th></tr></thead><tbody>
+ {% for state in states %}{% set setting = state.setting or {} %}<tr><td>{{ state.mailbox }}</td><td>{{ setting.status or 'Unknown' }}</td><td>{% if setting.scheduledStartDateTime %}{{ setting.scheduledStartDateTime.dateTime }} {{ setting.scheduledStartDateTime.timeZone }} → {{ setting.scheduledEndDateTime.dateTime }} {{ setting.scheduledEndDateTime.timeZone }}{% else %}—{% endif %}</td><td>{{ setting.externalAudience or '—' }}</td><td>{% if state.success %}Verified{% else %}<span class="text-danger">{{ state.error }}</span>{% endif %}</td><td>{% if state.success and can_write %}<button type="button" class="button button--small button--ghost" data-edit-mailbox="{{ state.mailbox }}" data-setting='{{ setting|tojson }}'>Edit</button>{% endif %}</td></tr>
+ {% else %}<tr><td colspan="6" class="table__empty">No authorized user mailboxes are available.</td></tr>{% endfor %}
+ </tbody></table></div>
+</section>
 {% endblock %}
 
 {% block scripts %}
@@ -62,8 +87,10 @@
   const same = document.getElementById('same-message');
   const externalField = document.getElementById('external-field');
   const external = document.getElementById('external-message');
-  const syncExternal = () => { externalField.hidden = same.checked; external.required = !same.checked; };
+  const audience = () => document.querySelector('input[name="external_audience"]:checked')?.value || 'none';
+  const syncExternal = () => { const enabled = audience() !== 'none'; externalField.hidden = same.checked || !enabled; external.required = enabled && !same.checked; };
   same?.addEventListener('change', syncExternal); syncExternal();
+  document.querySelectorAll('input[name="external_audience"]').forEach(input => input.addEventListener('change', syncExternal));
   document.getElementById('mailbox-filter')?.addEventListener('input', event => {
     const query = event.target.value.toLocaleLowerCase();
     document.querySelectorAll('[data-mailbox-row]').forEach(row => { row.hidden = !row.textContent.toLocaleLowerCase().includes(query); });
@@ -74,12 +101,36 @@
   });
   document.getElementById('oof-form')?.addEventListener('submit', event => {
     if (!document.querySelector('input[name="mailboxes"]:checked')) { event.preventDefault(); window.alert('Select at least one mailbox.'); return; }
+    if (event.submitter?.value === 'disable') return;
     for (const [localId, utcId] of [['start-local','start-time'],['end-local','end-time']]) {
       const value = document.getElementById(localId).value;
       if (!value) { event.preventDefault(); return; }
       document.getElementById(utcId).value = new Date(value).toISOString();
     }
   });
+  const showRange = () => {
+    const start = document.getElementById('start-local').value, end = document.getElementById('end-local').value;
+    document.getElementById('effective-range').textContent = start && end ? `Effective range: ${new Date(start).toISOString()} → ${new Date(end).toISOString()} (UTC; browser timezone ${Intl.DateTimeFormat().resolvedOptions().timeZone || 'local'})` : 'Enter both times to preview the effective UTC range.';
+  };
+  ['start-local','end-local'].forEach(id => document.getElementById(id)?.addEventListener('change', showRange));
+  const asLocalInput = value => {
+    if (!value) return '';
+    const date = new Date(value), offset = date.getTimezoneOffset() * 60000;
+    return new Date(date.getTime() - offset).toISOString().slice(0,16);
+  };
+  ['start-local','end-local'].forEach(id => { const input = document.getElementById(id); if (input.dataset.initialUtc) input.value = asLocalInput(input.dataset.initialUtc); }); showRange();
+  document.querySelectorAll('[data-edit-mailbox]').forEach(button => button.addEventListener('click', () => {
+    const setting = JSON.parse(button.dataset.setting), mailbox = button.dataset.editMailbox;
+    document.querySelectorAll('input[name="mailboxes"]').forEach(input => { input.checked = input.value.toLocaleLowerCase() === mailbox.toLocaleLowerCase(); });
+    const graphDate = item => item?.dateTime ? `${item.dateTime}${item.timeZone === 'UTC' && !item.dateTime.endsWith('Z') ? 'Z' : ''}` : '';
+    document.getElementById('start-local').value = asLocalInput(graphDate(setting.scheduledStartDateTime));
+    document.getElementById('end-local').value = asLocalInput(graphDate(setting.scheduledEndDateTime));
+    document.getElementById('internal-message').value = setting.internalReplyMessage || '';
+    document.getElementById('external-message').value = setting.externalReplyMessage || '';
+    const radio = document.querySelector(`input[name="external_audience"][value="${setting.externalAudience || 'none'}"]`); if (radio) radio.checked = true;
+    same.checked = (setting.internalReplyMessage || '') === (setting.externalReplyMessage || ''); syncExternal(); showRange();
+    document.getElementById('oof-form').scrollIntoView({behavior:'smooth'});
+  }));
 })();
 </script>
 {% endblock %}

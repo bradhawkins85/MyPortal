@@ -8,7 +8,7 @@ from app.api.dependencies.auth import get_current_user
 from app.api.dependencies.database import require_database
 from app.repositories import m365_spam_purge as purge_repo
 from app.schemas.m365_spam_purge import SpamPurgeRequestCreate, SpamPurgeRequestResponse
-from app.schemas.m365_out_of_office import OutOfOfficeCreate, OutOfOfficeResult
+from app.schemas.m365_out_of_office import OutOfOfficeCreate, OutOfOfficeDisable, OutOfOfficeResult
 from app.security.session import session_manager
 from app.services import m365 as m365_service
 from app.services import m365_spam_purge as purge_service
@@ -65,6 +65,21 @@ async def set_out_of_office(payload: OutOfOfficeCreate, request: Request, user: 
     await _require_oof_access(request, user, write=True)
     try:
         return await oof_service.set_automatic_replies(await _company_id(request), payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@oof_router.get("/state", summary="Inspect current automatic reply state")
+async def get_out_of_office_state(request: Request, user: dict = Depends(get_current_user)):
+    await _require_oof_access(request, user)
+    return await oof_service.get_automatic_replies(await _company_id(request))
+
+
+@oof_router.post("/disable", response_model=list[OutOfOfficeResult], summary="Disable automatic replies")
+async def disable_out_of_office(payload: OutOfOfficeDisable, request: Request, user: dict = Depends(get_current_user)):
+    await _require_oof_access(request, user, write=True)
+    try:
+        return await oof_service.disable_automatic_replies(await _company_id(request), payload)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
