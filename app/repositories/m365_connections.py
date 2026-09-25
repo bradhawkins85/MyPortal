@@ -231,21 +231,27 @@ async def activate(company_id: int, connection_id: int) -> dict[str, Any]:
                 candidate.get("app_object_id"), candidate.get("client_secret_key_id"),
                 candidate.get("client_secret_expires_at"), company_id,
             )
-            if previous:
-                await db.execute(
-                    """UPDATE company_m365_credentials SET tenant_id = %s, client_id = %s,
-                       client_secret = %s, app_object_id = %s, client_secret_key_id = %s,
-                       client_secret_expires_at = %s WHERE company_id = %s""",
-                    credential_values,
-                )
-            else:
-                await db.execute(
-                    """INSERT INTO company_m365_credentials
-                       (tenant_id, client_id, client_secret, app_object_id,
-                        client_secret_key_id, client_secret_expires_at, company_id)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                    credential_values,
-                )
+            # Initial setup writes a compatibility row before consent so that
+            # existing consumers can complete the setup journey.  An admin-only
+            # configuration can also leave a placeholder row for the company.
+            # Neither case has a previous active connection, so deciding between
+            # INSERT and UPDATE from ``previous`` races the unique company_id key.
+            # Upsert unconditionally and preserve token/admin columns just as the
+            # former UPDATE path did.
+            await db.execute(
+                """INSERT INTO company_m365_credentials
+                   (tenant_id, client_id, client_secret, app_object_id,
+                    client_secret_key_id, client_secret_expires_at, company_id)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)
+                   ON DUPLICATE KEY UPDATE
+                     tenant_id = VALUES(tenant_id),
+                     client_id = VALUES(client_id),
+                     client_secret = VALUES(client_secret),
+                     app_object_id = VALUES(app_object_id),
+                     client_secret_key_id = VALUES(client_secret_key_id),
+                     client_secret_expires_at = VALUES(client_secret_expires_at)""",
+                credential_values,
+            )
         except Exception:
             # Preserve the old active pointer if any step before compatibility
             # credential replacement fails. Secrets are reused, not rebuilt.
