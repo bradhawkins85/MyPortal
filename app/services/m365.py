@@ -973,6 +973,9 @@ class M365Error(RuntimeError):
         error body, when available.  Callers can use this to distinguish
         specific failure modes (e.g. ``Authentication_RequestFromNonPremiumTenantOrB2CTenant``)
         from generic permission errors.
+    :param graph_error_detail_codes: Sanitized ``error.details[].code`` values
+        returned by Graph.  Detail messages and other fields are deliberately
+        not retained because they may contain tenant data.
     """
 
     def __init__(
@@ -981,17 +984,23 @@ class M365Error(RuntimeError):
         *,
         http_status: int | None = None,
         graph_error_code: str | None = None,
+        graph_error_detail_codes: tuple[str, ...] = (),
         failure_kind: str | None = None,
     ) -> None:
         super().__init__(message)
         self.http_status: int | None = http_status
         self.graph_error_code: str | None = graph_error_code
+        self.graph_error_detail_codes: tuple[str, ...] = graph_error_detail_codes
         self.failure_kind: str | None = failure_kind
 
 
 def _safe_m365_error_fields(exc: M365Error) -> dict[str, Any]:
     """Return actionable Graph diagnostics without logging response payloads."""
-    return {"http_status": exc.http_status, "graph_error_code": exc.graph_error_code}
+    return {
+        "http_status": exc.http_status,
+        "graph_error_code": exc.graph_error_code,
+        "graph_error_detail_codes": exc.graph_error_detail_codes,
+    }
 
 
 class M365NoDelegatedTokenError(M365Error):
@@ -2250,6 +2259,7 @@ async def _graph_post(
         )
         graph_error_code: str | None = None
         graph_error_message: str | None = None
+        graph_error_detail_codes: tuple[str, ...] = ()
         try:
             err = (response.json().get("error") or {})
             code_value = err.get("code")
@@ -2258,14 +2268,24 @@ async def _graph_post(
                 graph_error_code = code_value
             if isinstance(message_value, str):
                 graph_error_message = message_value
+            details = err.get("details")
+            if isinstance(details, list):
+                graph_error_detail_codes = tuple(
+                    code
+                    for detail in details
+                    if isinstance(detail, dict)
+                    and isinstance((code := detail.get("code")), str)
+                )
         except Exception:  # noqa: BLE001
             graph_error_code = None
             graph_error_message = None
+            graph_error_detail_codes = ()
         suffix = f": {graph_error_message}" if graph_error_message else ""
         raise M365Error(
             f"Microsoft Graph POST failed ({response.status_code}){suffix}",
             http_status=response.status_code,
             graph_error_code=graph_error_code,
+            graph_error_detail_codes=graph_error_detail_codes,
         )
     if response.status_code == 204:
         return {}
@@ -2287,6 +2307,15 @@ def _is_app_role_assignment_propagation_error(exc: "M365Error") -> bool:
     if exc.http_status == 404:
         return True
     if exc.http_status == 400:
+        # Graph can express the same newly-created-principal propagation race
+        # as a generic Request_BadRequest with only an InvalidUpdate detail.
+        # This predicate is used solely for app-role assignment POSTs, so the
+        # bounded retry cannot turn unrelated application updates into retries.
+        if (
+            exc.graph_error_code == "Request_BadRequest"
+            and "InvalidUpdate" in exc.graph_error_detail_codes
+        ):
+            return True
         message = (str(exc) or "").lower()
         if _APP_ROLE_ASSIGN_TRANSIENT_MESSAGE in message:
             return True

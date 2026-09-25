@@ -1,0 +1,7 @@
+{
+  "guid": "4cf253f5-4d8a-4a01-9e10-e815a31dbc18",
+  "occurred_at": "2026-09-25T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Retry transient Microsoft Graph InvalidUpdate responses while provisioning tenant app-role grants.",
+  "content_hash": "6eb880c7e6d03587813e0c90bfb6a6d5911275e8495b1de882a50984f4681291"
+}

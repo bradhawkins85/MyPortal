@@ -90,6 +90,38 @@ async def test_graph_post_raises_on_error():
             )
 
 
+@pytest.mark.anyio("asyncio")
+async def test_graph_post_preserves_sanitized_detail_codes():
+    """Graph detail codes remain available without retaining detail messages."""
+    from unittest.mock import MagicMock
+
+    with patch("app.services.m365.httpx.AsyncClient") as mock_client_cls:
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_response.text = "redacted response"
+        mock_response.json.return_value = {
+            "error": {
+                "code": "Request_BadRequest",
+                "message": "redacted message",
+                "details": [
+                    {"code": "InvalidUpdate", "message": "tenant-sensitive detail"}
+                ],
+            }
+        }
+        mock_client_cls.return_value.__aenter__.return_value.post = AsyncMock(
+            return_value=mock_response
+        )
+
+        with pytest.raises(m365_service.M365Error) as raised:
+            await m365_service._graph_post(
+                "token", "https://graph.microsoft.com/v1.0/applications", {}
+            )
+
+    assert raised.value.graph_error_code == "Request_BadRequest"
+    assert raised.value.graph_error_detail_codes == ("InvalidUpdate",)
+    assert "tenant-sensitive detail" not in str(raised.value)
+
+
 # ---------------------------------------------------------------------------
 # Tests for provision_app_registration
 # ---------------------------------------------------------------------------
@@ -515,6 +547,40 @@ async def test_post_app_role_assignment_retries_on_transient_propagation_error(m
     assert result == {"id": "assignment-id"}
     assert attempts["n"] == 3
     assert len(sleeps) == 2  # slept between attempts 1→2 and 2→3
+
+
+@pytest.mark.anyio("asyncio")
+async def test_post_app_role_assignment_retries_invalid_update_detail(monkeypatch):
+    """Graph's detail-only InvalidUpdate propagation response is transient."""
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(m365_service.asyncio, "sleep", fake_sleep)
+    graph_post = AsyncMock(
+        side_effect=[
+            m365_service.M365Error(
+                "Microsoft Graph POST failed (400)",
+                http_status=400,
+                graph_error_code="Request_BadRequest",
+                graph_error_detail_codes=("InvalidUpdate",),
+            ),
+            {"id": "assignment-id"},
+        ]
+    )
+
+    with patch.object(m365_service, "_graph_post", graph_post):
+        result = await m365_service._post_app_role_assignment_with_retry(
+            "token",
+            "https://graph.microsoft.com/v1.0/servicePrincipals/resource-id/appRoleAssignedTo",
+            {"principalId": "new-sp-id", "resourceId": "resource-id", "appRoleId": "role-id"},
+            initial_delay_seconds=0.0,
+        )
+
+    assert result == {"id": "assignment-id"}
+    assert graph_post.await_count == 2
+    assert sleeps == [0.0]
 
 
 @pytest.mark.anyio("asyncio")
