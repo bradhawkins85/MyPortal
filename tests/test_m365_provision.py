@@ -122,6 +122,61 @@ async def test_graph_post_preserves_sanitized_detail_codes():
     assert "tenant-sensitive detail" not in str(raised.value)
 
 
+@pytest.mark.anyio("asyncio")
+async def test_graph_post_treats_existing_app_role_assignment_as_success():
+    """Graph's 400 duplicate-assignment variant is an idempotent success."""
+    from unittest.mock import MagicMock
+
+    with patch("app.services.m365.httpx.AsyncClient") as mock_client_cls:
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_response.text = "sanitized duplicate response"
+        mock_response.json.return_value = {
+            "error": {
+                "code": "Request_BadRequest",
+                "message": "Permission being assigned already exists on the object",
+                "details": [{"code": "InvalidUpdate"}],
+            }
+        }
+        mock_client_cls.return_value.__aenter__.return_value.post = AsyncMock(
+            return_value=mock_response
+        )
+
+        result = await m365_service._graph_post(
+            "token",
+            "https://graph.microsoft.com/v1.0/servicePrincipals/resource-id/appRoleAssignedTo",
+            {"principalId": "sp-id", "resourceId": "resource-id", "appRoleId": "role-id"},
+        )
+
+    assert result == {}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_graph_post_does_not_hide_duplicate_message_on_unrelated_endpoint():
+    """The duplicate special case must remain scoped to role assignments."""
+    from unittest.mock import MagicMock
+
+    with patch("app.services.m365.httpx.AsyncClient") as mock_client_cls:
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_response.text = "sanitized duplicate response"
+        mock_response.json.return_value = {
+            "error": {
+                "code": "Request_BadRequest",
+                "message": "Permission being assigned already exists on the object",
+                "details": [{"code": "InvalidUpdate"}],
+            }
+        }
+        mock_client_cls.return_value.__aenter__.return_value.post = AsyncMock(
+            return_value=mock_response
+        )
+
+        with pytest.raises(m365_service.M365Error):
+            await m365_service._graph_post(
+                "token", "https://graph.microsoft.com/v1.0/applications", {}
+            )
+
+
 # ---------------------------------------------------------------------------
 # Tests for provision_app_registration
 # ---------------------------------------------------------------------------
@@ -581,6 +636,33 @@ async def test_post_app_role_assignment_retries_invalid_update_detail(monkeypatc
     assert result == {"id": "assignment-id"}
     assert graph_post.await_count == 2
     assert sleeps == [0.0]
+
+
+@pytest.mark.anyio("asyncio")
+async def test_post_app_role_assignment_accepts_existing_assignment_without_retry(monkeypatch):
+    """The wrapped 400 duplicate variant must not enter propagation retries."""
+    async def fake_sleep(seconds: float) -> None:  # pragma: no cover
+        raise AssertionError("should not sleep for an existing assignment")
+
+    monkeypatch.setattr(m365_service.asyncio, "sleep", fake_sleep)
+    graph_post = AsyncMock(
+        side_effect=m365_service.M365Error(
+            "Microsoft Graph POST failed (400): Permission being assigned already exists on the object",
+            http_status=400,
+            graph_error_code="Request_BadRequest",
+            graph_error_detail_codes=("InvalidUpdate",),
+        )
+    )
+
+    with patch.object(m365_service, "_graph_post", graph_post):
+        result = await m365_service._post_app_role_assignment_with_retry(
+            "token",
+            "https://graph.microsoft.com/v1.0/servicePrincipals/resource-id/appRoleAssignedTo",
+            {"principalId": "sp-id", "resourceId": "resource-id", "appRoleId": "role-id"},
+        )
+
+    assert result == {}
+    graph_post.assert_awaited_once()
 
 
 @pytest.mark.anyio("asyncio")

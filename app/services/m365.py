@@ -2251,12 +2251,6 @@ async def _graph_post(
             f"Microsoft Graph POST network error ({type(exc).__name__})"
         ) from exc
     if response.status_code not in (200, 201, 204):
-        log_error(
-            "Microsoft Graph POST failed",
-            url=url,
-            status=response.status_code,
-            body=response.text,
-        )
         graph_error_code: str | None = None
         graph_error_message: str | None = None
         graph_error_detail_codes: tuple[str, ...] = ()
@@ -2280,6 +2274,26 @@ async def _graph_post(
             graph_error_code = None
             graph_error_message = None
             graph_error_detail_codes = ()
+        # Role assignment creation is idempotent from MyPortal's perspective.
+        # Although Graph commonly reports an existing assignment as 409, some
+        # tenants return Request_BadRequest/InvalidUpdate instead.  Treat only
+        # that precise response on a role-assignment collection as success so
+        # a repeated tenant confirmation cannot fail on a grant it already has.
+        if _is_app_role_assignment_already_exists_response(
+            url=url,
+            status=response.status_code,
+            graph_error_code=graph_error_code,
+            graph_error_message=graph_error_message,
+            graph_error_detail_codes=graph_error_detail_codes,
+        ):
+            log_info("App role assignment already exists, skipping", url=url)
+            return {}
+        log_error(
+            "Microsoft Graph POST failed",
+            url=url,
+            status=response.status_code,
+            body=response.text,
+        )
         suffix = f": {graph_error_message}" if graph_error_message else ""
         raise M365Error(
             f"Microsoft Graph POST failed ({response.status_code}){suffix}",
@@ -2301,6 +2315,40 @@ async def _graph_post(
 # documented mitigation is to retry with backoff – the assignment succeeds
 # within a few seconds once propagation completes.
 _APP_ROLE_ASSIGN_TRANSIENT_MESSAGE = "permission being assigned was not found"
+_APP_ROLE_ASSIGN_ALREADY_EXISTS_MESSAGE = "permission being assigned already exists on the object"
+
+
+def _is_app_role_assignment_already_exists_response(
+    *,
+    url: str,
+    status: int,
+    graph_error_code: str | None,
+    graph_error_message: str | None,
+    graph_error_detail_codes: tuple[str, ...],
+) -> bool:
+    """Recognize Graph's non-standard duplicate role-assignment response."""
+    path = urlsplit(url).path.rstrip("/")
+    is_assignment_collection = path.endswith("/appRoleAssignments") or path.endswith(
+        "/appRoleAssignedTo"
+    )
+    return (
+        is_assignment_collection
+        and status == 400
+        and graph_error_code == "Request_BadRequest"
+        and "InvalidUpdate" in graph_error_detail_codes
+        and (graph_error_message or "").strip().lower()
+        == _APP_ROLE_ASSIGN_ALREADY_EXISTS_MESSAGE
+    )
+
+
+def _is_app_role_assignment_already_exists_error(exc: "M365Error") -> bool:
+    """Recognize the duplicate response after it has been wrapped."""
+    return (
+        exc.http_status == 400
+        and exc.graph_error_code == "Request_BadRequest"
+        and "InvalidUpdate" in exc.graph_error_detail_codes
+        and _APP_ROLE_ASSIGN_ALREADY_EXISTS_MESSAGE in str(exc).lower()
+    )
 
 
 def _is_app_role_assignment_propagation_error(exc: "M365Error") -> bool:
@@ -2351,6 +2399,9 @@ async def _post_app_role_assignment_with_retry(
         try:
             return await _graph_post(access_token, url, payload)
         except M365Error as exc:
+            if _is_app_role_assignment_already_exists_error(exc):
+                log_info("App role assignment already exists, skipping", url=url)
+                return {}
             if not _is_app_role_assignment_propagation_error(exc):
                 raise
             last_exc = exc
