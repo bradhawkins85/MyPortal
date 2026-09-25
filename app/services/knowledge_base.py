@@ -428,6 +428,8 @@ def _article_access_metadata(article: Mapping[str, Any]) -> dict[str, Any]:
         "allowed_user_ids": _normalise_ids(article.get("allowed_user_ids", [])),
         "allowed_company_ids": _normalise_ids(article.get("company_ids", [])),
         "company_admin_ids": _normalise_ids(article.get("company_admin_ids", [])),
+        "asset_ids": _normalise_ids(article.get("asset_ids", [])),
+        "assets": list(article.get("assets") or []),
     }
 
 

@@ -506,6 +506,12 @@ def document_from_source(
         "consignment_id",
         "sku",
         "vendor_sku",
+        "owner",
+        "support_contact",
+        "criticality",
+        "location",
+        "operational_notes",
+        "review_status",
     ):
         if item.get(key):
             body_parts.append(str(item[key]))
