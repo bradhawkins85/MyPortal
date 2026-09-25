@@ -248,6 +248,12 @@ _MISSING_PERMISSION_ERROR_CODE = "Authentication_MSGraphPermissionMissing"
 _FORCE_GRANT_GRAPH_APP_ROLES: frozenset[str] = frozenset(
     {
         _SHAREPOINT_TENANT_SETTINGS_ROLE,
+        # Some tenant Graph service-principal projections lag behind the
+        # published staff lifecycle roles.  Omitting either role from a new
+        # registration makes password reset and session revocation fail while
+        # diagnostics correctly continue to require them.
+        "4c37e1b6-35a1-43bf-926a-6f30f2cdf585",  # User-PasswordProfile.ReadWrite.All
+        "77f952ba-9a5f-4521-8c9d-6c9648f7eaf7",  # User.RevokeSessions.All
         # This permission is a hard requirement for automatic credential
         # rotation.  Never silently omit it because a tenant's Graph service
         # principal projection is stale or incomplete.
