@@ -2426,8 +2426,15 @@ async def _graph_patch(
     access_token: str,
     url: str,
     payload: dict[str, Any],
+    *,
+    expected_error_statuses: frozenset[int] = frozenset(),
 ) -> dict[str, Any]:
-    """Issue a PATCH request to Microsoft Graph.  Raises :exc:`M365Error` on failure."""
+    """Issue a PATCH request to Microsoft Graph.  Raises :exc:`M365Error` on failure.
+
+    Statuses in ``expected_error_statuses`` are still raised to the caller, but
+    are not logged here as unexpected failures.  This lets recovery flows own
+    the appropriate, sanitized log message for an anticipated response.
+    """
     _validate_graph_url(url)
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -2445,12 +2452,13 @@ async def _graph_patch(
             f"Microsoft Graph PATCH network error ({type(exc).__name__})"
         ) from exc
     if response.status_code not in (200, 204):
-        log_error(
-            "Microsoft Graph PATCH failed",
-            url=url,
-            status=response.status_code,
-            body=response.text,
-        )
+        if response.status_code not in expected_error_statuses:
+            log_error(
+                "Microsoft Graph PATCH failed",
+                url=url,
+                status=response.status_code,
+                body=response.text,
+            )
         graph_error_code: str | None = None
         graph_error_message: str | None = None
         try:
@@ -2594,6 +2602,7 @@ async def provision_app_registration(
                 access_token,
                 f"https://graph.microsoft.com/v1.0/applications/{_graph_object_id(app_object_id)}",
                 app_payload,
+                expected_error_statuses=frozenset({404}),
             )
             log_info("Repaired M365 app registration in place", client_id=client_id)
         except M365Error as exc:
