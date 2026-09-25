@@ -204,10 +204,6 @@ async def admin_update_m365_mail_account(account_id: int, request: Request):
     updates["delete_after_import"] = _form_bool(form, "deleteAfterImport")
     updates["sync_known_only"] = _form_bool(form, "syncKnownOnly")
     updates["active"] = _form_bool(form, "active")
-    updates["app_fallback_enabled"] = _form_bool(form, "appFallbackEnabled")
-    # This acknowledgement is deliberately mailbox-scoped; it is never inferred
-    # from a company association or from another mailbox in the same tenant.
-    updates["mailbox_app_authorized"] = _form_bool(form, "appFallbackEnabled")
     updates["import_purpose"] = form.get("importPurpose", "support_ticket")
     priority_value = form.get("priority")
     if priority_value not in (None, ""):
@@ -486,12 +482,8 @@ async def admin_m365_mail_authorize(account_id: int, request: Request):
     company_id = account.get("company_id")
     redirect_uri = main_module._build_m365_redirect_uri(request)
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
-    oauth_client_id = (
-        await m365_service.get_effective_pkce_client_id_for_company(
-            company_id, redirect_uri=redirect_uri
-        )
-        if company_id
-        else await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri)
+    oauth_client_id = await m365_service.get_effective_pkce_client_id(
+        redirect_uri=redirect_uri
     )
     state = await main_module._new_m365_oauth_state(
         request,
@@ -525,7 +517,7 @@ async def admin_m365_mail_authorize(account_id: int, request: Request):
     response_class=HTMLResponse,
 )
 async def admin_m365_mail_disconnect(account_id: int, request: Request):
-    """Remove the per-account delegated tokens and revert to company credentials."""
+    """Remove the mailbox's delegated user tokens and stop authenticated imports."""
     current_user, redirect = await _main()._require_super_admin_page(request)
     if redirect:
         return redirect

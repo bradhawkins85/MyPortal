@@ -181,7 +181,7 @@ async def validate_mailbox_access(access_token: str, mailbox: str) -> None:
         raise ValueError("Mailbox address is required")
     await _graph_get(
         access_token,
-        f"{_GRAPH_BASE}/users/{quote(normalized, safe='')}?$select=id,userPrincipalName",
+        f"{_GRAPH_BASE}/users/{quote(normalized, safe='')}/mailFolders/inbox?$select=id",
     )
 
 
