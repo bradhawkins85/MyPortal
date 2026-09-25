@@ -96,6 +96,10 @@ _AUDIT_ARTICLE_FIELDS: tuple[str, ...] = (
     "allowed_user_ids",
     "allowed_company_ids",
     "company_admin_ids",
+    "owner_id",
+    "lifecycle_status",
+    "review_due_at",
+    "asset_ids",
 )
 
 
@@ -151,6 +155,9 @@ async def list_articles(
                 updated_at=article.get("updated_at"),
                 updated_at_iso=article.get("updated_at_iso"),
                 published_at_iso=article.get("published_at_iso"),
+                owner_id=article.get("owner_id"),
+                lifecycle_status=article.get("lifecycle_status", "draft"),
+                review_due_at_iso=article.get("review_due_at_iso"),
             )
         )
     return items
@@ -196,7 +203,34 @@ async def get_article(
         created_at=article.get("created_at"),
         updated_at=article.get("updated_at"),
         published_at=article.get("published_at"),
+        owner_id=article.get("owner_id"), lifecycle_status=article.get("lifecycle_status", "draft"),
+        review_due_at=article.get("review_due_at"), asset_ids=article.get("asset_ids", []),
+        assets=article.get("assets", []),
+        attachments=article.get("attachments", []),
     )
+
+
+@router.get("/articles/{slug}/customer-preview")
+async def preview_article_for_customer(
+    slug: str,
+    company_id: int | None = Query(None, ge=1),
+    current_user: dict = Depends(require_super_admin),
+) -> dict:
+    """Render the customer-safe representation without granting admin visibility.
+
+    This deliberately uses a non-admin access context, so restricted sections and
+    legacy conditional blocks are filtered exactly as they are for a customer.
+    """
+    memberships = ({company_id: {"company_id": company_id}} if company_id else {})
+    preview_context = kb_service.ArticleAccessContext(
+        user={"id": 0}, user_id=0, is_super_admin=False, memberships=memberships
+    )
+    article = await kb_service.get_article_by_slug_for_context(
+        slug, preview_context, include_unpublished=True, include_permissions=False
+    )
+    if not article:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+    return article
 
 
 @router.post("/articles", response_model=KnowledgeBaseArticleResponse, status_code=status.HTTP_201_CREATED)
@@ -252,6 +286,10 @@ async def create_article(
         created_at=article.get("created_at"),
         updated_at=article.get("updated_at"),
         published_at=article.get("published_at"),
+        owner_id=article.get("owner_id"), lifecycle_status=article.get("lifecycle_status", "draft"),
+        review_due_at=article.get("review_due_at"), asset_ids=article.get("asset_ids", []),
+        assets=article.get("assets", []),
+        attachments=article.get("attachments", []),
     )
 
 
@@ -264,7 +302,9 @@ async def update_article(
 ) -> KnowledgeBaseArticleResponse:
     existing_article = await kb_repo.get_article_by_id(article_id)
     try:
-        updated = await kb_service.update_article(article_id, payload.dict(exclude_unset=True))
+        updated = await kb_service.update_article(
+            article_id, payload.dict(exclude_unset=True), editor_id=int(current_user["id"])
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     context = await kb_service.build_access_context(current_user)
@@ -305,7 +345,33 @@ async def update_article(
         created_at=article.get("created_at"),
         updated_at=article.get("updated_at"),
         published_at=article.get("published_at"),
+        owner_id=article.get("owner_id"), lifecycle_status=article.get("lifecycle_status", "draft"),
+        review_due_at=article.get("review_due_at"), asset_ids=article.get("asset_ids", []),
+        assets=article.get("assets", []),
+        attachments=article.get("attachments", []),
     )
+
+
+@router.get("/articles/{article_id}/versions")
+async def list_article_versions(
+    article_id: int, current_user: dict = Depends(require_super_admin)
+) -> list[dict]:
+    """List immutable revisions; version history is never exposed to customers."""
+    if not await kb_repo.get_article_by_id(article_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+    return await kb_repo.list_article_versions(article_id)
+
+
+@router.get("/articles/{article_id}/versions/{version_number}")
+async def get_article_version(
+    article_id: int,
+    version_number: int,
+    current_user: dict = Depends(require_super_admin),
+) -> dict:
+    version = await kb_repo.get_article_version(article_id, version_number)
+    if not version:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article version not found")
+    return version
 
 
 @router.delete("/articles/{article_id}", status_code=status.HTTP_204_NO_CONTENT)
