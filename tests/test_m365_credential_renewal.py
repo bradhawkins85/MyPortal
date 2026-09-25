@@ -228,6 +228,60 @@ async def test_graph_post_handles_204_no_content():
     assert result == {}
 
 
+@pytest.mark.anyio("asyncio")
+async def test_graph_post_treats_existing_application_owner_as_success():
+    """A repeated owner reference is an idempotent success, not a setup failure."""
+    with patch("app.services.m365.httpx.AsyncClient") as mock_client_cls:
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_response.json.return_value = {
+            "error": {
+                "code": "Request_BadRequest",
+                "message": (
+                    "One or more added object references already exist for the "
+                    "following modified properties: 'owners'."
+                ),
+            }
+        }
+        mock_response.text = "sanitized Graph error"
+        mock_client_cls.return_value.__aenter__.return_value.post = AsyncMock(
+            return_value=mock_response
+        )
+
+        result = await m365_service._graph_post(
+            "token",
+            "https://graph.microsoft.com/v1.0/applications/x/owners/$ref",
+            {"@odata.id": "https://graph.microsoft.com/v1.0/directoryObjects/y"},
+        )
+
+    assert result == {}
+
+
+@pytest.mark.anyio("asyncio")
+async def test_graph_post_rejects_other_application_owner_failures():
+    """Only Graph's precise duplicate-owner response is suppressed."""
+    with patch("app.services.m365.httpx.AsyncClient") as mock_client_cls:
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_response.json.return_value = {
+            "error": {
+                "code": "Request_BadRequest",
+                "message": "The owner reference is invalid.",
+            }
+        }
+        mock_response.text = "sanitized Graph error"
+        mock_client_cls.return_value.__aenter__.return_value.post = AsyncMock(
+            return_value=mock_response
+        )
+
+        with pytest.raises(m365_service.M365Error, match="owner reference is invalid"):
+            await m365_service._graph_post(
+                "token",
+                "https://graph.microsoft.com/v1.0/applications/x/owners/$ref",
+                {"@odata.id": "https://graph.microsoft.com/v1.0/directoryObjects/y"},
+            )
+
+
 # ---------------------------------------------------------------------------
 # Tests: renew_admin_client_secret
 # ---------------------------------------------------------------------------

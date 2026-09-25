@@ -2291,6 +2291,14 @@ async def _graph_post(
         ):
             log_info("App role assignment already exists, skipping", url=url)
             return {}
+        if _is_app_owner_already_exists_response(
+            url=url,
+            status=response.status_code,
+            graph_error_code=graph_error_code,
+            graph_error_message=graph_error_message,
+        ):
+            log_info("Application owner already exists, skipping", url=url)
+            return {}
         log_error(
             "Microsoft Graph POST failed",
             url=url,
@@ -2319,6 +2327,37 @@ async def _graph_post(
 # within a few seconds once propagation completes.
 _APP_ROLE_ASSIGN_TRANSIENT_MESSAGE = "permission being assigned was not found"
 _APP_ROLE_ASSIGN_ALREADY_EXISTS_MESSAGE = "permission being assigned already exists on the object"
+_APP_OWNER_ALREADY_EXISTS_MESSAGE = (
+    "one or more added object references already exist for the following "
+    "modified properties: 'owners'."
+)
+
+
+def _is_app_owner_already_exists_response(
+    *,
+    url: str,
+    status: int,
+    graph_error_code: str | None,
+    graph_error_message: str | None,
+) -> bool:
+    """Recognize the precise Graph response for an existing app owner."""
+    path = urlsplit(url).path.rstrip("/")
+    return (
+        path.endswith("/owners/$ref")
+        and status == 400
+        and graph_error_code == "Request_BadRequest"
+        and (graph_error_message or "").strip().lower()
+        == _APP_OWNER_ALREADY_EXISTS_MESSAGE
+    )
+
+
+def _is_app_owner_already_exists_error(exc: "M365Error") -> bool:
+    """Recognize an existing-owner response after it has been wrapped."""
+    return (
+        exc.http_status == 400
+        and exc.graph_error_code == "Request_BadRequest"
+        and _APP_OWNER_ALREADY_EXISTS_MESSAGE in str(exc).strip().lower()
+    )
 
 
 def _is_app_role_assignment_already_exists_response(
@@ -2873,12 +2912,19 @@ async def _grant_provisioned_roles(
                 sp_object_id=sp_object_id,
             )
         except M365Error as exc:
-            log_error(
-                "Failed to add SP as owner of M365 app registration; "
-                "automatic secret renewal will not be available",
-                app_object_id=app_object_id,
-                error=str(exc),
-            )
+            if _is_app_owner_already_exists_error(exc):
+                log_info(
+                    "Service principal is already an owner of M365 app registration",
+                    app_object_id=app_object_id,
+                    sp_object_id=sp_object_id,
+                )
+            else:
+                log_error(
+                    "Failed to add SP as owner of M365 app registration; "
+                    "automatic secret renewal will not be available",
+                    app_object_id=app_object_id,
+                    error=str(exc),
+                )
     except Exception as exc:  # noqa: BLE001
         log_error(
             "_grant_provisioned_roles: unexpected error in background role grant",
