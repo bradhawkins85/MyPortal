@@ -25,7 +25,17 @@ def test_healthy_legacy_connection_is_exposed_for_migration_not_mislabelled():
 def test_partial_consent_and_interrupted_setup_are_resumable():
     health = build_connection_health(CREDS, pending={"verification_tenant": 1, "verification_workload": 0}, now=NOW)
     assert health["state"] == "partially_ready"
-    assert health["next_action_label"] == "Resume setup"
+    assert health["next_action_label"] == "Complete verification"
+    assert health["next_action_url"] == "/m365"
+    assert health["has_pending_candidate"] is True
+    assert all(item["help"] for item in health["workloads"])
+
+
+def test_fully_verified_candidate_still_requires_activation():
+    health = build_connection_health(CREDS, pending=VERIFIED, now=NOW)
+
+    assert health["state"] == "partially_ready"
+    assert health["has_pending_candidate"] is True
 
 
 def test_wrong_tenant_requires_reconnect():

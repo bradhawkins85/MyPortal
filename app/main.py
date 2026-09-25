@@ -4855,6 +4855,79 @@ async def test_m365_connectivity(request: Request):
     return RedirectResponse(url=f"/m365?{encoded}", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@app.post("/m365/connection/complete", response_class=RedirectResponse)
+async def complete_m365_connection(request: Request):
+    """Verify and activate the staged app created by guided tenant setup."""
+    user, _, __, company_id, redirect = await _load_license_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super admin privileges required",
+        )
+
+    candidate = await m365_connection_repo.get_pending(company_id)
+    if not candidate:
+        return flash_redirect(
+            "/m365",
+            "There is no staged Microsoft 365 setup to complete. Start guided tenant setup first.",
+            "error",
+        )
+    try:
+        verified = await m365_service.verify_connection_candidate(
+            company_id, int(candidate["id"])
+        )
+        checks = (
+            "verification_tenant",
+            "verification_workload",
+            "verification_renewal",
+        )
+        if not all(verified.get(check) for check in checks):
+            reason = str(verified.get("verification_error") or "").strip()
+            message = "Microsoft 365 verification did not pass all required checks."
+            if reason:
+                message += f" Microsoft reported: {reason}"
+            return flash_redirect("/m365", message, "error")
+        await m365_service.activate_connection_candidate(
+            company_id, int(candidate["id"])
+        )
+    except (m365_service.M365Error, ValueError, RuntimeError) as exc:
+        return flash_redirect(
+            "/m365", f"Microsoft 365 setup could not be completed: {exc}", "error"
+        )
+
+    # Populate permission health immediately so a successful cutover can show
+    # Connected without requiring a separate diagnostics visit.  Activation is
+    # already durable at this point, so report a diagnostics problem accurately
+    # rather than implying that the cutover itself failed.
+    try:
+        await m365_service.check_enterprise_app_permissions(company_id)
+    except m365_service.M365Error as exc:
+        log_error(
+            "M365 permission check failed after candidate activation",
+            company_id=company_id,
+            error=str(exc),
+        )
+        return flash_redirect(
+            "/m365/diagnostics",
+            "The connection was verified and activated, but the final permission check needs attention: "
+            f"{exc}",
+            "warning",
+        )
+
+    log_info(
+        "M365 staged connection verified and activated",
+        company_id=company_id,
+        user_id=user.get("id"),
+    )
+    return flash_redirect(
+        "/m365",
+        "Microsoft 365 setup is complete. Tenant access, workloads, renewal, and permissions were verified.",
+        "success",
+    )
+
+
 @app.post("/m365/sync", response_class=JSONResponse)
 async def sync_m365(request: Request):
     user, membership, _, company_id, redirect = await _load_license_context(request)

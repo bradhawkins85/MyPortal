@@ -22,6 +22,9 @@ def test_m365_configuration_uses_compact_responsive_workspace() -> None:
     assert "Connection overview" in source
     assert "Guided tenant setup" in source
     assert "Advanced provisioning credentials" in source
+    assert "Verify and activate connection" in source
+    assert 'action="/m365/connection/complete"' in source
+    assert "Successful sync jobs do not complete this setup step" in source
     assert source.count("{{ credential.tenant_id") == 1
     assert source.count("{{ credential.client_id") == 1
 
