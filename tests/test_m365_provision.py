@@ -478,6 +478,8 @@ async def test_provision_app_registration_replaces_deleted_pending_application()
         return {}
 
     async def mock_graph_get(token: str, url: str, **kwargs: Any) -> dict:
+        if "/applications?" in url:
+            return {"value": []}
         if m365_service._TEAMS_APP_ID in url:
             return {"value": []}
         return _make_graph_sp_response()
@@ -519,6 +521,55 @@ async def test_provision_app_registration_replaces_deleted_pending_application()
     assert result["service_principal_object_id"] == "replacement-sp-id"
     assert any(url.endswith("/applications") for url in posted_urls)
     assert any(url.endswith("/servicePrincipals") for url in posted_urls)
+
+
+@pytest.mark.anyio("asyncio")
+async def test_provision_app_registration_recovers_stale_object_id_by_client_id():
+    """A stale object ID must not duplicate an application that still exists."""
+    recovered_id = "93bcf873-a8bd-4061-b4d7-160b98ed8713"
+    graph_patch = AsyncMock(
+        side_effect=[
+            m365_service.M365Error(
+                "Microsoft Graph PATCH failed (404): Resource does not exist",
+                http_status=404,
+            ),
+            {},
+        ]
+    )
+
+    async def mock_graph_get(token: str, url: str, **kwargs: Any) -> dict:
+        if "/applications?" in url:
+            return {"value": [{"id": recovered_id}]}
+        return _make_graph_sp_response()
+
+    async def mock_graph_post(token: str, url: str, payload: dict) -> dict:
+        if "addPassword" in url:
+            return _make_secret_data("recovered-secret")
+        raise AssertionError(f"Unexpected POST while recovering application: {url}")
+
+    with (
+        patch.object(
+            m365_service,
+            "_get_sp_app_role_ids",
+            AsyncMock(return_value=("graph-sp-id", set(m365_service._PROVISION_APP_ROLES))),
+        ),
+        patch.object(m365_service, "_graph_patch", graph_patch),
+        patch.object(m365_service, "_graph_get", side_effect=mock_graph_get),
+        patch.object(m365_service, "_graph_post", side_effect=mock_graph_post),
+        patch.object(m365_service.asyncio, "create_task", lambda coro, **kwargs: coro.close()),
+    ):
+        result = await m365_service.provision_app_registration(
+            access_token="token",
+            app_object_id="93bcf873-a8bd-4061-b4d7-160b98ed8712",
+            client_id="existing-client-id",
+            service_principal_object_id="existing-sp-id",
+        )
+
+    assert result["app_object_id"] == recovered_id
+    assert result["client_id"] == "existing-client-id"
+    assert result["service_principal_object_id"] == "existing-sp-id"
+    assert graph_patch.await_count == 2
+    assert graph_patch.await_args_list[1].args[1].endswith(recovered_id)
 
 
 @pytest.mark.anyio("asyncio")

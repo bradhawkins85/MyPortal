@@ -186,7 +186,8 @@ def get_required_app_role_ids() -> list[str]:
 PROVISION_SCOPE = (
     "https://graph.microsoft.com/Application.ReadWrite.All "
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
-    "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory offline_access"
+    "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory "
+    "openid profile offline_access"
 )
 
 # Delegated scopes requested during the "Authorize portal access" (connect) flow.
@@ -202,7 +203,8 @@ PROVISION_SCOPE = (
 CONNECT_SCOPE = (
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
     "https://graph.microsoft.com/Directory.Read.All "
-    "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory offline_access"
+    "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory "
+    "openid profile offline_access"
 )
 
 # Minimal scopes used for the tenant-discovery sign-in step
@@ -2592,20 +2594,50 @@ async def provision_app_registration(
         except M365Error as exc:
             if exc.http_status != 404:
                 raise
-            # A pending connection can outlive an app registration that an
-            # administrator deleted directly in Entra.  Treat that stored
-            # object identity as stale and create a replacement instead of
-            # making every subsequent Confirm tenant attempt PATCH an object
-            # that no longer exists.  The old service-principal identity is
-            # tied to that deleted registration and must not be reused either.
-            log_warning(
-                "Stored M365 app registration no longer exists; creating a replacement",
-                app_object_id=app_object_id,
-                client_id=client_id,
+            # The object ID stored by an older deployment can be stale even
+            # while the same application (identified by its immutable appId)
+            # still exists.  Resolve by client ID before creating another app
+            # registration; this repairs the stored object identity without
+            # producing duplicate enterprise applications.
+            applications = await _graph_get(
+                access_token,
+                "https://graph.microsoft.com/v1.0/applications"
+                f"?$filter=appId eq '{quote(client_id, safe='')}'&$select=id",
             )
-            app_object_id = None
-            client_id = None
-            service_principal_object_id = None
+            matching_applications = applications.get("value") or []
+            if matching_applications:
+                recovered_app_object_id = str(
+                    matching_applications[0].get("id") or ""
+                ).strip()
+                if not recovered_app_object_id:
+                    raise M365Error(
+                        "Microsoft Graph returned an application without an object ID"
+                    )
+                await _graph_patch(
+                    access_token,
+                    "https://graph.microsoft.com/v1.0/applications/"
+                    f"{_graph_object_id(recovered_app_object_id)}",
+                    app_payload,
+                )
+                app_object_id = recovered_app_object_id
+                log_info(
+                    "Recovered M365 app registration by client ID",
+                    client_id=client_id,
+                    app_object_id=app_object_id,
+                )
+            else:
+                # A pending connection can outlive an app registration that an
+                # administrator deleted directly in Entra.  The old service
+                # principal identity is tied to that deleted registration and
+                # must not be reused for its replacement.
+                log_warning(
+                    "Stored M365 app registration no longer exists; creating a replacement",
+                    app_object_id=app_object_id,
+                    client_id=client_id,
+                )
+                app_object_id = None
+                client_id = None
+                service_principal_object_id = None
 
     if not app_object_id or not client_id:
         app_data = await _graph_post(
