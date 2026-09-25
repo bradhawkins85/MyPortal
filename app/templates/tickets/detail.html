@@ -257,7 +257,7 @@
                 <ul class="list">
                   {% for asset in ticket_assets %}
                     <li class="list__item">
-                      <strong>{{ asset.name }}</strong>
+                      <strong><a href="/assets/{{ asset.asset_id }}">{{ asset.name }}</a></strong>
                       {% if asset.type %}
                         <div class="list__meta">Type: {{ asset.type }}</div>
                       {% endif %}

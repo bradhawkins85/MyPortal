@@ -30,3 +30,12 @@ class AssetResponse(BaseModel):
     syncro_asset_id: Optional[str] = None
     tactical_asset_id: Optional[str] = None
     tray_device_uid: Optional[str] = None
+    owner: Optional[str] = None
+    support_contact: Optional[str] = None
+    criticality: Optional[str] = None
+    location: Optional[str] = None
+    operational_notes: Optional[str] = None
+    review_status: str = "not_reviewed"
+    reviewed_at: Optional[datetime] = None
+    external_references_json: Optional[str] = None
+    archived_at: Optional[datetime] = None

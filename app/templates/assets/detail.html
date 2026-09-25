@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block header_title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
+{% block title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
+{% block header_actions %}
+  {{ page_header_actions([{"label": "Back to Assets", "type": "link", "href": "/assets"}]) }}
+{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  {% if asset.archived_at %}
+    <div class="alert alert--warning admin-grid__full" role="status">
+      This asset is archived. Its ticket links, identifiers, custom fields, and documentation remain available.
+    </div>
+  {% endif %}
+  {% if required_missing %}
+    <div class="alert alert--warning admin-grid__full" role="status">
+      Documentation incomplete. Required for {{ asset.type or 'this type' }}: {{ required_missing | join(', ') }}.
+    </div>
+  {% endif %}
+
+  <section class="card card--panel">
+    <header class="card__header card__header--stacked">
+      <div><h2 class="card__title">Operational documentation</h2>
+      <p class="card__subtitle">These fields are maintained manually and are never overwritten by asset sync.</p></div>
+    </header>
+    <form method="post" action="/assets/{{ asset.id }}">
+      <div class="card__body">
+        <div class="form-group"><label class="form-label" for="asset-owner">Owner</label>
+          <input class="input" id="asset-owner" name="owner" maxlength="255" value="{{ asset.owner or '' }}" {% if not can_edit %}disabled{% endif %}></div>
+        <div class="form-group"><label class="form-label" for="asset-support">Support contact</label>
+          <input class="input" id="asset-support" name="support_contact" maxlength="255" value="{{ asset.support_contact or '' }}" {% if not can_edit %}disabled{% endif %}></div>
+        <div class="form-group"><label class="form-label" for="asset-criticality">Criticality</label>
+          <select class="input" id="asset-criticality" name="criticality" {% if not can_edit %}disabled{% endif %}>
+            <option value="">Not set</option>{% for value in ['low', 'medium', 'high', 'critical'] %}<option value="{{ value }}" {% if asset.criticality == value %}selected{% endif %}>{{ value | title }}</option>{% endfor %}
+          </select></div>
+        <div class="form-group"><label class="form-label" for="asset-location">Location</label>
+          <input class="input" id="asset-location" name="location" maxlength="255" value="{{ asset.location or '' }}" {% if not can_edit %}disabled{% endif %}></div>
+        <div class="form-group"><label class="form-label" for="asset-review">Review status</label>
+          <select class="input" id="asset-review" name="review_status" {% if not can_edit %}disabled{% endif %}>
+            {% for value, label in [('not_reviewed', 'Not reviewed'), ('needs_review', 'Needs review'), ('reviewed', 'Reviewed')] %}<option value="{{ value }}" {% if (asset.review_status or 'not_reviewed') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select></div>
+        <div class="form-group"><label class="form-label" for="asset-notes">Operational notes</label>
+          <textarea class="input" id="asset-notes" name="operational_notes" rows="8" {% if not can_edit %}disabled{% endif %}>{{ asset.operational_notes or '' }}</textarea>
+          <small class="form-help">Do not store passwords, recovery codes, or other secrets here.</small></div>
+        <div class="form-group"><label class="form-label" for="asset-references">External references</label>
+          <textarea class="input" id="asset-references" name="external_references" rows="5" placeholder="Runbook | https://docs.example.com/runbook" {% if not can_edit %}disabled{% endif %}>{% for reference in references %}{{ reference.label }} | {{ reference.url }}{% if not loop.last %}
+{% endif %}{% endfor %}</textarea>
+          <small class="form-help">One non-sensitive HTTP(S) link per line, optionally prefixed with a label and |.</small></div>
+      </div>
+      {% if can_edit %}<footer class="card__footer"><button class="button button--primary" type="submit">Save documentation</button></footer>{% endif %}
+    </form>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header"><h2 class="card__title">Synced inventory</h2></header>
+    <div class="card__body"><dl class="definition-list">
+      <dt>Asset ID</dt><dd>{{ asset.id }}</dd><dt>Company</dt><dd>{{ company.name if company else asset.company_id }}</dd>
+      <dt>Type</dt><dd>{{ asset.type or '—' }}</dd><dt>Status</dt><dd>{{ asset.status or '—' }}</dd>
+      <dt>Serial number</dt><dd>{{ asset.serial_number or '—' }}</dd><dt>Warranty</dt><dd>{{ asset.warranty_status or '—' }}{% if asset.warranty_end_date %} (ends {{ asset.warranty_end_date }}){% endif %}</dd>
+      <dt>Syncro ID</dt><dd>{{ asset.syncro_asset_id or '—' }}</dd><dt>Tactical ID</dt><dd>{{ asset.tactical_asset_id or '—' }}</dd>
+      <dt>Last sync</dt><dd>{{ asset.last_sync or 'Never' }}</dd>
+    </dl><p class="text-muted">Inventory fields above are sync-owned; operational documentation is manual-owned.</p></div>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header"><h2 class="card__title">Custom fields</h2></header>
+    <div class="card__body"><dl class="definition-list">
+      {% for field in custom_fields %}<dt>{{ field.display_name or field.name }}</dt><dd>
+        {% if field.field_type == 'url' and field.value %}<a href="{{ field.value }}" target="_blank" rel="noopener noreferrer">{{ field.value }}</a>{% elif field.field_type == 'checkbox' %}{{ 'Yes' if field.value else 'No' }}{% else %}{{ field.value or '—' }}{% endif %}
+      </dd>{% else %}<p class="text-muted">No custom fields configured.</p>{% endfor %}
+    </dl></div>
+  </section>
+
+  <section class="card card--panel">
+    <header class="card__header"><h2 class="card__title">Linked tickets</h2></header>
+    <div class="card__body"><ul>
+      {% for ticket in tickets %}<li><a href="/admin/tickets/{{ ticket.id }}">#{{ ticket.id }} — {{ ticket.subject or 'Ticket' }}</a> <span class="text-muted">{{ ticket.status or '' }}</span></li>
+      {% else %}<li class="text-muted">No tickets link to this asset.</li>{% endfor %}
+    </ul></div>
+  </section>
+
+  {% if references %}<section class="card card--panel admin-grid__full"><header class="card__header"><h2 class="card__title">References</h2></header><div class="card__body"><ul>
+    {% for reference in references %}<li><a href="{{ reference.url }}" target="_blank" rel="noopener noreferrer">{{ reference.label }}</a></li>{% endfor %}
+  </ul></div></section>{% endif %}
+
+  {% if can_edit %}<section class="card card--panel admin-grid__full"><form method="post" action="/assets/{{ asset.id }}/archive"><input type="hidden" name="action" value="{{ 'restore' if asset.archived_at else 'archive' }}"><button class="button button--ghost" type="submit">{{ 'Restore asset' if asset.archived_at else 'Archive asset' }}</button><p class="form-help">Archiving is reversible and retains identifiers, ticket links, custom values, and documentation.</p></form></section>{% endif %}
+</div>
+{% include "partials/csrf.html" %}
+{% endblock %}

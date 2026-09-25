@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+from urllib.parse import urlparse
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -17,9 +18,9 @@ from app.repositories import assets as asset_repo
 from app.repositories import companies as company_repo
 from app.repositories import network_devices as network_devices_repo
 from app.repositories import tray as tray_repo
-from app.repositories import user_companies as user_company_repo
 from app.services import tray as tray_service
 from app.services import hudu as hudu_service
+from app.services import audit as audit_service
 
 router = APIRouter(tags=["Assets"])
 
@@ -352,10 +353,38 @@ async def assets_settings_page(request: Request):
     extra = {
         "title": "Asset Custom Fields Settings",
         "is_super_admin": True,
+        "required_field_rules": await asset_repo.list_required_field_rules(),
+        "field_definitions": await asset_custom_fields_repo.list_field_definitions(),
     }
     return await main_module._render_template(
         "assets/settings.html", request, user, extra=extra
     )
+
+
+@router.post("/assets/settings/required-fields")
+async def save_asset_required_fields(request: Request):
+    main_module = _main()
+    user, _membership, _, _, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    form = await request.form()
+    asset_type = str(form.get("asset_type") or "").strip()
+    if not asset_type:
+        raise HTTPException(status_code=422, detail="Asset type is required")
+    allowed = {"owner", "support_contact", "criticality", "location", "operational_notes"}
+    allowed.update(
+        f"custom:{definition['id']}"
+        for definition in await asset_custom_fields_repo.list_field_definitions()
+    )
+    keys = [str(value) for value in form.getlist("field_keys") if str(value) in allowed]
+    await asset_repo.replace_required_fields(asset_type, keys)
+    await audit_service.record(
+        action="asset.requirements.update", request=request,
+        entity_type="asset_type", after={"asset_type": asset_type, "field_keys": keys},
+    )
+    return main_module.flash_redirect("/assets/settings", "Required fields saved.", "success")
 
 
 @router.get("/devices", response_class=HTMLResponse)
@@ -792,9 +821,33 @@ async def scan_network_now(request: Request, device_id: int):
     return main_module.flash_redirect("/devices", message, "success")
 
 
-@router.get("/assets/{asset_id}", response_class=RedirectResponse)
+def _parse_external_references(raw: str) -> list[dict[str, str]]:
+    """Parse one ``Label | https://…`` reference per line."""
+    references: list[dict[str, str]] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        label, separator, url = line.partition("|")
+        if not separator:
+            url, label = label, label
+        label, url = label.strip(), url.strip()
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise HTTPException(status_code=422, detail=f"Invalid external reference: {url}")
+        references.append({"label": label[:255] or url, "url": url})
+    return references
+
+
+def _clean_optional(form: Any, key: str) -> str | None:
+    value = str(form.get(key) or "").strip()
+    return value or None
+
+
+@router.get("/assets/{asset_id}", response_class=HTMLResponse)
 async def asset_detail_page(request: Request, asset_id: int):
-    user, _membership, _, company_id, redirect = await _load_asset_context(request)
+    main_module = _main()
+    user, membership, company, company_id, redirect = await _load_asset_context(request)
     if redirect:
         return redirect
 
@@ -805,12 +858,100 @@ async def asset_detail_page(request: Request, asset_id: int):
             status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found"
         )
 
-    safe_asset_id = int(asset_id)
-    if safe_asset_id <= 0:
-        return RedirectResponse(url="/assets", status_code=status.HTTP_303_SEE_OTHER)
-    return RedirectResponse(
-        url=f"/assets#asset-{safe_asset_id}", status_code=status.HTTP_303_SEE_OTHER
+    try:
+        references = json.loads(record.get("external_references_json") or "[]")
+    except (TypeError, ValueError):
+        references = []
+    if not isinstance(references, list):
+        references = []
+    definitions = await asset_custom_fields_repo.list_field_definitions()
+    values = await asset_custom_fields_repo.get_all_asset_field_values([asset_id])
+    custom_fields = [
+        {**definition, "value": values.get(asset_id, {}).get(definition["id"])}
+        for definition in definitions
+    ]
+    required_fields = await asset_repo.list_required_fields(record.get("type"))
+    required_missing = [
+        key for key in required_fields
+        if not record.get(key) and not any(
+            str(field.get("id")) == key.removeprefix("custom:") and field.get("value")
+            for field in custom_fields
+        )
+    ]
+    return await main_module._render_template(
+        "assets/detail.html", request, user, extra={
+            "title": str(record.get("name") or f"Asset {asset_id}"),
+            "asset": dict(record), "company": company,
+            "references": references, "custom_fields": custom_fields,
+            "tickets": await asset_repo.list_tickets_for_asset(asset_id),
+            "required_fields": required_fields, "required_missing": required_missing,
+            "can_edit": bool(user.get("is_super_admin")) or main_module._membership_menu_can(
+                user, membership, "menu.assets", write=True
+            ),
+        }
     )
+
+
+@router.post("/assets/{asset_id}")
+async def update_asset_documentation(request: Request, asset_id: int):
+    main_module = _main()
+    user, membership, _, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    if not (user.get("is_super_admin") or main_module._membership_menu_can(
+        user, membership, "menu.assets", write=True
+    )):
+        raise HTTPException(status_code=403, detail="Asset write access required")
+    record = await asset_repo.get_asset_by_id(asset_id)
+    if not record or int(record.get("company_id") or 0) != company_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    form = await request.form()
+    criticality = _clean_optional(form, "criticality")
+    review_status = str(form.get("review_status") or "not_reviewed")
+    if criticality not in {None, "low", "medium", "high", "critical"}:
+        raise HTTPException(status_code=422, detail="Invalid criticality")
+    if review_status not in {"not_reviewed", "needs_review", "reviewed"}:
+        raise HTTPException(status_code=422, detail="Invalid review status")
+    references = _parse_external_references(str(form.get("external_references") or ""))
+    await asset_repo.update_operational_documentation(
+        asset_id, owner=_clean_optional(form, "owner"),
+        support_contact=_clean_optional(form, "support_contact"),
+        criticality=criticality, location=_clean_optional(form, "location"),
+        operational_notes=_clean_optional(form, "operational_notes"),
+        review_status=review_status,
+        external_references_json=json.dumps(references) if references else None,
+    )
+    await audit_service.record(
+        action="asset.documentation.update", request=request,
+        entity_type="asset", entity_id=asset_id,
+        after={"criticality": criticality, "review_status": review_status,
+               "reference_count": len(references), "has_notes": bool(_clean_optional(form, "operational_notes"))},
+    )
+    return main_module.flash_redirect(f"/assets/{asset_id}", "Asset documentation saved.", "success")
+
+
+@router.post("/assets/{asset_id}/archive")
+async def archive_asset(request: Request, asset_id: int):
+    main_module = _main()
+    user, membership, _, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    if not (user.get("is_super_admin") or main_module._membership_menu_can(
+        user, membership, "menu.assets", write=True
+    )):
+        raise HTTPException(status_code=403, detail="Asset write access required")
+    record = await asset_repo.get_asset_by_id(asset_id)
+    if not record or int(record.get("company_id") or 0) != company_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    form = await request.form()
+    archived = str(form.get("action") or "archive") != "restore"
+    await asset_repo.set_asset_archived(asset_id, archived)
+    await audit_service.record(
+        action="asset.archive" if archived else "asset.restore", request=request,
+        entity_type="asset", entity_id=asset_id, after={"archived": archived},
+    )
+    message = "Asset archived." if archived else "Asset restored."
+    return main_module.flash_redirect(f"/assets/{asset_id}", message, "success")
 
 
 @router.delete("/assets/{asset_id}", response_class=JSONResponse)

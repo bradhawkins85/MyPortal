@@ -132,6 +132,77 @@ async def delete_asset(asset_id: int) -> None:
     await db.execute("DELETE FROM assets WHERE id = %s", (asset_id,))
 
 
+async def update_operational_documentation(
+    asset_id: int,
+    *,
+    owner: str | None,
+    support_contact: str | None,
+    criticality: str | None,
+    location: str | None,
+    operational_notes: str | None,
+    review_status: str,
+    external_references_json: str | None,
+) -> None:
+    """Update only human-owned fields; sync-owned inventory values are untouched."""
+    await db.execute(
+        """
+        UPDATE assets
+        SET owner = %s, support_contact = %s, criticality = %s, location = %s,
+            operational_notes = %s, review_status = %s,
+            reviewed_at = CASE WHEN %s = 'reviewed' THEN UTC_TIMESTAMP() ELSE reviewed_at END,
+            external_references_json = %s
+        WHERE id = %s
+        """,
+        (owner, support_contact, criticality, location, operational_notes,
+         review_status, review_status, external_references_json, asset_id),
+    )
+
+
+async def set_asset_archived(asset_id: int, archived: bool) -> None:
+    await db.execute(
+        "UPDATE assets SET archived_at = CASE WHEN %s THEN UTC_TIMESTAMP() ELSE NULL END WHERE id = %s",
+        (archived, asset_id),
+    )
+
+
+async def list_tickets_for_asset(asset_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """
+        SELECT t.id, t.subject, t.status, t.updated_at
+        FROM ticket_assets ta INNER JOIN tickets t ON t.id = ta.ticket_id
+        WHERE ta.asset_id = %s ORDER BY t.updated_at DESC, t.id DESC LIMIT 100
+        """,
+        (asset_id,),
+    )
+    return list(rows or [])
+
+
+async def list_required_fields(asset_type: str | None) -> list[str]:
+    if not asset_type:
+        return []
+    rows = await db.fetch_all(
+        "SELECT field_key FROM asset_type_required_fields WHERE asset_type = %s ORDER BY field_key",
+        (asset_type,),
+    )
+    return [str(row["field_key"]) for row in (rows or [])]
+
+
+async def list_required_field_rules() -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        "SELECT asset_type, field_key FROM asset_type_required_fields ORDER BY asset_type, field_key"
+    )
+    return list(rows or [])
+
+
+async def replace_required_fields(asset_type: str, field_keys: list[str]) -> None:
+    await db.execute("DELETE FROM asset_type_required_fields WHERE asset_type = %s", (asset_type,))
+    for field_key in dict.fromkeys(field_keys):
+        await db.execute(
+            "INSERT INTO asset_type_required_fields (asset_type, field_key) VALUES (%s, %s)",
+            (asset_type, field_key),
+        )
+
+
 def _ensure_datetime(value: Any) -> datetime | None:
     if value in (None, ""):
         return None
