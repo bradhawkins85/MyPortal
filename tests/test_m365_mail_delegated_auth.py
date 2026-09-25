@@ -80,6 +80,51 @@ def test_enrich_strips_tokens():
 # ---------------------------------------------------------------------------
 
 
+async def test_mailbox_oauth_client_uses_module_setting(monkeypatch):
+    async def fake_get_module(slug: str, *, redact: bool = True):
+        assert slug == "m365-mail"
+        assert redact is False
+        return {"settings": {"oauth_client_id": "mail-client-id"}}
+
+    async def forbidden_tenant_client(**kwargs):
+        raise AssertionError("tenant-level PKCE resolution must not be used")
+
+    monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
+    monkeypatch.setattr(
+        m365_mail.m365_service,
+        "get_effective_pkce_client_id_for_company",
+        forbidden_tenant_client,
+    )
+
+    assert (
+        await m365_mail.get_mailbox_oauth_client_id(
+            redirect_uri="https://portal.example/m365/callback"
+        )
+        == "mail-client-id"
+    )
+
+
+async def test_validate_mailbox_access_uses_mail_resource(monkeypatch):
+    requests: list[tuple[str, str]] = []
+
+    async def fake_graph_get(token: str, url: str):
+        requests.append((token, url))
+        return {"id": "inbox-id"}
+
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+
+    await m365_mail.validate_mailbox_access("mail-token", "shared+help@contoso.com")
+
+    assert requests == [
+        (
+            "mail-token",
+            "https://graph.microsoft.com/v1.0/users/"
+            "shared%2Bhelp%40contoso.com/mailFolders/inbox?$select=id",
+        )
+    ]
+    assert "?$select=id,userPrincipalName" not in requests[0][1]
+
+
 def test_has_delegated_tokens_true():
     account = _fake_account(refresh_token="enc:token")
     assert m365_mail._account_has_delegated_tokens(account) is True

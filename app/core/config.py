@@ -225,6 +225,9 @@ class Settings(BaseSettings):
     m365_pkce_client_id: str | None = Field(
         default=None, validation_alias="M365_PKCE_CLIENT_ID"
     )
+    m365_mail_client_id: str | None = Field(
+        default=None, validation_alias="M365_MAIL_CLIENT_ID"
+    )
     m365_client_secret_lifetime_days: int = Field(
         default=730, validation_alias="M365_CLIENT_SECRET_LIFETIME_DAYS", ge=1
     )

@@ -14,6 +14,7 @@ from app.repositories import companies as company_repo
 from app.services import m365 as m365_service
 from app.services import m365_mail as m365_mail_service
 from app.services import audit as audit_service
+from app.services import modules as modules_service
 
 __all__ = ["router"]
 
@@ -58,6 +59,8 @@ async def _render_m365_mail_dashboard(
         if not editing_account:
             editing_account = await m365_mail_service.get_account(editing_account_id)
     companies = await company_repo.list_companies()
+    module = await modules_service.get_module("m365-mail", redact=False)
+    module_settings = (module or {}).get("settings") or {}
     history_account = None
     if history_account_id is not None:
         for account in accounts:
@@ -76,6 +79,7 @@ async def _render_m365_mail_dashboard(
         "sync_result": sync_result,
         "history_account": history_account,
         "history_runs": history_runs or [],
+        "mail_oauth_client_id": str(module_settings.get("oauth_client_id") or ""),
     }
     response = await main_module._render_template(
         "admin/m365_mail.html", request, user, extra=extra
@@ -97,6 +101,30 @@ async def admin_m365_mail_accounts_page(
         request,
         current_user,
         editing_account_id=account_id,
+    )
+
+
+@router.post("/admin/modules/m365-mail/settings", response_class=HTMLResponse)
+async def admin_update_m365_mail_settings(request: Request):
+    """Store the dedicated public-client application used by mailbox imports."""
+    current_user, redirect = await _main()._require_super_admin_page(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    client_id = str(form.get("oauthClientId") or "").strip()
+    module = await modules_service.get_module("m365-mail", redact=False)
+    settings = dict((module or {}).get("settings") or {})
+    settings["oauth_client_id"] = client_id
+    await modules_service.update_module("m365-mail", settings=settings)
+    await audit_service.record(
+        action="m365_mail.oauth.configure", request=request,
+        user_id=int(current_user["id"]), entity_type="module", entity_id=None,
+        after={"dedicated_client_configured": bool(client_id)},
+    )
+    return flash_redirect(
+        "/admin/modules/m365-mail",
+        "Mailbox import OAuth application settings saved.",
+        "success",
     )
 
 
@@ -486,12 +514,8 @@ async def admin_m365_mail_authorize(account_id: int, request: Request):
     company_id = account.get("company_id")
     redirect_uri = main_module._build_m365_redirect_uri(request)
     code_verifier, code_challenge = m365_service.generate_pkce_pair()
-    oauth_client_id = (
-        await m365_service.get_effective_pkce_client_id_for_company(
-            company_id, redirect_uri=redirect_uri
-        )
-        if company_id
-        else await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri)
+    oauth_client_id = await m365_mail_service.get_mailbox_oauth_client_id(
+        redirect_uri=redirect_uri
     )
     state = await main_module._new_m365_oauth_state(
         request,
