@@ -1,0 +1,7 @@
+{
+  "guid": "026f16c7-acde-41c8-8d84-29d4db22514f",
+  "occurred_at": "2026-09-25T04:08:03Z",
+  "change_type": "fix",
+  "summary": "Added delegated shared-mailbox consent and self-mailbox validation for Office 365 mailbox imports.",
+  "content_hash": "m365-mail-shared-delegated-scope"
+}

@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from app.features.m365_mail import admin_routes
 from app.services import m365_mail
 
 
@@ -78,6 +79,97 @@ def test_enrich_strips_tokens():
 # ---------------------------------------------------------------------------
 # _account_has_delegated_tokens
 # ---------------------------------------------------------------------------
+
+
+async def test_validate_mailbox_access_uses_mail_resource(monkeypatch):
+    requests: list[tuple[str, str]] = []
+
+    async def fake_graph_get(token: str, url: str):
+        requests.append((token, url))
+        return {"id": "inbox-id"}
+
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+
+    await m365_mail.validate_mailbox_access("mail-token", "shared+help@contoso.com")
+
+    assert requests == [
+        (
+            "mail-token",
+            "https://graph.microsoft.com/v1.0/users/"
+            "shared%2Bhelp%40contoso.com/mailFolders/inbox?$select=id",
+        )
+    ]
+    assert "?$select=id,userPrincipalName" not in requests[0][1]
+
+
+async def test_validate_mailbox_access_uses_me_for_signed_in_mailbox(monkeypatch):
+    requests: list[str] = []
+
+    async def fake_graph_get(token: str, url: str):
+        requests.append(url)
+        return {"id": "inbox-id"}
+
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+
+    await m365_mail.validate_mailbox_access(
+        "mail-token",
+        "Support@Contoso.com",
+        signed_in_address="support@contoso.com",
+    )
+
+    assert requests == [
+        "https://graph.microsoft.com/v1.0/me/mailFolders/inbox?$select=id"
+    ]
+
+
+def test_delegated_scope_supports_shared_mailboxes():
+    assert "https://graph.microsoft.com/Mail.ReadWrite " in m365_mail.DELEGATED_MAIL_SCOPE
+    assert (
+        "https://graph.microsoft.com/Mail.ReadWrite.Shared"
+        in m365_mail.DELEGATED_MAIL_SCOPE
+    )
+
+
+async def test_authorize_uses_user_pkce_client_not_company_client(monkeypatch):
+    class MainStub:
+        async def _require_super_admin_page(self, request):
+            return {"id": 1, "is_super_admin": True}, None
+
+        def _build_m365_redirect_uri(self, request):
+            return "https://portal.example/m365/callback"
+
+        async def _new_m365_oauth_state(self, request, **kwargs):
+            assert kwargs["client_id"] == "user-pkce-client"
+            return "state"
+
+    async def fake_get_account(account_id):
+        return {"id": account_id, "company_id": 42}
+
+    async def fake_user_client(*, redirect_uri=None):
+        assert redirect_uri == "https://portal.example/m365/callback"
+        return "user-pkce-client"
+
+    async def forbidden_company_client(*args, **kwargs):
+        raise AssertionError("company tenant client must not authorize mailbox users")
+
+    monkeypatch.setattr(admin_routes, "_main", lambda: MainStub())
+    monkeypatch.setattr(m365_mail, "get_account", fake_get_account)
+    monkeypatch.setattr(
+        admin_routes.m365_service, "generate_pkce_pair", lambda: ("verifier", "challenge")
+    )
+    monkeypatch.setattr(
+        admin_routes.m365_service, "get_effective_pkce_client_id", fake_user_client
+    )
+    monkeypatch.setattr(
+        admin_routes.m365_service,
+        "get_effective_pkce_client_id_for_company",
+        forbidden_company_client,
+    )
+
+    response = await admin_routes.admin_m365_mail_authorize(7, object())
+
+    assert response.status_code == 303
+    assert "client_id=user-pkce-client" in response.headers["location"]
 
 
 def test_has_delegated_tokens_true():

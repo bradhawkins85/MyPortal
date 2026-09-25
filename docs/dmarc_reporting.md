@@ -15,7 +15,9 @@ imports.
 
 For Microsoft 365, license the shared mailbox where required, enable authenticated
 IMAP (or use the Graph-backed account), and restrict access to the ingestion
-identity. Microsoft Graph `Mail.ReadWrite` access is required.
+identity. Microsoft Graph delegated `Mail.ReadWrite` access is required for the
+signed-in user's mailbox, and `Mail.ReadWrite.Shared` is also requested so the
+same user can import a shared mailbox to which they have been granted access.
 
 Polling is registered through MyPortal's scheduled Microsoft Graph mailbox infrastructure. It
 uses the provider UID/message ID, persists every attachment before moving or

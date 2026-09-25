@@ -94,9 +94,10 @@ def test_m365_mail_callback_handles_null_company_id(monkeypatch):
             "user_principal_name": "shared@contoso.example",
         }
 
-    async def fake_validate_mailbox(access_token, mailbox):
+    async def fake_validate_mailbox(access_token, mailbox, *, signed_in_address=None):
         assert access_token == "access-token"
         assert mailbox == "shared@contoso.example"
+        assert signed_in_address == ""
 
     monkeypatch.setattr(
         main_module.m365_mail_service, "store_delegated_tokens", fake_store_tokens

@@ -61,11 +61,13 @@ _403_ERROR_MESSAGE = (
     "consent or update Exchange application access policies, then retry the sync."
 )
 
-# Delegated OAuth scope for the per-account sign-in flow.  Mail.ReadWrite
-# allows reading and marking messages as read.  offline_access provides the
-# refresh_token we store for background syncs.
+# Delegated OAuth scopes for the per-account sign-in flow. Mail.ReadWrite
+# covers the signed-in user's mailbox; Mail.ReadWrite.Shared covers shared or
+# delegated mailboxes that user can access. offline_access provides the refresh
+# token we store for background syncs.
 DELEGATED_MAIL_SCOPE = (
     "https://graph.microsoft.com/Mail.ReadWrite "
+    "https://graph.microsoft.com/Mail.ReadWrite.Shared "
     "https://graph.microsoft.com/User.Read "
     "offline_access openid profile"
 )
@@ -174,14 +176,25 @@ async def clear_delegated_tokens(account_id: int) -> dict[str, Any] | None:
     return await mail_repo.clear_account_tokens(account_id)
 
 
-async def validate_mailbox_access(access_token: str, mailbox: str) -> None:
+async def validate_mailbox_access(
+    access_token: str,
+    mailbox: str,
+    *,
+    signed_in_address: str | None = None,
+) -> None:
     """Verify that the delegated identity can access the configured mailbox."""
     normalized = _normalise_string(mailbox)
     if not normalized:
         raise ValueError("Mailbox address is required")
+    signed_in = _normalise_string(signed_in_address).casefold()
+    mailbox_path = (
+        "me"
+        if signed_in and signed_in == normalized.casefold()
+        else f"users/{quote(normalized, safe='')}"
+    )
     await _graph_get(
         access_token,
-        f"{_GRAPH_BASE}/users/{quote(normalized, safe='')}?$select=id,userPrincipalName",
+        f"{_GRAPH_BASE}/{mailbox_path}/mailFolders/inbox?$select=id",
     )
 
 
