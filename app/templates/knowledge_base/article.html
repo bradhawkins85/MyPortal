@@ -54,7 +54,12 @@
   </form>
   {% if kb_is_super_admin %}
     {{ page_header_actions([
+      {"label": "Export to PDF", "type": "link", "href": "/knowledge-base/articles/" ~ kb_article.slug ~ "/export.pdf", "variant": "primary"},
       {"label": "Knowledge base admin", "type": "link", "href": "/admin/knowledge-base"}
+    ]) }}
+  {% else %}
+    {{ page_header_actions([
+      {"label": "Export to PDF", "type": "link", "href": "/knowledge-base/articles/" ~ kb_article.slug ~ "/export.pdf", "variant": "primary"}
     ]) }}
   {% endif %}
 {% endblock %}
