@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import re
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from app.services import knowledge_base as knowledge_base_service
 
@@ -16,6 +19,18 @@ def _main():
     from app import main as main_module
 
     return main_module
+
+
+def _write_pdf(html: str, base_url: str) -> bytes:
+    try:
+        from weasyprint import HTML  # type: ignore
+    except (ImportError, OSError) as exc:  # pragma: no cover - environment dependent
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="PDF export is temporarily unavailable.",
+        ) from exc
+
+    return HTML(string=html, base_url=base_url).write_pdf()
 
 
 @router.get("/knowledge-base", response_class=HTMLResponse)
@@ -69,6 +84,41 @@ async def knowledge_base_article(request: Request, slug: str):
         context["request"],
         "knowledge_base/article.html",
         context,
+    )
+
+
+@router.get(
+    "/knowledge-base/articles/{slug}/export.pdf",
+    response_class=Response,
+    name="knowledge_base_article_pdf",
+)
+async def knowledge_base_article_pdf(request: Request, slug: str) -> Response:
+    """Download an accessible knowledge base article as a PDF."""
+
+    main_module = _main()
+    user, _ = await main_module._get_optional_user(request)
+    access_context = await knowledge_base_service.build_access_context(user)
+    include_unpublished = bool(user and user.get("is_super_admin"))
+    article = await knowledge_base_service.get_article_by_slug_for_context(
+        slug,
+        access_context,
+        include_unpublished=include_unpublished,
+        include_permissions=include_unpublished,
+    )
+    if not article:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
+
+    template = main_module.templates.get_template("knowledge_base/article_pdf.html")
+    rendered_html = template.render(
+        kb_article=article,
+        generated_at=datetime.now(timezone.utc),
+    )
+    pdf_bytes = _write_pdf(rendered_html, str(request.base_url))
+    safe_slug = re.sub(r"[^A-Za-z0-9_-]+", "-", slug).strip("-") or "article"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_slug}.pdf"'},
     )
 
 

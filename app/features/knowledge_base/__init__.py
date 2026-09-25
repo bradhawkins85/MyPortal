@@ -4,6 +4,7 @@ Owns the Knowledge Base page routes:
 
 * ``GET /knowledge-base``
 * ``GET /knowledge-base/articles/{slug}``
+* ``GET /knowledge-base/articles/{slug}/export.pdf``
 * ``GET /admin/knowledge-base``
 * ``GET /admin/knowledge-base/new``
 * ``GET /admin/knowledge-base/articles/{slug}``
@@ -21,7 +22,7 @@ from .routes import router as knowledge_base_router
 
 PACK = FeaturePack(
     slug="knowledge_base",
-    version="1.1.0",
+    version="1.2.0",
     routers=(knowledge_base_router,),
 )
 
