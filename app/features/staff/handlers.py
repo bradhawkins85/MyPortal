@@ -1702,11 +1702,25 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 ),
             },
             {
-                "name": "mark_source_read_only",
-                "label": "Mark source OneDrive read-only",
+                "name": "source_protection_operation",
+                "label": "Source protection operation",
+                "type": "select",
+                "default": "none",
+                "description": (
+                    "Explicitly disable the Entra account to prevent owner writes, or report that source protection was not requested. "
+                    "A read sharing invitation does not remove an owner's write access."
+                ),
+                "options": [
+                    {"value": "none", "label": "None (report not applied)"},
+                    {"value": "disable_account", "label": "Disable Entra account"},
+                ],
+            },
+            {
+                "name": "require_source_protection",
+                "label": "Require source protection",
                 "type": "checkbox",
-                "default": True,
-                "description": "Attempts to remove inherited permissions and grant the user read access after export.",
+                "default": False,
+                "description": "Pause the workflow unless the selected protection operation succeeds.",
             },
             {
                 "name": "wait_for_completion",
@@ -1730,7 +1744,6 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "options": [
                     {"value": "fail", "label": "Fail (safest)"},
                     {"value": "rename", "label": "Rename new export"},
-                    {"value": "replace", "label": "Replace existing"},
                 ],
             },
         ],

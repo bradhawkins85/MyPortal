@@ -1249,6 +1249,8 @@ async def _execute_policy_step(
             staff=staff,
             step_config=step,
             vars_map=vars_map,
+            execution_id=execution_id,
+            step_name=step_name or "m365_export_onedrive",
         )
 
     if step_type in {"http_get", "http_post"}:
@@ -1314,7 +1316,9 @@ async def _execute_policy_step(
                 "webhook_status": event.get("status"),
             }
         timeout_seconds = max(1, int(step.get("timeout_seconds") or 30))
-        async with monitored_client(httpx.AsyncClient, timeout=timeout_seconds) as client:
+        async with monitored_client(
+            httpx.AsyncClient, timeout=timeout_seconds
+        ) as client:
             response = await client.request(
                 method,
                 url,
@@ -2578,14 +2582,32 @@ async def _graph_post_for_location(
 
 
 async def _wait_for_graph_copy(
-    access_token: str, monitor_url: str, *, timeout_seconds: int
+    access_token: str,
+    monitor_url: str,
+    *,
+    timeout_seconds: int,
+    company_id: int | None = None,
 ) -> dict[str, Any]:
+    _validate_copy_monitor_url(monitor_url)
     deadline = datetime.now(timezone.utc) + timedelta(seconds=max(1, timeout_seconds))
     headers = {"Authorization": f"Bearer {access_token}"}
     last_payload: dict[str, Any] = {}
     async with monitored_client(httpx.AsyncClient, timeout=30) as client:
         while datetime.now(timezone.utc) < deadline:
             response = await client.get(monitor_url, headers=headers)
+            if response.status_code == 401 and company_id is not None:
+                access_token = await m365_service.acquire_access_token(
+                    company_id, force_client_credentials=True
+                )
+                headers = {"Authorization": f"Bearer {access_token}"}
+                response = await client.get(monitor_url, headers=headers)
+            if response.status_code in {429, 503}:
+                retry_after = min(
+                    60,
+                    max(1, int(response.headers.get("Retry-After", "5") or 5)),
+                )
+                await asyncio.sleep(retry_after)
+                continue
             if response.status_code >= 400:
                 raise WorkflowStepError(
                     f"OneDrive export copy monitor failed ({response.status_code})",
@@ -2609,6 +2631,20 @@ async def _wait_for_graph_copy(
         "OneDrive export copy did not complete before timeout",
         request_payload={"monitor_url": monitor_url, "last_payload": last_payload},
     )
+
+
+def _validate_copy_monitor_url(monitor_url: str) -> None:
+    """Reject operation URLs which could exfiltrate the Graph bearer token."""
+
+    parsed = urlparse(str(monitor_url or ""))
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme != "https" or not (
+        hostname == "graph.microsoft.com" or hostname.endswith(".sharepoint.com")
+    ):
+        raise WorkflowStepError(
+            "OneDrive copy returned an untrusted or invalid monitor URL",
+            request_payload={"monitor_url": monitor_url},
+        )
 
 
 def _onedrive_export_permission_message(exc: M365Error | WorkflowStepError) -> str:
@@ -2676,9 +2712,30 @@ async def _run_export_onedrive_step(
     staff: dict[str, Any],
     step_config: dict[str, Any] | None = None,
     vars_map: dict[str, Any] | None = None,
+    execution_id: int | None = None,
+    step_name: str = "m365_export_onedrive",
 ) -> dict[str, Any]:
+    """Copy a OneDrive root and return only verifiable protection/export claims.
+
+    Progress records are deliberately written independently of the step's success log so a
+    retry can reuse the destination folder and outstanding Graph operation URLs.
+    """
+
     _vars = vars_map or {}
     _step = step_config or {}
+    persisted = _vars.get("onedrive_export_state")
+    state: dict[str, Any] = dict(persisted) if isinstance(persisted, dict) else {}
+
+    async def persist() -> None:
+        if execution_id is not None:
+            await workflow_repo.append_step_log(
+                execution_id=execution_id,
+                step_name=f"{step_name}:export_state",
+                status="progress",
+                attempt=1,
+                response_payload={"onedrive_export_state": state},
+            )
+
     destination_drive_id = str(
         _resolve_template_value(_step.get("destination_drive_id"), vars_map=_vars) or ""
     ).strip()
@@ -2702,18 +2759,11 @@ async def _run_export_onedrive_step(
         )
 
     conflict_behavior = (
-        str(
-            _resolve_template_value(
-                _step.get("folder_conflict_behavior"), vars_map=_vars
-            )
-            or "fail"
-        )
-        .strip()
-        .lower()
+        str(_step.get("folder_conflict_behavior") or "fail").strip().lower()
     )
-    if conflict_behavior not in {"fail", "rename", "replace"}:
+    if conflict_behavior not in {"fail", "rename"}:
         raise WorkflowStepError(
-            "folder_conflict_behavior must be fail, rename, or replace"
+            "folder_conflict_behavior must be fail or rename; replace is unsafe for resumable exports"
         )
 
     access_token = await m365_service.acquire_access_token(
@@ -2726,120 +2776,186 @@ async def _run_export_onedrive_step(
         raise WorkflowStepError("Unable to resolve user UPN for OneDrive export")
     encoded_user_id = quote(user_id, safe="")
     safe_folder_name = user_upn.replace("/", "_").replace("\\", "_")
+    encoded_drive = quote(destination_drive_id, safe="")
+    if state and (
+        str(state.get("destination_drive_id") or destination_drive_id)
+        != destination_drive_id
+        or str(state.get("m365_user_id") or user_id) != user_id
+    ):
+        raise WorkflowStepError(
+            "Persisted OneDrive export state belongs to a different source or destination"
+        )
 
+    # These reads validate both resources and the app's effective source/destination access.
     source_root = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
         access_token,
         f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/drive/root?$select=id,name,webUrl",
     )
     source_root_id = str(source_root.get("id") or "root").strip() or "root"
-
-    encoded_destination_drive_id = quote(destination_drive_id, safe="")
-    destination_children_url = (
-        f"https://graph.microsoft.com/v1.0/drives/{encoded_destination_drive_id}/root/children"
-        if destination_parent_item_id.lower() == "root"
-        else f"https://graph.microsoft.com/v1.0/drives/{encoded_destination_drive_id}/items/{quote(destination_parent_item_id, safe='')}/children"
+    destination_drive = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+        access_token,
+        f"https://graph.microsoft.com/v1.0/drives/{encoded_drive}?$select=id,driveType,webUrl,sharePointIds",
     )
-    try:
-        destination_folder = (
-            await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
+    if (
+        str(destination_drive.get("driveType") or "documentLibrary")
+        != "documentLibrary"
+    ):
+        raise WorkflowStepError(
+            "OneDrive export destination must be a SharePoint document library"
+        )
+    if destination_parent_item_id.lower() != "root":
+        await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+            access_token,
+            f"https://graph.microsoft.com/v1.0/drives/{encoded_drive}/items/{quote(destination_parent_item_id, safe='')}?$select=id,folder",
+        )
+
+    destination_folder_id = str(state.get("destination_folder_id") or "").strip()
+    destination_folder: dict[str, Any]
+    if destination_folder_id:
+        destination_folder = await m365_service._graph_get(  # pyright: ignore[reportPrivateUsage]
+            access_token,
+            f"https://graph.microsoft.com/v1.0/drives/{encoded_drive}/items/{quote(destination_folder_id, safe='')}?$select=id,name,webUrl,folder",
+        )
+        if str(destination_folder.get("name") or "") != safe_folder_name:
+            raise WorkflowStepError(
+                "Persisted OneDrive export destination no longer matches this user"
+            )
+    else:
+        children_url = (
+            f"https://graph.microsoft.com/v1.0/drives/{encoded_drive}/root/children"
+            if destination_parent_item_id.lower() == "root"
+            else f"https://graph.microsoft.com/v1.0/drives/{encoded_drive}/items/{quote(destination_parent_item_id, safe='')}/children"
+        )
+        try:
+            destination_folder = await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
                 access_token,
-                destination_children_url,
+                children_url,
                 {
                     "name": safe_folder_name,
                     "folder": {},
                     "@microsoft.graph.conflictBehavior": conflict_behavior,
                 },
             )
+        except M365Error as exc:
+            _raise_onedrive_export_graph_error(
+                exc, operation="create_destination_folder"
+            )
+        destination_folder_id = str(destination_folder.get("id") or "").strip()
+        if not destination_folder_id:
+            raise WorkflowStepError(
+                "Graph did not return an ID for the OneDrive export destination folder"
+            )
+        state.update(
+            {
+                "destination_drive_id": destination_drive_id,
+                "destination_folder_id": destination_folder_id,
+                "m365_user_id": user_id,
+            }
         )
-    except M365Error as exc:
-        _raise_onedrive_export_graph_error(exc, operation="create_destination_folder")
-    destination_folder_id = str(destination_folder.get("id") or "").strip()
-    if not destination_folder_id:
-        raise WorkflowStepError(
-            "Graph did not return an ID for the OneDrive export destination folder"
-        )
+        await persist()
 
     source_children = await m365_service._graph_get_all(  # pyright: ignore[reportPrivateUsage]
         access_token,
         f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/drive/items/{quote(source_root_id, safe='')}/children",
     )
-
-    monitor_urls: list[str] = []
+    operations = state.setdefault("operations", {})
     copied_items: list[dict[str, str]] = []
     for child in source_children:
-        child_id = str(child.get("id") or "").strip()
-        child_name = str(child.get("name") or "").strip()
+        child_id, child_name = (
+            str(child.get("id") or "").strip(),
+            str(child.get("name") or "").strip(),
+        )
         if not child_id:
             continue
-        copy_payload = {
-            "parentReference": {
-                "driveId": destination_drive_id,
-                "id": destination_folder_id,
-            },
-            "name": child_name or None,
-        }
-        copy_payload = {
-            key: value for key, value in copy_payload.items() if value is not None
-        }
+        copied_items.append({"id": child_id, "name": child_name})
+        operation = operations.get(child_id)
+        if isinstance(operation, dict) and operation.get("monitor_url"):
+            continue
         try:
             _, monitor_url = await _graph_post_for_location(
                 access_token,
                 f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/drive/items/{quote(child_id, safe='')}/copy",
-                copy_payload,
+                {
+                    "parentReference": {
+                        "driveId": destination_drive_id,
+                        "id": destination_folder_id,
+                    },
+                    "name": child_name,
+                },
             )
         except WorkflowStepError as exc:
             _raise_onedrive_export_graph_error(exc, operation="copy_source_item")
-        if monitor_url:
-            monitor_urls.append(monitor_url)
-        copied_items.append({"id": child_id, "name": child_name})
+        if not monitor_url:
+            operations[child_id] = {"name": child_name, "status": "missing_monitor_url"}
+            await persist()
+            raise WorkflowStepError(
+                f"OneDrive copy for {child_name or child_id} was accepted without a monitor URL",
+                request_payload={"source_item_id": child_id},
+            )
+        _validate_copy_monitor_url(monitor_url)
+        operations[child_id] = {
+            "name": child_name,
+            "monitor_url": monitor_url,
+            "status": "in_progress",
+        }
+        await persist()
 
-    monitor_payloads: list[dict[str, Any]] = []
-    if monitor_urls and bool(_step.get("wait_for_completion", True)):
+    wait = bool(_step.get("wait_for_completion", True))
+    if wait:
         timeout_seconds = int(_step.get("copy_timeout_seconds") or 3600)
-        for monitor_url in monitor_urls:
-            monitor_payloads.append(
-                await _wait_for_graph_copy(
-                    access_token, monitor_url, timeout_seconds=timeout_seconds
-                )
-            )
-
-    read_only_applied = False
-    if bool(_step.get("mark_source_read_only", True)):
-        try:
-            await m365_service._graph_post(  # pyright: ignore[reportPrivateUsage]
+        for child_id, operation in operations.items():
+            if operation.get("status") == "completed":
+                continue
+            payload = await _wait_for_graph_copy(
                 access_token,
-                f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}/drive/items/{quote(source_root_id, safe='')}/invite",
-                {
-                    "requireSignIn": True,
-                    "sendInvitation": False,
-                    "roles": ["read"],
-                    "recipients": [{"email": user_upn}],
-                    "retainInheritedPermissions": False,
-                },
+                str(operation["monitor_url"]),
+                timeout_seconds=timeout_seconds,
+                company_id=company_id,
             )
-            read_only_applied = True
-        except M365Error as exc:
-            log_warning(
-                "Offboarding Export OneDrive: unable to mark source read-only",
-                user_id=user_id,
-                user_upn=user_upn,
-                http_status=exc.http_status,
-                error=str(exc),
-            )
+            operation.update({"status": "completed", "monitor_payload": payload})
+            await persist()
 
-    completed_count = sum(
-        1
-        for payload in monitor_payloads
-        if str(payload.get("status") or "").strip().lower()
-        in {"completed", "complete", "succeeded"}
+    destination_items = await m365_service._graph_get_all(  # pyright: ignore[reportPrivateUsage]
+        access_token,
+        f"https://graph.microsoft.com/v1.0/drives/{encoded_drive}/items/{quote(destination_folder_id, safe='')}/children?$select=id,name",
     )
-    copy_status = (
-        "completed"
-        if monitor_payloads and completed_count == len(monitor_payloads)
-        else ("accepted" if monitor_urls else "submitted")
+    destination_names = {str(item.get("name") or "") for item in destination_items}
+    missing_names = sorted(
+        item["name"] for item in copied_items if item["name"] not in destination_names
     )
+    operations_complete = all(
+        op.get("status") == "completed" for op in operations.values()
+    )
+    inventory_verified = not missing_names and (not copied_items or operations_complete)
+    copy_status = "completed" if inventory_verified else "in_progress"
 
-    return {
+    protection_operation = (
+        str(_step.get("source_protection_operation") or "none").strip().lower()
+    )
+    protection_applied = False
+    protection_status = "not_requested"
+    if protection_operation == "disable_account":
+        await _graph_patch(
+            access_token,
+            f"https://graph.microsoft.com/v1.0/users/{encoded_user_id}",
+            {"accountEnabled": False},
+        )
+        protection_applied, protection_status = True, "applied"
+    elif protection_operation != "none":
+        protection_status = "unsupported"
+    # A read sharing invitation is intentionally never used as evidence that an owner lost write access.
+    if bool(_step.get("require_source_protection")) and not protection_applied:
+        raise WorkflowStepError(
+            "Configured source protection was not applied; destructive steps remain blocked",
+            request_payload={"source_protection_operation": protection_operation},
+        )
+    if wait and not inventory_verified:
+        raise WorkflowStepError(
+            "OneDrive export inventory verification is incomplete",
+            request_payload={"missing_destination_items": missing_names},
+        )
+
+    result = {
         "company_id": int(company_id),
         "staff_id": int(staff["id"]),
         "m365_user_id": user_id,
@@ -2849,12 +2965,25 @@ async def _run_export_onedrive_step(
         "destination_folder_id": destination_folder_id,
         "destination_folder_name": safe_folder_name,
         "destination_folder_web_url": destination_folder.get("webUrl"),
-        "copy_monitor_urls": monitor_urls,
+        "copy_monitor_urls": [
+            str(op.get("monitor_url"))
+            for op in operations.values()
+            if op.get("monitor_url")
+        ],
+        "copy_operations": list(operations.values()),
         "copy_status": copy_status,
         "source_items_submitted": len(copied_items),
         "source_items": copied_items,
-        "source_marked_read_only": read_only_applied,
+        "missing_destination_items": missing_names,
+        "inventory_verified": inventory_verified,
+        "source_protection_operation": protection_operation,
+        "source_protection_status": protection_status,
+        "source_protection_applied": protection_applied,
+        "source_marked_read_only": False,
+        "export_verified": inventory_verified,
+        "onedrive_export_state": state,
     }
+    return result
 
 
 async def _run_offboarding_step(
@@ -3242,6 +3371,21 @@ async def _execute_policy_steps(
     secret_vars: set[str] = set()
 
     for item in prior_logs:
+        if str(item.get("status")) == "progress" and str(
+            item.get("step_name") or ""
+        ).endswith(":export_state"):
+            progress_payload = item.get("response_payload")
+            if isinstance(progress_payload, str):
+                try:
+                    progress_payload = json.loads(progress_payload)
+                except (TypeError, json.JSONDecodeError):
+                    progress_payload = {}
+            if isinstance(progress_payload, dict) and isinstance(
+                progress_payload.get("onedrive_export_state"), dict
+            ):
+                vars_map["onedrive_export_state"] = progress_payload[
+                    "onedrive_export_state"
+                ]
         if str(item.get("status")) != "success":
             continue
         response_payload = item.get("response_payload")
@@ -3348,6 +3492,22 @@ async def _execute_policy_steps(
         )
         step_failure_policy = _resolve_step_failure_policy(step)
         try:
+            effective_precheck_step = (
+                resolved_step if isinstance(resolved_step, dict) else step
+            )
+            if bool(effective_precheck_step.get("depends_on_onedrive_export")):
+                exception = effective_precheck_step.get("export_exception")
+                exception_authorized = isinstance(exception, dict) and bool(
+                    exception.get("authorized_by") and exception.get("reason")
+                )
+                if (
+                    not bool(vars_map.get("export_verified"))
+                    and not exception_authorized
+                ):
+                    raise WorkflowStepError(
+                        "Destructive step is blocked until the OneDrive export is verified or an authorized exception is recorded",
+                        request_payload={"dependency": "verified_onedrive_export"},
+                    )
             response_payload = await _attempt_step(
                 execution_id=execution_id,
                 step_name=step_name,
