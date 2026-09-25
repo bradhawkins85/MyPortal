@@ -140,6 +140,59 @@ def test_existing_credentials_are_reencrypted_for_legacy_inventory(monkeypatch):
     upsert_credentials.assert_not_awaited()
 
 
+def test_candidate_verification_retries_new_secret_replication(monkeypatch):
+    candidate = {
+        "id": 12,
+        "company_id": 1,
+        "tenant_id": "00000000-0000-0000-0000-000000000001",
+        "client_id": "00000000-0000-0000-0000-000000000002",
+        "client_secret": "encrypted-secret",
+        "app_object_id": "00000000-0000-0000-0000-000000000003",
+    }
+    verified = {
+        **candidate,
+        "verification_tenant": 1,
+        "verification_workload": 1,
+        "verification_renewal": 1,
+    }
+    monkeypatch.setattr(
+        m365.connection_repo, "get", AsyncMock(side_effect=[candidate, verified])
+    )
+    exchange = AsyncMock(
+        side_effect=[
+            m365.M365Error(
+                "Unable to acquire Microsoft 365 access token",
+                http_status=401,
+                graph_error_code="invalid_client",
+            ),
+            ("token", None, None),
+        ]
+    )
+    graph_get = AsyncMock(
+        side_effect=[
+            {"value": [{"id": candidate["tenant_id"]}]},
+            {"value": [{"id": "user"}]},
+            {"id": candidate["app_object_id"]},
+        ]
+    )
+    sleep = AsyncMock()
+    record = AsyncMock()
+    monkeypatch.setattr(m365, "_decrypt", lambda value: "secret")
+    monkeypatch.setattr(m365, "_exchange_token", exchange)
+    monkeypatch.setattr(m365, "_graph_get", graph_get)
+    monkeypatch.setattr(m365.asyncio, "sleep", sleep)
+    monkeypatch.setattr(m365.connection_repo, "record_verification", record)
+
+    result = asyncio.run(m365.verify_connection_candidate(1, 12))
+
+    assert result == verified
+    assert exchange.await_count == 2
+    sleep.assert_awaited_once_with(1.0)
+    record.assert_awaited_once_with(
+        12, tenant=True, workload=True, renewal=True, error=None
+    )
+
+
 def test_repeated_dependency_inventory_uses_warning_free_upserts(monkeypatch):
     execute = AsyncMock()
     monkeypatch.setattr(m365_connections.db, "execute", execute)
