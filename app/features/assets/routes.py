@@ -21,8 +21,16 @@ from app.repositories import tray as tray_repo
 from app.services import tray as tray_service
 from app.services import hudu as hudu_service
 from app.services import audit as audit_service
+from app.services import knowledge_base as knowledge_base_service
 
 router = APIRouter(tags=["Assets"])
+
+_RELATIONSHIP_TYPES = {
+    "depends_on": "Depends on", "runs_on": "Runs on",
+    "supported_by": "Supported by", "documented_by": "Documented by",
+    "connected_to": "Connected to", "located_in": "Located in",
+    "related_to": "Related to",
+}
 
 
 def _scanner_scope_from_form(form: Any) -> tuple[list[str], list[str]]:
@@ -878,6 +886,29 @@ async def asset_detail_page(request: Request, asset_id: int):
             for field in custom_fields
         )
     ]
+    access_context = await knowledge_base_service.build_access_context(user)
+    visible_articles = await knowledge_base_service.list_articles_for_context(
+        access_context, include_unpublished=bool(user.get("is_super_admin"))
+    )
+    articles_by_id = {int(article["id"]): article for article in visible_articles}
+    company_assets = await asset_repo.list_company_assets(company_id)
+    assets_by_id = {int(item["id"]): item for item in company_assets}
+    relationships = []
+    for relationship in await asset_repo.list_relationships_for_asset(company_id, asset_id):
+        item = dict(relationship)
+        if item["direction"] == "inbound":
+            target = assets_by_id.get(int(item["source_asset_id"]))
+        elif item["target_type"] == "asset":
+            target = assets_by_id.get(int(item["target_id"]))
+        elif item["target_type"] == "knowledge_base_article":
+            target = articles_by_id.get(int(item["target_id"]))
+        else:
+            target = None
+        # Silently omit inaccessible/deleted records: their existence must not leak.
+        if not target:
+            continue
+        item["target"] = target
+        relationships.append(item)
     return await main_module._render_template(
         "assets/detail.html", request, user, extra={
             "title": str(record.get("name") or f"Asset {asset_id}"),
@@ -885,11 +916,90 @@ async def asset_detail_page(request: Request, asset_id: int):
             "references": references, "custom_fields": custom_fields,
             "tickets": await asset_repo.list_tickets_for_asset(asset_id),
             "required_fields": required_fields, "required_missing": required_missing,
+            "relationships": relationships,
+            "relationship_types": _RELATIONSHIP_TYPES,
+            "relationship_assets": [a for a in company_assets if int(a["id"]) != asset_id],
+            "relationship_articles": visible_articles,
             "can_edit": bool(user.get("is_super_admin")) or main_module._membership_menu_can(
                 user, membership, "menu.assets", write=True
             ),
         }
     )
+
+
+@router.post("/assets/{asset_id}/relationships")
+async def create_asset_relationship(request: Request, asset_id: int):
+    main_module = _main()
+    user, membership, _, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    if not (user.get("is_super_admin") or main_module._membership_menu_can(
+        user, membership, "menu.assets", write=True
+    )):
+        raise HTTPException(status_code=403, detail="Asset write access required")
+    source = await asset_repo.get_asset_by_id(asset_id)
+    if not source or int(source.get("company_id") or 0) != company_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    form = await request.form()
+    target_type = str(form.get("target_type") or "")
+    relationship_type = str(form.get("relationship_type") or "")
+    try:
+        target_id = int(form.get("target_id") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Invalid relationship target")
+    if relationship_type not in _RELATIONSHIP_TYPES:
+        raise HTTPException(status_code=422, detail="Invalid relationship type")
+    if target_type == "asset":
+        target = await asset_repo.get_asset_by_id(target_id)
+        if (not target or int(target.get("company_id") or 0) != company_id
+                or target_id == asset_id):
+            raise HTTPException(status_code=404, detail="Relationship target not found")
+    elif target_type == "knowledge_base_article":
+        context = await knowledge_base_service.build_access_context(user)
+        visible = await knowledge_base_service.list_articles_for_context(
+            context, include_unpublished=bool(user.get("is_super_admin"))
+        )
+        if target_id not in {int(article["id"]) for article in visible}:
+            raise HTTPException(status_code=404, detail="Relationship target not found")
+    else:
+        raise HTTPException(status_code=422, detail="Unsupported relationship target")
+    created = await asset_repo.create_relationship(
+        company_id=company_id, source_asset_id=asset_id, target_type=target_type,
+        target_id=target_id, relationship_type=relationship_type,
+        created_by=int(user["id"]),
+    )
+    if not created:
+        raise HTTPException(status_code=409, detail="Relationship already exists")
+    await audit_service.record(
+        action="asset.relationship.create", request=request, entity_type="asset",
+        entity_id=asset_id, after={"target_type": target_type,
+                                   "target_id": target_id,
+                                   "relationship_type": relationship_type},
+    )
+    return main_module.flash_redirect(f"/assets/{asset_id}", "Relationship added.", "success")
+
+
+@router.post("/assets/{asset_id}/relationships/{relationship_id}/delete")
+async def delete_asset_relationship(request: Request, asset_id: int, relationship_id: int):
+    main_module = _main()
+    user, membership, _, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    if not (user.get("is_super_admin") or main_module._membership_menu_can(
+        user, membership, "menu.assets", write=True
+    )):
+        raise HTTPException(status_code=403, detail="Asset write access required")
+    asset = await asset_repo.get_asset_by_id(asset_id)
+    if not asset or int(asset.get("company_id") or 0) != company_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    relationships = await asset_repo.list_relationships_for_asset(company_id, asset_id)
+    if relationship_id not in {int(row["id"]) for row in relationships}:
+        raise HTTPException(status_code=404, detail="Relationship not found")
+    await asset_repo.delete_relationship(company_id, relationship_id)
+    await audit_service.record(action="asset.relationship.delete", request=request,
+                               entity_type="asset", entity_id=asset_id,
+                               before={"relationship_id": relationship_id})
+    return main_module.flash_redirect(f"/assets/{asset_id}", "Relationship removed.", "success")
 
 
 @router.post("/assets/{asset_id}")

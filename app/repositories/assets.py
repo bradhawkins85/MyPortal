@@ -129,7 +129,63 @@ async def get_asset_by_tactical_id(
 
 
 async def delete_asset(asset_id: int) -> None:
+    # target_id is polymorphic, so the database cannot declare this FK.  Remove
+    # inbound asset links explicitly; outbound links cascade from source_asset_id.
+    await db.execute(
+        "DELETE FROM asset_relationships WHERE target_type = 'asset' AND target_id = %s",
+        (asset_id,),
+    )
     await db.execute("DELETE FROM assets WHERE id = %s", (asset_id,))
+
+
+async def list_relationships_for_asset(
+    company_id: int, asset_id: int
+) -> list[dict[str, Any]]:
+    """Return both directions of tenant-scoped relationships for an asset."""
+    rows = await db.fetch_all(
+        """
+        SELECT r.*, 'outbound' AS direction
+        FROM asset_relationships r
+        WHERE r.company_id = %s AND r.source_asset_id = %s
+        UNION ALL
+        SELECT r.*, 'inbound' AS direction
+        FROM asset_relationships r
+        WHERE r.company_id = %s AND r.target_type = 'asset' AND r.target_id = %s
+        ORDER BY created_at DESC, id DESC
+        """,
+        (company_id, asset_id, company_id, asset_id),
+    )
+    return list(rows or [])
+
+
+async def create_relationship(
+    *, company_id: int, source_asset_id: int, target_type: str,
+    target_id: int, relationship_type: str, created_by: int | None,
+) -> bool:
+    """Create a relationship, returning False when that exact link exists."""
+    existing = await db.fetch_one(
+        """SELECT id FROM asset_relationships
+           WHERE company_id = %s AND source_asset_id = %s AND target_type = %s
+             AND target_id = %s AND relationship_type = %s""",
+        (company_id, source_asset_id, target_type, target_id, relationship_type),
+    )
+    if existing:
+        return False
+    await db.execute(
+        """INSERT INTO asset_relationships
+           (company_id, source_asset_id, target_type, target_id, relationship_type, created_by)
+           VALUES (%s, %s, %s, %s, %s, %s)""",
+        (company_id, source_asset_id, target_type, target_id, relationship_type, created_by),
+    )
+    return True
+
+
+async def delete_relationship(company_id: int, relationship_id: int) -> bool:
+    result = await db.execute(
+        "DELETE FROM asset_relationships WHERE id = %s AND company_id = %s",
+        (relationship_id, company_id),
+    )
+    return bool(result)
 
 
 async def update_operational_documentation(

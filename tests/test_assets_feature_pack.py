@@ -35,6 +35,8 @@ EXPECTED = {
     ("POST", "/assets/settings/required-fields"),
     ("POST", "/assets/{asset_id}"),
     ("POST", "/assets/{asset_id}/archive"),
+    ("POST", "/assets/{asset_id}/relationships"),
+    ("POST", "/assets/{asset_id}/relationships/{relationship_id}/delete"),
     ("DELETE", "/assets/{asset_id}"),
 }
 
@@ -157,6 +159,18 @@ async def test_asset_detail_page_renders_canonical_asset(monkeypatch):
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "get_all_asset_field_values", AsyncMock(return_value={}))
     monkeypatch.setattr(asset_repo, "list_required_fields", AsyncMock(return_value=[]))
     monkeypatch.setattr(asset_repo, "list_tickets_for_asset", AsyncMock(return_value=[]))
+    monkeypatch.setattr(asset_repo, "list_company_assets", AsyncMock(return_value=[]))
+    monkeypatch.setattr(asset_repo, "list_relationships_for_asset", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        assets_routes.knowledge_base_service,
+        "build_access_context",
+        AsyncMock(return_value=object()),
+    )
+    monkeypatch.setattr(
+        assets_routes.knowledge_base_service,
+        "list_articles_for_context",
+        AsyncMock(return_value=[]),
+    )
     renderer = AsyncMock(return_value=assets_routes.HTMLResponse("detail"))
     monkeypatch.setattr(main_module, "_render_template", renderer)
 
