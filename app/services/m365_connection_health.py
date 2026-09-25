@@ -48,8 +48,11 @@ def build_connection_health(
 
     if expired or (record and record.get("verification_error") and not tenant_ok):
         state, action, action_label = "reconnect_required", "/m365/discover", "Reconnect tenant"
-    elif pending and not all((tenant_ok, workload_ok, renewal_ok)):
-        state, action, action_label = "partially_ready", "/m365/connect", "Resume setup"
+    elif pending:
+        # Consent has already produced a staged application.  Sending an admin
+        # through consent again does not complete the staged cutover; the
+        # candidate must be verified and activated instead.
+        state, action, action_label = "partially_ready", "/m365", "Complete verification"
     elif active and active.get("mode") == "managed" and all((tenant_ok, workload_ok, renewal_ok, verified_at)):
         if permissions_ok:
             state, action, action_label = "healthy", "/m365/diagnostics", "View diagnostics"
@@ -72,15 +75,29 @@ def build_connection_health(
         "tenant_id": (credentials or {}).get("tenant_id") or (record or {}).get("tenant_id"),
         "last_verified_at": verified_at,
         "renewal_at": expiry,
+        "has_pending_candidate": bool(pending),
+        "verification_error": (record or {}).get("verification_error"),
         "workloads": [
-            {"name": "Tenant identity", "ready": tenant_ok},
-            {"name": "Enabled Microsoft 365 workloads", "ready": workload_ok},
-            {"name": "Automatic credential renewal", "ready": renewal_ok},
+            {
+                "name": "Tenant identity",
+                "ready": tenant_ok,
+                "help": "Confirms the enterprise app signs in to the expected tenant.",
+            },
+            {
+                "name": "Enabled Microsoft 365 workloads",
+                "ready": workload_ok,
+                "help": "Confirms the app can read the Graph workloads used by MyPortal.",
+            },
+            {
+                "name": "Automatic credential renewal",
+                "ready": renewal_ok,
+                "help": "Confirms MyPortal can access the app registration before its secret expires.",
+            },
         ],
         "message": {
             "legacy": "The existing connection remains active. Migrate it with rollback protection.",
             "pending_consent": "Confirm the tenant and review all requested access before granting consent.",
-            "partially_ready": "Setup was interrupted or verification is incomplete; resume at the failed step.",
+            "partially_ready": "A staged connection still needs verification and activation before setup is complete.",
             "healthy": "Tenant, enabled workloads, permissions and automatic renewal are verified.",
             "degraded": "The tenant is verified, but one or more permissions or workloads need repair.",
             "reconnect_required": "The tenant identity or credential is no longer valid.",
