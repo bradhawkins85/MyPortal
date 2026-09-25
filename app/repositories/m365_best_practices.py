@@ -99,8 +99,8 @@ async def _upsert_daily_history(
         SELECT
             SUM(CASE WHEN r.status = 'pass' THEN 1 ELSE 0 END) AS pass_count,
             SUM(CASE WHEN r.status = 'fail' THEN 1 ELSE 0 END) AS fail_count,
-            SUM(CASE WHEN r.status = 'unknown' THEN 1 ELSE 0 END) AS unknown_count,
-            SUM(CASE WHEN r.status = 'not_applicable' THEN 1 ELSE 0 END) AS not_applicable_count,
+            SUM(CASE WHEN r.status IN ('unknown', 'permission_missing', 'assessment_failed') THEN 1 ELSE 0 END) AS unknown_count,
+            SUM(CASE WHEN r.status IN ('not_applicable', 'not_licensed', 'unsupported') THEN 1 ELSE 0 END) AS not_applicable_count,
             MAX(CASE WHEN r.check_id = 'bp_monitor_secure_score' THEN r.details END) AS secure_score_details
         FROM m365_best_practice_results r
         LEFT JOIN m365_best_practice_settings s ON s.check_id = r.check_id
