@@ -8,7 +8,7 @@ from app.services.rag_urls import canonical_source_url
     [
         ("knowledge_base", "7", {"slug": "reset-password"}, "/knowledge-base/articles/reset-password"),
         ("tickets", "7", {}, "/admin/tickets/7"),
-        ("assets", "7", {}, "/admin/assets/7"),
+        ("assets", "7", {}, "/assets/7"),
         ("companies", "7", {}, "/admin/companies/7"),
         ("staff", "7", {}, "/admin/staff/7"),
         ("chats", "room 7", {}, "/chat/room%207"),

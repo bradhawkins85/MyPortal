@@ -37,7 +37,9 @@ def canonical_source_url(
         return f"/knowledge-base/articles/{quote(slug, safe='')}"
     routes = {
         "tickets": "/admin/tickets/{}",
-        "assets": "/admin/assets/{}",
+        # Assets are owned by the assets feature pack.  There is deliberately no
+        # parallel admin asset route (see the ITDOC architecture contract).
+        "assets": "/assets/{}",
         "companies": "/admin/companies/{}",
         "staff": "/admin/staff/{}",
         "chats": "/chat/{}",

@@ -1248,7 +1248,15 @@ async def _search_asset_sources(
     rows = await db.fetch_all(
         """
         SELECT a.id, a.company_id, a.name, a.type, a.serial_number, a.status,
-               a.os_name, a.last_user, a.warranty_status, a.last_sync
+               a.os_name, a.last_user, a.warranty_status, a.last_sync,
+               a.owner, a.support_contact, a.criticality, a.location,
+               a.operational_notes, a.review_status,
+               (SELECT GROUP_CONCAT(CONCAT_WS(': ', d.display_name, d.name,
+                                               v.value_text, v.value_date,
+                                               v.value_boolean) SEPARATOR '; ')
+                  FROM asset_custom_field_values v
+                  JOIN asset_custom_field_definitions d ON d.id = v.field_definition_id
+                 WHERE v.asset_id = a.id) AS custom_fields
         FROM assets a
         WHERE (? = 1
                OR EXISTS (
@@ -1256,13 +1264,27 @@ async def _search_asset_sources(
                    WHERE uc.company_id = a.company_id AND uc.user_id = ?
                ))
           AND (a.name LIKE ? OR a.type LIKE ? OR a.serial_number LIKE ? OR a.status LIKE ?
-               OR a.os_name LIKE ? OR a.last_user LIKE ? OR a.syncro_asset_id LIKE ? OR a.tactical_asset_id LIKE ?)
+               OR a.os_name LIKE ? OR a.last_user LIKE ? OR a.syncro_asset_id LIKE ? OR a.tactical_asset_id LIKE ?
+               OR a.owner LIKE ? OR a.support_contact LIKE ? OR a.location LIKE ?
+               OR a.operational_notes LIKE ? OR EXISTS (
+                   SELECT 1 FROM asset_custom_field_values v
+                   JOIN asset_custom_field_definitions d ON d.id = v.field_definition_id
+                   WHERE v.asset_id = a.id AND (d.name LIKE ? OR d.display_name LIKE ?
+                       OR v.value_text LIKE ? OR CAST(v.value_date AS CHAR) LIKE ?)))
         ORDER BY COALESCE(a.last_sync, a.name) DESC, a.id DESC
         LIMIT ?
         """,
         (
             1 if is_super_admin else 0,
             user_id,
+            like,
+            like,
+            like,
+            like,
+            like,
+            like,
+            like,
+            like,
             like,
             like,
             like,
@@ -1559,6 +1581,8 @@ async def execute_agent_query(
                 "allowed_user_ids": article.get("allowed_user_ids", []),
                 "allowed_company_ids": article.get("allowed_company_ids", []),
                 "company_admin_ids": article.get("company_admin_ids", []),
+                "asset_ids": article.get("asset_ids", []),
+                "assets": article.get("assets", []),
             }
         )
 
@@ -1875,6 +1899,13 @@ async def execute_agent_query(
                     "last_user": asset.get("last_user"),
                     "warranty_status": asset.get("warranty_status"),
                     "last_sync": _utc_iso(asset.get("last_sync")),
+                    "owner": asset.get("owner"),
+                    "support_contact": asset.get("support_contact"),
+                    "criticality": asset.get("criticality"),
+                    "location": asset.get("location"),
+                    "operational_notes": asset.get("operational_notes"),
+                    "review_status": asset.get("review_status"),
+                    "custom_fields": asset.get("custom_fields"),
                 }
             )
 
