@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CONTRACT_VERSION = "2026-09-25.1"
+CONTRACT_VERSION = "2026-09-25.2"
 
 
 @dataclass(frozen=True)
@@ -52,7 +52,7 @@ GRAPH_APPLICATION_PERMISSION_IDS = {
     # least-privileged permission for these property-specific operations.
     "User-PasswordProfile.ReadWrite.All": "4c37e1b6-35a1-43bf-926a-6f30f2cdf585",
     "User.EnableDisableAccount.All": "3011c876-62b7-4ada-afa2-506cbbecc68c",
-    "User.RevokeSessions.All": "77f952ba-9a5f-4521-8c9d-6c9648f7eaf7",
+    "User.RevokeSessions.All": "77f3a031-c388-4f99-b373-dc68676a979e",
     "LicenseAssignment.ReadWrite.All": "5facf0c1-8979-4e95-abcf-ff3d079771c0",
     "RoleManagement.ReadWrite.Directory": "9e3f62cf-ca93-4989-b6ce-bf83c28f9fe8",
     "Directory.Read.All": "7ab1d382-f21e-4acd-a863-ba3e13f7da61",
