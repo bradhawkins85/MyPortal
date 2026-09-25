@@ -184,10 +184,8 @@ def get_required_app_role_ids() -> list[str]:
 
 # OAuth scopes requested during the admin-consent provisioning flow
 PROVISION_SCOPE = (
-    "openid profile "
     "https://graph.microsoft.com/Application.ReadWrite.All "
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
-    "https://graph.microsoft.com/DelegatedPermissionGrant.ReadWrite.All "
     "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory offline_access"
 )
 
@@ -202,9 +200,7 @@ PROVISION_SCOPE = (
 # delegated permissions even if they are not statically configured on the enterprise
 # app registration (Microsoft Entra ID dynamic consent).
 CONNECT_SCOPE = (
-    "openid profile "
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
-    "https://graph.microsoft.com/DelegatedPermissionGrant.ReadWrite.All "
     "https://graph.microsoft.com/Directory.Read.All "
     "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory offline_access"
 )
@@ -2519,9 +2515,12 @@ async def provision_app_registration(
             skipped_roles=skipped_graph_roles,
         )
 
-    required_resource_access, baseline_application_grants, baseline_delegated_grants = (
-        await _build_required_resource_access(access_token)
-    )
+    required_resource_access = [{
+        "resourceAppId": _GRAPH_APP_ID,
+        "resourceAccess": [
+            {"id": role_id, "type": "Role"} for role_id in valid_graph_roles
+        ],
+    }]
 
     # 2. Repair the known app in place or create a side-by-side registration.
     app_payload: dict[str, Any] = {
@@ -2621,8 +2620,6 @@ async def provision_app_registration(
             graph_sp_id,
             app_object_id,
             valid_graph_roles=valid_graph_roles,
-            baseline_application_grants=baseline_application_grants,
-            baseline_delegated_grants=baseline_delegated_grants,
         ),
         name=f"provision_roles_{client_id}",
     )
@@ -2644,8 +2641,6 @@ async def _grant_provisioned_roles(
     app_object_id: str,
     *,
     valid_graph_roles: list[str] | None = None,
-    baseline_application_grants: list[tuple[str, str]] | None = None,
-    baseline_delegated_grants: list[tuple[str, list[str]]] | None = None,
 ) -> None:
     """Background task: grant all required role assignments for a newly-provisioned app.
 
@@ -2669,17 +2664,6 @@ async def _grant_provisioned_roles(
     # of attempting grants for roles that may not exist in the tenant).
     roles_to_grant = valid_graph_roles if valid_graph_roles is not None else _PROVISION_APP_ROLES
     try:
-        await _grant_required_admin_consent(
-            access_token,
-            sp_object_id,
-            [
-                grant for grant in (baseline_application_grants or [])
-                if grant[1] not in roles_to_grant
-                and grant[1] not in {_EXO_MANAGE_AS_APP_ROLE, _TEAMS_MANAGE_AS_APP_ROLE}
-            ],
-            baseline_delegated_grants or [],
-        )
-
         for role_name in REQUIRED_DIRECTORY_ROLES:
             await _ensure_directory_role_by_name(access_token, sp_object_id, role_name)
 
@@ -5153,16 +5137,6 @@ async def try_grant_missing_permissions(
             return False
         sp_object_id: str = sp_list[0]["id"]
 
-        _, baseline_application_grants, baseline_delegated_grants = (
-            await _build_required_resource_access(access_token)
-        )
-        baseline_consent_granted = await _grant_required_admin_consent(
-            access_token,
-            sp_object_id,
-            baseline_application_grants,
-            baseline_delegated_grants,
-        )
-
         # Retrieve current appRoleAssignments.
         # Track (appRoleId, resourceId) pairs to distinguish Exchange.ManageAsApp
         # (assigned to EXO SP) from Teams.ManageAsApp (assigned to Teams SP) – both
@@ -5185,12 +5159,9 @@ async def try_grant_missing_permissions(
         required_roles: set[str] = set(_PROVISION_APP_ROLES)
         missing: list[str] = sorted(required_roles - assigned_roles)
 
-        # Look up the Graph, EXO, and Teams service principal object IDs so we
-        # can check whether ManageAsApp has been granted to each one individually.
-        # We also retrieve the Graph SP's appRoles to filter out any required
-        # permissions that don't exist in this tenant.
+        # Look up the Exchange Online service principal so its ManageAsApp
+        # assignment can be checked independently from Microsoft Graph roles.
         exo_sp_id: str | None = None
-        teams_sp_id: str | None = None
         try:
             exo_sp_resp = await _graph_get(
                 access_token,
@@ -5207,36 +5178,9 @@ async def try_grant_missing_permissions(
                 **_safe_m365_error_fields(exc),
             )
 
-        teams_sp_has_role: bool = False
-        try:
-            teams_sp_resp = await _graph_get(
-                access_token,
-                "https://graph.microsoft.com/v1.0/servicePrincipals"
-                f"?$filter=appId eq '{_TEAMS_APP_ID}'&$select=id,appRoles",
-            )
-            teams_sp_list = teams_sp_resp.get("value", [])
-            if teams_sp_list:
-                teams_sp_obj = teams_sp_list[0]
-                teams_sp_id = teams_sp_obj["id"]
-                teams_sp_has_role = any(
-                    r.get("id") == _TEAMS_MANAGE_AS_APP_ROLE
-                    for r in teams_sp_obj.get("appRoles", [])
-                )
-        except M365Error as exc:
-            log_warning(
-                "M365 permission repair could not discover Teams service principal",
-                company_id=company_id,
-                **_safe_m365_error_fields(exc),
-            )
-
         exo_needed = exo_sp_id is not None and exo_sp_id not in manage_as_app_resource_ids
-        teams_needed = (
-            teams_sp_id is not None
-            and teams_sp_has_role
-            and teams_sp_id not in manage_as_app_resource_ids
-        )
 
-        granted: list[str] = ["required-admin-consent"] if baseline_consent_granted else []
+        granted: list[str] = []
 
         # Grant each missing Graph role assignment
         if missing:
