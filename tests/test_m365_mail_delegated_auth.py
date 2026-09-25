@@ -29,6 +29,7 @@ def _fake_account(
     access_token: str | None = None,
     token_expires_at: datetime | None = None,
     tenant_id: str | None = None,
+    **extra: Any,
 ) -> dict[str, Any]:
     return {
         "id": 1,
@@ -42,6 +43,7 @@ def _fake_account(
         "access_token": access_token,
         "token_expires_at": token_expires_at,
         "tenant_id": tenant_id,
+        **extra,
     }
 
 
@@ -236,9 +238,20 @@ async def test_sync_delegated_403_falls_back_to_client_credentials(monkeypatch):
         company_id=5,
         refresh_token="enc:refresh",
         tenant_id="tenant-123",
+        auth_company_id=5,
+        auth_connection_id=50,
+        auth_tenant_id="tenant-123",
+        auth_binding_status="verified",
+        app_fallback_enabled=True,
+        mailbox_app_authorized=True,
     )
     _patch_common(monkeypatch)
     monkeypatch.setattr(m365_mail.mail_repo, "get_account", lambda _: _coro(account))
+    monkeypatch.setattr(
+        m365_mail.mail_repo,
+        "get_verified_auth_connection",
+        lambda _: _coro({"id": 50, "company_id": 5, "tenant_id": "tenant-123"}),
+    )
 
     async def fake_acquire_delegated(acct):
         return "delegated-token"
@@ -316,9 +329,15 @@ async def test_sync_delegated_403_never_borrows_provisioned_company(monkeypatch)
 async def test_sync_delegated_403_fallback_then_client_creds_also_403(monkeypatch):
     """When both delegated and client_credentials get 403, surface actionable error."""
     from app.services.m365 import M365Error
-    account = _fake_account(company_id=5, refresh_token="enc:refresh", tenant_id="tenant-123")
+    account = _fake_account(
+        company_id=5, refresh_token="enc:refresh", tenant_id="tenant-123",
+        auth_company_id=5, auth_connection_id=50, auth_tenant_id="tenant-123",
+        auth_binding_status="verified", app_fallback_enabled=True,
+        mailbox_app_authorized=True,
+    )
     _patch_common(monkeypatch)
     monkeypatch.setattr(m365_mail.mail_repo, "get_account", lambda _: _coro(account))
+    monkeypatch.setattr(m365_mail.mail_repo, "get_verified_auth_connection", lambda _: _coro({"id": 50, "company_id": 5, "tenant_id": "tenant-123"}))
     async def fake_acquire_delegated(acct):
         return "delegated-token"
     monkeypatch.setattr(m365_mail, "_acquire_delegated_access_token", fake_acquire_delegated)
@@ -351,9 +370,15 @@ async def test_sync_delegated_403_retries_unread_filter_with_client_credentials(
     """
     from app.services.m365 import M365Error
 
-    account = _fake_account(company_id=5, refresh_token="enc:refresh", tenant_id="tenant-123")
+    account = _fake_account(
+        company_id=5, refresh_token="enc:refresh", tenant_id="tenant-123",
+        auth_company_id=5, auth_connection_id=50, auth_tenant_id="tenant-123",
+        auth_binding_status="verified", app_fallback_enabled=True,
+        mailbox_app_authorized=True,
+    )
     _patch_common(monkeypatch)
     monkeypatch.setattr(m365_mail.mail_repo, "get_account", lambda _: _coro(account))
+    monkeypatch.setattr(m365_mail.mail_repo, "get_verified_auth_connection", lambda _: _coro({"id": 50, "company_id": 5, "tenant_id": "tenant-123"}))
 
     async def fake_acquire_delegated(acct):
         return "delegated-token"

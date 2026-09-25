@@ -1,0 +1,7 @@
+{
+  "guid": "6e9dd6d6-41e7-4e95-a5f6-f3d25aa9487b",
+  "occurred_at": "2026-09-25T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Bind Microsoft 365 mailboxes to verified authentication tenants independently of ticket routing and require explicit app fallback authorization.",
+  "content_hash": "m365-mail-verified-auth-binding"
+}

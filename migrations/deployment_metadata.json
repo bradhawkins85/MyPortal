@@ -78,6 +78,12 @@
       "compatible-from": "*",
       "compatible-to": "*",
       "maintenance": false
+    },
+    "400_m365_mail_auth_binding.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
     }
   }
 }

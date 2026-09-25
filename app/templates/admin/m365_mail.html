@@ -40,7 +40,7 @@
           <span class="form-help">A DMARC mailbox imports RUA and RUF attachments and routes each report to the matching company email domain. DMARC mailboxes never create support tickets.</span>
         </label>
         <label class="form-field">
-          <span class="form-label">Company</span>
+          <span class="form-label">Ticket destination company</span>
           <select name="companyId" class="form-input" data-company-select>
             <option value="">— None —</option>
             {% for company in companies %}
@@ -49,6 +49,22 @@
           </select>
           <span class="form-help" data-company-help>Optional for support tickets. DMARC mailboxes ignore company selection and route by DMARC policy domain.</span>
         </label>
+        {% if is_editing %}
+          <div class="form-field">
+            <span class="form-label">Authentication tenant</span>
+            <div class="form-input" aria-readonly="true">
+              {{ editing_account.auth_tenant_id or editing_account.tenant_id or 'Not verified' }}
+            </div>
+            <span class="form-help">Authentication is bound independently of ticket routing. Reauthorize this mailbox to verify a missing or incorrect tenant.</span>
+          </div>
+          <div class="form-field form-field--checkbox">
+            <label class="checkbox">
+              <input type="checkbox" name="appFallbackEnabled" value="1" {% if editing_account.app_fallback_enabled and editing_account.mailbox_app_authorized %}checked{% endif %} {% if not editing_account.auth_connection_id %}disabled{% endif %} />
+              <span>Authorize application fallback for this exact mailbox</span>
+            </label>
+            <span class="form-help">Allows app-only access after a delegated denial only through this mailbox's active, verified tenant connection.</span>
+          </div>
+        {% endif %}
         <label class="form-field">
           <span class="form-label">User principal name (email)</span>
           <input type="text" name="userPrincipalName" class="form-input" value="{{ editing_account.user_principal_name if is_editing else '' }}" maxlength="255" required placeholder="user@contoso.com or shared@contoso.com" />

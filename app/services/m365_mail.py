@@ -85,7 +85,11 @@ def account_auth_status(account: Mapping[str, Any]) -> str:
     """Return a human-readable auth status string for the account."""
     if _account_has_delegated_tokens(account):
         return "signed_in"
-    if account.get("company_id"):
+    if account.get("auth_binding_status") == "repair_required":
+        return "repair_required"
+    if account.get("auth_connection_id") or (
+        "auth_connection_id" not in account and account.get("company_id")
+    ):
         return "company_credentials"
     return "not_configured"
 
@@ -168,6 +172,17 @@ async def store_delegated_tokens(
 async def clear_delegated_tokens(account_id: int) -> dict[str, Any] | None:
     """Remove per-account delegated tokens (disconnect)."""
     return await mail_repo.clear_account_tokens(account_id)
+
+
+async def validate_mailbox_access(access_token: str, mailbox: str) -> None:
+    """Verify that the delegated identity can access the configured mailbox."""
+    normalized = _normalise_string(mailbox)
+    if not normalized:
+        raise ValueError("Mailbox address is required")
+    await _graph_get(
+        access_token,
+        f"{_GRAPH_BASE}/users/{quote(normalized, safe='')}?$select=id,userPrincipalName",
+    )
 
 
 async def _acquire_delegated_access_token(
@@ -538,7 +553,7 @@ async def clone_account(account_id: int) -> dict[str, Any]:
 async def _acquire_access_token_for_mail_account(account: Mapping[str, Any]) -> str:
     if _account_has_delegated_tokens(account):
         return await _acquire_delegated_access_token(account)
-    auth_company_id = _int_or_none(account.get("company_id"))
+    auth_company_id = await _verified_app_company_id(account)
     if auth_company_id is None:
         raise ValueError(
             "This mailbox is not linked to a company and has no mailbox-specific "
@@ -547,6 +562,36 @@ async def _acquire_access_token_for_mail_account(account: Mapping[str, Any]) -> 
     return await m365_service.acquire_access_token(
         int(auth_company_id), force_client_credentials=True
     )
+
+
+async def _verified_app_company_id(account: Mapping[str, Any]) -> int | None:
+    """Resolve an app identity solely from the mailbox's explicit binding."""
+    # During an expand-first rolling deployment, old application instances may
+    # briefly read rows before migration 400 has added/populated these keys.
+    if "auth_connection_id" not in account:
+        return _int_or_none(account.get("company_id"))
+    if account.get("auth_binding_status") != "verified":
+        return None
+    connection = await mail_repo.get_verified_auth_connection(dict(account))
+    if not connection:
+        return None
+    expected_company_id = _int_or_none(account.get("auth_company_id"))
+    connection_company_id = _int_or_none(connection.get("company_id"))
+    if expected_company_id is None or expected_company_id != connection_company_id:
+        return None
+    return expected_company_id
+
+
+async def _delegated_app_fallback_company_id(
+    account: Mapping[str, Any],
+) -> int | None:
+    """Authorize delegated-to-app escalation only when explicitly configured."""
+    if not (
+        account.get("app_fallback_enabled")
+        and account.get("mailbox_app_authorized")
+    ):
+        return None
+    return await _verified_app_company_id(account)
 
 
 async def force_reimport_message(account_id: int, message_uid: str) -> dict[str, Any]:
@@ -563,7 +608,6 @@ async def force_reimport_message(account_id: int, message_uid: str) -> dict[str,
     if not existing:
         raise LookupError("Imported message record not found.")
 
-    await mail_repo.delete_message(account_id, normalized_uid)
     marked_unread = False
     mark_unread_error: str | None = None
 
@@ -586,10 +630,17 @@ async def force_reimport_message(account_id: int, message_uid: str) -> dict[str,
                 error=mark_unread_error,
             )
 
+    # In unread-only mode, removing the durable marker before Graph confirms
+    # the message is visible would make a failed reimport unreachable. Keep the
+    # original marker (and its ticket/history relationship) until that point.
+    deleted = not bool(account.get("process_unread_only")) or marked_unread
+    if deleted:
+        await mail_repo.delete_message(account_id, normalized_uid)
+
     return {
         "account": enrich_account_response(account),
         "message_uid": normalized_uid,
-        "deleted": True,
+        "deleted": deleted,
         "marked_unread": marked_unread,
         "mark_unread_error": mark_unread_error,
     }
@@ -620,7 +671,7 @@ async def _record_message(
     status: str,
     ticket_id: int | None,
     error: str | None,
-) -> None:
+) -> bool:
     try:
         await mail_repo.upsert_message(
             account_id=account_id,
@@ -630,6 +681,7 @@ async def _record_message(
             error=error,
             processed_at=datetime.now(timezone.utc),
         )
+        return True
     except Exception as exc:  # pragma: no cover - defensive logging
         log_error(
             "Failed to record M365 mail message status",
@@ -637,6 +689,7 @@ async def _record_message(
             message_uid=uid,
             error=str(exc),
         )
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1128,7 +1181,7 @@ async def sync_account(
         return result
 
     company_id = account.get("company_id")
-    auth_company_id = _int_or_none(company_id)
+    auth_company_id = await _verified_app_company_id(account)
 
     upn = _normalise_string(account.get("user_principal_name"))
     if not upn:
@@ -1330,19 +1383,14 @@ async def sync_account(
                     and using_delegated
                     and not delegated_fallback_attempted
                 ):
-                    # Delegated token lacks access to this mailbox.
-                    # Fall back to client_credentials (app-level permissions)
-                    # which can access any mailbox in the tenant.
                     delegated_fallback_attempted = True
-                    log_info(
-                        "Delegated token got 403; falling back to client_credentials",
-                        account_id=account_id,
-                        upn=upn,
+                    fallback_company_id = await _delegated_app_fallback_company_id(
+                        account
                     )
-                    if auth_company_id is not None:
+                    if fallback_company_id is not None:
                         try:
                             access_token = await m365_service.acquire_access_token(
-                                int(auth_company_id), force_client_credentials=True
+                                fallback_company_id, force_client_credentials=True
                             )
                             using_delegated = False
                             # Retry the exact failed query with app-only permissions.
@@ -1363,10 +1411,11 @@ async def sync_account(
                         {
                             "error": (
                                 "Mail sync failed (403 Forbidden). The signed-in user "
-                                "may not have access to this mailbox and no company "
-                                "credentials are available to fall back to. Please sign "
-                                "in again with a user that has access, or configure "
-                                "Microsoft 365 company credentials."
+                                "does not have access to this mailbox. Application "
+                                "fallback is not explicitly enabled and authorized for "
+                                "this mailbox on its verified tenant connection. Sign in "
+                                "again with a user that has mailbox access, or have an "
+                                "administrator authorize the exact fallback binding."
                             )
                         }
                     )
@@ -1639,13 +1688,15 @@ async def sync_account(
                             received_at=received_at or datetime.now(timezone.utc),
                             company_id=_int_or_none(account.get("company_id")),
                         )
-                        await _record_message(
+                        import_recorded = await _record_message(
                             account_id=int(account_id),
                             uid=msg_id,
                             status="imported",
                             ticket_id=None,
                             error=None,
                         )
+                        if not import_recorded:
+                            raise RuntimeError("DMARC import completion could not be recorded")
                         processed += 1
                         _remember_message_action(
                             {
@@ -2069,13 +2120,23 @@ async def sync_account(
                     }
                 )
 
-                await _record_message(
+                import_recorded = await _record_message(
                     account_id=int(account_id),
                     uid=msg_id,
                     status="imported",
                     ticket_id=int(ticket_id) if isinstance(ticket_id, int) else None,
                     error=None,
                 )
+                if not import_recorded:
+                    errors.append(
+                        {
+                            "message_id": msg_id,
+                            "error": "Import completion could not be recorded",
+                        }
+                    )
+                    # The durable marker is the commit point. Keep the Graph
+                    # message recoverable when it could not be persisted.
+                    continue
                 processed += 1
 
                 await _apply_post_import_action(
