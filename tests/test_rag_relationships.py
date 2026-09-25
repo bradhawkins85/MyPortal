@@ -142,6 +142,30 @@ def test_relationship_prompt_keeps_non_ticket_order():
     assert "Document A\nassets #42" in document_a
 
 
+def test_relationship_prompt_truncates_both_documents_to_context_budget():
+    from app.services.rag_relationships import _estimate_tokens, _prompt
+
+    source = {
+        "source_type": "knowledge_base",
+        "source_id": 1,
+        "title": "Long source",
+        "content": "source-content " * 1000,
+    }
+    target = {
+        "source_type": "knowledge_base",
+        "source_id": 2,
+        "title": "Long target",
+        "content": "target-content " * 1000,
+    }
+
+    prompt = _prompt(source, target, token_budget=500)
+
+    assert _estimate_tokens(prompt) <= 500
+    assert prompt.count("[Document content truncated") == 2
+    assert "source-content" in prompt
+    assert "target-content" in prompt
+
+
 def test_relationship_evaluator_uses_configured_module_model_by_default():
     from app.services.rag_relationships import _evaluation_payload
 

@@ -57,6 +57,11 @@ _MATCH_ORDER = {
 _EVALUATOR_BACKOFF_SECONDS = 60.0
 _evaluator_retry_after = 0.0
 _last_unavailable_log_at = 0.0
+_DEFAULT_PROMPT_TOKEN_BUDGET = 2500
+_TRUNCATION_NOTICE = (
+    "\n[Document content truncated to fit the relationship context window.]"
+)
+_CHARS_PER_TOKEN = 3
 
 
 class RelationshipEvaluatorUnavailable(RuntimeError):
@@ -196,24 +201,74 @@ def _evaluation_document_order(
     return source, target
 
 
-def _prompt(source: Mapping[str, Any], target: Mapping[str, Any]) -> str:
+def _truncate_tokens(text: str, token_limit: int) -> str:
+    """Return text bounded by the evaluator's approximate input-token budget."""
+
+    if _estimate_tokens(text) <= token_limit:
+        return text
+    notice_tokens = _estimate_tokens(_TRUNCATION_NOTICE)
+    content_bytes = max(0, token_limit - notice_tokens) * _CHARS_PER_TOKEN
+    prefix = text.encode("utf-8")[:content_bytes].decode("utf-8", errors="ignore")
+    return prefix.rstrip() + _TRUNCATION_NOTICE
+
+
+def _estimate_tokens(text: str) -> int:
+    """Conservatively estimate tokens without loading tokenizer data at runtime."""
+
+    encoded_length = len(text.encode("utf-8"))
+    return (encoded_length + _CHARS_PER_TOKEN - 1) // _CHARS_PER_TOKEN
+
+
+def _prompt(
+    source: Mapping[str, Any],
+    target: Mapping[str, Any],
+    *,
+    token_budget: int = _DEFAULT_PROMPT_TOKEN_BUDGET,
+) -> str:
     source, target = _evaluation_document_order(source, target)
-    return f"""You evaluate MyPortal RAG document relationships. Return JSON only.
+    template = """You evaluate MyPortal RAG document relationships. Return JSON only.
 
 Document A
-{source.get("source_type")} #{source.get("source_id")}
-{source.get("title")}
-{source.get("content") or ""}
+{source_type} #{source_id}
+{source_title}
+{source_content}
 ----------------------------
 Document B
-{target.get("source_type")} #{target.get("source_id")}
-{target.get("title")}
-{target.get("content") or ""}
+{target_type} #{target_id}
+{target_title}
+{target_content}
 
 Determine whether these documents are related. Store negative results too.
 Use one relationship value: DIRECT_MATCH, RELATED, SUPPORTING, DUPLICATE, NOT_RELEVANT, FOLLOW_UP, KNOWN_ISSUE, PARENT_CHILD.
 Return JSON only:
 {{"relationship":"DIRECT_MATCH","confidence":0.94,"score":0.93,"reason":"...","supporting_excerpt":"..."}}"""
+    prompt_without_content = template.format(
+        source_type=source.get("source_type"),
+        source_id=source.get("source_id"),
+        source_title=source.get("title"),
+        source_content="",
+        target_type=target.get("source_type"),
+        target_id=target.get("source_id"),
+        target_title=target.get("title"),
+        target_content="",
+    )
+    available_tokens = max(0, token_budget - _estimate_tokens(prompt_without_content))
+    source_budget = available_tokens // 2
+    target_budget = available_tokens - source_budget
+    return template.format(
+        source_type=source.get("source_type"),
+        source_id=source.get("source_id"),
+        source_title=source.get("title"),
+        source_content=_truncate_tokens(
+            str(source.get("content") or ""), source_budget
+        ),
+        target_type=target.get("source_type"),
+        target_id=target.get("source_id"),
+        target_title=target.get("title"),
+        target_content=_truncate_tokens(
+            str(target.get("content") or ""), target_budget
+        ),
+    )
 
 
 def _evaluation_payload(prompt: str, model_override: str) -> dict[str, Any]:
@@ -366,7 +421,12 @@ async def evaluate_next_batch(*, limit: int | None = None) -> int:
                     )
                     return
                 evaluation_payload = _evaluation_payload(
-                    _prompt(source, target), settings.rag_relationship_model
+                    _prompt(
+                        source,
+                        target,
+                        token_budget=settings.rag_relationship_max_context_tokens,
+                    ),
+                    settings.rag_relationship_model,
                 )
                 response = await modules_service.trigger_module(
                     "ollama", evaluation_payload, background=False
