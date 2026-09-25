@@ -259,7 +259,7 @@ def test_failed_cutover_restores_previous_active_connection(monkeypatch):
     calls = []
     async def execute(sql, params):
         calls.append((sql, params))
-        if "UPDATE company_m365_credentials" in sql:
+        if "INSERT INTO company_m365_credentials" in sql:
             raise RuntimeError("database failure")
     monkeypatch.setattr(m365_connections.db, "execute", execute)
 
@@ -273,6 +273,38 @@ def test_failed_cutover_restores_previous_active_connection(monkeypatch):
 
     assert any("state = 'active' WHERE id" in sql and params == (10,) for sql, params in calls)
     assert any("state = 'pending' WHERE id" in sql and params == (11,) for sql, params in calls)
+
+
+def test_first_connection_cutover_upserts_existing_compatibility_row(monkeypatch):
+    candidate = {
+        "id": 11, "company_id": 69, "state": "pending", "tenant_id": "tenant",
+        "client_id": "new", "client_secret": "encrypted", "app_object_id": "app",
+        "verification_tenant": 1, "verification_workload": 1,
+        "verification_renewal": 1,
+    }
+    monkeypatch.setattr(m365_connections, "get", AsyncMock(return_value=candidate))
+    monkeypatch.setattr(
+        m365_connections, "get_active", AsyncMock(side_effect=[None, candidate])
+    )
+    execute = AsyncMock()
+    monkeypatch.setattr(m365_connections.db, "execute", execute)
+
+    @asynccontextmanager
+    async def lock(*args, **kwargs):
+        yield True
+    monkeypatch.setattr(m365_connections.db, "acquire_lock", lock)
+
+    result = asyncio.run(m365_connections.activate(69, 11))
+
+    assert result == candidate
+    compatibility_calls = [
+        call for call in execute.await_args_list
+        if "INSERT INTO company_m365_credentials" in call.args[0]
+    ]
+    assert len(compatibility_calls) == 1
+    sql, params = compatibility_calls[0].args
+    assert "ON DUPLICATE KEY UPDATE" in sql
+    assert params[-1] == 69
 
 
 def test_retirement_requires_empty_dependency_inventory(monkeypatch):
