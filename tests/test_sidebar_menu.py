@@ -225,6 +225,8 @@ def test_sidebar_custom_groups_have_profile_controls_and_nested_styles():
     assert "sidebarGroupIcons" in base_template
     assert "data-sidebar-add-group" in profile_template
     assert "SIDEBAR_GROUP_ICONS" in profile_script
+    assert "renderSidebarItems({ focusKey: groupKey })" in profile_script
+    assert "inputToFocus.scrollIntoView({ block: 'nearest' })" in profile_script
     assert "sidebar-row--group-child" in stylesheet
     assert "menu__submenu--custom" in stylesheet
 

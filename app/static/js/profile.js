@@ -289,11 +289,12 @@
   let dragSourceIndex = null;
   let touchDragSourceIndex = null;
 
-  function renderSidebarItems() {
+  function renderSidebarItems({ focusKey = null } = {}) {
     if (!sidebarItemsBody) {
       return;
     }
     sidebarItemsBody.innerHTML = '';
+    let inputToFocus = null;
     sidebarState.forEach((item, index) => {
       const row = document.createElement('tr');
       row.draggable = true;
@@ -335,6 +336,9 @@
         nameInput.value = item.label;
         nameInput.setAttribute('aria-label', 'Group name');
         nameInput.addEventListener('input', () => { item.label = nameInput.value; });
+        if (item.key === focusKey) {
+          inputToFocus = nameInput;
+        }
         const iconSelect = document.createElement('select');
         iconSelect.className = 'select';
         iconSelect.setAttribute('aria-label', 'Group icon');
@@ -509,6 +513,13 @@
 
       sidebarItemsBody.appendChild(row);
     });
+    if (inputToFocus) {
+      // A newly added group can land below the table's visible area. Moving
+      // focus to its name both reveals the new row and makes it ready to edit.
+      inputToFocus.focus({ preventScroll: true });
+      inputToFocus.scrollIntoView({ block: 'nearest' });
+      inputToFocus.select();
+    }
   }
 
   if (sidebarSection && window.MyPortalSidebarMenu) {
@@ -597,13 +608,14 @@
     if (sidebarAddGroupButton) {
       sidebarAddGroupButton.addEventListener('click', () => {
         clearMessages([sidebarSuccess, sidebarError]);
+        const groupKey = `${SIDEBAR_GROUP_KEY_PREFIX}${Date.now()}`;
         sidebarState.push({
-          key: `${SIDEBAR_GROUP_KEY_PREFIX}${Date.now()}`,
+          key: groupKey,
           label: 'New group',
           icon: 'folder',
           hidden: false,
         });
-        renderSidebarItems();
+        renderSidebarItems({ focusKey: groupKey });
       });
     }
 
