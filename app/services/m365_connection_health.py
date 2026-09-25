@@ -41,7 +41,25 @@ def build_connection_health(
         credentials or {}
     ).get("client_secret_expires_at")
     expiry_utc = expiry.replace(tzinfo=timezone.utc) if isinstance(expiry, datetime) and not expiry.tzinfo else expiry
-    expired = bool(isinstance(expiry_utc, datetime) and expiry_utc <= now)
+    verified_utc = (
+        verified_at.replace(tzinfo=timezone.utc)
+        if isinstance(verified_at, datetime) and not verified_at.tzinfo
+        else verified_at
+    )
+    # A successful live verification is stronger evidence than stale expiry
+    # metadata.  In particular, older compatibility credential rows can retain
+    # an expired date while a newly activated managed connection has just
+    # authenticated successfully.  Do not immediately send that connection
+    # back through the reconnect journey when verification happened at or
+    # after the recorded expiry.
+    expired = bool(
+        isinstance(expiry_utc, datetime)
+        and expiry_utc <= now
+        and not (
+            isinstance(verified_utc, datetime)
+            and verified_utc >= expiry_utc
+        )
+    )
     permissions_ok = bool(permission_results) and all(
         bool(item.get("all_ok")) for item in permission_results
     )
