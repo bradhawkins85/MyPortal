@@ -11,18 +11,6 @@
 
   <div class="management" data-layout>
     <aside class="management__sidebar">
-      <h2 class="management__heading">Mailbox import OAuth app</h2>
-      <p class="management__intro">Use a dedicated public-client app registration for mailbox imports. This keeps delegated mail consent and tokens separate from Microsoft 365 tenant administration.</p>
-      <form action="/admin/modules/m365-mail/settings" method="post" class="form management__form">
-        {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
-        <label class="form-field">
-          <span class="form-label">Application (client) ID</span>
-          <input type="text" name="oauthClientId" class="form-input" value="{{ mail_oauth_client_id }}" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" />
-          <span class="form-help">The app requires delegated <code>Mail.ReadWrite</code> and <code>User.Read</code>, public client flows, and this portal's <code>/m365/callback</code> redirect URI. Leave blank to use the portal-wide PKCE client.</span>
-        </label>
-        <div class="form-actions"><button type="submit" class="button">Save OAuth app</button></div>
-      </form>
-
       <h2 class="management__heading">{{ 'Update mailbox' if is_editing else 'Create mailbox' }}</h2>
       <p class="management__intro">
         Import emails from an Office 365 mailbox into tickets or the DMARC reporting workspace using Microsoft Graph API.

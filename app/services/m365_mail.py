@@ -71,23 +71,6 @@ DELEGATED_MAIL_SCOPE = (
 )
 
 
-async def get_mailbox_oauth_client_id(*, redirect_uri: str | None = None) -> str:
-    """Return the mailbox-import public client, never a company's tenant app.
-
-    A module/environment-specific client takes precedence. The portal-wide
-    PKCE client remains a backwards-compatible fallback, but per-company M365
-    credentials are deliberately excluded from this resolution path.
-    """
-    module = await modules_service.get_module("m365-mail", redact=False)
-    module_settings = (module or {}).get("settings") or {}
-    configured = str(module_settings.get("oauth_client_id") or "").strip()
-    if not configured:
-        configured = str(get_settings().m365_mail_client_id or "").strip()
-    if configured:
-        return configured
-    return await m365_service.get_effective_pkce_client_id(redirect_uri=redirect_uri)
-
-
 # ---------------------------------------------------------------------------
 # Per-account delegated token helpers
 # ---------------------------------------------------------------------------

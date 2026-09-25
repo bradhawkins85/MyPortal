@@ -1002,7 +1002,6 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
         "icon": "📬",
         "settings": {
             "manage_url": "/admin/modules/m365-mail",
-            "oauth_client_id": "",
         },
     },
     {
@@ -1785,13 +1784,7 @@ def _coerce_settings(
         manage_url = (
             str(merged.get("manage_url") or "").strip() or "/admin/modules/m365-mail"
         )
-        oauth_client_id = str(merged.get("oauth_client_id") or "").strip()
-        env_client_id = os.getenv("M365_MAIL_CLIENT_ID", "").strip()
-        if env_client_id:
-            oauth_client_id = env_client_id
-        merged.update(
-            {"manage_url": manage_url, "oauth_client_id": oauth_client_id}
-        )
+        merged.update({"manage_url": manage_url})
     elif slug == "chatgpt-mcp":
         overrides = payload or {}
         shared_secret_override = overrides.get("shared_secret")

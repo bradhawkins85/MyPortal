@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from app.features.m365_mail import admin_routes
 from app.services import m365_mail
 
 
@@ -80,30 +81,6 @@ def test_enrich_strips_tokens():
 # ---------------------------------------------------------------------------
 
 
-async def test_mailbox_oauth_client_uses_module_setting(monkeypatch):
-    async def fake_get_module(slug: str, *, redact: bool = True):
-        assert slug == "m365-mail"
-        assert redact is False
-        return {"settings": {"oauth_client_id": "mail-client-id"}}
-
-    async def forbidden_tenant_client(**kwargs):
-        raise AssertionError("tenant-level PKCE resolution must not be used")
-
-    monkeypatch.setattr(m365_mail.modules_service, "get_module", fake_get_module)
-    monkeypatch.setattr(
-        m365_mail.m365_service,
-        "get_effective_pkce_client_id_for_company",
-        forbidden_tenant_client,
-    )
-
-    assert (
-        await m365_mail.get_mailbox_oauth_client_id(
-            redirect_uri="https://portal.example/m365/callback"
-        )
-        == "mail-client-id"
-    )
-
-
 async def test_validate_mailbox_access_uses_mail_resource(monkeypatch):
     requests: list[tuple[str, str]] = []
 
@@ -123,6 +100,48 @@ async def test_validate_mailbox_access_uses_mail_resource(monkeypatch):
         )
     ]
     assert "?$select=id,userPrincipalName" not in requests[0][1]
+
+
+async def test_authorize_uses_user_pkce_client_not_company_client(monkeypatch):
+    class MainStub:
+        async def _require_super_admin_page(self, request):
+            return {"id": 1, "is_super_admin": True}, None
+
+        def _build_m365_redirect_uri(self, request):
+            return "https://portal.example/m365/callback"
+
+        async def _new_m365_oauth_state(self, request, **kwargs):
+            assert kwargs["client_id"] == "user-pkce-client"
+            return "state"
+
+    async def fake_get_account(account_id):
+        return {"id": account_id, "company_id": 42}
+
+    async def fake_user_client(*, redirect_uri=None):
+        assert redirect_uri == "https://portal.example/m365/callback"
+        return "user-pkce-client"
+
+    async def forbidden_company_client(*args, **kwargs):
+        raise AssertionError("company tenant client must not authorize mailbox users")
+
+    monkeypatch.setattr(admin_routes, "_main", lambda: MainStub())
+    monkeypatch.setattr(m365_mail, "get_account", fake_get_account)
+    monkeypatch.setattr(
+        admin_routes.m365_service, "generate_pkce_pair", lambda: ("verifier", "challenge")
+    )
+    monkeypatch.setattr(
+        admin_routes.m365_service, "get_effective_pkce_client_id", fake_user_client
+    )
+    monkeypatch.setattr(
+        admin_routes.m365_service,
+        "get_effective_pkce_client_id_for_company",
+        forbidden_company_client,
+    )
+
+    response = await admin_routes.admin_m365_mail_authorize(7, object())
+
+    assert response.status_code == 303
+    assert "client_id=user-pkce-client" in response.headers["location"]
 
 
 def test_has_delegated_tokens_true():

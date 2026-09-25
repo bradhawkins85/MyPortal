@@ -19,7 +19,6 @@ def test_m365_mail_module_metadata():
     assert entry["description"]
     assert entry["icon"]
     assert entry["settings"]["manage_url"] == "/admin/modules/m365-mail"
-    assert entry["settings"]["oauth_client_id"] == ""
 
 
 def test_m365_mail_coerce_settings_default_manage_url():
@@ -38,10 +37,3 @@ def test_m365_mail_coerce_settings_empty_manage_url_defaults():
     """_coerce_settings for m365-mail should default when manage_url is empty."""
     result = _coerce_settings("m365-mail", {"manage_url": ""})
     assert result["manage_url"] == "/admin/modules/m365-mail"
-
-
-def test_m365_mail_coerce_settings_normalizes_oauth_client_id():
-    result = _coerce_settings(
-        "m365-mail", {"oauth_client_id": "  dedicated-mail-client  "}
-    )
-    assert result["oauth_client_id"] == "dedicated-mail-client"
