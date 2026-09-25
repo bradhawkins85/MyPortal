@@ -16,7 +16,7 @@
       <div>
         <h2 class="card__title">{{ 'Edit signature template' if template_record.id else 'New signature template' }}</h2>
         <p class="card__subtitle">
-          Design the HTML signature visually, maintain an exact TXT version, and preview resolved staff values before publishing.
+          Design the HTML signature visually, maintain an exact TXT version, and preview the same template selection data used by MyPortal before publishing for MyPortal use.
         </p>
       </div>
       {% if template_record.id %}
@@ -28,7 +28,7 @@
           {% if template_record.status != 'published' %}
             <form method="post" action="/m365/signatures/{{ template_record.id }}/publish">
               {% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}
-              <button type="submit" class="button">Publish</button>
+              <button type="submit" class="button">Publish for MyPortal</button>
             </form>
           {% else %}
             <form method="post" action="/m365/signatures/{{ template_record.id }}/disable">
@@ -113,7 +113,7 @@
         <input class="form-input" id="signature-schedule-end" name="schedule_end_on" type="date" value="{{ form_values.schedule_end_on or '' }}" />
       </div>
       <div class="form-field form-field--full">
-        <p class="form-help">Scheduling uses <strong>{{ schedule_timezone }}</strong>. Active published templates are ordered by priority, then the configured default, then the earliest activation start date, then the lowest template ID.</p>
+        <p class="form-help">Scheduling uses <strong>{{ schedule_timezone }}</strong>. Preview and default selection follow the same ordering: priority, configured default, earliest activation start date, then lowest template ID. Publication does not deploy to Outlook; client deployment is not configured.</p>
       </div>
       <div class="form-field">
         <label class="form-label" for="preview-staff-id">Preview staff member</label>
