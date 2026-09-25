@@ -277,11 +277,14 @@
   const sidebarResetButton = root.querySelector('[data-sidebar-reset]');
   const sidebarAddDividerButton = root.querySelector('[data-sidebar-add-divider]');
   const sidebarAddSpacerButton = root.querySelector('[data-sidebar-add-spacer]');
+  const sidebarAddGroupButton = root.querySelector('[data-sidebar-add-group]');
   const sidebarSuccess = { variant: 'success' };
   const sidebarError = { variant: 'error' };
   let sidebarState = [];
   const SIDEBAR_DIVIDER_KEY_PREFIX = '__divider__:';
   const SIDEBAR_SPACER_KEY_PREFIX = '__spacer__:';
+  const SIDEBAR_GROUP_KEY_PREFIX = '__group__:';
+  const SIDEBAR_GROUP_ICONS = ['folder', 'shop', 'briefcase', 'grid', 'star', 'users'];
   const SIDEBAR_PROTECTED_KEYS = new Set(['/admin/profile']);
   let dragSourceIndex = null;
   let touchDragSourceIndex = null;
@@ -294,13 +297,16 @@
     sidebarState.forEach((item, index) => {
       const row = document.createElement('tr');
       row.draggable = true;
+      const isGroup = item.key.startsWith(SIDEBAR_GROUP_KEY_PREFIX);
+      if (isGroup) row.classList.add('sidebar-row--group');
+      if (item.groupId) row.classList.add('sidebar-row--group-child');
 
       const visibleCell = document.createElement('td');
       const isProtected = SIDEBAR_PROTECTED_KEYS.has(item.key);
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.checked = !item.hidden;
-      checkbox.disabled = isProtected;
+      checkbox.disabled = isProtected || isGroup;
       checkbox.setAttribute('aria-label', `Toggle ${item.label}`);
       checkbox.addEventListener('change', () => {
         if (isProtected) {
@@ -321,7 +327,50 @@
       row.appendChild(visibleCell);
 
       const labelCell = document.createElement('td');
-      labelCell.textContent = item.label;
+      if (isGroup) {
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.className = 'input';
+        nameInput.maxLength = 60;
+        nameInput.value = item.label;
+        nameInput.setAttribute('aria-label', 'Group name');
+        nameInput.addEventListener('input', () => { item.label = nameInput.value; });
+        const iconSelect = document.createElement('select');
+        iconSelect.className = 'select';
+        iconSelect.setAttribute('aria-label', 'Group icon');
+        SIDEBAR_GROUP_ICONS.forEach((icon) => {
+          const option = document.createElement('option');
+          option.value = icon;
+          option.textContent = icon.charAt(0).toUpperCase() + icon.slice(1);
+          option.selected = icon === item.icon;
+          iconSelect.appendChild(option);
+        });
+        iconSelect.addEventListener('change', () => { item.icon = iconSelect.value; });
+        labelCell.append(nameInput, iconSelect);
+      } else {
+        const label = document.createElement('span');
+        label.textContent = item.label;
+        labelCell.appendChild(label);
+        const groupSelect = document.createElement('select');
+        groupSelect.className = 'select';
+        groupSelect.setAttribute('aria-label', `Group for ${item.label}`);
+        const ungroupedOption = document.createElement('option');
+        ungroupedOption.value = '';
+        ungroupedOption.textContent = 'No group';
+        groupSelect.appendChild(ungroupedOption);
+        sidebarState.filter((candidate) => candidate.key.startsWith(SIDEBAR_GROUP_KEY_PREFIX)).forEach((group) => {
+          const option = document.createElement('option');
+          option.value = group.key;
+          option.textContent = group.label || 'Untitled group';
+          option.selected = item.groupId === group.key;
+          groupSelect.appendChild(option);
+        });
+        groupSelect.addEventListener('change', () => {
+          item.groupId = groupSelect.value;
+          renderSidebarItems();
+        });
+        labelCell.appendChild(groupSelect);
+      }
       row.appendChild(labelCell);
 
       const handleCell = document.createElement('td');
@@ -340,7 +389,7 @@
 
       const removeCell = document.createElement('td');
       removeCell.className = 'table__actions';
-      const isDividerOrSpacer =
+      const isDividerOrSpacer = isGroup ||
         item.key.startsWith(SIDEBAR_DIVIDER_KEY_PREFIX) ||
         item.key.startsWith(SIDEBAR_SPACER_KEY_PREFIX);
       if (isDividerOrSpacer) {
@@ -350,6 +399,11 @@
         removeButton.textContent = 'Remove';
         removeButton.setAttribute('aria-label', `Remove ${item.label}`);
         removeButton.addEventListener('click', () => {
+          if (isGroup) {
+            sidebarState.forEach((candidate) => {
+              if (candidate.groupId === item.key) candidate.groupId = '';
+            });
+          }
           sidebarState.splice(index, 1);
           renderSidebarItems();
         });
@@ -458,10 +512,31 @@
   }
 
   if (sidebarSection && window.MyPortalSidebarMenu) {
-    sidebarState = window.MyPortalSidebarMenu.listItems().map((item) => ({
+    const savedSidebarPreferences = window.MyPortalSidebarMenu.getPreferences();
+    const availableItems = window.MyPortalSidebarMenu.listItems().map((item) => ({
       ...item,
       hidden: SIDEBAR_PROTECTED_KEYS.has(item.key) ? false : Boolean(item.hidden),
     }));
+    const availableByKey = new Map(availableItems.map((item) => [item.key, item]));
+    const groups = (savedSidebarPreferences.groups || []).map((group) => ({
+      key: group.id,
+      label: group.label,
+      icon: group.icon || 'folder',
+      hidden: false,
+    }));
+    const groupsByKey = new Map(groups.map((group) => [group.key, group]));
+    sidebarState = [];
+    (savedSidebarPreferences.order || []).forEach((key) => {
+      if (groupsByKey.has(key)) {
+        sidebarState.push(groupsByKey.get(key));
+        groupsByKey.delete(key);
+      } else if (availableByKey.has(key)) {
+        sidebarState.push(availableByKey.get(key));
+        availableByKey.delete(key);
+      }
+    });
+    groupsByKey.forEach((group) => sidebarState.push(group));
+    availableByKey.forEach((item) => sidebarState.push(item));
     renderSidebarItems();
 
     if (sidebarSaveButton) {
@@ -472,7 +547,19 @@
           hidden: sidebarState
             .filter((item) => item.hidden && !SIDEBAR_PROTECTED_KEYS.has(item.key))
             .map((item) => item.key),
+          groups: sidebarState
+            .filter((item) => item.key.startsWith(SIDEBAR_GROUP_KEY_PREFIX))
+            .map((group) => ({
+              id: group.key,
+              label: group.label.trim(),
+              icon: group.icon,
+              items: sidebarState.filter((item) => item.groupId === group.key).map((item) => item.key),
+            })),
         };
+        if (payload.groups.some((group) => !group.label)) {
+          showMessage(sidebarError, 'Every group needs a name.');
+          return;
+        }
         try {
           await window.MyPortalSidebarMenu.save(payload);
           showMessage(sidebarSuccess, 'Left menu preferences saved.');
@@ -507,12 +594,25 @@
       });
     }
 
+    if (sidebarAddGroupButton) {
+      sidebarAddGroupButton.addEventListener('click', () => {
+        clearMessages([sidebarSuccess, sidebarError]);
+        sidebarState.push({
+          key: `${SIDEBAR_GROUP_KEY_PREFIX}${Date.now()}`,
+          label: 'New group',
+          icon: 'folder',
+          hidden: false,
+        });
+        renderSidebarItems();
+      });
+    }
+
     if (sidebarResetButton) {
       sidebarResetButton.addEventListener('click', () => {
         clearMessages([sidebarSuccess, sidebarError]);
         sidebarState = window.MyPortalSidebarMenu
           .listItems()
-          .map((item) => ({ ...item, hidden: false }));
+          .map((item) => ({ ...item, hidden: false, groupId: '' }));
         renderSidebarItems();
       });
     }

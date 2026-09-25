@@ -34,7 +34,7 @@ def _audit_user_view(user: dict | None) -> dict | None:
     return {key: value for key, value in user.items() if key not in _USER_SENSITIVE_FIELDS}
 
 
-@router.get("/me/sidebar-preferences", response_model=dict[str, list[str]])
+@router.get("/me/sidebar-preferences", response_model=dict[str, Any])
 async def get_my_sidebar_preferences(
     _: None = Depends(require_database),
     current_user: dict = Depends(get_current_user),
@@ -42,7 +42,7 @@ async def get_my_sidebar_preferences(
     return await sidebar_preferences_repo.get_user_sidebar_preferences(int(current_user["id"]))
 
 
-@router.put("/me/sidebar-preferences", response_model=dict[str, list[str]])
+@router.put("/me/sidebar-preferences", response_model=dict[str, Any])
 async def update_my_sidebar_preferences(
     payload: dict,
     _: None = Depends(require_database),
