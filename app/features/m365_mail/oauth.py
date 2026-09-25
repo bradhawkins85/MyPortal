@@ -56,6 +56,10 @@ class M365MailOAuthService(Protocol):
 
     async def get_account(self, account_id: int) -> dict[str, Any] | None: ...
 
+    async def validate_mailbox_access(
+        self, access_token: str, mailbox: str
+    ) -> None: ...
+
 
 class AsyncPostClient(Protocol):
     async def __aenter__(self) -> "AsyncPostClient": ...
@@ -149,6 +153,16 @@ async def handle_m365_mail_auth_callback(
         tenant_id = str(identity["tid"])
     except Exception:
         return _mail_auth_error("Unable to verify the Microsoft account identity.")
+
+    try:
+        await m365_mail_service.validate_mailbox_access(
+            access_token, str(account.get("user_principal_name") or "")
+        )
+    except Exception:
+        return _mail_auth_error(
+            "The signed-in identity cannot access the configured mailbox. "
+            "No credentials were saved."
+        )
 
     await m365_mail_service.store_delegated_tokens(
         account_id,

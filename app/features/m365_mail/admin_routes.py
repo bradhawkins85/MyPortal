@@ -204,6 +204,10 @@ async def admin_update_m365_mail_account(account_id: int, request: Request):
     updates["delete_after_import"] = _form_bool(form, "deleteAfterImport")
     updates["sync_known_only"] = _form_bool(form, "syncKnownOnly")
     updates["active"] = _form_bool(form, "active")
+    updates["app_fallback_enabled"] = _form_bool(form, "appFallbackEnabled")
+    # This acknowledgement is deliberately mailbox-scoped; it is never inferred
+    # from a company association or from another mailbox in the same tenant.
+    updates["mailbox_app_authorized"] = _form_bool(form, "appFallbackEnabled")
     updates["import_purpose"] = form.get("importPurpose", "support_ticket")
     priority_value = form.get("priority")
     if priority_value not in (None, ""):

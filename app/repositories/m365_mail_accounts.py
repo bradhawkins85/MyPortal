@@ -19,7 +19,10 @@ def _make_aware(value: Any) -> datetime | None:
 
 def _normalise_account(row: dict[str, Any]) -> dict[str, Any]:
     account = dict(row)
-    for key in ("id", "company_id", "scheduled_task_id", "priority"):
+    for key in (
+        "id", "company_id", "auth_company_id", "auth_connection_id",
+        "scheduled_task_id", "priority",
+    ):
         if key in account and account[key] is not None:
             account[key] = int(account[key])
     for key in (
@@ -28,6 +31,8 @@ def _normalise_account(row: dict[str, Any]) -> dict[str, Any]:
         "delete_after_import",
         "sync_known_only",
         "active",
+        "app_fallback_enabled",
+        "mailbox_app_authorized",
     ):
         if key in account:
             account[key] = bool(int(account[key]))
@@ -168,6 +173,12 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
         "name",
         "company_id",
         "tenant_id",
+        "auth_company_id",
+        "auth_connection_id",
+        "auth_tenant_id",
+        "auth_binding_status",
+        "app_fallback_enabled",
+        "mailbox_app_authorized",
         "user_principal_name",
         "mailbox_type",
         "folder",
@@ -200,6 +211,8 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
             "delete_after_import",
             "sync_known_only",
             "active",
+            "app_fallback_enabled",
+            "mailbox_app_authorized",
         }:
             assignments.append(f"{key} = %s")
             params.append(1 if value else 0)
@@ -226,6 +239,25 @@ async def update_account(account_id: int, **fields: Any) -> dict[str, Any] | Non
     return await get_account(account_id)
 
 
+async def get_verified_auth_connection(account: dict[str, Any]) -> dict[str, Any] | None:
+    """Return only the explicitly bound, active and tenant-verified connection.
+
+    This deliberately performs no discovery by mailbox name or tenant probing.
+    """
+    connection_id = account.get("auth_connection_id")
+    tenant_id = str(account.get("auth_tenant_id") or account.get("tenant_id") or "").strip()
+    if not connection_id or not tenant_id:
+        return None
+    row = await db.fetch_one(
+        """SELECT id, company_id, tenant_id, version, state
+           FROM m365_connections
+           WHERE id = %s AND state = 'active' AND verification_tenant = 1
+             AND verified_at IS NOT NULL AND tenant_id = %s""",
+        (int(connection_id), tenant_id),
+    )
+    return dict(row) if row else None
+
+
 async def update_account_tokens(
     account_id: int,
     *,
@@ -245,7 +277,7 @@ async def update_account_tokens(
     if isinstance(token_expires_at, datetime):
         expires_value = token_expires_at.replace(tzinfo=None)
     revision_clause = "" if expected_revision is None else " AND token_revision = %s"
-    params: list[Any] = [tenant_id, refresh_token, access_token, expires_value,
+    params: list[Any] = [tenant_id, tenant_id, refresh_token, access_token, expires_value,
                          oauth_client_id, oauth_authority, oauth_account_id,
                          oauth_scopes, oauth_connection_version, account_id]
     if expected_revision is not None:
@@ -254,6 +286,8 @@ async def update_account_tokens(
         """
         UPDATE m365_mail_accounts
         SET tenant_id = %s,
+            auth_tenant_id = %s,
+            auth_binding_status = 'verified',
             refresh_token = %s,
             access_token = %s,
             token_expires_at = %s,

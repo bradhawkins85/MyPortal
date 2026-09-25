@@ -62,11 +62,19 @@ def test_m365_mail_callback_handles_null_company_id(monkeypatch):
         "extract_tenant_id_from_token",
         lambda token: "tenant-123",
     )
+    async def fake_validate_id_token(token, *, client_id):
+        return {"tid": "tenant-123", "oid": "user-1"}
+
+    monkeypatch.setattr(
+        main_module.m365_service,
+        "validate_microsoft_id_token",
+        fake_validate_id_token,
+    )
 
     stored: dict = {}
 
     async def fake_store_tokens(
-        account_id, *, tenant_id, refresh_token, access_token, expires_at
+        account_id, *, tenant_id, refresh_token, access_token, expires_at, **kwargs
     ):
         stored.update(
             {
@@ -79,12 +87,26 @@ def test_m365_mail_callback_handles_null_company_id(monkeypatch):
         )
 
     async def fake_get_account(account_id):
-        return {"name": "Shared Mailbox", "id": account_id}
+        return {
+            "name": "Shared Mailbox",
+            "id": account_id,
+            "company_id": None,
+            "user_principal_name": "shared@contoso.example",
+        }
+
+    async def fake_validate_mailbox(access_token, mailbox):
+        assert access_token == "access-token"
+        assert mailbox == "shared@contoso.example"
 
     monkeypatch.setattr(
         main_module.m365_mail_service, "store_delegated_tokens", fake_store_tokens
     )
     monkeypatch.setattr(main_module.m365_mail_service, "get_account", fake_get_account)
+    monkeypatch.setattr(
+        main_module.m365_mail_service,
+        "validate_mailbox_access",
+        fake_validate_mailbox,
+    )
 
     class FakeResponse:
         status_code = 200
@@ -123,6 +145,8 @@ def test_m365_mail_callback_handles_null_company_id(monkeypatch):
             "account_id": 1,
             "company_id": None,  # shared mailbox without company association
             "code_verifier": "code-verify",
+            "client_id": "pkce-client-id",
+            "redirect_uri": "https://portal.example/m365/callback",
         }
     )
 
