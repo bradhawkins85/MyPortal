@@ -177,6 +177,38 @@ async def test_graph_post_does_not_hide_duplicate_message_on_unrelated_endpoint(
             )
 
 
+@pytest.mark.anyio("asyncio")
+async def test_graph_patch_does_not_log_expected_error_status():
+    """An anticipated PATCH 404 is left to the recovery flow to log safely."""
+    from unittest.mock import MagicMock
+
+    with (
+        patch("app.services.m365.httpx.AsyncClient") as mock_client_cls,
+        patch.object(m365_service, "log_error") as error_log,
+    ):
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        mock_response.text = "tenant-specific Graph response"
+        mock_response.json.return_value = {
+            "error": {"code": "Request_ResourceNotFound", "message": "not found"}
+        }
+        mock_client_cls.return_value.__aenter__.return_value.patch = AsyncMock(
+            return_value=mock_response
+        )
+
+        with pytest.raises(m365_service.M365Error) as raised:
+            await m365_service._graph_patch(
+                "token",
+                "https://graph.microsoft.com/v1.0/applications/missing-id",
+                {},
+                expected_error_statuses=frozenset({404}),
+            )
+
+    assert raised.value.http_status == 404
+    assert raised.value.graph_error_code == "Request_ResourceNotFound"
+    error_log.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Tests for provision_app_registration
 # ---------------------------------------------------------------------------
