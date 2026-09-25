@@ -413,15 +413,15 @@ _USER_PASSWORD_PROFILE_READWRITE_ALL_ROLE = "4c37e1b6-35a1-43bf-926a-6f30f2cdf58
 _USER_REVOKE_SESSIONS_ALL_ROLE = "77f952ba-9a5f-4521-8c9d-6c9648f7eaf7"
 
 
-def test_provision_app_roles_force_staff_lifecycle_permissions_when_sp_projection_is_stale():
-    """New registrations must retain required staff roles despite stale SP metadata."""
+def test_provision_app_roles_skip_unavailable_staff_lifecycle_permissions():
+    """Do not submit role IDs that the tenant's Graph resource does not expose."""
     for role_id in (
         _USER_PASSWORD_PROFILE_READWRITE_ALL_ROLE,
         _USER_REVOKE_SESSIONS_ALL_ROLE,
     ):
         assert role_id in _PROVISION_APP_ROLES
-        assert role_id in m365_service._FORCE_GRANT_GRAPH_APP_ROLES
-        assert m365_service._is_graph_role_grantable(role_id, set()) is True
+        assert role_id not in m365_service._FORCE_GRANT_GRAPH_APP_ROLES
+        assert m365_service._is_graph_role_grantable(role_id, set()) is False
 
 
 def test_provision_app_roles_includes_reports_read_all():
