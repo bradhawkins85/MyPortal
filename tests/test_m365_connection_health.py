@@ -51,9 +51,34 @@ def test_managed_connection_requires_permissions_for_healthy_state():
 
 
 def test_expired_connection_preserves_reconnect_action_for_rollback_path():
-    health = build_connection_health({**CREDS, "client_secret_expires_at": NOW - timedelta(seconds=1)}, active=VERIFIED, now=NOW)
+    expired_at = NOW - timedelta(seconds=1)
+    health = build_connection_health(
+        {**CREDS, "client_secret_expires_at": expired_at},
+        active={**VERIFIED, "verified_at": expired_at - timedelta(days=1)},
+        now=NOW,
+    )
     assert health["state"] == "reconnect_required"
     assert health["next_action_url"] == "/m365/discover"
+
+
+def test_successful_verification_overrides_stale_credential_expiry_metadata():
+    stale_expiry = NOW - timedelta(days=1)
+    recently_verified = {
+        **VERIFIED,
+        "verified_at": NOW,
+        "client_secret_expires_at": None,
+    }
+
+    health = build_connection_health(
+        {**CREDS, "client_secret_expires_at": stale_expiry},
+        active=recently_verified,
+        permission_results=[{"all_ok": True}],
+        now=NOW,
+    )
+
+    assert health["state"] == "healthy"
+    assert health["label"] == "Connected"
+    assert health["next_action_label"] == "View diagnostics"
 
 
 def test_canonical_diagnostics_has_one_permission_table_and_accessible_controls():
