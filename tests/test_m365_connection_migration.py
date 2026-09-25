@@ -123,6 +123,19 @@ def test_existing_credentials_are_reencrypted_for_legacy_inventory(monkeypatch):
     assert current["client_secret"] == "decrypted-secret"
 
 
+def test_repeated_dependency_inventory_uses_warning_free_upserts(monkeypatch):
+    execute = AsyncMock()
+    monkeypatch.setattr(m365_connections.db, "execute", execute)
+
+    asyncio.run(m365_connections.inventory_dependencies(20, 1, "tenant"))
+
+    assert execute.await_count == 5
+    for call in execute.await_args_list:
+        sql = call.args[0]
+        assert "INSERT IGNORE" not in sql
+        assert "ON DUPLICATE KEY UPDATE" in sql
+
+
 def test_provisioning_never_searches_or_deletes_by_display_name(monkeypatch):
     get_roles = AsyncMock(return_value=("00000000-0000-0000-0000-000000000001", {}))
     build_access = AsyncMock(return_value=([], [], []))

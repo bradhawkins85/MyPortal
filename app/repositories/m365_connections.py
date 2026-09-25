@@ -90,41 +90,48 @@ async def inventory_dependencies(
     connection_id: int, company_id: int, tenant_id: str
 ) -> None:
     """Snapshot every known consumer before an old connection can be retired."""
+    # Unlike INSERT IGNORE, a duplicate-key no-op remains idempotent without
+    # making MySQL emit warning 1062 through aiomysql on every confirmation.
     statements: tuple[tuple[str, tuple[Any, ...]], ...] = (
         (
-            """INSERT IGNORE INTO m365_connection_dependencies
+            """INSERT INTO m365_connection_dependencies
                (connection_id, dependency_type, dependency_key, details)
                SELECT %s, 'scheduled_job', CAST(id AS CHAR), command
-               FROM scheduled_tasks WHERE company_id = %s""",
+               FROM scheduled_tasks WHERE company_id = %s
+               ON DUPLICATE KEY UPDATE dependency_key = dependency_key""",
             (connection_id, company_id),
         ),
         (
-            """INSERT IGNORE INTO m365_connection_dependencies
+            """INSERT INTO m365_connection_dependencies
                (connection_id, dependency_type, dependency_key, details)
                SELECT %s, 'delegated_mailbox', CAST(id AS CHAR), user_principal_name
-               FROM m365_mail_accounts WHERE company_id = %s""",
+               FROM m365_mail_accounts WHERE company_id = %s
+               ON DUPLICATE KEY UPDATE dependency_key = dependency_key""",
             (connection_id, company_id),
         ),
         (
-            """INSERT IGNORE INTO m365_connection_dependencies
+            """INSERT INTO m365_connection_dependencies
                (connection_id, dependency_type, dependency_key, details)
                SELECT %s, 'csp_mapping', CAST(id AS CHAR), csp_tenant_id
-               FROM companies WHERE id = %s AND csp_tenant_id IS NOT NULL""",
+               FROM companies WHERE id = %s AND csp_tenant_id IS NOT NULL
+               ON DUPLICATE KEY UPDATE dependency_key = dependency_key""",
             (connection_id, company_id),
         ),
         (
-            """INSERT IGNORE INTO m365_connection_dependencies
+            """INSERT INTO m365_connection_dependencies
                (connection_id, dependency_type, dependency_key, details)
                SELECT %s, 'personal_contact', CAST(user_id AS CHAR), account_email
-               FROM user_m365_contact_integrations WHERE tenant_id = %s""",
+               FROM user_m365_contact_integrations WHERE tenant_id = %s
+               ON DUPLICATE KEY UPDATE dependency_key = dependency_key""",
             (connection_id, tenant_id),
         ),
         (
-            """INSERT IGNORE INTO m365_connection_dependencies
+            """INSERT INTO m365_connection_dependencies
                (connection_id, dependency_type, dependency_key, details)
                SELECT %s, 'company_bootstrap', CAST(company_id AS CHAR), admin_client_id
                FROM company_m365_credentials WHERE company_id = %s
-                 AND admin_client_id IS NOT NULL AND admin_client_id != ''""",
+                 AND admin_client_id IS NOT NULL AND admin_client_id != ''
+               ON DUPLICATE KEY UPDATE dependency_key = dependency_key""",
             (connection_id, company_id),
         ),
     )
