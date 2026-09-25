@@ -229,6 +229,13 @@ def test_connect_scope_includes_approle_assignment_write():
     assert "AppRoleAssignment.ReadWrite.All" in m365_service.CONNECT_SCOPE
 
 
+def test_connect_scope_includes_application_write_for_self_owner_registration():
+    """CONNECT_SCOPE must allow repair of the app's self-owner relationship."""
+    assert "https://graph.microsoft.com/Application.ReadWrite.All" in (
+        m365_service.CONNECT_SCOPE
+    )
+
+
 def test_connect_scope_includes_directory_read():
     """CONNECT_SCOPE must include Directory.Read.All for service principal lookups."""
     assert "Directory.Read.All" in m365_service.CONNECT_SCOPE
