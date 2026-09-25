@@ -1,0 +1,7 @@
+{
+  "guid": "21f8e9be-7298-4461-b23f-b141f05b0e75",
+  "occurred_at": "2026-09-25T00:00:00Z",
+  "change_type": "Fix",
+  "summary": "Prevent tenant confirmation failures when an interrupted M365 candidate already occupies the first connection version.",
+  "content_hash": "3fb1f7af5a3f0d236d437d3e56deaef9d266ece922d505832aec5de71925fdae"
+}

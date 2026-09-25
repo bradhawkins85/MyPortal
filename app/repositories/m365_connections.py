@@ -39,6 +39,10 @@ async def ensure_legacy(company_id: int, credentials: dict[str, Any]) -> dict[st
             int(active["id"]), company_id, str(credentials.get("tenant_id") or "")
         )
         return active
+    # Version 1 may already belong to a candidate left behind by an interrupted
+    # provisioning attempt.  Allocate the next version instead of silently
+    # hitting that row through the company/version unique key; otherwise the
+    # no-op duplicate update below leaves no active row to return.
     await db.execute(
         """
         INSERT INTO m365_connections
@@ -46,9 +50,21 @@ async def ensure_legacy(company_id: int, credentials: dict[str, Any]) -> dict[st
            app_object_id, client_secret_key_id, client_secret_expires_at,
            verification_tenant, verification_workload, verification_renewal,
            verified_at, activated_at)
-        VALUES (%s, 1, 'legacy', 'active', %s, %s, %s, %s, %s, %s,
-                1, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        ON DUPLICATE KEY UPDATE company_id = VALUES(company_id)
+        SELECT %s, COALESCE(MAX(version), 0) + 1, 'legacy', 'active', %s, %s, %s,
+               %s, %s, %s, 1, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        FROM m365_connections WHERE company_id = %s
+        ON DUPLICATE KEY UPDATE
+          mode = 'legacy',
+          state = 'active',
+          client_secret = VALUES(client_secret),
+          app_object_id = VALUES(app_object_id),
+          client_secret_key_id = VALUES(client_secret_key_id),
+          client_secret_expires_at = VALUES(client_secret_expires_at),
+          verification_tenant = 1,
+          verification_workload = 1,
+          verification_renewal = 1,
+          verified_at = COALESCE(verified_at, CURRENT_TIMESTAMP),
+          activated_at = COALESCE(activated_at, CURRENT_TIMESTAMP)
         """,
         (
             company_id,
@@ -58,6 +74,7 @@ async def ensure_legacy(company_id: int, credentials: dict[str, Any]) -> dict[st
             credentials.get("app_object_id"),
             credentials.get("client_secret_key_id"),
             credentials.get("client_secret_expires_at"),
+            company_id,
         ),
     )
     active = await get_active(company_id)

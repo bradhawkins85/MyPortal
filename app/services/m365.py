@@ -1383,7 +1383,9 @@ async def stage_connection_candidate(
         str(current.get(key) or "").strip()
         for key in ("tenant_id", "client_id", "client_secret")
     ):
-        await connection_repo.ensure_legacy(company_id, current)
+        legacy = current.copy()
+        legacy["client_secret"] = _encrypt(str(current["client_secret"]))
+        await connection_repo.ensure_legacy(company_id, legacy)
     return await connection_repo.stage_candidate(
         company_id=company_id,
         tenant_id=tenant_id,
