@@ -1,0 +1,7 @@
+{
+  "guid": "48b0b920-f738-4cd5-900b-648cceaea040",
+  "occurred_at": "2026-09-25T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added a reporting catalogue query for filtering webhook events by name and response code with request and response data.",
+  "content_hash": "webhook-events-report-by-name-and-response-code"
+}
