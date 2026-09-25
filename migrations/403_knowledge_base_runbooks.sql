@@ -1,3 +1,8 @@
+-- phase: expand
+-- compatible-from: *
+-- compatible-to: *
+-- maintenance: false
+
 ALTER TABLE knowledge_base_articles
     ADD COLUMN owner_id INT NULL AFTER created_by,
     ADD COLUMN lifecycle_status VARCHAR(32) NOT NULL DEFAULT 'draft' AFTER is_published,
