@@ -11,6 +11,7 @@ def _normalise(row: dict[str, Any]) -> dict[str, Any]:
     normalised = dict(row)
     for key in (
         "token_expires_at",
+        "app_token_expires_at",
         "client_secret_expires_at",
         "admin_secret_expires_at",
         "created_at",
