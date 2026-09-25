@@ -473,6 +473,13 @@ class Settings(BaseSettings):
     rag_relationship_batch_size: int = Field(
         default=20, validation_alias="RAG_RELATIONSHIP_BATCH_SIZE", ge=1, le=200
     )
+    rag_relationship_max_context_tokens: int = Field(
+        default=2500,
+        validation_alias="RAG_RELATIONSHIP_MAX_CONTEXT_TOKENS",
+        ge=500,
+        le=20000,
+        description="Maximum input tokens sent to the relationship evaluator.",
+    )
     rag_relationship_min_score: float = Field(
         default=0.55, validation_alias="RAG_RELATIONSHIP_MIN_SCORE", ge=0.0, le=1.0
     )
