@@ -34,6 +34,32 @@ def _make_creds(
     }
 
 
+@pytest.mark.anyio("asyncio")
+async def test_get_credentials_decrypts_app_access_token():
+    """App-only cache entries must be decrypted before use as bearer tokens."""
+    stored = _make_creds()
+    stored["app_access_token"] = "encrypted-app-token"
+
+    with (
+        patch.object(
+            m365_service.m365_repo,
+            "get_credentials",
+            AsyncMock(return_value=stored),
+        ),
+        patch.object(
+            m365_service,
+            "_decrypt",
+            side_effect=lambda value: (
+                "plain-app-token" if value == "encrypted-app-token" else value
+            ),
+        ),
+    ):
+        result = await m365_service.get_credentials(1)
+
+    assert result is not None
+    assert result["app_access_token"] == "plain-app-token"
+
+
 # ---------------------------------------------------------------------------
 # Tests: stored valid token is reused (no token-endpoint call)
 # ---------------------------------------------------------------------------

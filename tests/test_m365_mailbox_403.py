@@ -21,6 +21,51 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio("asyncio")
+async def test_sync_mailboxes_401_force_refreshes_app_token_and_retries():
+    """An unreadable cached bearer token is replaced before retrying Graph."""
+    acquire = AsyncMock(side_effect=["cached-token", "fresh-token"])
+    fetch_report = AsyncMock(
+        side_effect=[
+            M365Error(
+                "Microsoft Graph request failed (401)",
+                http_status=401,
+                graph_error_code="InvalidAuthenticationToken",
+            ),
+            [],
+        ]
+    )
+
+    with (
+        patch.object(m365_service, "acquire_access_token", acquire),
+        patch.object(m365_service, "_fetch_mailbox_usage_report", fetch_report),
+        patch.object(m365_service, "get_all_users", AsyncMock(return_value=[])),
+        patch.object(m365_service, "_fetch_exo_recipient_types", AsyncMock(return_value={})),
+        patch.object(
+            m365_service,
+            "_fetch_exo_mailbox_permissions",
+            AsyncMock(return_value={}),
+        ),
+        patch.object(m365_service.m365_repo, "delete_stale_mailboxes", AsyncMock()),
+        patch.object(m365_service.m365_repo, "delete_stale_mailbox_members", AsyncMock()),
+        patch.object(
+            m365_service,
+            "sync_staff_custom_fields_from_m365_mailboxes",
+            AsyncMock(return_value=0),
+        ),
+    ):
+        result = await m365_service.sync_mailboxes(1)
+
+    assert result == 0
+    assert acquire.await_args_list[0].kwargs == {"force_client_credentials": True}
+    assert acquire.await_args_list[1].kwargs == {
+        "force_client_credentials": True,
+        "force_refresh": True,
+    }
+    assert fetch_report.await_args_list[0].args == ("cached-token",)
+    assert fetch_report.await_args_list[1].args == ("fresh-token",)
+
+
+@pytest.mark.anyio("asyncio")
 async def test_sync_mailboxes_403_no_delegated_token_raises_actionable_error():
     """A 403 from the reports endpoint with no delegated token raises 'Authorise portal access' guidance."""
     with (

@@ -1337,7 +1337,12 @@ async def get_credentials(company_id: int) -> dict[str, Any] | None:
     if not record:
         return None
     decrypted = record.copy()
-    for key in ("client_secret", "refresh_token", "access_token"):
+    for key in (
+        "client_secret",
+        "refresh_token",
+        "access_token",
+        "app_access_token",
+    ):
         decrypted[key] = _decrypt(decrypted.get(key))
     return decrypted
 
@@ -6646,32 +6651,49 @@ async def sync_mailboxes(company_id: int) -> int:
     try:
         report_items = await _fetch_mailbox_usage_report(access_token)
     except M365Error as exc:
-        if exc.http_status != 403:
+        if exc.http_status == 401:
+            # A cached app-only token can be revoked before its recorded expiry
+            # (or may have been written incorrectly by an older deployment).
+            # Evict it by forcing a client-credentials exchange and retry the
+            # idempotent report request once.  Do not enter permission repair:
+            # invalid authentication is distinct from a missing Graph role.
+            access_token = await acquire_access_token(
+                company_id,
+                force_client_credentials=True,
+                force_refresh=True,
+            )
+            report_items = await _fetch_mailbox_usage_report(access_token)
+        elif exc.http_status != 403:
             raise
-        # Attempt to self-heal using the same pattern as sync_company_licenses.
-        delegated_token = await acquire_delegated_token(company_id)
-        if delegated_token:
-            await try_grant_missing_permissions(company_id, access_token=delegated_token)
-            access_token = await acquire_access_token(company_id, force_client_credentials=True)
-            try:
-                report_items = await _fetch_mailbox_usage_report(access_token)
-            except M365Error as retry_exc:
-                if retry_exc.http_status == 403:
-                    raise M365Error(
-                        "Mailbox sync failed (403 Forbidden). Permissions have been "
-                        "re-applied but may not yet be effective due to Azure AD propagation "
-                        "delay. Please wait a few minutes and try again.",
-                        http_status=403,
-                    ) from retry_exc
-                raise
         else:
-            raise M365Error(
-                "Mailbox sync failed (403 Forbidden). The enterprise app does not have the "
-                "required permissions (e.g. Reports.Read.All). To fix this: on the M365 "
-                "settings page, click 'Authorise portal access' to complete setup and grant "
-                "the required permissions.",
-                http_status=403,
-            ) from exc
+            # Attempt to self-heal using the same pattern as sync_company_licenses.
+            delegated_token = await acquire_delegated_token(company_id)
+            if delegated_token:
+                await try_grant_missing_permissions(company_id, access_token=delegated_token)
+                access_token = await acquire_access_token(
+                    company_id,
+                    force_client_credentials=True,
+                    force_refresh=True,
+                )
+                try:
+                    report_items = await _fetch_mailbox_usage_report(access_token)
+                except M365Error as retry_exc:
+                    if retry_exc.http_status == 403:
+                        raise M365Error(
+                            "Mailbox sync failed (403 Forbidden). Permissions have been "
+                            "re-applied but may not yet be effective due to Azure AD propagation "
+                            "delay. Please wait a few minutes and try again.",
+                            http_status=403,
+                        ) from retry_exc
+                    raise
+            else:
+                raise M365Error(
+                    "Mailbox sync failed (403 Forbidden). The enterprise app does not have the "
+                    "required permissions (e.g. Reports.Read.All). To fix this: on the M365 "
+                    "settings page, click 'Authorise portal access' to complete setup and grant "
+                    "the required permissions.",
+                    http_status=403,
+                ) from exc
 
     def _looks_obfuscated_identifier(value: str) -> bool:
         """Return True for report identifiers that look privacy-obfuscated.
