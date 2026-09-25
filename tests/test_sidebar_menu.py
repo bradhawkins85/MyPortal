@@ -215,6 +215,20 @@ def test_hidden_expandable_sidebar_items_are_not_displayed():
     assert "display: none" in hidden_rule
 
 
+def test_sidebar_custom_groups_have_profile_controls_and_nested_styles():
+    base_template = Path("app/templates/base.html").read_text()
+    profile_template = Path("app/templates/admin/profile.html").read_text()
+    profile_script = Path("app/static/js/profile.js").read_text()
+    stylesheet = Path("app/static/css/app.css").read_text()
+
+    assert "buildCustomGroup" in base_template
+    assert "sidebarGroupIcons" in base_template
+    assert "data-sidebar-add-group" in profile_template
+    assert "SIDEBAR_GROUP_ICONS" in profile_script
+    assert "sidebar-row--group-child" in stylesheet
+    assert "menu__submenu--custom" in stylesheet
+
+
 def test_profile_menu_permission_shows_my_profile_for_non_admin(monkeypatch):
     user = {"id": 7, "email": "user@example.com", "is_super_admin": False}
     membership = {
