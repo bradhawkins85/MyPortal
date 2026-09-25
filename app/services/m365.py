@@ -186,7 +186,8 @@ def get_required_app_role_ids() -> list[str]:
 PROVISION_SCOPE = (
     "https://graph.microsoft.com/Application.ReadWrite.All "
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
-    "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory offline_access"
+    "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory "
+    "openid profile offline_access"
 )
 
 # Delegated scopes requested during the "Authorize portal access" (connect) flow.
@@ -202,7 +203,8 @@ PROVISION_SCOPE = (
 CONNECT_SCOPE = (
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
     "https://graph.microsoft.com/Directory.Read.All "
-    "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory offline_access"
+    "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory "
+    "openid profile offline_access"
 )
 
 # Minimal scopes used for the tenant-discovery sign-in step
