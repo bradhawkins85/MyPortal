@@ -194,6 +194,8 @@ PROVISION_SCOPE = (
 # The connect callback calls try_grant_missing_permissions() which needs
 # AppRoleAssignment.ReadWrite.All to add any newly-required application permissions
 # (e.g. SharePointTenantSettings.Read.All for SPO best-practice checks),
+# Application.ReadWrite.All to register the integration service principal as an
+# owner of its app registration (required for automatic credential renewal),
 # Directory.Read.All to look up service principals (including the Teams SP for
 # Teams.ManageAsApp grants), and RoleManagement.ReadWrite.Directory to assign the
 # Exchange Administrator and Teams Service Administrator directory roles.
@@ -201,6 +203,7 @@ PROVISION_SCOPE = (
 # delegated permissions even if they are not statically configured on the enterprise
 # app registration (Microsoft Entra ID dynamic consent).
 CONNECT_SCOPE = (
+    "https://graph.microsoft.com/Application.ReadWrite.All "
     "https://graph.microsoft.com/AppRoleAssignment.ReadWrite.All "
     "https://graph.microsoft.com/Directory.Read.All "
     "https://graph.microsoft.com/RoleManagement.ReadWrite.Directory "
