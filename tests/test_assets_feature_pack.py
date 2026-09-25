@@ -32,6 +32,9 @@ EXPECTED = {
     ("POST", "/devices/scanners/{device_id}/scan"),
     ("POST", "/assets/settings/device-types"),
     ("POST", "/assets/settings/device-types/{device_type_id}/delete"),
+    ("POST", "/assets/settings/required-fields"),
+    ("POST", "/assets/{asset_id}"),
+    ("POST", "/assets/{asset_id}/archive"),
     ("DELETE", "/assets/{asset_id}"),
 }
 
@@ -137,7 +140,7 @@ def test_assets_pack_loads_and_reloads_cleanly():
 
 
 @pytest.mark.anyio
-async def test_asset_detail_page_redirects_to_assets_anchor(monkeypatch):
+async def test_asset_detail_page_renders_canonical_asset(monkeypatch):
     import app.repositories.assets as asset_repo
 
     monkeypatch.setattr(
@@ -150,11 +153,17 @@ async def test_asset_detail_page_redirects_to_assets_anchor(monkeypatch):
         "get_asset_by_id",
         AsyncMock(return_value={"id": 42, "company_id": 3}),
     )
+    monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "list_field_definitions", AsyncMock(return_value=[]))
+    monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "get_all_asset_field_values", AsyncMock(return_value={}))
+    monkeypatch.setattr(asset_repo, "list_required_fields", AsyncMock(return_value=[]))
+    monkeypatch.setattr(asset_repo, "list_tickets_for_asset", AsyncMock(return_value=[]))
+    renderer = AsyncMock(return_value=assets_routes.HTMLResponse("detail"))
+    monkeypatch.setattr(main_module, "_render_template", renderer)
 
     response = await assets_routes.asset_detail_page(_make_request("/assets/42"), 42)
 
-    assert response.status_code == 303
-    assert response.headers["location"] == "/assets#asset-42"
+    assert response.status_code == 200
+    assert renderer.await_args.args[0] == "assets/detail.html"
 
 
 @pytest.mark.anyio

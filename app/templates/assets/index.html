@@ -112,7 +112,11 @@
                 {% set key = column.key %}
                 {% set value = asset.get(key) %}
                 {% set mobile_priority = column.priority %}
-                {% if key in ['ram_gb', 'approx_age', 'performance_score'] %}
+                {% if key == 'name' %}
+                  <td data-label="{{ column.label }}" data-column="{{ key }}" data-value="{{ value or '' }}" data-mobile-priority="essential">
+                    <a href="/assets/{{ asset.id }}">{{ value or ('Asset ' ~ asset.id) }}</a>
+                  </td>
+                {% elif key in ['ram_gb', 'approx_age', 'performance_score'] %}
                   <td
                     data-label="{{ column.label }}"
                     data-column="{{ key }}"

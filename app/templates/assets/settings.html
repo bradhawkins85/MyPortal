@@ -14,6 +14,17 @@
 {% block content %}
 <div class="admin-grid admin-grid--columns">
   <section class="card card--panel admin-grid__full">
+    <header class="card__header card__header--stacked"><div><h2 class="card__title">Per-type documentation requirements</h2><p class="card__subtitle">Optional rules flag incomplete documentation without replacing existing custom values.</p></div></header>
+    <form method="post" action="/assets/settings/required-fields">
+      <div class="card__body"><div class="form-group"><label class="form-label" for="required-asset-type">Asset type</label><input class="input" id="required-asset-type" name="asset_type" required maxlength="255" placeholder="Server"></div>
+      {% for key, label in [('owner', 'Owner'), ('support_contact', 'Support contact'), ('criticality', 'Criticality'), ('location', 'Location'), ('operational_notes', 'Operational notes')] %}<label><input type="checkbox" name="field_keys" value="{{ key }}"> {{ label }}</label>{% endfor %}
+      {% for field in field_definitions %}<label><input type="checkbox" name="field_keys" value="custom:{{ field.id }}"> {{ field.display_name or field.name }} (custom)</label>{% endfor %}
+      <p class="form-help">Submitting an asset type replaces only that type's requirement list. Existing asset and custom-field values remain unchanged.</p></div>
+      <footer class="card__footer"><button class="button button--primary" type="submit">Save requirements</button></footer>
+    </form>
+    {% if required_field_rules %}<div class="card__body"><h3>Configured rules</h3><ul>{% for rule in required_field_rules %}<li>{{ rule.asset_type }}: {{ rule.field_key }}</li>{% endfor %}</ul></div>{% endif %}
+  </section>
+  <section class="card card--panel admin-grid__full">
     <header class="card__header card__header--stacked">
       <div>
         <h2 class="card__title">Custom Fields Configuration</h2>
