@@ -5126,10 +5126,24 @@ async def get_last_enterprise_app_permissions(
     if not rows:
         return []
 
+    # Only current contract entries can determine connection health.  Permission
+    # GUIDs occasionally change upstream, and the result table is intentionally
+    # upserted by GUID so that an interrupted check cannot erase the last known
+    # state.  That also means rows written by an older contract can remain in
+    # the table.  Do not let those obsolete rows keep an otherwise repaired
+    # tenant degraded (or make a removed permission appear to be required).
+    catalog_permissions = {
+        (str(app["app_id"]), str(permission["id"]))
+        for app in ENTERPRISE_APP_CATALOG
+        for permission in app["permissions"]
+    }
+
     # Group rows by app_id, preserving the catalog order.
     by_app: dict[str, dict[str, Any]] = {}
     for row in rows:
-        app_id = row["app_id"]
+        app_id = str(row["app_id"])
+        if (app_id, str(row["role_id"])) not in catalog_permissions:
+            continue
         if app_id not in by_app:
             by_app[app_id] = {
                 "name": row["app_name"],

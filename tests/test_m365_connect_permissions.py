@@ -409,7 +409,7 @@ async def test_try_grant_missing_permissions_returns_false_when_all_grants_fail(
 
 _USER_READWRITE_ALL_ROLE = "741f803b-c850-494e-b5df-cde7c675a1ca"  # User.ReadWrite.All
 _GROUP_MEMBER_READWRITE_ALL_ROLE = "dbaae8cf-10b5-4b86-a4a1-f871c94c6695"  # GroupMember.ReadWrite.All
-_USER_PASSWORD_PROFILE_READWRITE_ALL_ROLE = "4c37e1b6-35a1-43bf-926a-6f30f2cdf585"
+_USER_PASSWORD_PROFILE_READWRITE_ALL_ROLE = "cc117bb9-00cf-4eb8-b580-ea2a878fe8f7"
 _USER_REVOKE_SESSIONS_ALL_ROLE = "77f3a031-c388-4f99-b373-dc68676a979e"
 _INVALID_USER_REVOKE_SESSIONS_ALL_ROLE = "77f952ba-9a5f-4521-8c9d-6c9648f7eaf7"
 
@@ -429,6 +429,42 @@ def test_provision_app_roles_exclude_invalid_revoke_sessions_role_id():
     """Never submit the former, invalid User.RevokeSessions.All role ID."""
     assert _USER_REVOKE_SESSIONS_ALL_ROLE in _PROVISION_APP_ROLES
     assert _INVALID_USER_REVOKE_SESSIONS_ALL_ROLE not in _PROVISION_APP_ROLES
+
+
+@pytest.mark.anyio("asyncio")
+async def test_last_permission_results_ignore_roles_from_an_old_contract():
+    """Obsolete GUID rows must not keep a repaired tenant degraded."""
+    rows = [
+        {
+            "app_id": _GRAPH_APP_ID,
+            "app_name": "Microsoft Graph",
+            "role_id": _USER_REVOKE_SESSIONS_ALL_ROLE,
+            "role_name": "User.RevokeSessions.All",
+            "status": "pass",
+            "checked_at": None,
+        },
+        {
+            "app_id": _GRAPH_APP_ID,
+            "app_name": "Microsoft Graph",
+            "role_id": _INVALID_USER_REVOKE_SESSIONS_ALL_ROLE,
+            "role_name": "User.RevokeSessions.All",
+            "status": "not_supported",
+            "checked_at": None,
+        },
+    ]
+
+    with patch.object(
+        m365_service.m365_repo,
+        "list_permission_check_results",
+        AsyncMock(return_value=rows),
+    ):
+        results = await m365_service.get_last_enterprise_app_permissions(62)
+
+    assert len(results) == 1
+    assert results[0]["all_ok"] is True
+    assert [item["id"] for item in results[0]["permissions"]] == [
+        _USER_REVOKE_SESSIONS_ALL_ROLE
+    ]
 
 
 def test_provision_app_roles_includes_reports_read_all():
