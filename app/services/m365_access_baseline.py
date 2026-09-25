@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
-CONTRACT_VERSION = "2026-09-25.2"
+CONTRACT_VERSION = "2026-09-25.3"
 
 
 @dataclass(frozen=True)
@@ -50,7 +50,7 @@ GRAPH_APPLICATION_PERMISSION_IDS = {
     # Staff lifecycle permissions are additive.  User.ReadWrite.All remains in
     # the legacy baseline for compatibility, but it is not presented as the
     # least-privileged permission for these property-specific operations.
-    "User-PasswordProfile.ReadWrite.All": "4c37e1b6-35a1-43bf-926a-6f30f2cdf585",
+    "User-PasswordProfile.ReadWrite.All": "cc117bb9-00cf-4eb8-b580-ea2a878fe8f7",
     "User.EnableDisableAccount.All": "3011c876-62b7-4ada-afa2-506cbbecc68c",
     "User.RevokeSessions.All": "77f3a031-c388-4f99-b373-dc68676a979e",
     "LicenseAssignment.ReadWrite.All": "5facf0c1-8979-4e95-abcf-ff3d079771c0",
