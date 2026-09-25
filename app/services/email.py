@@ -103,20 +103,13 @@ async def send_email(
         logger.warning("Email delivery skipped because no recipients were provided", subject=subject)
         return False, None
 
-    # M365 direct delivery is evaluated before SMTP availability: it is an
-    # alternative transport, not an SMTP enhancement.  Each recipient gets a
-    # distinct Inbox item so Graph can report that person's read state.
+    # M365 notification handling is evaluated before SMTP. Its result describes
+    # the actual Graph operation (created Inbox draft or submitted mail), not a
+    # delivery confirmation.
     try:
-        from app.repositories import module as module_repo
-
-        module_row = await module_repo.get_by_name("m365-direct-delivery")
-        direct_module = (
-            {
-                "enabled": bool(getattr(module_row, "enabled", False)),
-                "settings": getattr(module_row, "settings", None),
-            }
-            if module_row
-            else None
+        from app.services import modules as module_service
+        direct_module = await module_service.get_module(
+            "m365-direct-delivery", redact=False
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         direct_module = None
@@ -137,34 +130,60 @@ async def send_email(
             if not configured_domains or address.rsplit("@", 1)[-1].lower() in configured_domains
         ]
         delivered: list[str] = []
+        outcomes: list[dict[str, Any]] = []
         direct_errors: list[tuple[str, Exception]] = []
         if direct_company_id:
             from app.services import m365_direct_delivery
 
             for address in direct_recipients:
                 try:
-                    result = await m365_direct_delivery.deposit_message(
+                    mode = str(direct_settings.get("delivery_mode") or "inbox_item")
+                    configured_sender = str(direct_settings.get("sender_address") or "").strip()
+                    from app.services import email_recipients
+                    if ticket_reply_id:
+                        prior = await email_recipients.get_m365_terminal_operation(
+                            reply_id=ticket_reply_id, recipient_email=address,
+                        )
+                        if prior:
+                            delivered.append(address)
+                            outcomes.append(prior)
+                            continue
+                    result = await m365_direct_delivery.deliver_message(
                         company_id=direct_company_id,
                         recipient=address,
                         subject=subject,
                         html_body=html_body,
                         text_body=text_body,
-                        sender=sender,
+                        sender=configured_sender or (sender if mode == "inbox_item" else None),
                         reply_to=reply_to,
                         attachments=attachments,
+                        mode=mode,
                     )
-                    delivered.append(address)
-                    if ticket_reply_id and result.get("message_id"):
-                        from app.services import email_recipients
-
-                        await email_recipients.record_m365_delivery(
+                    if ticket_reply_id:
+                        await email_recipients.record_m365_operation(
                             reply_id=ticket_reply_id,
                             recipient_email=address,
                             company_id=direct_company_id,
-                            message_id=result["message_id"],
+                            message_id=result.get("message_id"),
+                            operation=result["operation"], state=result["state"],
                         )
+                    delivered.append(address)
+                    outcomes.append(result)
                 except Exception as exc:
                     direct_errors.append((address, exc))
+                    if ticket_reply_id:
+                        try:
+                            from app.services import email_recipients
+                            await email_recipients.record_m365_operation(
+                                reply_id=ticket_reply_id, recipient_email=address,
+                                company_id=direct_company_id, message_id=None,
+                                operation=str(direct_settings.get("delivery_mode") or "inbox_item"),
+                                state=("unknown" if isinstance(
+                                    exc, m365_direct_delivery.AmbiguousDeliveryError
+                                ) else "failed"),
+                            )
+                        except Exception as history_exc:  # pragma: no cover - defensive
+                            logger.warning("Unable to record M365 failure", error=str(history_exc))
                     logger.warning(
                         "M365 direct delivery failed",
                         recipient=address, subject=subject, error=str(exc),
@@ -172,17 +191,21 @@ async def send_email(
         elif direct_recipients:
             logger.error("M365 direct delivery is enabled without a company_id")
         to_addresses = [address for address in to_addresses if address not in delivered]
-        if direct_errors and not direct_settings.get("fallback_to_smtp", True):
+        # sendMail may have reached Exchange before a timeout. Falling back to
+        # SMTP could duplicate it and would silently change transport.
+        if direct_errors and (direct_settings.get("delivery_mode") == "send_mail" or
+                              not direct_settings.get("fallback_to_smtp", True)):
             failed = ", ".join(address for address, _ in direct_errors)
             raise EmailDispatchError(f"M365 direct delivery failed for: {failed}")
         if not to_addresses:
             logger.info(
-                "Email deposited directly into M365 inboxes",
+                "M365 notification operation completed",
                 subject=subject, recipients=delivered, tracking=bool(ticket_reply_id),
             )
             return True, {
-                "status": "succeeded", "provider": "m365-direct-delivery",
-                "recipients": delivered,
+                "status": outcomes[0]["state"] if len(outcomes) == 1 else "completed",
+                "operation": outcomes[0]["operation"] if len(outcomes) == 1 else "mixed",
+                "provider": "m365-direct-delivery", "recipients": delivered,
             }
 
     if not settings.smtp_host:
@@ -195,7 +218,8 @@ async def send_email(
     modified_html_body = html_body
     
     try:
-        smtp2go_module = await module_runtime_service.get_module(
+        from app.services import modules as module_service
+        smtp2go_module = await module_service.get_module(
             "smtp2go", redact=False
         )
         if smtp2go_module and smtp2go_module.get("enabled"):

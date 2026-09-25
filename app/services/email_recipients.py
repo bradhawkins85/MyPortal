@@ -232,6 +232,7 @@ async def get_recipients_for_reply(reply_id: int) -> list[dict[str, Any]]:
             """
             SELECT id, ticket_reply_id, recipient_email, recipient_role, recipient_name,
                    tracking_id, smtp2go_message_id, m365_message_id, m365_company_id,
+                   m365_operation, m365_state, m365_read_state,
                    email_sent_at, email_processed_at, email_delivered_at,
                    email_opened_at, email_open_count,
                    email_bounced_at, email_rejected_at, email_spam_at,
@@ -254,10 +255,26 @@ async def get_recipients_for_reply(reply_id: int) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-async def record_m365_delivery(
-    *, reply_id: int, recipient_email: str, company_id: int, message_id: str
+async def get_m365_terminal_operation(*, reply_id: int, recipient_email: str) -> dict[str, Any] | None:
+    """Return a completed operation so a caller retry cannot duplicate it."""
+    row = await db.fetch_one(
+        """SELECT m365_operation, m365_state, m365_message_id
+             FROM ticket_reply_email_recipients
+            WHERE ticket_reply_id = :reply_id AND recipient_email = :email
+              AND m365_state IN ('created', 'submitted', 'unknown') LIMIT 1""",
+        {"reply_id": int(reply_id), "email": _normalise_email(recipient_email)},
+    )
+    if not row:
+        return None
+    return {"operation": row["m365_operation"], "state": row["m365_state"],
+            "message_id": row["m365_message_id"]}
+
+
+async def record_m365_operation(
+    *, reply_id: int, recipient_email: str, company_id: int,
+    message_id: str | None, operation: str, state: str,
 ) -> None:
-    """Record a successful direct Inbox deposit for later read-status checks."""
+    """Record what Graph verified; created/submitted are not delivered."""
     now = datetime.now(timezone.utc)
     await record_recipients(
         reply_id=reply_id, tracking_id=None, smtp2go_message_id=None,
@@ -266,12 +283,22 @@ async def record_m365_delivery(
     await db.execute(
         """UPDATE ticket_reply_email_recipients
               SET m365_message_id = :message_id, m365_company_id = :company_id,
-                  email_delivered_at = COALESCE(email_delivered_at, :now),
-                  last_event_at = :now, last_event_type = 'delivered', updated_at = :now
+                  m365_operation = :operation, m365_state = :state,
+                  email_sent_at = CASE WHEN :state = 'submitted' THEN COALESCE(email_sent_at, :now) ELSE NULL END,
+                  last_event_at = :now, last_event_type = :state, updated_at = :now
             WHERE ticket_reply_id = :reply_id AND recipient_email = :email""",
-        {"message_id": message_id, "company_id": company_id, "now": now,
+        {"message_id": message_id, "company_id": company_id, "operation": operation,
+         "state": state, "now": now,
          "reply_id": int(reply_id), "email": _normalise_email(recipient_email)},
     )
+
+
+async def record_m365_delivery(*, reply_id: int, recipient_email: str,
+                               company_id: int, message_id: str) -> None:
+    """Compatibility wrapper: historical 'delivery' was an Inbox item create."""
+    await record_m365_operation(reply_id=reply_id, recipient_email=recipient_email,
+                                company_id=company_id, message_id=message_id,
+                                operation="inbox_item", state="created")
 
 
 async def refresh_m365_read_status(reply_id: int) -> None:
@@ -310,11 +337,27 @@ async def refresh_m365_read_status(reply_id: int) -> None:
                 await db.execute(
                     """UPDATE ticket_reply_email_recipients
                           SET email_opened_at = :now, email_open_count = 1,
+                              m365_read_state = 'read',
                               last_event_at = :now, last_event_type = 'open', updated_at = :now
                         WHERE id = :id AND email_opened_at IS NULL""",
                     {"now": now, "id": row["id"]},
                 )
-        except Exception as exc:  # a deleted message must not break the status popup
+            else:
+                await db.execute(
+                    """UPDATE ticket_reply_email_recipients
+                          SET m365_read_state = 'unread', updated_at = :now
+                        WHERE id = :id AND email_opened_at IS NULL""",
+                    {"now": datetime.now(timezone.utc), "id": row["id"]},
+                )
+        except Exception as exc:  # moved/deleted/unavailable means unknown, not unread
+            now = datetime.now(timezone.utc)
+            await db.execute(
+                """UPDATE ticket_reply_email_recipients
+                      SET m365_read_state = 'unknown', last_event_at = :now,
+                          last_event_type = 'read_unknown', updated_at = :now
+                    WHERE id = :id AND email_opened_at IS NULL""",
+                {"now": now, "id": row["id"]},
+            )
             logger.debug("Unable to refresh M365 message read status", recipient_id=row["id"], error=str(exc))
 
 
@@ -552,6 +595,8 @@ def compute_status(row: Mapping[str, Any]) -> str:
         return "delivered"
     if row.get("email_processed_at"):
         return "processed"
+    if row.get("m365_state") in {"created", "submitted", "failed", "unknown"}:
+        return str(row["m365_state"])
     if row.get("email_sent_at"):
         return "sent"
     return "pending"

@@ -321,6 +321,9 @@ async def list_reply_recipients(
                 "last_event_at": _iso(row.get("last_event_at")),
                 "last_event_type": row.get("last_event_type"),
                 "last_event_detail": row.get("last_event_detail"),
+                "m365_operation": row.get("m365_operation"),
+                "m365_state": row.get("m365_state"),
+                "m365_read_state": row.get("m365_read_state"),
             }
         )
 
