@@ -1447,11 +1447,10 @@ async def verify_connection_candidate(
     error: str | None = None
     try:
         secret = _decrypt(candidate.get("client_secret"))
-        token, _, _ = await _exchange_token(
+        token = await _exchange_new_connection_token(
             tenant_id=str(candidate["tenant_id"]),
             client_id=str(candidate["client_id"]),
             client_secret=secret,
-            refresh_token=None,
         )
         organization = await _graph_get(
             token, "https://graph.microsoft.com/v1.0/organization?$select=id"
@@ -1481,6 +1480,46 @@ async def verify_connection_candidate(
     if not result:
         raise M365Error("Microsoft 365 connection candidate disappeared")
     return result
+
+
+async def _exchange_new_connection_token(
+    *, tenant_id: str, client_id: str, client_secret: str | None
+) -> str:
+    """Acquire a newly provisioned app token after Entra replication.
+
+    ``addPassword`` can return successfully before the new credential is
+    accepted by every Microsoft identity endpoint.  The setup page is shown
+    immediately afterwards, so a single exchange made by *Complete setup* can
+    otherwise reject a valid connection with ``invalid_client``.  Keep this
+    retry local to candidate verification: normal authentication failures must
+    continue to fail fast for established connections.
+    """
+    last_error: M365Error | None = None
+    delay = 1.0
+    for attempt in range(1, 6):
+        try:
+            token, _, _ = await _exchange_token(
+                tenant_id=tenant_id,
+                client_id=client_id,
+                client_secret=client_secret or "",
+                refresh_token=None,
+            )
+            return token
+        except M365Error as exc:
+            last_error = exc
+            if attempt == 5:
+                break
+            log_info(
+                "New M365 connection credential not yet available; retrying",
+                tenant_id=tenant_id,
+                client_id=client_id,
+                attempt=attempt,
+                delay_seconds=delay,
+            )
+            await asyncio.sleep(delay)
+            delay *= 2
+    assert last_error is not None
+    raise last_error
 
 
 async def activate_connection_candidate(company_id: int, connection_id: int) -> dict[str, Any]:
