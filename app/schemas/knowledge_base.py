@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, conint, constr
 
 PermissionScope = Literal["anonymous", "user", "company", "company_admin", "super_admin"]
+LifecycleStatus = Literal["draft", "in_review", "published", "retired"]
 
 
 class KnowledgeBaseArticleSection(BaseModel):
@@ -28,6 +29,10 @@ class KnowledgeBaseArticleBase(BaseModel):
     allowed_company_ids: list[int] = Field(default_factory=list)
     sections: list[KnowledgeBaseArticleSection] = Field(default_factory=list)
     content: str | None = Field(default=None)
+    owner_id: int | None = None
+    lifecycle_status: LifecycleStatus = "draft"
+    review_due_at: datetime | None = None
+    asset_ids: list[int] = Field(default_factory=list)
 
 
 class KnowledgeBaseArticleCreate(KnowledgeBaseArticleBase):
@@ -44,6 +49,10 @@ class KnowledgeBaseArticleUpdate(BaseModel):
     allowed_user_ids: list[int] | None = None
     allowed_company_ids: list[int] | None = None
     sections: list[KnowledgeBaseArticleSection] | None = None
+    owner_id: int | None = None
+    lifecycle_status: LifecycleStatus | None = None
+    review_due_at: datetime | None = None
+    asset_ids: list[int] | None = None
 
 
 class KnowledgeBaseArticleResponse(BaseModel):
@@ -66,6 +75,12 @@ class KnowledgeBaseArticleResponse(BaseModel):
     created_at: datetime | None
     updated_at: datetime | None
     published_at: datetime | None
+    owner_id: int | None = None
+    lifecycle_status: LifecycleStatus = "draft"
+    review_due_at: datetime | None = None
+    asset_ids: list[int] = Field(default_factory=list)
+    assets: list[dict] = Field(default_factory=list)
+    attachments: list[dict] = Field(default_factory=list)
 
 
 class KnowledgeBaseArticleListItem(BaseModel):
@@ -80,6 +95,9 @@ class KnowledgeBaseArticleListItem(BaseModel):
     updated_at: datetime | None
     updated_at_iso: str | None
     published_at_iso: str | None
+    owner_id: int | None = None
+    lifecycle_status: LifecycleStatus = "draft"
+    review_due_at_iso: str | None = None
 
 
 class KnowledgeBaseSearchRequest(BaseModel):

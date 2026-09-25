@@ -498,6 +498,10 @@ def _serialise_article(
         "manual_ai_tags": list(article.get("manual_ai_tags") or []),
         "permission_scope": str(article.get("permission_scope")),
         "is_published": bool(article.get("is_published")),
+        "lifecycle_status": str(article.get("lifecycle_status") or "draft"),
+        "owner_id": article.get("owner_id"),
+        "review_due_at": article.get("review_due_at_utc"),
+        "review_due_at_iso": _isoformat(article.get("review_due_at_utc")),
         "updated_at": article.get("updated_at_utc"),
         "updated_at_iso": _isoformat(article.get("updated_at_utc")),
         "published_at": article.get("published_at_utc"),
@@ -578,6 +582,9 @@ def _serialise_article(
                     article.get("company_admin_ids", [])
                 ),
                 "conditional_companies": sorted(all_conditional_companies),
+                "asset_ids": _normalise_ids(article.get("asset_ids", [])),
+                "assets": list(article.get("assets") or []),
+                "attachments": list(article.get("attachments") or []),
             }
         )
     return base
@@ -592,7 +599,9 @@ async def list_articles_for_context(
     articles = await kb_repo.list_articles(include_unpublished=include_unpublished)
     visible: list[dict[str, Any]] = []
     for article in articles:
-        if include_unpublished or article.get("is_published"):
+        lifecycle = article.get("lifecycle_status") or ("published" if article.get("is_published") else "draft")
+        publishable = article.get("is_published") and lifecycle == "published"
+        if include_unpublished or publishable:
             if _article_visible(article, context) or include_permissions:
                 visible.append(
                     _serialise_article(
@@ -626,7 +635,10 @@ async def get_article_by_slug_for_context(
         return None
     if (
         not include_unpublished
-        and not article.get("is_published")
+        and (
+            not article.get("is_published")
+            or (article.get("lifecycle_status") or "published") != "published"
+        )
         and not context.is_super_admin
     ):
         return None
@@ -672,9 +684,13 @@ async def create_article(
         published_at=published_at,
         created_by=author_id,
         ai_tags=None,
+        owner_id=payload.get("owner_id") or author_id,
+        lifecycle_status=("published" if is_published else str(payload.get("lifecycle_status") or "draft")),
+        review_due_at=payload.get("review_due_at"),
     )
     await _sync_relations(created["id"], permission_scope, payload)
     await kb_repo.replace_article_sections(created["id"], prepared_sections)
+    await kb_repo.replace_article_assets(created["id"], payload.get("asset_ids") or [])
     refreshed = await kb_repo.get_article_by_id(created["id"])
     if not refreshed:
         raise RuntimeError("Failed to load knowledge base article after creation")
@@ -696,10 +712,13 @@ async def update_article(
     payload: Mapping[str, Any],
     *,
     notifier: RefreshNotifier | None = None,
+    editor_id: int | None = None,
 ) -> dict[str, Any]:
     current = await kb_repo.get_article_by_id(article_id)
     if not current:
         raise ValueError("Article not found")
+    # Capture the complete pre-edit state before destructive section/relation writes.
+    await kb_repo.create_article_version(current, created_by=editor_id)
     updates: dict[str, Any] = {}
     if "slug" in payload:
         updates["slug"] = payload.get("slug")
@@ -734,12 +753,16 @@ async def update_article(
         sections_update_required = True
     if "permission_scope" in payload:
         updates["permission_scope"] = payload.get("permission_scope")
+    for field in ("owner_id", "review_due_at", "lifecycle_status"):
+        if field in payload:
+            updates[field] = payload.get(field)
     published_flag = payload.get("is_published")
     if published_flag is not None:
         updates["is_published"] = bool(published_flag)
         updates["published_at"] = (
             datetime.now(timezone.utc) if updates["is_published"] else None
         )
+        updates["lifecycle_status"] = "published" if updates["is_published"] else str(payload.get("lifecycle_status") or "draft")
     title_for_ai_source = updates.get("title", current.get("title"))
     title_for_ai = str(title_for_ai_source) if title_for_ai_source is not None else ""
     summary_for_ai = (
@@ -752,6 +775,8 @@ async def update_article(
     await _sync_relations(article_id, permission_scope, payload)
     if sections_update_required:
         await kb_repo.replace_article_sections(article_id, prepared_sections)
+    if "asset_ids" in payload:
+        await kb_repo.replace_article_assets(article_id, payload.get("asset_ids") or [])
     refreshed = await kb_repo.get_article_by_id(article_id)
     if not refreshed:
         raise RuntimeError("Failed to refresh article after update")
