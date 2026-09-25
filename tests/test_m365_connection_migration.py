@@ -33,11 +33,13 @@ def test_first_connection_does_not_inventory_admin_credentials_placeholder(
     candidate = {"id": 12, "company_id": 1, "state": "pending"}
     ensure_legacy = AsyncMock()
     stage_candidate = AsyncMock(return_value=candidate)
+    upsert_credentials = AsyncMock(return_value={"company_id": 1})
     monkeypatch.setattr(
         m365.m365_repo, "get_credentials", AsyncMock(return_value=placeholder)
     )
     monkeypatch.setattr(m365.connection_repo, "ensure_legacy", ensure_legacy)
     monkeypatch.setattr(m365.connection_repo, "stage_candidate", stage_candidate)
+    monkeypatch.setattr(m365.m365_repo, "upsert_credentials", upsert_credentials)
     monkeypatch.setattr(m365, "_encrypt", lambda value: f"encrypted:{value}")
 
     result = asyncio.run(
@@ -64,6 +66,18 @@ def test_first_connection_does_not_inventory_admin_credentials_placeholder(
         client_secret="encrypted:secret",
         app_object_id="app",
         service_principal_object_id="service-principal",
+        client_secret_key_id="key",
+        client_secret_expires_at=None,
+    )
+    upsert_credentials.assert_awaited_once_with(
+        company_id=1,
+        tenant_id="tenant",
+        client_id="client",
+        client_secret="encrypted:secret",
+        refresh_token=None,
+        access_token=None,
+        token_expires_at=None,
+        app_object_id="app",
         client_secret_key_id="key",
         client_secret_expires_at=None,
     )
@@ -110,6 +124,8 @@ def test_existing_credentials_are_reencrypted_for_legacy_inventory(monkeypatch):
     monkeypatch.setattr(
         m365.connection_repo, "stage_candidate", AsyncMock(return_value={"id": 12})
     )
+    upsert_credentials = AsyncMock()
+    monkeypatch.setattr(m365.m365_repo, "upsert_credentials", upsert_credentials)
     monkeypatch.setattr(m365, "_encrypt", lambda value: f"encrypted:{value}")
 
     asyncio.run(
@@ -121,6 +137,7 @@ def test_existing_credentials_are_reencrypted_for_legacy_inventory(monkeypatch):
     inventoried = ensure_legacy.await_args.args[1]
     assert inventoried["client_secret"] == "encrypted:decrypted-secret"
     assert current["client_secret"] == "decrypted-secret"
+    upsert_credentials.assert_not_awaited()
 
 
 def test_repeated_dependency_inventory_uses_warning_free_upserts(monkeypatch):

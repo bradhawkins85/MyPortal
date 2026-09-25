@@ -1374,19 +1374,29 @@ async def delete_credentials(company_id: int) -> None:
 async def stage_connection_candidate(
     company_id: int, tenant_id: str, provisioned: dict[str, Any]
 ) -> dict[str, Any]:
-    """Persist a replacement without changing what production jobs consume."""
+    """Persist a candidate and initialise credentials for a first connection.
+
+    Existing complete credentials remain untouched until the verified cutover.
+    During initial setup, however, there is no active connection to protect, so
+    the compatibility row must be populated immediately.  The consent step and
+    other existing consumers use that row to continue the setup journey.
+    """
     current = await m365_repo.get_credentials(company_id)
+    has_complete_current = bool(
+        current
+        and all(
+            str(current.get(key) or "").strip()
+            for key in ("tenant_id", "client_id", "client_secret")
+        )
+    )
     # Admin-only configuration creates a compatibility row with blank customer
     # credentials.  Such a placeholder is not a legacy connection and must not
     # be inventoried before the company's first managed connection is staged.
-    if current and all(
-        str(current.get(key) or "").strip()
-        for key in ("tenant_id", "client_id", "client_secret")
-    ):
+    if has_complete_current:
         legacy = current.copy()
         legacy["client_secret"] = _encrypt(str(current["client_secret"]))
         await connection_repo.ensure_legacy(company_id, legacy)
-    return await connection_repo.stage_candidate(
+    candidate = await connection_repo.stage_candidate(
         company_id=company_id,
         tenant_id=tenant_id,
         client_id=provisioned["client_id"],
@@ -1396,6 +1406,20 @@ async def stage_connection_candidate(
         client_secret_key_id=provisioned.get("client_secret_key_id"),
         client_secret_expires_at=provisioned.get("client_secret_expires_at"),
     )
+    if not has_complete_current:
+        await m365_repo.upsert_credentials(
+            company_id=company_id,
+            tenant_id=tenant_id,
+            client_id=provisioned["client_id"],
+            client_secret=_encrypt(provisioned["client_secret"]),
+            refresh_token=None,
+            access_token=None,
+            token_expires_at=None,
+            app_object_id=provisioned.get("app_object_id"),
+            client_secret_key_id=provisioned.get("client_secret_key_id"),
+            client_secret_expires_at=provisioned.get("client_secret_expires_at"),
+        )
+    return candidate
 
 
 async def get_pending_connection(
