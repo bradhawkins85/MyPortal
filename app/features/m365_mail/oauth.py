@@ -57,7 +57,11 @@ class M365MailOAuthService(Protocol):
     async def get_account(self, account_id: int) -> dict[str, Any] | None: ...
 
     async def validate_mailbox_access(
-        self, access_token: str, mailbox: str
+        self,
+        access_token: str,
+        mailbox: str,
+        *,
+        signed_in_address: str | None = None,
     ) -> None: ...
 
 
@@ -156,12 +160,20 @@ async def handle_m365_mail_auth_callback(
 
     try:
         await m365_mail_service.validate_mailbox_access(
-            access_token, str(account.get("user_principal_name") or "")
+            access_token,
+            str(account.get("user_principal_name") or ""),
+            signed_in_address=str(
+                identity.get("preferred_username")
+                or identity.get("upn")
+                or identity.get("email")
+                or ""
+            ),
         )
     except Exception:
         return _mail_auth_error(
             "The signed-in identity cannot access the configured mailbox. "
-            "No credentials were saved."
+            "For a shared mailbox, grant the user mailbox access and consent "
+            "to Mail.ReadWrite.Shared. No credentials were saved."
         )
 
     await m365_mail_service.store_delegated_tokens(

@@ -102,6 +102,34 @@ async def test_validate_mailbox_access_uses_mail_resource(monkeypatch):
     assert "?$select=id,userPrincipalName" not in requests[0][1]
 
 
+async def test_validate_mailbox_access_uses_me_for_signed_in_mailbox(monkeypatch):
+    requests: list[str] = []
+
+    async def fake_graph_get(token: str, url: str):
+        requests.append(url)
+        return {"id": "inbox-id"}
+
+    monkeypatch.setattr(m365_mail, "_graph_get", fake_graph_get)
+
+    await m365_mail.validate_mailbox_access(
+        "mail-token",
+        "Support@Contoso.com",
+        signed_in_address="support@contoso.com",
+    )
+
+    assert requests == [
+        "https://graph.microsoft.com/v1.0/me/mailFolders/inbox?$select=id"
+    ]
+
+
+def test_delegated_scope_supports_shared_mailboxes():
+    assert "https://graph.microsoft.com/Mail.ReadWrite " in m365_mail.DELEGATED_MAIL_SCOPE
+    assert (
+        "https://graph.microsoft.com/Mail.ReadWrite.Shared"
+        in m365_mail.DELEGATED_MAIL_SCOPE
+    )
+
+
 async def test_authorize_uses_user_pkce_client_not_company_client(monkeypatch):
     class MainStub:
         async def _require_super_admin_page(self, request):
