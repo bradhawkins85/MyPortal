@@ -950,13 +950,15 @@ DEFAULT_MODULES: list[dict[str, Any]] = [
     {
         "slug": "m365-direct-delivery",
         "name": "M365 Direct Delivery",
-        "description": "Deposit notifications directly into Microsoft 365 inboxes without SMTP transport.",
+        "description": "Create an explicit M365 Inbox draft item, or opt in to Exchange sendMail.",
         "icon": "📨",
         "settings": {
             "company_id": 0,
             "recipient_domains": [],
             "fallback_to_smtp": True,
             "track_read_status": True,
+            "delivery_mode": "inbox_item",
+            "sender_address": "",
         },
     },
     {
@@ -1373,7 +1375,8 @@ _ENV_BACKED_MODULE_FIELDS: dict[str, tuple[str, ...]] = {
         "ab_campaigns",
     ),
     "m365-direct-delivery": (
-        "company_id", "recipient_domains", "fallback_to_smtp", "track_read_status"
+        "company_id", "recipient_domains", "fallback_to_smtp", "track_read_status",
+        "delivery_mode", "sender_address"
     ),
     "solidtime": (
         "base_url",
@@ -1633,6 +1636,8 @@ def _coerce_settings(
             "recipient_domains": [str(value).strip().lower().lstrip("@") for value in _ensure_list(merged.get("recipient_domains")) if str(value).strip()],
             "fallback_to_smtp": _ensure_bool(merged.get("fallback_to_smtp"), True),
             "track_read_status": _ensure_bool(merged.get("track_read_status"), True),
+            "delivery_mode": (merged.get("delivery_mode") if merged.get("delivery_mode") in ("inbox_item", "send_mail") else "inbox_item"),
+            "sender_address": str(merged.get("sender_address") or "").strip(),
         })
     elif slug == "syncro":
         base_url = str(merged.get("base_url") or "").strip().rstrip("/")

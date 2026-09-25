@@ -73,6 +73,7 @@ GRAPH_APPLICATION_PERMISSION_IDS = {
     # authorize the report-settings remediation PATCH.
     "ReportSettings.ReadWrite.All": "2a60023f-3219-47ad-baa4-40e17cd02a1d",
     "Mail.ReadWrite": "e2a3a72e-5f79-4c64-b1b1-878b674786c9",
+    "Mail.Send": "798ee544-9d2d-430c-a058-570e29e34338",
     "GroupMember.ReadWrite.All": "dbaae8cf-10b5-4b86-a4a1-f871c94c6695",
     "IdentityRiskyUser.Read.All": "dc5007c0-2d7d-4c42-879c-2dab87571379",
     "Application.Read.All": "9a5d68dd-52b0-4cc2-bd40-abcf44ac3a30",
@@ -92,6 +93,7 @@ _PROVISION_ONLY = {
     "Organization.Read.All": ("tenant_inventory", "GET /organization", "read", "required"),
     "MailboxSettings.Read": ("mailbox_reporting", "GET /users/{id}/mailboxSettings", "read", "required"),
     "Mail.ReadWrite": ("mail_import", "GET/PATCH /users/{id}/messages", "write", "optional"),
+    "Mail.Send": ("m365_notification_send", "POST /users/{sender}/sendMail", "write", "optional"),
     "IdentityRiskyUser.Read.All": ("security_monitoring", "GET /identityProtection/riskyUsers", "read", "optional"),
     "Application.Read.All": ("application_monitoring", "GET /applications", "read", "required"),
     "Sites.ReadWrite.All": ("offboarding_export", "PUT /sites/{id}/drive/items", "write", "optional"),
