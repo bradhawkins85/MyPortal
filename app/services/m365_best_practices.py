@@ -109,6 +109,13 @@ from app.services.m365_providers import (
     provider_enabled,
 )
 
+# Assessment outcomes are deliberately more precise than the original
+# pass/fail/unknown trio.  Only PASS and FAIL are scoreable evidence.
+STATUS_NOT_LICENSED = "not_licensed"
+STATUS_UNSUPPORTED = "unsupported"
+STATUS_PERMISSION_MISSING = "permission_missing"
+STATUS_ASSESSMENT_FAILED = "assessment_failed"
+
 
 # ---------------------------------------------------------------------------
 # Tenant capability detection (license-based)
@@ -296,7 +303,34 @@ ExoRunner = Callable[[str, str], Awaitable[dict[str, Any]]]
 BestPracticeRunner = Union[GraphRunner, ExoRunner]
 
 # Keys that are implementation details and must not be exposed in the public catalog
-_INTERNAL_KEYS = frozenset({"source", "source_type", "remediation_cmdlet", "remediation_params", "remediation_url", "remediation_payload", "remediation_type", "remediation_mailbox_params", "default_auto_remediate", "uses_company_id"})
+_INTERNAL_KEYS = frozenset({"source", "source_type", "remediation_cmdlet", "remediation_params", "remediation_url", "remediation_payload", "remediation_type", "remediation_mailbox_params", "default_auto_remediate", "uses_company_id", "desired_settings"})
+
+# Controls in the same alternative group express different acceptable company
+# policies; they are alternatives, not cumulative recommendations.  Keeping the
+# target and desired value machine-readable also lets batch remediation reject a
+# contradictory plan before it makes the first write.
+_DEFAULT_POLICY_PROFILES: dict[str, str] = {
+    "teams_global_lobby": "strict_invited_users",
+}
+
+
+def _validate_policy_selection(check_ids: set[str]) -> None:
+    """Reject enabled controls that require different values on one property."""
+    selected: dict[tuple[str, str], tuple[str, Any, str]] = {}
+    catalog = _catalog_map()
+    for check_id in check_ids:
+        bp = catalog.get(check_id) or {}
+        for desired in bp.get("desired_settings") or []:
+            key = (str(desired["resource"]), str(desired["property"]))
+            value = desired.get("value")
+            previous = selected.get(key)
+            if previous and previous[1] != value:
+                raise ValueError(
+                    "Conflicting policy controls: "
+                    f"{previous[0]} requires {key[0]}.{key[1]}={previous[1]!r}, "
+                    f"but {check_id} requires {value!r}. Select one policy profile."
+                )
+            selected[key] = (check_id, value, str(bp.get("policy_profile") or ""))
 
 _GLOBAL_ADMIN_ROLE_DEFINITION_ID = "62e90394-69f5-4237-9190-012177145e10"
 
@@ -1954,6 +1988,13 @@ def _teams_ps_error_detail(exc: M365Error, cmdlet: str) -> str:
     return f"Unable to query {cmdlet}: {exc}"
 
 
+def _failure_status(exc: M365Error) -> str:
+    """Classify inability to assess separately from policy non-compliance."""
+    if getattr(exc, "http_status", None) in {401, 403}:
+        return STATUS_PERMISSION_MISSING
+    return STATUS_ASSESSMENT_FAILED
+
+
 async def _teams_invoke_command(
     tokens: tuple[str, str], tenant_id: str, cmdlet: str,
     parameters: dict[str, Any] | None = None,
@@ -1979,7 +2020,7 @@ async def _check_anon_dialin_cannot_start_meeting(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
+        return _result(check_id, check_name, _failure_status(exc),
                        _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
@@ -2014,7 +2055,7 @@ async def _check_only_org_bypass_lobby(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
+        return _result(check_id, check_name, _failure_status(exc),
                        _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
@@ -2041,7 +2082,7 @@ async def _check_invited_users_auto_admitted(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
+        return _result(check_id, check_name, _failure_status(exc),
                        _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
@@ -2067,7 +2108,7 @@ async def _check_external_participants_no_control(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
+        return _result(check_id, check_name, _failure_status(exc),
                        _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
@@ -2093,7 +2134,7 @@ async def _check_external_users_cannot_initiate(
             exo_token, tenant_id, "Get-CsTenantFederationConfiguration"
         )
     except M365Error as exc:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
+        return _result(check_id, check_name, _failure_status(exc),
                        _teams_ps_error_detail(exc, "Get-CsTenantFederationConfiguration"))
     cfg = _exo_first_value(data)
     if not cfg:
@@ -2130,7 +2171,7 @@ async def _check_teams_external_files_approved_storage(
             exo_token, tenant_id, "Get-CsTeamsClientConfiguration", {"Identity": "Global"}
         )
     except M365Error as exc:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
+        return _result(check_id, check_name, _failure_status(exc),
                        _teams_ps_error_detail(exc, "Get-CsTeamsClientConfiguration"))
     cfg = _exo_first_value(data)
     if not cfg:
@@ -2166,7 +2207,7 @@ async def _check_restrict_anon_users_join_meeting(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
+        return _result(check_id, check_name, _failure_status(exc),
                        _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
@@ -2192,7 +2233,7 @@ async def _check_restrict_anon_users_start_meeting(
             exo_token, tenant_id, "Get-CsTeamsMeetingPolicy", {"Identity": "Global"}
         )
     except M365Error as exc:
-        return _result(check_id, check_name, STATUS_UNKNOWN,
+        return _result(check_id, check_name, _failure_status(exc),
                        _teams_ps_error_detail(exc, "Get-CsTeamsMeetingPolicy"))
     cfg = _exo_first_value(data)
     if not cfg:
@@ -5931,9 +5972,12 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "remediation": "Set-CsTeamsMeetingPolicy -Identity Global -AutoAdmittedUsers EveryoneInCompany",
         "source": _check_only_org_bypass_lobby,
         "source_type": "teams",
-        "default_enabled": True,
+        "default_enabled": False,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
+        "alternative_group": "teams_global_lobby",
+        "policy_profile": "organisation_only",
+        "desired_settings": [{"resource": "teams:meetingPolicy:Global", "property": "AutoAdmittedUsers", "value": "EveryoneInCompany"}],
     },
     {
         "id": "bp_invited_users_auto_admitted",
@@ -5949,6 +5993,9 @@ _BEST_PRACTICES: list[dict[str, Any]] = [
         "default_enabled": True,
         "has_remediation": False,
         "requires_licenses": [CAP_TEAMS],
+        "alternative_group": "teams_global_lobby",
+        "policy_profile": "strict_invited_users",
+        "desired_settings": [{"resource": "teams:meetingPolicy:Global", "property": "AutoAdmittedUsers", "value": "InvitedUsers"}],
     },
     {
         "id": "bp_dialin_cannot_bypass_lobby",
@@ -6522,6 +6569,10 @@ _RISK_SCORE_BY_SEVERITY = {
 _STATUS_PRIORITY_ORDER = {
     STATUS_FAIL: 0,
     STATUS_UNKNOWN: 1,
+    STATUS_PERMISSION_MISSING: 1,
+    STATUS_ASSESSMENT_FAILED: 1,
+    STATUS_UNSUPPORTED: 2,
+    STATUS_NOT_LICENSED: 2,
     STATUS_PASS: 2,
     STATUS_NOT_APPLICABLE: 3,
 }
@@ -6572,6 +6623,18 @@ def _remediation_runbook_for_bp(bp: Mapping[str, Any]) -> list[str]:
     if bp.get("has_remediation"):
         runbook.append(
             "Review prerequisites, approvals, and any maintenance-window impact before using automated remediation."
+        )
+    check_id = str(bp.get("id") or "")
+    policy_text = " ".join(
+        (check_id, str(bp.get("name") or ""), str(bp.get("description") or ""))
+    ).lower()
+    if "conditional access" in policy_text or "admin" in policy_text or "break-glass" in policy_text:
+        runbook.extend(
+            [
+                "Preview affected users, applications, locations, and sign-in impact before applying the change.",
+                "Preserve and verify emergency-access account exclusions; never remove the last tested recovery path.",
+                "Record a recovery operator and rollback procedure before enabling the policy.",
+            ]
         )
     remediation = str(bp.get("remediation") or "").strip()
     if remediation:
@@ -6655,6 +6718,11 @@ def _enrich_catalog_entry(bp: dict[str, Any]) -> dict[str, Any]:
     """
     entry = {k: v for k, v in bp.items() if k not in _INTERNAL_KEYS}
     entry.update(_posture_metadata_for_bp(bp))
+    alternative_group = str(bp.get("alternative_group") or "")
+    if alternative_group:
+        entry["selected_policy_profile"] = (
+            bp.get("policy_profile") == _DEFAULT_POLICY_PROFILES.get(alternative_group)
+        )
     requires = bp.get("requires_licenses") or []
     if requires:
         entry["requires_licenses_display"] = _format_missing_licenses(requires)
@@ -6804,6 +6872,7 @@ async def set_enabled_checks(
     """
     catalog = _catalog_map()
     enabled_filtered = {cid for cid in enabled_check_ids if cid in catalog}
+    _validate_policy_selection(enabled_filtered)
     auto_remediate_filtered: set[str] = set()
     if auto_remediate_check_ids is not None:
         auto_remediate_filtered = {
@@ -7316,7 +7385,7 @@ async def run_best_practices(
         # mark it as N/A and skip evaluation/auto-remediation entirely.
         missing = _missing_capabilities(bp.get("requires_licenses"), tenant_capabilities)
         if missing:
-            status = STATUS_NOT_APPLICABLE
+            status = STATUS_NOT_LICENSED
             details = (
                 "Not applicable – this check requires the following Microsoft 365 "
                 f"license(s) which the tenant does not have: "
@@ -7378,7 +7447,7 @@ async def run_best_practices(
                         )
                 elif source_type == "teams":
                     if not provider_enabled(company_id, "teams"):
-                        raw = _result(check_id, check_name, STATUS_NOT_APPLICABLE,
+                        raw = _result(check_id, check_name, STATUS_UNSUPPORTED,
                             "Teams provider is not enabled for this company; the legacy Exchange route is not used.")
                     else:
                         if teams_tokens is None:
@@ -7426,7 +7495,7 @@ async def run_best_practices(
                     check_id=check_id,
                     error=str(exc),
                 )
-                status = STATUS_UNKNOWN
+                status = _failure_status(exc)
                 details = f"Unable to evaluate check: {exc}"
 
         if affected_accounts:
@@ -7571,7 +7640,7 @@ async def run_single_check(
 
     missing = _missing_capabilities(bp.get("requires_licenses"), tenant_capabilities)
     if missing:
-        status = STATUS_NOT_APPLICABLE
+        status = STATUS_NOT_LICENSED
         details = (
             "Not applicable – this check requires the following Microsoft 365 "
             f"license(s) which the tenant does not have: "
@@ -7633,7 +7702,7 @@ async def run_single_check(
             elif source_type == "teams":
                 if not provider_enabled(company_id, "teams"):
                     raw = _result(
-                        check_id, check_name, STATUS_NOT_APPLICABLE,
+                        check_id, check_name, STATUS_UNSUPPORTED,
                         "Teams provider is not enabled for this company; the legacy Exchange route is not used.",
                     )
                 else:
@@ -7679,7 +7748,7 @@ async def run_single_check(
                 check_id=check_id,
                 error=str(exc),
             )
-            status = STATUS_UNKNOWN
+            status = _failure_status(exc)
             details = f"Unable to evaluate check: {exc}"
 
     if affected_accounts:
@@ -7813,6 +7882,25 @@ async def remediate_failed_checks_batch(company_id: int, *, scope: str) -> dict[
         and result.get("status") == STATUS_FAIL
         and result.get("has_remediation")
     ]
+    # Validate the whole plan before executing anything.  This prevents two
+    # checks from alternating a shared setting and makes the operation atomic
+    # with respect to planning errors.
+    try:
+        _validate_policy_selection(
+            {str(candidate.get("check_id") or "") for candidate in candidates}
+        )
+    except ValueError as exc:
+        return {
+            "success": False,
+            "message": str(exc),
+            "scope": normalised_scope,
+            "scope_label": _BATCH_REMEDIATION_SCOPES[normalised_scope],
+            "total": len(candidates),
+            "succeeded": 0,
+            "failed": len(candidates),
+            "failures": [str(exc)],
+            "refresh_issues": [],
+        }
     if not candidates:
         return {
             "success": True,
@@ -7835,29 +7923,36 @@ async def remediate_failed_checks_batch(company_id: int, *, scope: str) -> dict[
             failures.append(f"{candidate.get('check_name') or check_id}: remediation failed ({exc})")
             continue
         remediation_succeeded = bool(outcome.get("success"))
-        try:
-            await run_single_check(
-                company_id=company_id,
-                check_id=check_id,
-                allow_auto_remediation=False,
-                previous_status=STATUS_FAIL,
-                emit_ticket_on_fail=False,
-            )
-        except (ValueError, M365Error) as exc:
-            if remediation_succeeded:
-                succeeded += 1
-                refresh_issues.append(
-                    f"{candidate.get('check_name') or check_id}: unable to refresh check ({exc})"
-                )
-            else:
-                failures.append(
-                    f"{candidate.get('check_name') or check_id}: unable to refresh check ({exc})"
-                )
+        if not remediation_succeeded:
+            failures.append(f"{candidate.get('check_name') or check_id}: {outcome.get('message') or 'Remediation failed'}")
             continue
-        if remediation_succeeded:
+
+        verified = None
+        verify_error: Exception | None = None
+        for attempt in range(1, _MAX_CHECK_ATTEMPTS + 1):
+            try:
+                verified = await run_single_check(
+                    company_id=company_id, check_id=check_id,
+                    allow_auto_remediation=False, previous_status=STATUS_FAIL,
+                    emit_ticket_on_fail=False,
+                )
+                verify_error = None
+            except (ValueError, M365Error) as exc:
+                verify_error = exc
+            if verified and verified.get("status") == STATUS_PASS:
+                break
+            if attempt < _MAX_CHECK_ATTEMPTS:
+                await asyncio.sleep(_retry_backoff_seconds(attempt))
+        if verified and verified.get("status") == STATUS_PASS:
             succeeded += 1
         else:
-            failures.append(f"{candidate.get('check_name') or check_id}: {outcome.get('message') or 'Remediation failed'}")
+            detail = (
+                f"verification read failed ({verify_error})" if verify_error
+                else f"verification returned {verified.get('status') if verified else 'no result'}"
+            )
+            failures.append(
+                f"{candidate.get('check_name') or check_id}: remediation was written but {detail}"
+            )
     failed = len(failures)
     scope_label = _BATCH_REMEDIATION_SCOPES[normalised_scope]
     message = (
