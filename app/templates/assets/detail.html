@@ -39,6 +39,7 @@
     <div class="card__body">
       {% if can_edit %}
       <form class="asset-photo-upload" data-asset-photo-upload action="/assets/{{ asset.id }}/photos" method="post" enctype="multipart/form-data">
+        {% include "partials/csrf.html" %}
         <input type="hidden" name="idempotency_key" data-photo-key>
         <div class="asset-photo-actions">
           <label class="button button--primary" for="asset-camera">Take photo</label>
@@ -53,6 +54,10 @@
           <div class="asset-photo-actions"><button class="button button--primary" type="submit">Upload photo</button><button class="button button--ghost" type="button" data-photo-retake>Retake / choose another</button><button class="button button--ghost" type="button" data-photo-cancel>Cancel</button></div>
         </div>
         <p class="form-help">JPEG, PNG, or WebP; maximum 15 MB. Photos are internal unless explicitly shared.</p>
+        <div class="asset-photo-progress" data-photo-progress hidden>
+          <progress max="100" value="0" aria-label="Photo upload progress"></progress>
+          <span data-photo-progress-label>0%</span>
+        </div>
         <p data-photo-status role="status" aria-live="polite"></p>
       </form>
       {% endif %}

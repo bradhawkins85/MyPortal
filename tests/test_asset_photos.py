@@ -1,4 +1,5 @@
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException, UploadFile
@@ -47,3 +48,18 @@ def test_path_rejects_traversal(monkeypatch, tmp_path):
     monkeypatch.setattr(asset_photos, "ROOT", tmp_path)
     with pytest.raises(HTTPException):
         asset_photos.path(2, 9, "../secret")
+
+
+def test_asset_photo_browser_controls_include_csrf_camera_fallback_and_progress():
+    template = (Path(__file__).parents[1] / "app/templates/assets/detail.html").read_text()
+    script = (Path(__file__).parents[1] / "app/static/js/asset_photos.js").read_text()
+
+    assert '{% include "partials/csrf.html" %}' in template
+    assert 'capture="environment"' in template
+    assert template.count("data-photo-input") == 2
+    assert "data-photo-preview" in template
+    assert "data-photo-retake" in template
+    assert "data-photo-progress" in template
+    assert "XMLHttpRequest" in script
+    assert "request.upload.addEventListener('progress'" in script
+    assert "Retry will not create a duplicate" in script
