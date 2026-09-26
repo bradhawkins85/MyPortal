@@ -61,7 +61,7 @@ async def get_website_by_id(website_id: int) -> dict[str, Any] | None:
 
 
 async def create_website(company_id: int, values: dict[str, Any], user_id: int) -> int:
-    return int(await db.execute(
+    return await db.execute_returning_lastrowid(
         """INSERT INTO websites
         (company_id, name, url, owner, notes, monitor_availability, monitor_tls,
          collect_dns, collect_domain_expiry, created_by)
@@ -69,7 +69,7 @@ async def create_website(company_id: int, values: dict[str, Any], user_id: int) 
         (company_id, values["name"], values["url"], values.get("owner"), values.get("notes"),
          values["monitor_availability"], values["monitor_tls"], values["collect_dns"],
          values["collect_domain_expiry"], user_id),
-    ))
+    )
 
 
 async def update_website(company_id: int, website_id: int, values: dict[str, Any]) -> bool:
@@ -119,9 +119,9 @@ async def enqueue_check(website_id: int) -> int:
     )
     if existing:
         return int(existing["id"])
-    return int(await db.execute(
+    return await db.execute_returning_lastrowid(
         "INSERT INTO website_check_jobs (website_id) VALUES (%s)", (website_id,)
-    ))
+    )
 
 
 async def enqueue_due(now: datetime, limit: int) -> int:
