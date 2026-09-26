@@ -628,8 +628,8 @@ def _utc_naive(value: datetime | None, field: str) -> datetime | None:
 )
 async def list_grant_eligible_staff(
     company_id: int,
-    job_title: str,
     response: Response,
+    job_title: str | None = None,
     _: None = Depends(require_database),
     user: dict = Depends(get_current_user),
 ):
@@ -662,11 +662,19 @@ async def create_standing_grant(
     now = datetime.now(timezone.utc)
     review_due = _utc_naive(payload.review_due_at, "review_due_at")
     expires = _utc_naive(payload.expires_at, "expires_at")
-    if payload.review_due_at <= now or (payload.expires_at and payload.expires_at <= now):
+    if payload.review_due_at <= now or (
+        payload.expires_at and payload.expires_at <= now
+    ):
         raise HTTPException(422, "Review and expiry dates must be in the future")
     item = await repo.get_metadata(company_id, credential_id)
-    if item and item.get("credential_class") == "admin" and payload.review_due_at > now + timedelta(days=30):
-        raise HTTPException(422, "High-privilege grants must be reviewed within 30 days")
+    if (
+        item
+        and item.get("credential_class") == "admin"
+        and payload.review_due_at > now + timedelta(days=30)
+    ):
+        raise HTTPException(
+            422, "High-privilege grants must be reviewed within 30 days"
+        )
     row = await standing_grant_repo.create(
         credential_id=credential_id,
         company_id=company_id,
@@ -681,10 +689,15 @@ async def create_standing_grant(
         review_due_at=review_due,
     )
     if row is None:
-        raise HTTPException(422, "Credential, selector, or required approval is not eligible")
+        raise HTTPException(
+            422, "Credential, selector, or required approval is not eligible"
+        )
     await audit.record(
-        action="vault.standing_grant.create", request=request, user_id=user.get("id"),
-        entity_type="credential_standing_grant", entity_id=row["id"],
+        action="vault.standing_grant.create",
+        request=request,
+        user_id=user.get("id"),
+        entity_type="credential_standing_grant",
+        entity_id=row["id"],
         after={"capabilities": sorted(payload.capabilities), "purpose": row["purpose"]},
         metadata=_standing_grant_audit(row),
     )
@@ -728,37 +741,63 @@ async def reveal_shared_credential(
     await _require_enabled(company_id)
     _deny_impersonation(request)
     await _limit(request, user, reveal=True)
-    candidates = [r for r in await standing_grant_repo.resolve(int(user["id"]), company_id, "reveal") if int(r["credential_id"]) == credential_id]
+    candidates = [
+        r
+        for r in await standing_grant_repo.resolve(
+            int(user["id"]), company_id, "reveal"
+        )
+        if int(r["credential_id"]) == credential_id
+    ]
     high_privilege = any(r["credential_class"] == "admin" for r in candidates)
     if high_privilege:
         recent = datetime.utcnow() - session.created_at
         strong = await auth_repo.user_has_totp_authenticator(int(user["id"]))
         if not strong or recent.total_seconds() > 900:
             await audit.record(
-                action="vault.standing_grant.reveal_denied", request=request,
-                user_id=user.get("id"), entity_type="credential", entity_id=credential_id,
+                action="vault.standing_grant.reveal_denied",
+                request=request,
+                user_id=user.get("id"),
+                entity_type="credential",
+                entity_id=credential_id,
                 after={"outcome": "recent_strong_authentication_required"},
                 metadata={"company_id": company_id},
             )
             raise HTTPException(403, "Recent strong authentication is required")
-    result = await standing_grant_repo.reveal(int(user["id"]), company_id, credential_id)
+    result = await standing_grant_repo.reveal(
+        int(user["id"]), company_id, credential_id
+    )
     if result is None:
         await audit.record(
-            action="vault.standing_grant.reveal_denied", request=request,
-            user_id=user.get("id"), entity_type="credential", entity_id=credential_id,
-            after={"outcome": "not_authorized"}, metadata={"company_id": company_id},
+            action="vault.standing_grant.reveal_denied",
+            request=request,
+            user_id=user.get("id"),
+            entity_type="credential",
+            entity_id=credential_id,
+            after={"outcome": "not_authorized"},
+            metadata={"company_id": company_id},
         )
         raise HTTPException(404, "Shared credential unavailable")
     row, secret = result
     await audit.record(
-        action="vault.standing_grant.reveal", request=request, user_id=user.get("id"),
-        entity_type="credential", entity_id=credential_id,
+        action="vault.standing_grant.reveal",
+        request=request,
+        user_id=user.get("id"),
+        entity_type="credential",
+        entity_id=credential_id,
         after={"version": row["current_version"], "outcome": "success"},
         metadata=_standing_grant_audit(row),
     )
     return JSONResponse(
-        {"credential_id": credential_id, "version": row["current_version"], "secret": secret},
-        headers={"Cache-Control": "no-store, private", "Pragma": "no-cache", "X-Robots-Tag": "noindex, nofollow"},
+        {
+            "credential_id": credential_id,
+            "version": row["current_version"],
+            "secret": secret,
+        },
+        headers={
+            "Cache-Control": "no-store, private",
+            "Pragma": "no-cache",
+            "X-Robots-Tag": "noindex, nofollow",
+        },
     )
 
 
@@ -767,8 +806,11 @@ async def reveal_shared_credential(
     response_model=StandingGrant,
 )
 async def revoke_standing_grant(
-    company_id: int, grant_id: int, request: Request,
-    _: None = Depends(require_database), user: dict = Depends(get_current_user),
+    company_id: int,
+    grant_id: int,
+    request: Request,
+    _: None = Depends(require_database),
+    user: dict = Depends(get_current_user),
 ):
     await _authorize(user, company_id, write=True)
     _deny_impersonation(request)
@@ -776,9 +818,15 @@ async def revoke_standing_grant(
     if row is None:
         raise HTTPException(404, "Standing grant unavailable")
     await audit.record(
-        action="vault.standing_grant.revoke", request=request, user_id=user.get("id"),
-        entity_type="credential_standing_grant", entity_id=grant_id,
-        after={"outcome": "revoked", "rotation_guidance": "Rotate credentials after access removal or suspected compromise."},
+        action="vault.standing_grant.revoke",
+        request=request,
+        user_id=user.get("id"),
+        entity_type="credential_standing_grant",
+        entity_id=grant_id,
+        after={
+            "outcome": "revoked",
+            "rotation_guidance": "Rotate credentials after access removal or suspected compromise.",
+        },
         metadata=_standing_grant_audit(row),
     )
     return row
@@ -789,8 +837,12 @@ async def revoke_standing_grant(
     response_model=list[StandingGrant],
 )
 async def review_standing_grants(
-    company_id: int, credential_id: int, request: Request, response: Response,
-    _: None = Depends(require_database), user: dict = Depends(get_current_user),
+    company_id: int,
+    credential_id: int,
+    request: Request,
+    response: Response,
+    _: None = Depends(require_database),
+    user: dict = Depends(get_current_user),
 ):
     """Administrative review includes revoked policies but never credential values."""
     await _authorize(user, company_id, write=True)

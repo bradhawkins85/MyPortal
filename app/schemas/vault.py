@@ -134,6 +134,8 @@ class StandingGrant(BaseModel):
     expires_at: datetime | str | None = None
     review_due_at: datetime | str
     revoked_at: datetime | str | None = None
+    last_resolved_at: datetime | str | None = None
+    created_at: datetime | str | None = None
     can_enumerate: bool
     can_reveal: bool
     can_share: bool
