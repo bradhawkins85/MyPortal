@@ -8,7 +8,10 @@ from app.repositories import standing_credential_grants as grants
 
 def test_job_title_normalization_is_unicode_and_whitespace_stable():
     assert grants.normalize_job_title("  Operations\t Manager ") == "operations manager"
-    assert grants.normalize_job_title("ＯＰＥＲＡＴＩＯＮＳ Manager") == "operations manager"
+    assert (
+        grants.normalize_job_title("ＯＰＥＲＡＴＩＯＮＳ Manager")
+        == "operations manager"
+    )
     assert grants.normalize_job_title("Straße Manager") == "strasse manager"
 
 
@@ -17,10 +20,26 @@ async def test_eligible_staff_filters_titles_after_secure_database_scope(monkeyp
     monkeypatch.setattr(
         grants.db,
         "fetch_all",
-        AsyncMock(return_value=[
-            {"staff_id": 1, "user_id": 10, "first_name": "A", "last_name": "One", "job_title": "Operations  Manager", "email": "a@example.test"},
-            {"staff_id": 2, "user_id": 11, "first_name": "B", "last_name": "Two", "job_title": "General Manager", "email": "b@example.test"},
-        ]),
+        AsyncMock(
+            return_value=[
+                {
+                    "staff_id": 1,
+                    "user_id": 10,
+                    "first_name": "A",
+                    "last_name": "One",
+                    "job_title": "Operations  Manager",
+                    "email": "a@example.test",
+                },
+                {
+                    "staff_id": 2,
+                    "user_id": 11,
+                    "first_name": "B",
+                    "last_name": "Two",
+                    "job_title": "General Manager",
+                    "email": "b@example.test",
+                },
+            ]
+        ),
     )
     rows = await grants.eligible_staff(7, " operations manager ")
     assert [row["staff_id"] for row in rows] == [1]
@@ -33,12 +52,39 @@ async def test_eligible_staff_filters_titles_after_secure_database_scope(monkeyp
 
 
 @pytest.mark.anyio
+async def test_eligible_staff_without_title_lists_named_portal_staff(monkeypatch):
+    rows = [
+        {
+            "staff_id": 1,
+            "user_id": 10,
+            "first_name": "A",
+            "last_name": "One",
+            "job_title": "Operations Manager",
+            "email": "a@example.test",
+        }
+    ]
+    monkeypatch.setattr(grants.db, "fetch_all", AsyncMock(return_value=rows))
+
+    assert await grants.eligible_staff(7) == rows
+
+
+@pytest.mark.anyio
 async def test_reveal_does_not_decrypt_when_concurrent_revoke_wins(monkeypatch):
     now = datetime.now(timezone.utc)
-    monkeypatch.setattr(grants, "resolve", AsyncMock(return_value=[{
-        "id": 4, "credential_id": 9, "current_version": 3,
-        "expires_at": now + timedelta(days=1),
-    }]))
+    monkeypatch.setattr(
+        grants,
+        "resolve",
+        AsyncMock(
+            return_value=[
+                {
+                    "id": 4,
+                    "credential_id": 9,
+                    "current_version": 3,
+                    "expires_at": now + timedelta(days=1),
+                }
+            ]
+        ),
+    )
     monkeypatch.setattr(grants.db, "execute_rowcount", AsyncMock(return_value=0))
     reveal = AsyncMock()
     monkeypatch.setattr(grants.vault, "reveal", reveal)

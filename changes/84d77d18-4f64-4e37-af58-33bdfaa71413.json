@@ -1,0 +1,7 @@
+{
+  "guid": "84d77d18-4f64-4e37-af58-33bdfaa71413",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added the technician credential creation, standing access grant, review and authenticated link workflow.",
+  "content_hash": "technician-credential-sharing-flow"
+}
