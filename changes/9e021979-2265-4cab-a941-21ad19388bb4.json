@@ -1,0 +1,7 @@
+{
+  "guid": "9e021979-2265-4cab-a941-21ad19388bb4",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "test",
+  "summary": "Add the documentation-core migration and staged-rollout release gate",
+  "content_hash": "documentation-core-gate-v1"
+}
