@@ -374,9 +374,15 @@
               </a>
             </li>
             <li class="menu__item">
-              <a href="/infrastructure" {% if current_path.startswith('/infrastructure') %}aria-current="page"{% endif %}>
-                <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 3h16v6H4zm2 2v2h2V5zm-2 6h16v10H4zm3 2v6h3v-6zm5 0v6h5v-6z"/></svg></span>
-                <span class="menu__label">IP Addresses &amp; Racks</span>
+              <a href="/ipam" {% if current_path.startswith('/ipam') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h16v5H4zm2 2v1h3V6zm-2 5h16v9H4zm3 2v5h2v-5zm4 0v5h6v-5z"/></svg></span>
+                <span class="menu__label">IPAM</span>
+              </a>
+            </li>
+            <li class="menu__item">
+              <a href="/racks" {% if current_path.startswith('/racks') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 2h14v20H5zm2 3v4h10V5zm0 6v3h10v-3zm0 5v3h10v-3z"/></svg></span>
+                <span class="menu__label">Racks</span>
               </a>
             </li>
           {% endif %}

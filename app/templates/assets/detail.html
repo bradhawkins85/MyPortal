@@ -26,6 +26,14 @@
     </div>
   {% endif %}
 
+  {% if not customer_safe %}<section class="card card--panel admin-grid__full">
+    <header class="card__header"><div><h2 class="card__title">Network and rack assignments</h2><p class="card__subtitle">Open the dedicated workspace to manage each assignment.</p></div></header>
+    <div class="card__body"><dl class="definition-list">
+      <dt>IP addresses</dt><dd>{% for address in infrastructure_links.addresses %}<a href="/ipam#address-{{ address.id }}"><code>{{ address.address }}</code></a> <span class="text-muted">{{ address.network_name }}</span>{% if not loop.last %}<br>{% endif %}{% else %}<a href="/ipam#addresses">No documented address</a>{% endfor %}</dd>
+      <dt>Rack positions</dt><dd>{% for placement in infrastructure_links.placements %}<a href="/racks#rack-{{ placement.rack_id }}">{{ placement.rack_name }} · {{ placement.face|title }} U{{ placement.start_unit }}{% if placement.unit_height > 1 %}–{{ placement.start_unit + placement.unit_height - 1 }}{% endif %}</a>{% if not loop.last %}<br>{% endif %}{% else %}<a href="/racks">Not placed in a rack</a>{% endfor %}</dd>
+    </dl></div>
+  </section>{% endif %}
+
   <section class="card card--panel admin-grid__full asset-photos" id="asset-photos">
     <header class="card__header"><div><h2 class="card__title">Photos</h2><p class="card__subtitle">Photos stay with this asset through archive, restore, and reconciliation.</p></div></header>
     <div class="card__body">

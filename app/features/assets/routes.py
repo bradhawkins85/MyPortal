@@ -678,26 +678,55 @@ async def network_devices_page(request: Request):
     )
 
 
-@router.get("/infrastructure", response_class=HTMLResponse, summary="IP and rack documentation")
+@router.get("/infrastructure", summary="Legacy infrastructure entry point")
 async def infrastructure_page(request: Request):
-    """Show company IPAM and rack layouts without creating a second asset store."""
+    """Keep existing bookmarks working while directing technicians to IPAM."""
+    _user, _membership, _company, _company_id, redirect = await _load_asset_context(
+        request, "menu.network_devices"
+    )
+    if redirect:
+        return redirect
+    return RedirectResponse(url="/ipam", status_code=status.HTTP_303_SEE_OTHER)
+
+
+async def _infrastructure_page_context(request: Request):
     main_module = _main()
     user, membership, company, company_id, redirect = await _load_asset_context(
         request, "menu.network_devices"
     )
     if redirect:
-        return redirect
+        return main_module, user, redirect
     can_edit = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
         user, membership, "menu.network_devices", write=True
     )
     data = await infrastructure_repo.overview(company_id)
     data.update({
-        "title": "IP addresses & racks", "company": company, "can_edit": can_edit,
+        "company": company, "can_edit": can_edit,
         "assets": await asset_repo.list_company_assets(company_id),
         "address_states": sorted(infrastructure_repo.ADDRESS_STATES),
     })
+    return main_module, user, data
+
+
+@router.get("/ipam", response_class=HTMLResponse, summary="IP address management")
+async def ipam_page(request: Request):
+    main_module, user, data = await _infrastructure_page_context(request)
+    if isinstance(data, RedirectResponse):
+        return data
+    data["title"] = "IP address management"
     return await main_module._render_template(
-        "infrastructure/index.html", request, user, extra=data
+        "infrastructure/ipam.html", request, user, extra=data
+    )
+
+
+@router.get("/racks", response_class=HTMLResponse, summary="Rack management")
+async def racks_page(request: Request):
+    main_module, user, data = await _infrastructure_page_context(request)
+    if isinstance(data, RedirectResponse):
+        return data
+    data["title"] = "Rack management"
+    return await main_module._render_template(
+        "infrastructure/racks.html", request, user, extra=data
     )
 
 
@@ -737,7 +766,7 @@ async def create_ip_network(request: Request):
     await audit_service.record(action="infrastructure.network.create", request=request,
                                entity_type="ip_network", entity_id=record_id,
                                after={"company_id": company_id})
-    return _main().flash_redirect("/infrastructure", "Network added.", "success")
+    return _main().flash_redirect("/ipam#networks", "Network added.", "success")
 
 
 @router.post("/api/infrastructure/addresses", status_code=201, summary="Assign or reserve an IP address")
@@ -758,7 +787,7 @@ async def create_ip_address(request: Request):
     await audit_service.record(action="infrastructure.address.create", request=request,
                                entity_type="ip_address", entity_id=record_id,
                                after={"company_id": company_id, "asset_id": asset_id})
-    return _main().flash_redirect("/infrastructure", "IP address documented.", "success")
+    return _main().flash_redirect("/ipam#addresses", "IP address documented.", "success")
 
 
 @router.post("/api/infrastructure/racks", status_code=201, summary="Create a rack")
@@ -777,7 +806,7 @@ async def create_rack(request: Request):
     await audit_service.record(action="infrastructure.rack.create", request=request,
                                entity_type="rack", entity_id=record_id,
                                after={"company_id": company_id})
-    return _main().flash_redirect("/infrastructure", "Rack added.", "success")
+    return _main().flash_redirect("/racks", "Rack added.", "success")
 
 
 @router.post("/api/infrastructure/rack-equipment", status_code=201, summary="Place an asset in a rack")
@@ -797,7 +826,7 @@ async def place_rack_asset(request: Request):
     await audit_service.record(action="infrastructure.rack_equipment.create", request=request,
                                entity_type="rack_equipment", entity_id=record_id,
                                after={"company_id": company_id, "asset_id": asset_id})
-    return _main().flash_redirect("/infrastructure", "Asset placed in rack.", "success")
+    return _main().flash_redirect("/racks", "Asset placed in rack.", "success")
 
 
 @router.post("/api/infrastructure/{record_type}/{record_id}/delete", summary="Delete infrastructure documentation")
@@ -813,7 +842,8 @@ async def delete_infrastructure_record(request: Request, record_type: str, recor
     await audit_service.record(action="infrastructure.record.delete", request=request,
                                entity_type=record_type, entity_id=record_id,
                                before={"company_id": company_id})
-    return _main().flash_redirect("/infrastructure", "Documentation removed.", "success")
+    destination = "/ipam" if record_type in {"networks", "addresses"} else "/racks"
+    return _main().flash_redirect(destination, "Documentation removed.", "success")
 
 
 @router.post("/devices/discovered/{device_id}/hudu-sync")
@@ -1319,6 +1349,10 @@ async def asset_detail_page(
         await bcp_repo.list_bcp_context_for_asset(company_id, asset_id)
         if can_view_bcp and not customer_safe else []
     )
+    infrastructure_links = (
+        await infrastructure_repo.for_asset(company_id, asset_id)
+        if not customer_safe else {"addresses": [], "placements": []}
+    )
     return await main_module._render_template(
         "assets/detail.html", request, user, extra={
             "title": str(record.get("name") or f"Asset {asset_id}"),
@@ -1335,6 +1369,7 @@ async def asset_detail_page(
             "reconciliation_candidates": [] if customer_safe else await asset_repo.list_reconciliation_candidates(company_id, asset_id),
             "customer_safe": customer_safe,
             "bcp_context": bcp_context,
+            "infrastructure_links": infrastructure_links,
             "asset_photos": await asset_photo_repo.list_for_asset(
                 company_id, asset_id, customer_only=customer_safe
             ),
