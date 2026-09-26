@@ -1,0 +1,7 @@
+{
+  "guid": "f4c5cbf4-504c-4cb8-ae88-d0c5aec8f258",
+  "occurred_at": "2026-09-26T03:48:44.897401Z",
+  "change_type": "feature",
+  "summary": "Add audited, expiring onboarding credential grants for named and verified external recipients",
+  "content_hash": "4c2c50bc40431d78e7c2a520111d0b8d4596b2baab4bdcbb7ca1d21bcbf4f2c5"
+}
