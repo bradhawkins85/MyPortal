@@ -66,7 +66,7 @@ async def test_relationship_duplicate_is_conflict(monkeypatch):
 async def test_detail_omits_inaccessible_relationship_target(monkeypatch):
     monkeypatch.setattr(
         routes, "_load_asset_context",
-        AsyncMock(return_value=({"id": 7}, None, {"id": 3}, 3, None)),
+        AsyncMock(return_value=({"id": 7, "is_super_admin": True}, None, {"id": 3}, 3, None)),
     )
     monkeypatch.setattr(routes.asset_repo, "get_asset_by_id", AsyncMock(return_value={"id": 10, "company_id": 3}))
     monkeypatch.setattr(routes.asset_custom_fields_repo, "list_field_definitions", AsyncMock(return_value=[]))
