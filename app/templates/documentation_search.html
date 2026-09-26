@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Documentation search{% endblock %}
+
+{% block header_title %}
+  <span class="header__title-text">Documentation search</span>
+{% endblock %}
+
+{% block content %}
+<section class="documentation-search" data-documentation-search>
+  <article class="card card--panel">
+    <header class="card__header">
+      <div>
+        <h2 class="card__title">Find assets and runbooks</h2>
+        <p class="card__subtitle">Search only the documentation you can access for the active company.</p>
+      </div>
+    </header>
+
+    <form class="documentation-search__form" role="search" data-documentation-search-form>
+      <div class="documentation-search__query">
+        <label class="form-label" for="documentation-query">Hostname, asset or runbook</label>
+        <div class="documentation-search__query-controls">
+          <input class="form-input" id="documentation-query" name="q" type="search" maxlength="500"
+                 placeholder="Search a hostname, asset or runbook" autocomplete="off" required autofocus />
+          <button class="button button--primary" type="submit">Search</button>
+        </div>
+      </div>
+
+      <fieldset class="documentation-search__filters">
+        <legend class="visually-hidden">Search filters</legend>
+        <label class="form-field" for="documentation-company">
+          <span class="form-label">Company</span>
+          <select class="form-input" id="documentation-company" data-documentation-company>
+            {% for company in available_companies %}
+              <option value="{{ company.company_id }}" {% if company.company_id == active_company_id %}selected{% endif %}>
+                {{ company.company_name or ('Company #' ~ company.company_id) }}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="form-field" for="documentation-type">
+          <span class="form-label">Source</span>
+          <select class="form-input" id="documentation-type" name="record_type">
+            <option value="">All records</option><option value="assets">Assets</option>
+            <option value="knowledge_base">Knowledge base</option>
+          </select>
+        </label>
+        <label class="form-field" for="documentation-status">
+          <span class="form-label">Status</span>
+          <input class="form-input" id="documentation-status" name="status" type="text" maxlength="100" placeholder="Any status" />
+        </label>
+        <label class="form-field" for="documentation-owner">
+          <span class="form-label">Owner</span>
+          <input class="form-input" id="documentation-owner" name="owner" type="text" maxlength="100" placeholder="Any owner" />
+        </label>
+        <label class="form-field" for="documentation-asset-type">
+          <span class="form-label">Record type</span>
+          <input class="form-input" id="documentation-asset-type" name="asset_type" type="text" maxlength="100" placeholder="Any asset type" />
+        </label>
+      </fieldset>
+      <div class="documentation-search__filter-actions">
+        <button class="button button--ghost" type="button" data-documentation-clear>Clear filters</button>
+      </div>
+    </form>
+  </article>
+
+  <div class="documentation-search__status" role="status" aria-live="polite" data-documentation-status></div>
+  <section class="card card--panel documentation-search__results" aria-label="Search results" hidden data-documentation-results>
+    <header class="card__header"><h2 class="card__title" data-documentation-heading>Results</h2></header>
+    <ol class="documentation-search__list" data-documentation-list></ol>
+    <nav class="documentation-search__pagination" aria-label="Search result pages" hidden data-documentation-pagination>
+      <button class="button button--ghost" type="button" data-documentation-previous>Previous</button>
+      <span data-documentation-page></span>
+      <button class="button button--ghost" type="button" data-documentation-next>Next</button>
+    </nav>
+  </section>
+</section>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ static_url('/static/js/documentation_search.js') }}" defer></script>
+{% endblock %}
