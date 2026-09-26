@@ -10,6 +10,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from app.services import knowledge_base as knowledge_base_service
+from app.services import audit as audit_service
 
 
 router = APIRouter(tags=["Knowledge Base"])
@@ -114,6 +115,15 @@ async def knowledge_base_article_pdf(request: Request, slug: str) -> Response:
         generated_at=datetime.now(timezone.utc),
     )
     pdf_bytes = _write_pdf(rendered_html, str(request.base_url))
+    company_id = next(iter(access_context.memberships), None)
+    await audit_service.record(
+        action="knowledge_base.article.export", request=request,
+        user_id=int(user["id"]) if user and user.get("id") is not None else None,
+        entity_type="knowledge_base_article", entity_id=int(article["id"]),
+        after={"format": "pdf", "company_id": company_id},
+        metadata={"company_id": company_id} if company_id is not None else {},
+        actor="authenticated_user" if user else "anonymous",
+    )
     safe_slug = re.sub(r"[^A-Za-z0-9_-]+", "-", slug).strip("-") or "article"
     return Response(
         content=pdf_bytes,

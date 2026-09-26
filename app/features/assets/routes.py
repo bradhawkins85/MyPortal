@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import ipaddress
 import json
 from urllib.parse import urlparse
@@ -9,8 +11,8 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from app.core.logging import log_info
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
@@ -91,6 +93,17 @@ _ASSET_TABLE_COLUMNS: list[dict[str, str]] = [
     {"key": "warranty_end_date", "label": "Warranty end", "sort": "date"},
 ]
 
+# Customer output uses an allow-list. Never add notes, custom fields, linked
+# tickets, integration IDs, credentials, or relationship metadata here.
+_CUSTOMER_ASSET_FIELDS = (
+    "id", "name", "type", "machine_type", "status", "os_name",
+    "serial_number", "warranty_status", "warranty_end_date", "last_sync",
+)
+
+
+def _customer_asset(record: dict[str, Any]) -> dict[str, Any]:
+    return {key: record.get(key) for key in _CUSTOMER_ASSET_FIELDS}
+
 
 def _main():
     from app import main as main_module
@@ -147,7 +160,16 @@ async def assets_page(request: Request):
     )
 
     rows = await asset_repo.list_company_assets(company_id)
-    field_definitions = await asset_custom_fields_repo.list_field_definitions()
+    if not user.get("is_super_admin"):
+        rows = [
+            _customer_asset(dict(row))
+            for row in rows
+            if bool(row.get("customer_visible"))
+        ]
+    field_definitions = (
+        await asset_custom_fields_repo.list_field_definitions()
+        if user.get("is_super_admin") else []
+    )
 
     def _clean_text(value: Any) -> str | None:
         if value is None:
@@ -1131,7 +1153,9 @@ def _clean_optional(form: Any, key: str) -> str | None:
 
 
 @router.get("/assets/{asset_id}", response_class=HTMLResponse)
-async def asset_detail_page(request: Request, asset_id: int):
+async def asset_detail_page(
+    request: Request, asset_id: int, customer_preview: bool = Query(False)
+):
     main_module = _main()
     user, membership, company, company_id, redirect = await _load_asset_context(request)
     if redirect:
@@ -1139,24 +1163,29 @@ async def asset_detail_page(request: Request, asset_id: int):
 
     record = await asset_repo.get_asset_by_id(asset_id)
     record_company_id = record.get("company_id") if record else None
-    if record_company_id is None or int(record_company_id) != company_id:
+    is_super_admin = bool(user.get("is_super_admin"))
+    customer_safe = not is_super_admin or customer_preview
+    if (record_company_id is None or int(record_company_id) != company_id
+            or (not is_super_admin and not bool(record.get("customer_visible")))):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found"
         )
 
+    if customer_safe:
+        record = _customer_asset(dict(record))
     try:
         references = json.loads(record.get("external_references_json") or "[]")
     except (TypeError, ValueError):
         references = []
     if not isinstance(references, list):
         references = []
-    definitions = await asset_custom_fields_repo.list_field_definitions()
-    values = await asset_custom_fields_repo.get_all_asset_field_values([asset_id])
+    definitions = [] if customer_safe else await asset_custom_fields_repo.list_field_definitions()
+    values = {} if customer_safe else await asset_custom_fields_repo.get_all_asset_field_values([asset_id])
     custom_fields = [
         {**definition, "value": values.get(asset_id, {}).get(definition["id"])}
         for definition in definitions
     ]
-    required_fields = await asset_repo.list_required_fields(record.get("type"))
+    required_fields = [] if customer_safe else await asset_repo.list_required_fields(record.get("type"))
     required_missing = [
         key for key in required_fields
         if not record.get(key) and not any(
@@ -1170,6 +1199,8 @@ async def asset_detail_page(request: Request, asset_id: int):
     )
     articles_by_id = {int(article["id"]): article for article in visible_articles}
     company_assets = await asset_repo.list_company_assets(company_id)
+    if customer_safe:
+        company_assets = [item for item in company_assets if bool(item.get("customer_visible"))]
     assets_by_id = {int(item["id"]): item for item in company_assets}
     relationships = []
     for relationship in await asset_repo.list_relationships_for_asset(company_id, asset_id):
@@ -1192,17 +1223,68 @@ async def asset_detail_page(request: Request, asset_id: int):
             "title": str(record.get("name") or f"Asset {asset_id}"),
             "asset": dict(record), "company": company,
             "references": references, "custom_fields": custom_fields,
-            "tickets": await asset_repo.list_tickets_for_asset(asset_id),
+            "tickets": [] if customer_safe else await asset_repo.list_tickets_for_asset(asset_id),
             "required_fields": required_fields, "required_missing": required_missing,
             "relationships": relationships,
             "relationship_types": _RELATIONSHIP_TYPES,
             "relationship_assets": [a for a in company_assets if int(a["id"]) != asset_id],
             "relationship_articles": visible_articles,
-            "can_edit": bool(user.get("is_super_admin")) or main_module._membership_menu_can(
+            "can_edit": not customer_safe and (bool(user.get("is_super_admin")) or main_module._membership_menu_can(
                 user, membership, "menu.assets", write=True
-            ),
+            )), "customer_safe": customer_safe,
         }
     )
+
+
+@router.get("/asset-exports/csv")
+async def export_assets(request: Request) -> Response:
+    """Export only customer-safe fields for records the actor may access."""
+    user, membership, _company, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        raise HTTPException(status_code=403, detail="Asset access denied")
+    main_module = _main()
+    if not (user.get("is_super_admin") or main_module._membership_menu_can(
+        user, membership, "menu.assets", write=True
+    )):
+        raise HTTPException(status_code=403, detail="Asset export access denied")
+    records = await asset_repo.list_company_assets(company_id)
+    if not user.get("is_super_admin"):
+        records = [row for row in records if bool(row.get("customer_visible"))]
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=list(_CUSTOMER_ASSET_FIELDS), extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(_customer_asset(dict(row)) for row in records)
+    await audit_service.record(
+        action="asset.export", request=request, user_id=int(user["id"]),
+        entity_type="company", entity_id=company_id,
+        after={"company_id": company_id, "record_count": len(records), "format": "csv"},
+        metadata={"company_id": company_id},
+    )
+    return Response(output.getvalue(), media_type="text/csv; charset=utf-8", headers={
+        "Content-Disposition": f'attachment; filename="assets-company-{company_id}.csv"',
+        "Cache-Control": "private, no-store",
+    })
+
+
+@router.post("/assets/{asset_id}/publish")
+async def publish_asset(request: Request, asset_id: int):
+    user, _membership, _, company_id, redirect = await _load_asset_context(request)
+    if redirect or not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Super admin privileges required")
+    record = await asset_repo.get_asset_by_id(asset_id)
+    if not record or int(record.get("company_id") or 0) != company_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    form = await request.form()
+    visible = str(form.get("action") or "publish") == "publish"
+    await asset_repo.set_customer_visible(asset_id, visible)
+    await audit_service.record(
+        action="asset.publish" if visible else "asset.unpublish", request=request,
+        user_id=int(user["id"]), entity_type="asset", entity_id=asset_id,
+        before={"customer_visible": bool(record.get("customer_visible"))},
+        after={"customer_visible": visible}, metadata={"company_id": company_id},
+    )
+    return _main().flash_redirect(f"/assets/{asset_id}",
+                                  "Customer visibility updated.", "success")
 
 
 @router.post("/assets/{asset_id}/relationships")
