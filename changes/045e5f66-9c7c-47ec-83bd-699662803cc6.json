@@ -1,0 +1,7 @@
+{
+  "guid": "045e5f66-9c7c-47ec-83bd-699662803cc6",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added a live expiration register for asset warranties, custom dates, and knowledge base reviews.",
+  "content_hash": "d118c4d6401e0779cc2236906ca8b3cf7d58972438f55928e33e277cd1e8f631"
+}

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/tables.html" import data_table, table_toolbar, empty_state %}
+{% block title %}Expirations{% endblock %}
+{% block header_title %}<span class="header__title-text">Expirations</span>{% endblock %}
+{% block header_actions %}
+  {% set actions = [{"label": "Company view" if global_view else "Global view", "type": "link", "href": "/expirations" if global_view else "/expirations?scope=global"}] if is_super_admin else [] %}
+  {{ page_header_actions(actions) }}
+{% endblock %}
+{% block content %}
+{% set columns = [
+  {"key":"title", "label":"Record", "sort_type":"string", "mobile_priority":"essential"},
+  {"key":"company", "label":"Company", "sort_type":"string"},
+  {"key":"type", "label":"Date type", "sort_type":"string"},
+  {"key":"due", "label":"Due", "sort_type":"date", "mobile_priority":"essential"},
+  {"key":"state", "label":"State", "sort_type":"string", "mobile_priority":"essential"},
+  {"key":"owner", "label":"Owner", "sort_type":"string"},
+  {"key":"lead", "label":"Lead time", "sort_type":"number"},
+  {"key":"actions", "label":"Actions", "sortable":false}
+] %}
+<section class="card card--panel">
+  <header class="card__header card__header--stacked">
+    <p class="text-muted">Live dates from assets and accessible knowledge base articles. Source edits appear here automatically.</p>
+    {{ table_toolbar("expiration-table", search=true, search_placeholder="Search expirations", columns=columns) }}
+  </header>
+  {% if expirations %}
+    {% call data_table(columns, table_id="expiration-table", columns=columns, aria_label="Expiration register") %}
+      {% for item in expirations %}
+      <tr>
+        <td data-column-key="title"><a href="{{ item.url }}">{{ item.title }}</a></td>
+        <td data-column-key="company">{{ item.company_name }}</td>
+        <td data-column-key="type">{{ item.detail or item.source_type|replace('_', ' ')|title }}</td>
+        <td data-column-key="due" data-sort-value="{{ item.due_iso }}"><span data-utc="{{ item.due_iso }}T00:00:00Z">{{ item.due_iso }}</span></td>
+        <td data-column-key="state"><span class="status status--{{ 'danger' if item.state == 'overdue' else ('warning' if item.state == 'due_soon' else 'success') }}">{{ item.state|replace('_', ' ')|title }}</span></td>
+        <td data-column-key="owner">{{ item.owner_name or 'Unassigned' }}</td>
+        <td data-column-key="lead" data-sort-value="{{ item.lead_days }}">{{ item.lead_days }} days</td>
+        <td data-column-key="actions">
+          {% if can_manage_expirations %}
+          <details>
+            <summary>Configure</summary>
+            <form method="post" action="/expirations/settings">
+              {% include "partials/csrf.html" %}
+              <input type="hidden" name="source_type" value="{{ item.source_type }}">
+              <input type="hidden" name="source_id" value="{{ item.source_id }}">
+              <input type="hidden" name="source_field" value="{{ item.source_field }}">
+              <label>Lead days <input class="input" type="number" name="lead_days" min="0" max="3650" value="{{ item.lead_days }}" required></label>
+              <label>Owner <select class="input" name="owner_user_id"><option value="">Unassigned</option>{% for owner in expiration_owners %}<option value="{{ owner.id }}" {% if item.owner_user_id == owner.id %}selected{% endif %}>{{ ((owner.first_name or '') ~ ' ' ~ (owner.last_name or ''))|trim or owner.email }}</option>{% endfor %}</select></label>
+              <button class="button button--small" type="submit">Save</button>
+            </form>
+          </details>
+          <form method="post" action="/expirations/remind">
+            {% include "partials/csrf.html" %}
+            <input type="hidden" name="source_type" value="{{ item.source_type }}">
+            <input type="hidden" name="source_id" value="{{ item.source_id }}">
+            <input type="hidden" name="source_field" value="{{ item.source_field }}">
+            <button class="button button--ghost button--small" type="submit">Send reminder</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    {% endcall %}
+  {% else %}
+    {{ empty_state("No expiration dates", "Warranty, eligible custom date, and KB review dates will appear here.") }}
+  {% endif %}
+</section>
+{% endblock %}
