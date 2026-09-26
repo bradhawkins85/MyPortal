@@ -1,0 +1,7 @@
+{
+  "guid": "4f16ee41-52bb-46a7-8df1-b42fe58dc0d4",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "security",
+  "summary": "Define intentional credential storage and least-privilege sharing controls",
+  "content_hash": "itdoc-credential-contract-v1"
+}
