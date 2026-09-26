@@ -9,6 +9,15 @@ from app.core.database import db
 ADDRESS_STATES = {"available", "reserved", "assigned", "dhcp", "deprecated"}
 
 
+async def get_record(table: str, company_id: int, record_id: int) -> dict[str, Any] | None:
+    if table not in {"ip_networks", "racks"}:
+        raise ValueError("Invalid infrastructure record type")
+    return await db.fetch_one(
+        "SELECT * FROM " + table + " WHERE id=%s AND company_id=%s",
+        (record_id, company_id),
+    )
+
+
 async def overview(company_id: int) -> dict[str, list[dict[str, Any]]]:
     networks = list(await db.fetch_all(
         """SELECT n.*, COUNT(i.id) address_count

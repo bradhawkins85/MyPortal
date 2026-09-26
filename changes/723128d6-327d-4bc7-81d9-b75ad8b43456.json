@@ -1,0 +1,7 @@
+{
+  "guid": "723128d6-327d-4bc7-81d9-b75ad8b43456",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Add a searchable, company-scoped asset relationship picker for tickets, processes, websites, networks and racks.",
+  "content_hash": "asset-searchable-multi-record-relationships"
+}

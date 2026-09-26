@@ -167,19 +167,15 @@
         {% for relationship in relationships %}<li>
           <strong>{{ 'Inbound' if relationship.direction == 'inbound' else 'Outbound' }}:</strong>
           {{ relationship_types.get(relationship.relationship_type, relationship.relationship_type) }} —
-          {% if relationship.direction == 'inbound' or relationship.target_type == 'asset' %}
-            <a href="/assets/{{ relationship.target.id }}">{{ relationship.target.name or ('Asset ' ~ relationship.target.id) }}</a>
-          {% else %}
-            <a href="/knowledge-base/articles/{{ relationship.target.slug }}">{{ relationship.target.title }}</a>
-          {% endif %}
+          <a href="{{ relationship.target.url }}">{{ relationship.target.label }}</a>
+          <span class="text-muted">{{ relationship.target.type }} · {{ relationship.target.context }}</span>
           {% if can_edit %}<form method="post" action="/assets/{{ asset.id }}/relationships/{{ relationship.id }}/delete" class="form-inline"><button class="button button--ghost button--small" type="submit">Remove</button></form>{% endif %}
         </li>{% else %}<li class="text-muted">No relationships documented.</li>{% endfor %}
       </ul>
       {% if can_edit %}
       <form method="post" action="/assets/{{ asset.id }}/relationships">
         <div class="form-group"><label class="form-label" for="relationship-type">Relationship</label><select class="input" id="relationship-type" name="relationship_type" required>{% for value, label in relationship_types.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
-        <div class="form-group"><label class="form-label" for="relationship-target-type">Target kind</label><select class="input" id="relationship-target-type" name="target_type" required><option value="asset">Asset</option><option value="knowledge_base_article">Knowledge base article</option></select></div>
-        <div class="form-group"><label class="form-label" for="relationship-target">Target ID</label><input class="input" id="relationship-target" name="target_id" type="number" min="1" required list="relationship-targets"><datalist id="relationship-targets">{% for item in relationship_assets %}<option value="{{ item.id }}">Asset: {{ item.name }}</option>{% endfor %}{% for article in relationship_articles %}<option value="{{ article.id }}">Article: {{ article.title }}</option>{% endfor %}</datalist><small class="form-help">Select the matching target kind and ID from the accessible records listed.</small></div>
+        <div class="form-group" data-record-picker><label class="form-label" for="relationship-target-search">Find a record</label><input class="input" id="relationship-target-search" type="search" placeholder="Search by name, type, status, URL or network" autocomplete="off" data-record-picker-search><select class="input" id="relationship-target" name="target_key" required size="6" data-record-picker-options><option value="">Select an accessible record</option>{% for item in relationship_targets %}<option value="{{ item.key }}">{{ item.type }} — {{ item.label }} · {{ item.context }}</option>{% endfor %}</select><small class="form-help">Only active records in this company that you can access are shown.</small></div>
         <button class="button button--primary" type="submit">Add relationship</button>
       </form>
       {% endif %}
@@ -196,4 +192,4 @@
 </div>
 {% include "partials/csrf.html" %}
 {% endblock %}
-{% block scripts %}<script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script><script src="{{ static_url('/static/js/record_picker.js') }}" defer></script>{% endblock %}

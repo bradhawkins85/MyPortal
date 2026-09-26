@@ -23,6 +23,9 @@ from app.repositories import users as users_repo
 from app.repositories import companies as company_repo
 from app.repositories import network_devices as network_devices_repo
 from app.repositories import infrastructure as infrastructure_repo
+from app.repositories import processes as processes_repo
+from app.repositories import tickets as tickets_repo
+from app.repositories import websites as websites_repo
 from app.repositories import tray as tray_repo
 from app.repositories import bcp as bcp_repo
 from app.services import tray as tray_service
@@ -40,6 +43,30 @@ _RELATIONSHIP_TYPES = {
     "connected_to": "Connected to", "located_in": "Located in",
     "related_to": "Related to",
 }
+
+_RELATIONSHIP_TARGET_TYPES = {
+    "asset", "knowledge_base_article", "ticket", "process_run", "website",
+    "ip_network", "rack",
+}
+
+
+def _relationship_target(record_type: str, record: dict[str, Any]) -> dict[str, Any]:
+    """Build the safe display contract used by the picker and relationship list."""
+    record_id = int(record["id"])
+    if record_type == "asset":
+        return {"key": f"asset:{record_id}", "type": "Asset", "label": record.get("name") or "Unnamed asset", "context": record.get("type") or record.get("serial_number") or "Asset", "url": f"/assets/{record_id}"}
+    if record_type == "knowledge_base_article":
+        return {"key": f"knowledge_base_article:{record_id}", "type": "Knowledge base", "label": record.get("title") or "Untitled article", "context": record.get("lifecycle_status") or "Article", "url": f"/knowledge-base/articles/{record['slug']}"}
+    if record_type == "ticket":
+        number = record.get("ticket_number") or record_id
+        return {"key": f"ticket:{record_id}", "type": "Ticket", "label": f"#{number} — {record.get('subject') or 'Untitled ticket'}", "context": record.get("status") or "Ticket", "url": f"/admin/tickets/{record_id}"}
+    if record_type == "process_run":
+        return {"key": f"process_run:{record_id}", "type": "Process", "label": record.get("template_name") or "Process run", "context": record.get("status") or "Run", "url": f"/api/processes/runs/{record_id}"}
+    if record_type == "website":
+        return {"key": f"website:{record_id}", "type": "Website", "label": record.get("name") or "Unnamed website", "context": record.get("url") or "Website", "url": f"/api/websites/{record_id}"}
+    if record_type == "ip_network":
+        return {"key": f"ip_network:{record_id}", "type": "Network", "label": record.get("name") or "Unnamed network", "context": record.get("cidr") or "Network", "url": f"/infrastructure#network-{record_id}"}
+    return {"key": f"rack:{record_id}", "type": "Rack", "label": record.get("name") or "Unnamed rack", "context": record.get("location") or f"{record.get('unit_count') or '?'} units", "url": f"/infrastructure#rack-{record_id}"}
 
 
 def _scanner_scope_from_form(form: Any) -> tuple[list[str], list[str]]:
@@ -1296,21 +1323,41 @@ async def asset_detail_page(
     if customer_safe:
         company_assets = [item for item in company_assets if bool(item.get("customer_visible"))]
     assets_by_id = {int(item["id"]): item for item in company_assets}
+    relationship_targets: list[dict[str, Any]] = []
+    target_records: dict[str, dict[int, dict[str, Any]]] = {
+        "asset": assets_by_id, "knowledge_base_article": articles_by_id,
+    }
+    if not customer_safe:
+        can_view_tickets = bool(user.get("is_super_admin")) or main_module._membership_menu_can(user, membership, "menu.tickets", write=True)
+        can_view_infrastructure = bool(user.get("is_super_admin")) or main_module._membership_menu_can(user, membership, "menu.network_devices")
+        tickets = await tickets_repo.list_tickets(company_id=company_id, limit=None) if can_view_tickets else []
+        infrastructure = await infrastructure_repo.overview(company_id) if can_view_infrastructure else {"networks": [], "racks": []}
+        target_records.update({
+            "ticket": {int(item["id"]): item for item in tickets},
+            "process_run": {int(item["id"]): item for item in await processes_repo.list_runs(company_id) if item.get("status") != "cancelled"},
+            "website": {int(item["id"]): item for item in await websites_repo.list_websites(company_id)},
+            "ip_network": {int(item["id"]): item for item in infrastructure["networks"]},
+            "rack": {int(item["id"]): item for item in infrastructure["racks"]},
+        })
+        for target_type, records in target_records.items():
+            for target_id, target in records.items():
+                if target_type == "asset" and (target_id == asset_id or target.get("archived_at")):
+                    continue
+                relationship_targets.append(_relationship_target(target_type, target))
+        relationship_targets.sort(key=lambda item: (item["type"], item["label"].casefold()))
     relationships = []
     for relationship in await asset_repo.list_relationships_for_asset(company_id, asset_id):
         item = dict(relationship)
         if item["direction"] == "inbound":
             target = assets_by_id.get(int(item["source_asset_id"]))
-        elif item["target_type"] == "asset":
-            target = assets_by_id.get(int(item["target_id"]))
-        elif item["target_type"] == "knowledge_base_article":
-            target = articles_by_id.get(int(item["target_id"]))
+        elif item["target_type"] in target_records:
+            target = target_records[item["target_type"]].get(int(item["target_id"]))
         else:
             target = None
         # Silently omit inaccessible/deleted records: their existence must not leak.
         if not target:
             continue
-        item["target"] = target
+        item["target"] = _relationship_target("asset" if item["direction"] == "inbound" else item["target_type"], target)
         relationships.append(item)
     can_view_bcp = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
         user, membership, "menu.continuity"
@@ -1330,6 +1377,7 @@ async def asset_detail_page(
             "relationship_types": _RELATIONSHIP_TYPES,
             "relationship_assets": [a for a in company_assets if int(a["id"]) != asset_id],
             "relationship_articles": visible_articles,
+            "relationship_targets": relationship_targets,
             "linked_runbooks": linked_runbooks,
             "can_edit": not customer_safe and can_write,
             "reconciliation_candidates": [] if customer_safe else await asset_repo.list_reconciliation_candidates(company_id, asset_id),
@@ -1510,18 +1558,25 @@ async def create_asset_relationship(request: Request, asset_id: int):
     if not source or int(source.get("company_id") or 0) != company_id:
         raise HTTPException(status_code=404, detail="Asset not found")
     form = await request.form()
+    target_key = str(form.get("target_key") or "")
     target_type = str(form.get("target_type") or "")
     relationship_type = str(form.get("relationship_type") or "")
     try:
-        target_id = int(form.get("target_id") or 0)
+        if target_key:
+            target_type, raw_target_id = target_key.split(":", 1)
+        else:
+            raw_target_id = form.get("target_id") or 0
+        target_id = int(raw_target_id)
     except (TypeError, ValueError):
         raise HTTPException(status_code=422, detail="Invalid relationship target")
     if relationship_type not in _RELATIONSHIP_TYPES:
         raise HTTPException(status_code=422, detail="Invalid relationship type")
+    if target_type not in _RELATIONSHIP_TARGET_TYPES or target_id < 1:
+        raise HTTPException(status_code=422, detail="Unsupported relationship target")
     if target_type == "asset":
         target = await asset_repo.get_asset_by_id(target_id)
         if (not target or int(target.get("company_id") or 0) != company_id
-                or target_id == asset_id):
+                or target_id == asset_id or target.get("archived_at")):
             raise HTTPException(status_code=404, detail="Relationship target not found")
     elif target_type == "knowledge_base_article":
         context = await knowledge_base_service.build_access_context(user)
@@ -1530,8 +1585,25 @@ async def create_asset_relationship(request: Request, asset_id: int):
         )
         if target_id not in {int(article["id"]) for article in visible}:
             raise HTTPException(status_code=404, detail="Relationship target not found")
-    else:
-        raise HTTPException(status_code=422, detail="Unsupported relationship target")
+    elif target_type == "ticket":
+        if not (user.get("is_super_admin") or main_module._membership_menu_can(user, membership, "menu.tickets", write=True)):
+            raise HTTPException(status_code=404, detail="Relationship target not found")
+        target = await tickets_repo.get_ticket(target_id)
+        if not target or int(target.get("company_id") or 0) != company_id or target.get("merged_into_ticket_id"):
+            raise HTTPException(status_code=404, detail="Relationship target not found")
+    elif target_type == "process_run":
+        target = await processes_repo.get_run(company_id, target_id)
+        if not target or target.get("status") == "cancelled":
+            raise HTTPException(status_code=404, detail="Relationship target not found")
+    elif target_type == "website":
+        if not await websites_repo.get_website(company_id, target_id):
+            raise HTTPException(status_code=404, detail="Relationship target not found")
+    elif target_type in {"ip_network", "rack"}:
+        if not (user.get("is_super_admin") or main_module._membership_menu_can(user, membership, "menu.network_devices")):
+            raise HTTPException(status_code=404, detail="Relationship target not found")
+        table = "ip_networks" if target_type == "ip_network" else "racks"
+        if not await infrastructure_repo.get_record(table, company_id, target_id):
+            raise HTTPException(status_code=404, detail="Relationship target not found")
     created = await asset_repo.create_relationship(
         company_id=company_id, source_asset_id=asset_id, target_type=target_type,
         target_id=target_id, relationship_type=relationship_type,

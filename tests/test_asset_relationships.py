@@ -80,9 +80,61 @@ async def test_detail_omits_inaccessible_relationship_target(monkeypatch):
     }]))
     monkeypatch.setattr(routes.knowledge_base_service, "build_access_context", AsyncMock(return_value=object()))
     monkeypatch.setattr(routes.knowledge_base_service, "list_articles_for_context", AsyncMock(return_value=[]))
+    monkeypatch.setattr(routes.asset_photo_repo, "list_for_asset", AsyncMock(return_value=[]))
     renderer = AsyncMock(return_value=routes.HTMLResponse("detail"))
     monkeypatch.setattr(main_module, "_render_template", renderer)
 
     await routes.asset_detail_page(_request("/assets/10"), 10)
 
     assert renderer.await_args.kwargs["extra"]["relationships"] == []
+
+
+@pytest.mark.anyio
+async def test_relationship_accepts_company_ticket_from_picker(monkeypatch):
+    monkeypatch.setattr(
+        routes, "_load_asset_context",
+        AsyncMock(return_value=({"id": 7, "is_super_admin": True}, None, {}, 3, None)),
+    )
+    monkeypatch.setattr(routes.asset_repo, "get_asset_by_id", AsyncMock(return_value={"id": 10, "company_id": 3}))
+    monkeypatch.setattr(routes.tickets_repo, "get_ticket", AsyncMock(return_value={"id": 55, "company_id": 3}))
+    create = AsyncMock(return_value=True)
+    monkeypatch.setattr(routes.asset_repo, "create_relationship", create)
+    monkeypatch.setattr(routes.audit_service, "record", AsyncMock())
+    request = _request()
+    request._receive = _form_receive(b"target_key=ticket%3A55&relationship_type=related_to")
+
+    response = await routes.create_asset_relationship(request, 10)
+
+    assert response.status_code == 303
+    assert create.await_args.kwargs["target_type"] == "ticket"
+    assert create.await_args.kwargs["target_id"] == 55
+
+
+@pytest.mark.anyio
+async def test_relationship_hides_cross_company_ticket(monkeypatch):
+    monkeypatch.setattr(
+        routes, "_load_asset_context",
+        AsyncMock(return_value=({"id": 7, "is_super_admin": True}, None, {}, 3, None)),
+    )
+    monkeypatch.setattr(routes.asset_repo, "get_asset_by_id", AsyncMock(return_value={"id": 10, "company_id": 3}))
+    monkeypatch.setattr(routes.tickets_repo, "get_ticket", AsyncMock(return_value={"id": 55, "company_id": 4}))
+    request = _request()
+    request._receive = _form_receive(b"target_key=ticket%3A55&relationship_type=related_to")
+
+    with pytest.raises(HTTPException) as error:
+        await routes.create_asset_relationship(request, 10)
+
+    assert error.value.status_code == 404
+
+
+def _form_receive(body: bytes):
+    sent = False
+
+    async def receive():
+        nonlocal sent
+        if sent:
+            return {"type": "http.request", "body": b"", "more_body": False}
+        sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return receive
