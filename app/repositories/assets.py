@@ -4,6 +4,9 @@ import json
 from datetime import date, datetime, time, timezone
 from typing import Any
 
+import aiomysql
+import aiosqlite
+
 from app.core.database import db
 
 
@@ -241,12 +244,19 @@ async def create_relationship(
     )
     if existing:
         return False
-    await db.execute(
-        """INSERT INTO asset_relationships
-           (company_id, source_asset_id, target_type, target_id, relationship_type, created_by)
-           VALUES (%s, %s, %s, %s, %s, %s)""",
-        (company_id, source_asset_id, target_type, target_id, relationship_type, created_by),
-    )
+    try:
+        await db.execute(
+            """INSERT INTO asset_relationships
+               (company_id, source_asset_id, target_type, target_id, relationship_type, created_by)
+               VALUES (%s, %s, %s, %s, %s, %s)""",
+            (company_id, source_asset_id, target_type, target_id, relationship_type, created_by),
+        )
+    except (aiomysql.IntegrityError, aiosqlite.IntegrityError) as exc:
+        # The unique key is the race-safe duplicate guard after the friendly
+        # pre-check above. Do not misreport unrelated integrity failures.
+        if (exc.args and exc.args[0] == 1062) or "UNIQUE constraint failed" in str(exc):
+            return False
+        raise
     return True
 
 
