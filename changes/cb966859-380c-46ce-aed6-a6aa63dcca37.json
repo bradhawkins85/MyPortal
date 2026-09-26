@@ -1,0 +1,7 @@
+{
+  "guid": "cb966859-380c-46ce-aed6-a6aa63dcca37",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "Feature",
+  "summary": "Add company-scoped integration health, asset provenance, and an audited reconciliation queue.",
+  "content_hash": "5ca8b19fb7657aefee0de038eb425963453e82d19dbd38d3c122ea9162478524"
+}

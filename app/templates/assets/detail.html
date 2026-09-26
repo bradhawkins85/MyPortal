@@ -169,6 +169,14 @@
     <div class="card__body"><ul>{% for candidate in reconciliation_candidates %}<li><strong>{{ candidate.source | title }}</strong> — {{ candidate.external_id }}{% if candidate.last_error %}<span class="text-muted">{{ candidate.last_error }}</span>{% endif %}{% if can_edit %}<form class="form-inline" method="post" action="/assets/{{ asset.id }}/reconciliation/{{ candidate.id }}/approve"><button class="button button--primary button--small" type="submit">Approve match</button></form>{% endif %}</li>{% endfor %}</ul></div>
   </section>{% endif %}
 
+  {% if not customer_safe %}<section class="card card--panel admin-grid__full" id="source-records">
+    <header class="card__header"><div><h2 class="card__title">Data provenance and ownership</h2><p class="card__subtitle">Integration-owned inventory is refreshed by its source. Notes, references, relationships, photos, and custom fields remain manually owned.</p></div></header>
+    <div class="card__body"><div class="table-wrapper"><table class="table"><thead><tr><th>Source</th><th>Source record</th><th>Status</th><th>Fields owned by source</th><th>Last successful update</th></tr></thead><tbody>
+      {% for source in asset_sources %}<tr><td>{{ source.source | replace('_', ' ') | title }}</td><td><a href="#source-record-{{ source.id }}" id="source-record-{{ source.id }}"><code>{{ source.external_id }}</code></a></td><td><span class="status status--{{ 'success' if source.status == 'active' else 'warning' }}">{{ source.status | replace('_', ' ') | title }}</span></td><td>{{ source.owned_fields | join(', ') or 'Record linkage only' }}</td><td>{% if source.last_success_at %}<span data-utc="{{ source.last_success_at }}">{{ source.last_success_at }}</span>{% else %}Never{% endif %}</td></tr>
+      {% else %}<tr><td colspan="5">No integration source is linked. This asset is manually owned.</td></tr>{% endfor %}
+    </tbody></table></div></div>
+  </section>{% endif %}
+
   {% if not customer_safe %}<section class="card card--panel">
     <header class="card__header"><h2 class="card__title">Linked tickets</h2></header>
     <div class="card__body"><ul>
