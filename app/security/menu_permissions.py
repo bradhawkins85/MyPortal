@@ -9,6 +9,24 @@ AccessLevel = Literal["none", "read", "write"]
 ACCESS_LEVELS: tuple[AccessLevel, ...] = ("none", "read", "write")
 BOOLEAN_MENU_PERMISSIONS: frozenset[str] = frozenset({"menu.admin.technician"})
 
+# Sparse role payloads written before the feature-specific catalogue existed
+# inherit only access they already had through the old owning permission.  The
+# Roles editor submits every key, so an explicit ``none`` always wins and new
+# or reviewed roles never gain access implicitly.
+COMPATIBILITY_PERMISSION_MAP: dict[str, str] = {
+    "menu.documentation_search": "menu.assets",
+    "menu.asset_photos": "menu.assets",
+    "menu.asset_relationships": "menu.assets",
+    "menu.processes": "menu.assets",
+    "menu.expirations": "menu.assets",
+    "menu.websites": "menu.assets",
+    "menu.ipam": "menu.network_devices",
+    "menu.racks": "menu.network_devices",
+    "menu.bcp_asset_links": "menu.continuity",
+    "menu.credentials": "menu.admin.company",
+    "menu.credential_sharing": "menu.admin.company",
+}
+
 
 @dataclass(frozen=True)
 class MenuPermission:
@@ -37,8 +55,16 @@ MENU_PERMISSIONS: tuple[MenuPermission, ...] = (
     MenuPermission("menu.quotes", "Quotes", "Commerce", "View quotes; write access allows quote actions.", (), "can_access_quotes"),
     MenuPermission("menu.orders", "Orders", "Commerce", "View orders; write access allows order actions.", ("orders.access",), "can_access_orders"),
     MenuPermission("menu.forms", "Forms", "Company", "View forms; write access allows submissions.", ("forms.access",), "can_access_forms"),
+    MenuPermission("menu.documentation_search", "Documentation search", "Documentation", "Search only documentation sources the role can already open. This permission never grants access to a search result by itself."),
     MenuPermission("menu.assets", "Assets", "Company", "View assets; write access allows asset changes.", ("assets.manage",), "can_manage_assets"),
+    MenuPermission("menu.asset_photos", "Asset photos", "Asset actions", "View and download photos for accessible assets; write access allows uploads, captions, visibility changes, ordering, and deletion."),
+    MenuPermission("menu.asset_relationships", "Asset relationships", "Asset actions", "View links between accessible records; write access allows relationship creation and removal."),
+    MenuPermission("menu.processes", "Processes", "Documentation", "View process templates and runs; write access allows templates, runs, and workflow steps to be changed."),
+    MenuPermission("menu.expirations", "Expirations", "Documentation", "View accessible expiry and review dates; write access allows reminder settings and workflow actions."),
+    MenuPermission("menu.websites", "Website monitoring", "Documentation", "View documented websites and monitoring results; write access allows website changes and on-demand checks."),
     MenuPermission("menu.network_devices", "Network Devices", "Company", "View discovered network devices; write access allows device actions and subnet scanner management."),
+    MenuPermission("menu.ipam", "IP address management", "Infrastructure", "View networks and addresses; write access allows network and address changes."),
+    MenuPermission("menu.racks", "Rack management", "Infrastructure", "View racks and placements; write access allows rack and equipment changes."),
     MenuPermission("menu.defender", "Windows Defender", "Company", "View endpoint protection status; write access allows Defender configuration, exclusions, and ticket creation."),
     MenuPermission("menu.m365.configuration", "Office 365 Configuration", "Office 365", "View or manage Microsoft 365 tenant configuration.", ("licenses.manage",), "can_manage_licenses"),
     MenuPermission("menu.m365.best_practices", "Office 365 Best Practices", "Office 365", "View or run Microsoft 365 best-practice checks.", ("m365_best_practices.access",), "can_view_m365_best_practices"),
@@ -66,6 +92,9 @@ MENU_PERMISSIONS: tuple[MenuPermission, ...] = (
     MenuPermission("menu.compliance_checks", "Compliance Checks", "Compliance", "View assigned compliance checks.", ("compliance_checks.access",), "can_view_compliance_checks"),
     MenuPermission("menu.compliance_checks.library", "Compliance Checks Library", "Compliance", "Manage compliance check library items.", ("compliance_checks.manage",), "can_manage_compliance_checks", admin_only=True),
     MenuPermission("menu.continuity", "Continuity", "Compliance", "View or manage business continuity plans.", ("continuity.access", "bcp:view", "bcp:edit"), "can_view_bcp"),
+    MenuPermission("menu.bcp_asset_links", "BCP asset links", "Compliance", "View asset links only when the role can also view both BCP and Assets; write access allows links to be changed subject to BCP plan permissions."),
+    MenuPermission("menu.credentials", "Credential vault", "Credentials", "View company credential metadata; write access allows credential creation, rotation, and lifecycle management. Secret reveal still requires its existing strong-authentication and grant checks."),
+    MenuPermission("menu.credential_sharing", "Credential sharing", "Credentials", "View grant metadata; write access allows credentials to be shared or grants revoked. Recipient, grant, strong-authentication, and company checks always remain in force."),
     MenuPermission("menu.admin.profile", "My Profile", "Administration", "View and update the user's administration profile."),
     MenuPermission("menu.admin.impersonation", "Impersonation", "Administration", "Access impersonation administration.", admin_only=True),
     MenuPermission("menu.admin.users", "Users", "Administration", "View and manage portal user accounts.", admin_only=True),
@@ -165,6 +194,9 @@ def normalize_menu_permissions(raw: Any) -> dict[str, AccessLevel]:
         for key, value in source.items():
             if key in MENU_PERMISSION_MAP:
                 normalized[key] = normalize_menu_permission_level(key, value)
+        for target_key, former_key in COMPATIBILITY_PERMISSION_MAP.items():
+            if target_key not in source and former_key in source:
+                normalized[target_key] = normalized[former_key]
         # Also accept a legacy list nested under permissions for compatibility.
         legacy = raw.get("legacy") or raw.get("permissions")
         if isinstance(legacy, list):

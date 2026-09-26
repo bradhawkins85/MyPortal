@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.api.dependencies.auth import get_current_user
 from app.schemas.documentation_search import DocumentationSearchResponse
@@ -26,6 +26,12 @@ async def documentation_search(
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     current_user: dict = Depends(get_current_user),
 ) -> DocumentationSearchResponse:
+    from app import main as main_module
+
+    if not await main_module._has_menu_page_access(
+        request, current_user, "menu.documentation_search"
+    ):
+        raise HTTPException(status_code=403, detail="Documentation search access required")
     result = await search_documentation(
         q, current_user,
         active_company_id=(getattr(request.state, "active_company_id", None)

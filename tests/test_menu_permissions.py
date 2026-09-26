@@ -101,3 +101,40 @@ def test_technician_permission_catalogue_exposes_yes_no_levels():
     )
 
     assert technician_permission["levels"] == ["none", "write"]
+
+
+def test_sparse_legacy_roles_inherit_only_previously_owned_feature_access():
+    permissions = normalize_menu_permissions({
+        "menu.assets": "read",
+        "menu.network_devices": "write",
+        "menu.continuity": "read",
+        "menu.admin.company": "none",
+    })
+    assert permissions["menu.processes"] == "read"
+    assert permissions["menu.asset_photos"] == "read"
+    assert permissions["menu.ipam"] == "write"
+    assert permissions["menu.racks"] == "write"
+    assert permissions["menu.bcp_asset_links"] == "read"
+    assert permissions["menu.credentials"] == "none"
+
+
+def test_explicit_feature_denial_overrides_compatibility_mapping():
+    permissions = normalize_menu_permissions({
+        "menu.assets": "write",
+        "menu.processes": "none",
+        "menu.asset_photos": "read",
+    })
+    assert permissions["menu.processes"] == "none"
+    assert permissions["menu.asset_photos"] == "read"
+    assert permissions["menu.asset_relationships"] == "write"
+
+
+def test_new_feature_permissions_default_to_no_access():
+    permissions = normalize_menu_permissions(None)
+    for key in (
+        "menu.documentation_search", "menu.processes", "menu.ipam", "menu.racks",
+        "menu.expirations", "menu.websites", "menu.asset_photos",
+        "menu.asset_relationships", "menu.bcp_asset_links", "menu.credentials",
+        "menu.credential_sharing",
+    ):
+        assert permissions[key] == "none"

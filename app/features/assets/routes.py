@@ -550,7 +550,7 @@ def _expiration_key(item: dict[str, Any]) -> tuple[str, int, str]:
 async def expirations_page(request: Request):
     """Aggregate dates live from sources the current user may access."""
     main_module = _main()
-    user, membership, company, company_id, redirect = await _load_asset_context(request)
+    user, membership, company, company_id, redirect = await _load_asset_context(request, "menu.expirations")
     if redirect:
         return redirect
     global_view = bool(user.get("is_super_admin")) and request.query_params.get("scope") == "global"
@@ -613,7 +613,7 @@ async def expirations_page(request: Request):
         item.setdefault("url", f"/assets/{item['source_id']}")
     items.sort(key=lambda item: item.get("due_iso") or "9999-12-31")
     can_manage = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
-        user, membership, "menu.assets", write=True
+        user, membership, "menu.expirations", write=True
     )
     return await main_module._render_template("assets/expirations.html", request, user, extra={
         "title": "Expirations", "expirations": items, "global_view": global_view,
@@ -625,10 +625,10 @@ async def expirations_page(request: Request):
 @router.post("/expirations/settings")
 async def save_expiration_settings(request: Request):
     main_module = _main()
-    user, membership, _company, company_id, redirect = await _load_asset_context(request)
+    user, membership, _company, company_id, redirect = await _load_asset_context(request, "menu.expirations")
     if redirect:
         return redirect
-    if not (user.get("is_super_admin") or main_module._membership_menu_can(user, membership, "menu.assets", write=True)):
+    if not (user.get("is_super_admin") or main_module._membership_menu_can(user, membership, "menu.expirations", write=True)):
         raise HTTPException(status_code=403, detail="Write access to assets is required")
     form = await request.form()
     try:
@@ -655,11 +655,11 @@ async def save_expiration_settings(request: Request):
 @router.post("/expirations/remind")
 async def send_expiration_reminder(request: Request):
     main_module = _main()
-    user, membership, _company, company_id, redirect = await _load_asset_context(request)
+    user, membership, _company, company_id, redirect = await _load_asset_context(request, "menu.expirations")
     if redirect:
         return redirect
     can_write = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
-        user, membership, "menu.assets", write=True
+        user, membership, "menu.expirations", write=True
     )
     if not can_write:
         raise HTTPException(status_code=403, detail="Write access to assets is required")
@@ -788,15 +788,15 @@ async def infrastructure_page(request: Request):
     return RedirectResponse(url="/ipam", status_code=status.HTTP_303_SEE_OTHER)
 
 
-async def _infrastructure_page_context(request: Request):
+async def _infrastructure_page_context(request: Request, permission_key: str):
     main_module = _main()
     user, membership, company, company_id, redirect = await _load_asset_context(
-        request, "menu.network_devices"
+        request, permission_key
     )
     if redirect:
         return main_module, user, redirect
     can_edit = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
-        user, membership, "menu.network_devices", write=True
+        user, membership, permission_key, write=True
     )
     data = await infrastructure_repo.overview(company_id)
     data.update({
@@ -809,7 +809,7 @@ async def _infrastructure_page_context(request: Request):
 
 @router.get("/ipam", response_class=HTMLResponse, summary="IP address management")
 async def ipam_page(request: Request):
-    main_module, user, data = await _infrastructure_page_context(request)
+    main_module, user, data = await _infrastructure_page_context(request, "menu.ipam")
     if isinstance(data, RedirectResponse):
         return data
     data["title"] = "IP address management"
@@ -820,7 +820,7 @@ async def ipam_page(request: Request):
 
 @router.get("/racks", response_class=HTMLResponse, summary="Rack management")
 async def racks_page(request: Request):
-    main_module, user, data = await _infrastructure_page_context(request)
+    main_module, user, data = await _infrastructure_page_context(request, "menu.racks")
     if isinstance(data, RedirectResponse):
         return data
     data["title"] = "Rack management"
@@ -836,15 +836,15 @@ def _required_text(form: Any, key: str, limit: int = 191) -> str:
     return value
 
 
-async def _infrastructure_write_context(request: Request):
+async def _infrastructure_write_context(request: Request, permission_key: str):
     main_module = _main()
     user, membership, _company, company_id, redirect = await _load_asset_context(
-        request, "menu.network_devices"
+        request, permission_key
     )
     if redirect:
         return user, company_id, redirect
     if not (user.get("is_super_admin") or main_module._membership_menu_can(
-        user, membership, "menu.network_devices", write=True
+        user, membership, permission_key, write=True
     )):
         raise HTTPException(status_code=403, detail="Network documentation write access required")
     return user, company_id, None
@@ -852,7 +852,7 @@ async def _infrastructure_write_context(request: Request):
 
 @router.post("/api/infrastructure/networks", status_code=201, summary="Create a CIDR network")
 async def create_ip_network(request: Request):
-    user, company_id, redirect = await _infrastructure_write_context(request)
+    user, company_id, redirect = await _infrastructure_write_context(request, "menu.ipam")
     if redirect:
         return redirect
     form = await request.form()
@@ -870,7 +870,7 @@ async def create_ip_network(request: Request):
 
 @router.post("/api/infrastructure/addresses", status_code=201, summary="Assign or reserve an IP address")
 async def create_ip_address(request: Request):
-    user, company_id, redirect = await _infrastructure_write_context(request)
+    user, company_id, redirect = await _infrastructure_write_context(request, "menu.ipam")
     if redirect:
         return redirect
     form = await request.form()
@@ -891,7 +891,7 @@ async def create_ip_address(request: Request):
 
 @router.post("/api/infrastructure/racks", status_code=201, summary="Create a rack")
 async def create_rack(request: Request):
-    _user, company_id, redirect = await _infrastructure_write_context(request)
+    _user, company_id, redirect = await _infrastructure_write_context(request, "menu.racks")
     if redirect:
         return redirect
     form = await request.form()
@@ -910,7 +910,7 @@ async def create_rack(request: Request):
 
 @router.post("/api/infrastructure/rack-equipment", status_code=201, summary="Place an asset in a rack")
 async def place_rack_asset(request: Request):
-    _user, company_id, redirect = await _infrastructure_write_context(request)
+    _user, company_id, redirect = await _infrastructure_write_context(request, "menu.racks")
     if redirect:
         return redirect
     form = await request.form()
@@ -930,13 +930,14 @@ async def place_rack_asset(request: Request):
 
 @router.post("/api/infrastructure/{record_type}/{record_id}/delete", summary="Delete infrastructure documentation")
 async def delete_infrastructure_record(request: Request, record_type: str, record_id: int):
-    _user, company_id, redirect = await _infrastructure_write_context(request)
-    if redirect:
-        return redirect
     tables = {"networks": "ip_networks", "addresses": "ip_addresses",
               "racks": "racks", "rack-equipment": "rack_equipment"}
     if record_type not in tables:
         raise HTTPException(status_code=404, detail="Record type not found")
+    permission_key = "menu.ipam" if record_type in {"networks", "addresses"} else "menu.racks"
+    _user, company_id, redirect = await _infrastructure_write_context(request, permission_key)
+    if redirect:
+        return redirect
     await infrastructure_repo.delete_record(tables[record_type], record_id, company_id)
     await audit_service.record(action="infrastructure.record.delete", request=request,
                                entity_type=record_type, entity_id=record_id,
@@ -1383,6 +1384,18 @@ async def asset_detail_page(
     can_write = is_super_admin or main_module._membership_menu_can(
         user, membership, "menu.assets", write=True
     )
+    can_view_relationships = is_super_admin or main_module._membership_menu_can(
+        user, membership, "menu.asset_relationships"
+    )
+    can_view_photos = is_super_admin or main_module._membership_menu_can(
+        user, membership, "menu.asset_photos"
+    )
+    can_edit_relationships = is_super_admin or main_module._membership_menu_can(
+        user, membership, "menu.asset_relationships", write=True
+    )
+    can_edit_photos = is_super_admin or main_module._membership_menu_can(
+        user, membership, "menu.asset_photos", write=True
+    )
     customer_safe = (not can_write) or customer_preview
     if (record_company_id is None or int(record_company_id) != company_id
             or (not is_super_admin and not can_write and (not bool(record.get("customer_visible")) or not await _customer_role_can_view_asset(membership, company_id, asset_id)))):
@@ -1436,10 +1449,14 @@ async def asset_detail_page(
         infrastructure = await infrastructure_repo.overview(company_id) if can_view_infrastructure else {"networks": [], "racks": []}
         target_records.update({
             "ticket": {int(item["id"]): item for item in tickets},
-            "process_run": {int(item["id"]): item for item in await processes_repo.list_runs(company_id) if item.get("status") != "cancelled"},
-            "website": {int(item["id"]): item for item in await websites_repo.list_websites(company_id)},
-            "ip_network": {int(item["id"]): item for item in infrastructure["networks"]},
-            "rack": {int(item["id"]): item for item in infrastructure["racks"]},
+            "process_run": {int(item["id"]): item for item in await processes_repo.list_runs(company_id) if item.get("status") != "cancelled"}
+                if main_module._membership_menu_can(user, membership, "menu.processes") else {},
+            "website": {int(item["id"]): item for item in await websites_repo.list_websites(company_id)}
+                if main_module._membership_menu_can(user, membership, "menu.websites") else {},
+            "ip_network": {int(item["id"]): item for item in infrastructure["networks"]}
+                if main_module._membership_menu_can(user, membership, "menu.ipam") else {},
+            "rack": {int(item["id"]): item for item in infrastructure["racks"]}
+                if main_module._membership_menu_can(user, membership, "menu.racks") else {},
         })
         for target_type, records in target_records.items():
             for target_id, target in records.items():
@@ -1448,7 +1465,7 @@ async def asset_detail_page(
                 relationship_targets.append(_relationship_target(target_type, target))
         relationship_targets.sort(key=lambda item: (item["type"], item["label"].casefold()))
     relationships = []
-    for relationship in await asset_repo.list_relationships_for_asset(company_id, asset_id):
+    for relationship in (await asset_repo.list_relationships_for_asset(company_id, asset_id) if can_view_relationships else []):
         item = dict(relationship)
         if item["direction"] == "inbound":
             target = assets_by_id.get(int(item["source_asset_id"]))
@@ -1483,7 +1500,7 @@ async def asset_detail_page(
             "relationship_types": _RELATIONSHIP_TYPES,
             "relationship_assets": [a for a in company_assets if int(a["id"]) != asset_id],
             "relationship_articles": visible_articles,
-            "relationship_targets": relationship_targets,
+            "relationship_targets": relationship_targets if can_view_relationships else [],
             "linked_runbooks": linked_runbooks,
             "linked_websites": [] if customer_safe else await websites_repo.list_for_asset(company_id, asset_id),
             "can_edit": not customer_safe and can_write,
@@ -1494,9 +1511,13 @@ async def asset_detail_page(
             "customer_role_ids": await audience_repo.list_role_ids(company_id, "asset", asset_id) if can_write else [],
             "bcp_context": bcp_context,
             "infrastructure_links": infrastructure_links,
-            "asset_photos": await asset_photo_repo.list_for_asset(
+            "asset_photos": (await asset_photo_repo.list_for_asset(
                 company_id, asset_id, customer_only=customer_safe
-            ),
+            )) if can_view_photos else [],
+            "can_view_asset_photos": can_view_photos,
+            "can_view_asset_relationships": can_view_relationships,
+            "can_edit_asset_photos": can_edit_photos,
+            "can_edit_asset_relationships": can_edit_relationships,
         }
     )
 
@@ -1506,15 +1527,20 @@ async def _photo_context(request: Request, asset_id: int, *, write: bool = False
     if redirect:
         raise HTTPException(status_code=403, detail="Asset access denied")
     main_module = _main()
-    can_write = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
-        user, membership, "menu.assets", write=True
+    can_view_photos = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
+        user, membership, "menu.asset_photos"
     )
+    can_write = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
+        user, membership, "menu.asset_photos", write=True
+    )
+    if not can_view_photos:
+        raise HTTPException(status_code=403, detail="Asset photo access denied")
     asset = await asset_repo.get_asset_by_id(asset_id)
     if (not asset or int(asset.get("company_id") or 0) != company_id
             or (not can_write and not bool(asset.get("customer_visible")))):
         raise HTTPException(status_code=404, detail="Asset not found")
     if write and not can_write:
-        raise HTTPException(status_code=403, detail="Asset write access required")
+        raise HTTPException(status_code=403, detail="Asset photo write access required")
     return user, company_id, can_write
 
 
@@ -1662,9 +1688,9 @@ async def create_asset_relationship(request: Request, asset_id: int):
     if redirect:
         return redirect
     if not (user.get("is_super_admin") or main_module._membership_menu_can(
-        user, membership, "menu.assets", write=True
+        user, membership, "menu.asset_relationships", write=True
     )):
-        raise HTTPException(status_code=403, detail="Asset write access required")
+        raise HTTPException(status_code=403, detail="Asset relationship write access required")
     source = await asset_repo.get_asset_by_id(asset_id)
     if not source or int(source.get("company_id") or 0) != company_id:
         raise HTTPException(status_code=404, detail="Asset not found")
@@ -1703,14 +1729,19 @@ async def create_asset_relationship(request: Request, asset_id: int):
         if not target or int(target.get("company_id") or 0) != company_id or target.get("merged_into_ticket_id"):
             raise HTTPException(status_code=404, detail="Relationship target not found")
     elif target_type == "process_run":
+        if not (user.get("is_super_admin") or main_module._membership_menu_can(user, membership, "menu.processes")):
+            raise HTTPException(status_code=404, detail="Relationship target not found")
         target = await processes_repo.get_run(company_id, target_id)
         if not target or target.get("status") == "cancelled":
             raise HTTPException(status_code=404, detail="Relationship target not found")
     elif target_type == "website":
+        if not (user.get("is_super_admin") or main_module._membership_menu_can(user, membership, "menu.websites")):
+            raise HTTPException(status_code=404, detail="Relationship target not found")
         if not await websites_repo.get_website(company_id, target_id):
             raise HTTPException(status_code=404, detail="Relationship target not found")
     elif target_type in {"ip_network", "rack"}:
-        if not (user.get("is_super_admin") or main_module._membership_menu_can(user, membership, "menu.network_devices")):
+        target_permission = "menu.ipam" if target_type == "ip_network" else "menu.racks"
+        if not (user.get("is_super_admin") or main_module._membership_menu_can(user, membership, target_permission)):
             raise HTTPException(status_code=404, detail="Relationship target not found")
         table = "ip_networks" if target_type == "ip_network" else "racks"
         if not await infrastructure_repo.get_record(table, company_id, target_id):
@@ -1738,9 +1769,9 @@ async def delete_asset_relationship(request: Request, asset_id: int, relationshi
     if redirect:
         return redirect
     if not (user.get("is_super_admin") or main_module._membership_menu_can(
-        user, membership, "menu.assets", write=True
+        user, membership, "menu.asset_relationships", write=True
     )):
-        raise HTTPException(status_code=403, detail="Asset write access required")
+        raise HTTPException(status_code=403, detail="Asset relationship write access required")
     asset = await asset_repo.get_asset_by_id(asset_id)
     if not asset or int(asset.get("company_id") or 0) != company_id:
         raise HTTPException(status_code=404, detail="Asset not found")

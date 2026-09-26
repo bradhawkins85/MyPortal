@@ -74,7 +74,13 @@ def _deny_impersonation(request: Request) -> None:
         )
 
 
-async def _authorize(user: dict, company_id: int, *, write: bool = False) -> None:
+async def _authorize(
+    user: dict,
+    company_id: int,
+    *,
+    write: bool = False,
+    permission_key: str = "menu.credentials",
+) -> None:
     await _require_enabled(company_id)
     if user.get("is_super_admin"):
         return
@@ -85,7 +91,11 @@ async def _authorize(user: dict, company_id: int, *, write: bool = False) -> Non
             status_code=status.HTTP_403_FORBIDDEN, detail="Vault access denied"
         ) from None
     membership = await user_company_repo.get_user_company(user_id, company_id)
-    if not membership or (write and not membership.get("is_admin")):
+    from app import main as main_module
+
+    if not membership or not main_module._membership_menu_can(
+        user, membership, permission_key, write=write
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Vault access denied"
         )
@@ -192,7 +202,7 @@ async def list_credentials(
     user: dict = Depends(get_current_user),
 ):
     """List searchable metadata. Secret material and ciphertext are never selected."""
-    await _authorize(user, company_id, write=True)
+    await _authorize(user, company_id)
     _no_store(response)
     return await repo.list_credentials(company_id)
 
@@ -456,7 +466,7 @@ async def create_credential_grant(
     user: dict = Depends(get_current_user),
 ):
     """Grant one pinned onboarding-password version; no notification contains the password."""
-    await _authorize(user, company_id, write=True)
+    await _authorize(user, company_id, write=True, permission_key="menu.credential_sharing")
     _deny_impersonation(request)
     await _limit(request, user)
     _validate_grant_payload(payload)
@@ -735,7 +745,7 @@ async def list_grant_eligible_staff(
     user: dict = Depends(get_current_user),
 ):
     """Preview the current, unambiguous people eligible for a title policy."""
-    await _authorize(user, company_id, write=True)
+    await _authorize(user, company_id, permission_key="menu.credential_sharing")
     _no_store(response)
     return await standing_grant_repo.eligible_staff(company_id, job_title)
 
@@ -753,7 +763,7 @@ async def create_standing_grant(
     _: None = Depends(require_database),
     user: dict = Depends(get_current_user),
 ):
-    await _authorize(user, company_id, write=True)
+    await _authorize(user, company_id, write=True, permission_key="menu.credential_sharing")
     _deny_impersonation(request)
     await _limit(request, user)
     if (payload.selector_type == "staff") != (payload.staff_id is not None):
@@ -913,7 +923,7 @@ async def revoke_standing_grant(
     _: None = Depends(require_database),
     user: dict = Depends(get_current_user),
 ):
-    await _authorize(user, company_id, write=True)
+    await _authorize(user, company_id, write=True, permission_key="menu.credential_sharing")
     _deny_impersonation(request)
     row = await standing_grant_repo.revoke(grant_id, company_id, int(user["id"]))
     if row is None:
@@ -946,7 +956,7 @@ async def review_standing_grants(
     user: dict = Depends(get_current_user),
 ):
     """Administrative review includes revoked policies but never credential values."""
-    await _authorize(user, company_id, write=True)
+    await _authorize(user, company_id, permission_key="menu.credential_sharing")
     _deny_impersonation(request)
     item = await repo.get_metadata(company_id, credential_id)
     if item is None:

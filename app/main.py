@@ -2053,6 +2053,20 @@ def _build_menu_access_map(
         if membership_data.get(boolean_key):
             promote(menu_key, "write" if boolean_key.startswith("can_manage") or boolean_key == "is_admin" else "read")
 
+    # Pre-catalogue membership booleans receive the same compatibility-only
+    # preservation as sparse role payloads. Explicit feature denials still win
+    # through ``promote`` and newly saved roles contain every feature key.
+    if membership_data.get("can_manage_assets"):
+        for key in (
+            "menu.documentation_search", "menu.asset_photos",
+            "menu.asset_relationships", "menu.processes", "menu.expirations",
+            "menu.websites",
+        ):
+            promote(key, "write")
+    if membership_data.get("is_admin"):
+        promote("menu.credentials", "write")
+        promote("menu.credential_sharing", "write")
+
     if membership_data.get("can_manage_licenses"):
         promote("menu.m365.configuration", "write")
     if membership_data.get("can_manage_licenses") and membership_data.get("can_access_cart"):
@@ -3229,7 +3243,9 @@ async def ai_search_page(request: Request):
 @app.get("/documentation-search", response_class=HTMLResponse)
 async def documentation_search_page(request: Request):
     """Render the permission-scoped asset and knowledge-base search workspace."""
-    user, redirect = await _require_authenticated_user(request)
+    user, redirect = await _require_menu_page_access(
+        request, "menu.documentation_search", detail="Documentation search access required"
+    )
     if redirect:
         return redirect
     return await _render_template(
