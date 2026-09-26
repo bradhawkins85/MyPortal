@@ -35,10 +35,12 @@ from app.security.session import SessionData
 from app.repositories import auth as auth_repo
 from app.services import audit
 from app.security.rate_limiter import SimpleRateLimiter
+from app.security.client_ip import get_client_ip
 
 router = APIRouter(prefix="/api/vault", tags=["Credential vault"])
 _reveal_limiter = SimpleRateLimiter(10, 60, namespace="vault-reveal")
 _write_limiter = SimpleRateLimiter(30, 60, namespace="vault-write")
+_external_share_limiter = SimpleRateLimiter(10, 300, namespace="vault-external-share")
 
 
 def _no_store(response: Response) -> None:
@@ -511,6 +513,15 @@ async def revoke_credential_grant(
 async def verify_external_share(
     payload: ShareVerification, request: Request, _: None = Depends(require_database)
 ):
+    allowed, retry_after = await _external_share_limiter.check(
+        "ip:" + (get_client_ip(request, default="anonymous") or "anonymous")
+    )
+    if not allowed:
+        raise HTTPException(
+            429,
+            "Share unavailable",
+            headers={"Retry-After": str(int(retry_after or 300))},
+        )
     grant_id = await grant_repo.verify_external(
         payload.share_token, payload.verification_code
     )
