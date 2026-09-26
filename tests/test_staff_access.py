@@ -65,6 +65,7 @@ async def test_apply_pending_access_for_user_assigns_permissions(monkeypatch):
         return assignments.get((staff_id, company_id))
 
     assign_mock = AsyncMock()
+    link_mock = AsyncMock(return_value=True)
     delete_mock = AsyncMock()
 
     monkeypatch.setattr(
@@ -81,6 +82,11 @@ async def test_apply_pending_access_for_user_assigns_permissions(monkeypatch):
         staff_access_service.user_company_repo,
         "assign_user_to_company",
         assign_mock,
+    )
+    monkeypatch.setattr(
+        staff_access_service.staff_repo,
+        "link_portal_user",
+        link_mock,
     )
     monkeypatch.setattr(
         staff_access_service.pending_repo,
@@ -110,6 +116,8 @@ async def test_apply_pending_access_for_user_assigns_permissions(monkeypatch):
     )
 
     await staff_access_service.apply_pending_access_for_user(user)
+
+    assert link_mock.await_count == 2
 
     assert assign_mock.await_count == 2
     first_call = assign_mock.await_args_list[0]

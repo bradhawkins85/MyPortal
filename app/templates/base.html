@@ -525,6 +525,16 @@
               </a>
             </li>
           {% endif %}
+          {% if has_authenticated_user and active_company_id %}
+            <li class="menu__item">
+              <a href="/shared-credentials" {% if current_path == '/shared-credentials' %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false"><path d="M7 10V7a5 5 0 0 1 10 0v3h1a2 2 0 0 1 2 2v8H4v-8a2 2 0 0 1 2-2zm2 0h6V7a3 3 0 0 0-6 0zm3 3a2 2 0 0 0-1 3.73V18h2v-1.27A2 2 0 0 0 12 13z"/></svg>
+                </span>
+                <span class="menu__label">Shared credentials</span>
+              </a>
+            </li>
+          {% endif %}
           {% if can_view_compliance %}
             <li class="menu__item">
               <a href="/compliance" {% if current_path.startswith('/compliance') and not current_path.startswith('/compliance-checks') %}aria-current="page"{% endif %}>

@@ -106,3 +106,45 @@ class ShareVerification(BaseModel):
 
 class ShareToken(BaseModel):
     share_token: str = Field(min_length=32, max_length=256)
+
+
+class StandingGrantCreate(BaseModel):
+    selector_type: Literal["staff", "job_title"]
+    staff_id: int | None = Field(default=None, gt=0)
+    job_title: str | None = Field(default=None, min_length=1, max_length=255)
+    capabilities: set[Literal["enumerate", "reveal", "share", "administer"]] = Field(
+        min_length=1
+    )
+    purpose: str = Field(min_length=3, max_length=500)
+    approver_user_id: int | None = Field(default=None, gt=0)
+    expires_at: datetime | None = None
+    review_due_at: datetime
+
+
+class StandingGrant(BaseModel):
+    id: int
+    credential_id: int
+    company_id: int
+    selector_type: str
+    staff_id: int | None = None
+    job_title: str | None = None
+    purpose: str
+    grantor_user_id: int
+    approver_user_id: int | None = None
+    expires_at: datetime | str | None = None
+    review_due_at: datetime | str
+    revoked_at: datetime | str | None = None
+    can_enumerate: bool
+    can_reveal: bool
+    can_share: bool
+    can_administer: bool
+    model_config = ConfigDict(extra="ignore")
+
+
+class EligibleStaff(BaseModel):
+    staff_id: int
+    user_id: int
+    first_name: str
+    last_name: str
+    job_title: str
+    email: str
