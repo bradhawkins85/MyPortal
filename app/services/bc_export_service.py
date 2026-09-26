@@ -430,6 +430,7 @@ async def export_to_pdf(
 async def export_bcp_to_pdf(
     plan_id: int,
     event_log_limit: int = 100,
+    visible_asset_ids: set[int] | None = None,
 ) -> tuple[io.BytesIO, str]:
     """
     Export a Business Continuity Plan to template-faithful PDF format.
@@ -468,7 +469,7 @@ async def export_bcp_to_pdf(
         raise ValueError(f"Plan {plan_id} not found")
     
     # Gather all required data for the PDF
-    data = await _gather_bcp_export_data(plan_id, event_log_limit)
+    data = await _gather_bcp_export_data(plan_id, event_log_limit, visible_asset_ids)
     
     # Compute content hash from gathered data
     content_hash = compute_content_hash(data, {"plan_id": plan_id, "plan_title": plan["title"]})
@@ -484,7 +485,9 @@ async def export_bcp_to_pdf(
     return pdf_buffer, content_hash
 
 
-async def _gather_bcp_export_data(plan_id: int, event_log_limit: int) -> dict[str, Any]:
+async def _gather_bcp_export_data(
+    plan_id: int, event_log_limit: int, visible_asset_ids: set[int] | None = None
+) -> dict[str, Any]:
     """
     Gather all data needed for BCP PDF export.
     
@@ -541,8 +544,18 @@ async def _gather_bcp_export_data(plan_id: int, event_log_limit: int) -> dict[st
     
     # Section 5: Recovery
     recovery_actions = await bcp_repo.list_recovery_actions(plan_id)
+    asset_links: list[dict[str, Any]] = []
+    if visible_asset_ids is not None:
+        asset_links = await bcp_repo.list_component_asset_links(plan_id, "recovery_action")
+        asset_links = [
+            link for link in asset_links if int(link["asset_id"]) in visible_asset_ids
+        ]
+    asset_links_by_action: dict[int, list[dict[str, Any]]] = {}
+    for link in asset_links:
+        asset_links_by_action.setdefault(int(link["component_id"]), []).append(link)
     # Enrich recovery actions with humanized RTO and owner names
     for action in recovery_actions:
+        action["asset_links"] = asset_links_by_action.get(int(action["id"]), [])
         if action.get("rto_hours") is not None:
             action["rto_humanized"] = humanize_hours(action["rto_hours"])
         if action.get("owner_id"):

@@ -683,6 +683,7 @@
                     <th>Action</th>
                     <th>Critical Activity</th>
                     <th>Resources/Outcomes</th>
+                    <th>Assets</th>
                     <th>RTO</th>
                     <th>Owner</th>
                     <th>Due Date</th>
@@ -695,6 +696,7 @@
                     <td>{{ action.action }}</td>
                     <td>{{ action.activity_name or '-' }}</td>
                     <td>{{ action.resources or '-' }}</td>
+                    <td>{% for link in action.asset_links %}{{ link.name or link.asset_name_snapshot }} (#{{ link.asset_id }}){% if link.archived_at %} [Archived]{% endif %}{% if not loop.last %}; {% endif %}{% else %}-{% endfor %}</td>
                     <td>{{ action.rto_humanized or '-' }}</td>
                     <td>{{ action.owner_name or '-' }}</td>
                     <td>{{ action.due_date.strftime('%d/%m/%Y') if action.due_date else '-' }}</td>

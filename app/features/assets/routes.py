@@ -20,11 +20,11 @@ from app.repositories import assets as asset_repo
 from app.repositories import asset_photos as asset_photo_repo
 from app.repositories import expirations as expiration_repo
 from app.repositories import users as users_repo
-from app.repositories import user_companies as user_company_repo
 from app.repositories import companies as company_repo
 from app.repositories import network_devices as network_devices_repo
 from app.repositories import infrastructure as infrastructure_repo
 from app.repositories import tray as tray_repo
+from app.repositories import bcp as bcp_repo
 from app.services import tray as tray_service
 from app.services import hudu as hudu_service
 from app.services import audit as audit_service
@@ -1308,6 +1308,13 @@ async def asset_detail_page(
             continue
         item["target"] = target
         relationships.append(item)
+    can_view_bcp = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
+        user, membership, "menu.continuity"
+    )
+    bcp_context = (
+        await bcp_repo.list_bcp_context_for_asset(company_id, asset_id)
+        if can_view_bcp and not customer_safe else []
+    )
     return await main_module._render_template(
         "assets/detail.html", request, user, extra={
             "title": str(record.get("name") or f"Asset {asset_id}"),
@@ -1322,6 +1329,7 @@ async def asset_detail_page(
             "can_edit": not customer_safe and can_write,
             "reconciliation_candidates": [] if customer_safe else await asset_repo.list_reconciliation_candidates(company_id, asset_id),
             "customer_safe": customer_safe,
+            "bcp_context": bcp_context,
             "asset_photos": await asset_photo_repo.list_for_asset(
                 company_id, asset_id, customer_only=customer_safe
             ),

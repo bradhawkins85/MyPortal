@@ -2619,6 +2619,140 @@ async def seed_default_emergency_kit_items(plan_id: int) -> None:
 # Recovery Action Management
 # ============================================================================
 
+_ASSET_LINK_COMPONENT_TABLES = {
+    "critical_activity": "bcp_critical_activity",
+    "recovery_action": "bcp_recovery_action",
+    "risk": "bcp_risk",
+}
+
+
+async def list_component_asset_links(
+    plan_id: int,
+    component_type: str | None = None,
+    component_id: int | None = None,
+    *,
+    include_unlinked: bool = False,
+) -> list[dict[str, Any]]:
+    """Return canonical assets linked to BCP components.
+
+    Live asset fields are returned for active links. The small identifier
+    snapshot remains available for historical/approved-plan presentation and
+    intentionally excludes operational notes, custom fields, and credentials.
+    """
+    conditions = ["link.plan_id = %s"]
+    params: list[Any] = [plan_id]
+    if component_type is not None:
+        if component_type not in _ASSET_LINK_COMPONENT_TABLES:
+            raise ValueError("Unsupported BCP component type")
+        conditions.append("link.component_type = %s")
+        params.append(component_type)
+    if component_id is not None:
+        conditions.append("link.component_id = %s")
+        params.append(component_id)
+    if not include_unlinked:
+        conditions.append("link.unlinked_at IS NULL")
+    return list(await db.fetch_all(
+        """SELECT link.id, link.company_id, link.plan_id, link.component_type,
+                  link.component_id, link.asset_id, link.asset_name_snapshot,
+                  link.asset_type_snapshot, link.asset_serial_snapshot,
+                  link.linked_at, link.unlinked_at,
+                  asset.name, asset.type, asset.serial_number, asset.archived_at
+           FROM bcp_component_asset_links link
+           LEFT JOIN assets asset ON asset.id = link.asset_id
+                                AND asset.company_id = link.company_id
+           WHERE """ + " AND ".join(conditions) +
+        " ORDER BY link.component_type, link.component_id, link.linked_at, link.id",
+        tuple(params),
+    ) or [])
+
+
+async def link_asset_to_component(
+    *, plan_id: int, company_id: int, component_type: str, component_id: int,
+    asset_id: int, linked_by_user_id: int,
+) -> dict[str, Any]:
+    """Link an existing same-company asset after validating both link ends."""
+    table = _ASSET_LINK_COMPONENT_TABLES.get(component_type)
+    if table is None:
+        raise ValueError("Unsupported BCP component type")
+    component = await db.fetch_one(
+        "SELECT component.id FROM " + table + " component "
+        "INNER JOIN bcp_plan plan ON plan.id = component.plan_id "
+        "WHERE component.id = %s AND component.plan_id = %s AND plan.company_id = %s",
+        (component_id, plan_id, company_id),
+    )
+    asset = await db.fetch_one(
+        """SELECT id, name, type, serial_number FROM assets
+           WHERE id = %s AND company_id = %s""",
+        (asset_id, company_id),
+    )
+    if not component or not asset:
+        raise ValueError("Component or asset is not available for this company")
+    existing = await db.fetch_one(
+        """SELECT id FROM bcp_component_asset_links
+           WHERE company_id = %s AND plan_id = %s AND component_type = %s
+             AND component_id = %s AND asset_id = %s AND unlinked_at IS NULL""",
+        (company_id, plan_id, component_type, component_id, asset_id),
+    )
+    if existing:
+        links = await list_component_asset_links(plan_id, component_type, component_id)
+        return next(link for link in links if int(link["id"]) == int(existing["id"]))
+    link_id = await db.execute_returning_lastrowid(
+        """INSERT INTO bcp_component_asset_links
+           (company_id, plan_id, component_type, component_id, asset_id,
+            asset_name_snapshot, asset_type_snapshot, asset_serial_snapshot,
+            linked_by_user_id)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+        (company_id, plan_id, component_type, component_id, asset_id,
+         asset["name"], asset.get("type"), asset.get("serial_number"), linked_by_user_id),
+    )
+    links = await list_component_asset_links(plan_id, component_type, component_id)
+    return next(link for link in links if int(link["id"]) == int(link_id))
+
+
+async def unlink_asset_from_component(
+    *, link_id: int, plan_id: int, company_id: int, unlinked_by_user_id: int,
+) -> dict[str, Any] | None:
+    """Soft-unlink an asset, preserving approved-plan history."""
+    before = await db.fetch_one(
+        """SELECT * FROM bcp_component_asset_links
+           WHERE id = %s AND plan_id = %s AND company_id = %s AND unlinked_at IS NULL""",
+        (link_id, plan_id, company_id),
+    )
+    if not before:
+        return None
+    await db.execute(
+        """UPDATE bcp_component_asset_links
+           SET unlinked_at = CURRENT_TIMESTAMP, unlinked_by_user_id = %s
+           WHERE id = %s AND plan_id = %s AND company_id = %s AND unlinked_at IS NULL""",
+        (unlinked_by_user_id, link_id, plan_id, company_id),
+    )
+    return dict(before)
+
+
+async def list_bcp_context_for_asset(company_id: int, asset_id: int) -> list[dict[str, Any]]:
+    """List active and historical BCP contexts for an authorised asset page."""
+    return list(await db.fetch_all(
+        """SELECT link.id, link.plan_id, link.component_type, link.component_id,
+                  link.asset_name_snapshot, link.linked_at, link.unlinked_at,
+                  plan.title, plan.version,
+                  CASE
+                    WHEN link.component_type = 'recovery_action' THEN recovery.action
+                    WHEN link.component_type = 'critical_activity' THEN activity.name
+                    WHEN link.component_type = 'risk' THEN risk.description
+                  END AS component_label
+           FROM bcp_component_asset_links link
+           INNER JOIN bcp_plan plan ON plan.id = link.plan_id AND plan.company_id = link.company_id
+           LEFT JOIN bcp_recovery_action recovery
+                  ON link.component_type = 'recovery_action' AND recovery.id = link.component_id
+           LEFT JOIN bcp_critical_activity activity
+                  ON link.component_type = 'critical_activity' AND activity.id = link.component_id
+           LEFT JOIN bcp_risk risk
+                  ON link.component_type = 'risk' AND risk.id = link.component_id
+           WHERE link.company_id = %s AND link.asset_id = %s
+           ORDER BY link.unlinked_at IS NOT NULL, plan.title, link.linked_at""",
+        (company_id, asset_id),
+    ) or [])
+
 
 async def list_recovery_actions(
     plan_id: int,
