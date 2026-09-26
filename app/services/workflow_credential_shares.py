@@ -132,6 +132,6 @@ async def create_for_staff_workflow(
             raise WorkflowCredentialShareError("Credential is not eligible for an external one-time share")
         return {
             "grant_id": int(grant["id"]),
-            "url": f"{_base_url()}/credential-share/{quote(token, safe='')}",
+            "url": f"{_base_url()}/credential-share#{quote(token, safe='')}",
             "kind": "external_one_time",
         }

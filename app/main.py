@@ -671,6 +671,7 @@ if settings.ip_whitelist_enabled and settings.ip_whitelist:
         "/api/auth/login",
         "/api/auth/register",
         "/api/webhooks",  # Webhooks use signature verification instead
+        "/api/vault/shares",  # External shares use opaque tokens and verification codes
         "/api/integration-modules/xero/webhook",
         "/manifest.webmanifest",
         "/service-worker.js",
@@ -821,6 +822,8 @@ app.add_middleware(
         "/api/tray/enrol",
         "/api/tray/popup-chat",
         "/api/tray/ticket-form",
+        "/api/vault/shares/verify",
+        "/api/vault/shares/reveal",
         # Public Wait For Webhook callbacks authenticate with an unguessable
         # webhook URL plus the per-step post key in the JSON payload, not a
         # browser session. Requiring CSRF here blocks legitimate automation.
@@ -1199,6 +1202,20 @@ async def authenticated_swagger_ui(request: Request) -> Response:
         swagger_css_url="/static/css/swagger-ui.css",
         swagger_favicon_url="/static/favicon.svg",
     )
+
+@app.get("/credential-share", response_class=HTMLResponse, include_in_schema=False)
+async def credential_share_page(request: Request):
+    """Public shell; the share token is read only from the URL fragment by the browser."""
+    response = templates.TemplateResponse(request, "credential_share.html", {})
+    response.headers.update({
+        "Cache-Control": "no-store, private, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow, noarchive, nosnippet",
+        "Referrer-Policy": "no-referrer",
+    })
+    return response
+
 
 app.include_router(auth.router)
 app.include_router(dashboard_api.router)
