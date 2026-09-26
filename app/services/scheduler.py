@@ -138,6 +138,13 @@ class SchedulerService:
             return
         self._scheduler.start()
         self._started = True
+        from app.services.website_check_worker import website_check_worker
+        self._scheduler.add_job(
+            website_check_worker.run_once, "interval",
+            seconds=get_settings().website_check_poll_seconds,
+            id="website-check-worker", max_instances=1, coalesce=True,
+            next_run_time=datetime.now(timezone.utc), replace_existing=True,
+        )
         await self._ensure_monitoring_jobs()
         self._start_refresh_task()
         log_info("Scheduler started")

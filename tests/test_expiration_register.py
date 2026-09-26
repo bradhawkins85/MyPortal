@@ -11,13 +11,13 @@ def test_asset_expirations_are_live_queries_and_company_scoped(monkeypatch):
         {"source_id": 4, "source_type": "warranty", "source_field": "warranty_end_date",
          "title": "Laptop", "due_at": date(2027, 1, 2), "company_id": 9,
          "company_name": "Example"}
-    ], []])
+    ], [], []])
     monkeypatch.setattr(expirations.db, "fetch_all", fetch)
 
     rows = asyncio.run(expirations.list_asset_dates(9))
 
     assert rows[0]["due_at"] == date(2027, 1, 2)
-    assert fetch.await_count == 2
+    assert fetch.await_count == 3
     assert all(call.args[1] == (9,) for call in fetch.await_args_list)
     assert "expiration" not in fetch.await_args_list[0].args[0].lower().split("from")[1]
 
