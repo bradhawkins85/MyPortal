@@ -365,6 +365,14 @@
                 <span class="menu__label">Assets</span>
               </a>
             </li>
+            {% if feature_pack_available('processes') %}
+            <li class="menu__item">
+              <a href="/processes" {% if current_path.startswith('/processes') %}aria-current="page"{% endif %}>
+                <span class="menu__icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 4h12v2H4zm0 7h12v2H4zm0 7h12v2H4zm14-9 4 3-4 3z"/></svg></span>
+                <span class="menu__label">Processes</span>
+              </a>
+            </li>
+            {% endif %}
           {% endif %}
           {% if can_access_network_devices %}
             <li class="menu__item">

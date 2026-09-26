@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% block header_title %}{{ 'Edit process template' if process_template else 'Create process template' }}{% endblock %}
+{% block title %}{{ 'Edit process template' if process_template else 'Create process template' }}{% endblock %}
+{% block header_actions %}{{ page_header_actions([{"label": "Back to templates", "type": "link", "href": "/processes/templates"}]) }}{% endblock %}
+{% block content %}
+<section class="card card--panel"><header class="card__header"><div><h2 class="card__title">{{ process_template.name if process_template else 'Template details' }}</h2>{% if process_template %}<p class="card__subtitle">Editing publishes version {{ process_template.current_version + 1 }}. Runs already started remain on snapshot v{{ process_template.current_version }}.</p>{% endif %}</div></header>
+ <form class="card__body" data-template-form data-template-id="{{ process_template.id if process_template else '' }}">
+  <div class="form-group"><label class="form-label" for="process-name">Name</label><input class="input" id="process-name" name="name" maxlength="191" required value="{{ process_template.name if process_template else '' }}"></div>
+  <div class="form-group"><label class="form-label" for="process-description">Description <span class="field-optional">optional</span></label><textarea class="input" id="process-description" name="description" rows="3">{{ process_template.description if process_template and process_template.description else '' }}</textarea></div>
+  <fieldset><legend>Ordered steps</legend><div data-step-list>{% if process_template %}{% for step in process_template.steps %}<div class="card card--panel" data-step><div class="card__body"><div class="form-group"><label class="form-label">Step title</label><input class="input" name="step_title" required maxlength="255" value="{{ step.title }}"></div><div class="form-group"><label class="form-label">Instructions</label><textarea class="input" name="step_instructions" rows="3">{{ step.instructions or '' }}</textarea></div><button class="button button--ghost button--small" type="button" data-remove-step>Remove</button></div></div>{% endfor %}{% else %}<div class="card card--panel" data-step><div class="card__body"><div class="form-group"><label class="form-label">Step title</label><input class="input" name="step_title" required maxlength="255"></div><div class="form-group"><label class="form-label">Instructions</label><textarea class="input" name="step_instructions" rows="3"></textarea></div><button class="button button--ghost button--small" type="button" data-remove-step>Remove</button></div></div>{% endif %}</div>
+  <button class="button button--ghost" type="button" data-add-step>Add step</button><p class="form-help" data-form-message role="status"></p><button class="button button--primary" type="submit">{{ 'Publish new version' if process_template else 'Create template' }}</button>
+ </fieldset></form>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/processes.js') }}" defer></script>{% endblock %}

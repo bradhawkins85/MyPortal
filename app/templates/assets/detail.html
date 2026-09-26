@@ -4,7 +4,7 @@
 {% block header_title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
 {% block title %}{{ asset.name or ('Asset ' ~ asset.id) }}{% endblock %}
 {% block header_actions %}
-  {% set detail_actions = [{"label": "Back to Assets", "type": "link", "href": "/assets"}] %}
+  {% set detail_actions = [{"label": "Start process", "type": "link", "href": "/processes/start?asset_id=" ~ asset.id}, {"label": "Back to Assets", "type": "link", "href": "/assets"}] %}
   {% if not customer_safe %}{% set _ = detail_actions.append({"label": "Company credentials", "type": "link", "href": "/admin/companies/" ~ asset.company_id ~ "/edit#credentials"}) %}{% endif %}
   {% if is_super_admin and not customer_safe %}{% set _ = detail_actions.append({"label": "Customer preview", "type": "link", "href": "/assets/" ~ asset.id ~ "?customer_preview=true"}) %}{% endif %}
   {{ page_header_actions(detail_actions) }}

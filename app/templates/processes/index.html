@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% block header_title %}Processes{% endblock %}
+{% block title %}Processes{% endblock %}
+{% block header_actions %}{{ page_header_actions([{"label": "Start process", "type": "link", "href": "/processes/start"}, {"label": "Templates", "type": "link", "href": "/processes/templates"}]) }}{% endblock %}
+{% block content %}
+<section class="card card--panel" data-process-table>
+ <header class="card__header"><div><h2 class="card__title">{{ 'My assigned runs' if assigned else 'Active and recent runs' }}</h2><p class="card__subtitle">Track ownership, deadlines and execution status.</p></div></header>
+ <div class="card__body"><div class="table-toolbar"><input class="input" type="search" data-table-search aria-label="Filter runs" placeholder="Filter runs"><select class="input" data-status-filter aria-label="Filter by status"><option value="">All statuses</option>{% for status in ['pending','in_progress','paused','completed','failed','cancelled'] %}<option value="{{ status }}">{{ status | replace('_',' ') | title }}</option>{% endfor %}</select><a class="button button--ghost" href="/processes{{ '' if assigned else '?assigned=true' }}">{{ 'All runs' if assigned else 'Assigned to me' }}</a></div>
+ <div class="table-responsive"><table class="table"><thead><tr><th><button class="button button--ghost button--small" data-sort="name">Process</button></th><th>Status</th><th>Priority</th><th>Assignee</th><th><button class="button button--ghost button--small" data-sort="due">Due</button></th></tr></thead><tbody>
+ {% for run in runs %}<tr data-search="{{ run.template_name }} {{ run.assignee_name or '' }}" data-status="{{ run.status }}" data-name="{{ run.template_name | lower }}" data-due="{{ run.due_at or '' }}"><td><a href="/processes/{{ run.id }}"><strong>{{ run.template_name }}</strong></a><br><span class="text-muted">Snapshot v{{ run.template_version }}</span></td><td><span class="status status--{{ 'success' if run.status == 'completed' else ('danger' if run.status == 'failed' else ('warning' if run.status == 'paused' else 'info')) }}">{{ run.status | replace('_',' ') | title }}</span></td><td>{{ run.priority | title }}</td><td>{{ run.assignee_name or 'Unassigned' }}</td><td>{% if run.due_at %}<span data-utc="{{ run.due_at }}">{{ run.due_at }}</span>{% else %}—{% endif %}</td></tr>
+ {% else %}<tr data-empty><td colspan="5"><div class="empty-state"><h3>No runs found</h3><p>{{ 'Nothing is currently assigned to you.' if assigned else 'Start a process from here, an asset, or a ticket.' }}</p></div></td></tr>{% endfor %}
+ </tbody></table></div></div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/processes.js') }}" defer></script>{% endblock %}

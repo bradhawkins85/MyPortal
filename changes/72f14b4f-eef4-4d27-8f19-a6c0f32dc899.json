@@ -1,0 +1,7 @@
+{
+  "guid": "72f14b4f-eef4-4d27-8f19-a6c0f32dc899",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added technician UI for versioned process templates and immutable execution runs.",
+  "content_hash": "processes-ui-v1"
+}
