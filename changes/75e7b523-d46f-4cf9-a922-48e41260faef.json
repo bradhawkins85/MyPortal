@@ -1,0 +1,7 @@
+{
+  "guid": "75e7b523-d46f-4cf9-a922-48e41260faef",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "Feature",
+  "summary": "Added company-scoped website management, linked records, observation history, expiry evidence, and manual checks to the web interface.",
+  "content_hash": "ad65688f6fe0e92fc921a41fe863246a5e5ff158fe252d64bec4ce3c77126318"
+}

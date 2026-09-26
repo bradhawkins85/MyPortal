@@ -63,7 +63,7 @@ def _relationship_target(record_type: str, record: dict[str, Any]) -> dict[str, 
     if record_type == "process_run":
         return {"key": f"process_run:{record_id}", "type": "Process", "label": record.get("template_name") or "Process run", "context": record.get("status") or "Run", "url": f"/api/processes/runs/{record_id}"}
     if record_type == "website":
-        return {"key": f"website:{record_id}", "type": "Website", "label": record.get("name") or "Unnamed website", "context": record.get("url") or "Website", "url": f"/api/websites/{record_id}"}
+        return {"key": f"website:{record_id}", "type": "Website", "label": record.get("name") or "Unnamed website", "context": record.get("url") or "Website", "url": f"/websites/{record_id}"}
     if record_type == "ip_network":
         return {"key": f"ip_network:{record_id}", "type": "Network", "label": record.get("name") or "Unnamed network", "context": record.get("cidr") or "Network", "url": f"/infrastructure#network-{record_id}"}
     return {"key": f"rack:{record_id}", "type": "Rack", "label": record.get("name") or "Unnamed rack", "context": record.get("location") or f"{record.get('unit_count') or '?'} units", "url": f"/infrastructure#rack-{record_id}"}
@@ -499,6 +499,21 @@ async def expirations_page(request: Request):
     global_view = bool(user.get("is_super_admin")) and request.query_params.get("scope") == "global"
     selected_company_id = None if global_view else company_id
     items = await expiration_repo.list_asset_dates(selected_company_id)
+    if not global_view:
+        for website in await websites_repo.list_websites(company_id):
+            for field, checked_field, source_field, label in (
+                ("certificate_expires_at", "certificate_checked_at", "certificate_expiry_source", "TLS certificate"),
+                ("domain_expires_at", "domain_checked_at", "domain_expiry_source", "Domain registration"),
+            ):
+                if website.get(field):
+                    items.append({
+                        "source_type": "website", "source_id": int(website["id"]),
+                        "source_field": field, "title": website.get("name") or "Website",
+                        "detail": f"{label} · source {website.get(source_field) or 'unknown'} · checked {website.get(checked_field) or 'unknown'}",
+                        "due_at": website[field], "company_id": company_id,
+                        "company_name": company.get("name") if company else "Company",
+                        "url": f"/websites/{website['id']}",
+                    })
     access = await knowledge_base_service.build_access_context(user)
     articles = await knowledge_base_service.list_articles_for_context(
         access, include_unpublished=bool(user.get("is_super_admin"))
@@ -1413,6 +1428,7 @@ async def asset_detail_page(
             "relationship_articles": visible_articles,
             "relationship_targets": relationship_targets,
             "linked_runbooks": linked_runbooks,
+            "linked_websites": [] if customer_safe else await websites_repo.list_for_asset(company_id, asset_id),
             "can_edit": not customer_safe and can_write,
             "reconciliation_candidates": [] if customer_safe else await asset_repo.list_reconciliation_candidates(company_id, asset_id),
             "customer_safe": customer_safe,

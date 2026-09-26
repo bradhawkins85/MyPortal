@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% from "macros/tables.html" import data_table, table_toolbar, empty_state %}
+{% block title %}Websites{% endblock %}
+{% block header_title %}Websites{% endblock %}
+{% block header_actions %}{{ page_header_actions([{"label":"Create website","type":"link","href":"/websites/new","variant":"primary"}] if can_write else []) }}{% endblock %}
+{% block content %}
+<section class="card card--panel">
+  <header class="card__header card__header--stacked"><div><h2 class="card__title">Company websites</h2><p class="card__subtitle">Availability and expiry observations are evidence from the last successful check, not guarantees.</p></div>{{ table_toolbar("websites-table", search=true, search_placeholder="Search websites", filters=[{"name":"state","label":"State","value":request.query_params.get('state',''),"options":[("","All states"),("available","Available"),("outage","Observed outage"),("check_failed","Check failed"),("stale","Stale"),("unknown","Unknown")]}], columns=[{"key":"name","label":"Website"},{"key":"state","label":"State"},{"key":"status","label":"HTTP"},{"key":"checked","label":"Last observation"}]) }}</header>
+  <div class="card__body">
+  {% if websites %}{% call data_table([], table_id="websites-table", columns=[{"key":"name","label":"Website","mobile_priority":"essential"},{"key":"state","label":"State","mobile_priority":"essential"},{"key":"status","label":"HTTP"},{"key":"checked","label":"Last observation","sort_type":"date"}], aria_label="Company websites") %}
+    {% for website in websites %}<tr data-filter-state="{{ website.display_state }}"><td data-column-key="name"><a href="/websites/{{ website.id }}"><strong>{{ website.name }}</strong></a><br><span class="text-muted">{{ website.url }}</span></td><td data-column-key="state"><span class="status status--{{ 'success' if website.display_state == 'available' else 'danger' if website.display_state == 'outage' else 'warning' if website.display_state in ['check_failed','stale'] else 'neutral' }}">{{ website.display_state|replace('_',' ')|title }}</span></td><td data-column-key="status">{{ website.last_http_status or '—' }}</td><td data-column-key="checked">{% if website.last_success_at %}<span data-utc="{{ website.last_success_at.isoformat() if website.last_success_at.isoformat is defined else website.last_success_at }}">{{ website.last_success_at }}</span>{% else %}Never{% endif %}</td></tr>{% endfor %}
+  {% endcall %}{% else %}{{ empty_state("No websites documented", "Create a website to link operational records and collect observations.") }}{% endif %}
+  </div>
+</section>
+{% endblock %}

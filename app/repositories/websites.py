@@ -13,10 +13,49 @@ async def list_websites(company_id: int) -> list[dict[str, Any]]:
     ) or [])
 
 
+async def list_for_asset(company_id: int, asset_id: int) -> list[dict[str, Any]]:
+    return list(await db.fetch_all(
+        """SELECT w.id, w.name, w.url FROM website_asset_links l
+           INNER JOIN websites w ON w.id = l.website_id
+           INNER JOIN assets a ON a.id = l.asset_id
+           WHERE l.asset_id = %s AND w.company_id = %s AND a.company_id = %s
+           ORDER BY w.name""", (asset_id, company_id, company_id)
+    ) or [])
+
+
 async def get_website(company_id: int, website_id: int) -> dict[str, Any] | None:
     return await db.fetch_one(
         "SELECT * FROM websites WHERE company_id = %s AND id = %s", (company_id, website_id)
     )
+
+
+async def get_links(company_id: int, website_id: int) -> dict[str, list[dict[str, Any]]]:
+    """Return linked records, retaining company scoping as defence in depth."""
+    assets = await db.fetch_all(
+        """SELECT a.id, a.name, a.type FROM website_asset_links l
+           INNER JOIN assets a ON a.id = l.asset_id
+           WHERE l.website_id = %s AND a.company_id = %s ORDER BY a.name""",
+        (website_id, company_id),
+    )
+    articles = await db.fetch_all(
+        """SELECT a.id, a.title, a.slug FROM website_kb_links l
+           INNER JOIN knowledge_base_articles a ON a.id = l.article_id
+           INNER JOIN knowledge_base_article_companies c ON c.article_id = a.id
+           WHERE l.website_id = %s AND c.company_id = %s ORDER BY a.title""",
+        (website_id, company_id),
+    )
+    return {"assets": list(assets or []), "articles": list(articles or [])}
+
+
+async def list_check_jobs(company_id: int, website_id: int, limit: int = 20) -> list[dict[str, Any]]:
+    return list(await db.fetch_all(
+        """SELECT j.id, j.status, j.attempt_count, j.max_attempts, j.last_error,
+                  j.created_at, j.completed_at
+           FROM website_check_jobs j INNER JOIN websites w ON w.id = j.website_id
+           WHERE j.website_id = %s AND w.company_id = %s
+           ORDER BY j.id DESC LIMIT %s""",
+        (website_id, company_id, limit),
+    ) or [])
 
 
 async def create_website(company_id: int, values: dict[str, Any], user_id: int) -> int:
