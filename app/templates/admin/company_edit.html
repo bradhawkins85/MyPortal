@@ -11,7 +11,19 @@
   ]) }}
 {% endblock %}
 {% block content %}
-<section class="card card--panel" id="credentials">
+<section class="card card--panel" id="vault-rollout">
+  <header class="card__header"><div><h2 class="card__title">Credential vault rollout</h2><p class="card__subtitle">Super-admin control for this company's encrypted credential vault.</p></div><span id="vault-status" class="badge">Checking…</span></header>
+  <div class="card__body card__body--stacked">
+    <div id="vault-diagnostics" class="form-help" role="status" aria-live="polite">Checking encryption, migration, and access prerequisites…</div>
+    <p id="vault-rollback" class="form-help"></p>
+    <label><input id="vault-confirm" type="checkbox"> I understand this is an audited access-control change.</label>
+    <div class="form-actions">
+      <button id="vault-enable" class="button button--primary" type="button" disabled>Enable vault</button>
+      <button id="vault-disable" class="button button--danger" type="button" disabled>Disable vault</button>
+    </div>
+  </div>
+</section>
+<section class="card card--panel" id="credentials" hidden>
   <header class="card__header"><div><h2 class="card__title">Create and share a credential</h2><p class="card__subtitle">Store the secret in the encrypted vault, grant least-privilege access, then copy an authenticated portal link.</p></div></header>
   <div class="card__body card__body--stacked">
     <form id="credential-create" class="form" autocomplete="off">
@@ -43,6 +55,11 @@
 <script nonce="{{ csp_nonce }}">
 (() => {
   const companyId = {{ company.id }}; const rows = document.getElementById('credential-rows'); const csrf = document.querySelector('meta[name="csrf-token"]')?.content || ''; let credentials = []; const grants = new Map();
+  const vaultConfirm=document.getElementById('vault-confirm'); const enable=document.getElementById('vault-enable'); const disable=document.getElementById('vault-disable'); let vaultState;
+  function paintVault(data){vaultState=data; document.getElementById('vault-status').textContent=data.state.toUpperCase(); document.getElementById('vault-diagnostics').textContent=data.diagnostics.length?data.diagnostics.join(' '):'All encryption, migration, and access prerequisites are ready.'; document.getElementById('vault-rollback').textContent=data.rollback_guidance; document.getElementById('credentials').hidden=!data.enabled; enable.disabled=!vaultConfirm.checked||!data.can_enable; disable.disabled=!vaultConfirm.checked||!data.enabled;}
+  async function loadVault(){const r=await fetch(`/api/vault/admin/companies/${companyId}/status`,{cache:'no-store'}); if(!r.ok){document.getElementById('vault-status').textContent='ERROR';document.getElementById('vault-diagnostics').textContent='Vault readiness could not be checked. Review application and migration logs.';return;} paintVault(await r.json());}
+  async function changeVault(enabled){if(!vaultConfirm.checked||!confirm(`${enabled?'Enable':'Disable'} this company vault? This audited action changes access immediately.`))return; enable.disabled=disable.disabled=true; const r=await fetch(`/api/vault/admin/companies/${companyId}/status`,{method:'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify({enabled,confirmed:true})}); if(r.ok){vaultConfirm.checked=false;paintVault(await r.json());if(enabled){loadStaff();load();}}else{document.getElementById('vault-diagnostics').textContent=r.status===409?'Vault cannot be enabled until every prerequisite is ready.':'Vault status could not be changed.';await loadVault();}}
+  vaultConfirm.addEventListener('change',()=>vaultState&&paintVault(vaultState)); enable.addEventListener('click',()=>changeVault(true)); disable.addEventListener('click',()=>changeVault(false));
   const escapeHtml = value => { const node = document.createElement('span'); node.textContent = value == null ? '' : String(value); return node.innerHTML; };
   const headers = {'Content-Type':'application/json', 'X-CSRF-Token':csrf};
   const iso = value => value ? new Date(value).toISOString() : null;
@@ -55,7 +72,7 @@
   document.getElementById('credential-filter').addEventListener('input',render);
   document.getElementById('credential-create').addEventListener('submit',async event=>{event.preventDefault(); const message=document.getElementById('credential-message'); const secret=document.getElementById('credential-secret'); const type=document.getElementById('credential-link-type').value; const linkId=Number(document.getElementById('credential-link-id').value); const body={company_id:companyId,name:document.getElementById('credential-name').value.trim(),username:document.getElementById('credential-username').value||null,credential_class:document.getElementById('credential-class').value,expires_on:document.getElementById('credential-expiry').value||null,review_on:document.getElementById('credential-review').value||null,secret:secret.value,links:type&&linkId?[[type,linkId]]:[]}; const created=await fetch('/api/vault/credentials',{method:'POST',headers,body:JSON.stringify(body)}); secret.value=''; if(!created.ok){message.textContent='Credential could not be created. Check all fields.';return;} const item=await created.json(); const selector=document.getElementById('grant-selector').value; const capabilities=Array.from(document.querySelectorAll('[name="capability"]:checked'),x=>x.value); const grantBody={selector_type:selector,staff_id:selector==='staff'?Number(document.getElementById('grant-staff').value)||null:null,job_title:selector==='job_title'?document.getElementById('grant-title').value.trim():null,capabilities,purpose:document.getElementById('grant-purpose').value.trim(),expires_at:iso(document.getElementById('grant-expiry').value),review_due_at:iso(document.getElementById('grant-review').value)}; const granted=await fetch(`/api/vault/companies/${companyId}/credentials/${item.id}/standing-grants`,{method:'POST',headers,body:JSON.stringify(grantBody)}); if(!granted.ok){message.textContent='Credential was stored, but the grant was not created. Review eligibility and approval requirements.';}else{const url=new URL('/shared-credentials',location.origin); url.searchParams.set('credential',item.id); await navigator.clipboard.writeText(url.href); message.textContent='Credential and grant created. Authenticated portal link copied.';} await load();});
   rows.addEventListener('click',async event=>{const copy=event.target.closest('[data-copy]'); const revoke=event.target.closest('[data-revoke]'); if(copy){const url=new URL('/shared-credentials',location.origin);url.searchParams.set('credential',copy.dataset.copy);await navigator.clipboard.writeText(url.href);document.getElementById('credential-message').textContent='Authenticated portal link copied. Access is checked on every visit.';} if(revoke&&confirm('Revoke this grant? Rotate the credential if the secret may already have been seen.')){await fetch(`/api/vault/companies/${companyId}/standing-grants/${revoke.dataset.revoke}/revoke`,{method:'POST',headers:{'X-CSRF-Token':csrf}});await load();}});
-  const review=new Date(Date.now()+90*86400000); document.getElementById('grant-review').value=review.toISOString().slice(0,16); loadStaff(); load();
+  const review=new Date(Date.now()+90*86400000); document.getElementById('grant-review').value=review.toISOString().slice(0,16); loadVault();
 })();
 </script>
   <div class="company-edit-page" data-company-id="{{ company.id }}">

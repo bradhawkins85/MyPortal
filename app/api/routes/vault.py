@@ -7,13 +7,15 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 
-from app.api.dependencies.auth import get_current_user
+from app.api.dependencies.auth import get_current_user, require_super_admin
 from app.api.dependencies.database import require_database
 from app.repositories import user_companies as user_company_repo
 from app.repositories import vault as repo
 from app.repositories import credential_grants as grant_repo
 from app.repositories import standing_credential_grants as standing_grant_repo
 from app.repositories import credential_features as feature_repo
+from app.repositories import companies as company_repo
+from app.security import vault as vault_crypto
 from app.schemas.vault import (
     CredentialCreate,
     CredentialMetadata,
@@ -29,6 +31,8 @@ from app.schemas.vault import (
     StandingGrantCreate,
     StandingGrant,
     EligibleStaff,
+    VaultFeatureChange,
+    VaultFeatureStatus,
 )
 from app.api.dependencies.auth import get_current_session
 from app.security.session import SessionData
@@ -90,6 +94,92 @@ async def _authorize(user: dict, company_id: int, *, write: bool = False) -> Non
 async def _require_enabled(company_id: int) -> None:
     if not await feature_repo.is_enabled(company_id):
         raise HTTPException(status_code=404, detail="Credential vault unavailable")
+
+
+async def _feature_status(company_id: int) -> dict:
+    if not await company_repo.get_company_by_id(company_id):
+        raise HTTPException(status_code=404, detail="Company not found")
+    feature = await feature_repo.get(company_id)
+    enabled = bool(feature and feature.get("enabled"))
+    diagnostics: list[str] = []
+    try:
+        vault_crypto.ensure_configured()
+    except vault_crypto.VaultConfigurationError:
+        diagnostics.append(
+            "Encryption key configuration is incomplete. Configure VAULT_KEYS and VAULT_ACTIVE_KEY_ID."
+        )
+    missing = await feature_repo.missing_prerequisite_tables()
+    if missing:
+        diagnostics.append(
+            "Required vault database migrations have not completed: "
+            + ", ".join(missing)
+        )
+    ready = not diagnostics
+    state = (
+        "error"
+        if enabled and not ready
+        else "enabled"
+        if enabled
+        else "ready"
+        if ready
+        else "disabled"
+    )
+    return {
+        "company_id": company_id,
+        "state": state,
+        "enabled": enabled,
+        "can_enable": ready and not enabled,
+        "diagnostics": diagnostics,
+        "rollback_guidance": (
+            "Disable the vault to stop all company access. Encrypted records are retained and "
+            "remain unavailable until an authorised re-enable."
+        ),
+        "updated_at": feature.get("updated_at") if feature else None,
+    }
+
+
+@router.get("/admin/companies/{company_id}/status", response_model=VaultFeatureStatus)
+async def vault_feature_status(
+    company_id: int,
+    response: Response,
+    _: None = Depends(require_database),
+    user: dict = Depends(require_super_admin),
+):
+    """Return only non-secret vault rollout diagnostics."""
+    _no_store(response)
+    return await _feature_status(company_id)
+
+
+@router.put("/admin/companies/{company_id}/status", response_model=VaultFeatureStatus)
+async def change_vault_feature_status(
+    company_id: int,
+    payload: VaultFeatureChange,
+    request: Request,
+    response: Response,
+    _: None = Depends(require_database),
+    user: dict = Depends(require_super_admin),
+):
+    """Explicitly enable or disable a company vault; ciphertext is never removed."""
+    if not payload.confirmed:
+        raise HTTPException(400, "Explicit confirmation is required")
+    before = await _feature_status(company_id)
+    if payload.enabled and not before["can_enable"] and not before["enabled"]:
+        raise HTTPException(409, "Vault prerequisites are not ready")
+    await feature_repo.set_enabled(
+        company_id, enabled=payload.enabled, actor_id=int(user["id"])
+    )
+    await audit.record(
+        action="vault.feature.enable" if payload.enabled else "vault.feature.disable",
+        request=request,
+        user_id=int(user["id"]),
+        entity_type="company",
+        entity_id=company_id,
+        before={"enabled": before["enabled"]},
+        after={"enabled": payload.enabled},
+        metadata={"company_id": company_id},
+    )
+    _no_store(response)
+    return await _feature_status(company_id)
 
 
 @router.get(

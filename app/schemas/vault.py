@@ -150,3 +150,18 @@ class EligibleStaff(BaseModel):
     last_name: str
     job_title: str
     email: str
+
+
+class VaultFeatureChange(BaseModel):
+    enabled: bool
+    confirmed: bool = Field(description="Explicit confirmation of this audited change")
+
+
+class VaultFeatureStatus(BaseModel):
+    company_id: int
+    state: Literal["disabled", "ready", "enabled", "error"]
+    enabled: bool
+    can_enable: bool
+    diagnostics: list[str]
+    rollback_guidance: str
+    updated_at: datetime | str | None = None
