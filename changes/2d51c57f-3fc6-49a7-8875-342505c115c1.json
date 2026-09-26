@@ -1,0 +1,7 @@
+{
+  "guid": "2d51c57f-3fc6-49a7-8875-342505c115c1",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added idempotent MyPortal vault credential creation to onboarding and offboarding workflows.",
+  "content_hash": "workflow-vault-credential-step"
+}

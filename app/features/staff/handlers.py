@@ -961,6 +961,11 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "description": "Creates an asset password entry in Hudu under the company linked to this workflow for secure credential storage.",
     },
     {
+        "type": "create_myportal_credential",
+        "name": "Create MyPortal credential",
+        "description": "Stores an approved prior-step secret in this company's vault and exposes only its credential ID/version.",
+    },
+    {
         "type": "delete_staff_record",
         "name": "Delete staff record",
         "description": (
@@ -1087,6 +1092,11 @@ _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "type": "hudu_push_password",
         "name": "Push password to Hudu",
         "description": "Creates an asset password entry in Hudu under the company linked to this workflow for secure credential storage.",
+    },
+    {
+        "type": "create_myportal_credential",
+        "name": "Create MyPortal credential",
+        "description": "Stores a newly rotated, organisation-controlled prior-step secret in this company's vault; never collect an employee's private password.",
     },
     {
         "type": "delete_staff_record",
@@ -2054,6 +2064,20 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
                 "default": "",
                 "description": "Optional description for this credential entry.",
             },
+        ],
+    },
+    "create_myportal_credential": {
+        "fields": [
+            {"name": "credential_name", "label": "Credential name", "type": "text", "default": "${vars.staff.full_name} - Account", "required": True, "description": "Supports workflow variable templates."},
+            {"name": "username", "label": "Username", "type": "text", "default": "${vars.staff.email}"},
+            {"name": "credential_class", "label": "Class", "type": "select", "default": "user", "options": ["user", "shared", "service", "device", "other"]},
+            {"name": "secret_source", "label": "Secret source", "type": "text", "default": "${vars.generated_password}", "required": True, "description": "Must be a protected output from an earlier step. Literal passwords cannot be saved."},
+            {"name": "owner", "label": "Owner", "type": "text", "default": "${vars.staff.full_name}"},
+            {"name": "asset_id", "label": "Linked asset ID (optional)", "type": "number", "required": False},
+            {"name": "ticket_id", "label": "Linked ticket ID (optional)", "type": "number", "required": False},
+            {"name": "expires_on", "label": "Expiry date (optional)", "type": "date", "required": False},
+            {"name": "review_on", "label": "Review date (optional)", "type": "date", "required": False},
+            {"name": "credential_output_var", "label": "Store credential ID as variable", "type": "text", "default": "credential_id", "description": "Only the non-secret credential ID is made available to later steps."},
         ],
     },
 }

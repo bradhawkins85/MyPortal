@@ -3,10 +3,12 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import ValidationError
 
 from app.services import staff_onboarding_workflows as workflows
 from app.features.staff import handlers as staff_handlers
 from app.features.staff.handlers import _normalise_workflow_config
+from app.schemas.staff_onboarding_workflows import WorkflowStepDefinition
 
 
 @pytest.fixture
@@ -79,6 +81,55 @@ def test_normalise_workflow_steps_preserves_hudu_password_label_config():
     assert steps[0]["_workflow_step_name"] == "Push password to Hudu"
     assert steps[0]["name"] == "${vars.staff.full_name} - M365 Password"
     assert steps[0]["type"] == "hudu_push_password"
+
+
+def test_myportal_credential_is_available_in_both_catalogs_with_form_help():
+    assert any(s["type"] == "create_myportal_credential" for s in staff_handlers._ONBOARDING_STEP_CATALOG)
+    assert any(s["type"] == "create_myportal_credential" for s in staff_handlers._OFFBOARDING_STEP_CATALOG)
+    fields = staff_handlers._WORKFLOW_STEP_FORM_SCHEMA["create_myportal_credential"]["fields"]
+    assert {field["name"] for field in fields} >= {
+        "credential_name", "username", "credential_class", "secret_source",
+        "owner", "asset_id", "ticket_id", "expires_on", "review_on",
+        "credential_output_var",
+    }
+
+
+def test_myportal_credential_rejects_literal_secret_in_policy():
+    with pytest.raises(ValidationError, match="literal passwords are not allowed"):
+        WorkflowStepDefinition(
+            key="create_myportal_credential",
+            name="Store account",
+            config={"type": "create_myportal_credential", "secret_source": "not-a-variable"},
+        )
+
+
+@pytest.mark.anyio
+async def test_myportal_credential_step_returns_only_non_secret_metadata(monkeypatch):
+    from app.services import workflow_vault
+
+    create = AsyncMock(return_value={"credential_id": 71, "credential_version": 1})
+    monkeypatch.setattr(workflow_vault, "create_for_staff_workflow", create)
+    result = await workflows._execute_policy_step(
+        step={
+            "type": "create_myportal_credential",
+            "credential_name": "New account",
+            "credential_class": "user",
+            "secret_source": "resolved-secret",
+            "credential_output_var": "new_credential_id",
+        },
+        company_id=9,
+        staff={"id": 4},
+        policy_config={},
+        vars_map={},
+        execution_id=22,
+        step_name="store-vault",
+    )
+    assert result == {
+        "credential_id": 71,
+        "credential_version": 1,
+        "new_credential_id": 71,
+    }
+    assert create.await_args.kwargs["plaintext"] == "resolved-secret"
 
 
 def test_normalise_workflow_steps_uses_offboarding_steps_for_offboarding_direction():

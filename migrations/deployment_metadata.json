@@ -150,6 +150,12 @@
       "compatible-from": "*",
       "compatible-to": "*",
       "maintenance": false
+    },
+    "417_workflow_vault_credentials.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
     }
   }
 }
