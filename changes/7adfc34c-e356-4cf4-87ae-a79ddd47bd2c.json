@@ -1,0 +1,7 @@
+{
+  "guid": "7adfc34c-e356-4cf4-87ae-a79ddd47bd2c",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added runbook lifecycle, linked asset, attachment, version history, review status, and safe customer preview controls to the knowledge-base UI.",
+  "content_hash": "knowledge-base-runbook-management-ui"
+}

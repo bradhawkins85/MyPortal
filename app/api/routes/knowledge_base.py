@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
+
+import aiofiles
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.api.dependencies.auth import get_current_session, get_current_user, get_optional_user, require_super_admin
@@ -226,7 +230,7 @@ async def preview_article_for_customer(
         user={"id": 0}, user_id=0, is_super_admin=False, memberships=memberships
     )
     article = await kb_service.get_article_by_slug_for_context(
-        slug, preview_context, include_unpublished=True, include_permissions=False
+        slug, preview_context, include_unpublished=False, include_permissions=False
     )
     if not article:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
@@ -372,6 +376,71 @@ async def get_article_version(
     if not version:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article version not found")
     return version
+
+
+_BLOCKED_ATTACHMENT_SUFFIXES = {".exe", ".bat", ".cmd", ".com", ".js", ".mjs", ".html", ".htm", ".svg", ".xml"}
+
+
+@router.post("/articles/{article_id}/attachments", status_code=status.HTTP_201_CREATED)
+async def upload_article_attachment(
+    article_id: int, file: UploadFile = File(...), current_user: dict = Depends(require_super_admin)
+) -> dict:
+    if not await kb_repo.get_article_by_id(article_id):
+        raise HTTPException(status_code=404, detail="Article not found")
+    file_name = file_storage.sanitize_filename(file.filename or "attachment")
+    suffix = Path(file_name).suffix.lower()
+    content_type = (file.content_type or "").split(";", 1)[0].lower()
+    if suffix in _BLOCKED_ATTACHMENT_SUFFIXES or content_type in {
+        "text/html", "application/xhtml+xml", "image/svg+xml", "application/xml",
+        "text/xml", "application/javascript", "text/javascript",
+    }:
+        await file.close()
+        raise HTTPException(status_code=400, detail="Unsupported attachment type")
+    directory = _PRIVATE_UPLOADS_PATH / "knowledge-base" / "attachments" / str(article_id)
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = directory / f"{uuid4().hex}{suffix}"
+    size = 0
+    try:
+        async with aiofiles.open(destination, "wb") as target:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > 15 * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail="Attachment exceeds the 15 MB limit")
+                await target.write(chunk)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
+    return await kb_repo.create_attachment(
+        article_id, file_name=file_name, content_type=file.content_type,
+        storage_path=str(destination.relative_to(_PROJECT_ROOT)), file_size=size,
+        uploaded_by=int(current_user["id"]),
+    )
+
+
+@router.get("/articles/{article_id}/attachments/{attachment_id}")
+async def download_article_attachment(
+    article_id: int, attachment_id: int, current_user: dict = Depends(require_super_admin)
+) -> FileResponse:
+    attachment = await kb_repo.get_attachment(attachment_id)
+    if not attachment or int(attachment["article_id"]) != article_id:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    path = (_PROJECT_ROOT / attachment["storage_path"]).resolve()
+    if _PROJECT_ROOT not in path.parents or not path.is_file():
+        raise HTTPException(status_code=404, detail="Attachment file not found")
+    return FileResponse(path, filename=attachment["file_name"], media_type="application/octet-stream")
+
+
+@router.delete("/articles/{article_id}/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_article_attachment(
+    article_id: int, attachment_id: int, current_user: dict = Depends(require_super_admin)
+) -> None:
+    attachment = await kb_repo.get_attachment(attachment_id)
+    if not attachment or int(attachment["article_id"]) != article_id:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    file_storage.delete_stored_file(attachment["storage_path"], _PRIVATE_UPLOADS_PATH)
+    await kb_repo.delete_attachment(attachment_id)
 
 
 @router.delete("/articles/{article_id}", status_code=status.HTTP_204_NO_CONTENT)

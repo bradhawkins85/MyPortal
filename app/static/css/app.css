@@ -6720,6 +6720,30 @@ dialog.modal:not([open]) {
   color: #bbf7d0;
 }
 
+.kb-admin__attachment-upload,
+.kb-admin__review-actions,
+.kb-admin__attachment {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-gap-base);
+}
+
+.kb-admin__attachment {
+  justify-content: space-between;
+  padding-block: var(--space-gap-tight);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.kb-admin__version-content,
+[data-kb-preview-output] {
+  margin-top: var(--space-gap-base);
+  padding: var(--space-gap-roomy);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow-wrap: anywhere;
+}
+
 .button__icon {
   display: inline-flex;
   margin-right: 0.5rem;

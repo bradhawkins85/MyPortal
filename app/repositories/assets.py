@@ -117,6 +117,18 @@ async def list_company_assets(company_id: int) -> list[dict[str, Any]]:
     return list(rows or [])
 
 
+async def list_assets_for_knowledge_base_editor() -> list[dict[str, Any]]:
+    """Return concise asset labels for the super-admin runbook editor."""
+    rows = await db.fetch_all(
+        """SELECT a.id, a.name, a.type, c.name AS company_name
+           FROM assets a
+           LEFT JOIN companies c ON c.id = a.company_id
+           WHERE a.archived_at IS NULL
+           ORDER BY c.name ASC, a.name ASC, a.id ASC"""
+    )
+    return list(rows or [])
+
+
 async def get_asset_by_id(asset_id: int) -> dict[str, Any] | None:
     return await db.fetch_one(
         "SELECT * FROM assets WHERE id = %s",

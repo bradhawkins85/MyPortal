@@ -445,6 +445,10 @@ async def get_attachment(attachment_id: int) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+async def delete_attachment(attachment_id: int) -> None:
+    await db.execute("DELETE FROM knowledge_base_article_attachments WHERE id = %s", (attachment_id,))
+
+
 async def delete_article(article_id: int) -> None:
     await db.execute("DELETE FROM knowledge_base_articles WHERE id = %s", (article_id,))
     from app.services import rag_outbox
