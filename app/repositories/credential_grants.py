@@ -29,7 +29,7 @@ async def create(
     verification_code: str | None,
 ) -> dict[str, Any] | None:
     credential = await db.fetch_one(
-        "SELECT c.current_version FROM credentials c JOIN credential_links l ON l.credential_id = c.id AND l.company_id = c.company_id AND l.target_type = 'staff' AND l.target_id = %s WHERE c.id = %s AND c.company_id = %s AND c.credential_class = 'onboarding' AND c.revoked_at IS NULL AND c.archived_at IS NULL",
+        "SELECT c.current_version FROM credentials c JOIN credential_links l ON l.credential_id = c.id AND l.company_id = c.company_id AND l.target_type = 'staff' AND l.target_id = %s WHERE c.id = %s AND c.company_id = %s AND c.revoked_at IS NULL AND c.archived_at IS NULL",
         (staff_id, credential_id, company_id),
     )
     if credential is None:
