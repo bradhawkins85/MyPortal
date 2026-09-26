@@ -98,6 +98,7 @@ from app.api.routes import (
     tickets as tickets_api,
     tray as tray_api,
     users,
+    vault as vault_api,
     system,
     chat as chat_api,
     features as features_api,
@@ -1229,6 +1230,7 @@ app.include_router(issues_api.router)
 app.include_router(subscriptions_api.router)
 app.include_router(audit_logs.router)
 app.include_router(api_keys.router)
+app.include_router(vault_api.router)
 app.include_router(scheduler_api.router)
 app.include_router(tickets_api.router)
 app.include_router(email_tracking_api.router)
