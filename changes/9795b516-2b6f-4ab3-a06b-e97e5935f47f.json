@@ -1,0 +1,7 @@
+{
+  "guid": "9795b516-2b6f-4ab3-a06b-e97e5935f47f",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "Feature",
+  "summary": "Technicians can create and maintain manual assets with reviewed integration reconciliation.",
+  "content_hash": "manual-assets-and-reconciliation"
+}

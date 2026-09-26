@@ -19,6 +19,7 @@ from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import assets as asset_repo
 from app.repositories import expirations as expiration_repo
 from app.repositories import users as users_repo
+from app.repositories import user_companies as user_company_repo
 from app.repositories import companies as company_repo
 from app.repositories import network_devices as network_devices_repo
 from app.repositories import infrastructure as infrastructure_repo
@@ -158,9 +159,10 @@ async def assets_page(request: Request):
     can_export_assets = main_module._membership_menu_can(
         user, membership, "menu.assets", write=True
     )
+    can_write_assets = bool(user.get("is_super_admin")) or can_export_assets
 
     rows = await asset_repo.list_company_assets(company_id)
-    if not user.get("is_super_admin"):
+    if not can_write_assets:
         rows = [
             _customer_asset(dict(row))
             for row in rows
@@ -362,6 +364,7 @@ async def assets_page(request: Request):
         "stats": stats,
         "has_assets": bool(prepared),
         "can_export_assets": can_export_assets,
+        "can_write_assets": can_write_assets,
         "is_super_admin": bool(user.get("is_super_admin")),
         "has_asset_actions": has_asset_actions,
         "matrix_enabled": main_module.settings.matrix_enabled,
@@ -369,6 +372,88 @@ async def assets_page(request: Request):
     return await main_module._render_template(
         "assets/index.html", request, user, extra=extra
     )
+
+
+async def _asset_write_context(request: Request):
+    main_module = _main()
+    user, membership, company, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return user, company, company_id, redirect
+    if not (user.get("is_super_admin") or main_module._membership_menu_can(
+        user, membership, "menu.assets", write=True
+    )):
+        raise HTTPException(status_code=403, detail="Asset write access required")
+    return user, company, company_id, None
+
+
+@router.get("/assets/new", response_class=HTMLResponse, summary="Create a manual asset")
+async def new_asset_page(request: Request):
+    user, company, _company_id, redirect = await _asset_write_context(request)
+    if redirect:
+        return redirect
+    return await _main()._render_template(
+        "assets/form.html", request, user,
+        extra={"title": "Create asset", "company": company, "asset": None,
+               "custom_fields": await asset_custom_fields_repo.list_field_definitions()},
+    )
+
+
+def _manual_asset_values(form: Any) -> dict[str, str | None]:
+    name = str(form.get("name") or "").strip()
+    if not name or len(name) > 255:
+        raise HTTPException(status_code=422, detail="Asset name is required and must be 255 characters or fewer")
+    values: dict[str, str | None] = {"name": name}
+    for key in ("type", "status", "serial_number", "location"):
+        value = str(form.get(key) or "").strip()
+        if len(value) > 255:
+            raise HTTPException(status_code=422, detail=f"{key.replace('_', ' ').title()} is too long")
+        values[key] = value or None
+    return values
+
+
+async def _save_submitted_custom_fields(asset_id: int, form: Any) -> None:
+    for definition in await asset_custom_fields_repo.list_field_definitions():
+        key = f"custom_{definition['id']}"
+        raw = form.get(key)
+        field_type = definition.get("field_type")
+        if field_type == "checkbox":
+            await asset_custom_fields_repo.set_asset_field_value(
+                asset_id, int(definition["id"]), value_boolean=str(raw or "") == "1"
+            )
+        elif field_type == "date":
+            value = str(raw or "").strip() or None
+            if value:
+                try:
+                    date.fromisoformat(value)
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail="Invalid custom field date") from exc
+            await asset_custom_fields_repo.set_asset_field_value(
+                asset_id, int(definition["id"]), value_date=value
+            )
+        else:
+            value = str(raw or "").strip() or None
+            await asset_custom_fields_repo.set_asset_field_value(
+                asset_id, int(definition["id"]), value_text=value
+            )
+
+
+@router.post("/assets", status_code=303, summary="Create a manual asset")
+async def create_manual_asset(request: Request):
+    user, _company, company_id, redirect = await _asset_write_context(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    values = _manual_asset_values(form)
+    asset_id = await asset_repo.create_manual_asset(
+        company_id=company_id, created_by=int(user["id"]), **values
+    )
+    await _save_submitted_custom_fields(asset_id, form)
+    await audit_service.record(
+        action="asset.manual.create", request=request, user_id=int(user["id"]),
+        entity_type="asset", entity_id=asset_id,
+        after={"company_id": company_id, "name": values["name"], "provenance": "manual"},
+    )
+    return RedirectResponse(url=f"/assets/{asset_id}", status_code=303)
 
 
 def _expiration_key(item: dict[str, Any]) -> tuple[str, int, str]:
@@ -1164,9 +1249,12 @@ async def asset_detail_page(
     record = await asset_repo.get_asset_by_id(asset_id)
     record_company_id = record.get("company_id") if record else None
     is_super_admin = bool(user.get("is_super_admin"))
-    customer_safe = not is_super_admin or customer_preview
+    can_write = is_super_admin or main_module._membership_menu_can(
+        user, membership, "menu.assets", write=True
+    )
+    customer_safe = (not can_write) or customer_preview
     if (record_company_id is None or int(record_company_id) != company_id
-            or (not is_super_admin and not bool(record.get("customer_visible")))):
+            or (not is_super_admin and not can_write and not bool(record.get("customer_visible")))):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found"
         )
@@ -1229,9 +1317,9 @@ async def asset_detail_page(
             "relationship_types": _RELATIONSHIP_TYPES,
             "relationship_assets": [a for a in company_assets if int(a["id"]) != asset_id],
             "relationship_articles": visible_articles,
-            "can_edit": not customer_safe and (bool(user.get("is_super_admin")) or main_module._membership_menu_can(
-                user, membership, "menu.assets", write=True
-            )), "customer_safe": customer_safe,
+            "can_edit": not customer_safe and can_write,
+            "reconciliation_candidates": [] if customer_safe else await asset_repo.list_reconciliation_candidates(company_id, asset_id),
+            "customer_safe": customer_safe,
         }
     )
 
@@ -1376,6 +1464,10 @@ async def update_asset_documentation(request: Request, asset_id: int):
     if not record or int(record.get("company_id") or 0) != company_id:
         raise HTTPException(status_code=404, detail="Asset not found")
     form = await request.form()
+    if record.get("provenance") == "manual":
+        values = _manual_asset_values(form)
+        await asset_repo.update_manual_inventory(asset_id, **values)
+        await _save_submitted_custom_fields(asset_id, form)
     criticality = _clean_optional(form, "criticality")
     review_status = str(form.get("review_status") or "not_reviewed")
     if criticality not in {None, "low", "medium", "high", "critical"}:
@@ -1398,6 +1490,26 @@ async def update_asset_documentation(request: Request, asset_id: int):
                "reference_count": len(references), "has_notes": bool(_clean_optional(form, "operational_notes"))},
     )
     return main_module.flash_redirect(f"/assets/{asset_id}", "Asset documentation saved.", "success")
+
+
+@router.post("/assets/{asset_id}/reconciliation/{source_record_id}/approve")
+async def approve_asset_reconciliation(request: Request, asset_id: int, source_record_id: int):
+    user, _company, company_id, redirect = await _asset_write_context(request)
+    if redirect:
+        return redirect
+    record = await asset_repo.get_asset_by_id(asset_id)
+    if not record or int(record.get("company_id") or 0) != company_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if not await asset_repo.approve_reconciliation(company_id, asset_id, source_record_id):
+        raise HTTPException(status_code=404, detail="Possible match not found")
+    await audit_service.record(
+        action="asset.reconciliation.approve", request=request, user_id=int(user["id"]),
+        entity_type="asset", entity_id=asset_id,
+        after={"source_record_id": source_record_id, "canonical_asset_id": asset_id},
+    )
+    return _main().flash_redirect(
+        f"/assets/{asset_id}", "Integration match approved. Manual documentation was preserved.", "success"
+    )
 
 
 @router.post("/assets/{asset_id}/archive")

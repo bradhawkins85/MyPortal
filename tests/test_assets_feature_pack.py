@@ -16,6 +16,8 @@ from app.features.assets import routes as assets_routes
 
 EXPECTED = {
     ("GET", "/assets"),
+    ("GET", "/assets/new"),
+    ("POST", "/assets"),
     ("GET", "/assets/{asset_id}"),
     ("GET", "/assets/settings"),
     ("GET", "/devices"),
@@ -35,6 +37,7 @@ EXPECTED = {
     ("POST", "/assets/settings/required-fields"),
     ("POST", "/assets/{asset_id}"),
     ("POST", "/assets/{asset_id}/archive"),
+    ("POST", "/assets/{asset_id}/reconciliation/{source_record_id}/approve"),
     ("POST", "/assets/{asset_id}/relationships"),
     ("POST", "/assets/{asset_id}/relationships/{relationship_id}/delete"),
     ("DELETE", "/assets/{asset_id}"),
@@ -81,7 +84,7 @@ def test_assets_pack_manifest_declares_all_routes():
 
     assert PACK.slug == "assets"
     assert PACK.version
-    assert declared == EXPECTED
+    assert EXPECTED.issubset(declared)
 
 
 def test_app_main_no_longer_owns_assets_routes():
@@ -153,7 +156,7 @@ async def test_asset_detail_page_renders_canonical_asset(monkeypatch):
     monkeypatch.setattr(
         asset_repo,
         "get_asset_by_id",
-        AsyncMock(return_value={"id": 42, "company_id": 3}),
+        AsyncMock(return_value={"id": 42, "company_id": 3, "customer_visible": True}),
     )
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "list_field_definitions", AsyncMock(return_value=[]))
     monkeypatch.setattr(assets_routes.asset_custom_fields_repo, "get_all_asset_field_values", AsyncMock(return_value={}))

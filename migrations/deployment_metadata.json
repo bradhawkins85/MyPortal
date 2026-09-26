@@ -138,6 +138,12 @@
       "compatible-from": "*",
       "compatible-to": "*",
       "maintenance": false
+    },
+    "415_manual_assets.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
     }
   }
 }

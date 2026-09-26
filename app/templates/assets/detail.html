@@ -33,6 +33,13 @@
     </header>
     <form method="post" action="/assets/{{ asset.id }}">
       <div class="card__body">
+        {% if asset.provenance == 'manual' %}
+        <div class="alert alert--info" role="status">Manually documented asset — integrations cannot overwrite it until an authorised match is approved.</div>
+        <div class="form-group"><label class="form-label" for="asset-name">Name</label><input class="input" id="asset-name" name="name" maxlength="255" required value="{{ asset.name or '' }}" {% if not can_edit %}disabled{% endif %}></div>
+        <div class="form-group"><label class="form-label" for="asset-type">Type</label><input class="input" id="asset-type" name="type" maxlength="255" value="{{ asset.type or '' }}" {% if not can_edit %}disabled{% endif %}></div>
+        <div class="form-group"><label class="form-label" for="asset-status">Status</label><input class="input" id="asset-status" name="status" maxlength="255" value="{{ asset.status or '' }}" {% if not can_edit %}disabled{% endif %}></div>
+        <div class="form-group"><label class="form-label" for="asset-serial">Serial number</label><input class="input" id="asset-serial" name="serial_number" maxlength="255" value="{{ asset.serial_number or '' }}" {% if not can_edit %}disabled{% endif %}></div>
+        {% endif %}
         <div class="form-group"><label class="form-label" for="asset-owner">Owner</label>
           <input class="input" id="asset-owner" name="owner" maxlength="255" value="{{ asset.owner or '' }}" {% if not can_edit %}disabled{% endif %}></div>
         <div class="form-group"><label class="form-label" for="asset-support">Support contact</label>
@@ -60,23 +67,34 @@
   </section>{% endif %}
 
   <section class="card card--panel">
-    <header class="card__header"><h2 class="card__title">Synced inventory</h2></header>
+    <header class="card__header"><h2 class="card__title">{{ 'Manual inventory' if asset.provenance == 'manual' else 'Synced inventory' }}</h2></header>
     <div class="card__body"><dl class="definition-list">
       <dt>Asset ID</dt><dd>{{ asset.id }}</dd><dt>Company</dt><dd>{{ company.name if company else asset.company_id }}</dd>
       <dt>Type</dt><dd>{{ asset.type or '—' }}</dd><dt>Status</dt><dd>{{ asset.status or '—' }}</dd>
       <dt>Serial number</dt><dd>{{ asset.serial_number or '—' }}</dd><dt>Warranty</dt><dd>{{ asset.warranty_status or '—' }}{% if asset.warranty_end_date %} (ends {{ asset.warranty_end_date }}){% endif %}</dd>
       {% if not customer_safe %}<dt>Syncro ID</dt><dd>{{ asset.syncro_asset_id or '—' }}</dd><dt>Tactical ID</dt><dd>{{ asset.tactical_asset_id or '—' }}</dd>{% endif %}
-      <dt>Last sync</dt><dd>{{ asset.last_sync or 'Never' }}</dd>
-    </dl><p class="text-muted">Inventory fields above are sync-owned; operational documentation is manual-owned.</p></div>
+      <dt>Provenance</dt><dd>{{ 'Manual' if asset.provenance == 'manual' else 'Integration' }}</dd>
+      <dt>Last sync</dt><dd>{{ asset.last_sync or ('Not applicable' if asset.provenance == 'manual' else 'Never') }}</dd>
+    </dl><p class="text-muted">{{ 'Inventory and documentation are technician-maintained.' if asset.provenance == 'manual' else 'Inventory fields above are sync-owned; operational documentation is manual-owned.' }}</p></div>
   </section>
 
   {% if not customer_safe %}<section class="card card--panel">
     <header class="card__header"><h2 class="card__title">Custom fields</h2></header>
     <div class="card__body"><dl class="definition-list">
       {% for field in custom_fields %}<dt>{{ field.display_name or field.name }}</dt><dd>
-        {% if field.field_type == 'url' and field.value %}<a href="{{ field.value }}" target="_blank" rel="noopener noreferrer">{{ field.value }}</a>{% elif field.field_type == 'checkbox' %}{{ 'Yes' if field.value else 'No' }}{% else %}{{ field.value or '—' }}{% endif %}
+        {% if asset.provenance == 'manual' and can_edit %}
+          {% if field.field_type == 'checkbox' %}<label class="checkbox"><input form="manual-custom-fields" name="custom_{{ field.id }}" value="1" type="checkbox" {% if field.value %}checked{% endif %}><span>Yes</span></label>
+          {% elif field.field_type == 'date' %}<input form="manual-custom-fields" class="input" name="custom_{{ field.id }}" type="date" value="{{ field.value or '' }}">
+          {% elif field.field_type == 'url' %}<input form="manual-custom-fields" class="input" name="custom_{{ field.id }}" type="url" value="{{ field.value or '' }}">
+          {% else %}<input form="manual-custom-fields" class="input" name="custom_{{ field.id }}" value="{{ field.value or '' }}">{% endif %}
+        {% elif field.field_type == 'url' and field.value %}<a href="{{ field.value }}" target="_blank" rel="noopener noreferrer">{{ field.value }}</a>{% elif field.field_type == 'checkbox' %}{{ 'Yes' if field.value else 'No' }}{% else %}{{ field.value or '—' }}{% endif %}
       </dd>{% else %}<p class="text-muted">No custom fields configured.</p>{% endfor %}
-    </dl></div>
+    </dl>{% if asset.provenance == 'manual' and can_edit %}<form id="manual-custom-fields" method="post" action="/assets/{{ asset.id }}"><input type="hidden" name="name" value="{{ asset.name }}"><input type="hidden" name="type" value="{{ asset.type or '' }}"><input type="hidden" name="status" value="{{ asset.status or '' }}"><input type="hidden" name="serial_number" value="{{ asset.serial_number or '' }}"><input type="hidden" name="location" value="{{ asset.location or '' }}"><input type="hidden" name="review_status" value="{{ asset.review_status or 'not_reviewed' }}"><button class="button button--primary" type="submit">Save custom fields</button></form>{% endif %}</div>
+  </section>{% endif %}
+
+  {% if not customer_safe and reconciliation_candidates %}<section class="card card--panel admin-grid__full">
+    <header class="card__header"><div><h2 class="card__title">Possible integration matches</h2><p class="card__subtitle">Review identifiers before linking. A name alone is never merged automatically.</p></div></header>
+    <div class="card__body"><ul>{% for candidate in reconciliation_candidates %}<li><strong>{{ candidate.source | title }}</strong> — {{ candidate.external_id }}{% if candidate.last_error %}<span class="text-muted">{{ candidate.last_error }}</span>{% endif %}{% if can_edit %}<form class="form-inline" method="post" action="/assets/{{ asset.id }}/reconciliation/{{ candidate.id }}/approve"><button class="button button--primary button--small" type="submit">Approve match</button></form>{% endif %}</li>{% endfor %}</ul></div>
   </section>{% endif %}
 
   {% if not customer_safe %}<section class="card card--panel">
