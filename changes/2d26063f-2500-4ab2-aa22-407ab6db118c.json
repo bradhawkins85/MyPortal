@@ -1,0 +1,7 @@
+{
+  "guid": "2d26063f-2500-4ab2-aa22-407ab6db118c",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added company-scoped CIDR, IP address, DNS name and graphical rack documentation linked to existing assets.",
+  "content_hash": "network-rack-documentation-v1"
+}
