@@ -120,6 +120,24 @@
       "compatible-from": "*",
       "compatible-to": "*",
       "maintenance": false
+    },
+    "412_onboarding_credential_grants.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "413_standing_credential_grants.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
+    "414_credential_feature_flags.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
     }
   }
 }

@@ -83,10 +83,10 @@ async def revoke(
 async def reveal_named(
     grant_id: int, user_id: int, company_id: int
 ) -> tuple[dict[str, Any], str] | None:
-    # The conditional update is the authorization linearization point: a revoke
-    # that wins first prevents reveal; a later revoke follows this recorded reveal.
+    # Consuming is the authorization linearization point. Exactly one competing
+    # request can win, and a revoke that wins first prevents any decryption.
     changed = await db.execute_rowcount(
-        "UPDATE credential_grants SET opened_at = COALESCE(opened_at, CURRENT_TIMESTAMP), revealed_at = CURRENT_TIMESTAMP WHERE id = %s AND company_id = %s AND recipient_user_id = %s AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP",
+        "UPDATE credential_grants SET opened_at = COALESCE(opened_at, CURRENT_TIMESTAMP), revealed_at = CURRENT_TIMESTAMP, consumed_at = CURRENT_TIMESTAMP WHERE id = %s AND company_id = %s AND recipient_user_id = %s AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP",
         (grant_id, company_id, user_id),
     )
     if changed != 1:
@@ -102,7 +102,10 @@ async def reveal_named(
 
 async def verify_external(token: str, code: str) -> int | None:
     row = await db.fetch_one(
-        "SELECT id, verification_hash FROM credential_grants WHERE token_hash = %s AND recipient_user_id IS NULL AND verified_at IS NULL AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP",
+        "SELECT g.id, g.verification_hash FROM credential_grants g "
+        "JOIN company_credential_features f ON f.company_id = g.company_id AND f.enabled = 1 "
+        "WHERE g.token_hash = %s AND g.recipient_user_id IS NULL AND g.verified_at IS NULL "
+        "AND g.revoked_at IS NULL AND g.consumed_at IS NULL AND g.expires_at > CURRENT_TIMESTAMP",
         (digest(token),),
     )
     if row is None or not hmac.compare_digest(
@@ -110,7 +113,7 @@ async def verify_external(token: str, code: str) -> int | None:
     ):
         return None
     changed = await db.execute_rowcount(
-        "UPDATE credential_grants SET verified_at = CURRENT_TIMESTAMP, opened_at = COALESCE(opened_at, CURRENT_TIMESTAMP) WHERE id = %s AND verified_at IS NULL AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP",
+        "UPDATE credential_grants SET verified_at = CURRENT_TIMESTAMP, opened_at = COALESCE(opened_at, CURRENT_TIMESTAMP) WHERE id = %s AND verified_at IS NULL AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP AND EXISTS (SELECT 1 FROM company_credential_features f WHERE f.company_id = credential_grants.company_id AND f.enabled = 1)",
         (row["id"],),
     )
     return int(row["id"]) if changed else None
@@ -120,7 +123,7 @@ async def consume_external(token: str) -> tuple[dict[str, Any], str] | None:
     token_hash = digest(token)
     # The conditional state transition is the one-time gate. Only its winner may decrypt.
     changed = await db.execute_rowcount(
-        "UPDATE credential_grants SET consumed_at = CURRENT_TIMESTAMP, revealed_at = CURRENT_TIMESTAMP WHERE token_hash = %s AND recipient_user_id IS NULL AND verified_at IS NOT NULL AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP",
+        "UPDATE credential_grants SET consumed_at = CURRENT_TIMESTAMP, revealed_at = CURRENT_TIMESTAMP WHERE token_hash = %s AND recipient_user_id IS NULL AND verified_at IS NOT NULL AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP AND EXISTS (SELECT 1 FROM company_credential_features f WHERE f.company_id = credential_grants.company_id AND f.enabled = 1)",
         (token_hash,),
     )
     if changed != 1:
