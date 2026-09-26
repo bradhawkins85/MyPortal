@@ -85,6 +85,12 @@
       "compatible-to": "*",
       "maintenance": false
     },
+    "405_websites_monitoring.sql": {
+      "phase": "expand",
+      "compatible-from": "*",
+      "compatible-to": "*",
+      "maintenance": false
+    },
     "403_asset_typed_relationships.sql": {
       "phase": "expand",
       "compatible-from": "*",
