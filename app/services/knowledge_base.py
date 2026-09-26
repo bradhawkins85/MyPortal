@@ -12,6 +12,7 @@ import nh3
 
 from app.core.logging import log_error
 from app.repositories import knowledge_base as kb_repo
+from app.repositories import customer_content_audience as audience_repo
 from app.services import company_access
 from app.services import modules as modules_service
 from app.services.ai_prompt_security import UntrustedRecord, build_prompt
@@ -364,6 +365,9 @@ async def build_access_context(user: Mapping[str, Any] | None) -> ArticleAccessC
     except (TypeError, ValueError):
         user_id = None
     memberships: dict[int, Mapping[str, Any]] = {}
+    simulated = user.get("simulated_membership")
+    if isinstance(simulated, Mapping) and simulated.get("company_id") is not None:
+        memberships[int(simulated["company_id"])] = simulated
     if user_id is not None:
         try:
             membership_rows = await company_access.list_accessible_companies(user)
@@ -378,7 +382,7 @@ async def build_access_context(user: Mapping[str, Any] | None) -> ArticleAccessC
                 company_id_int = int(company_id)
             except (TypeError, ValueError):
                 continue
-            memberships[company_id_int] = membership
+            memberships.setdefault(company_id_int, membership)
     is_super_admin = bool(user.get("is_super_admin"))
     return ArticleAccessContext(
         user=user,
@@ -418,6 +422,26 @@ def _article_visible(article: Mapping[str, Any], context: ArticleAccessContext) 
             bool(membership.get("is_admin"))
             for membership in context.memberships.values()
         )
+    return False
+
+
+def _membership_has_content_permission(membership: Mapping[str, Any], key: str) -> bool:
+    permissions = membership.get("menu_permissions") or membership.get("permissions") or {}
+    return isinstance(permissions, Mapping) and str(permissions.get(key) or "none") in {"read", "write"}
+
+
+async def _role_audience_visible(article: Mapping[str, Any], context: ArticleAccessContext) -> bool:
+    """Require both the content capability and an explicit per-record grant."""
+    if context.is_super_admin:
+        return True
+    if str(article.get("permission_scope") or "anonymous") in {"anonymous", "user", "super_admin"}:
+        return True
+    for company_id, membership in context.memberships.items():
+        role_id = membership.get("role_id")
+        if role_id is None or not _membership_has_content_permission(membership, "content.knowledge_base"):
+            continue
+        if await audience_repo.role_can_access(company_id, "knowledge_base", int(article["id"]), int(role_id)):
+            return True
     return False
 
 
@@ -604,7 +628,7 @@ async def list_articles_for_context(
         lifecycle = article.get("lifecycle_status") or ("published" if article.get("is_published") else "draft")
         publishable = article.get("is_published") and lifecycle == "published"
         if include_unpublished or publishable:
-            if _article_visible(article, context) or include_permissions:
+            if ((_article_visible(article, context) and await _role_audience_visible(article, context)) or include_permissions):
                 visible.append(
                     _serialise_article(
                         article,
@@ -644,7 +668,7 @@ async def get_article_by_slug_for_context(
         and not context.is_super_admin
     ):
         return None
-    if not _article_visible(article, context) and not (
+    if (not _article_visible(article, context) or not await _role_audience_visible(article, context)) and not (
         include_permissions and context.is_super_admin
     ):
         return None
@@ -691,6 +715,7 @@ async def create_article(
         review_due_at=payload.get("review_due_at"),
     )
     await _sync_relations(created["id"], permission_scope, payload)
+    await _sync_role_audience(created["id"], permission_scope, payload)
     await kb_repo.replace_article_sections(created["id"], prepared_sections)
     await kb_repo.replace_article_assets(created["id"], payload.get("asset_ids") or [])
     refreshed = await kb_repo.get_article_by_id(created["id"])
@@ -775,6 +800,7 @@ async def update_article(
         current = await kb_repo.update_article(article_id, **updates)
     permission_scope = str(current.get("permission_scope"))
     await _sync_relations(article_id, permission_scope, payload)
+    await _sync_role_audience(article_id, permission_scope, payload)
     if sections_update_required:
         await kb_repo.replace_article_sections(article_id, prepared_sections)
     if "asset_ids" in payload:
@@ -847,6 +873,19 @@ async def _sync_relations(
     else:
         await kb_repo.replace_article_companies(article_id, [], require_admin=False)
         await kb_repo.replace_article_companies(article_id, [], require_admin=True)
+
+
+async def _sync_role_audience(article_id: int, permission_scope: str, payload: Mapping[str, Any]) -> None:
+    """Store an explicit deny-by-default audience for company publications."""
+    if "allowed_role_ids" not in payload:
+        return
+    company_ids = _normalise_ids(payload.get("allowed_company_ids") or [])
+    role_ids = _normalise_ids(payload.get("allowed_role_ids") or [])
+    if permission_scope not in {"company", "company_admin"}:
+        company_ids = []
+        role_ids = []
+    for company_id in company_ids:
+        await audience_repo.replace_roles(company_id, "knowledge_base", article_id, role_ids)
 
 
 def _build_excerpt(content: str, query: str, summary: str | None) -> str | None:

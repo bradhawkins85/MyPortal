@@ -26,6 +26,8 @@ MENU_PERMISSIONS: tuple[MenuPermission, ...] = (
     MenuPermission("menu.service_status", "Service status", "General", "View service status dashboards."),
     MenuPermission("menu.notifications", "Notifications", "General", "View and manage notification settings.", admin_only=True),
     MenuPermission("menu.knowledge_base", "Knowledge base", "General", "View knowledge base articles."),
+    MenuPermission("content.knowledge_base", "Published articles & runbooks", "Customer Portal content", "Open published knowledge-base articles, runbooks, their search results, attachments, and exports."),
+    MenuPermission("content.assets", "Published assets", "Customer Portal content", "Open customer-published assets, linked records, downloads, and exports."),
     MenuPermission("menu.help", "Help", "General", "View help and support documentation."),
     MenuPermission("menu.chat", "Chat", "General", "Access the chat interface.", ("chat.access",), "can_access_chat"),
     MenuPermission("menu.tickets", "Tickets", "Company", "No Access blocks tickets, Own opens /tickets for the user, All opens /tickets for company tickets, and technicians can use /admin/tickets across customers.", ("helpdesk.technician",), None),

@@ -13,6 +13,7 @@ class KnowledgeBaseArticleSection(BaseModel):
     heading: constr(strip_whitespace=True, max_length=255) | None = None
     content: constr(min_length=1)
     allowed_company_ids: list[int] = Field(default_factory=list)
+    allowed_role_ids: list[int] = Field(default_factory=list, description="Customer roles explicitly allowed to open this company publication.")
 
 
 class KnowledgeBaseArticleSectionResponse(KnowledgeBaseArticleSection):
@@ -48,6 +49,7 @@ class KnowledgeBaseArticleUpdate(BaseModel):
     is_published: bool | None = None
     allowed_user_ids: list[int] | None = None
     allowed_company_ids: list[int] | None = None
+    allowed_role_ids: list[int] | None = None
     sections: list[KnowledgeBaseArticleSection] | None = None
     owner_id: int | None = None
     lifecycle_status: LifecycleStatus | None = None
@@ -68,6 +70,7 @@ class KnowledgeBaseArticleResponse(BaseModel):
     manual_ai_tags: list[str] = Field(default_factory=list)
     allowed_user_ids: list[int]
     allowed_company_ids: list[int]
+    allowed_role_ids: list[int] = Field(default_factory=list)
     company_admin_ids: list[int]
     conditional_companies: list[str] = Field(default_factory=list)
     sections: list[KnowledgeBaseArticleSectionResponse]

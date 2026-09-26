@@ -92,6 +92,11 @@
               <select class="form-input" id="kb-article-companies" name="allowed_company_ids" multiple size="6"></select>
               <p class="form-help" data-kb-company-help>Leave empty to grant access to every company membership within the selected scope.</p>
             </div>
+            <div class="form-field" data-kb-role-select hidden>
+              <label class="form-label" for="kb-article-roles">Published to customer roles</label>
+              <select class="form-input" id="kb-article-roles" name="allowed_role_ids" multiple size="6">{% for role in kb_role_options %}<option value="{{ role.id }}">{{ role.name }}</option>{% endfor %}</select>
+              <p class="form-help">Deny by default: select every role that may open this record. The role must also have the Published articles &amp; runbooks permission.</p>
+            </div>
           </div>
         </fieldset>
         <fieldset class="kb-admin__fieldset">

@@ -125,6 +125,7 @@ from app.repositories import licenses as license_repo
 from app.repositories import license_sku_friendly_names as sku_friendly_repo
 from app.repositories import forms as forms_repo
 from app.repositories import knowledge_base as knowledge_base_repo
+from app.repositories import customer_content_audience as customer_content_audience_repo
 from app.repositories import m365 as m365_repo
 from app.repositories import notifications as notifications_repo
 from app.repositories import chat as chat_repo
@@ -140,6 +141,7 @@ from app.repositories import ticket_attachments as attachments_repo
 from app.repositories import ticket_expenses as expenses_repo
 from app.repositories import user_companies as user_company_repo
 from app.repositories import users as user_repo
+from app.services import knowledge_base as knowledge_base_service
 from app.services import system_update_history
 from app.services.agent_sources import SOURCE_REGISTRY as AGENT_SOURCE_REGISTRY
 from app.security.menu_permissions import MENU_PERMISSIONS, catalogue_for_api, menu_has_access, normalize_access_level, normalize_menu_permissions
@@ -2317,6 +2319,7 @@ async def _build_base_context(
         "role_switcher_allowed": role_switcher_allowed,
         "role_switcher_roles": role_switcher_roles,
         "selected_role_id": selected_role.get("id") if selected_role else None,
+        "selected_role": selected_role,
         "is_helpdesk_technician": is_helpdesk_technician,
         "has_admin_technician_access": has_admin_technician_access,
         "is_company_admin": is_super_admin or _menu_can(menu_access, "menu.admin.company"),
@@ -6679,15 +6682,34 @@ async def admin_impersonation_start(request: Request):
 
 
 @app.get("/admin/roles", response_class=HTMLResponse)
-async def admin_roles(request: Request):
+async def admin_roles(request: Request, company_id: int | None = Query(None), role_id: int | None = Query(None)):
     current_user, redirect = await _require_super_admin_page(request)
     if redirect:
         return redirect
     roles_list = await role_repo.list_roles()
+    companies = await company_repo.list_companies()
+    overview: list[dict[str, Any]] = []
+    overview_role = next((role for role in roles_list if int(role["id"]) == role_id), None) if role_id else None
+    if company_id and overview_role:
+        content_permissions = overview_role.get("permissions") or {}
+        for article in await knowledge_base_service.list_articles_for_context(
+            await knowledge_base_service.build_access_context(current_user), include_unpublished=True, include_permissions=True
+        ):
+            company_ids = article.get("allowed_company_ids") or article.get("company_admin_ids") or []
+            if company_id in company_ids:
+                granted = role_id in await customer_content_audience_repo.list_role_ids(company_id, "knowledge_base", int(article["id"]))
+                overview.append({"type": "Article / runbook", "title": article["title"], "published": bool(article["is_published"]), "allowed": granted and content_permissions.get("content.knowledge_base") in {"read", "write"}})
+        for asset in await assets_repo.list_company_assets(company_id):
+            granted = role_id in await customer_content_audience_repo.list_role_ids(company_id, "asset", int(asset["id"]))
+            overview.append({"type": "Asset", "title": asset.get("name") or f"Asset {asset['id']}", "published": bool(asset.get("customer_visible")), "allowed": granted and content_permissions.get("content.assets") in {"read", "write"}})
     extra = {
         "title": "Role management",
         "roles": roles_list,
         "menu_permission_catalogue": catalogue_for_api(),
+        "companies": companies,
+        "overview_company_id": company_id,
+        "overview_role_id": role_id,
+        "published_content_overview": overview,
     }
     return await _render_template("admin/roles.html", request, current_user, extra=extra)
 

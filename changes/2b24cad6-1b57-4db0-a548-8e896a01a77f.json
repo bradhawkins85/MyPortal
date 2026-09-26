@@ -1,0 +1,7 @@
+{
+  "guid": "2b24cad6-1b57-4db0-a548-8e896a01a77f",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "Feature",
+  "summary": "Added deny-by-default customer-role audiences for published knowledge-base content and assets, including true role preview enforcement.",
+  "content_hash": "customer-content-role-audiences-v1"
+}
