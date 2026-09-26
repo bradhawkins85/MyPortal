@@ -19,6 +19,7 @@ from app.repositories import expirations as expiration_repo
 from app.repositories import users as users_repo
 from app.repositories import companies as company_repo
 from app.repositories import network_devices as network_devices_repo
+from app.repositories import infrastructure as infrastructure_repo
 from app.repositories import tray as tray_repo
 from app.services import tray as tray_service
 from app.services import hudu as hudu_service
@@ -566,6 +567,144 @@ async def network_devices_page(request: Request):
             "can_sync_hudu": bool(company.get("hudu_id")),
         },
     )
+
+
+@router.get("/infrastructure", response_class=HTMLResponse, summary="IP and rack documentation")
+async def infrastructure_page(request: Request):
+    """Show company IPAM and rack layouts without creating a second asset store."""
+    main_module = _main()
+    user, membership, company, company_id, redirect = await _load_asset_context(
+        request, "menu.network_devices"
+    )
+    if redirect:
+        return redirect
+    can_edit = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
+        user, membership, "menu.network_devices", write=True
+    )
+    data = await infrastructure_repo.overview(company_id)
+    data.update({
+        "title": "IP addresses & racks", "company": company, "can_edit": can_edit,
+        "assets": await asset_repo.list_company_assets(company_id),
+        "address_states": sorted(infrastructure_repo.ADDRESS_STATES),
+    })
+    return await main_module._render_template(
+        "infrastructure/index.html", request, user, extra=data
+    )
+
+
+def _required_text(form: Any, key: str, limit: int = 191) -> str:
+    value = str(form.get(key) or "").strip()
+    if not value or len(value) > limit:
+        raise HTTPException(status_code=422, detail=f"Invalid {key.replace('_', ' ')}")
+    return value
+
+
+async def _infrastructure_write_context(request: Request):
+    main_module = _main()
+    user, membership, _company, company_id, redirect = await _load_asset_context(
+        request, "menu.network_devices"
+    )
+    if redirect:
+        return user, company_id, redirect
+    if not (user.get("is_super_admin") or main_module._membership_menu_can(
+        user, membership, "menu.network_devices", write=True
+    )):
+        raise HTTPException(status_code=403, detail="Network documentation write access required")
+    return user, company_id, None
+
+
+@router.post("/api/infrastructure/networks", status_code=201, summary="Create a CIDR network")
+async def create_ip_network(request: Request):
+    user, company_id, redirect = await _infrastructure_write_context(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    try:
+        record_id = await infrastructure_repo.create_network(
+            company_id, _required_text(form, "name"), _required_text(form, "cidr", 49),
+            str(form.get("description") or "").strip()[:1000] or None)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await audit_service.record(action="infrastructure.network.create", request=request,
+                               entity_type="ip_network", entity_id=record_id,
+                               after={"company_id": company_id})
+    return _main().flash_redirect("/infrastructure", "Network added.", "success")
+
+
+@router.post("/api/infrastructure/addresses", status_code=201, summary="Assign or reserve an IP address")
+async def create_ip_address(request: Request):
+    user, company_id, redirect = await _infrastructure_write_context(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    try:
+        asset_id = int(form["asset_id"]) if form.get("asset_id") else None
+        record_id = await infrastructure_repo.create_address(
+            company_id, int(form.get("network_id")), _required_text(form, "address", 45),
+            str(form.get("state") or "reserved"), asset_id,
+            str(form.get("dns_names") or "").replace(",", "\n").splitlines(),
+            str(form.get("notes") or "").strip()[:1000] or None)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await audit_service.record(action="infrastructure.address.create", request=request,
+                               entity_type="ip_address", entity_id=record_id,
+                               after={"company_id": company_id, "asset_id": asset_id})
+    return _main().flash_redirect("/infrastructure", "IP address documented.", "success")
+
+
+@router.post("/api/infrastructure/racks", status_code=201, summary="Create a rack")
+async def create_rack(request: Request):
+    _user, company_id, redirect = await _infrastructure_write_context(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    try:
+        record_id = await infrastructure_repo.create_rack(
+            company_id, _required_text(form, "name"),
+            str(form.get("location") or "").strip()[:255] or None,
+            int(form.get("unit_count")))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await audit_service.record(action="infrastructure.rack.create", request=request,
+                               entity_type="rack", entity_id=record_id,
+                               after={"company_id": company_id})
+    return _main().flash_redirect("/infrastructure", "Rack added.", "success")
+
+
+@router.post("/api/infrastructure/rack-equipment", status_code=201, summary="Place an asset in a rack")
+async def place_rack_asset(request: Request):
+    _user, company_id, redirect = await _infrastructure_write_context(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    try:
+        asset_id = int(form.get("asset_id"))
+        record_id = await infrastructure_repo.place_asset(
+            company_id, int(form.get("rack_id")), asset_id, int(form.get("start_unit")),
+            int(form.get("unit_height")), str(form.get("face") or "front"),
+            str(form.get("notes") or "").strip()[:1000] or None)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await audit_service.record(action="infrastructure.rack_equipment.create", request=request,
+                               entity_type="rack_equipment", entity_id=record_id,
+                               after={"company_id": company_id, "asset_id": asset_id})
+    return _main().flash_redirect("/infrastructure", "Asset placed in rack.", "success")
+
+
+@router.post("/api/infrastructure/{record_type}/{record_id}/delete", summary="Delete infrastructure documentation")
+async def delete_infrastructure_record(request: Request, record_type: str, record_id: int):
+    _user, company_id, redirect = await _infrastructure_write_context(request)
+    if redirect:
+        return redirect
+    tables = {"networks": "ip_networks", "addresses": "ip_addresses",
+              "racks": "racks", "rack-equipment": "rack_equipment"}
+    if record_type not in tables:
+        raise HTTPException(status_code=404, detail="Record type not found")
+    await infrastructure_repo.delete_record(tables[record_type], record_id, company_id)
+    await audit_service.record(action="infrastructure.record.delete", request=request,
+                               entity_type=record_type, entity_id=record_id,
+                               before={"company_id": company_id})
+    return _main().flash_redirect("/infrastructure", "Documentation removed.", "success")
 
 
 @router.post("/devices/discovered/{device_id}/hudu-sync")
