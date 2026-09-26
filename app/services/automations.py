@@ -39,6 +39,7 @@ TRIGGER_EVENTS: list[dict[str, str]] = [
     {"value": "smtp2go.opened", "label": "SMTP2Go email opened"},
     {"value": "smtp2go.clicked", "label": "SMTP2Go email clicked"},
     {"value": "smtp2go.not_engaged", "label": "SMTP2Go email not engaged"},
+    {"value": "expirations.reminder", "label": "Expiration reminder requested"},
 ]
 
 _EVENT_ALIASES: dict[str, tuple[str, ...]] = {

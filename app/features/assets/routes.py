@@ -15,6 +15,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from app.core.logging import log_info
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import assets as asset_repo
+from app.repositories import expirations as expiration_repo
+from app.repositories import users as users_repo
 from app.repositories import companies as company_repo
 from app.repositories import network_devices as network_devices_repo
 from app.repositories import tray as tray_repo
@@ -22,6 +24,7 @@ from app.services import tray as tray_service
 from app.services import hudu as hudu_service
 from app.services import audit as audit_service
 from app.services import knowledge_base as knowledge_base_service
+from app.services import automations as automations_service
 
 router = APIRouter(tags=["Assets"])
 
@@ -343,6 +346,142 @@ async def assets_page(request: Request):
     return await main_module._render_template(
         "assets/index.html", request, user, extra=extra
     )
+
+
+def _expiration_key(item: dict[str, Any]) -> tuple[str, int, str]:
+    return str(item["source_type"]), int(item["source_id"]), str(item["source_field"])
+
+
+@router.get("/expirations", response_class=HTMLResponse)
+async def expirations_page(request: Request):
+    """Aggregate dates live from sources the current user may access."""
+    main_module = _main()
+    user, membership, company, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    global_view = bool(user.get("is_super_admin")) and request.query_params.get("scope") == "global"
+    selected_company_id = None if global_view else company_id
+    items = await expiration_repo.list_asset_dates(selected_company_id)
+    access = await knowledge_base_service.build_access_context(user)
+    articles = await knowledge_base_service.list_articles_for_context(
+        access, include_unpublished=bool(user.get("is_super_admin"))
+    )
+    for article in articles:
+        due = article.get("review_due_at") or article.get("review_due_at_utc")
+        if not due:
+            continue
+        company_ids = [int(value) for value in article.get("company_ids", [])]
+        if not global_view and company_ids and company_id not in company_ids:
+            continue
+        items.append({
+            "source_type": "kb_review", "source_id": int(article["id"]),
+            "source_field": "review_due_at", "title": article.get("title") or article.get("slug"),
+            "detail": "Knowledge base review", "due_at": due,
+            "company_id": company_ids[0] if len(company_ids) == 1 else company_id,
+            "company_name": company.get("name") if not global_view else ("Global" if not company_ids else "Company restricted"),
+            "url": f"/knowledge-base/articles/{article['slug']}",
+        })
+    metadata = {_expiration_key(row): row for row in await expiration_repo.list_metadata(selected_company_id)}
+    today = datetime.now(timezone.utc).date()
+    for item in items:
+        due = item.get("due_at")
+        due = due.date() if isinstance(due, datetime) else due
+        if isinstance(due, str):
+            try:
+                due = date.fromisoformat(due[:10])
+            except ValueError:
+                due = None
+        item["due_iso"] = due.isoformat() if isinstance(due, date) else ""
+        item["days_remaining"] = (due - today).days if isinstance(due, date) else None
+        meta = metadata.get(_expiration_key(item), {})
+        item["lead_days"] = int(meta.get("lead_days") or 30)
+        item["owner_user_id"] = meta.get("owner_user_id")
+        item["owner_name"] = meta.get("owner_name")
+        remaining = item["days_remaining"]
+        item["state"] = "overdue" if remaining is not None and remaining < 0 else (
+            "due_soon" if remaining is not None and remaining <= item["lead_days"] else "upcoming"
+        )
+        item.setdefault("url", f"/assets/{item['source_id']}")
+    items.sort(key=lambda item: item.get("due_iso") or "9999-12-31")
+    can_manage = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
+        user, membership, "menu.assets", write=True
+    )
+    return await main_module._render_template("assets/expirations.html", request, user, extra={
+        "title": "Expirations", "expirations": items, "global_view": global_view,
+        "can_manage_expirations": can_manage,
+        "expiration_owners": await users_repo.list_users_for_company(company_id),
+    })
+
+
+@router.post("/expirations/settings")
+async def save_expiration_settings(request: Request):
+    main_module = _main()
+    user, membership, _company, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    if not (user.get("is_super_admin") or main_module._membership_menu_can(user, membership, "menu.assets", write=True)):
+        raise HTTPException(status_code=403, detail="Write access to assets is required")
+    form = await request.form()
+    try:
+        source_id = int(str(form.get("source_id")))
+        lead_days = int(str(form.get("lead_days")))
+        owner_user_id = int(str(form.get("owner_user_id"))) if form.get("owner_user_id") else None
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid expiration settings") from exc
+    if not 0 <= lead_days <= 3650:
+        raise HTTPException(status_code=422, detail="Lead time must be between 0 and 3650 days")
+    source_type = str(form.get("source_type") or "")
+    source_field = str(form.get("source_field") or "")
+    if source_type not in {"warranty", "asset_custom_date", "kb_review"} or not source_field:
+        raise HTTPException(status_code=422, detail="Invalid expiration source")
+    if owner_user_id and owner_user_id not in {int(row["id"]) for row in await users_repo.list_users_for_company(company_id)}:
+        raise HTTPException(status_code=422, detail="Owner must belong to this company")
+    await expiration_repo.save_metadata(company_id=company_id,
+        source_type=source_type, source_id=source_id,
+        source_field=source_field, lead_days=lead_days,
+        owner_user_id=owner_user_id)
+    return main_module.flash_redirect("/expirations", "Expiration settings saved.", "success")
+
+
+@router.post("/expirations/remind")
+async def send_expiration_reminder(request: Request):
+    main_module = _main()
+    user, membership, _company, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    can_write = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
+        user, membership, "menu.assets", write=True
+    )
+    if not can_write:
+        raise HTTPException(status_code=403, detail="Write access to assets is required")
+    form = await request.form()
+    source_type, source_field = str(form.get("source_type") or ""), str(form.get("source_field") or "")
+    try:
+        source_id = int(str(form.get("source_id")))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Invalid expiration source") from exc
+    visible = await expiration_repo.list_asset_dates(company_id)
+    allowed = any(_expiration_key(row) == (source_type, source_id, source_field) for row in visible)
+    if source_type == "kb_review":
+        access = await knowledge_base_service.build_access_context(user)
+        allowed = any(int(row["id"]) == source_id and row.get("review_due_at") for row in
+                      await knowledge_base_service.list_articles_for_context(access, include_unpublished=bool(user.get("is_super_admin"))))
+    if not allowed:
+        raise HTTPException(status_code=404, detail="Expiration not found")
+    try:
+        result = await automations_service.handle_event("expirations.reminder", {
+            "expiration": {"source_type": source_type, "source_id": source_id,
+                           "source_field": source_field, "company_id": company_id},
+            "actor": {"id": user.get("id")},
+        })
+        await expiration_repo.record_attempt(company_id=company_id, source_type=source_type,
+            source_id=source_id, source_field=source_field, status="queued")
+    except Exception as exc:
+        await expiration_repo.record_attempt(company_id=company_id, source_type=source_type,
+            source_id=source_id, source_field=source_field, status="failed", error=str(exc))
+        return main_module.flash_redirect("/expirations", "Reminder failed and can be retried.", "error")
+    message = "Reminder queued." if result else "No matching automation is enabled."
+    return main_module.flash_redirect("/expirations", message, "success" if result else "warning")
 
 
 @router.get("/assets/settings", response_class=HTMLResponse)
