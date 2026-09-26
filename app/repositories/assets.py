@@ -104,7 +104,10 @@ async def list_company_assets(company_id: int) -> list[dict[str, Any]]:
             syncro_asset_id,
             tactical_asset_id,
             mac_address,
-            customer_visible
+            customer_visible,
+            provenance,
+            archived_at,
+            location
         FROM assets
         WHERE company_id = %s
         ORDER BY name ASC, id ASC
@@ -119,6 +122,59 @@ async def get_asset_by_id(asset_id: int) -> dict[str, Any] | None:
         "SELECT * FROM assets WHERE id = %s",
         (asset_id,),
     )
+
+
+async def create_manual_asset(
+    *, company_id: int, name: str, type: str | None, status: str | None,
+    serial_number: str | None, location: str | None, created_by: int,
+) -> int:
+    """Create a human-owned canonical asset without integration identifiers."""
+    return await db.execute_returning_lastrowid(
+        """INSERT INTO assets
+           (company_id, name, type, status, serial_number, location, provenance,
+            manual_created_by)
+           VALUES (%s, %s, %s, %s, %s, %s, 'manual', %s)""",
+        (company_id, name, type, status, serial_number, location, created_by),
+    )
+
+
+async def update_manual_inventory(
+    asset_id: int, *, name: str, type: str | None, status: str | None,
+    serial_number: str | None, location: str | None,
+) -> None:
+    """Update fields owned by a manual asset; integration-owned rows are excluded."""
+    await db.execute(
+        """UPDATE assets SET name = %s, type = %s, status = %s,
+           serial_number = %s, location = %s
+           WHERE id = %s AND provenance = 'manual'""",
+        (name, type, status, serial_number, location, asset_id),
+    )
+
+
+async def list_reconciliation_candidates(company_id: int, asset_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """SELECT id, source, external_id, last_seen_at, last_error
+           FROM asset_source_records
+           WHERE company_id = %s AND asset_id = %s AND status = 'possible_match'
+           ORDER BY last_seen_at DESC, id DESC""",
+        (company_id, asset_id),
+    )
+    return list(rows or [])
+
+
+async def approve_reconciliation(company_id: int, asset_id: int, source_record_id: int) -> bool:
+    result = await db.execute(
+        """UPDATE asset_source_records SET status = 'active', last_error = NULL
+           WHERE id = %s AND company_id = %s AND asset_id = %s
+             AND status = 'possible_match'""",
+        (source_record_id, company_id, asset_id),
+    )
+    if result:
+        await db.execute(
+            "UPDATE assets SET provenance = 'integration' WHERE id = %s AND company_id = %s",
+            (asset_id, company_id),
+        )
+    return bool(result)
 
 
 async def get_asset_by_tactical_id(
@@ -388,9 +444,15 @@ async def upsert_asset(
     source_key = str(source_external_id or "").strip() or None
     if source and source_key:
         link = await db.fetch_one(
-            "SELECT asset_id FROM asset_source_records WHERE company_id = %s AND source = %s AND external_id = %s",
+            "SELECT asset_id, status FROM asset_source_records WHERE company_id = %s AND source = %s AND external_id = %s",
             (company_id, source, source_key),
         )
+        if link and link.get("status") == "possible_match":
+            await _record_asset_source(
+                company_id, source, source_key, link.get("asset_id"), "possible_match",
+                source_fields, "Awaiting authorised reconciliation review",
+            )
+            return None
         if link and link.get("asset_id"):
             row = {"id": link["asset_id"]}
     if not row and sync_id:
@@ -405,24 +467,41 @@ async def upsert_asset(
         )
     if not row and serial_number:
         candidates = await db.fetch_all(
-            "SELECT id FROM assets WHERE company_id = %s AND serial_number = %s",
+            "SELECT id, provenance FROM assets WHERE company_id = %s AND serial_number = %s",
             (company_id, serial_number),
         )
         if len(candidates or []) == 1:
-            row = candidates[0]
+            candidate = candidates[0]
+            if source and source_key and candidate.get("provenance") == "manual":
+                await _record_asset_source(
+                    company_id, source, source_key, int(candidate["id"]),
+                    "possible_match", source_fields,
+                    "Same-company manual asset has the supplied serial number; review required",
+                )
+                return None
+            row = candidate
         elif len(candidates or []) > 1 and source and source_key:
             await _record_asset_source(
                 company_id, source, source_key, None, "quarantined", source_fields,
                 "Multiple assets share the supplied serial number",
             )
             return None
-    if not row and match_name and name:
+    if not row and name and (match_name or (source and source_key)):
         candidates = await db.fetch_all(
-            "SELECT id FROM assets WHERE company_id = %s AND LOWER(name) = LOWER(%s)",
+            "SELECT id, provenance FROM assets WHERE company_id = %s AND LOWER(name) = LOWER(%s)",
             (company_id, name),
         )
         if len(candidates or []) == 1:
-            row = candidates[0]
+            candidate = candidates[0]
+            if source and source_key and candidate.get("provenance") == "manual":
+                await _record_asset_source(
+                    company_id, source, source_key, int(candidate["id"]),
+                    "possible_match", source_fields,
+                    "Name-only match to a manual asset; review required",
+                )
+                return None
+            if match_name:
+                row = candidate
         elif len(candidates or []) > 1 and source and source_key:
             await _record_asset_source(
                 company_id, source, source_key, None, "quarantined", source_fields,
@@ -509,8 +588,9 @@ async def upsert_asset(
                 warranty_end_date,
                 syncro_asset_id,
                 tactical_asset_id,
-                mac_address
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                mac_address,
+                provenance
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'integration')
             """,
             (
                 company_id,

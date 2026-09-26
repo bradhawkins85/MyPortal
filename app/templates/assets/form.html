@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+
+{% block title %}Create asset{% endblock %}
+{% block header_title %}Create asset{% endblock %}
+{% block header_actions %}{{ page_header_actions([{"label": "Cancel", "type": "link", "href": "/assets"}]) }}{% endblock %}
+
+{% block content %}
+<div class="admin-grid admin-grid--columns">
+  <section class="card card--panel admin-grid__full">
+    <header class="card__header card__header--stacked">
+      <div><h2 class="card__title">Manual asset</h2><p class="card__subtitle">Add site equipment that is not supplied by an integration. It will not be marked as synced.</p></div>
+    </header>
+    <form method="post" action="/assets">
+      <div class="card__body">
+        <div class="form-group"><label class="form-label" for="asset-company">Company</label><input class="input" id="asset-company" value="{{ company.name }}" disabled><small class="form-help">Assets are always created for your active company.</small></div>
+        <div class="form-group"><label class="form-label" for="asset-name">Name</label><input class="input" id="asset-name" name="name" maxlength="255" required></div>
+        <div class="form-group"><label class="form-label" for="asset-type">Type</label><input class="input" id="asset-type" name="type" maxlength="255" placeholder="Printer, UPS, switch…"></div>
+        <div class="form-group"><label class="form-label" for="asset-status">Status</label><input class="input" id="asset-status" name="status" maxlength="255" value="Active"></div>
+        <div class="form-group"><label class="form-label" for="asset-serial">Serial number</label><input class="input" id="asset-serial" name="serial_number" maxlength="255"></div>
+        <div class="form-group"><label class="form-label" for="asset-location">Location</label><input class="input" id="asset-location" name="location" maxlength="255"></div>
+        {% for field in custom_fields %}
+          <div class="form-group"><label class="form-label" for="custom-{{ field.id }}">{{ field.display_name or field.name }}</label>
+          {% if field.field_type == 'checkbox' %}<label class="checkbox"><input id="custom-{{ field.id }}" name="custom_{{ field.id }}" value="1" type="checkbox"><span>Yes</span></label>
+          {% elif field.field_type == 'date' %}<input class="input" id="custom-{{ field.id }}" name="custom_{{ field.id }}" type="date">
+          {% elif field.field_type == 'url' %}<input class="input" id="custom-{{ field.id }}" name="custom_{{ field.id }}" type="url">
+          {% else %}<input class="input" id="custom-{{ field.id }}" name="custom_{{ field.id }}" type="text">{% endif %}</div>
+        {% endfor %}
+      </div>
+      <footer class="card__footer"><button class="button button--primary" type="submit">Create asset</button></footer>
+    </form>
+  </section>
+</div>
+{% include "partials/csrf.html" %}
+{% endblock %}

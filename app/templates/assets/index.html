@@ -9,6 +9,9 @@
 {% block header_actions %}
   {% from "macros/header.html" import page_header_actions %}
   {% set asset_actions = [] %}
+  {% if can_write_assets %}
+    {% set _ = asset_actions.append({"label": "Create asset", "type": "link", "href": "/assets/new", "variant": "primary"}) %}
+  {% endif %}
   {% if is_super_admin %}
     {% set _ = asset_actions.append({"label": "Settings", "type": "link", "href": "/assets/settings"}) %}
   {% endif %}
