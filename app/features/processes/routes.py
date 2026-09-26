@@ -68,7 +68,7 @@ async def access_context(
     company_id = int(company_id)
     membership = await user_company_repo.get_user_company(int(user["id"]), company_id)
     from app import main as main_module
-    if not main_module._membership_menu_can(user, membership, "menu.assets"):
+    if not main_module._membership_menu_can(user, membership, "menu.processes"):
         raise HTTPException(status_code=403, detail="Process access required")
     return user, company_id, membership
 
@@ -76,7 +76,7 @@ async def access_context(
 def require_write(context: tuple[dict, int, dict | None]) -> tuple[dict, int]:
     user, company_id, membership = context
     from app import main as main_module
-    if not main_module._membership_menu_can(user, membership, "menu.assets", write=True):
+    if not main_module._membership_menu_can(user, membership, "menu.processes", write=True):
         raise HTTPException(status_code=403, detail="Process write access required")
     return user, company_id
 
@@ -187,7 +187,7 @@ async def _page_context(request: Request, context: tuple[dict, int, dict | None]
     user, company_id, membership = context
     return await main_module._render_template(
         extra.pop("template_name"), request, user,
-        extra={"can_write_processes": main_module._membership_menu_can(user, membership, "menu.assets", write=True),
+        extra={"can_write_processes": main_module._membership_menu_can(user, membership, "menu.processes", write=True),
                "process_company_id": company_id, **extra},
     )
 

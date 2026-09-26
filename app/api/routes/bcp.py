@@ -72,7 +72,7 @@ def _as_utc_naive(value: datetime | None) -> datetime | None:
 
 
 async def _visible_bcp_assets(
-    request: Request, user: dict[str, Any], company_id: int
+    request: Request, user: dict[str, Any], company_id: int, *, write: bool = False
 ) -> list[dict[str, Any]]:
     """Return only assets the BCP user may also see in the Assets module."""
     from app import main as main_module
@@ -80,8 +80,11 @@ async def _visible_bcp_assets(
     membership = await main_module._get_effective_company_membership(
         request, int(user["id"]), company_id
     )
-    if not (user.get("is_super_admin") or main_module._membership_menu_can(
-        user, membership, "menu.assets"
+    if not (user.get("is_super_admin") or (
+        main_module._membership_menu_can(user, membership, "menu.assets")
+        and main_module._membership_menu_can(
+            user, membership, "menu.bcp_asset_links", write=write
+        )
     )):
         return []
     can_write_assets = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
@@ -3453,7 +3456,7 @@ async def create_recovery_action_endpoint(
         )
     allowed_assets = {
         int(asset["id"])
-        for asset in await _visible_bcp_assets(request, user, company_id)
+        for asset in await _visible_bcp_assets(request, user, company_id, write=True)
     }
     requested_assets = set(asset_ids)
     if not requested_assets.issubset(allowed_assets):
@@ -3527,7 +3530,7 @@ async def update_recovery_action_endpoint(
         )
     allowed_assets = {
         int(asset["id"])
-        for asset in await _visible_bcp_assets(request, user, company_id)
+        for asset in await _visible_bcp_assets(request, user, company_id, write=True)
     }
     requested_assets = set(asset_ids)
     if not requested_assets.issubset(allowed_assets):

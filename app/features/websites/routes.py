@@ -46,7 +46,7 @@ async def access_context(user: dict = Depends(get_current_user),
     company_id = int(company_id)
     membership = await user_company_repo.get_user_company(int(user["id"]), company_id)
     from app import main as main_module
-    if not main_module._membership_menu_can(user, membership, "menu.assets"):
+    if not main_module._membership_menu_can(user, membership, "menu.websites"):
         raise HTTPException(status_code=403, detail="Website access required")
     return user, company_id, membership
 
@@ -54,7 +54,7 @@ async def access_context(user: dict = Depends(get_current_user),
 def require_write(context):
     user, company_id, membership = context
     from app import main as main_module
-    if not main_module._membership_menu_can(user, membership, "menu.assets", write=True):
+    if not main_module._membership_menu_can(user, membership, "menu.websites", write=True):
         raise HTTPException(status_code=403, detail="Website write access required")
     return user, company_id
 
@@ -77,7 +77,7 @@ async def _web_context(request: Request, *, write: bool = False):
         raise HTTPException(status_code=400, detail="An active company is required")
     company_id = int(company_id)
     membership = await main_module._get_effective_company_membership(request, user["id"], company_id)
-    if not main_module._membership_menu_can(user, membership, "menu.assets", write=write):
+    if not main_module._membership_menu_can(user, membership, "menu.websites", write=write):
         raise HTTPException(status_code=403, detail="Website access required")
     return user, company_id, membership, None
 
@@ -125,7 +125,7 @@ async def websites_page(request: Request):
     state_filter = request.query_params.get("state", "")
     if state_filter in {"available", "outage", "check_failed", "stale", "unknown"}:
         rows = [row for row in rows if row["display_state"] == state_filter]
-    can_write = main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+    can_write = main_module._membership_menu_can(user, membership, "menu.websites", write=True)
     return await main_module._render_template("websites/index.html", request, user, extra={
         "title": "Websites", "websites": rows, "can_write": can_write,
     })
@@ -196,7 +196,7 @@ async def website_detail_page(request: Request, website_id: int):
         dns = json.loads(website.get("dns_facts_json") or "null")
     except (TypeError, json.JSONDecodeError):
         dns = None
-    can_write = main_module._membership_menu_can(user, membership, "menu.assets", write=True)
+    can_write = main_module._membership_menu_can(user, membership, "menu.websites", write=True)
     return await main_module._render_template("websites/detail.html", request, user, extra={
         "title": website["name"], "website": website, "links": links, "dns": dns,
         "jobs": await repo.list_check_jobs(company_id, website_id), "can_write": can_write,

@@ -1,0 +1,7 @@
+{
+  "guid": "7f1e6ae4-71f3-4f23-8ad5-99a8cb83e84a",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "security",
+  "summary": "Added feature-specific IT documentation, infrastructure, asset action, BCP link, website, process, expiration and credential role permissions with consistent enforcement.",
+  "content_hash": "itdoc-role-permissions-2026-09"
+}

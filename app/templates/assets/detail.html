@@ -34,10 +34,10 @@
     </dl></div>
   </section>{% endif %}
 
-  <section class="card card--panel admin-grid__full asset-photos" id="asset-photos">
+  {% if can_view_asset_photos %}<section class="card card--panel admin-grid__full asset-photos" id="asset-photos">
     <header class="card__header"><div><h2 class="card__title">Photos</h2><p class="card__subtitle">Photos stay with this asset through archive, restore, and reconciliation.</p></div></header>
     <div class="card__body">
-      {% if can_edit %}
+      {% if can_edit_asset_photos %}
       <form class="asset-photo-upload" data-asset-photo-upload action="/assets/{{ asset.id }}/photos" method="post" enctype="multipart/form-data">
         {% include "partials/csrf.html" %}
         <input type="hidden" name="idempotency_key" data-photo-key>
@@ -64,7 +64,7 @@
       <div class="asset-photo-gallery">
         {% for photo in asset_photos %}<article class="asset-photo-card">
           <a href="/assets/{{ asset.id }}/photos/{{ photo.id }}/original"><img loading="lazy" src="/assets/{{ asset.id }}/photos/{{ photo.id }}/thumbnail" alt="{{ photo.caption or 'Asset photo' }}"></a>
-          {% if can_edit %}<form method="post" action="/assets/{{ asset.id }}/photos/{{ photo.id }}">
+          {% if can_edit_asset_photos %}<form method="post" action="/assets/{{ asset.id }}/photos/{{ photo.id }}">
             {% include "partials/csrf.html" %}<label class="form-label">Caption<input class="input" name="caption" maxlength="500" value="{{ photo.caption or '' }}"></label>
             <label class="form-label">Order<input class="input" name="sort_order" type="number" min="0" max="10000" value="{{ photo.sort_order }}"></label>
             <label class="checkbox"><input name="customer_visible" type="checkbox" value="true" {% if photo.customer_visible %}checked{% endif %}> <span>Customer visible</span></label>
@@ -74,7 +74,7 @@
         </article>{% else %}<p class="text-muted">No photos attached.</p>{% endfor %}
       </div>
     </div>
-  </section>
+  </section>{% endif %}
 
   {% if not customer_safe %}<section class="card card--panel">
     <header class="card__header card__header--stacked">
@@ -185,7 +185,7 @@
     </ul></div>
   </section>{% endif %}
 
-  <section class="card card--panel admin-grid__full">
+  {% if can_view_asset_relationships %}<section class="card card--panel admin-grid__full">
     <header class="card__header"><div><h2 class="card__title">Relationships</h2>
       <p class="card__subtitle">Typed links to company assets and accessible support documentation.</p></div></header>
     <div class="card__body">
@@ -195,10 +195,10 @@
           {{ relationship_types.get(relationship.relationship_type, relationship.relationship_type) }} —
           <a href="{{ relationship.target.url }}">{{ relationship.target.label }}</a>
           <span class="text-muted">{{ relationship.target.type }} · {{ relationship.target.context }}</span>
-          {% if can_edit %}<form method="post" action="/assets/{{ asset.id }}/relationships/{{ relationship.id }}/delete" class="form-inline"><button class="button button--ghost button--small" type="submit">Remove</button></form>{% endif %}
+          {% if can_edit_asset_relationships %}<form method="post" action="/assets/{{ asset.id }}/relationships/{{ relationship.id }}/delete" class="form-inline"><button class="button button--ghost button--small" type="submit">Remove</button></form>{% endif %}
         </li>{% else %}<li class="text-muted">No relationships documented.</li>{% endfor %}
       </ul>
-      {% if can_edit %}
+      {% if can_edit_asset_relationships %}
       <form method="post" action="/assets/{{ asset.id }}/relationships">
         <div class="form-group"><label class="form-label" for="relationship-type">Relationship</label><select class="input" id="relationship-type" name="relationship_type" required>{% for value, label in relationship_types.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
         <div class="form-group" data-record-picker><label class="form-label" for="relationship-target-search">Find a record</label><input class="input" id="relationship-target-search" type="search" placeholder="Search by name, type, status, URL or network" autocomplete="off" data-record-picker-search><select class="input" id="relationship-target" name="target_key" required size="6" data-record-picker-options><option value="">Select an accessible record</option>{% for item in relationship_targets %}<option value="{{ item.key }}">{{ item.type }} — {{ item.label }} · {{ item.context }}</option>{% endfor %}</select><small class="form-help">Only active records in this company that you can access are shown.</small></div>
@@ -206,7 +206,7 @@
       </form>
       {% endif %}
     </div>
-  </section>
+  </section>{% endif %}
 
   {% if references %}<section class="card card--panel admin-grid__full"><header class="card__header"><h2 class="card__title">References</h2></header><div class="card__body"><ul>
     {% for reference in references %}<li><a href="{{ reference.url }}" target="_blank" rel="noopener noreferrer">{{ reference.label }}</a></li>{% endfor %}
