@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime, time, timezone
 from typing import Any
 
@@ -175,6 +176,75 @@ async def list_reconciliation_candidates(company_id: int, asset_id: int) -> list
         (company_id, asset_id),
     )
     return list(rows or [])
+
+
+async def list_asset_sources(company_id: int, asset_id: int) -> list[dict[str, Any]]:
+    """Return human-readable provenance for one canonical asset."""
+    rows = await db.fetch_all(
+        """SELECT id, source, external_id, status, field_ownership_json,
+                  last_seen_at, last_success_at
+           FROM asset_source_records
+           WHERE company_id = %s AND asset_id = %s
+           ORDER BY source, external_id""",
+        (company_id, asset_id),
+    )
+    result = []
+    for row in rows or []:
+        item = dict(row)
+        try:
+            fields = json.loads(item.get("field_ownership_json") or "[]")
+        except (TypeError, ValueError):
+            fields = []
+        item["owned_fields"] = [str(field).replace("_", " ").title() for field in fields]
+        result.append(item)
+    return result
+
+
+async def list_integration_health(company_id: int) -> list[dict[str, Any]]:
+    """Build per-source health without ever returning another company's runs."""
+    runs = await db.fetch_all(
+        """SELECT id, source, status, records_processed, safe_error, started_at, completed_at
+           FROM integration_sync_runs WHERE company_id = %s
+           ORDER BY started_at DESC, id DESC""",
+        (company_id,),
+    )
+    health: dict[str, dict[str, Any]] = {}
+    for raw in runs or []:
+        run = dict(raw)
+        source = str(run.get("source") or "unknown")
+        item = health.setdefault(source, {"source": source, "last_success": None,
+                                          "last_failure": None, "latest": None})
+        if item["latest"] is None:
+            item["latest"] = run
+        if run.get("status") == "succeeded" and item["last_success"] is None:
+            item["last_success"] = run
+        if run.get("status") == "failed" and item["last_failure"] is None:
+            item["last_failure"] = run
+    return list(health.values())
+
+
+async def list_company_reconciliation_queue(company_id: int) -> list[dict[str, Any]]:
+    rows = await db.fetch_all(
+        """SELECT sr.id, sr.asset_id, sr.source, sr.external_id, sr.status,
+                  sr.last_seen_at, sr.last_error, a.name AS asset_name
+           FROM asset_source_records sr
+           LEFT JOIN assets a ON a.id = sr.asset_id AND a.company_id = sr.company_id
+           WHERE sr.company_id = %s AND sr.status IN ('possible_match', 'quarantined')
+           ORDER BY sr.last_seen_at DESC, sr.id DESC""",
+        (company_id,),
+    )
+    return list(rows or [])
+
+
+async def reject_reconciliation(company_id: int, source_record_id: int) -> bool:
+    result = await db.execute(
+        """UPDATE asset_source_records SET status = 'rejected', asset_id = NULL,
+                  last_error = 'Match rejected by an authorised technician'
+           WHERE id = %s AND company_id = %s
+             AND status IN ('possible_match', 'quarantined')""",
+        (source_record_id, company_id),
+    )
+    return bool(result)
 
 
 async def approve_reconciliation(company_id: int, asset_id: int, source_record_id: int) -> bool:
@@ -683,9 +753,15 @@ async def start_sync_run(company_id: int, source: str) -> int:
 async def finish_sync_run(
     run_id: int, *, processed: int = 0, error: str | None = None
 ) -> None:
+    safe_error = (error or "")[:500]
+    safe_error = re.sub(r"(?i)bearer\s+\S+", "Bearer [REDACTED]", safe_error)
+    safe_error = re.sub(
+        r"(?i)(authorization|token|password|secret|api[-_ ]?key)(\s*[:=]\s*)\S+",
+        r"\1\2[REDACTED]", safe_error,
+    )
     await db.execute(
         "UPDATE integration_sync_runs SET status = %s, records_processed = %s, safe_error = %s, completed_at = UTC_TIMESTAMP() WHERE id = %s",
-        ("failed" if error else "succeeded", processed, (error or "")[:500] or None, run_id),
+        ("failed" if error else "succeeded", processed, safe_error or None, run_id),
     )
 
 

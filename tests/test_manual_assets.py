@@ -67,3 +67,30 @@ async def test_discovered_serial_match_requires_review_without_overwrite(monkeyp
     statements = "\n".join(call.args[0] for call in execute.await_args_list)
     assert "asset_source_records" in statements
     assert not any("UPDATE assets" in call.args[0] for call in execute.await_args_list)
+
+
+@pytest.mark.anyio
+async def test_health_queries_are_company_scoped(monkeypatch):
+    fetch = AsyncMock(return_value=[])
+    monkeypatch.setattr(assets.db, "fetch_all", fetch)
+
+    await assets.list_integration_health(44)
+    await assets.list_company_reconciliation_queue(44)
+
+    assert fetch.await_args_list[0].args[1] == (44,)
+    assert fetch.await_args_list[1].args[1] == (44,)
+    assert all("company_id = %s" in call.args[0] for call in fetch.await_args_list)
+
+
+@pytest.mark.anyio
+async def test_sync_failure_redacts_secret_bearing_error(monkeypatch):
+    execute = AsyncMock(return_value=1)
+    monkeypatch.setattr(assets.db, "execute", execute)
+
+    await assets.finish_sync_run(7, error="Authorization: Bearer abc123 token=hidden")
+
+    params = execute.await_args.args[1]
+    assert params[0] == "failed"
+    assert "abc123" not in params[2]
+    assert "hidden" not in params[2]
+    assert "[REDACTED]" in params[2]

@@ -415,6 +415,53 @@ async def _asset_write_context(request: Request):
     return user, company, company_id, None
 
 
+@router.get("/assets/integration-health", response_class=HTMLResponse,
+            summary="View company integration health and reconciliation queue")
+async def integration_health_page(request: Request):
+    user, membership, company, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        return redirect
+    main_module = _main()
+    can_resolve = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
+        user, membership, "menu.assets", write=True
+    )
+    health = await asset_repo.list_integration_health(company_id)
+    now = datetime.now(timezone.utc)
+    for item in health:
+        success = item.get("last_success")
+        value = success.get("completed_at") if success else None
+        if isinstance(value, datetime):
+            value = value.replace(tzinfo=value.tzinfo or timezone.utc)
+            item["is_stale"] = now - value > timedelta(hours=24)
+        else:
+            item["is_stale"] = True
+        item["current_failure"] = bool(item.get("latest") and item["latest"].get("status") == "failed")
+    return await main_module._render_template(
+        "assets/integration_health.html", request, user,
+        extra={"title": "Integration health", "company": company, "health": health,
+               "queue": await asset_repo.list_company_reconciliation_queue(company_id),
+               "can_resolve": can_resolve},
+    )
+
+
+@router.post("/assets/integration-health/reconciliation/{source_record_id}/reject",
+             summary="Reject an ambiguous asset match")
+async def reject_asset_reconciliation(request: Request, source_record_id: int):
+    user, _company, company_id, redirect = await _asset_write_context(request)
+    if redirect:
+        return redirect
+    if not await asset_repo.reject_reconciliation(company_id, source_record_id):
+        raise HTTPException(status_code=404, detail="Pending match not found")
+    await audit_service.record(
+        action="asset.reconciliation.reject", request=request, user_id=int(user["id"]),
+        entity_type="asset_source_record", entity_id=source_record_id,
+        after={"source_record_id": source_record_id, "decision": "rejected"},
+    )
+    return _main().flash_redirect(
+        "/assets/integration-health", "Integration match rejected.", "success"
+    )
+
+
 @router.get("/assets/new", response_class=HTMLResponse, summary="Create a manual asset")
 async def new_asset_page(request: Request):
     user, company, _company_id, redirect = await _asset_write_context(request)
@@ -1431,6 +1478,7 @@ async def asset_detail_page(
             "linked_websites": [] if customer_safe else await websites_repo.list_for_asset(company_id, asset_id),
             "can_edit": not customer_safe and can_write,
             "reconciliation_candidates": [] if customer_safe else await asset_repo.list_reconciliation_candidates(company_id, asset_id),
+            "asset_sources": [] if customer_safe else await asset_repo.list_asset_sources(company_id, asset_id),
             "customer_safe": customer_safe,
             "bcp_context": bcp_context,
             "infrastructure_links": infrastructure_links,

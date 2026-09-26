@@ -16,6 +16,7 @@
     {% set _ = asset_actions.append({"label": "Settings", "type": "link", "href": "/assets/settings"}) %}
   {% endif %}
   {% set _ = asset_actions.append({"label": "Network devices", "type": "link", "href": "/devices"}) %}
+  {% set _ = asset_actions.append({"label": "Integration health", "type": "link", "href": "/assets/integration-health"}) %}
   {{ page_header_actions(asset_actions) }}
 {% endblock %}
 

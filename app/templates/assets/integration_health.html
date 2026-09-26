@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "macros/header.html" import page_header_actions %}
+{% block header_title %}Integration health{% endblock %}
+{% block title %}Integration health{% endblock %}
+{% block header_actions %}{{ page_header_actions([{"label": "View assets", "type": "link", "href": "/assets"}]) }}{% endblock %}
+{% block content %}
+<div class="admin-grid">
+  <section class="card card--panel admin-grid__full">
+    <header class="card__header"><div><h2 class="card__title">Source sync status</h2><p class="card__subtitle">Company-scoped operational status. Stale data remains usable; a current failure means the latest run failed.</p></div></header>
+    <div class="card__body">
+      <div class="table-toolbar"><label class="visually-hidden" for="health-search">Filter sources</label><input class="input" id="health-search" type="search" placeholder="Filter sources" data-table-filter="integration-health-table"></div>
+      <div class="table-wrapper"><table class="table" id="integration-health-table" data-table data-table-id="integration-health"><thead><tr><th data-sortable>Source</th><th data-sortable>Health</th><th data-sortable>Last success</th><th data-sortable>Last failure</th><th data-sortable>Processed</th><th>Error</th><th>Assets</th></tr></thead><tbody>
+      {% for item in health %}{% set latest = item.latest %}{% set success = item.last_success %}{% set failure = item.last_failure %}<tr>
+        <td>{{ item.source | replace('_', ' ') | title }}</td>
+        <td>{% if item.current_failure %}<span class="status status--danger">Current sync failed</span>{% elif item.is_stale %}<span class="status status--warning">Stale, usable</span>{% elif latest and latest.status == 'running' %}<span class="status status--info">Running</span>{% else %}<span class="status status--success">Healthy</span>{% endif %}</td>
+        <td data-value="{{ success.completed_at if success else '' }}">{% if success %}<span data-utc="{{ success.completed_at }}">{{ success.completed_at }}</span>{% else %}Never{% endif %}</td>
+        <td data-value="{{ failure.completed_at if failure else '' }}">{% if failure %}<span data-utc="{{ failure.completed_at }}">{{ failure.completed_at }}</span>{% else %}—{% endif %}</td>
+        <td data-value="{{ latest.records_processed or 0 }}">{{ latest.records_processed or 0 }}</td>
+        <td>{{ latest.safe_error if item.current_failure and latest.safe_error else '—' }}</td><td><a href="/assets">View affected assets</a></td>
+      </tr>{% else %}<tr><td colspan="7">No sync runs have been recorded for this company.</td></tr>{% endfor %}
+      </tbody></table></div>
+    </div>
+  </section>
+  <section class="card card--panel admin-grid__full">
+    <header class="card__header"><div><h2 class="card__title">Reconciliation queue</h2><p class="card__subtitle">Ambiguous and quarantined source records requiring an explicit technician decision.</p></div></header>
+    <div class="card__body">
+      <div class="table-toolbar"><label class="visually-hidden" for="queue-search">Filter matches</label><input class="input" id="queue-search" type="search" placeholder="Filter matches" data-table-filter="reconciliation-table"></div>
+      <div class="table-wrapper"><table class="table" id="reconciliation-table" data-table data-table-id="asset-reconciliation"><thead><tr><th data-sortable>Source</th><th data-sortable>Source record</th><th data-sortable>Existing asset</th><th data-sortable>Reason</th><th data-sortable>Seen</th><th>Decision</th></tr></thead><tbody>
+      {% for match in queue %}<tr><td>{{ match.source | replace('_', ' ') | title }}</td><td><a href="{{ '/assets/' ~ match.asset_id ~ '#source-record-' ~ match.id if match.asset_id else '#source-' ~ match.id }}"><code>{{ match.external_id }}</code></a></td><td>{% if match.asset_id %}<a href="/assets/{{ match.asset_id }}">{{ match.asset_name or ('Asset ' ~ match.asset_id) }}</a>{% else %}No single candidate{% endif %}</td><td>{{ match.last_error or 'Manual review required' }}</td><td data-value="{{ match.last_seen_at }}"><span data-utc="{{ match.last_seen_at }}">{{ match.last_seen_at }}</span></td><td>{% if can_resolve %}{% if match.asset_id %}<form class="form-inline" method="post" action="/assets/{{ match.asset_id }}/reconciliation/{{ match.id }}/approve">{% include "partials/csrf.html" %}<button class="button button--primary button--small" type="submit">Approve</button></form>{% endif %}<form class="form-inline" method="post" action="/assets/integration-health/reconciliation/{{ match.id }}/reject">{% include "partials/csrf.html" %}<button class="button button--danger button--small" type="submit">Reject</button></form>{% else %}Read only{% endif %}</td></tr>
+      {% else %}<tr><td colspan="6">No matches need review.</td></tr>{% endfor %}
+      </tbody></table></div>
+    </div>
+  </section>
+</div>
+{% endblock %}
