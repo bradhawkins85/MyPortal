@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from app.core.database import db
@@ -56,6 +56,8 @@ async def list_check_jobs(company_id: int, website_id: int, limit: int = 20) -> 
            ORDER BY j.id DESC LIMIT %s""",
         (website_id, company_id, limit),
     ) or [])
+async def get_website_by_id(website_id: int) -> dict[str, Any] | None:
+    return await db.fetch_one("SELECT * FROM websites WHERE id = %s", (website_id,))
 
 
 async def create_website(company_id: int, values: dict[str, Any], user_id: int) -> int:
@@ -111,9 +113,99 @@ async def replace_links(company_id: int, website_id: int, asset_ids: list[int], 
 
 
 async def enqueue_check(website_id: int) -> int:
+    existing = await db.fetch_one(
+        "SELECT id FROM website_check_jobs WHERE website_id = %s AND status IN ('pending', 'running') ORDER BY id LIMIT 1",
+        (website_id,),
+    )
+    if existing:
+        return int(existing["id"])
     return int(await db.execute(
         "INSERT INTO website_check_jobs (website_id) VALUES (%s)", (website_id,)
     ))
+
+
+async def enqueue_due(now: datetime, limit: int) -> int:
+    rows = await db.fetch_all(
+        "SELECT id, next_check_at FROM websites WHERE next_check_at IS NULL OR next_check_at <= %s ORDER BY next_check_at, id LIMIT %s",
+        (now, limit),
+    ) or []
+    created = 0
+    for row in rows:
+        before = await db.fetch_one(
+            "SELECT id FROM website_check_jobs WHERE website_id = %s AND status IN ('pending', 'running') LIMIT 1",
+            (row["id"],),
+        )
+        if not before:
+            due = row.get("next_check_at") or "initial"
+            key = ("website:" + str(row["id"]) + ":" + str(due))[:191]
+            try:
+                await db.execute("INSERT INTO website_check_jobs (website_id, available_at, idempotency_key) VALUES (%s, %s, %s)", (row["id"], now, key))
+                created += 1
+            except Exception as exc:
+                # The unique idempotency key is the final arbiter when two
+                # application instances schedule the same due observation.
+                if "unique" not in str(exc).lower() and "duplicate" not in str(exc).lower():
+                    raise
+    return created
+
+
+async def claim_jobs(*, owner: str, now: datetime, lease_seconds: int, limit: int,
+                     company_limit: int) -> list[dict[str, Any]]:
+    lease_until = now + timedelta(seconds=lease_seconds)
+    candidates = await db.fetch_all(
+        """SELECT j.*, w.company_id FROM website_check_jobs j JOIN websites w ON w.id = j.website_id
+        WHERE j.available_at <= %s AND (j.status = 'pending' OR (j.status = 'running' AND j.lease_expires_at < %s))
+        ORDER BY j.available_at, j.id LIMIT %s""", (now, now, limit * max(company_limit, 1) * 2),
+    ) or []
+    claimed, company_counts = [], {}
+    for candidate in candidates:
+        company_id = int(candidate["company_id"])
+        if company_counts.get(company_id, 0) >= company_limit:
+            continue
+        changed = await db.execute(
+            """UPDATE website_check_jobs SET status = 'running', lease_owner = %s,
+            lease_expires_at = %s, started_at = COALESCE(started_at, %s),
+            attempt_count = attempt_count + 1, updated_at = %s
+            WHERE id = %s AND (status = 'pending' OR (status = 'running' AND lease_expires_at < %s))""",
+            (owner, lease_until, now, now, candidate["id"], now),
+        )
+        if changed:
+            row = await db.fetch_one("SELECT * FROM website_check_jobs WHERE id = %s AND lease_owner = %s", (candidate["id"], owner))
+            if row:
+                claimed.append(dict(row))
+                company_counts[company_id] = company_counts.get(company_id, 0) + 1
+        if len(claimed) >= limit:
+            break
+    return claimed
+
+
+async def finish_job(job: dict[str, Any], *, owner: str, ok: bool, now: datetime,
+                     interval_seconds: int, error: str | None = None) -> None:
+    if ok:
+        changed = await db.execute(
+            "UPDATE website_check_jobs SET status = 'completed', completed_at = %s, lease_owner = NULL, lease_expires_at = NULL, last_error = NULL, updated_at = %s WHERE id = %s AND lease_owner = %s AND status = 'running'",
+            (now, now, job["id"], owner),
+        )
+        if changed:
+            await db.execute("UPDATE websites SET next_check_at = %s WHERE id = %s", (now + timedelta(seconds=interval_seconds), job["website_id"]))
+        return
+    attempts = int(job.get("attempt_count") or 0)
+    exhausted = attempts >= int(job.get("max_attempts") or 3)
+    delay = interval_seconds if exhausted else min(3600, 30 * (2 ** max(0, attempts - 1)))
+    status = "failed" if exhausted else "pending"
+    changed = await db.execute(
+        "UPDATE website_check_jobs SET status = %s, available_at = %s, lease_owner = NULL, lease_expires_at = NULL, last_error = %s, completed_at = %s, updated_at = %s WHERE id = %s AND lease_owner = %s AND status = 'running'",
+        (status, now + timedelta(seconds=delay), (error or "Website check failed")[:500], now if exhausted else None, now, job["id"], owner),
+    )
+    if exhausted and changed:
+        await db.execute("UPDATE websites SET next_check_at = %s WHERE id = %s", (now + timedelta(seconds=interval_seconds), job["website_id"]))
+
+
+async def job_health() -> dict[str, Any]:
+    rows = await db.fetch_all("SELECT status, COUNT(*) count FROM website_check_jobs GROUP BY status") or []
+    oldest = await db.fetch_one("SELECT MIN(available_at) oldest_ready_at FROM website_check_jobs WHERE status = 'pending'")
+    return {"counts": {str(row["status"]): int(row["count"]) for row in rows},
+            "oldest_ready_at": oldest and oldest.get("oldest_ready_at")}
 
 
 async def record_success(website_id: int, checked_at: datetime, http_status: int | None,

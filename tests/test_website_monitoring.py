@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import socket
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -48,3 +49,23 @@ def test_failed_check_records_failure_without_success(monkeypatch):
     result = asyncio.run(monitoring.check_website({"id": 7, "url": "http://localhost"}))
     assert result["ok"] is False and result["retryable"] is True
     assert [item[0] for item in calls] == ["failure"]
+
+
+def test_success_feeds_certificate_and_domain_expiries(monkeypatch):
+    certificate = {"expires_at": "cert-date", "source": "tls-handshake"}
+    domain = {"expires_at": "domain-date", "source": "rdap"}
+    monkeypatch.setattr(monitoring, "validate_public_url", AsyncMock(return_value=("example.com", 443, ["93.184.216.34"])))
+    monkeypatch.setattr(monitoring, "inspect_certificate", AsyncMock(return_value=certificate))
+    monkeypatch.setattr(monitoring, "lookup_domain_expiry", AsyncMock(return_value=domain))
+    monkeypatch.setattr(monitoring.repo, "record_success", AsyncMock())
+    monkeypatch.setattr(monitoring.repo, "record_domain_expiry", AsyncMock())
+
+    result = asyncio.run(monitoring.check_website({
+        "id": 7, "url": "https://example.com", "monitor_tls": True,
+        "monitor_availability": False, "collect_domain_expiry": True,
+    }))
+
+    assert result["ok"] is True
+    assert result["certificate"] == certificate
+    assert result["domain"] == domain
+    monitoring.repo.record_domain_expiry.assert_awaited_once()
