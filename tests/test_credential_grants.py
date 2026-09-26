@@ -71,3 +71,21 @@ async def test_wrong_verification_code_fails_without_state_change(monkeypatch):
         is None
     )
     update.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_named_grant_is_consumed_before_decrypt_and_cannot_race(monkeypatch):
+    monkeypatch.setattr(
+        credential_grants.db, "execute_rowcount", AsyncMock(return_value=0)
+    )
+    get = AsyncMock()
+    monkeypatch.setattr(credential_grants, "get", get)
+    reveal = AsyncMock()
+    monkeypatch.setattr(credential_grants.vault, "reveal", reveal)
+
+    assert await credential_grants.reveal_named(8, 12, 4) is None
+    sql = credential_grants.db.execute_rowcount.await_args.args[0]
+    assert "consumed_at = CURRENT_TIMESTAMP" in sql
+    assert "consumed_at IS NULL" in sql
+    get.assert_not_awaited()
+    reveal.assert_not_awaited()

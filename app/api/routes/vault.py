@@ -13,6 +13,7 @@ from app.repositories import user_companies as user_company_repo
 from app.repositories import vault as repo
 from app.repositories import credential_grants as grant_repo
 from app.repositories import standing_credential_grants as standing_grant_repo
+from app.repositories import credential_features as feature_repo
 from app.schemas.vault import (
     CredentialCreate,
     CredentialMetadata,
@@ -68,6 +69,7 @@ def _deny_impersonation(request: Request) -> None:
 
 
 async def _authorize(user: dict, company_id: int, *, write: bool = False) -> None:
+    await _require_enabled(company_id)
     if user.get("is_super_admin"):
         return
     try:
@@ -81,6 +83,11 @@ async def _authorize(user: dict, company_id: int, *, write: bool = False) -> Non
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Vault access denied"
         )
+
+
+async def _require_enabled(company_id: int) -> None:
+    if not await feature_repo.is_enabled(company_id):
+        raise HTTPException(status_code=404, detail="Credential vault unavailable")
 
 
 @router.get(
@@ -416,6 +423,7 @@ async def reveal_named_grant(
     user: dict = Depends(get_current_user),
 ):
     """Reveal only a grant addressed to the authenticated user, never generic company managers."""
+    await _require_enabled(company_id)
     _deny_impersonation(request)
     await _limit(request, user, reveal=True)
     result = await grant_repo.reveal_named(grant_id, int(user["id"]), company_id)
@@ -483,6 +491,7 @@ async def revoke_credential_grant(
     _: None = Depends(require_database),
     user: dict = Depends(get_current_user),
 ):
+    await _require_enabled(company_id)
     _deny_impersonation(request)
     row = await grant_repo.revoke(grant_id, company_id, int(user["id"]))
     if row is None:
@@ -694,6 +703,7 @@ async def list_shared_credentials(
     user: dict = Depends(get_current_user),
 ):
     """Return deduplicated metadata only; a general portal role grants nothing."""
+    await _require_enabled(company_id)
     _deny_impersonation(request)
     _no_store(response)
     rows = await standing_grant_repo.resolve(int(user["id"]), company_id, "enumerate")
@@ -715,6 +725,7 @@ async def reveal_shared_credential(
     _: None = Depends(require_database),
     user: dict = Depends(get_current_user),
 ):
+    await _require_enabled(company_id)
     _deny_impersonation(request)
     await _limit(request, user, reveal=True)
     candidates = [r for r in await standing_grant_repo.resolve(int(user["id"]), company_id, "reveal") if int(r["credential_id"]) == credential_id]

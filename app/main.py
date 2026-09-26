@@ -118,6 +118,7 @@ from app.repositories import audit_logs as audit_repo
 from app.repositories import auth as auth_repo
 from app.repositories import assets as assets_repo
 from app.repositories import companies as company_repo
+from app.repositories import credential_features as credential_feature_repo
 from app.repositories import company_memberships as membership_repo
 from app.repositories import change_log as change_log_repo
 from app.repositories import licenses as license_repo
@@ -2506,6 +2507,8 @@ async def shared_credentials_page(request: Request):
         return redirect
     if getattr(request.state, "active_company_id", None) is None:
         raise HTTPException(status_code=403, detail="Select a company to view shared credentials")
+    if not await credential_feature_repo.is_enabled(int(request.state.active_company_id)):
+        raise HTTPException(status_code=404, detail="Credential vault unavailable")
     return await _render_template(
         "shared_credentials.html", request, user, extra={"title": "Shared credentials"}
     )

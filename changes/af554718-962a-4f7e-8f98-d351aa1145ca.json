@@ -1,0 +1,7 @@
+{
+  "guid": "af554718-962a-4f7e-8f98-d351aa1145ca",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "security",
+  "summary": "Gate credential vault by company and add security rollout evidence",
+  "content_hash": "dd3a3edeecca8de2b4eecf6841c386f1adaaa6573f1481669b2659e1a930f486"
+}
