@@ -6,9 +6,15 @@ from app.core.database import db
 from app.security import vault
 
 _METADATA_COLUMNS = (
-    "id, company_id, name, username, current_version, created_at, updated_at"
+    "id, company_id, name, username, credential_class, owner, intended_recipient, "
+    "expires_on, review_on, last_rotated_at, archived_at, revoked_at, current_version, created_at, updated_at"
 )
-_LINK_TABLES = {"asset": "assets", "staff": "staff", "ticket": "tickets"}
+_LINK_TABLES = {
+    "asset": "assets",
+    "staff": "staff",
+    "ticket": "tickets",
+    "process_run": "process_runs",
+}
 
 
 async def _validate_links(company_id: int, links: list[tuple[str, int]]) -> None:
@@ -30,7 +36,7 @@ async def list_credentials(company_id: int) -> list[dict[str, Any]]:
     return await db.fetch_all(
         "SELECT "
         + _METADATA_COLUMNS
-        + " FROM credentials WHERE company_id = %s ORDER BY name, id",
+        + " FROM credentials WHERE company_id = %s ORDER BY archived_at IS NOT NULL, name, id",
         (company_id,),
     )
 
@@ -49,14 +55,29 @@ async def create_credential(
     company_id: int,
     name: str,
     username: str | None,
+    credential_class: str,
+    owner: str | None,
+    intended_recipient: str | None,
+    expires_on: object | None,
+    review_on: object | None,
     plaintext: str,
     created_by: int | None,
     links: list[tuple[str, int]],
 ) -> dict[str, Any]:
     await _validate_links(company_id, links)
     credential_id = await db.execute(
-        "INSERT INTO credentials (company_id, name, username, current_version, created_by) VALUES (%s, %s, %s, 1, %s)",
-        (company_id, name, username, created_by),
+        "INSERT INTO credentials (company_id, name, username, credential_class, owner, intended_recipient, expires_on, review_on, current_version, last_rotated_at, created_by) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 1, CURRENT_TIMESTAMP, %s)",
+        (
+            company_id,
+            name,
+            username,
+            credential_class,
+            owner,
+            intended_recipient,
+            expires_on,
+            review_on,
+            created_by,
+        ),
     )
     encrypted = vault.encrypt(
         plaintext, company_id=company_id, credential_id=credential_id, version=1
@@ -86,7 +107,7 @@ async def reveal(
     company_id: int, credential_id: int, version: int | None = None
 ) -> tuple[int, str] | None:
     metadata = await get_metadata(company_id, credential_id)
-    if metadata is None:
+    if metadata is None or metadata.get("archived_at") or metadata.get("revoked_at"):
         return None
     selected = version or int(metadata["current_version"])
     row = await db.fetch_one(
@@ -107,7 +128,7 @@ async def add_version(
     *, company_id: int, credential_id: int, plaintext: str, created_by: int | None
 ) -> dict[str, Any] | None:
     metadata = await get_metadata(company_id, credential_id)
-    if metadata is None:
+    if metadata is None or metadata.get("archived_at") or metadata.get("revoked_at"):
         return None
     version = int(metadata["current_version"]) + 1
     encrypted = vault.encrypt(
@@ -125,7 +146,44 @@ async def add_version(
         ),
     )
     await db.execute(
-        "UPDATE credentials SET current_version = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s AND company_id = %s",
+        "UPDATE credentials SET current_version = %s, last_rotated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = %s AND company_id = %s",
         (version, credential_id, company_id),
+    )
+    return await get_metadata(company_id, credential_id)
+
+
+async def update_metadata(
+    company_id: int, credential_id: int, values: dict[str, Any]
+) -> dict[str, Any] | None:
+    await db.execute(
+        "UPDATE credentials SET name = %s, username = %s, credential_class = %s, owner = %s, intended_recipient = %s, expires_on = %s, review_on = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s AND company_id = %s AND revoked_at IS NULL",
+        (
+            values["name"],
+            values.get("username"),
+            values["credential_class"],
+            values.get("owner"),
+            values.get("intended_recipient"),
+            values.get("expires_on"),
+            values.get("review_on"),
+            credential_id,
+            company_id,
+        ),
+    )
+    return await get_metadata(company_id, credential_id)
+
+
+async def set_lifecycle(
+    company_id: int, credential_id: int, action: str
+) -> dict[str, Any] | None:
+    column = {"archive": "archived_at", "revoke": "revoked_at"}.get(action)
+    if column is None:
+        raise ValueError("Unsupported lifecycle action")
+    await db.execute(
+        "UPDATE credentials SET "
+        + column
+        + " = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = %s AND company_id = %s AND "
+        + column
+        + " IS NULL",
+        (credential_id, company_id),
     )
     return await get_metadata(company_id, credential_id)

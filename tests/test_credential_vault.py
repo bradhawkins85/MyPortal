@@ -7,7 +7,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from pydantic import SecretStr
 
 from app.core.config import get_settings
-from app.schemas.vault import CredentialCreate, CredentialMetadata
+from app.schemas.vault import CredentialCreate, CredentialMetadata, CredentialUpdate
 from app.security import vault
 
 
@@ -74,3 +74,24 @@ def test_unknown_key_fails_closed(vault_settings):
     )
     with pytest.raises(vault.VaultConfigurationError, match="unavailable"):
         vault.decrypt(forged, company_id=1, credential_id=2, version=1)
+
+
+def test_metadata_edit_contract_cannot_accept_a_secret():
+    payload = CredentialUpdate(
+        name="Onboarding password",
+        credential_class="onboarding",
+        owner="Service desk",
+        intended_recipient="New starter",
+        secret="must not be accepted",
+    )
+    assert "secret" not in payload.model_dump()
+
+
+def test_process_run_is_a_safe_reference_type():
+    payload = CredentialCreate(
+        company_id=4,
+        name="Deployment account",
+        secret=SecretStr("not in the ticket"),
+        links=[("process_run", 12), ("ticket", 20)],
+    )
+    assert payload.links == [("process_run", 12), ("ticket", 20)]

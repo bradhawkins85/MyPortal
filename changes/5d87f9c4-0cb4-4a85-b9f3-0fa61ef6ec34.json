@@ -1,0 +1,7 @@
+{
+  "guid": "5d87f9c4-0cb4-4a85-b9f3-0fa61ef6ec34",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added credential lifecycle metadata and secure maintenance actions.",
+  "content_hash": "credential-vault-lifecycle-v1"
+}

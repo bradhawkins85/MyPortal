@@ -11,6 +11,47 @@
   ]) }}
 {% endblock %}
 {% block content %}
+<section class="card card--panel" id="credentials">
+  <header class="card__header"><div><h2 class="card__title">Credentials</h2><p class="card__subtitle">Secrets are stored in the encrypted company vault and are never shown on this page.</p></div></header>
+  <div class="card__body">
+    <form id="credential-create" class="form" autocomplete="off">
+      <div class="form-field"><label class="form-label" for="credential-name">Name</label><input class="form-input" id="credential-name" maxlength="191" required></div>
+      <div class="form-field"><label class="form-label" for="credential-class">Class</label><select class="form-input" id="credential-class"><option value="onboarding">Onboarding password</option><option value="shared">Shared</option><option value="admin">Administrator</option><option value="service">Service</option><option value="other">Other</option></select></div>
+      <div class="form-field"><label class="form-label" for="credential-owner">Owner</label><input class="form-input" id="credential-owner" maxlength="191"></div>
+      <div class="form-field"><label class="form-label" for="credential-recipient">Intended recipient</label><input class="form-input" id="credential-recipient" maxlength="191"></div>
+      <div class="form-field"><label class="form-label" for="credential-secret">Secret</label><input class="form-input" id="credential-secret" type="password" autocomplete="new-password" required><p class="form-help">This value is submitted in the request body, never the URL, and is not retained by this form.</p></div>
+      <button class="button button--primary" type="submit">Create credential</button>
+    </form>
+    <div class="table-toolbar"><label class="form-label" for="credential-filter">Filter credentials</label><input class="form-input" id="credential-filter" type="search"></div>
+    <div class="table-scroll"><table class="data-table"><thead><tr><th data-sort="name">Name</th><th>Class</th><th>Owner / recipient</th><th>Review</th><th>Last rotation</th><th>Status</th><th>Actions</th></tr></thead><tbody id="credential-rows"><tr><td colspan="7">Loading…</td></tr></tbody></table></div>
+  </div>
+</section>
+<script nonce="{{ csp_nonce }}">
+(() => {
+  const companyId = {{ company.id }};
+  const rows = document.getElementById('credential-rows');
+  let credentials = [];
+  const escapeHtml = value => { const node = document.createElement('span'); node.textContent = value == null ? '' : String(value); return node.innerHTML; };
+  function render() {
+    const query = document.getElementById('credential-filter').value.toLowerCase();
+    const visible = credentials.filter(item => [item.name, item.credential_class, item.owner, item.intended_recipient].some(value => String(value || '').toLowerCase().includes(query)));
+    rows.innerHTML = visible.map(item => `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.credential_class)}</td><td>${escapeHtml(item.owner || '—')} / ${escapeHtml(item.intended_recipient || '—')}</td><td>${escapeHtml(item.review_on || item.expires_on || '—')}</td><td>${escapeHtml(item.last_rotated_at || '—')}</td><td><span class="status status--${item.revoked_at ? 'danger' : item.archived_at ? 'neutral' : 'success'}">${item.revoked_at ? 'Revoked' : item.archived_at ? 'Archived' : 'Active'}</span></td><td>${item.archived_at || item.revoked_at ? '' : `<button class="button button--small button--secondary" data-reveal="${item.id}" type="button">Reveal & copy</button> <button class="button button--small button--ghost" data-archive="${item.id}" type="button">Archive</button>`}</td></tr>`).join('') || '<tr><td colspan="7">No matching credentials.</td></tr>';
+  }
+  async function load() { const response = await fetch(`/api/vault/companies/${companyId}/credentials`, {cache: 'no-store'}); if (response.ok) { credentials = await response.json(); render(); } else { rows.innerHTML = '<tr><td colspan="7">Credentials are unavailable.</td></tr>'; } }
+  document.getElementById('credential-filter').addEventListener('input', render);
+  document.getElementById('credential-create').addEventListener('submit', async event => {
+    event.preventDefault(); const secret = document.getElementById('credential-secret');
+    const response = await fetch('/api/vault/credentials', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({company_id: companyId, name: document.getElementById('credential-name').value, credential_class: document.getElementById('credential-class').value, owner: document.getElementById('credential-owner').value || null, intended_recipient: document.getElementById('credential-recipient').value || null, secret: secret.value})});
+    secret.value = ''; if (response.ok) { event.target.reset(); await load(); } else { alert('Credential could not be created.'); }
+  });
+  rows.addEventListener('click', async event => {
+    const revealId = event.target.dataset.reveal; const archiveId = event.target.dataset.archive;
+    if (revealId) { if (!confirm('Reveal and copy this secret? This action is audited.')) return; const response = await fetch(`/api/vault/companies/${companyId}/credentials/${revealId}/reveal`, {method: 'POST', cache: 'no-store'}); if (!response.ok) return alert('Secret reveal denied.'); const value = (await response.json()).secret; try { await navigator.clipboard.writeText(value); alert('Secret copied. Clear your clipboard after use.'); } finally { /* Do not insert secret into the document. */ } }
+    if (archiveId && confirm('Archive this credential?')) { const response = await fetch(`/api/vault/companies/${companyId}/credentials/${archiveId}/archive`, {method: 'POST'}); if (response.ok) await load(); }
+  });
+  load();
+})();
+</script>
   <div class="company-edit-page" data-company-id="{{ company.id }}">
   <div class="admin-grid admin-grid--columns">
     <details class="card card--panel card-collapsible admin-grid__full" data-company-edit-section="general" open>
