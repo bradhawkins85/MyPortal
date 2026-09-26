@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 import string
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
@@ -10,6 +11,7 @@ from app.api.dependencies.auth import get_current_user
 from app.api.dependencies.database import require_database
 from app.repositories import user_companies as user_company_repo
 from app.repositories import vault as repo
+from app.repositories import credential_grants as grant_repo
 from app.schemas.vault import (
     CredentialCreate,
     CredentialMetadata,
@@ -17,6 +19,11 @@ from app.schemas.vault import (
     SecretGenerate,
     SecretReplace,
     SecretReveal,
+    CredentialGrantCreate,
+    CredentialGrant,
+    ExternalGrantCreated,
+    ShareVerification,
+    ShareToken,
 )
 from app.services import audit
 from app.security.rate_limiter import SimpleRateLimiter
@@ -303,3 +310,279 @@ async def credential_lifecycle(
         after={"company_id": company_id},
     )
     return row
+
+
+def _grant_audit_metadata(row: dict) -> dict:
+    return {
+        "company_id": row["company_id"],
+        "credential_id": row["credential_id"],
+        "credential_version": row["credential_version"],
+        "staff_id": row["staff_id"],
+        "grantor_user_id": row["grantor_user_id"],
+        "recipient_user_id": row.get("recipient_user_id"),
+        "recipient_email": row.get("recipient_email"),
+    }
+
+
+def _validate_grant_payload(payload: CredentialGrantCreate) -> None:
+    if (payload.recipient_user_id is None) == (payload.recipient_email is None):
+        raise HTTPException(
+            422, "Choose exactly one named portal recipient or external recipient"
+        )
+    expires = payload.expires_at
+    if expires.tzinfo is None or expires.utcoffset() is None:
+        raise HTTPException(422, "expires_at must include a timezone")
+    if expires.astimezone(timezone.utc) <= datetime.now(timezone.utc):
+        raise HTTPException(422, "expires_at must be in the future")
+
+
+@router.post(
+    "/companies/{company_id}/credentials/{credential_id}/grants",
+    response_model=CredentialGrant | ExternalGrantCreated,
+    status_code=201,
+)
+async def create_credential_grant(
+    company_id: int,
+    credential_id: int,
+    payload: CredentialGrantCreate,
+    request: Request,
+    _: None = Depends(require_database),
+    user: dict = Depends(get_current_user),
+):
+    """Grant one pinned onboarding-password version; no notification contains the password."""
+    await _authorize(user, company_id, write=True)
+    _deny_impersonation(request)
+    await _limit(request, user)
+    _validate_grant_payload(payload)
+    external = payload.recipient_email is not None
+    token = secrets.token_urlsafe(32) if external else None
+    code = f"{secrets.randbelow(1_000_000):06d}" if external else None
+    row = await grant_repo.create(
+        credential_id=credential_id,
+        company_id=company_id,
+        staff_id=payload.staff_id,
+        grantor_user_id=int(user["id"]),
+        recipient_user_id=payload.recipient_user_id,
+        recipient_email=(
+            payload.recipient_email.lower().strip() if payload.recipient_email else None
+        ),
+        reason=payload.reason.strip(),
+        expires_at=payload.expires_at.astimezone(timezone.utc).replace(tzinfo=None),
+        token=token,
+        verification_code=code,
+    )
+    if row is None:
+        raise HTTPException(404, "Credential or recipient not found")
+    metadata = _grant_audit_metadata(row)
+    await audit.record(
+        action="vault.grant.create",
+        request=request,
+        user_id=user.get("id"),
+        entity_type="credential_grant",
+        entity_id=row["id"],
+        after={"reason": row["reason"], "expires_at": row["expires_at"]},
+        metadata=metadata,
+    )
+    await audit.record(
+        action="vault.grant.notify",
+        request=request,
+        user_id=user.get("id"),
+        entity_type="credential_grant",
+        entity_id=row["id"],
+        metadata=metadata,
+    )
+    return (
+        ExternalGrantCreated(**row, share_token=token, verification_code=code)
+        if external
+        else CredentialGrant(**row)
+    )
+
+
+@router.post(
+    "/companies/{company_id}/grants/{grant_id}/reveal", response_model=SecretReveal
+)
+async def reveal_named_grant(
+    company_id: int,
+    grant_id: int,
+    request: Request,
+    _: None = Depends(require_database),
+    user: dict = Depends(get_current_user),
+):
+    """Reveal only a grant addressed to the authenticated user, never generic company managers."""
+    _deny_impersonation(request)
+    await _limit(request, user, reveal=True)
+    result = await grant_repo.reveal_named(grant_id, int(user["id"]), company_id)
+    if result is None:
+        expired = await grant_repo.claim_expiry(
+            grant_id=grant_id, user_id=int(user["id"])
+        )
+        if expired:
+            await audit.record(
+                action="vault.grant.expire",
+                request=request,
+                user_id=user.get("id"),
+                entity_type="credential_grant",
+                entity_id=grant_id,
+                metadata=_grant_audit_metadata(expired),
+            )
+        await audit.record(
+            action="vault.grant.fail",
+            request=request,
+            user_id=user.get("id"),
+            entity_type="credential_grant",
+            entity_id=grant_id,
+            metadata={"company_id": company_id},
+        )
+        raise HTTPException(404, "Share unavailable")
+    row, secret = result
+    metadata = _grant_audit_metadata(row)
+    await audit.record(
+        action="vault.grant.open",
+        request=request,
+        user_id=user.get("id"),
+        entity_type="credential_grant",
+        entity_id=grant_id,
+        metadata=metadata,
+    )
+    await audit.record(
+        action="vault.grant.reveal",
+        request=request,
+        user_id=user.get("id"),
+        entity_type="credential_grant",
+        entity_id=grant_id,
+        metadata=metadata,
+    )
+    return JSONResponse(
+        {
+            "credential_id": row["credential_id"],
+            "version": row["credential_version"],
+            "secret": secret,
+        },
+        headers={
+            "Cache-Control": "no-store, private",
+            "Pragma": "no-cache",
+            "X-Robots-Tag": "noindex, nofollow",
+        },
+    )
+
+
+@router.post(
+    "/companies/{company_id}/grants/{grant_id}/revoke", response_model=CredentialGrant
+)
+async def revoke_credential_grant(
+    company_id: int,
+    grant_id: int,
+    request: Request,
+    _: None = Depends(require_database),
+    user: dict = Depends(get_current_user),
+):
+    _deny_impersonation(request)
+    row = await grant_repo.revoke(grant_id, company_id, int(user["id"]))
+    if row is None:
+        raise HTTPException(404, "Share unavailable")
+    await audit.record(
+        action="vault.grant.revoke",
+        request=request,
+        user_id=user.get("id"),
+        entity_type="credential_grant",
+        entity_id=grant_id,
+        metadata=_grant_audit_metadata(row),
+    )
+    return row
+
+
+@router.post("/shares/verify", status_code=204)
+async def verify_external_share(
+    payload: ShareVerification, request: Request, _: None = Depends(require_database)
+):
+    grant_id = await grant_repo.verify_external(
+        payload.share_token, payload.verification_code
+    )
+    if grant_id is None:
+        expired = await grant_repo.claim_expiry(token=payload.share_token)
+        if expired:
+            await audit.record(
+                action="vault.share.expire",
+                request=request,
+                entity_type="credential_grant",
+                entity_id=expired["id"],
+                metadata=_grant_audit_metadata(expired),
+                source="ui",
+                actor="external_recipient",
+            )
+        await audit.record(
+            action="vault.share.fail",
+            request=request,
+            entity_type="credential_grant",
+            source="ui",
+            actor="external_recipient",
+        )
+        raise HTTPException(404, "Share unavailable")
+    await audit.record(
+        action="vault.share.open",
+        request=request,
+        entity_type="credential_grant",
+        entity_id=grant_id,
+        source="ui",
+        actor="external_recipient",
+    )
+    return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/shares/reveal", response_model=SecretReveal)
+async def reveal_external_share(
+    payload: ShareToken, request: Request, _: None = Depends(require_database)
+):
+    result = await grant_repo.consume_external(payload.share_token)
+    if result is None:
+        expired = await grant_repo.claim_expiry(token=payload.share_token)
+        if expired:
+            await audit.record(
+                action="vault.share.expire",
+                request=request,
+                entity_type="credential_grant",
+                entity_id=expired["id"],
+                metadata=_grant_audit_metadata(expired),
+                source="ui",
+                actor="external_recipient",
+            )
+        await audit.record(
+            action="vault.share.fail",
+            request=request,
+            entity_type="credential_grant",
+            source="ui",
+            actor="external_recipient",
+        )
+        raise HTTPException(404, "Share unavailable")
+    row, secret = result
+    metadata = _grant_audit_metadata(row)
+    await audit.record(
+        action="vault.share.reveal",
+        request=request,
+        entity_type="credential_grant",
+        entity_id=row["id"],
+        metadata=metadata,
+        source="ui",
+        actor="external_recipient",
+    )
+    await audit.record(
+        action="vault.share.consume",
+        request=request,
+        entity_type="credential_grant",
+        entity_id=row["id"],
+        metadata=metadata,
+        source="ui",
+        actor="external_recipient",
+    )
+    return JSONResponse(
+        {
+            "credential_id": row["credential_id"],
+            "version": row["credential_version"],
+            "secret": secret,
+        },
+        headers={
+            "Cache-Control": "no-store, private",
+            "Pragma": "no-cache",
+            "X-Robots-Tag": "noindex, nofollow",
+        },
+    )

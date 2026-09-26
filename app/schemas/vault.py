@@ -66,3 +66,43 @@ class SecretReveal(BaseModel):
     credential_id: int
     version: int
     secret: str
+
+
+class CredentialGrantCreate(BaseModel):
+    """Grant one immutable onboarding credential version to one recipient."""
+
+    recipient_user_id: int | None = Field(default=None, gt=0)
+    recipient_email: str | None = Field(default=None, min_length=3, max_length=254)
+    staff_id: int = Field(gt=0)
+    reason: str = Field(min_length=3, max_length=500)
+    expires_at: datetime
+
+
+class CredentialGrant(BaseModel):
+    id: int
+    credential_id: int
+    credential_version: int
+    company_id: int
+    staff_id: int
+    recipient_user_id: int | None = None
+    recipient_email: str | None = None
+    reason: str
+    expires_at: datetime | str
+    revoked_at: datetime | str | None = None
+    consumed_at: datetime | str | None = None
+
+
+class ExternalGrantCreated(CredentialGrant):
+    """Secrets returned once for delivery over two independent channels."""
+
+    share_token: str
+    verification_code: str
+
+
+class ShareVerification(BaseModel):
+    share_token: str = Field(min_length=32, max_length=256)
+    verification_code: str = Field(min_length=6, max_length=32)
+
+
+class ShareToken(BaseModel):
+    share_token: str = Field(min_length=32, max_length=256)

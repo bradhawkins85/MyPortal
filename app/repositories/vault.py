@@ -149,6 +149,11 @@ async def add_version(
         "UPDATE credentials SET current_version = %s, last_rotated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = %s AND company_id = %s",
         (version, credential_id, company_id),
     )
+    # A grant is pinned to the initial value and must close as soon as that value rotates.
+    await db.execute(
+        "UPDATE credential_grants SET revoked_at = CURRENT_TIMESTAMP WHERE credential_id = %s AND company_id = %s AND revoked_at IS NULL AND consumed_at IS NULL",
+        (credential_id, company_id),
+    )
     return await get_metadata(company_id, credential_id)
 
 
@@ -184,6 +189,10 @@ async def set_lifecycle(
         + " = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = %s AND company_id = %s AND "
         + column
         + " IS NULL",
+        (credential_id, company_id),
+    )
+    await db.execute(
+        "UPDATE credential_grants SET revoked_at = CURRENT_TIMESTAMP WHERE credential_id = %s AND company_id = %s AND revoked_at IS NULL AND consumed_at IS NULL",
         (credential_id, company_id),
     )
     return await get_metadata(company_id, credential_id)
