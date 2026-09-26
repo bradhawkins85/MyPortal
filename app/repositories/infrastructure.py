@@ -33,6 +33,21 @@ async def overview(company_id: int) -> dict[str, list[dict[str, Any]]]:
     return {"networks": networks, "addresses": addresses, "racks": racks, "equipment": equipment}
 
 
+async def for_asset(company_id: int, asset_id: int) -> dict[str, list[dict[str, Any]]]:
+    """Return company-scoped IP assignments and rack placements for an asset."""
+    addresses = list(await db.fetch_all(
+        """SELECT i.id, i.address, i.state, n.name network_name
+           FROM ip_addresses i JOIN ip_networks n ON n.id=i.network_id
+           WHERE i.company_id=%s AND i.asset_id=%s ORDER BY i.address""",
+        (company_id, asset_id)) or [])
+    placements = list(await db.fetch_all(
+        """SELECT e.id, e.rack_id, e.start_unit, e.unit_height, e.face, r.name rack_name
+           FROM rack_equipment e JOIN racks r ON r.id=e.rack_id
+           WHERE e.company_id=%s AND e.asset_id=%s ORDER BY r.name, e.face""",
+        (company_id, asset_id)) or [])
+    return {"addresses": addresses, "placements": placements}
+
+
 async def create_network(company_id: int, name: str, cidr: str, description: str | None) -> int:
     canonical = str(ipaddress.ip_network(cidr, strict=False))
     return await db.execute_returning_lastrowid(

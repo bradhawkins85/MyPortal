@@ -1,0 +1,7 @@
+{
+  "guid": "bd14ef95-29f8-416a-a24f-fae4256acb93",
+  "occurred_at": "2026-09-26T09:53:51.313107+00:00",
+  "change_type": "feature",
+  "summary": "Split infrastructure into dedicated IPAM and rack management pages.",
+  "content_hash": "4acd16096b7f1da35b22ceb7b73febbdb5b47b8dff04cbf54f96f145384bc781"
+}
