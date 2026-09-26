@@ -103,7 +103,8 @@ async def list_company_assets(company_id: int) -> list[dict[str, Any]]:
             warranty_end_date,
             syncro_asset_id,
             tactical_asset_id,
-            mac_address
+            mac_address,
+            customer_visible
         FROM assets
         WHERE company_id = %s
         ORDER BY name ASC, id ASC
@@ -219,6 +220,14 @@ async def set_asset_archived(asset_id: int, archived: bool) -> None:
     await db.execute(
         "UPDATE assets SET archived_at = CASE WHEN %s THEN UTC_TIMESTAMP() ELSE NULL END WHERE id = %s",
         (archived, asset_id),
+    )
+
+
+async def set_customer_visible(asset_id: int, visible: bool) -> None:
+    """Publish or withdraw an asset from its company's customer portal."""
+    await db.execute(
+        "UPDATE assets SET customer_visible = %s WHERE id = %s",
+        (1 if visible else 0, asset_id),
     )
 
 
