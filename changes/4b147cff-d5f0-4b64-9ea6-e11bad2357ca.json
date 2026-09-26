@@ -1,0 +1,7 @@
+{
+  "guid": "4b147cff-d5f0-4b64-9ea6-e11bad2357ca",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added company website documentation with SSRF-safe availability, TLS, DNS and domain expiry monitoring.",
+  "content_hash": "website-monitoring-v1"
+}
