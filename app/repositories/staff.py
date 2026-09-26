@@ -378,6 +378,18 @@ async def list_staff_with_users(company_id: int) -> list[dict[str, Any]]:
     return results
 
 
+async def link_portal_user(staff_id: int, company_id: int, user_id: int) -> bool:
+    """Create the explicit staff identity link after an approved access assignment."""
+    changed = await db.execute_rowcount(
+        "UPDATE staff SET portal_user_id = %s WHERE id = %s AND company_id = %s "
+        "AND enabled = 1 AND (portal_user_id IS NULL OR portal_user_id = %s) "
+        "AND NOT EXISTS (SELECT 1 FROM staff duplicate WHERE duplicate.company_id = %s "
+        "AND duplicate.portal_user_id = %s AND duplicate.enabled = 1 AND duplicate.id <> %s)",
+        (user_id, staff_id, company_id, user_id, company_id, user_id, staff_id),
+    )
+    return changed == 1
+
+
 async def list_all_staff(
     *,
     account_action: str | None = None,

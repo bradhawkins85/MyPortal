@@ -186,3 +186,14 @@ approved grants. Rollback disables vault routes/jobs and leaves encrypted tables
 dormant; it never exports plaintext or copies values into documentation. Promotion
 requires security-owner sign-off, audit review, IdP first-use behaviour verification,
 and zero credential results in ordinary search/export/publication probes.
+
+## Standing grants and secrets already disclosed
+
+Standing grants are continuing MyPortal viewing policies and remain distinct from
+the one-time or expiring onboarding delivery flow. Revocation, staff departure,
+title change, portal deactivation, membership removal, or review expiry prevents
+future MyPortal reveals; it cannot retract a password a person has already seen.
+Administrators should rotate a shared or high-privilege credential promptly after
+access is removed or compromise is suspected. These controls do not replace the
+identity provider's conditional access, individual-account, session-revocation,
+password-rotation, or break-glass controls.

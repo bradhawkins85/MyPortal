@@ -58,6 +58,12 @@ async def apply_pending_access_for_user(user: dict[str, Any]) -> None:
             is_admin=assignment.get("is_admin", False),
         )
 
+        # The approved pending assignment, rather than a coincidental email
+        # match, is the trust event that links this portal identity to staff.
+        linked = await staff_repo.link_portal_user(staff_id_int, company_id_int, user_id)
+        if not linked:
+            continue
+
         role_id_raw = assignment.get("role_id")
         role_id_int: int | None
         if role_id_raw is None:

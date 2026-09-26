@@ -2499,6 +2499,18 @@ async def _render_template(
     return response
 
 
+@app.get("/shared-credentials", response_class=HTMLResponse)
+async def shared_credentials_page(request: Request):
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    if getattr(request.state, "active_company_id", None) is None:
+        raise HTTPException(status_code=403, detail="Select a company to view shared credentials")
+    return await _render_template(
+        "shared_credentials.html", request, user, extra={"title": "Shared credentials"}
+    )
+
+
 bcp.configure_page_rendering(
     build_base_context=_build_base_context,
     templates=templates,

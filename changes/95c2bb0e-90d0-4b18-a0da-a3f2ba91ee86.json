@@ -1,0 +1,7 @@
+{
+  "guid": "95c2bb0e-90d0-4b18-a0da-a3f2ba91ee86",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added dynamically resolved named-staff and job-title standing credential grants.",
+  "content_hash": "standing-credential-grants-v1"
+}
