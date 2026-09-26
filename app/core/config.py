@@ -89,6 +89,8 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SESSION_SECRET", "SECRET_KEY")
     )
     totp_encryption_key: str = Field(validation_alias="TOTP_ENCRYPTION_KEY")
+    vault_keys: str = Field(default="", validation_alias="VAULT_KEYS")
+    vault_active_key_id: str = Field(default="", validation_alias="VAULT_ACTIVE_KEY_ID")
     database_host: str | None = Field(default=None, validation_alias="DB_HOST")
     database_port: int = Field(default=3306, validation_alias="DB_PORT", ge=1, le=65535)
     database_user: str | None = Field(default=None, validation_alias="DB_USER")
