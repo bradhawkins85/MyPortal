@@ -966,6 +966,11 @@ _OFFBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "description": "Stores an approved prior-step secret in this company's vault and exposes only its credential ID/version.",
     },
     {
+        "type": "share_myportal_credential",
+        "name": "Share MyPortal credential",
+        "description": "Grants verified, least-privilege vault access and exposes a link (never plaintext) to later steps.",
+    },
+    {
         "type": "delete_staff_record",
         "name": "Delete staff record",
         "description": (
@@ -1097,6 +1102,11 @@ _ONBOARDING_STEP_CATALOG: list[dict[str, Any]] = [
         "type": "create_myportal_credential",
         "name": "Create MyPortal credential",
         "description": "Stores a newly rotated, organisation-controlled prior-step secret in this company's vault; never collect an employee's private password.",
+    },
+    {
+        "type": "share_myportal_credential",
+        "name": "Share MyPortal credential",
+        "description": "Grants verified, least-privilege vault access and exposes a link (never plaintext) to later steps.",
     },
     {
         "type": "delete_staff_record",
@@ -2078,6 +2088,20 @@ _WORKFLOW_STEP_FORM_SCHEMA: dict[str, dict[str, Any]] = {
             {"name": "expires_on", "label": "Expiry date (optional)", "type": "date", "required": False},
             {"name": "review_on", "label": "Review date (optional)", "type": "date", "required": False},
             {"name": "credential_output_var", "label": "Store credential ID as variable", "type": "text", "default": "credential_id", "description": "Only the non-secret credential ID is made available to later steps."},
+        ],
+    },
+    "share_myportal_credential": {
+        "fields": [
+            {"name": "credential_id", "label": "Credential ID", "type": "text", "default": "${vars.credential_id}", "required": True, "description": "ID from Create MyPortal credential or a same-company credential."},
+            {"name": "selector_type", "label": "Recipient selector", "type": "select", "options": ["staff", "job_title", "external"], "required": True},
+            {"name": "staff_id", "label": "Staff ID", "type": "text", "required": False},
+            {"name": "job_title", "label": "Job title", "type": "text", "required": False},
+            {"name": "recipient_email", "label": "External recipient email", "type": "text", "required": False},
+            {"name": "permissions", "label": "Permissions", "type": "text", "default": "reveal", "required": True, "description": "Comma-separated: enumerate, reveal, share, administer."},
+            {"name": "reason", "label": "Reason", "type": "textarea", "required": True},
+            {"name": "expires_at", "label": "Expiry (UTC, required for external)", "type": "text", "required": False},
+            {"name": "verification_code", "label": "Independent verification code", "type": "text", "required": False, "description": "Required for external one-time shares; deliver separately."},
+            {"name": "output_var", "label": "Output object variable", "type": "text", "default": "credential_share", "required": True},
         ],
     },
 }

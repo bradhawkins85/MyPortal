@@ -56,7 +56,7 @@ STATE_OFFBOARDING_FAILED = "offboarding_failed"
 DIRECTION_ONBOARDING = "onboarding"
 DIRECTION_OFFBOARDING = "offboarding"
 _VAR_PATTERN = re.compile(r"\$\{vars\.([a-zA-Z0-9_.-]+)\}")
-_SECRET_KEY_TOKENS = ("password", "secret", "token", "key")
+_SECRET_KEY_TOKENS = ("password", "secret", "token", "key", "verification_code")
 
 
 def _default_workflow_key(direction: str) -> str:
@@ -832,10 +832,12 @@ def _resolve_template_value(raw: Any, *, vars_map: dict[str, Any]) -> Any:
     if isinstance(raw, str):
         exact_match = _VAR_PATTERN.fullmatch(raw.strip())
         if exact_match:
-            return vars_map.get(exact_match.group(1))
+            path = exact_match.group(1)
+            return vars_map.get(path) if path in vars_map else _get_nested_value(vars_map, path)
 
         def _replace(match: re.Match[str]) -> str:
-            value = vars_map.get(match.group(1))
+            path = match.group(1)
+            value = vars_map.get(path) if path in vars_map else _get_nested_value(vars_map, path)
             if value is None:
                 return ""
             return str(value)
@@ -1916,6 +1918,33 @@ async def _execute_policy_step(
             "credential_version": result["credential_version"],
             output_var: result["credential_id"],
         }
+
+    if step_type == "share_myportal_credential":
+        from app.services import workflow_credential_shares
+
+        if execution_id is None or not step_name:
+            raise WorkflowStepError("Share MyPortal credential requires workflow execution context")
+        try:
+            result = await workflow_credential_shares.create_for_staff_workflow(
+                company_id=company_id,
+                workflow_staff_id=int(staff["id"]),
+                execution_id=execution_id,
+                step_identity=step_name,
+                credential_id=step.get("credential_id"),
+                selector_type=str(step.get("selector_type") or ""),
+                staff_id=step.get("staff_id"),
+                job_title=step.get("job_title"),
+                recipient_email=step.get("recipient_email"),
+                permissions=step.get("permissions"),
+                reason=str(step.get("reason") or ""),
+                expires_at=step.get("expires_at"),
+                verification_code=step.get("verification_code"),
+                grantor_user_id=staff.get("requested_by_user_id"),
+            )
+        except workflow_credential_shares.WorkflowCredentialShareError as exc:
+            raise WorkflowStepError(str(exc)) from exc
+        output_var = str(step.get("output_var") or "credential_share").strip()
+        return {output_var: result, "grant_id": result["grant_id"], "url": result["url"]}
 
     if step_type == "create_user":
         # Resolve UPN/email: prefer the configured user_principal_name template (which
@@ -3546,6 +3575,10 @@ async def _execute_policy_steps(
                 ).strip()
                 if generated_output:
                     step_secret_vars.add(generated_output)
+            if str(effective_precheck_step.get("type") or "").strip().lower() == "share_myportal_credential":
+                # A standing portal URL is harmless, but treating every share URL
+                # as sensitive prevents external bearer URLs entering logs/tickets.
+                step_secret_vars.update({"url", "verification_code"})
             if bool(effective_precheck_step.get("depends_on_onedrive_export")):
                 exception = effective_precheck_step.get("export_exception")
                 exception_authorized = isinstance(exception, dict) and bool(

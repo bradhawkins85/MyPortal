@@ -1,0 +1,7 @@
+{
+  "guid": "9f2ad453-9ed6-4fac-a246-d2d60bfa6e9a",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added secure credential sharing steps to onboarding and offboarding workflows.",
+  "content_hash": "workflow-credential-sharing-v1"
+}

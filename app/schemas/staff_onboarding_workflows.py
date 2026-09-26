@@ -41,6 +41,25 @@ class WorkflowStepDefinition(BaseModel):
                 raise ValueError(
                     "Create MyPortal credential secret_source must reference a protected prior-step variable; literal passwords are not allowed."
                 )
+        if step_type == "share_myportal_credential":
+            required = ("credential_id", "selector_type", "reason", "permissions")
+            missing = [name for name in required if not self.config.get(name)]
+            if missing:
+                raise ValueError(
+                    "Share MyPortal credential requires: " + ", ".join(missing) + "."
+                )
+            selector = str(self.config.get("selector_type") or "").strip().lower()
+            if selector not in {"staff", "job_title", "external"}:
+                raise ValueError("Credential share selector must be staff, job_title, or external.")
+            if selector == "staff" and not self.config.get("staff_id"):
+                raise ValueError("Staff credential shares require staff_id.")
+            if selector == "job_title" and not self.config.get("job_title"):
+                raise ValueError("Job-title credential shares require job_title.")
+            if selector == "external":
+                if not self.config.get("recipient_email") or not self.config.get("expires_at"):
+                    raise ValueError("External shares require recipient_email and expires_at.")
+                if not self.config.get("verification_code"):
+                    raise ValueError("External shares require independent verification_code.")
         return self
 
 
