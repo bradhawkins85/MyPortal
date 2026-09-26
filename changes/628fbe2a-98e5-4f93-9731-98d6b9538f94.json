@@ -1,0 +1,7 @@
+{
+  "guid": "628fbe2a-98e5-4f93-9731-98d6b9538f94",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added permission-aware documentation search to the technician interface.",
+  "content_hash": "documentation-search-ui"
+}

@@ -11362,6 +11362,28 @@ a.stat-strip__stat:focus-visible {
     grid-template-columns: 1fr;
   }
 }
+
+.documentation-search { display: grid; gap: var(--space-gap-roomy); min-width: 0; }
+.documentation-search__form { display: grid; gap: var(--space-gap-roomy); }
+.documentation-search__query { max-width: 52rem; }
+.documentation-search__query-controls { display: flex; gap: var(--space-gap-base); }
+.documentation-search__query-controls .form-input { flex: 1; min-width: 0; }
+.documentation-search__filters { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-gap-base); padding: 0; border: 0; }
+.documentation-search__filter-actions { display: flex; justify-content: flex-end; }
+.documentation-search__status:empty { display: none; }
+.documentation-search__list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.documentation-search__result { display: grid; gap: var(--space-gap-tight); padding: var(--space-gap-roomy) 0; border-bottom: 1px solid var(--color-border); }
+.documentation-search__result:last-child { border-bottom: 0; }
+.documentation-search__result-title { width: fit-content; font-weight: 700; overflow-wrap: anywhere; }
+.documentation-search__result-meta { color: var(--color-text-muted); font-size: .875rem; }
+.documentation-search__result p { margin: 0; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.documentation-search__pagination { display: flex; align-items: center; justify-content: center; gap: var(--space-gap-base); padding-top: var(--space-gap-roomy); }
+@media (max-width: 900px) { .documentation-search__filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) {
+  .documentation-search__query-controls { align-items: stretch; flex-direction: column; }
+  .documentation-search__filters { grid-template-columns: 1fr; }
+  .documentation-search__query-controls .button { width: 100%; }
+}
 .asset-photo-actions { display: flex; flex-wrap: wrap; gap: var(--space-2, .5rem); align-items: center; }
 .asset-photo-preview { margin-top: var(--space-3, .75rem); max-width: 36rem; }
 .asset-photo-preview > img { display: block; width: 100%; max-height: 26rem; object-fit: contain; border-radius: var(--radius-md, .5rem); }

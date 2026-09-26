@@ -3206,6 +3206,20 @@ async def ai_search_page(request: Request):
     )
 
 
+@app.get("/documentation-search", response_class=HTMLResponse)
+async def documentation_search_page(request: Request):
+    """Render the permission-scoped asset and knowledge-base search workspace."""
+    user, redirect = await _require_authenticated_user(request)
+    if redirect:
+        return redirect
+    return await _render_template(
+        "documentation_search.html",
+        request,
+        user,
+        extra={"title": "Documentation search"},
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     user, redirect = await _require_authenticated_user(request)
