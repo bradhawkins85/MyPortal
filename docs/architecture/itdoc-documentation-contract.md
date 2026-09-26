@@ -1,6 +1,6 @@
 # Documentation module scope, permissions, and migration contract
 
-**Status:** Approved baseline for ITDOC 01/12 (#4223)  
+**Status:** Approved baseline for ITDOC 01/18 (#4223)
 **Applies to:** every later ITDOC migration, page, API, search index, export, and integration
 
 ## Non-negotiable boundaries
@@ -16,6 +16,13 @@ non-sensitive label or URL identifying an entry in the existing password manager
 but not the secret, a secret-bearing URL, or a value that can retrieve it without
 authentication. UI help, imports, API validation, and server-side persistence must
 enforce this rule. Hudu's existing password workflow remains separate.
+
+ITDOC 13/18 adds the separate, encrypted credential-vault workstream defined in
+[`itdoc-credential-handling-contract.md`](itdoc-credential-handling-contract.md).
+Credential records are not documentation content, cannot be reached through a
+documentation link, and remain excluded from documentation search, publication,
+and export. This explicit boundary is part of both the ITDOC 01/18 scope (#4223)
+and the ITDOC 00/18 roadmap (#4235).
 
 This contract is additive. When documentation is disabled for a company, existing
 Assets, knowledge-base, ticket, search, export, audit, and integration behaviour is
