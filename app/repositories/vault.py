@@ -50,6 +50,24 @@ async def get_metadata(company_id: int, credential_id: int) -> dict[str, Any] | 
     )
 
 
+async def get_workflow_credential(
+    company_id: int, execution_id: int, step_identity: str
+) -> dict[str, Any] | None:
+    return await db.fetch_one(
+        "SELECT " + _METADATA_COLUMNS + " FROM credentials "
+        "WHERE company_id = %s AND workflow_execution_id = %s AND workflow_step_identity = %s",
+        (company_id, execution_id, step_identity),
+    )
+
+
+async def credential_feature_enabled(company_id: int) -> bool:
+    row = await db.fetch_one(
+        "SELECT enabled FROM company_credential_features WHERE company_id = %s",
+        (company_id,),
+    )
+    return bool(row and row.get("enabled"))
+
+
 async def create_credential(
     *,
     company_id: int,
@@ -63,10 +81,12 @@ async def create_credential(
     plaintext: str,
     created_by: int | None,
     links: list[tuple[str, int]],
+    workflow_execution_id: int | None = None,
+    workflow_step_identity: str | None = None,
 ) -> dict[str, Any]:
     await _validate_links(company_id, links)
     credential_id = await db.execute(
-        "INSERT INTO credentials (company_id, name, username, credential_class, owner, intended_recipient, expires_on, review_on, current_version, last_rotated_at, created_by) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 1, CURRENT_TIMESTAMP, %s)",
+        "INSERT INTO credentials (company_id, name, username, credential_class, owner, intended_recipient, expires_on, review_on, current_version, last_rotated_at, created_by, workflow_execution_id, workflow_step_identity) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 1, CURRENT_TIMESTAMP, %s, %s, %s)",
         (
             company_id,
             name,
@@ -77,6 +97,8 @@ async def create_credential(
             expires_on,
             review_on,
             created_by,
+            workflow_execution_id,
+            workflow_step_identity,
         ),
     )
     encrypted = vault.encrypt(

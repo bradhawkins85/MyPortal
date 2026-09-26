@@ -25,6 +25,14 @@ class VaultIntegrityError(ValueError):
     """Raised without sensitive detail when ciphertext authentication fails."""
 
 
+def ensure_configured() -> None:
+    """Fail before a caller starts a database write when the vault is unavailable."""
+    settings = get_settings()
+    keys = _decode_keyring(settings.vault_keys)
+    if not settings.vault_active_key_id or settings.vault_active_key_id not in keys:
+        raise VaultConfigurationError("The active vault key is not configured")
+
+
 @dataclass(frozen=True)
 class EncryptedSecret:
     key_id: str

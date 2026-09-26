@@ -32,6 +32,17 @@ class WorkflowStepDefinition(BaseModel):
             raise ValueError("Step name is required.")
         return text
 
+    @model_validator(mode="after")
+    def validate_vault_secret_source(self) -> "WorkflowStepDefinition":
+        step_type = str(self.config.get("type") or self.key).strip().lower()
+        if step_type == "create_myportal_credential":
+            source = str(self.config.get("secret_source") or "").strip()
+            if not re.fullmatch(r"\$\{vars\.[a-zA-Z0-9_.-]+\}", source):
+                raise ValueError(
+                    "Create MyPortal credential secret_source must reference a protected prior-step variable; literal passwords are not allowed."
+                )
+        return self
+
 
 class WorkflowFailurePolicy(BaseModel):
     mode: str = Field(default="fail_fast")

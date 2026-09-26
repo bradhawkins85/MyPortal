@@ -1876,6 +1876,47 @@ async def _execute_policy_step(
         )
         return {"generated_password": generated, var_name: generated}
 
+    if step_type == "create_myportal_credential":
+        from app.services import workflow_vault
+
+        if execution_id is None or not step_name:
+            raise WorkflowStepError("Create MyPortal credential requires workflow execution context")
+        secret_value = str(step.get("secret_source") or "")
+        if not secret_value:
+            raise WorkflowStepError("Create MyPortal credential requires an approved prior-step secret")
+        def _optional_id(field: str) -> int | None:
+            raw = step.get(field)
+            if raw in (None, ""):
+                return None
+            try:
+                return int(raw)
+            except (TypeError, ValueError) as exc:
+                raise WorkflowStepError(f"{field} must be a numeric ID") from exc
+        try:
+            result = await workflow_vault.create_for_staff_workflow(
+                company_id=company_id,
+                staff_id=int(staff["id"]),
+                execution_id=execution_id,
+                step_identity=step_name,
+                name=str(step.get("credential_name") or ""),
+                username=str(step.get("username") or "").strip() or None,
+                credential_class=str(step.get("credential_class") or "other").strip().lower(),
+                plaintext=secret_value,
+                owner=str(step.get("owner") or "").strip() or None,
+                expires_on=step.get("expires_on"),
+                review_on=step.get("review_on"),
+                asset_id=_optional_id("asset_id"),
+                ticket_id=_optional_id("ticket_id"),
+            )
+        except workflow_vault.WorkflowVaultError as exc:
+            raise WorkflowStepError(str(exc)) from exc
+        output_var = str(step.get("credential_output_var") or "credential_id").strip()
+        return {
+            "credential_id": result["credential_id"],
+            "credential_version": result["credential_version"],
+            output_var: result["credential_id"],
+        }
+
     if step_type == "create_user":
         # Resolve UPN/email: prefer the configured user_principal_name template (which
         # supports variables like ${vars.staff.first_name}.${vars.staff.last_name}@co.com),
@@ -3495,6 +3536,16 @@ async def _execute_policy_steps(
             effective_precheck_step = (
                 resolved_step if isinstance(resolved_step, dict) else step
             )
+            step_secret_vars = set(secret_vars)
+            if str(effective_precheck_step.get("type") or "").strip().lower() in {
+                "generate_password",
+                "generate_kid_friendly_password",
+            }:
+                generated_output = str(
+                    effective_precheck_step.get("output_var") or "generated_password"
+                ).strip()
+                if generated_output:
+                    step_secret_vars.add(generated_output)
             if bool(effective_precheck_step.get("depends_on_onedrive_export")):
                 exception = effective_precheck_step.get("export_exception")
                 exception_authorized = isinstance(exception, dict) and bool(
@@ -3526,6 +3577,7 @@ async def _execute_policy_steps(
                     execution_id=execution_id,
                     step_name=step_name,
                 ),
+                secret_vars=step_secret_vars,
             )
         except WorkflowStepError as exc:
             if step_failure_policy["mode"] == "continue":
@@ -3568,6 +3620,15 @@ async def _execute_policy_steps(
         )
         context_patch: dict[str, Any] = {"vars": {}, "secret_vars": []}
         effective_step = resolved_step if isinstance(resolved_step, dict) else step
+        if str(effective_step.get("type") or "").strip().lower() in {
+            "generate_password",
+            "generate_kid_friendly_password",
+        }:
+            generated_output = str(
+                effective_step.get("output_var") or "generated_password"
+            ).strip()
+            if generated_output:
+                secret_vars.add(generated_output)
         output_var = str(effective_step.get("output_var") or "").strip()
         if output_var:
             vars_map[output_var] = step_outputs
