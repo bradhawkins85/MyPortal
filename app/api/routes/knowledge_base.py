@@ -421,8 +421,16 @@ async def upload_article_attachment(
 
 @router.get("/articles/{article_id}/attachments/{attachment_id}")
 async def download_article_attachment(
-    article_id: int, attachment_id: int, current_user: dict = Depends(require_super_admin)
+    article_id: int, attachment_id: int, current_user: dict | None = Depends(get_optional_user)
 ) -> FileResponse:
+    source_article = await kb_repo.get_article_by_id(article_id)
+    context = await kb_service.build_access_context(current_user)
+    visible_article = (
+        await kb_service.get_article_by_slug_for_context(str(source_article["slug"]), context)
+        if source_article else None
+    )
+    if not visible_article:
+        raise HTTPException(status_code=404, detail="Attachment not found")
     attachment = await kb_repo.get_attachment(attachment_id)
     if not attachment or int(attachment["article_id"]) != article_id:
         raise HTTPException(status_code=404, detail="Attachment not found")

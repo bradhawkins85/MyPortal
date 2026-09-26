@@ -12,6 +12,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from app.services import knowledge_base as knowledge_base_service
 from app.services import audit as audit_service
 from app.repositories import assets as asset_repo
+from app.repositories import roles as role_repo
+from app.repositories import customer_content_audience as audience_repo
 
 
 router = APIRouter(tags=["Knowledge Base"])
@@ -167,12 +169,14 @@ async def admin_new_knowledge_base_article_page(request: Request):
 
     user_options, company_options = await main_module._prepare_kb_editor_options()
     asset_options = await asset_repo.list_assets_for_knowledge_base_editor()
+    role_options = await role_repo.list_roles()
     extra = {
         "title": "New knowledge base article",
         "kb_initial_article": None,
         "kb_user_options": user_options,
         "kb_company_options": company_options,
         "kb_asset_options": jsonable_encoder(asset_options),
+        "kb_role_options": jsonable_encoder(role_options),
         "kb_form_mode": "create",
         "kb_catalogue_payload": [],
     }
@@ -203,13 +207,19 @@ async def admin_edit_knowledge_base_article_page(request: Request, slug: str):
 
     user_options, company_options = await main_module._prepare_kb_editor_options()
     asset_options = await asset_repo.list_assets_for_knowledge_base_editor()
+    role_options = await role_repo.list_roles()
     serialised_article = jsonable_encoder(article)
+    role_ids: set[int] = set()
+    for company_id in serialised_article.get("allowed_company_ids", []):
+        role_ids.update(await audience_repo.list_role_ids(int(company_id), "knowledge_base", int(article["id"])))
+    serialised_article["allowed_role_ids"] = sorted(role_ids)
     extra = {
         "title": f"Edit knowledge base article · {article.get('title') or article.get('slug')}",
         "kb_initial_article": serialised_article,
         "kb_user_options": user_options,
         "kb_company_options": company_options,
         "kb_asset_options": jsonable_encoder(asset_options),
+        "kb_role_options": jsonable_encoder(role_options),
         "kb_form_mode": "edit",
         "kb_catalogue_payload": [{"slug": serialised_article.get("slug")}],
     }

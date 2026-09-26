@@ -92,8 +92,10 @@ async def apply_selected_role(request: Request, user: dict[str, Any], session: A
     effective_user["is_super_admin"] = False
     effective_user["role_switcher_allowed"] = True
     effective_user["selected_role_id"] = int(role["id"])
+    effective_user["simulated_membership"] = request.state.active_membership = _virtual_membership(
+        role, session.active_company_id
+    )
     request.state.selected_role = role
-    request.state.active_membership = _virtual_membership(role, session.active_company_id)
     _effective_permissions.set(frozenset(role.get("legacy_permissions") or ()))
     return effective_user
 

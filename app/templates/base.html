@@ -29,6 +29,12 @@
     data-low-stock-threshold="{{ low_stock_threshold | default(5) }}"
     data-super-admin="{{ 'true' if current_user and current_user.is_super_admin else 'false' }}"
   >
+    {% if selected_role_id | default(none) %}
+    <div class="role-preview-banner" role="status">
+      <strong>Customer role preview:</strong> {{ selected_role.name if selected_role is defined and selected_role else 'selected role' }}. Super-admin access is disabled for this view.
+      <form action="/switch-role" method="post"><input type="hidden" name="roleId" value="super_admin" /><input type="hidden" name="returnUrl" value="/admin/roles" />{% if csrf_token %}<input type="hidden" name="_csrf" value="{{ csrf_token }}" />{% endif %}<button type="submit" class="button button--small">Exit preview</button></form>
+    </div>
+    {% endif %}
     {% set has_authenticated_user = current_user is defined and current_user and current_user.get('id') %}
     <div class="layout" data-layout>
       <div class="layout__scrim" data-mobile-nav-scrim aria-hidden="true"></div>

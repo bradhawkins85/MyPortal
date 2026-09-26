@@ -151,6 +151,18 @@
     </div>
   </div>
 
+  <section class="card card--panel admin-grid__full">
+    <header class="card__header"><div><h2 class="card__title">Published content for this role</h2><p class="card__subtitle">Metadata-only overview; restricted content is never included in the simulated customer view.</p></div></header>
+    <div class="card__body card__body--stacked">
+      <form method="get" class="form-inline">
+        <label class="form-label" for="overview-company">Company</label><select class="form-input" id="overview-company" name="company_id" required><option value="">Select company</option>{% for company in companies %}<option value="{{ company.id }}" {% if company.id == overview_company_id %}selected{% endif %}>{{ company.name }}</option>{% endfor %}</select>
+        <label class="form-label" for="overview-role">Role</label><select class="form-input" id="overview-role" name="role_id" required><option value="">Select role</option>{% for role in roles %}<option value="{{ role.id }}" {% if role.id == overview_role_id %}selected{% endif %}>{{ role.name }}</option>{% endfor %}</select>
+        <button class="button" type="submit">Review content</button>
+      </form>
+      {% if overview_company_id and overview_role_id %}<div class="table-wrapper"><table class="table" data-table data-table-id="role-content-overview"><thead><tr><th data-sort="string">Type</th><th data-sort="string">Record</th><th data-sort="string">Publication</th><th data-sort="string">Effective access</th></tr></thead><tbody>{% for item in published_content_overview %}<tr><td>{{ item.type }}</td><td>{{ item.title }}</td><td><span class="status status--{{ 'success' if item.published else 'neutral' }}">{{ 'Published' if item.published else 'Unpublished' }}</span></td><td><span class="status status--{{ 'success' if item.allowed and item.published else 'warning' }}">{{ 'Visible' if item.allowed and item.published else 'Role restricted' }}</span></td></tr>{% else %}<tr><td colspan="4" class="table__empty">No company content records found.</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+    </div>
+  </section>
+
   <details class="card card--panel card-collapsible admin-grid__full" data-roles-admin-menu>
     <summary class="card__header card__header--collapsible">
       <div>

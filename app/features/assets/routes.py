@@ -28,6 +28,8 @@ from app.repositories import tickets as tickets_repo
 from app.repositories import websites as websites_repo
 from app.repositories import tray as tray_repo
 from app.repositories import bcp as bcp_repo
+from app.repositories import customer_content_audience as audience_repo
+from app.repositories import roles as role_repo
 from app.services import tray as tray_service
 from app.services import hudu as hudu_service
 from app.services import audit as audit_service
@@ -36,6 +38,18 @@ from app.services import automations as automations_service
 from app.services import asset_photos as asset_photo_service
 
 router = APIRouter(tags=["Assets"])
+
+
+async def _customer_role_can_view_asset(membership: dict[str, Any] | None, company_id: int, asset_id: int) -> bool:
+    # Non-role grants (named staff/job-title/one-time credentials) remain under
+    # their existing policy and are intentionally not converted into role grants.
+    if not membership or membership.get("role_id") is None:
+        return True
+    permissions = membership.get("menu_permissions") or membership.get("permissions") or {}
+    role_id = membership.get("role_id")
+    if not isinstance(permissions, dict) or permissions.get("content.assets") not in {"read", "write"}:
+        return False
+    return await audience_repo.role_can_access(company_id, "asset", asset_id, int(role_id))
 
 _RELATIONSHIP_TYPES = {
     "depends_on": "Depends on", "runs_on": "Runs on",
@@ -192,11 +206,7 @@ async def assets_page(request: Request):
 
     rows = await asset_repo.list_company_assets(company_id)
     if not can_write_assets:
-        rows = [
-            _customer_asset(dict(row))
-            for row in rows
-            if bool(row.get("customer_visible"))
-        ]
+        rows = [_customer_asset(dict(row)) for row in rows if bool(row.get("customer_visible")) and await _customer_role_can_view_asset(membership, company_id, int(row["id"]))]
     field_definitions = (
         await asset_custom_fields_repo.list_field_definitions()
         if user.get("is_super_admin") else []
@@ -1375,7 +1385,7 @@ async def asset_detail_page(
     )
     customer_safe = (not can_write) or customer_preview
     if (record_company_id is None or int(record_company_id) != company_id
-            or (not is_super_admin and not can_write and not bool(record.get("customer_visible")))):
+            or (not is_super_admin and not can_write and (not bool(record.get("customer_visible")) or not await _customer_role_can_view_asset(membership, company_id, asset_id)))):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found"
         )
@@ -1413,7 +1423,7 @@ async def asset_detail_page(
     ]
     company_assets = await asset_repo.list_company_assets(company_id)
     if customer_safe:
-        company_assets = [item for item in company_assets if bool(item.get("customer_visible"))]
+        company_assets = [item for item in company_assets if bool(item.get("customer_visible")) and await _customer_role_can_view_asset(membership, company_id, int(item["id"]))]
     assets_by_id = {int(item["id"]): item for item in company_assets}
     relationship_targets: list[dict[str, Any]] = []
     target_records: dict[str, dict[int, dict[str, Any]]] = {
@@ -1480,6 +1490,8 @@ async def asset_detail_page(
             "reconciliation_candidates": [] if customer_safe else await asset_repo.list_reconciliation_candidates(company_id, asset_id),
             "asset_sources": [] if customer_safe else await asset_repo.list_asset_sources(company_id, asset_id),
             "customer_safe": customer_safe,
+            "customer_roles": await role_repo.list_roles() if can_write else [],
+            "customer_role_ids": await audience_repo.list_role_ids(company_id, "asset", asset_id) if can_write else [],
             "bcp_context": bcp_context,
             "infrastructure_links": infrastructure_links,
             "asset_photos": await asset_photo_repo.list_for_asset(
@@ -1599,13 +1611,11 @@ async def export_assets(request: Request) -> Response:
     if redirect:
         raise HTTPException(status_code=403, detail="Asset access denied")
     main_module = _main()
-    if not (user.get("is_super_admin") or main_module._membership_menu_can(
-        user, membership, "menu.assets", write=True
-    )):
+    if not (user.get("is_super_admin") or main_module._membership_menu_can(user, membership, "menu.assets")):
         raise HTTPException(status_code=403, detail="Asset export access denied")
     records = await asset_repo.list_company_assets(company_id)
     if not user.get("is_super_admin"):
-        records = [row for row in records if bool(row.get("customer_visible"))]
+        records = [row for row in records if bool(row.get("customer_visible")) and await _customer_role_can_view_asset(membership, company_id, int(row["id"]))]
     output = io.StringIO(newline="")
     writer = csv.DictWriter(output, fieldnames=list(_CUSTOMER_ASSET_FIELDS), extrasaction="ignore")
     writer.writeheader()
@@ -1633,11 +1643,13 @@ async def publish_asset(request: Request, asset_id: int):
     form = await request.form()
     visible = str(form.get("action") or "publish") == "publish"
     await asset_repo.set_customer_visible(asset_id, visible)
+    role_ids = form.getlist("allowed_role_ids") if visible else []
+    await audience_repo.replace_roles(company_id, "asset", asset_id, [int(value) for value in role_ids])
     await audit_service.record(
         action="asset.publish" if visible else "asset.unpublish", request=request,
         user_id=int(user["id"]), entity_type="asset", entity_id=asset_id,
         before={"customer_visible": bool(record.get("customer_visible"))},
-        after={"customer_visible": visible}, metadata={"company_id": company_id},
+        after={"customer_visible": visible, "allowed_role_ids": [int(value) for value in role_ids]}, metadata={"company_id": company_id},
     )
     return _main().flash_redirect(f"/assets/{asset_id}",
                                   "Customer visibility updated.", "success")

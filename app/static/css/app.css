@@ -12479,3 +12479,5 @@ a.shop-product-card {
   .features-toolbar .form-input { max-width: none; }
   .image-upload-preview { min-height: 8rem; }
 }
+ .role-preview-banner { display:flex; align-items:center; justify-content:center; gap:var(--space-3); flex-wrap:wrap; padding:var(--space-2) var(--space-4); background:var(--color-surface-raised); color:var(--color-text); border-bottom:2px solid var(--color-warning); position:sticky; top:0; z-index:1000; }
+ .role-preview-banner form { margin:0; }

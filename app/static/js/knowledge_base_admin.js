@@ -41,8 +41,10 @@
   const idField = document.getElementById('kb-article-id');
   const userFieldWrapper = form.querySelector('[data-kb-user-select]');
   const companyFieldWrapper = form.querySelector('[data-kb-company-select]');
+  const roleFieldWrapper = form.querySelector('[data-kb-role-select]');
   const userSelect = document.getElementById('kb-article-users');
   const companySelect = document.getElementById('kb-article-companies');
+  const roleSelect = document.getElementById('kb-article-roles');
   const scopeHelp = form.querySelector('[data-kb-scope-help]');
   const companyHelp = form.querySelector('[data-kb-company-help]');
   const deleteButton = form.querySelector('[data-kb-delete]');
@@ -909,10 +911,12 @@
     if (selectedScope === 'user') {
       userFieldWrapper.hidden = false;
       companyFieldWrapper.hidden = true;
+      if (roleFieldWrapper) roleFieldWrapper.hidden = true;
       renderUserOptions(getSelectedValues(userSelect));
     } else if (selectedScope === 'company' || selectedScope === 'company_admin') {
       userFieldWrapper.hidden = true;
       companyFieldWrapper.hidden = false;
+      if (roleFieldWrapper) roleFieldWrapper.hidden = false;
       renderCompanyOptions(getSelectedValues(companySelect));
       if (companyHelp) {
         companyHelp.textContent =
@@ -923,6 +927,7 @@
     } else {
       userFieldWrapper.hidden = true;
       companyFieldWrapper.hidden = true;
+      if (roleFieldWrapper) roleFieldWrapper.hidden = true;
     }
   }
 
@@ -942,6 +947,7 @@
     existingTools.hidden = true;
     renderUserOptions([]);
     renderCompanyOptions([]);
+    if (roleSelect) Array.from(roleSelect.options).forEach((option) => { option.selected = false; });
     renderSections([]);
     addSection({ heading: '', content: '<p><br></p>' });
     updateScopeFields('anonymous');
@@ -1023,6 +1029,7 @@
 
     renderUserOptions(selectedUsers);
     renderCompanyOptions(selectedCompanies);
+    if (roleSelect) Array.from(roleSelect.options).forEach((option) => { option.selected = (article.allowed_role_ids || []).map(Number).includes(Number(option.value)); });
     updateScopeFields(article.permission_scope);
     
     // Show and populate AI tags
@@ -1071,6 +1078,7 @@
       payload.allowed_user_ids = getSelectedValues(userSelect);
     } else if (scope === 'company' || scope === 'company_admin') {
       payload.allowed_company_ids = getSelectedValues(companySelect);
+      payload.allowed_role_ids = getSelectedValues(roleSelect);
     }
     return payload;
   }
