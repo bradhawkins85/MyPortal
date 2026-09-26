@@ -1,0 +1,7 @@
+{
+  "guid": "535d7880-a4b1-4fc8-8cce-923eaf913829",
+  "occurred_at": "2026-09-26T00:00Z",
+  "change_type": "Feature",
+  "summary": "Added permission-scoped canonical asset links to BCP recovery actions, exports, and asset context views.",
+  "content_hash": "51b5ecc03631c4f1ae1835a7288903b8162e53e033a34b95b2b1ea9a8aab23d3"
+}

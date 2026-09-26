@@ -103,6 +103,18 @@
     </form>
   </section>{% endif %}
 
+  {% if bcp_context %}<section class="card card--panel admin-grid__full">
+    <header class="card__header"><div><h2 class="card__title">Business continuity context</h2><p class="card__subtitle">Plans and recovery components that depend on this canonical asset.</p></div></header>
+    <div class="card__body"><ul>
+      {% for context in bcp_context %}<li>
+        <a href="/bcp/recovery">{{ context.title or ('Plan ' ~ context.plan_id) }}</a>
+        {% if context.version %}<span class="text-muted">version {{ context.version }}</span>{% endif %}
+        — {{ context.component_type | replace('_', ' ') | title }}: {{ context.component_label or ('Component ' ~ context.component_id) }}
+        {% if context.unlinked_at %}<span class="status status--neutral">Historical link</span>{% endif %}
+      </li>{% endfor %}
+    </ul></div>
+  </section>{% endif %}
+
   <section class="card card--panel">
     <header class="card__header"><h2 class="card__title">{{ 'Manual inventory' if asset.provenance == 'manual' else 'Synced inventory' }}</h2></header>
     <div class="card__body"><dl class="definition-list">

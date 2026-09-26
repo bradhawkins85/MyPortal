@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from app.api.dependencies.auth import get_current_session
 from app.core.config import get_settings
 from app.repositories import bcp as bcp_repo
+from app.repositories import assets as asset_repo
 from app.repositories import company_memberships as membership_repo
 from app.security.flash import flash_redirect
 from app.security.session import SessionData
@@ -68,6 +69,35 @@ def _as_utc_naive(value: datetime | None) -> datetime | None:
     if value.tzinfo is not None:
         return value.astimezone(timezone.utc).replace(tzinfo=None)
     return value
+
+
+async def _visible_bcp_assets(
+    request: Request, user: dict[str, Any], company_id: int
+) -> list[dict[str, Any]]:
+    """Return only assets the BCP user may also see in the Assets module."""
+    from app import main as main_module
+
+    membership = await main_module._get_effective_company_membership(
+        request, int(user["id"]), company_id
+    )
+    if not (user.get("is_super_admin") or main_module._membership_menu_can(
+        user, membership, "menu.assets"
+    )):
+        return []
+    can_write_assets = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
+        user, membership, "menu.assets", write=True
+    )
+    assets = await asset_repo.list_company_assets(company_id)
+    if not can_write_assets:
+        assets = [asset for asset in assets if bool(asset.get("customer_visible"))]
+    return assets
+
+
+def _group_component_asset_links(links: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]:
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for link in links:
+        grouped.setdefault(int(link["component_id"]), []).append(link)
+    return grouped
 
 
 def _build_bcp_kpi_items(
@@ -740,6 +770,18 @@ async def bcp_recovery(
     # Get all critical activities for activity filter
     activities = await bcp_repo.list_critical_activities(plan["id"], sort_by="name")
 
+    visible_assets = await _visible_bcp_assets(request, user, company_id)
+    visible_asset_ids = {int(asset["id"]) for asset in visible_assets}
+    asset_links = await bcp_repo.list_component_asset_links(
+        plan["id"], "recovery_action"
+    )
+    # Do not reveal even the existence of an asset the viewer cannot access.
+    asset_links = [link for link in asset_links if int(link["asset_id"]) in visible_asset_ids]
+    for action in actions:
+        action["asset_links"] = _group_component_asset_links(asset_links).get(
+            int(action["id"]), []
+        )
+
     
     context = await build_base_context(
         request,
@@ -750,6 +792,7 @@ async def bcp_recovery(
             "actions": actions,
             "all_users": all_users,
             "activities": activities,
+            "available_assets": visible_assets,
             "owner_filter": owner_filter,
             "status_filter": status_filter,
             "activity_filter": activity_filter,
@@ -1539,7 +1582,14 @@ async def export_bcp_pdf(
     
     try:
         # Generate PDF
-        pdf_buffer, content_hash = await export_bcp_to_pdf(plan["id"], event_log_limit=event_log_limit)
+        visible_asset_ids = {
+            int(asset["id"])
+            for asset in await _visible_bcp_assets(request, user, company_id)
+        }
+        pdf_buffer, content_hash = await export_bcp_to_pdf(
+            plan["id"], event_log_limit=event_log_limit,
+            visible_asset_ids=visible_asset_ids,
+        )
         
         # Create filename
         timestamp = dt.now().strftime("%Y%m%d_%H%M%S")
@@ -3377,6 +3427,7 @@ async def create_recovery_action_endpoint(
     rto_hours: int = Form(None),
     due_date: str = Form(None),
     critical_activity_id: int = Form(None),
+    asset_ids: list[int] = Form(default=[]),
 ):
     """Create a new recovery action."""
     user, company_id = await _require_bcp_edit(request)
@@ -3400,8 +3451,15 @@ async def create_recovery_action_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="RTO hours must be non-negative"
         )
-    
-    await bcp_repo.create_recovery_action(
+    allowed_assets = {
+        int(asset["id"])
+        for asset in await _visible_bcp_assets(request, user, company_id)
+    }
+    requested_assets = set(asset_ids)
+    if not requested_assets.issubset(allowed_assets):
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    created = await bcp_repo.create_recovery_action(
         plan["id"],
         action,
         resources if resources else None,
@@ -3410,6 +3468,12 @@ async def create_recovery_action_endpoint(
         due_date_obj,
         critical_activity_id if critical_activity_id else None,
     )
+    for asset_id in requested_assets:
+        await bcp_repo.link_asset_to_component(
+            plan_id=plan["id"], company_id=company_id,
+            component_type="recovery_action", component_id=int(created["id"]),
+            asset_id=asset_id, linked_by_user_id=int(user["id"]),
+        )
     
     
     # Audit logging
@@ -3417,8 +3481,9 @@ async def create_recovery_action_endpoint(
         action="bcp.recovery_action.create",
         user_id=user["id"],
         entity_type="recovery_action",
-        entity_id=None,
-        metadata={"company_id": company_id},
+        entity_id=created["id"],
+        new_value={"asset_ids": sorted(requested_assets)},
+        metadata={"company_id": company_id, "plan_id": plan["id"]},
         request=request,
     )
     
@@ -3435,10 +3500,16 @@ async def update_recovery_action_endpoint(
     rto_hours: int = Form(None),
     due_date: str = Form(None),
     critical_activity_id: int = Form(None),
+    asset_ids: list[int] = Form(default=[]),
 ):
     """Update a recovery action."""
     user, company_id = await _require_bcp_edit(request)
     
+    plan = await bcp_repo.get_plan_by_company(company_id)
+    before = await bcp_repo.get_recovery_action_by_id(action_id)
+    if not plan or not before or int(before["plan_id"]) != int(plan["id"]):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recovery action not found")
+
     # Parse due date if provided
     due_date_obj = None
     if due_date:
@@ -3454,7 +3525,14 @@ async def update_recovery_action_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="RTO hours must be non-negative"
         )
-    
+    allowed_assets = {
+        int(asset["id"])
+        for asset in await _visible_bcp_assets(request, user, company_id)
+    }
+    requested_assets = set(asset_ids)
+    if not requested_assets.issubset(allowed_assets):
+        raise HTTPException(status_code=404, detail="Asset not found")
+
     updated = await bcp_repo.update_recovery_action(
         action_id,
         action=action,
@@ -3469,13 +3547,33 @@ async def update_recovery_action_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recovery action not found")
     
     
-    # Audit logging
+    current_links = await bcp_repo.list_component_asset_links(
+        plan["id"], "recovery_action", action_id
+    )
+    current_by_asset = {int(link["asset_id"]): link for link in current_links}
+    visible_current_ids = set(current_by_asset) & allowed_assets
+    for asset_id in requested_assets - visible_current_ids:
+        await bcp_repo.link_asset_to_component(
+            plan_id=plan["id"], company_id=company_id,
+            component_type="recovery_action", component_id=action_id,
+            asset_id=asset_id, linked_by_user_id=int(user["id"]),
+        )
+    # Hidden assets are outside this editor's authority and remain linked.
+    for asset_id in visible_current_ids - requested_assets:
+        await bcp_repo.unlink_asset_from_component(
+            link_id=int(current_by_asset[asset_id]["id"]), plan_id=plan["id"],
+            company_id=company_id, unlinked_by_user_id=int(user["id"]),
+        )
+
+    # The existing audit/version history records the full link delta.
     await audit.log_action(
         action="bcp.recovery_action.update",
         user_id=user["id"],
         entity_type="recovery_action",
         entity_id=action_id,
-        metadata={"company_id": company_id},
+        previous_value={"asset_ids": sorted(current_by_asset)},
+        new_value={"asset_ids": sorted(requested_assets)},
+        metadata={"company_id": company_id, "plan_id": plan["id"]},
         request=request,
     )
     
@@ -3552,6 +3650,14 @@ async def export_recovery_actions_csv(request: Request):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
     
     actions = await bcp_repo.list_recovery_actions(plan["id"])
+    exportable_assets = {
+        int(asset["id"]): asset
+        for asset in await _visible_bcp_assets(request, user, company_id)
+    }
+    links = await bcp_repo.list_component_asset_links(plan["id"], "recovery_action")
+    links_by_action = _group_component_asset_links([
+        link for link in links if int(link["asset_id"]) in exportable_assets
+    ])
     
     # Create CSV
     output = StringIO()
@@ -3568,6 +3674,7 @@ async def export_recovery_actions_csv(request: Request):
             "Completed At",
             "Created At",
             "Updated At",
+            "Assets",
         ],
     )
     writer.writeheader()
@@ -3594,6 +3701,14 @@ async def export_recovery_actions_csv(request: Request):
             "Completed At": action.get("completed_at", ""),
             "Created At": action.get("created_at", ""),
             "Updated At": action.get("updated_at", ""),
+            "Assets": "; ".join(
+                "{} (ID {}{})".format(
+                    link.get("name") or link["asset_name_snapshot"],
+                    link["asset_id"],
+                    ", archived" if link.get("archived_at") else "",
+                )
+                for link in links_by_action.get(int(action["id"]), [])
+            ),
         })
     
     output.seek(0)

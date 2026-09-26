@@ -111,7 +111,7 @@
               <tr>
                 <th style="width: 35%;">Action</th>
                 <th style="width: 15%;">Critical Activity</th>
-                <th style="width: 15%;">Resources/Outcomes</th>
+                <th style="width: 15%;">Resources/Assets</th>
                 <th style="width: 8%;">RTO</th>
                 <th style="width: 10%;">Owner</th>
                 <th style="width: 10%;">Due Date</th>
@@ -125,7 +125,7 @@
                     <div style="font-weight: 500;">{{ action.action }}</div>
                     {% if can_edit %}
                       <div class="action-buttons" style="margin-top: 0.5rem;">
-                        <button type="button" data-bcp-action="edit-recovery-action" data-bcp-payload='{{ {"id": action.id, "action": action.action, "resources": action.resources or "", "owner_id": action.owner_id, "rto_hours": action.rto_hours, "due_date": action.due_date.strftime("%Y-%m-%d") if action.due_date else "", "critical_activity_id": action.critical_activity_id} | tojson | e }}' class="btn btn-sm btn-secondary">Edit</button>
+                        <button type="button" data-bcp-action="edit-recovery-action" data-bcp-payload='{{ {"id": action.id, "action": action.action, "resources": action.resources or "", "owner_id": action.owner_id, "rto_hours": action.rto_hours, "due_date": action.due_date.strftime("%Y-%m-%d") if action.due_date else "", "critical_activity_id": action.critical_activity_id, "asset_ids": action.asset_links | map(attribute="asset_id") | list} | tojson | e }}' class="btn btn-sm btn-secondary">Edit</button>
                         {% if not action.completed_at %}
                           <form method="post" action="/bcp/recovery/{{ action.id }}/complete" style="display:inline;">
                             <button type="submit" class="btn btn-sm btn-success">Mark Complete</button>
@@ -138,7 +138,16 @@
                     {% endif %}
                   </td>
                   <td>{{ action.activity_name if action.activity_name else '-' }}</td>
-                  <td style="font-size: 0.875rem;">{{ action.resources if action.resources else '-' }}</td>
+                  <td style="font-size: 0.875rem;">
+                    <div>{{ action.resources if action.resources else '-' }}</div>
+                    {% if action.asset_links %}<ul class="list-unstyled" aria-label="Linked assets">
+                      {% for link in action.asset_links %}<li>
+                        <a href="/assets/{{ link.asset_id }}">{{ link.name or link.asset_name_snapshot }}</a>
+                        <span class="text-muted">#{{ link.asset_id }}{% if link.type or link.asset_type_snapshot %} · {{ link.type or link.asset_type_snapshot }}{% endif %}</span>
+                        {% if link.archived_at %}<span class="status status--warning">Archived</span>{% endif %}
+                      </li>{% endfor %}
+                    </ul>{% endif %}
+                  </td>
                   <td>{{ action.rto_humanized }}</td>
                   <td>{{ action.owner.name if action.owner else '-' }}</td>
                   <td>
@@ -210,6 +219,19 @@
           <textarea id="resources" name="resources" class="form-control" rows="3"></textarea>
         </div>
 
+        <fieldset class="form-group">
+          <legend class="form-label">Canonical assets</legend>
+          <p class="form-help">Links point to the existing Assets inventory; no asset details or secrets are copied into the plan.</p>
+          <div class="asset-choice-list">
+          {% for asset in available_assets %}
+            <label class="checkbox" for="recovery-asset-{{ asset.id }}">
+              <input id="recovery-asset-{{ asset.id }}" type="checkbox" name="asset_ids" value="{{ asset.id }}">
+              <span>{{ asset.name or ('Asset ' ~ asset.id) }} · #{{ asset.id }}{% if asset.type %} · {{ asset.type }}{% endif %}{% if asset.archived_at %} (Archived){% endif %}</span>
+            </label>
+          {% else %}<span class="text-muted">No assets are visible to you for this company.</span>{% endfor %}
+          </div>
+        </fieldset>
+
         <div class="form-row">
           <div class="form-group">
             <label for="rto_hours">RTO (hours)</label>
@@ -249,7 +271,7 @@ function showAddModal() {
   document.getElementById('actionModal').style.display = 'flex';
 }
 
-function showEditModal(id, action, resources, ownerId, rtoHours, dueDate, activityId) {
+function showEditModal(id, action, resources, ownerId, rtoHours, dueDate, activityId, assetIds) {
   document.getElementById('modalTitle').textContent = 'Edit Recovery Action';
   document.getElementById('actionForm').action = '/bcp/recovery/' + encodeURIComponent(String(id)) + '/update';
   document.getElementById('action').value = action;
@@ -258,6 +280,10 @@ function showEditModal(id, action, resources, ownerId, rtoHours, dueDate, activi
   document.getElementById('rto_hours').value = rtoHours || '';
   document.getElementById('due_date').value = dueDate;
   document.getElementById('critical_activity_id').value = activityId || '';
+  const selectedAssets = new Set((assetIds || []).map(String));
+  document.querySelectorAll('#actionForm input[name="asset_ids"]').forEach((input) => {
+    input.checked = selectedAssets.has(input.value);
+  });
   document.getElementById('actionModal').style.display = 'flex';
 }
 

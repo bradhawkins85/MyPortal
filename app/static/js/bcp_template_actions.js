@@ -132,7 +132,8 @@
             payload.owner_id,
             payload.rto_hours,
             valueOrEmpty(payload.due_date),
-            payload.critical_activity_id
+            payload.critical_activity_id,
+            payload.asset_ids || []
           );
         }
         break;
