@@ -70,6 +70,50 @@ pytest -q tests/test_documentation_core_gate.py tests/test_asset_relationships.p
   tests/test_asset_importer.py
 ```
 
+### Required staged browser gate
+
+The lower-level suites above remain mandatory, but they do not approve a staged
+promotion on their own. Configure the protected `documentation-staging` GitHub
+environment and run **Documentation browser rollout gate** against the deployed
+candidate. A missing control, link, or finishable browser flow fails that job.
+
+Prepare two isolated companies using the normal administration screens (never
+production data, SQL, or setup APIs), and store a JSON fixture in the protected
+`DOCUMENTATION_BROWSER_FIXTURE_JSON` environment secret. It must contain:
+
+- `base_url`; an `empty_search` value; `wrong_company_path` and a harmless
+  `wrong_company_marker` used to prove that denial pages do not disclose titles;
+- `users` entries for `technician`, `customer`, `named_staff`, `job_title`, and
+  `wrong_company`, each with email/password; authorised role entries also need
+  `visible_path` and `visible_text` for their assigned published record;
+- `asset` with `path`, `name`, `search`, linked `runbook`, active
+  `process_template`, and same-company numeric `ticket_id`;
+- `website` with `name` and populated TLS/domain observations; and
+- `credential_share` with a newly issued fragment URL and separately delivered
+  one-time `code`. Create a fresh share before every run because redemption is
+  intentionally destructive.
+
+The technician needs documentation, asset-photo, process-run, website and expiry
+permissions. The customer sees only deliberately published content. Give the
+named-staff and job-title users the same single standing-access test record by
+their respective grant types. The wrong-company user belongs only to company B.
+Do not place real credentials or customer data in this environment or fixture.
+
+For a local rehearsal, install Chromium and run the exact gate command:
+
+```bash
+playwright install chromium
+MYPORTAL_BROWSER_FIXTURE=/secure/path/fixture.json \
+  pytest -q -m browser_gate tests/browser
+```
+
+The gate covers keyboard-only search → asset → runbook, asset → process → ticket,
+website → expiry, mobile camera-picker fallback → photo, one-time recipient
+redemption, useful empty/expired states, rendered role visibility, and direct
+wrong-company requests. Record the workflow URL, commit SHA, UTC run time, target
+company and browser in deployment evidence. A skip is not a pass: the protected
+workflow deliberately fails before pytest when its fixture secret is absent.
+
 ## 3. Security and failure-path gate
 
 Use two companies with similarly named assets and separate customer users.
@@ -120,7 +164,9 @@ decision maker, and observation window.
 4. **Customer publication:** deliberately publish selected KB/asset information.
    Test with a real pilot customer role; unpublished, internal, archived, and
    other-company data must remain absent.
-5. **Promote or roll back:** compare baseline identities and counts, obtain owner
+5. **Browser gate:** refresh the one-time credential share and run the protected
+   browser workflow. Do not promote on any failure, retry, or skipped journey.
+6. **Promote or roll back:** compare baseline identities and counts, obtain owner
    sign-off, then proceed to the next company. On any isolation, duplication,
    broken-link, credential exposure, or unexplained 500 event, revoke the pilot
    permissions, stop related writes, preserve evidence, and execute application

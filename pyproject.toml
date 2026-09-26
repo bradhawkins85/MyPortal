@@ -50,6 +50,7 @@ dev = [
     "pytest-asyncio",
     "httpx",
     "respx",
+    "pytest-playwright>=0.7.0",
 ]
 
 [build-system]
