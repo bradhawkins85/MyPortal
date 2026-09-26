@@ -43,6 +43,7 @@
             <th scope="col" data-sort="string" data-column-key="title">Title</th>
             <th scope="col" data-sort="string" data-column-key="scope">Scope</th>
             <th scope="col" data-sort="string" data-column-key="status">Status</th>
+            <th scope="col" data-sort="date" data-column-key="review">Review due</th>
             <th scope="col" data-sort="string" data-column-key="ai-tags">AI tags</th>
             <th scope="col" data-sort="date" data-column-key="updated">Updated</th>
           </tr>
@@ -75,6 +76,7 @@
                 <span class="status status--warning">Draft</span>
               {% endif %}
             </td>
+            <td data-label="Review due" data-value="{{ article.review_due_at_iso or '' }}" data-column-key="review">{% if article.review_due_at_iso %}<span data-utc="{{ article.review_due_at_iso }}">{{ article.review_due_at_iso }}</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
             <td data-label="AI tags" data-value="{{ (article.ai_tags or []) | join(', ') }}" data-column-key="ai-tags">
               {% for tag in article.ai_tags or [] %}<span class="tag tag--muted">{{ tag }}</span>{% endfor %}{% for tag in article.manual_ai_tags or [] %}<span class="tag tag--manual" title="Manual admin-added AI tag">{{ tag }}</span>{% endfor %}{% if not article.ai_tags and not article.manual_ai_tags %}<span class="text-muted">—</span>{% endif %}
             </td>
@@ -84,7 +86,7 @@
           </tr>
           {% else %}
           <tr>
-            <td colspan="5" class="table__empty">No knowledge base articles are available yet.</td>
+            <td colspan="6" class="table__empty">No knowledge base articles are available yet.</td>
           </tr>
           {% endfor %}
         </tbody>

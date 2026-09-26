@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from app.services import knowledge_base as knowledge_base_service
 from app.services import audit as audit_service
+from app.repositories import assets as asset_repo
 
 
 router = APIRouter(tags=["Knowledge Base"])
@@ -165,11 +166,13 @@ async def admin_new_knowledge_base_article_page(request: Request):
         return redirect
 
     user_options, company_options = await main_module._prepare_kb_editor_options()
+    asset_options = await asset_repo.list_assets_for_knowledge_base_editor()
     extra = {
         "title": "New knowledge base article",
         "kb_initial_article": None,
         "kb_user_options": user_options,
         "kb_company_options": company_options,
+        "kb_asset_options": jsonable_encoder(asset_options),
         "kb_form_mode": "create",
         "kb_catalogue_payload": [],
     }
@@ -199,12 +202,14 @@ async def admin_edit_knowledge_base_article_page(request: Request, slug: str):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found")
 
     user_options, company_options = await main_module._prepare_kb_editor_options()
+    asset_options = await asset_repo.list_assets_for_knowledge_base_editor()
     serialised_article = jsonable_encoder(article)
     extra = {
         "title": f"Edit knowledge base article · {article.get('title') or article.get('slug')}",
         "kb_initial_article": serialised_article,
         "kb_user_options": user_options,
         "kb_company_options": company_options,
+        "kb_asset_options": jsonable_encoder(asset_options),
         "kb_form_mode": "edit",
         "kb_catalogue_payload": [{"slug": serialised_article.get("slug")}],
     }

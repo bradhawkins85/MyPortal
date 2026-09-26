@@ -94,6 +94,22 @@
             </div>
           </div>
         </fieldset>
+        <fieldset class="kb-admin__fieldset">
+          <legend class="kb-admin__fieldset-title">Runbook lifecycle</legend>
+          <div class="kb-admin__fieldset-body">
+            <div class="form-field"><label class="form-label" for="kb-article-owner">Owner</label><select class="form-input" id="kb-article-owner"><option value="">Unassigned</option>{% for user in kb_user_options %}<option value="{{ user.id }}">{{ user.label }}</option>{% endfor %}</select></div>
+            <div class="form-field"><label class="form-label" for="kb-article-lifecycle">Lifecycle status</label><select class="form-input" id="kb-article-lifecycle"><option value="draft">Draft</option><option value="in_review">In review</option><option value="published">Published</option><option value="retired">Retired</option></select></div>
+            <div class="form-field"><label class="form-label" for="kb-article-review-due">Review due date</label><input class="form-input" id="kb-article-review-due" type="date" /></div>
+            <div class="form-field form-field--wide"><label class="form-label" for="kb-article-assets">Linked assets</label><select class="form-input" id="kb-article-assets" multiple size="7">{% for asset in kb_asset_options %}<option value="{{ asset.id }}">{{ asset.company_name or 'No company' }} — {{ asset.name or ('Asset ' ~ asset.id) }}{% if asset.type %} ({{ asset.type }}){% endif %}</option>{% endfor %}</select><p class="form-help">Link the runbook to existing assets. Hold Ctrl or Command to select more than one.</p></div>
+          </div>
+        </fieldset>
+        <fieldset class="kb-admin__fieldset" data-kb-existing-tools hidden>
+          <legend class="kb-admin__fieldset-title">Attachments &amp; review</legend>
+          <div class="kb-admin__fieldset-body">
+            <div class="form-field form-field--wide"><label class="form-label" for="kb-attachment-file">Attachments</label><div data-kb-attachments></div><div class="kb-admin__attachment-upload"><input class="form-input" id="kb-attachment-file" type="file" /><button class="button button--ghost" type="button" data-kb-upload>Upload</button></div><p class="form-help">Maximum 15 MB. Active web content and executable files are rejected.</p></div>
+            <div class="form-field form-field--wide"><label class="form-label" for="kb-preview-company">Preview as customer</label><div class="kb-admin__review-actions"><select class="form-input" id="kb-preview-company"><option value="">Anonymous customer</option>{% for company in kb_company_options %}<option value="{{ company.id }}">{{ company.name }}</option>{% endfor %}</select><button class="button button--ghost" type="button" data-kb-preview>Customer preview</button><button class="button button--ghost" type="button" data-kb-versions>Version history</button></div><p class="form-help">Preview uses customer permissions; drafts and restricted content will not be exposed.</p><div data-kb-preview-output hidden></div><div data-kb-version-list hidden></div><article class="kb-admin__version-content" data-kb-version-content hidden></article></div>
+          </div>
+        </fieldset>
         <fieldset class="kb-admin__fieldset" data-kb-ai-tags-section hidden>
           <legend class="kb-admin__fieldset-title">AI Tags</legend>
           <div class="kb-admin__fieldset-body">
@@ -150,6 +166,7 @@
   <script type="application/json" id="kb-admin-articles">{{ kb_catalogue_payload | tojson }}</script>
   <script type="application/json" id="kb-admin-user-options">{{ kb_user_options | tojson }}</script>
   <script type="application/json" id="kb-admin-company-options">{{ kb_company_options | tojson }}</script>
+  <script type="application/json" id="kb-admin-asset-options">{{ kb_asset_options | tojson }}</script>
   <script type="application/json" id="kb-admin-active-article">{{ kb_initial_article | tojson }}</script>
   <script src="{{ static_url('/static/js/knowledge_base_admin.js') }}" defer></script>
 {% endblock %}

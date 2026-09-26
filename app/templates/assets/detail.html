@@ -103,6 +103,11 @@
     </form>
   </section>{% endif %}
 
+  {% if linked_runbooks %}<section class="card card--panel admin-grid__full">
+    <header class="card__header"><div><h2 class="card__title">Linked runbooks</h2><p class="card__subtitle">Knowledge-base procedures linked directly to this asset.</p></div></header>
+    <div class="card__body"><ul>{% for article in linked_runbooks %}<li><a href="/knowledge-base/articles/{{ article.slug }}">{{ article.title }}</a> <span class="status status--{{ 'success' if article.is_published else 'warning' }}">{{ article.lifecycle_status | replace('_', ' ') | title }}</span>{% if article.review_due_at_iso %} <span class="text-muted">Review due <span data-utc="{{ article.review_due_at_iso }}">{{ article.review_due_at_iso }}</span></span>{% endif %}</li>{% endfor %}</ul></div>
+  </section>{% endif %}
+
   {% if bcp_context %}<section class="card card--panel admin-grid__full">
     <header class="card__header"><div><h2 class="card__title">Business continuity context</h2><p class="card__subtitle">Plans and recovery components that depend on this canonical asset.</p></div></header>
     <div class="card__body"><ul>

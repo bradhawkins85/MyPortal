@@ -1288,6 +1288,10 @@ async def asset_detail_page(
         access_context, include_unpublished=bool(user.get("is_super_admin"))
     )
     articles_by_id = {int(article["id"]): article for article in visible_articles}
+    linked_runbooks = [
+        article for article in visible_articles
+        if asset_id in {int(value) for value in article.get("asset_ids", [])}
+    ]
     company_assets = await asset_repo.list_company_assets(company_id)
     if customer_safe:
         company_assets = [item for item in company_assets if bool(item.get("customer_visible"))]
@@ -1326,6 +1330,7 @@ async def asset_detail_page(
             "relationship_types": _RELATIONSHIP_TYPES,
             "relationship_assets": [a for a in company_assets if int(a["id"]) != asset_id],
             "relationship_articles": visible_articles,
+            "linked_runbooks": linked_runbooks,
             "can_edit": not customer_safe and can_write,
             "reconciliation_candidates": [] if customer_safe else await asset_repo.list_reconciliation_candidates(company_id, asset_id),
             "customer_safe": customer_safe,

@@ -52,6 +52,17 @@
   const aiTagsSection = form.querySelector('[data-kb-ai-tags-section]');
   const aiTagsContainer = document.getElementById('kb-ai-tags-container');
   const refreshTagsButton = form.querySelector('[data-kb-refresh-tags]');
+  const ownerField = document.getElementById('kb-article-owner');
+  const lifecycleField = document.getElementById('kb-article-lifecycle');
+  const reviewDueField = document.getElementById('kb-article-review-due');
+  const assetSelect = document.getElementById('kb-article-assets');
+  const existingTools = form.querySelector('[data-kb-existing-tools]');
+  const attachmentsElement = form.querySelector('[data-kb-attachments]');
+  const attachmentFile = document.getElementById('kb-attachment-file');
+  const previewOutput = form.querySelector('[data-kb-preview-output]');
+  const previewCompany = document.getElementById('kb-preview-company');
+  const versionList = form.querySelector('[data-kb-version-list]');
+  const versionContent = form.querySelector('[data-kb-version-content]');
 
   const editorObservers = new WeakMap();
   const imageResize = {
@@ -924,6 +935,11 @@
     summaryField.value = '';
     scopeField.value = 'anonymous';
     publishedField.checked = false;
+    ownerField.value = '';
+    lifecycleField.value = 'draft';
+    reviewDueField.value = '';
+    Array.from(assetSelect.options).forEach((option) => { option.selected = false; });
+    existingTools.hidden = true;
     renderUserOptions([]);
     renderCompanyOptions([]);
     renderSections([]);
@@ -936,7 +952,9 @@
       aiTagsSection.hidden = true;
     }
     
-    if (deleteButton) {
+
+
+  if (deleteButton) {
       deleteButton.hidden = true;
     }
     if (editorTitle) {
@@ -987,6 +1005,13 @@
     }
     scopeField.value = article.permission_scope || 'anonymous';
     publishedField.checked = Boolean(article.is_published);
+    ownerField.value = article.owner_id == null ? '' : String(article.owner_id);
+    lifecycleField.value = article.lifecycle_status || 'draft';
+    reviewDueField.value = article.review_due_at ? String(article.review_due_at).slice(0, 10) : '';
+    const linkedAssets = new Set((article.asset_ids || []).map(String));
+    Array.from(assetSelect.options).forEach((option) => { option.selected = linkedAssets.has(option.value); });
+    existingTools.hidden = false;
+    renderAttachments(article.attachments || []);
 
     const selectedUsers = Array.isArray(article.allowed_user_ids) ? article.allowed_user_ids : [];
     const selectedCompanies = (() => {
@@ -1037,6 +1062,10 @@
           ? section.allowed_company_ids
           : [],
       })),
+      owner_id: ownerField.value ? Number(ownerField.value) : null,
+      lifecycle_status: lifecycleField.value,
+      review_due_at: reviewDueField.value ? `${reviewDueField.value}T00:00:00Z` : null,
+      asset_ids: getSelectedValues(assetSelect),
     };
     if (scope === 'user') {
       payload.allowed_user_ids = getSelectedValues(userSelect);
@@ -1044,6 +1073,44 @@
       payload.allowed_company_ids = getSelectedValues(companySelect);
     }
     return payload;
+  }
+
+
+  function renderAttachments(attachments) {
+    if (!attachmentsElement) return;
+    if (!attachments.length) { attachmentsElement.innerHTML = '<p class="text-muted">No attachments.</p>'; return; }
+    attachmentsElement.innerHTML = attachments.map((item) => `<div class="kb-admin__attachment"><a href="/api/knowledge-base/articles/${state.activeId}/attachments/${item.id}">${escapeHtml(item.file_name)}</a><span>${Math.ceil(Number(item.file_size || 0) / 1024)} KB</span><button class="button button--danger button--small" type="button" data-kb-delete-attachment="${item.id}">Remove</button></div>`).join('');
+  }
+
+  async function uploadAttachment() {
+    if (!state.activeId || !attachmentFile.files.length) return;
+    const body = new FormData(); body.append('file', attachmentFile.files[0]);
+    const response = await fetch(`/api/knowledge-base/articles/${state.activeId}/attachments`, { method: 'POST', body });
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || 'Upload failed');
+    await loadArticle(state.activeSlug);
+  }
+
+  async function showCustomerPreview() {
+    const companyQuery = previewCompany.value ? `?company_id=${encodeURIComponent(previewCompany.value)}` : '';
+    const response = await fetch(`/api/knowledge-base/articles/${encodeURIComponent(state.activeSlug)}/customer-preview${companyQuery}`);
+    previewOutput.hidden = false;
+    if (!response.ok) { previewOutput.innerHTML = '<div class="alert alert--warning">This article is not visible to an authorised customer in the selected/default context.</div>'; return; }
+    const article = await response.json();
+    previewOutput.innerHTML = `<div class="alert alert--info">Customer-safe preview</div><h3>${escapeHtml(article.title)}</h3>${article.content || ''}`;
+  }
+
+  async function showVersions() {
+    const response = await fetch(`/api/knowledge-base/articles/${state.activeId}/versions`);
+    if (!response.ok) throw new Error('Unable to load version history');
+    const versions = await response.json(); versionList.hidden = false;
+    versionList.innerHTML = versions.length ? versions.map((item) => `<button type="button" class="button button--ghost button--small" data-kb-version="${item.version_number}">Version ${item.version_number} · ${escapeHtml(item.created_at || '')}</button>`).join('') : '<p class="text-muted">No earlier versions.</p>';
+  }
+
+  async function showVersion(versionNumber) {
+    const response = await fetch(`/api/knowledge-base/articles/${state.activeId}/versions/${versionNumber}`);
+    if (!response.ok) throw new Error('Unable to load version');
+    const version = await response.json(); versionContent.hidden = false;
+    versionContent.innerHTML = `<h3>Version ${version.version_number}: ${escapeHtml(version.title || '')}</h3><p>${escapeHtml(version.summary || '')}</p>${version.content || ''}`;
   }
 
   async function submitForm() {
@@ -1232,6 +1299,21 @@
     event.preventDefault();
     submitForm();
   });
+
+  form.querySelector('[data-kb-upload]')?.addEventListener('click', () => uploadAttachment().catch((error) => setStatus(error.message, 'error')));
+  form.querySelector('[data-kb-preview]')?.addEventListener('click', () => showCustomerPreview().catch((error) => setStatus(error.message, 'error')));
+  form.querySelector('[data-kb-versions]')?.addEventListener('click', () => showVersions().catch((error) => setStatus(error.message, 'error')));
+  attachmentsElement?.addEventListener('click', async (event) => {
+    const button = event.target.closest('[data-kb-delete-attachment]');
+    if (!button || !confirm('Remove this attachment?')) return;
+    const response = await fetch(`/api/knowledge-base/articles/${state.activeId}/attachments/${button.dataset.kbDeleteAttachment}`, { method: 'DELETE' });
+    if (response.ok) await loadArticle(state.activeSlug);
+  });
+  versionList?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-kb-version]');
+    if (button) showVersion(button.dataset.kbVersion).catch((error) => setStatus(error.message, 'error'));
+  });
+
 
   if (deleteButton) {
     deleteButton.addEventListener('click', () => {
