@@ -164,6 +164,7 @@ async def test_asset_detail_page_renders_canonical_asset(monkeypatch):
     monkeypatch.setattr(asset_repo, "list_tickets_for_asset", AsyncMock(return_value=[]))
     monkeypatch.setattr(asset_repo, "list_company_assets", AsyncMock(return_value=[]))
     monkeypatch.setattr(asset_repo, "list_relationships_for_asset", AsyncMock(return_value=[]))
+    monkeypatch.setattr(assets_routes.asset_photo_repo, "list_for_asset", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         assets_routes.knowledge_base_service,
         "build_access_context",

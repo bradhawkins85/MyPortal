@@ -11,12 +11,13 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from app.core.logging import log_info
 from app.repositories import asset_custom_fields as asset_custom_fields_repo
 from app.repositories import assets as asset_repo
+from app.repositories import asset_photos as asset_photo_repo
 from app.repositories import expirations as expiration_repo
 from app.repositories import users as users_repo
 from app.repositories import user_companies as user_company_repo
@@ -29,6 +30,7 @@ from app.services import hudu as hudu_service
 from app.services import audit as audit_service
 from app.services import knowledge_base as knowledge_base_service
 from app.services import automations as automations_service
+from app.services import asset_photos as asset_photo_service
 
 router = APIRouter(tags=["Assets"])
 
@@ -1320,8 +1322,114 @@ async def asset_detail_page(
             "can_edit": not customer_safe and can_write,
             "reconciliation_candidates": [] if customer_safe else await asset_repo.list_reconciliation_candidates(company_id, asset_id),
             "customer_safe": customer_safe,
+            "asset_photos": await asset_photo_repo.list_for_asset(
+                company_id, asset_id, customer_only=customer_safe
+            ),
         }
     )
+
+
+async def _photo_context(request: Request, asset_id: int, *, write: bool = False):
+    user, membership, _company, company_id, redirect = await _load_asset_context(request)
+    if redirect:
+        raise HTTPException(status_code=403, detail="Asset access denied")
+    main_module = _main()
+    can_write = bool(user.get("is_super_admin")) or main_module._membership_menu_can(
+        user, membership, "menu.assets", write=True
+    )
+    asset = await asset_repo.get_asset_by_id(asset_id)
+    if (not asset or int(asset.get("company_id") or 0) != company_id
+            or (not can_write and not bool(asset.get("customer_visible")))):
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if write and not can_write:
+        raise HTTPException(status_code=403, detail="Asset write access required")
+    return user, company_id, can_write
+
+
+@router.post("/assets/{asset_id}/photos", response_class=JSONResponse)
+async def upload_asset_photo(
+    request: Request, asset_id: int, photo: UploadFile = File(...),
+    caption: str = Form(""), idempotency_key: str = Form(...),
+    customer_visible: bool = Form(False),
+):
+    """Attach a content-validated photo to the authorised canonical asset."""
+    user, company_id, _ = await _photo_context(request, asset_id, write=True)
+    key = idempotency_key.strip()
+    if not key or len(key) > 64 or not all(c.isalnum() or c in "-_" for c in key):
+        raise HTTPException(status_code=422, detail="Invalid upload retry key")
+    existing = await asset_photo_repo.get_by_key(company_id, asset_id, key)
+    if existing:
+        await photo.close()
+        return JSONResponse({"id": existing["id"], "duplicate": True}, status_code=200)
+    clean_caption = caption.strip()[:500] or None
+    prepared = await asset_photo_service.prepare(photo, company_id, asset_id)
+    try:
+        created = await asset_photo_repo.create(
+            asset_id=asset_id, company_id=company_id, caption=clean_caption,
+            sort_order=0, customer_visible=customer_visible,
+            idempotency_key=key, uploaded_by=int(user["id"]), **prepared,
+        )
+    except Exception:
+        asset_photo_service.remove(company_id, asset_id, str(prepared["storage_name"]), str(prepared["thumbnail_name"]))
+        # A concurrent retry may have won the unique idempotency-key insert.
+        existing = await asset_photo_repo.get_by_key(company_id, asset_id, key)
+        if existing:
+            return JSONResponse({"id": existing["id"], "duplicate": True}, status_code=200)
+        raise
+    await audit_service.record(
+        action="asset.photo.upload", request=request, user_id=int(user["id"]),
+        entity_type="asset", entity_id=asset_id,
+        after={"photo_id": created["id"], "size_bytes": created["size_bytes"],
+               "customer_visible": bool(created["customer_visible"])},
+        metadata={"company_id": company_id},
+    )
+    return JSONResponse({"id": created["id"], "duplicate": False}, status_code=201)
+
+
+@router.get("/assets/{asset_id}/photos/{photo_id}/{variant}", response_class=FileResponse)
+async def get_asset_photo(request: Request, asset_id: int, photo_id: int, variant: str):
+    _user, company_id, can_write = await _photo_context(request, asset_id)
+    item = await asset_photo_repo.get(company_id, asset_id, photo_id)
+    if not item or (not can_write and not bool(item.get("customer_visible"))):
+        raise HTTPException(status_code=404, detail="Photo not found")
+    if variant not in {"original", "thumbnail"}:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    file_path = asset_photo_service.path(
+        company_id, asset_id, item["storage_name" if variant == "original" else "thumbnail_name"]
+    )
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return FileResponse(file_path, media_type="image/jpeg", headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+
+
+@router.post("/assets/{asset_id}/photos/{photo_id}")
+async def update_asset_photo(request: Request, asset_id: int, photo_id: int):
+    user, company_id, _ = await _photo_context(request, asset_id, write=True)
+    item = await asset_photo_repo.get(company_id, asset_id, photo_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    form = await request.form()
+    try:
+        order = max(0, min(10000, int(form.get("sort_order") or 0)))
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid photo order")
+    caption = str(form.get("caption") or "").strip()[:500] or None
+    visible = str(form.get("customer_visible") or "").lower() in {"1", "true", "on"}
+    await asset_photo_repo.update(company_id, asset_id, photo_id, caption=caption, sort_order=order, customer_visible=visible)
+    await audit_service.record(action="asset.photo.update", request=request, user_id=int(user["id"]), entity_type="asset", entity_id=asset_id, after={"photo_id": photo_id, "sort_order": order, "customer_visible": visible}, metadata={"company_id": company_id})
+    return _main().flash_redirect(f"/assets/{asset_id}#asset-photos", "Photo updated.", "success")
+
+
+@router.post("/assets/{asset_id}/photos/{photo_id}/delete")
+async def delete_asset_photo(request: Request, asset_id: int, photo_id: int):
+    user, company_id, _ = await _photo_context(request, asset_id, write=True)
+    item = await asset_photo_repo.get(company_id, asset_id, photo_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    await asset_photo_repo.delete(company_id, asset_id, photo_id)
+    asset_photo_service.remove(company_id, asset_id, item["storage_name"], item["thumbnail_name"])
+    await audit_service.record(action="asset.photo.delete", request=request, user_id=int(user["id"]), entity_type="asset", entity_id=asset_id, before={"photo_id": photo_id, "size_bytes": item["size_bytes"]}, metadata={"company_id": company_id})
+    return _main().flash_redirect(f"/assets/{asset_id}#asset-photos", "Photo deleted.", "success")
 
 
 @router.get("/asset-exports/csv")

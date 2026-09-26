@@ -26,6 +26,43 @@
     </div>
   {% endif %}
 
+  <section class="card card--panel admin-grid__full asset-photos" id="asset-photos">
+    <header class="card__header"><div><h2 class="card__title">Photos</h2><p class="card__subtitle">Photos stay with this asset through archive, restore, and reconciliation.</p></div></header>
+    <div class="card__body">
+      {% if can_edit %}
+      <form class="asset-photo-upload" data-asset-photo-upload action="/assets/{{ asset.id }}/photos" method="post" enctype="multipart/form-data">
+        <input type="hidden" name="idempotency_key" data-photo-key>
+        <div class="asset-photo-actions">
+          <label class="button button--primary" for="asset-camera">Take photo</label>
+          <input class="visually-hidden" id="asset-camera" data-photo-input type="file" name="photo" accept="image/jpeg,image/png,image/webp" capture="environment">
+          <label class="button button--ghost" for="asset-picker">Choose image</label>
+          <input class="visually-hidden" id="asset-picker" data-photo-input type="file" accept="image/jpeg,image/png,image/webp">
+        </div>
+        <div class="asset-photo-preview" data-photo-preview hidden>
+          <img alt="Photo preview" data-photo-preview-image>
+          <div class="form-group"><label class="form-label" for="photo-caption">Caption <span class="field-optional">optional</span></label><input class="input" id="photo-caption" name="caption" maxlength="500"></div>
+          <label class="checkbox"><input name="customer_visible" type="checkbox" value="true"> <span>Allow customer portal users to view this photo</span></label>
+          <div class="asset-photo-actions"><button class="button button--primary" type="submit">Upload photo</button><button class="button button--ghost" type="button" data-photo-retake>Retake / choose another</button><button class="button button--ghost" type="button" data-photo-cancel>Cancel</button></div>
+        </div>
+        <p class="form-help">JPEG, PNG, or WebP; maximum 15 MB. Photos are internal unless explicitly shared.</p>
+        <p data-photo-status role="status" aria-live="polite"></p>
+      </form>
+      {% endif %}
+      <div class="asset-photo-gallery">
+        {% for photo in asset_photos %}<article class="asset-photo-card">
+          <a href="/assets/{{ asset.id }}/photos/{{ photo.id }}/original"><img loading="lazy" src="/assets/{{ asset.id }}/photos/{{ photo.id }}/thumbnail" alt="{{ photo.caption or 'Asset photo' }}"></a>
+          {% if can_edit %}<form method="post" action="/assets/{{ asset.id }}/photos/{{ photo.id }}">
+            {% include "partials/csrf.html" %}<label class="form-label">Caption<input class="input" name="caption" maxlength="500" value="{{ photo.caption or '' }}"></label>
+            <label class="form-label">Order<input class="input" name="sort_order" type="number" min="0" max="10000" value="{{ photo.sort_order }}"></label>
+            <label class="checkbox"><input name="customer_visible" type="checkbox" value="true" {% if photo.customer_visible %}checked{% endif %}> <span>Customer visible</span></label>
+            <button class="button button--ghost button--small" type="submit">Save</button>
+          </form><form method="post" action="/assets/{{ asset.id }}/photos/{{ photo.id }}/delete" data-confirm="Delete this photo permanently?">{% include "partials/csrf.html" %}<button class="button button--danger button--small" type="submit">Delete</button></form>
+          {% else %}<p>{{ photo.caption or '' }}</p>{% endif %}
+        </article>{% else %}<p class="text-muted">No photos attached.</p>{% endfor %}
+      </div>
+    </div>
+  </section>
+
   {% if not customer_safe %}<section class="card card--panel">
     <header class="card__header card__header--stacked">
       <div><h2 class="card__title">Operational documentation</h2>
@@ -142,3 +179,4 @@
 </div>
 {% include "partials/csrf.html" %}
 {% endblock %}
+{% block scripts %}<script src="{{ static_url('/static/js/asset_photos.js') }}" defer></script>{% endblock %}
