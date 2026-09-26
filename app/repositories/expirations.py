@@ -38,7 +38,19 @@ async def list_asset_dates(company_id: int | None) -> list[dict[str, Any]]:
         + custom_clause,
         params,
     )
-    return [dict(row) for row in warranties] + [dict(row) for row in custom]
+    website_clause = "" if company_id is None else " AND w.company_id = %s"
+    websites = await db.fetch_all(
+        """SELECT w.id source_id, 'website' source_type,
+                  CASE WHEN dates.kind = 'certificate' THEN 'certificate_expires_at' ELSE 'domain_expires_at' END source_field,
+                  w.name title, CASE WHEN dates.kind = 'certificate' THEN w.certificate_expires_at ELSE w.domain_expires_at END due_at,
+                  w.company_id, c.name company_name, dates.kind detail
+           FROM websites w JOIN companies c ON c.id = w.company_id
+           JOIN (SELECT 'certificate' kind UNION ALL SELECT 'domain') dates
+           WHERE CASE WHEN dates.kind = 'certificate' THEN w.certificate_expires_at ELSE w.domain_expires_at END IS NOT NULL"""
+        + website_clause,
+        params,
+    )
+    return [dict(row) for row in warranties] + [dict(row) for row in custom] + [dict(row) for row in (websites or [])]
 
 
 async def list_metadata(company_id: int | None) -> list[dict[str, Any]]:

@@ -1,0 +1,7 @@
+{
+  "guid": "7b1d598a-682c-4f7c-a930-10d3fab96662",
+  "occurred_at": "2026-09-26T00:00:00Z",
+  "change_type": "feature",
+  "summary": "Added automatic leased website checks with retry health and expiration register observations.",
+  "content_hash": "website-check-worker-scheduler-retries-expirations"
+}

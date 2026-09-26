@@ -65,6 +65,14 @@ async def list_websites(context=Depends(access_context)):
     return await repo.list_websites(context[1])
 
 
+@router.get("/checks/health", summary="Website check queue health")
+async def check_health(context=Depends(access_context)):
+    user, _, _ = context
+    if not user.get("is_super_admin"):
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    return await repo.job_health()
+
+
 @router.get("/{website_id}", summary="Get website monitoring facts")
 async def get_website(website_id: int, context=Depends(access_context)):
     website = await repo.get_website(context[1], website_id)
