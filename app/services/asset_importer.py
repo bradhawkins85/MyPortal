@@ -86,6 +86,9 @@ async def import_assets_for_company(
             warranty_status=warranty_status,
             warranty_end_date=warranty_end,
             syncro_asset_id=syncro_asset_id,
+            source="syncro",
+            source_external_id=syncro_asset_id,
+            source_fields=list(details.keys()),
         )
         processed += 1
 
@@ -318,6 +321,9 @@ async def sync_tactical_agent(
         mac_address=_clean_string(details.get("mac_address")),
         tactical_asset_id=agent_id,
         match_name=True,
+        source="tacticalrmm",
+        source_external_id=agent_id,
+        source_fields=list(details.keys()),
     )
     if not asset_id:
         raise tacticalrmm.TacticalRMMAPIError("Unable to create the MyPortal asset")
@@ -398,6 +404,9 @@ async def import_tactical_assets_for_company(
             mac_address=_clean_string(details.get("mac_address")),
             tactical_asset_id=tactical_id,
             match_name=True,
+            source="tacticalrmm",
+            source_external_id=tactical_id,
+            source_fields=list(details.keys()),
         )
         if asset_id and tactical_id:
             try:
